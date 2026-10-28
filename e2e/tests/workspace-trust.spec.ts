@@ -131,7 +131,7 @@ test("managed-checkout trust switches persist independently of Claude's legacy r
     for (const { harness } of AGENTS) expect(await trustState(request, harness)).toMatchObject({ enabled: false });
     await page.goto("/");
     await openSettings(page, "agent trust");
-    const dialog = page.getByRole("dialog", { name: "settings", exact: true });
+    const dialog = page.getByRole("dialog", { name: "Settings", exact: true });
     const choices = AGENTS.map(({ harness }) =>
       dialog.locator(`#checkout-${harness}-trust`).getByRole("checkbox").first()
     );
@@ -233,7 +233,7 @@ for (const { harness, name } of AGENTS.filter((agent) => agent.harness !== "pi")
       await attachSession(page, session.id);
       const band = bandFor(page, harness);
       const surface = page.locator(`.workspace-trust-surface[data-agent="${harness}"]`);
-      const dialog = page.getByRole("dialog", { name: "settings", exact: true });
+      const dialog = page.getByRole("dialog", { name: "Settings", exact: true });
       const field = dialog.locator(`#checkout-${harness}-trust`);
       const toggle = field.getByRole("checkbox").first();
       await expect(page.locator(".app-main .layout")).toHaveAttribute("data-workspace-trust-prompt", "true");
@@ -262,8 +262,8 @@ for (const { harness, name } of AGENTS.filter((agent) => agent.harness !== "pi")
       for (const width of [390, 1280]) {
         await page.setViewportSize({ width, height: 900 });
         await band.getByRole("button", { name: "Settings", exact: true }).click();
-        await expect(dialog.locator('.app-settings-panel[aria-label="agent trust"]')).toBeVisible();
-        await expect(dialog.locator('.app-settings-panel[aria-label="sessions"]')).toBeHidden();
+        await expect(dialog.locator('.app-settings-panel[aria-label="Agent trust"]')).toBeVisible();
+        await expect(dialog.locator('.app-settings-panel[aria-label="Sessions"]')).toBeHidden();
         await expect(field).toBeFocused();
         await expect(toggle).toBeEnabled();
         await expect(toggle).not.toBeChecked();
@@ -277,11 +277,11 @@ for (const { harness, name } of AGENTS.filter((agent) => agent.harness !== "pi")
         ).toBe(true);
         if (width === 390) {
           await expect(dialog.getByRole("button", { name: "‹ Settings", exact: true })).toBeVisible();
-          await expect(dialog.getByRole("navigation", { name: "settings sections", exact: true })).toBeHidden();
+          await expect(dialog.getByRole("navigation", { name: "Settings sections", exact: true })).toBeHidden();
           await dialog.getByRole("button", { name: "Close", exact: true }).click();
           await openSettings(page);
-          await expect(dialog.getByRole("checkbox", { name: "skip session confirmations", exact: true })).toBeFocused();
-          await expect(dialog.locator('.app-settings-panel[aria-label="agent trust"]')).toBeHidden();
+          await expect(dialog.getByRole("checkbox", { name: "Skip session confirmations", exact: true })).toBeFocused();
+          await expect(dialog.locator('.app-settings-panel[aria-label="Agent trust"]')).toBeHidden();
           await dialog.getByRole("button", { name: "Close", exact: true }).click();
         }
       }
@@ -290,7 +290,7 @@ for (const { harness, name } of AGENTS.filter((agent) => agent.harness !== "pi")
       await dialog.getByRole("button", { name: "Close", exact: true }).click();
       await expect(band).toHaveCount(0);
       await openSettings(page);
-      await expect(dialog.locator('.app-settings-panel[aria-label="sessions"]')).toBeVisible();
+      await expect(dialog.locator('.app-settings-panel[aria-label="Sessions"]')).toBeVisible();
       await selectSettingsSection(page, "agent trust");
       await expect(toggle).toBeChecked();
       await toggle.uncheck();
@@ -361,7 +361,7 @@ for (const { harness, name } of AGENTS.filter((agent) => agent.harness !== "pi")
       await expect(surface).toHaveAttribute("data-hint-dismissed", "true");
       await openSettings(page, "agent trust");
       await field.getByRole("checkbox", {
-        name: `show the hint when ${name} asks about a managed checkout`,
+        name: `Show the hint when ${name} asks about a managed checkout`,
         exact: true,
       }).check();
       await expect.poll(async () => (await trustState(request, harness)).hint_dismissed).toBe(false);

@@ -397,7 +397,7 @@ test("the pinned name action opens ordinary New with remembered defaults", async
     await page.locator(".new-session-button").click();
     const form = page.locator(".create-session-form");
     await expect(form).toBeVisible();
-    const ordinaryHost = await form.getByRole("combobox", { name: "host", exact: true }).getAttribute("data-host-id");
+    const ordinaryHost = await form.getByRole("combobox", { name: "Host", exact: true }).getAttribute("data-host-id");
     const ordinaryCwd = await form.getByLabel("Folder", { exact: true }).inputValue();
     await form.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(form).toHaveCount(0);
@@ -410,7 +410,7 @@ test("the pinned name action opens ordinary New with remembered defaults", async
     await page.keyboard.press("Enter");
     await expect(dialog).toHaveCount(0);
     await expect(form.getByLabel("Name (optional)")).toHaveValue(name);
-    await expect(form.getByRole("combobox", { name: "host", exact: true })).toHaveAttribute("data-host-id", ordinaryHost);
+    await expect(form.getByRole("combobox", { name: "Host", exact: true })).toHaveAttribute("data-host-id", ordinaryHost);
     await expect(form.getByLabel("Folder", { exact: true })).toHaveValue(ordinaryCwd);
     await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "YOLO", exact: true })).toHaveAttribute("aria-pressed", "true");
     await expect(form.locator('.launch-composer-search input[role="combobox"]')).toHaveValue("");
@@ -507,7 +507,7 @@ test("a template pick waits for launcher inputs before applying the template", a
     await expect(form.getByRole("combobox", { name: "Model", exact: true })).toHaveValue(model.id);
     await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true })).toHaveAttribute("aria-pressed", "true");
     await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: model.efforts[0][0].toUpperCase() + model.efforts[0].slice(1), exact: true })).toHaveAttribute("aria-pressed", "true");
-    await expect(form.getByRole("combobox", { name: "host", exact: true })).toHaveAttribute("data-host-id", String(local!.id));
+    await expect(form.getByRole("combobox", { name: "Host", exact: true })).toHaveAttribute("data-host-id", String(local!.id));
     await expect(form.getByLabel("Folder", { exact: true })).toHaveValue("/tmp");
     // Null resets to the harness's current default. For Codex that is guarded;
     // applying a template must not revive the removed default-mode control.

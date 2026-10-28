@@ -116,11 +116,11 @@ test("app settings", async ({ page, request }) => {
   // so callouts must target the selected panel rather than its hidden peers.
   const { director } = await open(page, request);
   await page.locator(".app-settings-toggle").click();
-  const dialog = page.getByRole("dialog", { name: "settings", exact: true });
+  const dialog = page.getByRole("dialog", { name: "Settings", exact: true });
   await expect(dialog).toBeVisible();
-  const sections = dialog.getByRole("navigation", { name: "settings sections", exact: true });
+  const sections = dialog.getByRole("navigation", { name: "Settings sections", exact: true });
   await sections.getByRole("button", { name: "Hosts", exact: true }).click();
-  const hosts = dialog.getByRole("region", { name: "hosts", exact: true });
+  const hosts = dialog.getByRole("region", { name: "Hosts", exact: true });
   await expect(hosts).toBeVisible();
   await director.callout(
     sections,
@@ -130,7 +130,7 @@ test("app settings", async ({ page, request }) => {
     { side: "top", dx: -80, dy: -140 },
   );
   await director.callout(
-    hosts.getByRole("checkbox", { name: "set up new hosts without asking", exact: true }),
+    hosts.getByRole("checkbox", { name: "Set up new hosts without asking", exact: true }),
     "Both questions Farhelm asks about hosts can be turned off, or back on, here.",
     { side: "top", dx: -90, dy: -180 },
   );

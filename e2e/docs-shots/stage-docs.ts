@@ -43,18 +43,55 @@ interface FleetFile {
   openId: string;
   /** Development-only metadata for the same two approved cwd/age rewrites. */
   toolbarReview?: ScenarioSession;
+  /** Owned requester; only its cwd/age join the existing listing rewrites. */
+  spawnReview?: ScenarioSession;
 }
 
-/** Hand the staged fleet to the shot projects, which run as separate tests. */
-export function writeFleet(fleet: StagedFleet, toolbarReview?: ScenarioSession): void {
-  const file: FleetFile = { ids: [...fleet.ids.entries()], now: fleet.now, openId: fleet.openId, toolbarReview };
+/** Hand real IDs and declared display metadata to the separate shot processes.
+ * Development sources remain in the fleet until their owning test removes
+ * them; metadata adds only the same cwd/age rewrites as ordinary rows.
+ */
+export function writeFleet(fleet: StagedFleet, toolbarReview?: ScenarioSession, spawnReview?: ScenarioSession): void {
+  const file: FleetFile = { ids: [...fleet.ids.entries()], now: fleet.now, openId: fleet.openId, toolbarReview, spawnReview };
   writeFileSync(DOCS_FLEET_PATH, JSON.stringify(file));
 }
 
 /** Read the fleet the staging project staged in this run. */
-export function readFleet(): StagedFleet & { toolbarReview?: ScenarioSession } {
+export function readFleet(): StagedFleet & { toolbarReview?: ScenarioSession; spawnReview?: ScenarioSession } {
   const file = JSON.parse(readFileSync(DOCS_FLEET_PATH, "utf8")) as FleetFile;
-  return { ids: new Map(file.ids), now: file.now, openId: file.openId, toolbarReview: file.toolbarReview };
+  return { ids: new Map(file.ids), now: file.now, openId: file.openId, toolbarReview: file.toolbarReview, spawnReview: file.spawnReview };
+}
+
+/** Stage one requester whose inherited command is safe to show on a real card.
+ * The existing private Claude wrapper executes .hero-agent from this cwd;
+ * only that file knows the fixture's path. No request is emitted until the
+ * dedicated shot test opens the real GUI, and that test must deny it and
+ * remove this source. Ordinary docs and hero staging never use this fixture.
+ */
+export async function stageSpawnReviewSession(request: APIRequestContext, scenario: Scenario, fleet: StagedFleet) {
+  const local = scenario.hosts.find((host) => host.kind === "local");
+  if (!local) throw new Error("approval review requires the owned local host");
+  const review: ScenarioSession = {
+    title: "Review agent request", host: local.key, cwd: "/tmp", wrapper: "claude",
+    status: "idle", age: 0, yolo: false, seen: true, open: false,
+  };
+  const info = readStackInfo(DOCS_STACK_INFO_PATH);
+  const cwd = path.join(info.work, "spawn-review");
+  mkdirSync(cwd, { recursive: true });
+  // Quote the private executable as one shell word; forwarded launch flags
+  // belong to the existing fixture, just as in the ordinary replay wrapper.
+  const fixture = `'${info.fixtures.replaceAll("'", `'\\''`)}'`;
+  writeFileSync(path.join(cwd, ".hero-agent"), `#!/bin/sh\nexec ${fixture} fake-agent --script spawn "$@"\n`, { mode: 0o700 });
+  const response = await request.post("/api/sessions", {
+    data: {
+      cwd, title: review.title, host: (await hostIds(request, scenario)).get(local.key),
+      command: { command: "claude {farhelm_args}", agent: "claude", yolo: false },
+    },
+  });
+  expect(response.ok(), `create approval review source: ${await response.text()}`).toBe(true);
+  const { id } = await response.json();
+  fleet.ids.set(review.title, id);
+  return review;
 }
 
 /** Stage an enabled Restart without inventing a launch or conversation reply.
@@ -317,6 +354,8 @@ export interface DocsFleetOptions {
 /**
  * Load the UI on the staged fleet with every rewrite in place: the hero's two
  * (ages and folders, installed by `openStagedFleet`) and the docs' own.
+ * Development sources join that declaration so their real scratch cwd never
+ * enters a pictured row; their statuses and approval replies are untouched.
  */
 export async function openDocsFleet(
   page: Page,
@@ -326,6 +365,7 @@ export async function openDocsFleet(
 ): Promise<StagedFleet> {
   const fleet = readFleet();
   if (fleet.toolbarReview) scenario.sessions.push(fleet.toolbarReview);
+  if (fleet.spawnReview) scenario.sessions.push(fleet.spawnReview);
   await installDocsRewrites(page, request, scenario, fleet.now);
   if (options.checkoutTrash) await installCheckoutTrash(page, request, scenario, fleet.now);
   if (options.terminalFiles) await installTerminalFiles(page, scenario);

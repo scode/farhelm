@@ -188,7 +188,7 @@ const SELECTED_OWNERS = [
   ".templates-row[aria-pressed=\"true\"]",
   ".segmented-control > button[aria-pressed=\"true\"]",
   ".segment-radio > input:checked + span",
-  ".app-settings-dialog[aria-label=\"settings\"] .app-settings-navigation button[aria-pressed=\"true\"]",
+  ".app-settings-dialog[aria-label=\"Settings\"] .app-settings-navigation button[aria-pressed=\"true\"]",
   ".launch-kind-tab.selected",
   ".launch-composer-folder-options button[aria-selected=\"true\"]",
   ".launch-composer-repository-options > button[aria-selected=\"true\"]",

@@ -2015,7 +2015,7 @@ test("restart with refuses held composer actions and scopes model search", async
   const dialog = await openInjectedDialog(page);
   const search = dialog.locator('.launch-composer-search input[role="combobox"]');
   for (const [query, label, field] of [
-    ["host:local", "Host: local (this machine)", "host"],
+    ["host:local", "Host: Local (this machine)", "host"],
     ["name:held-name", "Set session name: held-name", "session name"],
     ["/tmp", "Use this path: /tmp", "destination"],
     ["claude", "Harness: Claude", "agent type"],

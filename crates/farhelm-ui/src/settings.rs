@@ -297,7 +297,7 @@ pub(crate) fn SettingsDialog(
                 class: "app-settings-dialog host-dialog-framed",
                 role: "dialog",
                 aria_modal: "true",
-                aria_label: "settings",
+                aria_label: "Settings",
                 tabindex: "-1",
                 onmounted: move |_| {
                     if let Some(selector) = &trust_focus {
@@ -322,21 +322,21 @@ pub(crate) fn SettingsDialog(
                         crate::icons::SettingsIcon {}
                     },
                     summary: "For every host on this helm, and for this device",
-                    dismiss_label: "close settings",
-                    dismiss_tooltip: "close settings; unsaved fields are discarded",
+                    dismiss_label: "Close settings",
+                    dismiss_tooltip: "Close settings; unsaved fields are discarded",
                     on_dismiss: move |_| on_close.call(()),
                 }
                 div { class: if sections_open() { "dialog-body host-settings-body app-settings-sections-open" } else { "dialog-body host-settings-body" },
                     nav {
                         class: "app-settings-navigation",
-                        aria_label: "settings sections",
+                        aria_label: "Settings sections",
                         for (key, label) in SETTINGS_SECTIONS.iter().copied().filter(|(key, _)| *key != "app" || has_updater) {
                             button {
                                 key: "{key}",
                                 r#type: "button",
                                 aria_pressed: selected() == key,
                                 aria_controls: "settings-{key}",
-                                "data-tooltip": "show {label} settings",
+                                "data-tooltip": "Show {label} settings",
                                 onclick: move |_| {
                                     selected.set(key);
                                     sections_open.set(false);
@@ -353,7 +353,7 @@ pub(crate) fn SettingsDialog(
                         button {
                             r#type: "button",
                             class: "app-settings-back",
-                            "data-tooltip": "choose a settings section",
+                            "data-tooltip": "Choose a settings section",
                             onclick: move |_| {
                                 sections_open.set(true);
                                 focus_settings_content(true);
@@ -363,7 +363,7 @@ pub(crate) fn SettingsDialog(
                         section {
                             id: "settings-sessions",
                             class: "host-settings-section app-settings-panel",
-                            aria_label: "sessions",
+                            aria_label: "Sessions",
                             hidden: selected() != "sessions",
                             h3 {
                                 class: "host-settings-section-title",
@@ -373,8 +373,8 @@ pub(crate) fn SettingsDialog(
                             div { class: "setting-group",
                                 label {
                                     class: "app-settings-choice setting-row",
-                                    "data-tooltip": "delete, replace, restart and close terminal tabs on the first click",
-                                    span { "skip session confirmations" }
+                                    "data-tooltip": "Delete, replace, restart and close terminal tabs on the first click",
+                                    span { "Skip session confirmations" }
                                     input {
                                         r#type: "checkbox",
                                         class: "control-switch",
@@ -416,8 +416,8 @@ pub(crate) fn SettingsDialog(
                             div { class: "setting-group",
                                 label {
                                     class: "app-settings-choice setting-row",
-                                    "data-tooltip": "offer to name a quick-launched session while its agent starts",
-                                    span { "name sessions on quick launch" }
+                                    "data-tooltip": "Offer to name a quick-launched session while its agent starts",
+                                    span { "Name sessions on quick launch" }
                                     input {
                                         r#type: "checkbox",
                                         class: "control-switch",
@@ -449,8 +449,8 @@ pub(crate) fn SettingsDialog(
                             div { class: "setting-group",
                                 label {
                                     class: "app-settings-choice setting-row",
-                                    "data-tooltip": "color each terminal's frame to match its host icon",
-                                    span { "color terminal frames by host" }
+                                    "data-tooltip": "Color each terminal's frame to match its host icon",
+                                    span { "Color terminal frames by host" }
                                     input {
                                         r#type: "checkbox",
                                         class: "control-switch",
@@ -492,7 +492,7 @@ pub(crate) fn SettingsDialog(
                         section {
                             id: "settings-hosts",
                             class: "host-settings-section app-settings-panel",
-                            aria_label: "hosts",
+                            aria_label: "Hosts",
                             hidden: selected() != "hosts",
                             h3 {
                                 class: "host-settings-section-title",
@@ -505,8 +505,8 @@ pub(crate) fn SettingsDialog(
                             div { class: "setting-group",
                                 label {
                                     class: "app-settings-choice setting-row",
-                                    "data-tooltip": "set up a new host as soon as it has been checked, without showing the plan first",
-                                    span { "set up new hosts without asking" }
+                                    "data-tooltip": "Set up a new host as soon as it has been checked, without showing the plan first",
+                                    span { "Set up new hosts without asking" }
                                     input {
                                         r#type: "checkbox",
                                         class: "control-switch",
@@ -534,8 +534,8 @@ pub(crate) fn SettingsDialog(
                             div { class: "setting-group",
                                 label {
                                     class: "app-settings-choice setting-row",
-                                    "data-tooltip": "forget a host as soon as you choose remove, without asking; its sessions keep running",
-                                    span { "remove hosts without asking" }
+                                    "data-tooltip": "Forget a host as soon as you choose remove, without asking; its sessions keep running",
+                                    span { "Remove hosts without asking" }
                                     input {
                                         r#type: "checkbox",
                                         class: "control-switch",
@@ -564,7 +564,7 @@ pub(crate) fn SettingsDialog(
                         section {
                             id: "settings-terminal",
                             class: "host-settings-section app-settings-panel",
-                            aria_label: "terminal",
+                            aria_label: "Terminal",
                             hidden: selected() != "terminal",
                             h3 {
                                 class: "host-settings-section-title",
@@ -577,19 +577,19 @@ pub(crate) fn SettingsDialog(
                             div { class: "segmented-control terminal-link-choices", role: "radiogroup", aria_label: "Terminal web links",
                                 TerminalLinkChoice {
                                     value: TerminalLinkClick::Intercept,
-                                    label: "open in Farhelm, don't pass the click on",
+                                    label: "Open in Farhelm, don't pass the click on",
                                     help: "Farhelm opens the link once. The program does not receive that click or a drag starting there.",
                                     on_change: link_change,
                                 }
                                 TerminalLinkChoice {
                                     value: TerminalLinkClick::Both,
-                                    label: "open in Farhelm and also pass the click on",
+                                    label: "Open in Farhelm and also pass the click on",
                                     help: "Use this when the program needs link clicks. A program that opens links itself may open a second tab.",
                                     on_change: link_change,
                                 }
                                 TerminalLinkChoice {
                                     value: TerminalLinkClick::Program,
-                                    label: "pass the click on only",
+                                    label: "Pass the click on only",
                                     help: "Let the program handle links. Farhelm does not open them; without mouse reporting, clicking a link does nothing.",
                                     on_change: link_change,
                                 }
@@ -605,7 +605,7 @@ pub(crate) fn SettingsDialog(
                         section {
                             id: "settings-checkouts",
                             class: "host-settings-section app-settings-panel",
-                            aria_label: "checkouts",
+                            aria_label: "Checkouts",
                             hidden: selected() != "checkouts",
                             h3 {
                                 class: "host-settings-section-title",
@@ -622,7 +622,7 @@ pub(crate) fn SettingsDialog(
                         section {
                             id: "settings-agent-trust",
                             class: "host-settings-section app-settings-panel",
-                            aria_label: "agent trust",
+                            aria_label: "Agent trust",
                             hidden: selected() != "agent-trust",
                             h3 {
                                 class: "host-settings-section-title",
@@ -637,7 +637,7 @@ pub(crate) fn SettingsDialog(
                         section {
                             id: "settings-notifications",
                             class: "host-settings-section app-settings-panel",
-                            aria_label: "notifications",
+                            aria_label: "Notifications",
                             hidden: selected() != "notifications",
                             h3 {
                                 class: "host-settings-section-title",
@@ -651,7 +651,7 @@ pub(crate) fn SettingsDialog(
                             section {
                                 id: "settings-app",
                                 class: "host-settings-section app-settings-panel",
-                                aria_label: "app",
+                                aria_label: "App",
                                 hidden: selected() != "app",
                                 h3 {
                                     class: "host-settings-section-title",
@@ -664,8 +664,8 @@ pub(crate) fn SettingsDialog(
                                 div { class: "setting-group",
                                     label {
                                         class: "app-settings-choice setting-row",
-                                        "data-tooltip": "install updates automatically: check for a new Farhelm release when the app starts and about once a day, and install it in the background",
-                                        span { "install updates automatically" }
+                                        "data-tooltip": "Install updates automatically: check for a new Farhelm release when the app starts and about once a day, and install it in the background",
+                                        span { "Install updates automatically" }
                                         input {
                                             r#type: "checkbox",
                                             class: "control-switch",
@@ -716,16 +716,16 @@ pub(crate) fn SettingsDialog(
                     // its footer names it.
                     span { class: "dialog-footer-hint",
                         if cfg!(native_desktop) {
-                            "Most choices save immediately; ntfy alerts, checkout fields and file types use save."
+                            "Most choices save immediately; ntfy alerts, checkout fields and file types use Save."
                         } else {
-                            "Most choices save immediately; ntfy alerts and checkout fields use save."
+                            "Most choices save immediately; ntfy alerts and checkout fields use Save."
                         }
                     }
                     crate::modal_dialog::DialogActions {
                         button {
                             r#type: "button",
                             class: "btn btn-neutral app-settings-close",
-                            "data-tooltip": "close settings; unsaved fields are discarded",
+                            "data-tooltip": "Close settings; unsaved fields are discarded",
                             onclick: move |_| on_close.call(()),
                             "Close"
                         }
@@ -834,7 +834,7 @@ fn OpenExtensionsSettings() -> Element {
             label {
                 r#for: "open-extensions-input",
                 class: "open-extensions-label",
-                "file types to open with {modifier}-click"
+                "File types to open with {modifier}-click"
             }
             input {
                 id: "open-extensions-input",
@@ -872,9 +872,9 @@ fn OpenExtensionsSettings() -> Element {
                         span { aria_hidden: "true", "⚠" }
                         " {extension}: "
                         if kind == WarningKind::Html {
-                            "an agent-written page may run in your browser"
+                            "An agent-written page may run in your browser"
                         } else {
-                            "no protection from the default app"
+                            "No protection from the default app"
                         }
                     }
                     p {
@@ -890,7 +890,7 @@ fn OpenExtensionsSettings() -> Element {
                 r#type: "button",
                 class: "btn btn-neutral",
                 aria_disabled: saving(),
-                "data-tooltip": "save the file types this helm may open",
+                "data-tooltip": "Save the file types this helm may open",
                 onclick: move |_| {
                     if saving() {
                         return;
@@ -925,15 +925,15 @@ fn OpenExtensionsSettings() -> Element {
                     });
                 },
                 if saving() {
-                    "saving…"
+                    "Saving…"
                 } else {
-                    "save file types"
+                    "Save file types"
                 }
             }
             if let Some(result) = outcome() {
                 match result {
                     Ok(()) => rsx! {
-                        p { class: "checkout-root-success", role: "status", "file types saved" }
+                        p { class: "checkout-root-success", role: "status", "File types saved" }
                     },
                     Err(reason) => rsx! {
                         p { class: "checkout-root-error", role: "alert", "{reason}" }

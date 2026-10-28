@@ -204,7 +204,7 @@ pub(crate) fn SoundSettings() -> Element {
     rsx! {
         section {
             class: "host-settings-section",
-            aria_label: "sounds",
+            aria_label: "Sounds",
             onmounted: move |_| {
                 spawn(async move {
                     let _ = document::eval("while (!window.farhelmSounds) { await new Promise(r => setTimeout(r, 50)); } window.farhelmSounds.mountSettings();").await;
@@ -213,9 +213,9 @@ pub(crate) fn SoundSettings() -> Element {
             h4 { class: "host-settings-section-title", "Sounds" }
             p { class: "host-settings-help", "These choices apply only to this device. The session open in an active window stays quiet." }
             for (kind, label, default, help) in [
-                ("waiting", "session waiting", true, "play a bell when a session starts waiting for your answer"),
-                ("approval", "approval request", true, "play a ding-dong when an agent asks Farhelm to do something that needs your approval"),
-                ("finished", "turn finished", false, "play a soft pluck when an agent goes from running to idle"),
+                ("waiting", "Session waiting", true, "Play a bell when a session starts waiting for your answer"),
+                ("approval", "Approval request", true, "Play a ding-dong when an agent asks Farhelm to do something that needs your approval"),
+                ("finished", "Turn finished", false, "Play a soft pluck when an agent goes from running to idle"),
             ] {
                 label { class: "app-settings-choice setting-row",
                     "data-tooltip": help,

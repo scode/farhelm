@@ -845,7 +845,7 @@ test.describe("multi-host", () => {
     // The local row: named as itself, never as an address, and with no
     // management affordances — SPEC.md's "never a ghost, never needing
     // registration" is also a promise that it cannot be removed.
-    const local = hostRowByName(page, "local (this machine)");
+    const local = hostRowByName(page, "Local (this machine)");
     await expect(local).toHaveAttribute("data-host-phase", "connected");
     await expect(local).toHaveAttribute("data-host-kind", "local");
     // The host panel and session row share the saved drawing, while the
@@ -853,7 +853,7 @@ test.describe("multi-host", () => {
     // must still show the familiar laptop in red.
     await expect(local.locator(".host-kind-icon")).toHaveCount(1);
     await expect(local.locator(".host-kind-icon")).toHaveAttribute("data-glyph", "laptop");
-    await expect(local.locator(".host-kind-icon + .visually-hidden")).toHaveText("local");
+    await expect(local.locator(".host-kind-icon + .visually-hidden")).toHaveText("Local");
     await expect(local.locator(".host-status .status-dot")).toBeVisible();
     await expect(local.locator(".host-status-label")).toHaveText("Connected");
     // The local row menu contains Retry and whichever provisioning command
@@ -879,7 +879,7 @@ test.describe("multi-host", () => {
     await expect(remote).toHaveAttribute("data-host-kind", "ssh");
     await expect(remote.locator(".host-kind-icon")).toHaveCount(1);
     await expect(remote.locator(".host-kind-icon")).toHaveAttribute("data-glyph", "cloud");
-    await expect(remote.locator(".host-kind-icon + .visually-hidden")).toHaveText("remote");
+    await expect(remote.locator(".host-kind-icon + .visually-hidden")).toHaveText("Remote");
     await openHostMenu(remote);
     await expect(remote.locator(".host-remove")).toHaveCount(1);
 
@@ -998,12 +998,12 @@ test.describe("multi-host", () => {
     // By name: the permanent answer is also a danger button and now comes
     // first, and a test that clicks it leaves "don't ask again" set for every
     // later test sharing this helm.
-    const confirm = dialog.getByRole("button", { name: "remove", exact: true });
+    const confirm = dialog.getByRole("button", { name: "Remove", exact: true });
     const cancel = dialog.locator(".host-settings-close");
     await expect(confirm).toBeVisible();
     await expect(cancel).toBeVisible();
 
-    await expect(dialog.getByRole("heading")).toHaveText(`remove host · ${destination}`);
+    await expect(dialog.getByRole("heading")).toHaveText(`Remove host · ${destination}`);
     await expect(dialog.locator(".host-dialog-destination")).toHaveText(destination);
     expect(await dialog.getByRole("heading").evaluate((node) => node.getBoundingClientRect().height)).toBeLessThan(32);
     await page.setViewportSize({ width: 360, height: 160 });
@@ -1014,7 +1014,7 @@ test.describe("multi-host", () => {
     await expect.poll(() => dialog.evaluate((node) => node.scrollTop)).toBe(0);
     await page.mouse.wheel(0, 100_000);
     await expect.poll(() => dialog.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
-    const body = dialog.getByRole("region", { name: "host removal details", exact: true });
+    const body = dialog.getByRole("region", { name: "Host removal details", exact: true });
     await body.focus();
     await assertFullyPaintedAndHitTestable(page, body);
     await body.press("Home");
@@ -1022,7 +1022,7 @@ test.describe("multi-host", () => {
     await body.press("End");
     await expect.poll(() => body.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
     for (const part of [dialog.locator(".host-dialog-permanent-hint"), confirm, cancel,
-      dialog.getByRole("button", { name: "remove, don't ask again", exact: true }),
+      dialog.getByRole("button", { name: "Remove, don't ask again", exact: true }),
       dialog.locator(".host-settings-dismiss")]) {
       await part.scrollIntoViewIfNeeded();
       await assertFullyPaintedAndHitTestable(page, part);
@@ -1071,7 +1071,7 @@ test.describe("multi-host", () => {
     const row = hostRowByName(page, "user@remove-refusal");
     await openHostMenu(row);
     await row.locator(".host-remove").click();
-    await page.locator(".host-remove-dialog").getByRole("button", { name: "remove", exact: true }).click();
+    await page.locator(".host-remove-dialog").getByRole("button", { name: "Remove", exact: true }).click();
 
     const dialog = page.locator(".host-remove-dialog");
     await expect(dialog).toBeVisible();
@@ -1127,7 +1127,7 @@ test.describe("multi-host", () => {
     await page.goto("/");
     await openHostsPanel(page);
     const row = hostRowByName(page, "user@remote-host");
-    await expect(row.locator(".host-status-label")).toHaveText("unreachable, retrying");
+    await expect(row.locator(".host-status-label")).toHaveText("Unreachable, retrying");
 
     // The toggle itself, BEFORE opening anything: still on the header's one
     // line, fully inside the sidebar, not wrapped away to the left.
@@ -1212,7 +1212,7 @@ test.describe("multi-host", () => {
     await expect(page.locator(".add-host-form")).toBeVisible();
     await expect(page.locator('.host-add-dialog[role="dialog"]')).toBeVisible();
     await expect(page.locator(".add-host-ssh")).toBeFocused();
-    await page.getByRole("button", { name: "cancel", exact: true }).click();
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(page.locator(".add-host-form")).toHaveCount(0);
     await expect(page.locator(".add-host-button")).toBeFocused();
 
@@ -1421,7 +1421,7 @@ test.describe("multi-host", () => {
     // session menu's; the order under test is the verbs', so read only the
     // label span rather than the item's whole text.
     const items = row.getByRole("menuitem").locator(".session-row-menu-label");
-    await expect(items).toHaveText(["retry", "set up automatically", "settings"]);
+    await expect(items).toHaveText(["Retry", "Set up automatically", "Settings"]);
     const retry = row.locator(".host-retry");
     const automatic = row.locator(".provisioning-auto-setup");
     const alias = row.locator(".host-settings");
@@ -1479,16 +1479,16 @@ test.describe("multi-host", () => {
       await page.locator(".host-settings").click();
       const dialog = page.locator(".host-settings-dialog");
       await expect(dialog.locator(".host-settings-appearance")).toBeVisible();
-      const icons = dialog.getByRole("group", { name: "icon", exact: true });
-      const colors = dialog.getByRole("group", { name: "color", exact: true });
+      const icons = dialog.getByRole("group", { name: "Icon", exact: true });
+      const colors = dialog.getByRole("group", { name: "Color", exact: true });
       await expect(icons.getByRole("button")).toHaveCount(16);
       await expect(colors.getByRole("button")).toHaveCount(8);
-      await icons.getByRole("button", { name: "rocket", exact: true }).click();
-      await expect(icons.getByRole("button", { name: "rocket", exact: true })).toHaveAttribute("aria-pressed", "true");
-      await expect(colors.getByRole("button", { name: "teal", exact: true })).toBeEnabled();
+      await icons.getByRole("button", { name: "Rocket", exact: true }).click();
+      await expect(icons.getByRole("button", { name: "Rocket", exact: true })).toHaveAttribute("aria-pressed", "true");
+      await expect(colors.getByRole("button", { name: "Teal", exact: true })).toBeEnabled();
       // Establish keyboard focus before Space: pointer history is not a
       // premise for the color buttons' native keyboard activation.
-      const teal = colors.getByRole("button", { name: "teal", exact: true });
+      const teal = colors.getByRole("button", { name: "Teal", exact: true });
       await teal.focus();
       await expect(teal).toBeFocused();
       await teal.press("Space");
@@ -1539,13 +1539,13 @@ test.describe("multi-host", () => {
       await expect(dialog).toBeVisible();
       await expect(dialog.locator(".host-settings-appearance")).toBeVisible();
       await expect(dialog.locator(".host-settings-mark [data-glyph=laptop]")).toBeVisible();
-      const localIcons = dialog.getByRole("group", { name: "icon", exact: true });
-      const localColors = dialog.getByRole("group", { name: "color", exact: true });
-      await localIcons.getByRole("button", { name: "house", exact: true }).click();
-      await expect(localIcons.getByRole("button", { name: "house", exact: true })).toHaveAttribute("aria-pressed", "true");
-      await expect(localColors.getByRole("button", { name: "steel", exact: true })).toBeEnabled();
-      await localColors.getByRole("button", { name: "steel", exact: true }).click();
-      await expect(localColors.getByRole("button", { name: "steel", exact: true })).toHaveAttribute("aria-pressed", "true");
+      const localIcons = dialog.getByRole("group", { name: "Icon", exact: true });
+      const localColors = dialog.getByRole("group", { name: "Color", exact: true });
+      await localIcons.getByRole("button", { name: "House", exact: true }).click();
+      await expect(localIcons.getByRole("button", { name: "House", exact: true })).toHaveAttribute("aria-pressed", "true");
+      await expect(localColors.getByRole("button", { name: "Steel", exact: true })).toBeEnabled();
+      await localColors.getByRole("button", { name: "Steel", exact: true }).click();
+      await expect(localColors.getByRole("button", { name: "Steel", exact: true })).toHaveAttribute("aria-pressed", "true");
       await dialog.locator(".host-settings-close").click();
       for (const client of [page, observer]) {
         const sessionRow = client.locator(`[data-session-id="${localSession.id}"]`);
@@ -1555,7 +1555,7 @@ test.describe("multi-host", () => {
         await expect(hostMark).toBeVisible();
         await expect(hostMark).toHaveAttribute("data-glyph", "house", { timeout: 20_000 });
         await expect(hostMark).toHaveCSS("color", await resolveToken(client, "--host-icon-steel"));
-        await expect(hostMark).toHaveAttribute("data-tooltip", "local: on this machine, where the helm runs");
+        await expect(hostMark).toHaveAttribute("data-tooltip", "Local: on this machine, where the helm runs");
         await showSessionsPanel(client);
         await expect(sessionMark).toBeVisible();
         await expect(sessionMark).toHaveAttribute("data-glyph", "house");
@@ -1628,9 +1628,9 @@ test.describe("multi-host", () => {
       await openHostMenu(hostRow);
       await hostRow.locator(".host-settings").click();
       const dialog = page.locator(".host-settings-dialog");
-      const rocket = dialog.getByRole("button", { name: "rocket", exact: true });
-      const teal = dialog.getByRole("button", { name: "teal", exact: true });
-      await expect(dialog.getByRole("button", { name: "cloud", exact: true })).toHaveAttribute("aria-pressed", "true");
+      const rocket = dialog.getByRole("button", { name: "Rocket", exact: true });
+      const teal = dialog.getByRole("button", { name: "Teal", exact: true });
+      await expect(dialog.getByRole("button", { name: "Cloud", exact: true })).toHaveAttribute("aria-pressed", "true");
       holdReads = true;
       await rocket.click();
       await expect.poll(() => submitted.length).toBe(1);
@@ -1693,7 +1693,7 @@ test.describe("multi-host", () => {
       await expect(help).toContainText("These sessions start on this host without asking you to confirm.");
       await expect(dialog.locator(".host-settings-mark [data-glyph=laptop]")).toHaveCount(1);
       await expect(dialog.locator('[data-setting="destination"]')).toHaveCount(0);
-      await expect(dialog.locator(".host-settings-footer")).toContainText("changes save as you make them");
+      await expect(dialog.locator(".host-settings-footer")).toContainText("Changes save as you make them");
       await test.info().attach("host-settings-local", { body: await dialog.screenshot(), contentType: "image/png" });
       await toggle.click();
       await expect(toggle).not.toBeChecked();
@@ -1817,7 +1817,7 @@ test.describe("multi-host", () => {
     await expect(edit, "focus moves to the dialog's first control").toBeFocused();
     await expect(dialog.locator('[data-setting="destination"] .host-settings-value')).toHaveText(destination);
     await expect(dialog.locator(".host-settings-title")).toHaveText(destination);
-    await expect(dialog.locator(".host-settings-summary")).toContainText("connected");
+    await expect(dialog.locator(".host-settings-summary")).toContainText("Connected");
     await expect(dialog.locator(".host-settings-version")).toHaveText("Farhelm 0.1.0");
     await expect(dialog.locator(".host-settings-mark [data-glyph=cloud]")).toHaveCount(1);
     await test.info().attach("host-settings-remote", { body: await dialog.screenshot(), contentType: "image/png" });
@@ -1897,7 +1897,7 @@ test.describe("multi-host", () => {
     await row.locator(".host-settings").click();
     const dialog = page.locator(".host-settings-refreshed");
     await expect(dialog).toBeVisible();
-    await expect(dialog).toHaveAttribute("aria-label", `host settings · ${destination}`);
+    await expect(dialog).toHaveAttribute("aria-label", `Host settings · ${destination}`);
     await expect(dialog.locator('[data-setting="destination"] .host-settings-value')).toHaveText(destination);
     await expect(dialog.locator(".host-settings-title")).toHaveText(destination);
     const body = dialog.locator(".host-settings-body");
@@ -1907,7 +1907,7 @@ test.describe("multi-host", () => {
     const dismiss = dialog.locator(".host-settings-dismiss");
     const close = dialog.locator(".host-settings-close");
     const note = dialog.locator(".host-settings-footer > span");
-    await expect(note).toHaveText("changes save as you make them");
+    await expect(note).toHaveText("Changes save as you make them");
     await page.mouse.move(0, 0);
 
     /** Full bounds and a center hit prove the visible control is not covered. */
@@ -2421,13 +2421,13 @@ test.describe("multi-host", () => {
 
     await page.goto("/");
     await openHostsPanel(page);
-    const local = hostRowByName(page, "local (this machine)");
+    const local = hostRowByName(page, "Local (this machine)");
     await expect(local).toHaveAttribute(
       "data-host-phase",
       "unreachable-reprobing",
     );
     await expect(local.locator(".host-status-label")).toHaveText(
-      "unreachable, retrying",
+      "Unreachable, retrying",
     );
     // The remedy is the helm's own sentence, with the state directory
     // intact: a hint that said only `farhelm supervisor run` would send the
@@ -2491,7 +2491,7 @@ test.describe("multi-host", () => {
     await openHostsPanel(page);
     const row = hostRowByName(page, "user@reinstalled");
     await expect(row).toHaveAttribute("data-host-phase", "identity-mismatch");
-    await expect(row.locator(".host-status-label")).toHaveText("identity mismatch");
+    await expect(row.locator(".host-status-label")).toHaveText("Identity mismatch");
     // Both, because the decision is between them.
     await expect(row.locator(".host-detail")).toContainText("identity-before");
     await expect(row.locator(".host-detail")).toContainText("identity-after");
@@ -2734,7 +2734,7 @@ test.describe("multi-host", () => {
       // status badge (this session is `running`) hides its own word the
       // same way, and a loose selector would be ambiguous between the two
       // clipped spans on the same row.
-      await expect(row.locator(".host-kind-icon + .visually-hidden")).toHaveText("remote");
+      await expect(row.locator(".host-kind-icon + .visually-hidden")).toHaveText("Remote");
       id = await findSessionIdByTitle(request, title);
 
       // The list's own answer must agree with the row: the session lives on
@@ -2986,7 +2986,7 @@ test.describe("multi-host", () => {
       expect(await page.evaluate(() => (window as any).__outageOriginal.element.isConnected)).toBe(true);
       await expect(page.locator(".terminal-pane > .banner")).toBeHidden();
       await expect(page.locator("#term-connecting")).toBeHidden();
-      await expect(row.locator(".stale-badge")).toHaveText("waiting for supervisor");
+      await expect(row.locator(".stale-badge")).toHaveText("Waiting for supervisor");
       await expect(row).toHaveAttribute("data-session-selected", "true");
       // The selected stale row stays inverse; the ordinary notice keeps
       // its secondary prose and accent heading on a neutral surface.
@@ -2994,8 +2994,8 @@ test.describe("multi-host", () => {
       await expect(card.locator(".session-unavailable-explanation")).toHaveCSS("color", await resolveToken(page, "--fg-1"));
       await expect(card.locator(".session-unavailable-heading")).toHaveCSS("color", await resolveToken(page, "--accent"));
       await setCompact(page, true);
-      await expect(row.locator(".compact-qualifier")).toHaveText("waiting for supervisor");
-      await expect(row.locator(".compact-qualifier")).toHaveAttribute("data-tooltip", /waiting for supervisor.*last-known/);
+      await expect(row.locator(".compact-qualifier")).toHaveText("Waiting for supervisor");
+      await expect(row.locator(".compact-qualifier")).toHaveAttribute("data-tooltip", /Waiting for supervisor.*last-known/);
       await setCompact(page, false);
       await expect(page.locator(".sort-title")).toBeFocused();
       const dot = await row.locator(".status-dot").evaluate((node) => {
@@ -3649,7 +3649,7 @@ test.describe("multi-host", () => {
       await expect(page.locator(".host-remove-dialog")).toContainText(
         "supervisor and sessions keep running",
       );
-      await page.locator(".host-remove-dialog").getByRole("button", { name: "remove", exact: true }).click();
+      await page.locator(".host-remove-dialog").getByRole("button", { name: "Remove", exact: true }).click();
 
       await expect(hostRowByName(page, info.remote_ssh)).toHaveCount(0, {
         timeout: 30_000,
@@ -3735,7 +3735,7 @@ test.describe("multi-host", () => {
           stage: "setting-up",
           last_error: "sentinel-connecting",
         },
-        needles: ["attempt 3", "finishing connection setup…", "sentinel-connecting"],
+        needles: ["Attempt 3", "finishing connection setup…", "sentinel-connecting"],
       },
       {
         id: 8002,
@@ -3830,10 +3830,10 @@ test.describe("multi-host", () => {
       // The development helm never calls a real peer old: keep the age
       // cases explicit so optional and required updates exercise the UI.
       ...[
-        { id: 8011, kind: "ssh", updateKind: "optional", label: "old version" },
-        { id: 8013, kind: "local", updateKind: undefined, label: "old version" },
-        { id: 8015, kind: "ssh", updateKind: undefined, label: "old version" },
-        { id: 8016, kind: "ssh", updateKind: undefined, label: "too new" },
+        { id: 8011, kind: "ssh", updateKind: "optional", label: "Old version" },
+        { id: 8013, kind: "local", updateKind: undefined, label: "Old version" },
+        { id: 8015, kind: "ssh", updateKind: undefined, label: "Old version" },
+        { id: 8016, kind: "ssh", updateKind: undefined, label: "Too new" },
       ].map((entry) => ({
         ...entry,
         phase: "connected",
@@ -3851,7 +3851,7 @@ test.describe("multi-host", () => {
         id: 8012,
         phase: "version-skew",
         updateKind: "required",
-        label: "needs update",
+        label: "Needs update",
         state: {
           phase: "version-skew",
           peer_protocol: 1,
@@ -3925,7 +3925,7 @@ test.describe("multi-host", () => {
         const count = status.locator(".host-update-count");
         const step = status.locator(".host-update-step");
         await expect(verb).toBeVisible();
-        await expect(verb).toHaveText("setting up");
+        await expect(verb).toHaveText("Setting up");
         await expect(count).toBeVisible();
         await expect(count).toHaveText("0/1");
         await expect(step).toBeVisible();
@@ -3955,7 +3955,7 @@ test.describe("multi-host", () => {
         await expect(status.locator(".host-status-label")).toHaveText(label!);
         await expect(status.getByRole("button")).toHaveCount(0);
       } else if (entry.phase === "connected" && label === undefined) {
-        await expect(row.getByRole("status", { name: "connected" })).toHaveCount(1);
+        await expect(row.getByRole("status", { name: "Connected" })).toHaveCount(1);
         await expect(status.locator(".host-status-label")).toHaveText("Connected");
       } else {
         await expect(status.locator(".host-status-label")).toBeVisible();
@@ -4057,7 +4057,7 @@ test.describe("multi-host", () => {
         const row = page.locator(`[data-host-id="${hostId}"]`);
         const button = row.getByRole("button", { name: `update ${name}`, exact: true });
         await expect(button).toBeVisible();
-        await expect(row.getByRole("status", { name: "old version" })).toHaveCount(1);
+        await expect(row.getByRole("status", { name: "Old version" })).toHaveCount(1);
         await row.hover();
         const toggle = row.locator(".host-row-menu");
         await assertFullyPaintedAndHitTestable(page, button);
@@ -4092,7 +4092,7 @@ test.describe("multi-host", () => {
           .toEqual([{ method: "POST", body: null, path: `/api/hosts/${hostId}/update` }]);
         const progress = row.locator('.host-update-pending[data-update-phase="planning"]');
         await expect(progress).toBeVisible();
-        await expect(progress).toHaveText("updating…");
+        await expect(progress).toHaveText("Updating…");
         await expect(progress.locator(".host-update-dot")).toBeVisible();
         await expect(button).toHaveCount(0);
         await expect(toggle).toBeFocused();
@@ -4215,15 +4215,15 @@ test.describe("multi-host", () => {
     await expect(dialog).toBeVisible();
     // Remove takes initial focus; Cancel and the header still dismiss without a write.
     await expect(dialog.locator(".host-remove-confirm")).toBeFocused();
-    await expect(dialog.getByRole("heading")).toHaveText(`remove host · ${info.remote_ssh}`);
+    await expect(dialog.getByRole("heading")).toHaveText(`Remove host · ${info.remote_ssh}`);
     for (const phone of [false, true]) {
       await page.setViewportSize({ width: phone ? 390 : 1100, height: 850 });
       await expect(dialog.locator(".host-remove-confirm")).toBeFocused();
       await expectQuietInitialFocus(page, dialog.locator(".host-remove-confirm"));
-      await expectManagementAnswers(dialog, ["cancel", "remove, don't ask again", "remove"], phone);
+      await expectManagementAnswers(dialog, ["Cancel", "Remove, don't ask again", "Remove"], phone);
       await testInfo.attach(`host-remove-${phone ? "phone" : "desktop"}`, { body: await dialog.screenshot(), contentType: "image/png" });
     }
-    await expectCancelTooltipReturns(page, dialog.locator(".host-settings-close"), dialog.getByRole("button", { name: "remove", exact: true }));
+    await expectCancelTooltipReturns(page, dialog.locator(".host-settings-close"), dialog.getByRole("button", { name: "Remove", exact: true }));
     await dialog.locator(".host-settings-close").click();
     await expect(dialog).toHaveCount(0);
     await expect(row.locator(".host-row-menu")).toBeFocused();
@@ -4233,7 +4233,7 @@ test.describe("multi-host", () => {
     await openHostMenu(row);
     await row.locator(".host-remove").click();
     await expect(dialog).toBeVisible();
-    await dialog.getByRole("button", { name: "cancel host removal", exact: true }).click();
+    await dialog.getByRole("button", { name: "Cancel host removal", exact: true }).click();
     await expect(dialog).toHaveCount(0);
     await expect(row.locator(".host-row-menu")).toBeFocused();
     expect(removals, "neither dismissal removes the host").toHaveLength(0);
@@ -4291,7 +4291,7 @@ test.describe("multi-host", () => {
         await expect.poll(() => arrived).toBe(true);
         await expect(dialog).toBeVisible();
         await expect(dialog.locator(".host-settings-close")).toBeDisabled();
-        await dialog.getByRole("button", { name: "cancel host removal", exact: true }).click();
+        await dialog.getByRole("button", { name: "Cancel host removal", exact: true }).click();
         await expect(dialog).toBeVisible();
         expect(await row.evaluate((node) => node.closest("[inert]") !== null)).toBe(true);
         expect(await dialog.evaluate((node) => node.contains(document.activeElement))).toBe(true);
@@ -4468,10 +4468,10 @@ test.describe("multi-host", () => {
       // A new Enter would accept the requested uninstall plan.
       await expect(dialog.locator(".uninstall-confirm")).toBeFocused();
       await expectQuietInitialFocus(page, dialog.locator(".uninstall-confirm"));
-      await expect(dialog.getByRole("heading")).toHaveText(`uninstall Farhelm · ${info.remote_ssh}`);
+      await expect(dialog.getByRole("heading")).toHaveText(`Uninstall Farhelm · ${info.remote_ssh}`);
       for (const phone of [false, true]) {
         await page.setViewportSize({ width: phone ? 390 : 1100, height: 850 });
-        await expectManagementAnswers(dialog, ["cancel", "uninstall"], phone);
+        await expectManagementAnswers(dialog, ["Cancel", "Uninstall"], phone);
         await expectUninstallText(page, dialog.locator(".provisioning-plan"), confirmation, offer.steps);
         await testInfo.attach(`host-uninstall-${phone ? "phone" : "desktop"}`, { body: await dialog.screenshot(), contentType: "image/png" });
       }
@@ -4489,7 +4489,7 @@ test.describe("multi-host", () => {
       await expect.poll(() => dialog.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
       await page.setViewportSize({ width: 1100, height: 850 });
       await expectCancelTooltipReturns(page, dialog.locator(".uninstall-cancel"), dialog.locator(".uninstall-confirm"));
-      await dialog.getByRole("button", { name: "cancel Farhelm uninstall", exact: true }).click();
+      await dialog.getByRole("button", { name: "Cancel Farhelm uninstall", exact: true }).click();
       await expect(dialog).toHaveCount(0);
       await expect(row.locator(".host-row-menu")).toBeFocused();
       await openHostMenu(row);
@@ -4538,7 +4538,7 @@ test.describe("multi-host", () => {
             .toBeUndefined();
           await expect(hostRowByName(page, info.remote_ssh)).toHaveCount(0, { timeout: 30_000 });
           await expect(notice.locator(".uninstall-notice-text"))
-            .toHaveText(`removed from ${info.remote_ssh} · data kept`);
+            .toHaveText(`Removed from ${info.remote_ssh} · data kept`);
           noticeWhileHeld = true;
         } finally {
           heldReply = true;
@@ -4549,7 +4549,7 @@ test.describe("multi-host", () => {
       await dialog.locator(".uninstall-confirm").click();
       await expect(hostRowByName(page, info.remote_ssh)).toHaveCount(0, { timeout: 30_000 });
       await expect(notice.locator(".uninstall-notice-text"))
-        .toHaveText(`removed from ${info.remote_ssh} · data kept`);
+        .toHaveText(`Removed from ${info.remote_ssh} · data kept`);
       // The text-only tooltip keeps host and path as separate LTR runs even
       // though it cannot use the PeerLine elements of the visible notice.
       const isolatedNotice = `Farhelm was removed from \u2066${info.remote_ssh}\u2069; its data remains in \u2066${kept}\u2069 on that host.`;
@@ -4656,21 +4656,21 @@ test.describe("multi-host", () => {
       await openHostMenu(row);
       await row.locator(".provisioning-uninstall").click();
       await planRequested;
-      await expect(row.locator(".host-update-pending")).toContainText("uninstalling");
+      await expect(row.locator(".host-update-pending")).toContainText("Uninstalling");
       releasePlan?.();
       const dialog = page.locator(".host-uninstall-dialog");
       await expect(dialog).toContainText("Farhelm will uninstall from", { timeout: 30_000 });
       await expect(page.locator(".host-details-toggle")).not.toBeChecked();
       await dialog.locator(".uninstall-confirm").click();
 
-      await expect(row.locator(".host-update-running")).toContainText("uninstalling", {
+      await expect(row.locator(".host-update-running")).toContainText("Uninstalling", {
         timeout: 30_000,
       });
       await expect(row.locator(".provisioning-run")).toBeVisible();
       await expect(row.locator(".provisioning-run-fold")).toBeVisible();
       await row.locator(".provisioning-run-fold").click();
       await expect(row.locator(".provisioning-run")).toHaveCount(0);
-      await expect(row.locator(".host-update-running")).toContainText("uninstalling");
+      await expect(row.locator(".host-update-running")).toContainText("Uninstalling");
       await expect(row).toHaveCount(0, { timeout: 60_000 });
     } finally {
       releasePlan?.();
@@ -5092,7 +5092,7 @@ test.describe("multi-host", () => {
       // This is a refresh oracle, not a visibility assertion: Hosts remains
       // mounted while the original composer stays open over Sessions.
       await expect(page.locator(`[data-host-id="${local.id}"] .host-name`)).toHaveText(
-        "local (this machine)",
+        "Local (this machine)",
         { timeout: 15_000 },
       );
       await expect

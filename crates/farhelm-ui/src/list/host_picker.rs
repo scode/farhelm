@@ -95,11 +95,11 @@ pub(super) fn HostPicker(
         div { class: "launcher-host-picker",
             button {
                 class: "create-session-host", r#type: "button", role: "combobox",
-                aria_label: "host", aria_haspopup: "listbox", aria_expanded: showing,
+                aria_label: "Host", aria_haspopup: "listbox", aria_expanded: showing,
                 aria_controls: "launcher-host-options",
                 aria_activedescendant: (showing && count > 0).then(|| format!("launcher-host-option-{index}")),
                 "data-host-id": selected.map(|id| id.to_string()).unwrap_or_default(),
-                "data-tooltip": "host: the machine the session runs on",
+                "data-tooltip": "Host: the machine the session runs on",
                 disabled: busy,
                 onblur: move |_| { open.set(false); prefix.set(String::new()); },
                 onclick: move |_| {
@@ -182,8 +182,8 @@ pub(super) fn HostPicker(
                 span { class: "launcher-host-chevron", aria_hidden: "true", "▾" }
             }
             if showing {
-                div { id: "launcher-host-options", class: "launcher-host-options", role: "listbox", aria_label: "host",
-                    if hosts.is_empty() { p { role: "status", "loading hosts…" } }
+                div { id: "launcher-host-options", class: "launcher-host-options", role: "listbox", aria_label: "Host",
+                    if hosts.is_empty() { p { role: "status", "Loading hosts…" } }
                     for (position, host) in hosts.iter().enumerate() {
                         button {
                             key: "{host.id}", id: "launcher-host-option-{position}",

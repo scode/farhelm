@@ -161,7 +161,7 @@ async function interceptFeedback(page: Page, answer: (route: Route) => Promise<v
  */
 test("the help menu sits below the gear and follows the menu conventions", async ({ page }) => {
   await page.goto("/");
-  const gear = page.getByRole("button", { name: "settings", exact: true });
+  const gear = page.getByRole("button", { name: "Settings", exact: true });
   const { toggle, menu } = await openHelpMenu(page);
   const gearBox = await gear.boundingBox();
   const toggleBox = await toggle.boundingBox();

@@ -132,8 +132,8 @@ pub(crate) fn ClaudeTrustSettings() -> Element {
     rsx! {
         div { id: "checkout-claude-trust", class: "checkout-claude-trust", tabindex: "-1",
             label { class: "app-settings-choice setting-row",
-                "data-tooltip": "mark each new managed checkout trusted in Claude's own settings file before the agent starts; see the caveats below",
-                span { "answer Claude's \"trust this folder?\" for new checkouts" }
+                "data-tooltip": "Mark each new managed checkout trusted in Claude's own settings file before the agent starts; see the caveats below",
+                span { "Answer Claude's \"trust this folder?\" for new checkouts" }
                 input {
                     r#type: "checkbox", class: "control-switch", checked: enabled, disabled: locked,
                     aria_describedby: "claude-trust-help claude-trust-caveats",
@@ -170,8 +170,8 @@ pub(crate) fn ClaudeTrustSettings() -> Element {
                 p { "As when you answer Yes yourself, the repository's Claude hooks and commands then run without Claude's warning. When Farhelm archives the checkout, it removes that folder's trust key again, also best effort." }
             }
             label { class: "app-settings-choice setting-row",
-                "data-tooltip": "show a note above the terminal when Claude asks whether to trust a new managed checkout",
-                span { "show the hint when Claude asks about a managed checkout" }
+                "data-tooltip": "Show a note above the terminal when Claude asks whether to trust a new managed checkout",
+                span { "Show the hint when Claude asks about a managed checkout" }
                 input { r#type: "checkbox", class: "control-switch", checked: !dismissed, disabled: value.is_none(),
                     "data-preference-checked": (!dismissed).to_string(),
                     onchange: move |event| {

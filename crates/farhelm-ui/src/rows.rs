@@ -1263,13 +1263,13 @@ mod tests {
             stale: true,
             ..session("a", "a")
         };
-        let detail = session_row_detail(&row, "checking host");
+        let detail = session_row_detail(&row, "Checking host");
         assert!(has_detail_line(&row));
         assert_eq!(
             detail.ended.unwrap().text,
             "exited (code unknown) — peer<U+202E>message"
         );
-        assert_eq!(detail.stale_cause, Some("checking host"));
+        assert_eq!(detail.stale_cause, Some("Checking host"));
         assert_eq!(
             status_badge(
                 &row.status,
@@ -1468,11 +1468,11 @@ mod tests {
         })]));
         assert_eq!(
             session_unavailable_cause(pending.lookup(Some(1))),
-            "checking host"
+            "Checking host"
         );
         assert_eq!(
             session_unavailable_cause(known.lookup(Some(1))),
-            "waiting for supervisor"
+            "Waiting for supervisor"
         );
         assert_eq!(host_read_moves(&pending, &known, true, false), ["b"]);
         let mut absent = pending.clone();
@@ -1482,7 +1482,7 @@ mod tests {
         failed.record(Err("transport failed".into()));
         assert_eq!(
             session_unavailable_cause(failed.lookup(Some(1))),
-            "host state unavailable"
+            "Host state unavailable"
         );
         assert_eq!(host_read_moves(&known, &failed, true, false), ["b"]);
         assert_eq!(host_read_moves(&pending, &failed, true, false), ["b"]);

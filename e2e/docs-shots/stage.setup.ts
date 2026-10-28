@@ -7,12 +7,15 @@
  * one and read the staged ids from the fleet file it writes. The scenario's
  * launch templates are created here too, after the hosts are connected, since
  * a template names its host by an identity only a connected host has.
+ * Focused development selections may add an owned source. The approval source
+ * emits no request here: the shot test connects its GUI before triggering it
+ * and owns Deny, exact permission restoration and removal of that source.
  */
 import { test } from "@playwright/test";
 import { loadScenario } from "../readme-hero/scenario";
 import { readStackInfo, stageFleet } from "../readme-hero/stage";
 import { DOCS_SHOTS_DIR, DOCS_STACK_INFO_PATH } from "./paths";
-import { stageTemplates, stageToolbarReviewSession, writeFleet } from "./stage-docs";
+import { stageSpawnReviewSession, stageTemplates, stageToolbarReviewSession, writeFleet } from "./stage-docs";
 
 test("stage the docs fleet", async ({ page, request }) => {
   const scenario = loadScenario(DOCS_SHOTS_DIR);
@@ -24,5 +27,10 @@ test("stage the docs fleet", async ({ page, request }) => {
   const toolbarReview = scope === "session-toolbar" || scope === "launcher" || scope === "sentence-launcher"
     ? await stageToolbarReviewSession(request, scenario, fleet)
     : undefined;
-  writeFleet(fleet, toolbarReview);
+  // This source creates no child: its one real request is photographed and
+  // denied by the focused development test, which also owns source cleanup.
+  const spawnReview = scope === "sentence-hosts-settings" || scope === "sentence-approval"
+    ? await stageSpawnReviewSession(request, scenario, fleet)
+    : undefined;
+  writeFleet(fleet, toolbarReview, spawnReview);
 });

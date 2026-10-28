@@ -415,7 +415,7 @@ for (const action of ["setup", "uninstall", "refusal"] as const) {
       await expect(modal).toBeVisible();
       await expect(page.locator(".hosts-heading")).not.toBeVisible();
       if (action === "refusal") await expect(modal).toContainText("rail update refusal");
-      await modal.getByRole("button", { name: action === "refusal" ? "close" : "cancel", exact: true }).click();
+      await modal.getByRole("button", { name: action === "refusal" ? "Close" : "Cancel", exact: true }).click();
       await expect(modal).toHaveCount(0);
       await expect(avatar).toBeFocused();
       await expect(page.locator(".hosts-panel-toggle")).toHaveAttribute("aria-pressed", "false");
@@ -791,7 +791,7 @@ for (const reason of ["Remove success", "authoritative Settings disappearance"] 
       waiting = true;
       await notifyFeed(feed, 2);
       const card = page.locator(`.approval-card[data-approval-id="${approvalId}"]`);
-      const answer = card.getByRole("button", { name: "allow", exact: true });
+      const answer = card.getByRole("button", { name: "Allow", exact: true });
       await expect(answer).toBeVisible();
       await expect(answer).toBeEnabled();
       expect(await answer.evaluate((node) => node.closest("[data-modal-exempt]") !== null)).toBe(true);
@@ -935,7 +935,7 @@ test("queued Update refusals retain modal focus and isolation", async ({ page, r
   }
   await page.goto("/");
   await showHostsPanel(page);
-  await page.getByRole("button", { name: "update all" }).click();
+  await page.getByRole("button", { name: "Update all" }).click();
   await expect.poll(() => refused.size).toBe(2);
   const refusal = page.locator(".host-refusal-dialog");
   await expect(refusal).toBeVisible();
@@ -1077,7 +1077,7 @@ test("an open Update popup follows the new current step in a short viewport", as
   const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
   await openHostMenu(row);
   await row.locator(".provisioning-update").click();
-  await expect(row.locator(".host-update-step")).toHaveText(" create directories");
+  await expect(row.locator(".host-update-step")).toHaveText(" Create directories");
   const live = await progress(request, accepted.host_id);
   expect(live.status).toBe("running");
   expect(live.operation).toBe("update");
@@ -1264,7 +1264,7 @@ for (const operation of ["setup", "uninstall"] as const) {
         "the plain renderer preserves every line and the final LF").toBe(confirmation);
       await expect(body.locator(".provisioning-copy-plan")).toHaveCount(0);
       await expect(body.locator("button, input, select, textarea, a[href], summary")).toHaveCount(0);
-      await expect(body).toHaveAccessibleName(`host ${operation} plan`);
+      await expect(body).toHaveAccessibleName(`Host ${operation} plan`);
       await expect(body).toHaveAttribute("tabindex", "0");
       await expectKeyboardScroll(page, dialog.locator(".host-settings-dismiss"), body);
       await dialog.locator(".host-settings-dismiss").click();
@@ -1298,12 +1298,12 @@ for (const phone of [false, true]) {
     await page.goto("/");
     await openHostsPanel(page);
     await page.locator(".host-rail-add").click();
-    const dialog = page.getByRole("dialog", { name: "add host", exact: true });
-    await expect(dialog.getByRole("heading", { name: "add host", exact: true })).toBeVisible();
-    await expectHostAnswers(dialog, ["cancel", "add"], phone);
+    const dialog = page.getByRole("dialog", { name: "Add host", exact: true });
+    await expect(dialog.getByRole("heading", { name: "Add host", exact: true })).toBeVisible();
+    await expectHostAnswers(dialog, ["Cancel", "Add"], phone);
     await testInfo.attach(`host-add-${phone ? "phone" : "desktop"}`, { body: await dialog.screenshot(), contentType: "image/png" });
     const before = (await dialog.boundingBox())!;
-    await expectKeyboardTooltip(page, dialog.getByRole("button", { name: "cancel", exact: true }));
+    await expectKeyboardTooltip(page, dialog.getByRole("button", { name: "Cancel", exact: true }));
     const reply = page.waitForResponse((response) => response.url().endsWith("/api/hosts/probe") && response.request().method() === "POST");
     await page.locator(".add-host-ssh").fill(remote);
     await expect(page.locator(".add-host-ssh")).toBeFocused();
@@ -1312,11 +1312,11 @@ for (const phone of [false, true]) {
     const planned = await (await reply).json() as ProbeReply;
     expect(planned.result, "real discovery must produce the plan this test measures").toBe("provisionable");
     if (planned.result !== "provisionable") throw new Error("fixture did not offer setup");
-    await expect(dialog.getByRole("heading")).toHaveText(`set up host · ${remote}`);
-    await expect(dialog.getByRole("button", { name: "set up", exact: true })).toBeFocused();
-    await expectQuietInitialFocus(page, dialog.getByRole("button", { name: "set up", exact: true }));
+    await expect(dialog.getByRole("heading")).toHaveText(`Set up host · ${remote}`);
+    await expect(dialog.getByRole("button", { name: "Set up", exact: true })).toBeFocused();
+    await expectQuietInitialFocus(page, dialog.getByRole("button", { name: "Set up", exact: true }));
     expect((await dialog.boundingBox())!.width).toBe(before.width);
-    await expectHostAnswers(dialog, ["cancel", "set up, don't ask again", "set up"], phone);
+    await expectHostAnswers(dialog, ["Cancel", "Set up, don't ask again", "Set up"], phone);
     const plan = dialog.locator(".provisioning-plan");
     expect(planned.steps, "the real helm sends the ordered step descriptions").toBeDefined();
     await expect(plan.locator(".provisioning-plan-step")).toHaveCount(planned.steps!.steps.length);
@@ -1341,8 +1341,8 @@ for (const phone of [false, true]) {
     await page.keyboard.press("PageDown");
     await expect.poll(() => dialog.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
     await page.setViewportSize({ width: phone ? 390 : 1100, height: 850 });
-    await expectCancelTooltipReturns(page, dialog.getByRole("button", { name: "cancel", exact: true }), dialog.getByRole("button", { name: "set up", exact: true }));
-    await dialog.getByRole("button", { name: "cancel host setup", exact: true }).click();
+    await expectCancelTooltipReturns(page, dialog.getByRole("button", { name: "Cancel", exact: true }), dialog.getByRole("button", { name: "Set up", exact: true }));
+    await dialog.getByRole("button", { name: "Cancel host setup", exact: true }).click();
     await expect(dialog).toHaveCount(0);
     expect((await hosts(request)).some((host) => host.destination === remote)).toBe(false);
     expect((await backendEvents()).map((event) => event.event)).toEqual(["probe", "inspect"]);
@@ -1366,22 +1366,22 @@ test("confirmed setup expands its row once and can be folded", async ({ page, re
   await page.locator(".host-rail-add").click();
   await page.locator(".add-host-ssh").fill(remote);
   await page.locator(".add-host-submit").click();
-  const dialog = page.getByRole("dialog", { name: "add host", exact: true });
+  const dialog = page.getByRole("dialog", { name: "Add host", exact: true });
   await expect(dialog.locator(".provisioning-plan")).toBeVisible();
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
-  await dialog.getByRole("button", { name: "set up", exact: true }).click();
+  await dialog.getByRole("button", { name: "Set up", exact: true }).click();
   await expect(dialog).toHaveCount(0);
 
   const row = hostRowByName(page, remote);
   await expect(row.locator('.provisioning-run[data-provisioning-operation="setup"]')).toBeVisible({ timeout: 30_000 });
   await expect(row.locator('.provisioning-step[data-step="create-directories"] .provisioning-step-name'))
-    .toHaveText("create directories");
+    .toHaveText("Create directories");
   await testInfo.attach("setup-progress-rail", { body: await row.screenshot(), contentType: "image/png" });
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   await row.locator(".provisioning-run-fold").click();
   await expect(row.locator(".provisioning-run")).toHaveCount(0);
   await expect(row.locator(".host-update-verb")).toBeVisible();
-  await expect(row.locator(".host-update-verb")).toHaveText("setting up");
+  await expect(row.locator(".host-update-verb")).toHaveText("Setting up");
   const compact = await row.evaluate((node) => {
     const sidebar = node.closest(".app-sidebar")!;
     const menu = node.querySelector(".host-row-menu")!.getBoundingClientRect();
@@ -1423,7 +1423,7 @@ test("real discovery offers one peer-safe concrete plan and mutates nothing befo
   await expect(plan.locator(".provisioning-plan-path").first()).toHaveAttribute(
     "data-tooltip", /<U\+202E>.*<U\+200B>/,
   );
-  await expect(page.getByRole("button", { name: "set up", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Set up", exact: true })).toBeVisible();
   expect((await hosts(request)).some((host) => host.destination === remote)).toBe(false);
   expect((await backendEvents()).map((event) => event.event)).toEqual(["probe", "inspect"]);
 });
@@ -1486,7 +1486,7 @@ test("agent host add asks before setup despite preference and after refusal reop
   expect(probes[0]).toMatchObject({ target: { destination: edited }, new_entry: { alias: "edited agent alias" } });
   expect(provisions, "preference did not auto-submit agent setup").toBe(0);
   expect((await backendEvents()).map((event) => event.event)).toEqual(["probe", "inspect"]);
-  await form.getByRole("button", { name: "set up", exact: true }).click();
+  await form.getByRole("button", { name: "Set up", exact: true }).click();
   form = page.locator(".add-host-form");
   await expect(form.locator(".add-host-error")).toContainText("controlled definite setup refusal");
   await expect(form.locator(".add-host-ssh")).toHaveValue(edited);
@@ -1497,7 +1497,7 @@ test("agent host add asks before setup despite preference and after refusal reop
   expect(provisions, "origin retained after pending card is gone and form remounted").toBe(1);
   expect(answers, "reprobe is ordinary flow, not a new approval").toHaveLength(1);
   expect((await backendEvents()).map((event) => event.event)).toEqual(["probe", "inspect", "probe", "inspect"]);
-  await form.getByRole("button", { name: "cancel", exact: true }).click();
+  await form.getByRole("button", { name: "Cancel", exact: true }).click();
   await expect(form).toHaveCount(0);
   expect(answers, "post-acceptance cancel is not Deny").toHaveLength(1);
   await expect(page.locator(".hosts-panel-toggle")).toHaveAttribute("aria-pressed", "false");
@@ -1530,7 +1530,7 @@ test("a permanent setup answer is reversible through settings after the next add
   await page.locator(".add-host-ssh").fill(first);
   await page.locator(".add-host-submit").click();
   await expect(page.locator(".provisioning-plan")).toBeVisible();
-  await page.getByRole("button", { name: "set up, don't ask again", exact: true }).click();
+  await page.getByRole("button", { name: "Set up, don't ask again", exact: true }).click();
   await expect(hostRowByName(page, first)).toBeVisible();
   await expect.poll(async () => (await readPreferences(request)).skip_host_setup_confirmation).toBe(true);
 
@@ -1538,12 +1538,12 @@ test("a permanent setup answer is reversible through settings after the next add
   await page.locator(".add-host-ssh").fill(second);
   await page.locator(".add-host-submit").click();
   await expect(hostRowByName(page, second)).toBeVisible();
-  await expect(page.getByRole("button", { name: "set up", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Set up", exact: true })).toHaveCount(0);
   await expect(page.locator(".add-host-form")).toHaveCount(0);
 
   await openSettings(page, "hosts");
-  const settings = page.getByRole("dialog", { name: "settings", exact: true });
-  const toggle = settings.getByRole("checkbox", { name: "set up new hosts without asking", exact: true });
+  const settings = page.getByRole("dialog", { name: "Settings", exact: true });
+  const toggle = settings.getByRole("checkbox", { name: "Set up new hosts without asking", exact: true });
   await expect(toggle).toBeChecked();
   await toggle.uncheck();
   await expect(settings.locator("#host-setup-preference-help")).toContainText("asks before doing it");
@@ -1553,7 +1553,7 @@ test("a permanent setup answer is reversible through settings after the next add
   await expect(page.locator(".provisioning-plan")).toBeVisible();
   await expect(page.getByText(`Undo "don't ask again" with the gear at the foot of the host rail`)).toBeVisible();
   expect((await hosts(request)).some((host) => host.destination === third)).toBe(false);
-  await page.getByRole("button", { name: "cancel", exact: true }).click();
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
   await openSettings(page, "hosts");
   await toggle.check();
   await expect.poll(async () => (await readPreferences(request)).skip_host_setup_confirmation).toBe(true);
@@ -1585,9 +1585,9 @@ function recordSetupPreferenceWrites(page: Page): unknown[] {
  * reflects this client's own preference at once. */
 async function expectSetupStillAsks(page: Page): Promise<void> {
   await openSettings(page, "hosts");
-  const settings = page.getByRole("dialog", { name: "settings", exact: true });
+  const settings = page.getByRole("dialog", { name: "Settings", exact: true });
   await expect(
-    settings.getByRole("checkbox", { name: "set up new hosts without asking", exact: true }),
+    settings.getByRole("checkbox", { name: "Set up new hosts without asking", exact: true }),
     "the setup question is still asked",
   ).not.toBeChecked();
   await settings.getByRole("button", { name: "Close", exact: true }).click();
@@ -1687,7 +1687,7 @@ test("cancel and a permanent answer on a host row's setup question change no pre
   const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
   await openHostMenu(row);
   await row.locator(".provisioning-rerun").click();
-  const question = page.getByRole("dialog", { name: "host setup", exact: true });
+  const question = page.getByRole("dialog", { name: "Host setup", exact: true });
   await expect(question).toBeVisible();
 
   const answerWasLive = await question.evaluate((node) => {
@@ -1714,12 +1714,12 @@ test("cancel and a permanent answer on a host row's setup question change no pre
   await expect(row.locator(".host-row-menu-panel")).toBeVisible();
   await row.locator(".provisioning-rerun").press("Enter");
   await expect(question).toBeVisible();
-  await expectQuietInitialFocus(page, question.getByRole("button", { name: "set up", exact: true }));
-  await expect(question.getByRole("heading")).toHaveText(`set up host · ${remote}`);
-  await expectHostAnswers(question, ["cancel", "set up, don't ask again", "set up"], false);
+  await expectQuietInitialFocus(page, question.getByRole("button", { name: "Set up", exact: true }));
+  await expect(question.getByRole("heading")).toHaveText(`Set up host · ${remote}`);
+  await expectHostAnswers(question, ["Cancel", "Set up, don't ask again", "Set up"], false);
   await testInfo.attach("host-row-setup", { body: await question.screenshot(), contentType: "image/png" });
-  await expectCancelTooltipReturns(page, question.getByRole("button", { name: "cancel", exact: true }), question.getByRole("button", { name: "set up", exact: true }));
-  await question.getByRole("button", { name: "cancel host setup", exact: true }).click();
+  await expectCancelTooltipReturns(page, question.getByRole("button", { name: "Cancel", exact: true }), question.getByRole("button", { name: "Set up", exact: true }));
+  await question.getByRole("button", { name: "Cancel host setup", exact: true }).click();
   await expect(question).toHaveCount(0);
   await expect(row.locator(".host-row-menu")).toBeFocused();
   expect(provisions, "header dismissal sends no setup").toHaveLength(0);
@@ -1729,7 +1729,7 @@ test("cancel and a permanent answer on a host row's setup question change no pre
   await openHostMenu(row);
   await row.locator(".provisioning-rerun").click();
   await expect(question).toBeVisible();
-  await expect(question.getByRole("button", { name: "set up", exact: true })).toBeFocused();
+  await expect(question.getByRole("button", { name: "Set up", exact: true })).toBeFocused();
   await page.keyboard.press("Enter");
   await expect.poll(() => provisions.length).toBe(1);
 });
@@ -1805,7 +1805,7 @@ test("an unreadable successful probe refreshes a registration without inventing 
   await probeRemote(page, remote);
 
   await expect(page.locator(".add-host-error")).toContainText(
-    "the helm accepted the host probe, but its reply could not be read",
+    "The helm accepted the host probe, but its reply could not be read",
   );
   await expect(page.locator(".add-host-form .provisioning-plan")).toHaveCount(0);
   await expect(page.locator(`.host-row:has-text("${remote}")`)).toBeVisible();
@@ -1829,7 +1829,7 @@ test("discovery registers an answering supervisor through the real handler", asy
   await probeRemote(page, remote);
 
   await expect(page.locator(`.host-row:has-text("${remote}")`)).toBeVisible();
-  await expect(page.getByRole("button", { name: "set up", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Set up", exact: true })).toHaveCount(0);
   expect((await backendEvents()).map((event) => event.event)).toEqual(["probe"]);
 });
 
@@ -1918,7 +1918,7 @@ test("the add dialog refuses a taken or malformed alias before contacting the ho
 
   await form.locator(".add-host-alias").fill("x".repeat(65));
   await form.locator(".add-host-submit").click();
-  await expect(form.locator(".add-host-error")).toHaveText("host alias must be at most 64 characters");
+  await expect(form.locator(".add-host-error")).toHaveText("Host alias must be at most 64 characters");
   expect(probeRequests, "a malformed alias is refused in the browser").toBe(1);
   expect((await backendEvents()).filter((event) => event.event === "probe")).toHaveLength(0);
   expect((await hosts(request)).some((host) => host.destination === remote)).toBe(false);
@@ -1944,7 +1944,7 @@ test("the add dialog's alias survives the setup question", async ({ page }, test
   await page.locator(".add-host-alias").fill(alias);
   await page.locator(".add-host-submit").click();
   await expect(page.locator(".add-host-form .provisioning-plan")).toBeVisible();
-  await page.getByRole("button", { name: "set up", exact: true }).click();
+  await page.getByRole("button", { name: "Set up", exact: true }).click();
   await expect(page.locator(`.host-row:has-text("${alias}")`)).toBeVisible();
 });
 
@@ -2031,7 +2031,7 @@ test("the add dialog's cancel stays live while discovery is pending", async ({
   await showHostsPanel(page);
   await probeRemote(page, remote);
   await arrived;
-  await expect(page.locator(".add-host-submit")).toHaveText("checking…");
+  await expect(page.locator(".add-host-submit")).toHaveText("Checking…");
 
   const cancel = page.locator(".add-host-cancel");
   await expect(cancel).toBeEnabled();
@@ -2063,7 +2063,7 @@ test("accepted ADD registers before execution and releases the page lock while r
   await page.goto("/");
   await openHostsPanel(page);
   await probeRemote(page, remote);
-  await page.getByRole("button", { name: "set up", exact: true }).click();
+  await page.getByRole("button", { name: "Set up", exact: true }).click();
 
   const registered = await hostFor(request, remote);
   await expect(page.locator(`[data-host-id="${registered.id}"]`)).toBeVisible();
@@ -2142,7 +2142,7 @@ test("a refused ADD attempt reopens the form and refreshes committed state", asy
   const consumed = await request.post("/api/hosts/provision", { data: { probe_id: planned.probe_id } });
   expect(consumed.status()).toBe(202);
 
-  await page.getByRole("button", { name: "set up", exact: true }).click();
+  await page.getByRole("button", { name: "Set up", exact: true }).click();
   const form = page.locator(".add-host-form");
   await expect(form.locator(".add-host-error")).toContainText("already been used");
   await expect(form.locator(".add-host-ssh")).toHaveValue(remote);
@@ -2168,7 +2168,7 @@ test("a malformed accepted ADD closes the form and warns without retrying", asyn
   await page.goto("/");
   await openHostsPanel(page);
   await probeRemote(page, remote);
-  await page.getByRole("button", { name: "set up", exact: true }).click();
+  await page.getByRole("button", { name: "Set up", exact: true }).click();
 
   await expect(page.locator(".add-host-form")).toHaveCount(0);
   await expect(page.locator(".add-host-warning")).toContainText("accepted");
@@ -2368,7 +2368,7 @@ test("an unvalidated automatic local probe reveals its feedback", async ({ page 
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   release();
   await expect(page.locator('[data-host-kind="local"] .provisioning-error')).toContainText(
-    "the helm accepted the local probe, but its reply could not be read",
+    "The helm accepted the local probe, but its reply could not be read",
   );
   await expect(page.locator(".host-details-toggle")).toBeChecked();
 });
@@ -2408,8 +2408,8 @@ test("a held local plan opens its confirmation while details stay folded", async
     "install the local supervisor",
   );
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
-  const question = page.getByRole("dialog", { name: "host setup", exact: true });
-  await expect(question.getByRole("heading")).toHaveText("set up host · local (this machine)");
+  const question = page.getByRole("dialog", { name: "Host setup", exact: true });
+  await expect(question.getByRole("heading")).toHaveText("Set up host · Local (this machine)");
   await expect(question.locator(".host-settings-summary")).toHaveText("Farhelm is not running here yet");
   await testInfo.attach("host-local-setup", { body: await question.screenshot(), contentType: "image/png" });
 });
@@ -2493,7 +2493,7 @@ test("the local row's update is greyed out, points at the installer, and sends n
   await expect(item).toBeVisible();
   await expect(item).toHaveAttribute("aria-disabled", "true");
   await expect(item.locator(".session-row-menu-description")).toHaveText(
-    "run the installer again to update this machine",
+    "Run the installer again to update this machine",
   );
 
   // A sent update is not a POST from the handler itself: the click queues the
@@ -2647,7 +2647,7 @@ async function holdLockWithAdd(
   await page.locator(".add-host-ssh").fill(destination);
   await page.locator(".add-host-submit").click();
   await expect(page.locator(".add-host-form .provisioning-plan")).toBeVisible();
-  await page.getByRole("button", { name: "set up", exact: true }).click();
+  await page.getByRole("button", { name: "Set up", exact: true }).click();
   await confirmed;
   await expect(page.locator(".host-add-dialog")).toHaveCount(0);
   // The held confirm owns the page token: unrelated adds disable until
@@ -2660,7 +2660,7 @@ async function holdLockWithAdd(
  * The inline status names the helm's current step, which may contain spaces.
  * The `updating: ` prefix is visually hidden but kept for assistive technology.
  */
-const RUNNING_PROGRESS = /updating: \d+\/\d+ .+ \d+:\d{2}/;
+const RUNNING_PROGRESS = /Updating: \d+\/\d+ .+ \d+:\d{2}/;
 
 /**
  * The row's pending `updating…` status at one exact lifecycle stage.
@@ -2767,10 +2767,10 @@ test(`single Update shows inline progress without opening its row in ${appearanc
   // not push the menu toggle past the sidebar's visible right edge (the
   // sidebar clips horizontal overflow): the name truncates, while the count
   // and clock stay whole, left of the toggle.
-  await expect(row.locator(".host-update-step")).toHaveText(" create directories");
+  await expect(row.locator(".host-update-step")).toHaveText(" Create directories");
   // The visible count is bare, and `updating: ` survives only as hidden text:
   // in a sidebar this narrow the prefix was most of the step name's room.
-  await expect(row.locator(".host-update-count .visually-hidden")).toHaveText("updating: ");
+  await expect(row.locator(".host-update-count .visually-hidden")).toHaveText("Updating: ");
   const geometry = await row.evaluate((node) => {
     const sidebar = node.closest(".app-sidebar")!;
     const sidebarBox = sidebar.getBoundingClientRect();
@@ -2802,8 +2802,8 @@ test(`single Update shows inline progress without opening its row in ${appearanc
   await expect(popup).toHaveCount(0);
   await row.locator(".host-update-count").hover();
   await expect(popup).toBeVisible();
-  await expect(popup).toContainText(/updating: \d+ of \d+ steps done/);
-  await expect(popup.locator(".host-update-popup-step")).toHaveText("create directories");
+  await expect(popup).toContainText(/Updating: \d+ of \d+ steps done/);
+  await expect(popup.locator(".host-update-popup-step")).toHaveText("Create directories");
   await expect(popup).toContainText(/\d+:\d{2} elapsed/);
   // Both live clocks keep their technical face; the popup's explanatory
   // suffix stays in Inter. Resolve the actual weight-matched bundled face.
@@ -3901,7 +3901,7 @@ test("update all dispatches remote hosts and keeps their results independent", a
   const localUpdates = countUpdateRequests(page, localId);
   const rowOne = page.locator(`[data-host-id="${one.host_id}"]`);
   const rowTwo = page.locator(`[data-host-id="${two.host_id}"]`);
-  const updateAll = page.getByRole("button", { name: "update all" });
+  const updateAll = page.getByRole("button", { name: "Update all" });
   await expect(updateAll).toBeEnabled();
   // Both activations land before a reactive rerender. Per-row ownership must
   // consume only one request each, even when the header is clicked twice.
@@ -3978,11 +3978,11 @@ test("update all skips a host already busy with setup", async ({ page, request }
   // Observing an accepted ADD opens that run's rail even in a new window.
   // Its compact status remains the same authority that suppresses Update.
   await expect(busyRow.locator(".provisioning-run")).toHaveAttribute("data-provisioning-status", "running");
-  await expect(busyRow.locator(".host-update-verb")).toHaveText("setting up");
+  await expect(busyRow.locator(".host-update-verb")).toHaveText("Setting up");
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   await openHostMenu(busyRow);
   await expect(busyRow.locator(".provisioning-update")).toHaveCount(0);
-  const updateAll = page.getByRole("button", { name: "update all" });
+  const updateAll = page.getByRole("button", { name: "Update all" });
   await expect(updateAll).toBeEnabled();
   await updateAll.click();
   await expect.poll(() => readyUpdates.confirms).toBe(1);
@@ -4291,7 +4291,7 @@ test("a stale Completed around submission settles nothing and replays nothing", 
   // tracked run's unseen end is retained as uncertainty — reconciliation
   // evidence beyond the rendered marker.
   await expect(row.locator(".provisioning-warning")).toContainText(
-    `update run ${submittedRun} ended without reporting its outcome`,
+    `Update run ${submittedRun} ended without reporting its outcome`,
   );
   await expect(row.locator(".host-detail")).toBeVisible();
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
@@ -4752,7 +4752,7 @@ for (const boundary of ["following", "submitting", "submitting-current"] as cons
           if (boundary === "submitting") acceptance.release();
           const warning = row.locator(".provisioning-warning");
           const changedValues = change === "destination"
-            ? `ssh destination changed from ‹${remote}› to ‹${remote}<U+202E>-other›`
+            ? `SSH destination changed from ‹${remote}› to ‹${remote}<U+202E>-other›`
             : "identity changed from ‹recorded<U+2066>-identity› to ‹replacement<U+202E>-identity›";
           await expect(warning).toContainText(changedValues);
           await expect(warning).toContainText(boundary === "following"
@@ -4848,7 +4848,7 @@ for (const boundary of ["following", "submitting"] as const) {
       await expect(row.locator(".provisioning-run")).toHaveAttribute("data-provisioning-status", "running");
       await expect(row.locator(".host-update-running")).toBeVisible();
       const warning = row.locator(".provisioning-warning");
-      await expect(warning).toContainText("update run unresolved-A ended without reporting its outcome");
+      await expect(warning).toContainText("Update run unresolved-A ended without reporting its outcome");
       const original = await warning.textContent();
       if (boundary === "submitting") {
         observed = "B-failed";
@@ -4957,12 +4957,12 @@ test("incarnation churn keeps a followed run while a target change detaches it",
   await notifyFeed(feed, 3);
   await expect(row.locator(".host-destination-detail")).toContainText(moved);
   await expect(row.locator(".provisioning-warning")).toContainText(
-    `this host's ssh destination changed from ‹${remote}› to ‹${moved}› while it was being updated`,
+    `This host's SSH destination changed from ‹${remote}› to ‹${moved}› while it was being updated`,
   );
   await expect(row.locator(".host-detail")).toBeVisible();
   await notifyFeed(feed, 4);
   await expect(row.locator(".provisioning-warning")).toContainText(
-    `this host's ssh destination changed from ‹${remote}› to ‹${moved}› while it was being updated`,
+    `This host's SSH destination changed from ‹${remote}› to ‹${moved}› while it was being updated`,
   );
 
   // Recovery is a fresh explicit attempt. The old held run finishes first
@@ -4977,7 +4977,7 @@ test("incarnation churn keeps a followed run while a target change detaches it",
     "completed",
   );
   await expect(row.locator(".provisioning-warning")).toContainText(
-    `this host's ssh destination changed from ‹${remote}› to ‹${moved}› while it was being updated`,
+    `This host's SSH destination changed from ‹${remote}› to ‹${moved}› while it was being updated`,
   );
   await configureBackend({ targets: { [target(remote)]: { hold_actions: true } } });
   await openHostMenu(row);
@@ -5091,7 +5091,7 @@ test("a progress read racing submission commits nothing; the delayed acceptance 
     "running",
   );
   await expect(row.locator(".provisioning-warning")).toContainText(
-    `update run ${runA} ended without reporting its outcome`,
+    `Update run ${runA} ended without reporting its outcome`,
   );
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   expect(updates.plans).toBe(1);
@@ -5107,7 +5107,7 @@ test("a progress read racing submission commits nothing; the delayed acceptance 
     "completed",
   );
   await expect(row.locator(".provisioning-warning")).toContainText(
-    `update run ${runA} ended without reporting its outcome`,
+    `Update run ${runA} ended without reporting its outcome`,
   );
   await expect(row.locator(".host-detail")).toBeVisible();
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
@@ -5224,7 +5224,7 @@ test("a held acceptance across a target change retires the old run instead of ad
   // reread that would otherwise adopt it as new-target work.
   releaseAcceptance();
   await expect(row.locator(".provisioning-warning")).toContainText(
-    `ssh destination changed from ‹${remote}› to ‹${movedTo}› while its update was being sent`,
+    `SSH destination changed from ‹${remote}› to ‹${movedTo}› while its update was being sent`,
   );
 
   // The held pre-acceptance read completes into the install fence and commits
@@ -5241,7 +5241,7 @@ test("a held acceptance across a target change retires the old run instead of ad
     "running",
   );
   await expect(row.locator(".provisioning-warning")).toContainText(
-    `ssh destination changed from ‹${remote}› to ‹${movedTo}› while its update was being sent`,
+    `SSH destination changed from ‹${remote}› to ‹${movedTo}› while its update was being sent`,
   );
   const repeatRead = page.waitForResponse((response) =>
     isProvisioningGet(response.url(), response.request().method())
@@ -5253,7 +5253,7 @@ test("a held acceptance across a target change retires the old run instead of ad
     "running",
   );
   await expect(row.locator(".provisioning-warning")).toContainText(
-    `ssh destination changed from ‹${remote}› to ‹${movedTo}› while its update was being sent`,
+    `SSH destination changed from ‹${remote}› to ‹${movedTo}› while its update was being sent`,
   );
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   expect(updates.plans).toBe(1);
@@ -5271,7 +5271,7 @@ test("a held acceptance across a target change retires the old run instead of ad
     "running",
   );
   await expect(row.locator(".provisioning-warning")).toContainText(
-    `ssh destination changed from ‹${remote}› to ‹${movedTo}› while its update was being sent`,
+    `SSH destination changed from ‹${remote}› to ‹${movedTo}› while its update was being sent`,
   );
   await expect(row.locator(".host-detail")).toBeVisible();
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
@@ -5429,7 +5429,7 @@ test("a progress read across a held acceptance and target change cannot adopt th
   // since the suppressed reads adopted nothing) before the follow-up reread.
   releaseAcceptance();
   await expect(row.locator(".provisioning-warning")).toContainText(
-    `ssh destination changed from ‹${remote}› to ‹${movedTo}› while its update was being sent`,
+    `SSH destination changed from ‹${remote}› to ‹${movedTo}› while its update was being sent`,
   );
 
   // The acceptance's own reread returns the old run, and a feed-driven
@@ -5441,7 +5441,7 @@ test("a progress read across a held acceptance and target change cannot adopt th
     "running",
   );
   await expect(row.locator(".provisioning-warning")).toContainText(
-    `ssh destination changed from ‹${remote}› to ‹${movedTo}› while its update was being sent`,
+    `SSH destination changed from ‹${remote}› to ‹${movedTo}› while its update was being sent`,
   );
   const repeatRead = page.waitForResponse((response) =>
     isProvisioningGet(response.url(), response.request().method())
@@ -5453,7 +5453,7 @@ test("a progress read across a held acceptance and target change cannot adopt th
     "running",
   );
   await expect(row.locator(".provisioning-warning")).toContainText(
-    `ssh destination changed from ‹${remote}› to ‹${movedTo}› while its update was being sent`,
+    `SSH destination changed from ‹${remote}› to ‹${movedTo}› while its update was being sent`,
   );
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   expect(updates.plans).toBe(1);
@@ -5471,10 +5471,10 @@ test("a progress read across a held acceptance and target change cannot adopt th
     "running",
   );
   await expect(row.locator(".provisioning-warning")).toContainText(
-    `ssh destination changed from ‹${remote}› to ‹${movedTo}› while its update was being sent`,
+    `SSH destination changed from ‹${remote}› to ‹${movedTo}› while its update was being sent`,
   );
   await expect(row.locator(".provisioning-warning")).not.toContainText(
-    `update run ${runA} ended without reporting its outcome`,
+    `Update run ${runA} ended without reporting its outcome`,
   );
   await expect(row.locator(".host-detail")).toBeVisible();
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();

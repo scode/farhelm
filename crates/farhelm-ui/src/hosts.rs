@@ -225,12 +225,12 @@ fn HostRefusalDialog(
     // The shortened heading must leave the complete destination readable.
     let destination = host.destination.as_ref().unwrap_or(&host.name).escaped();
     let action = match refusal.action {
-        HostRefusalAction::Setup => "set up host",
-        HostRefusalAction::Update => "update host",
-        HostRefusalAction::Uninstall => "uninstall Farhelm",
-        HostRefusalAction::Retry => "retry host",
-        HostRefusalAction::Adopt => "adopt host",
-        HostRefusalAction::Remove => "remove host",
+        HostRefusalAction::Setup => "Set up host",
+        HostRefusalAction::Update => "Update host",
+        HostRefusalAction::Uninstall => "Uninstall Farhelm",
+        HostRefusalAction::Retry => "Retry host",
+        HostRefusalAction::Adopt => "Adopt host",
+        HostRefusalAction::Remove => "Remove host",
     };
     rsx! {
         div { class: "host-settings-backdrop", role: "presentation",
@@ -255,12 +255,12 @@ fn HostRefusalDialog(
                     title: rsx! { "{action} · " span { class: "peer-value", dir: "ltr", "{name}" } },
                     summary: "Farhelm refused this action",
                     summary_danger: true,
-                    dismiss_label: "close host refusal",
-                    dismiss_tooltip: "close this refusal",
+                    dismiss_label: "Close host refusal",
+                    dismiss_tooltip: "Close this refusal",
                     on_dismiss: on_close,
                 }
                 ScrollRegion { class: "dialog-body host-settings-body",
-                    handle: DialogHandle::new(".host-refusal-dialog"), selector: ".host-settings-body", name: "reason for refusal",
+                    handle: DialogHandle::new(".host-refusal-dialog"), selector: ".host-settings-body", name: "Reason for refusal",
                     recovery: RecoveryFocus::new(".host-refusal-close", None, true, RecoveryDelay::OneFrame),
                     p { class: "host-settings-value peer-value host-dialog-destination", dir: "ltr", "{destination}" }
                     PeerLine {
@@ -273,18 +273,18 @@ fn HostRefusalDialog(
                         button {
                             r#type: "button",
                             class: "btn btn-neutral host-refusal-close",
-                            "data-tooltip": "close this refusal",
+                            "data-tooltip": "Close this refusal",
                             autofocus: true,
                             onclick: move |_| on_close.call(()),
-                            "close"
+                            "Close"
                         }
                         if refusal.remove_instead {
                             button {
                                 r#type: "button",
                                 class: "btn btn-danger host-refusal-remove",
-                                "data-tooltip": "remove this host from Farhelm's list; its supervisor and sessions keep running",
+                                "data-tooltip": "Remove this host from Farhelm's list; its supervisor and sessions keep running",
                                 onclick: move |_| on_remove.call(()),
-                                "remove"
+                                "Remove"
                             }
                         }
                     }
@@ -302,7 +302,7 @@ fn HostRefusalDialog(
 /// every other value goes through the ordinary peer display helper here.
 pub(crate) fn gui_host_name(name: &str, local: bool) -> String {
     if local && name == "this machine" {
-        "local (this machine)".to_string()
+        "Local (this machine)".to_string()
     } else {
         display_peer(name)
     }
@@ -370,21 +370,21 @@ pub(crate) fn phase_display_label(state: &HostPhase) -> &'static str {
     if runs_newer_version(state) {
         // Before the phase's own words: a newer host is not one that needs
         // an update or runs an old version, whatever else its phase says.
-        return "too new";
+        return "Too new";
     }
     match state {
-        HostPhase::Connecting { .. } => "connecting",
-        HostPhase::Unreachable { .. } => "unreachable, retrying",
+        HostPhase::Connecting { .. } => "Connecting",
+        HostPhase::Unreachable { .. } => "Unreachable, retrying",
         HostPhase::Connected {
             old_version: true, ..
-        } => "old version",
-        HostPhase::Connected { .. } => "connected",
-        HostPhase::VersionSkew { .. } => "needs update",
-        HostPhase::IdentityMismatch { .. } => "identity mismatch",
-        HostPhase::IdentityUnverified { .. } => "identity unverified",
-        HostPhase::Duplicate { .. } => "duplicate",
-        HostPhase::Retired { .. } => "retired",
-        HostPhase::Unrecognized => "unrecognized",
+        } => "Old version",
+        HostPhase::Connected { .. } => "Connected",
+        HostPhase::VersionSkew { .. } => "Needs update",
+        HostPhase::IdentityMismatch { .. } => "Identity mismatch",
+        HostPhase::IdentityUnverified { .. } => "Identity unverified",
+        HostPhase::Duplicate { .. } => "Duplicate",
+        HostPhase::Retired { .. } => "Retired",
+        HostPhase::Unrecognized => "Unrecognized",
     }
 }
 
@@ -392,7 +392,7 @@ pub(crate) fn phase_display_label(state: &HostPhase) -> &'static str {
 /// whose build the helm reports as newer, or a version-skewed one whose
 /// protocol is the higher of the two.
 ///
-/// Such a host is labelled "too new" rather than "needs update" or "old
+/// Such a host is labelled "Too new" rather than "Needs update" or "old
 /// version", and Update is not offered for it, alone or in "update all":
 /// Update installs the helm's own build, which here would be a downgrade
 /// (SPEC.md: Update never downgrades a host). The remedy is updating the
@@ -409,7 +409,7 @@ pub(crate) fn runs_newer_version(state: &HostPhase) -> bool {
     }
 }
 
-/// The hover text of a "too new" label, `None` for any other host.
+/// The hover text of a "Too new" label, `None` for any other host.
 ///
 /// The label stays two words for the host list's layout; this carries the
 /// rest: the host's build and protocol and the helm's, as far as the helm
@@ -423,7 +423,7 @@ pub(crate) fn too_new_title(state: &HostPhase) -> Option<String> {
             build_version,
             ..
         } => Some(format!(
-            "this host runs farhelm {}, which is newer than this helm's {} (both speak protocol \
+            "This host runs Farhelm {}, which is newer than this helm's {} (both speak protocol \
              {}); update the helm",
             build_version.escaped(),
             crate::skew::CLIENT_BUILD,
@@ -436,7 +436,7 @@ pub(crate) fn too_new_title(state: &HostPhase) -> Option<String> {
             our_build,
             ..
         } if peer_protocol > our_protocol => Some(format!(
-            "this host runs farhelm {} (protocol {peer_protocol}), which is newer than this \
+            "This host runs Farhelm {} (protocol {peer_protocol}), which is newer than this \
              helm's {} (protocol {our_protocol}); update the helm",
             peer_build.escaped(),
             our_build.escaped(),
@@ -547,17 +547,17 @@ fn update_menu_item(kind: HostKind, planning: bool, app_updates: bool) -> Update
     if app_updates && kind == HostKind::Local {
         UpdateMenuItem {
             disabled: false,
-            description: "check for a newer Farhelm and install it",
+            description: "Check for a newer Farhelm and install it",
         }
     } else if kind.updates_from_panel() {
         UpdateMenuItem {
             disabled: planning,
-            description: "install the newer Farhelm version",
+            description: "Install the newer Farhelm version",
         }
     } else {
         UpdateMenuItem {
             disabled: true,
-            description: "run the installer again to update this machine",
+            description: "Run the installer again to update this machine",
         }
     }
 }
@@ -619,11 +619,11 @@ fn rail_presentation(
     update_available: bool,
 ) -> RailPresentation {
     let operation = match progress {
-        Some(HostUpdateProgress::Pending(_)) => Some("updating"),
+        Some(HostUpdateProgress::Pending(_)) => Some("Updating"),
         Some(HostUpdateProgress::PendingConfirmed(operation)) => Some(match operation {
-            ProvisioningOperation::Add => "setting up",
-            ProvisioningOperation::Update => "updating",
-            ProvisioningOperation::Uninstall => "uninstalling",
+            ProvisioningOperation::Add => "Setting up",
+            ProvisioningOperation::Update => "Updating",
+            ProvisioningOperation::Uninstall => "Uninstalling",
         }),
         Some(HostUpdateProgress::Running(summary)) => Some(summary.verb()),
         None => None,
@@ -635,7 +635,9 @@ fn rail_presentation(
         updating: operation.is_some(),
         update_available: update_available && operation.is_none() && !runs_newer_version(state),
         words: match operation {
-            Some(operation) => format!("{phase_words}; {operation}"),
+            // This is one sentence; the shared standalone verb is capitalized,
+            // but its grammatical clause after the semicolon is not.
+            Some(operation) => format!("{phase_words}; {}", operation.to_ascii_lowercase()),
             None if update_available && !runs_newer_version(state) => {
                 format!("{phase_words}; update available")
             }
@@ -879,7 +881,8 @@ pub(crate) fn state_detail(state: &HostPhase) -> Vec<DetailPart> {
             stage,
             last_error,
         } => {
-            // Only closed vocabulary becomes our own text. Failure context
+            // These closed phrases continue after the attempt prefix, so their
+            // leading word stays lowercase. Failure context
             // keeps its peer run, including when it contains SSH's last lines.
             let progress = match stage {
                 Some(ConnectionStage::WaitingToConnect) => {
@@ -897,11 +900,11 @@ pub(crate) fn state_detail(state: &HostPhase) -> Vec<DetailPart> {
             };
             let lead = match (progress, last_error) {
                 (Some(progress), _) if *attempt == 0 => {
-                    format!("the first connection attempt: {progress}")
+                    format!("The first connection attempt: {progress}")
                 }
-                (Some(progress), _) => format!("attempt {attempt}: {progress}"),
-                (None, Some(_)) => format!("attempt {attempt} is in flight"),
-                (None, None) => "the first connection attempt is in flight".to_string(),
+                (Some(progress), _) => format!("Attempt {attempt}: {progress}"),
+                (None, Some(_)) => format!("Attempt {attempt} is in flight"),
+                (None, None) => "The first connection attempt is in flight".to_string(),
             };
             let mut parts = vec![DetailPart::text(lead)];
             if let Some(error) = last_error {
@@ -917,14 +920,14 @@ pub(crate) fn state_detail(state: &HostPhase) -> Vec<DetailPart> {
         // Printing the whole chain in both would put one long peer string on
         // two consecutive lines, where the second is the one a user acts on.
         HostPhase::Unreachable { cause, .. } if cause == LOCAL_SUPERVISOR_NOT_RUNNING => {
-            vec![DetailPart::text("no supervisor is running on this machine")]
+            vec![DetailPart::text("No supervisor is running on this machine")]
         }
         // The helm bounds and control-escapes failed-attempt diagnostics,
         // including retained SSH stderr. They still belong in a peer run:
         // normalization does not let remote words lay out the surrounding row.
         HostPhase::Unreachable { last_error, .. } => {
             if last_error.raw().trim().is_empty() {
-                vec![DetailPart::text("the host did not answer")]
+                vec![DetailPart::text("The host did not answer")]
             } else {
                 vec![DetailPart::peer(last_error)]
             }
@@ -936,7 +939,7 @@ pub(crate) fn state_detail(state: &HostPhase) -> Vec<DetailPart> {
             ..
         } => {
             let mut parts = vec![
-                DetailPart::text("farhelm "),
+                DetailPart::text("Farhelm "),
                 DetailPart::mono_peer(build_version),
             ];
             match identity {
@@ -960,17 +963,17 @@ pub(crate) fn state_detail(state: &HostPhase) -> Vec<DetailPart> {
             ..
         } => vec![
             DetailPart::text(format!(
-                "the host speaks protocol {peer_protocol} (farhelm "
+                "The host speaks protocol {peer_protocol} (Farhelm "
             )),
             DetailPart::mono_peer(peer_build),
-            DetailPart::text(format!("); this helm speaks {our_protocol} (farhelm ")),
+            DetailPart::text(format!("); this helm speaks {our_protocol} (Farhelm ")),
             DetailPart::mono_peer(our_build),
             DetailPart::text(")"),
         ],
         // Keep identity preformatting before PeerLine's ordinary escape pass:
         // these comparison surfaces already used both layers in this order.
         HostPhase::IdentityMismatch { recorded, reported } => vec![
-            DetailPart::text("recorded as install "),
+            DetailPart::text("Recorded as install "),
             DetailPart::peer(recorded.identity()),
             DetailPart::text("; the destination now reports "),
             DetailPart::peer(reported.identity()),
@@ -978,7 +981,7 @@ pub(crate) fn state_detail(state: &HostPhase) -> Vec<DetailPart> {
         ],
         HostPhase::IdentityUnverified { recorded } => vec![
             DetailPart::text(
-                "the host answered without an identity, so this helm cannot confirm it is still \
+                "The host answered without an identity, so this helm cannot confirm it is still \
                  the install recorded as ",
             ),
             DetailPart::peer(recorded.identity()),
@@ -989,7 +992,7 @@ pub(crate) fn state_detail(state: &HostPhase) -> Vec<DetailPart> {
             twin_name,
         } => {
             let mut parts = vec![
-                DetailPart::text("this entry reaches install "),
+                DetailPart::text("This entry reaches install "),
                 DetailPart::peer(identity.identity()),
             ];
             match twin_name {
@@ -1010,14 +1013,14 @@ pub(crate) fn state_detail(state: &HostPhase) -> Vec<DetailPart> {
         HostPhase::Retired { reason } => {
             if reason.raw().trim().is_empty() {
                 vec![DetailPart::text(
-                    "no connection actor is running for this entry",
+                    "No connection actor is running for this entry",
                 )]
             } else {
                 vec![DetailPart::peer(reason)]
             }
         }
         HostPhase::Unrecognized => vec![DetailPart::text(
-            "this build does not know the state the helm is reporting for this host",
+            "This build does not know the state the helm is reporting for this host",
         )],
     }
 }
@@ -1086,12 +1089,12 @@ pub(crate) fn state_remedy(state: &HostPhase) -> Option<Vec<DetailPart>> {
         HostPhase::Unreachable { cause, last_error } if cause == LOCAL_SUPERVISOR_NOT_RUNNING => {
             if last_error.raw().trim().is_empty() {
                 Some(vec![DetailPart::text(
-                    "start a supervisor on this machine with `farhelm supervisor run`, passing \
+                    "Start a supervisor on this machine with `farhelm supervisor run`, passing \
                      the same `--state-dir` this helm was started with if it has one",
                 )])
             } else {
                 Some(vec![
-                    DetailPart::text("the helm reports: "),
+                    DetailPart::text("The helm reports: "),
                     DetailPart::peer(last_error),
                 ])
             }
@@ -1104,28 +1107,28 @@ pub(crate) fn state_remedy(state: &HostPhase) -> Option<Vec<DetailPart>> {
             (!remediation.raw().trim().is_empty()).then(|| vec![DetailPart::peer(remediation)])
         }
         HostPhase::IdentityMismatch { .. } => Some(vec![DetailPart::text(
-            "adopt the identity the host reports, or fix the destination; adopting resets this \
+            "Adopt the identity the host reports, or fix the destination; adopting resets this \
              host to asking before YOLO launches",
         )]),
         // Adopt is deliberately absent from this list of remedies, because
         // it is absent from the host's options: see `adoptable`.
         HostPhase::IdentityUnverified { .. } => Some(vec![DetailPart::text(
-            "fix the host so it reports its identity, or retarget or remove this entry — it is \
+            "Fix the host so it reports its identity, or retarget or remove this entry — it is \
              re-probed meanwhile, so a host that starts identifying itself again recovers on its \
              own",
         )]),
         HostPhase::Duplicate { twin_name, .. } => Some(match twin_name {
             Some(name) => vec![
-                DetailPart::text("remove "),
+                DetailPart::text("Remove "),
                 DetailPart::peer(name.clone()),
                 DetailPart::text(" or change this entry's destination, then press Retry"),
             ],
             None => vec![DetailPart::text(
-                "remove the other entry or change this entry's destination, then press Retry",
+                "Remove the other entry or change this entry's destination, then press Retry",
             )],
         }),
         HostPhase::Retired { .. } => Some(vec![DetailPart::text(
-            "retry to start a fresh connection actor for this entry",
+            "Retry to start a fresh connection actor for this entry",
         )]),
     }
 }
@@ -1407,21 +1410,21 @@ pub(crate) enum HostLookup<'a> {
 /// they say what the client failed to read, not what happened to the host.
 pub(crate) fn session_unavailable_cause(lookup: HostLookup<'_>) -> &'static str {
     match lookup {
-        HostLookup::Pending => "checking host",
-        HostLookup::Failed(_) => "host state unavailable",
-        HostLookup::Absent => "host removed",
+        HostLookup::Pending => "Checking host",
+        HostLookup::Failed(_) => "Host state unavailable",
+        HostLookup::Absent => "Host removed",
         HostLookup::Known(host) => match &host.state {
             HostPhase::Connecting { .. } | HostPhase::Unreachable { .. } => {
-                "waiting for supervisor"
+                "Waiting for supervisor"
             }
-            HostPhase::Connected { .. } => "refreshing session",
-            HostPhase::VersionSkew { .. } if runs_newer_version(&host.state) => "host is too new",
-            HostPhase::VersionSkew { .. } => "host needs update",
-            HostPhase::IdentityMismatch { .. } => "host identity mismatch",
-            HostPhase::IdentityUnverified { .. } => "host identity unverified",
-            HostPhase::Duplicate { .. } => "duplicate host",
-            HostPhase::Retired { .. } => "host connection stopped",
-            HostPhase::Unrecognized => "host state unknown",
+            HostPhase::Connected { .. } => "Refreshing session",
+            HostPhase::VersionSkew { .. } if runs_newer_version(&host.state) => "Host is too new",
+            HostPhase::VersionSkew { .. } => "Host needs update",
+            HostPhase::IdentityMismatch { .. } => "Host identity mismatch",
+            HostPhase::IdentityUnverified { .. } => "Host identity unverified",
+            HostPhase::Duplicate { .. } => "Duplicate host",
+            HostPhase::Retired { .. } => "Host connection stopped",
+            HostPhase::Unrecognized => "Host state unknown",
         },
     }
 }
@@ -1444,7 +1447,15 @@ pub(crate) fn stale_session_notice(
     lookup: HostLookup<'_>,
 ) -> SessionUnavailableNotice {
     let name = if host_name.trim().is_empty() {
-        vec![DetailPart::text("this session's host")]
+        // The pending notice prefixes this phrase with "Checking"; other
+        // notices use it as a standalone subject. Real host names stay exact.
+        vec![DetailPart::text(
+            if matches!(&lookup, HostLookup::Pending) {
+                "this session's host"
+            } else {
+                "This session's host"
+            },
+        )]
     } else {
         vec![DetailPart::peer(host_name)]
     };
@@ -1468,7 +1479,7 @@ pub(crate) fn stale_session_notice(
             (explanation, detail)
         }
         HostLookup::Pending => {
-            let mut parts = vec![DetailPart::text("checking ")];
+            let mut parts = vec![DetailPart::text("Checking ")];
             parts.extend(name);
             parts.push(DetailPart::text("…"));
             (parts, vec![])
@@ -2476,7 +2487,7 @@ pub(crate) fn HostsPanel(
             match result {
                 Ok(ProvisioningSubmission::Accepted(accepted)) => {
                     if accepted.run_id.is_empty() {
-                        add_warning.set(Some("the helm accepted setup but returned no run identity, so its outcome is unknown".into()));
+                        add_warning.set(Some("The helm accepted setup but returned no run identity, so its outcome is unknown".into()));
                     }
                 }
                 Ok(ProvisioningSubmission::Unvalidated(warning)) => add_warning.set(Some(warning)),
@@ -2567,8 +2578,8 @@ pub(crate) fn HostsPanel(
                 if let Some(missing) = selected_host.filter(|id| !list.iter().any(|host| host.id == *id)) {
                     button { r#type: "button", class: "btn host-rail-tombstone",
                         "data-rail-host-id": "{missing}", disabled: true, aria_pressed: "true",
-                        aria_label: "host {missing} (no longer registered)",
-                        "data-tooltip": "host {missing} is no longer registered; choose All or another host",
+                        aria_label: "Host {missing} (no longer registered)",
+                        "data-tooltip": "Host {missing} is no longer registered; choose All or another host",
                         "?"
                     }
                 }
@@ -2576,7 +2587,7 @@ pub(crate) fn HostsPanel(
                 span { class: "host-rail-unavailable", role: "status", aria_label: "The host list could not be loaded", "data-tooltip": "The host list could not be loaded", "?" }
             }
             button { r#type: "button", class: "btn host-rail-add",
-                aria_label: "Add host", "data-tooltip": "Add host: connect a machine over ssh",
+                aria_label: "Add host", "data-tooltip": "Add host: connect a machine over SSH",
                 disabled: busy, onclick: move |_| open_add.call(true),
                 crate::icons::ActionIcon { glyph: crate::icons::ActionGlyph::Add }
             }
@@ -2599,11 +2610,11 @@ pub(crate) fn HostsPanel(
                         span { class: "heading-count", "{hosts.len()}" }
                         span { class: "heading-label", if hosts.len() == 1 { " host" } else { " hosts" } }
                     } else {
-                        span { class: "heading-label", "hosts" }
+                        span { class: "heading-label", "Hosts" }
                     }
                 }
                 label { class: "host-details-control",
-                    "data-tooltip": "details: show every host's version, identity, sessions and diagnostics",
+                    "data-tooltip": "Details: show every host's version, identity, sessions and diagnostics",
                     input {
                     r#type: "checkbox",
                     class: "host-details-toggle control-switch",
@@ -2627,8 +2638,8 @@ pub(crate) fn HostsPanel(
                 button {
                     r#type: "button",
                     class: "btn btn-neutral update-all-button",
-                    aria_label: "update all",
-                    "data-tooltip": "update all: update every remote host that has an update available",
+                    aria_label: "Update all",
+                    "data-tooltip": "Update all: update every remote host that has an update available",
                     disabled: !update_all_available,
                     onclick: move |_| {
                         // Read the latest snapshot at activation, since the
@@ -2656,7 +2667,7 @@ pub(crate) fn HostsPanel(
                 button {
                     r#type: "button",
                     class: "btn btn-neutral add-host-button",
-                    "data-tooltip": "add host: connect a machine over ssh",
+                    "data-tooltip": "Add host: connect a machine over SSH",
                     // The icon keeps the same compact action anatomy as New.
                     aria_label: "Add host",
                     // Opening the add dialog waits out any live MUTATION,
@@ -2802,19 +2813,19 @@ pub(crate) fn HostsPanel(
                     button {
                         r#type: "button",
                         class: "btn uninstall-notice-copy",
-                        "aria-label": "copy kept data path",
-                        "data-tooltip": "copy the kept data path",
+                        "aria-label": "Copy kept data path",
+                        "data-tooltip": "Copy the kept data path",
                         onclick: {
                             let path = notice.state_dir.clone();
                             move |_| crate::session_view::copy_to_clipboard(&path)
                         },
-                        "copy"
+                        "Copy"
                     }
                     button {
                         r#type: "button",
                         class: "btn uninstall-notice-dismiss",
-                        "aria-label": "dismiss uninstall notice",
-                        "data-tooltip": "dismiss: hide this notice",
+                        "aria-label": "Dismiss uninstall notice",
+                        "data-tooltip": "Dismiss: hide this notice",
                         onclick: move |_| uninstall_notice.set(None),
                         "×"
                     }
@@ -2832,16 +2843,16 @@ pub(crate) fn HostsPanel(
             if let Some(error) = read.refresh_error() {
                 if read.hosts().is_some() {
                     div { class: "status error hosts-refresh-error",
-                        "showing the last state this client read; the refresh failed: {error}"
+                        "Showing the last state this client read; the refresh failed: {error}"
                     }
                 } else {
                     div { class: "status error hosts-load-error",
-                        "the hosts list could not be loaded: {error}"
+                        "The hosts list could not be loaded: {error}"
                     }
                 }
             }
             if read.is_loading() {
-                div { class: "status hosts-status", "loading hosts…" }
+                div { class: "status hosts-status", "Loading hosts…" }
             }
             }
             if let Some(list) = rendered_hosts {
@@ -3243,10 +3254,10 @@ fn validate_alias_draft(value: &str) -> Result<Option<String>, String> {
         return Ok(None);
     }
     if value.chars().any(char::is_control) {
-        return Err("host alias must not contain control characters".to_string());
+        return Err("Host alias must not contain control characters".to_string());
     }
     if value.chars().count() > 64 {
-        return Err("host alias must be at most 64 characters".to_string());
+        return Err("Host alias must be at most 64 characters".to_string());
     }
     Ok(Some(value.to_string()))
 }
@@ -3301,7 +3312,7 @@ fn uninstall_notice_parts(notice: &UninstallNotice) -> Vec<DetailPart> {
 /// copy button carries the raw path rather than this shortened wording.
 fn uninstall_notice_compact_parts(notice: &UninstallNotice) -> Vec<DetailPart> {
     vec![
-        DetailPart::text("removed from "),
+        DetailPart::text("Removed from "),
         DetailPart::peer(notice.host_name.clone()),
         DetailPart::text(" · data kept"),
     ]
@@ -3327,7 +3338,7 @@ fn uninstall_notice_compact_parts(notice: &UninstallNotice) -> Vec<DetailPart> {
 /// recorded/reported value [`adoptable`] compares, a distinct thing from
 /// the name or destination a menu happens to be labeled with.
 fn host_menu_label(name: &str) -> String {
-    format!("host actions for {}", clamp_title(&name.into()))
+    format!("Host actions for {}", clamp_title(&name.into()))
 }
 
 /// Split the host-menu header into app-authored separators and peer-owned
@@ -3338,7 +3349,7 @@ fn host_menu_summary_parts(host: &Host) -> Vec<DetailPart> {
     let destination = host
         .destination
         .as_ref()
-        .map_or_else(|| DetailPart::peer("local host"), DetailPart::mono_peer);
+        .map_or_else(|| DetailPart::peer("Local host"), DetailPart::mono_peer);
     let version = match &host.state {
         HostPhase::Connected { build_version, .. } => DetailPart::mono_peer(build_version),
         HostPhase::VersionSkew { peer_build, .. } => DetailPart::mono_peer(peer_build),
@@ -4286,11 +4297,11 @@ fn HostRow(
                 match host.kind {
                     HostKind::Local => rsx! {
                         HostMark { icon: host.icon, color: host.color, local: true }
-                        span { class: "visually-hidden", "local" }
+                        span { class: "visually-hidden", "Local" }
                     },
                     HostKind::Ssh => rsx! {
                         HostMark { icon: host.icon, color: host.color }
-                        span { class: "visually-hidden", "remote" }
+                        span { class: "visually-hidden", "Remote" }
                     },
                     HostKind::Unrecognized => rsx! {},
                 }
@@ -4304,7 +4315,7 @@ fn HostRow(
                         "host-status {phase_class(&host.state)}"
                     },
                     role: "status",
-                    // A "too new" label's explanation (the versions and "update
+                    // A "Too new" label's explanation (the versions and "update
                     // the helm") lives in its hover tooltip, which is not in
                     // the accessibility tree; this names a clipped copy of it.
                     aria_describedby: too_new_title(&host.state).map(|_| format!("host-status-description-{id}")),
@@ -4321,7 +4332,7 @@ fn HostRow(
                                 class: "host-status-label host-update-pending",
                                 "data-update-phase": phase.attribute(),
                                 UpdateProgressDot {}
-                                "updating…"
+                                "Updating…"
                             }
                         },
                         Some(HostUpdateProgress::PendingConfirmed(operation)) => rsx! {
@@ -4330,9 +4341,9 @@ fn HostRow(
                                 "data-update-phase": "planning",
                                 UpdateProgressDot {}
                                 {match operation {
-                                    ProvisioningOperation::Add => "setting up…",
-                                    ProvisioningOperation::Uninstall => "uninstalling…",
-                                    ProvisioningOperation::Update => "updating…",
+                                    ProvisioningOperation::Add => "Setting up…",
+                                    ProvisioningOperation::Uninstall => "Uninstalling…",
+                                    ProvisioningOperation::Update => "Updating…",
                                 }}
                             }
                         },
@@ -4402,7 +4413,7 @@ fn HostRow(
                         r#type: "button",
                         class: "btn host-row-menu",
                         aria_label: host_menu_label(host.name.raw()),
-                        "data-tooltip": "host actions: settings, update, retry, remove and more",
+                        "data-tooltip": "Host actions: settings, update, retry, remove and more",
                         aria_expanded: menu_open,
                         aria_haspopup: "menu",
                         onkeydown: move |evt| {
@@ -4502,9 +4513,9 @@ fn HostRow(
                                     },
                                     HostMenuActionIcon { action: HostMenuAction::Retry }
                                     menu_panel::MenuItemCopy {
-                                        label: rsx! { "retry" },
+                                        label: rsx! { "Retry" },
                                         description_id: "host-menu-retry-description",
-                                        description: rsx! { "try the connection again" },
+                                        description: rsx! { "Try the connection again" },
                                     }
                                 }
                                 if let (Some(reported), Some(label)) = (adopt_identity, adopt_label) {
@@ -4589,13 +4600,13 @@ fn HostRow(
                                         },
                                         HostMenuActionIcon { action: HostMenuAction::Rerun }
                                         menu_panel::MenuItemCopy {
-                                            label: rsx! { if provisioning_menu.planning { "planning…" } else { "re-run" } },
+                                            label: rsx! { if provisioning_menu.planning { "Planning…" } else { "Re-run" } },
                                             description_id: "host-menu-rerun-description",
                                             description: rsx! {
                                                 match operation {
-                                                    ProvisioningOperation::Update => "try the failed update again",
-                                                    ProvisioningOperation::Add => "try the failed setup again",
-                                                    ProvisioningOperation::Uninstall => "try the failed uninstall again",
+                                                    ProvisioningOperation::Update => "Try the failed update again",
+                                                    ProvisioningOperation::Add => "Try the failed setup again",
+                                                    ProvisioningOperation::Uninstall => "Try the failed uninstall again",
                                                 }
                                             },
                                         }
@@ -4644,9 +4655,9 @@ fn HostRow(
                                         },
                                         HostMenuActionIcon { action: HostMenuAction::AutomaticSetup }
                                         menu_panel::MenuItemCopy {
-                                            label: rsx! { "set up automatically" },
+                                            label: rsx! { "Set up automatically" },
                                             description_id: "host-menu-automatic-setup-description",
-                                            description: rsx! { "install Farhelm on this host" },
+                                            description: rsx! { "Install Farhelm on this host" },
                                         }
                                     }
                                 }
@@ -4700,7 +4711,7 @@ fn HostRow(
                                         },
                                         HostMenuActionIcon { action: HostMenuAction::Update }
                                         menu_panel::MenuItemCopy {
-                                            label: rsx! { if provisioning_menu.planning && !local_app_update { "planning…" } else { "update" } },
+                                            label: rsx! { if provisioning_menu.planning && !local_app_update { "Planning…" } else { "Update" } },
                                             description_id: "host-menu-update-description",
                                             description: rsx! { "{update_item.description}" },
                                         }
@@ -4733,9 +4744,9 @@ fn HostRow(
                                     },
                                     HostMenuActionIcon { action: HostMenuAction::Settings }
                                     menu_panel::MenuItemCopy {
-                                        label: rsx! { "settings" },
+                                        label: rsx! { "Settings" },
                                         description_id: "host-menu-settings-description",
-                                        description: rsx! { "edit this host's connection" },
+                                        description: rsx! { "Edit this host's connection" },
                                     }
                                 }
                                 if manageable {
@@ -4788,9 +4799,9 @@ fn HostRow(
                                             },
                                             HostMenuActionIcon { action: HostMenuAction::Uninstall }
                                             menu_panel::MenuItemCopy {
-                                                label: rsx! { "uninstall" },
+                                                label: rsx! { "Uninstall" },
                                                 description_id: "host-menu-uninstall-description",
-                                                description: rsx! { "remove Farhelm from this host, keeping its data" },
+                                                description: rsx! { "Remove Farhelm from this host, keeping its data" },
                                             }
                                         }
                                     }
@@ -4829,9 +4840,9 @@ fn HostRow(
                                         },
                                         HostMenuActionIcon { action: HostMenuAction::Remove }
                                         menu_panel::MenuItemCopy {
-                                            label: rsx! { "remove" },
+                                            label: rsx! { "Remove" },
                                             description_id: "host-menu-remove-description",
-                                            description: rsx! { "forget this host" },
+                                            description: rsx! { "Forget this host" },
                                         }
                                     }
                                 }
@@ -4944,7 +4955,7 @@ fn HostDestinationForm(
             input {
                 r#type: "text",
                 class: if alias { "host-destination-input" } else { "host-destination-input font-mono" },
-                placeholder: if alias { "host alias" } else { "ssh destination" },
+                placeholder: if alias { "Host alias" } else { "SSH destination" },
                 // Every browser text "correction" is off for both fields
                 // this input can be — see this component's own doc for why
                 // the two reasons differ: a destination gets EXECUTED as
@@ -4966,14 +4977,14 @@ fn HostDestinationForm(
             button {
                 r#type: "submit",
                 class: "btn btn-primary host-save-destination",
-                "data-tooltip": if alias { "save the new alias" } else { "save the new ssh destination" },
+                "data-tooltip": if alias { "Save the new alias" } else { "Save the new SSH destination" },
                 disabled: busy,
-                "save"
+                "Save"
             }
             button {
                 r#type: "button",
                 class: "btn btn-neutral host-cancel-edit",
-                "data-tooltip": "cancel: keep the current value",
+                "data-tooltip": "Cancel: keep the current value",
                 disabled: busy,
                 onclick: move |_| {
                     if busy {
@@ -4981,7 +4992,7 @@ fn HostDestinationForm(
                     }
                     on_cancel.call(());
                 },
-                "cancel"
+                "Cancel"
             }
         }
     }
@@ -5282,7 +5293,7 @@ fn probe_error_parts(error: String) -> Vec<DetailPart> {
 /// Destination bytes use mono independently of an alias's interface face.
 fn destination_detail_parts(destination: impl Into<crate::peer::PeerText>) -> Vec<DetailPart> {
     vec![
-        DetailPart::text("destination: "),
+        DetailPart::text("Destination: "),
         DetailPart::mono_peer(destination),
     ]
 }
@@ -5347,7 +5358,7 @@ fn AddHostForm(
     let request_id = agent_request.as_ref().map(|card| card.id.clone());
     let requester_title = agent_request
         .as_ref()
-        .map(|card| display_peer(card.session.title.as_deref().unwrap_or("unknown")))
+        .map(|card| display_peer(card.session.title.as_deref().unwrap_or("Unknown")))
         .unwrap_or_default();
     let close_request_id = request_id.clone();
     let request_error = agent_add
@@ -5440,7 +5451,7 @@ fn AddHostForm(
                 AddConfirm::Accepted(claim) => claim,
                 AddConfirm::BindingChanged => {
                     error.set(Some(
-                        "the ssh destination changed after discovery; probe again".to_string(),
+                        "The SSH destination changed after discovery; probe again".to_string(),
                     ));
                     return;
                 }
@@ -5503,7 +5514,7 @@ fn AddHostForm(
                 hidden: ssh_help_open(),
                 role: "dialog",
                 aria_modal: "true",
-                aria_label: "add host",
+                aria_label: "Add host",
                 tabindex: "-1",
                 on_escape: move |evt: KeyboardEvent| {
                     if !evt.is_composing() {
@@ -5556,7 +5567,7 @@ fn AddHostForm(
                             Ok(crate::api::AnswerOutcome::Gone) => {
                                 agent_add.answering.write().remove(&id);
                                 probing.set(false);
-                                error.set(Some("this request is no longer waiting; no host was added".into()));
+                                error.set(Some("This request is no longer waiting; no host was added".into()));
                                 return;
                             }
                             Err(reason) => {
@@ -5618,20 +5629,20 @@ fn AddHostForm(
                 }
             } else {
                 settings_dialog::HostDialogHeader {
-                    title: rsx! { "add host" },
-                    summary: "an ssh destination this helm can reach",
-                    dismiss_label: "cancel adding host",
-                    dismiss_tooltip: "cancel: close without adding a host",
+                    title: rsx! { "Add host" },
+                    summary: "An SSH destination this helm can reach",
+                    dismiss_label: "Cancel adding host",
+                    dismiss_tooltip: "Cancel: close without adding a host",
                     on_dismiss: move |_| close.call(()),
                 }
                 div { class: "dialog-body host-settings-body",
                 if let Some(card) = &agent_request {
                     dl { class: "agent-add-requester",
-                        dt { "from host" }
+                        dt { "From host" }
                         dd { class: "host-settings-value peer-value", dir: "ltr", "{display_peer(&card.host_name)}" }
-                        dt { "from session" }
+                        dt { "From session" }
                         dd { class: "host-settings-value peer-value", dir: "ltr", "{requester_title}" }
-                        dt { "from session id" }
+                        dt { "From session ID" }
                         dd { class: "host-settings-value peer-value", dir: "ltr", "{display_identity(&card.session.id)}" }
                     }
                 }
@@ -5640,14 +5651,14 @@ fn AddHostForm(
                     // spelling makes invisible/bidi text visible before Allow,
                     // and follows edits rather than the original agent draft.
                     dl { class: "agent-add-approved-fields",
-                        dt { "destination to add" }
+                        dt { "Destination to add" }
                         dd { class: "host-settings-value peer-value", dir: "ltr", "{display_peer(&ssh())}" }
-                        dt { "alias to add" }
+                        dt { "Alias to add" }
                         dd { class: "host-settings-value peer-value", dir: "ltr", "{display_peer(&alias())}" }
                     }
                 }
                 label {
-                    "ssh destination"
+                    "SSH destination"
                     // Same total opt-out of browser text mangling the create
                     // form's command fields carry, for the same reason: the
                     // destination becomes part of an ssh command line, and a
@@ -5670,7 +5681,7 @@ fn AddHostForm(
                     "user@host, or a Host name from your ssh config. Farhelm checks that it can reach the destination before adding it."
                 }
                 label {
-                    "alias (optional)"
+                    "Alias (optional)"
                     input {
                         r#type: "text",
                         class: "add-host-alias",
@@ -5692,7 +5703,7 @@ fn AddHostForm(
                 p { class: "host-dialog-help",
                     "Does this host ask for a second factor or other approval on every ssh login? "
                     button { r#type: "button", class: "add-host-ssh-help inline-link",
-                        "data-tooltip": "ssh needs 2FA?: see the commands for the destination you're adding",
+                        "data-tooltip": "SSH needs 2FA?: see the commands for the destination you're adding",
                         onclick: move |_| {
                             settings_dialog::ADD_DIALOG.release();
                             ssh_help_open.set(true);
@@ -5712,16 +5723,16 @@ fn AddHostForm(
                         r#type: "button",
                         class: "btn btn-neutral add-host-cancel",
                         disabled: approval_busy || approval_paused,
-                        "data-tooltip": "cancel: close without adding a host",
+                        "data-tooltip": "Cancel: close without adding a host",
                         onclick: move |_| close.call(()),
-                        "cancel"
+                        "Cancel"
                     }
                 button {
                     r#type: "submit",
                     class: "btn btn-primary add-host-submit",
-                    "data-tooltip": "add: check the ssh destination, then add the host",
+                    "data-tooltip": "Add: check the SSH destination, then add the host",
                     disabled: busy,
-                    if *probing.read() { "checking…" } else { "add" }
+                    if *probing.read() { "Checking…" } else { "Add" }
                 }
                 }
                 }
@@ -5879,7 +5890,7 @@ mod tests {
         let parts = destination_detail_parts("host\u{202E}spoof\u{200B}.example");
         assert!(matches!(&parts[1], DetailPart::MonoPeer(_)));
         let shown = detail_text(&parts);
-        assert_eq!(shown, "destination: host<U+202E>spoof<U+200B>.example");
+        assert_eq!(shown, "Destination: host<U+202E>spoof<U+200B>.example");
     }
 
     /// A host in the given state, with the rest of the row as plain as
@@ -6352,7 +6363,7 @@ mod tests {
             detail_text(&destination_detail_parts(
                 host.destination.as_ref().unwrap()
             )),
-            "destination: user@<U+200B>box"
+            "Destination: user@<U+200B>box"
         );
     }
 
@@ -6526,15 +6537,15 @@ mod tests {
     #[farhelm_testtrace::test]
     fn rail_phases_and_progress_keep_distinct_meanings() {
         let expected = [
-            ("connecting", "connecting", false),
-            ("unreachable", "unreachable, retrying", true),
-            ("connected", "connected", false),
-            ("needs-attention", "too new", false),
-            ("needs-attention", "identity mismatch", false),
-            ("needs-attention", "identity unverified", false),
-            ("needs-attention", "duplicate", false),
-            ("needs-attention", "retired", false),
-            ("needs-attention", "unrecognized", false),
+            ("connecting", "Connecting", false),
+            ("unreachable", "Unreachable, retrying", true),
+            ("connected", "Connected", false),
+            ("needs-attention", "Too new", false),
+            ("needs-attention", "Identity mismatch", false),
+            ("needs-attention", "Identity unverified", false),
+            ("needs-attention", "Duplicate", false),
+            ("needs-attention", "Retired", false),
+            ("needs-attention", "Unrecognized", false),
         ];
         for (state, (phase, words, dimmed)) in every_phase().into_iter().zip(expected) {
             let ordinary = rail_presentation(&state, None, false);
@@ -6593,13 +6604,13 @@ mod tests {
         let old = rail_presentation(&state, None, true);
         assert!(old.update_available);
         assert_eq!(old.phase, "old-version");
-        assert_eq!(old.words, "old version; update available");
+        assert_eq!(old.words, "Old version; update available");
         if let HostPhase::Connected { newer_version, .. } = &mut state {
             *newer_version = true;
         }
         let newer = rail_presentation(&state, None, true);
         assert!(!newer.update_available);
-        assert_eq!(newer.words, "too new");
+        assert_eq!(newer.words, "Too new");
         let skew = HostPhase::VersionSkew {
             peer_protocol: 7,
             peer_build: "old".into(),
@@ -6609,7 +6620,7 @@ mod tests {
         };
         let required = rail_presentation(&skew, None, true);
         assert!(required.update_available);
-        assert_eq!(required.words, "needs update; update available");
+        assert_eq!(required.words, "Needs update; update available");
     }
 
     /// Every phase keeps a stable wire token for data attributes and
@@ -6670,7 +6681,7 @@ mod tests {
             };
             assert_eq!(
                 detail_text(&state_detail(&first)),
-                format!("the first connection attempt: {progress}")
+                format!("The first connection attempt: {progress}")
             );
             let previous = "earlier SSH failure\u{202e}\u{200b}";
             let first_retry = HostPhase::Connecting {
@@ -6680,7 +6691,7 @@ mod tests {
             };
             assert_eq!(
                 detail_text(&state_detail(&first_retry)),
-                format!("attempt 1: {progress}; the last one failed: earlier failure")
+                format!("Attempt 1: {progress}; the last one failed: earlier failure")
             );
             let retry = HostPhase::Connecting {
                 attempt: 3,
@@ -6690,7 +6701,7 @@ mod tests {
             assert_eq!(
                 state_detail(&retry),
                 vec![
-                    DetailPart::text(format!("attempt 3: {progress}")),
+                    DetailPart::text(format!("Attempt 3: {progress}")),
                     DetailPart::text("; the last one failed: "),
                     DetailPart::peer(previous),
                 ],
@@ -6715,7 +6726,7 @@ mod tests {
                     stage,
                     last_error: None,
                 })),
-                "the first connection attempt is in flight"
+                "The first connection attempt is in flight"
             );
             assert_eq!(
                 state_detail(&HostPhase::Connecting {
@@ -6724,7 +6735,7 @@ mod tests {
                     last_error: Some("earlier failure".into()),
                 }),
                 vec![
-                    DetailPart::text("attempt 3 is in flight"),
+                    DetailPart::text("Attempt 3 is in flight"),
                     DetailPart::text("; the last one failed: "),
                     DetailPart::peer("earlier failure"),
                 ]
@@ -6750,7 +6761,7 @@ mod tests {
                 last_error: Some("earlier failure".into()),
             });
             let notice = stale_session_notice("remote", HostLookup::Known(&host));
-            assert_eq!(notice.cause, "waiting for supervisor");
+            assert_eq!(notice.cause, "Waiting for supervisor");
             assert_eq!(
                 notice.explanation,
                 vec![
@@ -7022,7 +7033,7 @@ mod tests {
         assert_eq!(
             compact,
             vec![
-                DetailPart::text("removed from "),
+                DetailPart::text("Removed from "),
                 DetailPart::peer("build-box"),
                 DetailPart::text(" · data kept"),
             ]
@@ -7076,11 +7087,12 @@ mod tests {
 
     /// The client-side mirror of the helm's alias validation
     /// (`store::validate_alias` — same trim, same empty-clears rule, same
-    /// control-character and length checks, same messages) so a syntax
+    /// control-character and length checks) so a syntax
     /// failure is caught before a round trip, without the two ever being
     /// allowed to drift on the RULES: the helm remains the authority that
     /// decides whether a value is accepted at all, since only it can see
-    /// every other host's current display name.
+    /// every other host's current display name. The browser owns the display
+    /// casing of its local refusals; peer error messages keep their own bytes.
     #[farhelm_testtrace::test]
     fn validate_alias_draft_mirrors_the_helms_rules() {
         assert_eq!(
@@ -7095,18 +7107,18 @@ mod tests {
         );
         assert_eq!(
             validate_alias_draft("bad\u{0007}name"),
-            Err("host alias must not contain control characters".to_string())
+            Err("Host alias must not contain control characters".to_string())
         );
         assert_eq!(
             validate_alias_draft("bad\nname"),
-            Err("host alias must not contain control characters".to_string()),
+            Err("Host alias must not contain control characters".to_string()),
             "a newline is a control character too — the exact byte an alias must never carry, \
              since `farhelm agent` prints host names on stdout"
         );
         let sixty_five = "a".repeat(65);
         assert_eq!(
             validate_alias_draft(&sixty_five),
-            Err("host alias must be at most 64 characters".to_string())
+            Err("Host alias must be at most 64 characters".to_string())
         );
         let sixty_four = "a".repeat(64);
         assert_eq!(
@@ -7138,7 +7150,7 @@ mod tests {
         ));
         assert_eq!(
             resolve_edit_submission(EditField::Alias, "bad\u{0007}name"),
-            Err("host alias must not contain control characters".to_string()),
+            Err("Host alias must not contain control characters".to_string()),
             "a refused alias draft must surface validate_alias_draft's own error, not a \
              destination-shaped one"
         );
@@ -7184,7 +7196,7 @@ mod tests {
         );
         assert_eq!(
             label,
-            format!("host actions for {}", display_peer(name)),
+            format!("Host actions for {}", display_peer(name)),
             "short enough not to clamp, so the label is exactly the escaped name"
         );
         assert!(label.contains("<U+202E>") && label.contains("<U+200B>"));
@@ -7218,7 +7230,7 @@ mod tests {
         assert!(
             parts.iter().any(|part| matches!(
                 part,
-                DetailPart::Text(text) if text.contains("recorded as install")
+                DetailPart::Text(text) if text.contains("Recorded as install")
             )),
             "this UI's own words carry which is which"
         );
@@ -7426,7 +7438,7 @@ mod tests {
             remediation: "update the host's farhelm binary".into(),
         });
         let notice = stale_session_notice("user@box", HostLookup::Known(&skewed));
-        assert_eq!(notice.cause, "host needs update");
+        assert_eq!(notice.cause, "Host needs update");
         assert!(detail_text(&notice.detail).contains("user@box"));
         assert_eq!(
             detail_text(&notice.explanation),
@@ -7442,12 +7454,17 @@ mod tests {
     #[farhelm_testtrace::test]
     fn the_stale_notice_distinguishes_unread_unrefreshed_and_unregistered() {
         let unread = stale_session_notice("user@box", HostLookup::Pending);
-        assert_eq!(unread.cause, "checking host");
-        assert_eq!(detail_text(&unread.explanation), "checking user@box…");
+        assert_eq!(unread.cause, "Checking host");
+        assert_eq!(detail_text(&unread.explanation), "Checking user@box…");
+        assert_eq!(
+            detail_text(&stale_session_notice("", HostLookup::Pending).explanation),
+            "Checking this session's host…",
+            "the unnamed fallback is a clause after Checking, not a second sentence"
+        );
 
         let unrefreshed =
             stale_session_notice("user@box", HostLookup::Failed("connection refused"));
-        assert_eq!(unrefreshed.cause, "host state unavailable");
+        assert_eq!(unrefreshed.cause, "Host state unavailable");
         assert!(detail_text(&unrefreshed.explanation).contains("could not be refreshed"));
         assert_eq!(detail_text(&unrefreshed.detail), "connection refused");
 
@@ -7463,15 +7480,15 @@ mod tests {
     #[farhelm_testtrace::test]
     fn outage_cards_share_causes_with_rows_and_preserve_remedies() {
         let expected = [
-            "waiting for supervisor",
-            "waiting for supervisor",
-            "refreshing session",
-            "host is too new",
-            "host identity mismatch",
-            "host identity unverified",
-            "duplicate host",
-            "host connection stopped",
-            "host state unknown",
+            "Waiting for supervisor",
+            "Waiting for supervisor",
+            "Refreshing session",
+            "Host is too new",
+            "Host identity mismatch",
+            "Host identity unverified",
+            "Duplicate host",
+            "Host connection stopped",
+            "Host state unknown",
         ];
         for (state, expected) in every_phase().into_iter().zip(expected) {
             let host = host(state);
@@ -7495,7 +7512,7 @@ mod tests {
             last_error: "start the matching supervisor".into(),
         });
         let notice = stale_session_notice("local", HostLookup::Known(&local));
-        assert_eq!(notice.cause, "waiting for supervisor");
+        assert_eq!(notice.cause, "Waiting for supervisor");
         assert_eq!(Some(notice.explanation), state_remedy(&local.state));
     }
 
@@ -7527,7 +7544,7 @@ mod tests {
             refresh: RefreshHealth::Pending,
         };
         assert_eq!(phase_label(&old), "connected");
-        assert_eq!(phase_display_label(&old), "old version");
+        assert_eq!(phase_display_label(&old), "Old version");
         assert_eq!(phase_class(&old), "old-version");
         assert!(is_connected(&old));
 
@@ -7538,7 +7555,7 @@ mod tests {
             newer_version: false,
             refresh: RefreshHealth::Pending,
         };
-        assert_eq!(phase_display_label(&current), "connected");
+        assert_eq!(phase_display_label(&current), "Connected");
         assert_eq!(phase_class(&current), "connected");
 
         let skew = HostPhase::VersionSkew {
@@ -7548,7 +7565,7 @@ mod tests {
             our_build: "0.14.0-rc.2".into(),
             remediation: "update".into(),
         };
-        assert_eq!(phase_display_label(&skew), "needs update");
+        assert_eq!(phase_display_label(&skew), "Needs update");
         assert_eq!(phase_class(&skew), "needs-attention");
         assert_eq!(too_new_title(&skew), None);
     }
@@ -7654,7 +7671,7 @@ mod tests {
                 update_menu_item(HostKind::Local, planning, false),
                 UpdateMenuItem {
                     disabled: true,
-                    description: "run the installer again to update this machine",
+                    description: "Run the installer again to update this machine",
                 },
                 "local, planning {planning}"
             );
@@ -7662,7 +7679,7 @@ mod tests {
                 update_menu_item(HostKind::Local, planning, true),
                 UpdateMenuItem {
                     disabled: false,
-                    description: "check for a newer Farhelm and install it",
+                    description: "Check for a newer Farhelm and install it",
                 },
                 "local with the app's updater, planning {planning}"
             );
@@ -7671,7 +7688,7 @@ mod tests {
                     update_menu_item(HostKind::Ssh, planning, app_updates),
                     UpdateMenuItem {
                         disabled: planning,
-                        description: "install the newer Farhelm version",
+                        description: "Install the newer Farhelm version",
                     },
                     "ssh, planning {planning}, app updates {app_updates}"
                 );
@@ -7722,14 +7739,14 @@ mod tests {
         assert_eq!(host_update_title(&HostPhase::Unrecognized), None);
     }
 
-    /// A host running a newer farhelm than the helm is labelled "too new",
+    /// A host running a newer farhelm than the helm is labelled "Too new",
     /// connected or skewed, and the label's hover carries both versions.
     ///
-    /// Why it matters: such a host used to read "needs update" (a skew) or
+    /// Why it matters: such a host used to read "Needs update" (a skew) or
     /// plain "connected", inviting an Update that would install the helm's
     /// older build over it, and nothing said that the helm was the side
     /// behind. Specified: a connected host the helm calls newer, and a
-    /// skewed host with the higher protocol, both read "too new", with a
+    /// skewed host with the higher protocol, both read "Too new", with a
     /// hover naming the host's build, the helm's and the protocols; the
     /// connected one keeps the amber advisory colour and stays connected.
     #[farhelm_testtrace::test]
@@ -7742,7 +7759,7 @@ mod tests {
             refresh: RefreshHealth::Pending,
         };
         assert!(runs_newer_version(&connected));
-        assert_eq!(phase_display_label(&connected), "too new");
+        assert_eq!(phase_display_label(&connected), "Too new");
         assert_eq!(phase_class(&connected), "too-new");
         assert!(is_connected(&connected));
         let hover = too_new_title(&connected).expect("a too-new host has a hover");
@@ -7760,7 +7777,7 @@ mod tests {
             remediation: "update this helm".into(),
         };
         assert!(runs_newer_version(&skew));
-        assert_eq!(phase_display_label(&skew), "too new");
+        assert_eq!(phase_display_label(&skew), "Too new");
         let hover = too_new_title(&skew).expect("a too-new skew has a hover");
         for expected in ["9.0.0", "protocol 3", "0.14.0", "protocol 2"] {
             assert!(

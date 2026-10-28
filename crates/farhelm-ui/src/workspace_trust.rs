@@ -59,9 +59,9 @@ impl TrustAgent {
     /// that every agent asks the same folder-trust question.
     fn choice_label(self) -> &'static str {
         match self {
-            Self::Codex => "answer Codex's folder-trust question for managed checkouts",
-            Self::Muse => "answer Muse's workspace-trust question for managed checkouts",
-            Self::Pi => "approve Pi project resources for managed checkouts",
+            Self::Codex => "Answer Codex's folder-trust question for managed checkouts",
+            Self::Muse => "Answer Muse's workspace-trust question for managed checkouts",
+            Self::Pi => "Approve Pi project resources for managed checkouts",
         }
     }
 
@@ -226,8 +226,8 @@ pub(crate) fn WorkspaceTrustSettings(agent: TrustAgent) -> Element {
             }
             if agent.has_hint() {
                 label { class: "app-settings-choice setting-row",
-                    "data-tooltip": "show a note above the terminal when {name} asks about trust in a managed checkout",
-                    span { "show the hint when {name} asks about a managed checkout" }
+                    "data-tooltip": "Show a note above the terminal when {name} asks about trust in a managed checkout",
+                    span { "Show the hint when {name} asks about a managed checkout" }
                     input { r#type: "checkbox", class: "control-switch", checked: !dismissed, disabled: value.is_none(),
                         "data-preference-checked": (!dismissed).to_string(),
                         onchange: move |event| {

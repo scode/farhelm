@@ -69,9 +69,9 @@ test("restoring confirmations reports save failure and recovers", async ({ page,
   });
   try {
     await page.goto("/");
-    await page.getByRole("button", { name: "settings", exact: true }).click();
-    const settings = page.getByRole("dialog", { name: "settings", exact: true });
-    const toggle = settings.getByRole("checkbox", { name: "skip session confirmations", exact: true });
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    const settings = page.getByRole("dialog", { name: "Settings", exact: true });
+    const toggle = settings.getByRole("checkbox", { name: "Skip session confirmations", exact: true });
     const error = settings.getByRole("alert");
     await expect(toggle).toBeChecked();
     await toggle.uncheck();
@@ -92,7 +92,7 @@ test("restoring confirmations reports save failure and recovers", async ({ page,
     await expect.poll(async () => (await readPreferences(request)).skip_session_confirmations).toBe(false);
     await expect(error).toHaveCount(0);
     await page.reload();
-    await page.getByRole("button", { name: "settings", exact: true }).click();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
     await expect(toggle).not.toBeChecked();
     await expect(error).toHaveCount(0);
   } finally {
@@ -126,9 +126,9 @@ test("superseded restoration cannot report an older failure", async ({ page, req
   });
   try {
     await page.goto("/");
-    await page.getByRole("button", { name: "settings", exact: true }).click();
-    const settings = page.getByRole("dialog", { name: "settings", exact: true });
-    const toggle = settings.getByRole("checkbox", { name: "skip session confirmations", exact: true });
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    const settings = page.getByRole("dialog", { name: "Settings", exact: true });
+    const toggle = settings.getByRole("checkbox", { name: "Skip session confirmations", exact: true });
     await expect(toggle).toBeChecked();
     // Supersession releases the old completion on the intervening opt-out,
     // before the first HTTP response. Retain even a transient warning there:
@@ -279,10 +279,10 @@ test("skip session confirmations walks row header interrupted card and tab actio
   try {
     await patchPreferences(request, { skip_session_confirmations: null });
     await page.goto("/");
-    const gear = page.getByRole("button", { name: "settings", exact: true });
+    const gear = page.getByRole("button", { name: "Settings", exact: true });
     await gear.click();
-    const settings = page.getByRole("dialog", { name: "settings", exact: true });
-    const toggle = settings.getByRole("checkbox", { name: "skip session confirmations", exact: true });
+    const settings = page.getByRole("dialog", { name: "Settings", exact: true });
+    const toggle = settings.getByRole("checkbox", { name: "Skip session confirmations", exact: true });
     await expect(toggle).not.toBeChecked();
     await expect(settings.locator("#session-confirmations-help")).toContainText("YOLO, host and trash");
     await toggle.check();

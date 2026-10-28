@@ -1083,7 +1083,7 @@ test("held rename success preserves an unrelated focus destination", async ({ pa
     await expect.poll(() => feed.openSockets()).toBe(1);
     feed.notify(2);
     const card = page.locator(`.approval-card[data-approval-id="${approvalId}"]`);
-    const destination = card.getByRole("button", { name: "allow", exact: true });
+    const destination = card.getByRole("button", { name: "Allow", exact: true });
     await expect(card).toBeVisible();
     await expect(destination).toBeVisible();
     await expect(destination).toBeEnabled();

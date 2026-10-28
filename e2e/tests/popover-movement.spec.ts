@@ -108,7 +108,7 @@ async function prepare(page: Page, request: APIRequestContext, extraAbove = fals
   await page.goto("/");
   await waitForSessionReady(page, selected);
   await feed.waitForConnection(1);
-  await expect(page.locator(".hosts-status", { hasText: "loading hosts" })).toHaveCount(0);
+  await expect(page.locator(".hosts-status", { hasText: "Loading hosts" })).toHaveCount(0);
   await expect(page.locator(".host-rail-avatar").first()).toBeVisible();
   await expect(page.locator(".session-row")).toHaveCount(sessions.length);
   await expect(page.locator(".session-row").nth(0)).toHaveAttribute("data-session-id", above);
@@ -688,17 +688,17 @@ for (const kind of ["menu", "bell"] as const) {
     const above = row(page, fixture.above);
     const detail = above.locator(".session-row-detail");
     const cause = detail.locator(".stale-badge");
-    await expect(cause).toHaveText("host is too new");
+    await expect(cause).toHaveText("Host is too new");
     host.setNewer(false);
     await fixture.refresh();
-    await expect(cause).toHaveText("host needs update");
+    await expect(cause).toHaveText("Host needs update");
     const longerCapsuleWidth = (await cause.boundingBox())!.width;
     host.setNewer(true);
     await fixture.refresh();
-    await expect(cause).toHaveText("host is too new");
+    await expect(cause).toHaveText("Host is too new");
     await fitStalePair(page, detail, longerCapsuleWidth);
     await fixture.refresh();
-    await expect(cause).toHaveText("host is too new");
+    await expect(cause).toHaveText("Host is too new");
     await expect(above).toHaveAttribute("data-session-stale", "true");
     await expect(page.locator(".session-row-detail")).toHaveCount(1);
     await expect(page.locator(".host-details-toggle")).not.toBeChecked();
@@ -722,7 +722,7 @@ for (const kind of ["menu", "bell"] as const) {
     expect(JSON.stringify((await unchangedListing.json()).sessions), "the concurrent listing must remain byte-equivalent data").toBe(frozen);
     expect(await unchangedListing.finished()).toBeNull();
     await finishRender(page);
-    await expect(cause, "the changed host response has not been published yet").toHaveText("host is too new");
+    await expect(cause, "the changed host response has not been published yet").toHaveText("Host is too new");
     await expect(panel).toBeVisible();
     await expect(kind === "menu" ? target.locator(".session-row-rename") : panel).toBeFocused();
     const detailHeight = (await detail.boundingBox())!.height;
@@ -737,7 +737,7 @@ for (const kind of ["menu", "bell"] as const) {
     expect(await changedHost.finished()).toBeNull();
     await waitForFeedReadersSettled(page);
     await finishRender(page);
-    await expect(cause).toHaveText("host needs update");
+    await expect(cause).toHaveText("Host needs update");
     await expect(detail.locator(".status-badge")).toHaveText(endedText);
     await expect(page.locator(".session-row-detail")).toHaveCount(1);
     expect((await detail.boundingBox())!.height, "only the wider host cause must add a detail line").toBeGreaterThan(detailHeight);

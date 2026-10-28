@@ -785,7 +785,7 @@ test("opening replace-with focuses search before any typing or mode click", asyn
     await attachSession(page, source.id);
     await waitForTermText(page, "FAKE-AGENT READY");
     await expect(
-      page.locator(".hosts-status", { hasText: "loading hosts" }),
+      page.locator(".hosts-status", { hasText: "Loading hosts" }),
     ).toHaveCount(0, { timeout: 20_000 });
     await installFocusTrace(page);
     const posts: string[] = [];
@@ -858,7 +858,7 @@ test("opening replace-with from the keyboard focuses search before any typing", 
     await attachSession(page, sourceId);
     await waitForTermText(page, "FAKE-AGENT READY");
     await expect(
-      page.locator(".hosts-status", { hasText: "loading hosts" }),
+      page.locator(".hosts-status", { hasText: "Loading hosts" }),
     ).toHaveCount(0, { timeout: 20_000 });
     await installFocusTrace(page);
     const posts: string[] = [];

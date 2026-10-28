@@ -16,9 +16,9 @@ import { addTab, selectTerminal, islandText, waitForIslandText, fulfillAsHelm, i
 
 const invocation = `"${path.resolve(__dirname, "../../target/debug/farhelm-fixtures")}" fake-agent --script mouse-modes`;
 const labels = {
-  intercept: "open in Farhelm, don't pass the click on",
-  both: "open in Farhelm and also pass the click on",
-  program: "pass the click on only",
+  intercept: "Open in Farhelm, don't pass the click on",
+  both: "Open in Farhelm and also pass the click on",
+  program: "Pass the click on only",
 } as const;
 
 /** Match the existing mouse-mode suite's negative notice window: beyond the
@@ -361,12 +361,12 @@ test("terminal link ownership opens once and preserves program clicks in all mou
     let expectedOpens: string[] = [];
     for (const mode of ["both", "intercept", "program"] as const) {
       await openSettings(page, "terminal");
-      const dialog = page.getByRole("dialog", { name: "settings", exact: true });
+      const dialog = page.getByRole("dialog", { name: "Settings", exact: true });
       // The native radio owns state; its visible segment is the pointer target.
       await dialog.getByRole("radio", { name: labels[mode], exact: true }).locator("..").click();
       await expect.poll(() => readPreferences(request)).toMatchObject({ terminal_link_click: mode });
       await expect.poll(() => page.evaluate(() => (window as any).farhelmTerminalLinkClickMode)).toBe(mode);
-      await dialog.getByRole("button", { name: "close settings", exact: true }).click();
+      await dialog.getByRole("button", { name: "Close settings", exact: true }).click();
       expect(await page.evaluate(() => (window as any).__farhelmTerm === (window as any).__linkTermBefore)).toBe(true);
       expect(await page.evaluate((el) => (window as any).__farhelmIslands[el].term === (window as any).__linkTabBefore, tabElement)).toBe(true);
       await selectTerminal(page, "agent");
@@ -589,14 +589,14 @@ test("program-only link clicks do nothing without mouse reporting", async ({ pag
     const reports = reportBarrier(page);
     for (const [mode, count] of [["program", 0], ["both", 1], ["intercept", 2]] as const) {
       await openSettings(page, "terminal");
-      const dialog = page.getByRole("dialog", { name: "settings", exact: true });
+      const dialog = page.getByRole("dialog", { name: "Settings", exact: true });
       const choice = dialog.getByRole("radio", { name: labels[mode], exact: true });
       // The native radio is visually clipped inside its clickable segment.
       // Activate the user-facing label, then prove the actual input changed.
       await choice.locator("..").click();
       await expect(choice).toBeChecked();
       await expect.poll(() => page.evaluate(() => (window as any).farhelmTerminalLinkClickMode)).toBe(mode);
-      await dialog.getByRole("button", { name: "close settings", exact: true }).click();
+      await dialog.getByRole("button", { name: "Close settings", exact: true }).click();
       await cue(page, "links");
       const point = await cell(page, "OSC-LINK");
       await page.mouse.click(point.x, point.y);

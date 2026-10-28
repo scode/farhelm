@@ -625,7 +625,7 @@ test("launcher choice-button Enter applies then launches", async ({ page, reques
 test("launcher value-control Enter keeps the shown choices", async ({ page, request }) => {
   const { form, bodies } = await observeChoiceCreates(page, request);
   await form.getByRole("button", { name: "Codex", exact: true }).click();
-  const host = form.getByLabel("host", { exact: true });
+  const host = form.getByLabel("Host", { exact: true });
   const hostId = await host.getAttribute("data-host-id");
   expect(hostId, "the connected host selection must have settled").not.toBe("");
   expect(await enterCreateChoice(form, host, bodies)).toMatchObject({ host: Number(hostId) });
@@ -687,14 +687,14 @@ test("launcher repeated Enter never launches", async ({ page, request }) => {
   });
   const { form, bodies } = await observeChoiceCreates(page, request);
   await form.getByRole("button", { name: "Codex", exact: true }).click();
-  await expect(form.getByLabel("host", { exact: true }), "the recent must belong to the selected connected destination").toHaveAttribute("data-host-id", String(host));
+  await expect(form.getByLabel("Host", { exact: true }), "the recent must belong to the selected connected destination").toHaveAttribute("data-host-id", String(host));
   const recent = form.locator(".launch-composer-recents button");
   await expect(recent).toHaveCount(1);
   await expect(recent).toContainText("High");
   await expect(form.locator(".create-session-submit")).toHaveAttribute("aria-disabled", "false");
   for (const control of [
     form.locator(".launch-composer-effort-choice").getByRole("button", { name: "Low", exact: true }),
-    form.getByLabel("host", { exact: true }),
+    form.getByLabel("Host", { exact: true }),
     form.getByLabel("Folder", { exact: true }),
     form.locator(".create-session-submit"),
     recent,

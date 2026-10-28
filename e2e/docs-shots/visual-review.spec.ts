@@ -7,9 +7,14 @@
  * Native updater/App controls, loaded SSH-help commands, successful uninstall
  * plans remain uncaptured. Setup progress uses the existing owned backend's
  * held action, with the real helm publishing progress and controlled failures.
+ * The focused sentence-case selection also denies one authentic Spawn request
+ * after photographing it; the requested child is never launched.
  */
 import { expect, test, type APIRequestContext, type Locator, type Page, type Request as NetworkRequest } from "@playwright/test";
-import { hostRowByName, listHosts, openHostMenu, openRowMenu, patchPreferences, readPreferences, showHostsPanel, showSessionsPanel } from "../tests/helpers/fleet";
+import { cleanupSession, hostRowByName, listHosts, listSessions, openHostMenu, openRowMenu, patchPreferences, readPreferences, setLocalYoloWithoutAsking, showHostsPanel, showSessionsPanel } from "../tests/helpers/fleet";
+import { setLocalCommandsWithoutAsking } from "../tests/helpers/approvals";
+import { cleanupOwnedSteps } from "../tests/helpers/cleanup";
+import { submitPrompt } from "../tests/helpers/real-agent";
 import { chooseLauncherHost } from "../tests/helpers/host-picker";
 import { openSettings, selectSettingsSection } from "../tests/helpers/settings";
 import { attachSession, waitForTermText } from "../tests/helpers/term";
@@ -41,6 +46,8 @@ const menusOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "menus";
 const dialogsOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "dialogs";
 const launcherOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "launcher";
 const sentenceLauncherOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sentence-launcher";
+const sentenceHostsSettingsOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sentence-hosts-settings";
+const sentenceApprovalOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sentence-approval";
 
 /** Photograph native-only chrome with the goal's explicit CSS-only fallback.
  * The ordinary staged web app supplies the surrounding frame and terminals.
@@ -443,7 +450,7 @@ async function hostHintShots(page: Page, request: APIRequestContext, scenario: S
     await openHostMenu(host);
     await host.locator(".host-remove").click();
     await expect(remove).toBeVisible();
-    await expect(remove.locator(".dialog-actions button")).toHaveText(["cancel", "remove, don't ask again", "remove"]);
+    await expect(remove.locator(".dialog-actions button")).toHaveText(["Cancel", "Remove, don't ask again", "Remove"]);
     await expect(remove.locator(".btn-outline")).toHaveClass(/btn-danger/);
     await expect(remove.locator("#host-remove-permanent-hint")).toHaveText(hint);
     await insideViewport(page, remove.locator("#host-remove-permanent-hint"));
@@ -469,10 +476,19 @@ async function hostHintShots(page: Page, request: APIRequestContext, scenario: S
     await expect(add.locator(".provisioning-plan")).toContainText(scenario.add_host.ssh);
     await expect(add.locator(".provisioning-confirm")).toBeVisible();
     await expect(add.locator(".host-setup-permanent")).toHaveClass(/btn-outline/);
-    await expect(add.locator(".dialog-actions button")).toHaveText(["cancel", "set up, don't ask again", "set up"]);
+    await expect(add.locator(".dialog-actions button")).toHaveText(["Cancel", "Set up, don't ask again", "Set up"]);
     await expect(add.locator("#host-setup-permanent-hint")).toHaveText(hint);
     await insideViewport(page, add.locator("#host-setup-permanent-hint"));
+    if (sentenceHostsSettingsOnly) await expect(add.locator(".provisioning-copy-plan")).toBeInViewport();
     await shot(page, `${name}-setup-plan`, window, { pad: 0 });
+    if (sentenceHostsSettingsOnly) {
+      const body = add.locator(".host-settings-body");
+      if (await body.evaluate(element => element.scrollHeight > element.clientHeight + 1)) {
+        await scrollToEnd(body);
+        await expect(add.locator(".provisioning-plan-step").last()).toBeInViewport();
+        await shot(page, `${name}-setup-plan-end`, window, { pad: 0 });
+      }
+    }
   } finally {
     if (await add.isVisible()) await add.locator(".add-host-cancel").click();
     await expect(add).toBeHidden();
@@ -777,7 +793,7 @@ async function launcherYoloShots(page: Page, request: APIRequestContext, name: s
   expect(local?.yolo_without_asking, "the staged host must ask before a YOLO launch").toBe(false);
   const launcher = await openLauncher(page);
   await launcher.getByRole("tab", { name: "Agent", exact: true }).click();
-  await chooseLauncherHost(launcher.getByRole("combobox", { name: "host", exact: true }), String(local!.id));
+  await chooseLauncherHost(launcher.getByRole("combobox", { name: "Host", exact: true }), String(local!.id));
   await launcher.getByLabel("Folder", { exact: true }).fill("~");
   await launcher.getByLabel("Folder", { exact: true }).press("Escape");
   await expect(launcher.getByRole("listbox", { name: "Folders" })).toHaveCount(0);
@@ -976,9 +992,9 @@ async function settingsShots(page: Page, name: string, includePhone: boolean) {
   for (const part of [".host-settings-header", ".host-settings-footer", ".app-settings-close"]) {
     await insideViewport(page, settings.locator(part));
   }
-  await expect(settings.getByRole("checkbox", { name: "skip session confirmations", exact: true })).not.toBeChecked();
+  await expect(settings.getByRole("checkbox", { name: "Skip session confirmations", exact: true })).not.toBeChecked();
   await shot(page, `${name}-settings`, window, { pad: 0 });
-  const namingSwitch = settings.getByRole("checkbox", { name: "name sessions on quick launch", exact: true });
+  const namingSwitch = settings.getByRole("checkbox", { name: "Name sessions on quick launch", exact: true });
   await keyboardFocusSwitch(page, settings, namingSwitch);
   await focusedShot(page, `${name}-settings-focused`, namingSwitch, settings);
   await expect(namingSwitch).toBeChecked();
@@ -1019,7 +1035,7 @@ async function settingsShots(page: Page, name: string, includePhone: boolean) {
   await expect(trust.locator("#checkout-pi-trust input").first()).toBeInViewport();
   await shot(page, `${name}-settings-agent-trust-end`, window, { pad: 0 });
   const notifications = await selectSettingsSection(page, "notifications");
-  const sounds = notifications.getByRole("region", { name: "sounds", exact: true });
+  const sounds = notifications.getByRole("region", { name: "Sounds", exact: true });
   await expect.poll(() => page.evaluate(() => typeof (globalThis as typeof globalThis & {
     farhelmSounds?: { mountSettings?: unknown };
   }).farhelmSounds?.mountSettings), { message: "the real sound asset is available for its mounted controls" }).toBe("function");
@@ -1028,12 +1044,12 @@ async function settingsShots(page: Page, name: string, includePhone: boolean) {
   await expect(sounds.locator('[data-sound-event="finished"]')).not.toBeChecked();
   const ntfy = notifications.locator(".ntfy-settings");
   await expect(ntfy.locator('input[type="url"]')).toHaveCSS("font-family", /JetBrains Mono/);
-  await expect(ntfy.getByRole("checkbox", { name: "send ntfy alerts", exact: true })).toBeEnabled();
-  await expect(ntfy.getByRole("checkbox", { name: "send ntfy alerts", exact: true })).not.toBeChecked();
+  await expect(ntfy.getByRole("checkbox", { name: "Send ntfy alerts", exact: true })).toBeEnabled();
+  await expect(ntfy.getByRole("checkbox", { name: "Send ntfy alerts", exact: true })).not.toBeChecked();
   await sounds.scrollIntoViewIfNeeded();
   await shot(page, `${name}-settings-notifications`, window, { pad: 0 });
   await scrollToEnd(settings.locator(".host-settings-body"));
-  await expect(ntfy.getByRole("button", { name: "save", exact: true })).toBeInViewport();
+  await expect(ntfy.getByRole("button", { name: "Save", exact: true })).toBeInViewport();
   await shot(page, `${name}-settings-notifications-end`, window, { pad: 0 });
   // Unsaved directory/command examples expose the mono fields beside Inter
   // labels without changing checkout configuration or running a command.
@@ -1051,44 +1067,137 @@ async function settingsShots(page: Page, name: string, includePhone: boolean) {
   await expect(settings).toBeHidden();
 }
 
+/** Keep host settings evidence shared with the ordinary capture sequence.
+ * Optional editor pictures use public unsaved drafts, then Cancel; the real
+ * destination's private seed must never enter a screenshot. Icon/color focus
+ * is observed without activating a choice or writing host preferences.
+ */
+async function hostSettingsShots(page: Page, scenario: Scenario, name: string, includeEditors = false) {
+  const remote = scenario.hosts.find((host) => host.kind === "remote");
+  if (!remote) throw new Error("the visual review needs a staged remote host");
+  const host = hostRowByName(page, remote.alias);
+  await openHostMenu(host);
+  await inspectMenu(page, host.locator(".host-row-menu-panel"));
+  await shot(page, `${name}-host-menu`, [page.locator("body")], { pad: 0 });
+  await host.locator(".host-settings").click();
+  const settings = page.locator(".host-settings-dialog");
+  try {
+    await expect(settings).toBeVisible();
+    await expect(settings.locator(".host-links-without-asking-toggle")).toBeEnabled();
+    await shot(page, `${name}-host-settings`, [page.locator("body")], { pad: 0 });
+    for (const kind of ["icon", "color"]) {
+      const selected = settings.locator(`.host-${kind}-choice[aria-pressed="true"]`);
+      await expect(selected).toBeEnabled();
+      await keyboardFocusControl(page, settings, selected);
+      await focusedShot(page, `${name}-host-${kind}-focused`, selected, settings);
+      await expect(selected).toHaveAttribute("aria-pressed", "true");
+    }
+    // The ordinary height hides lower permissions; the second image proves
+    // those labels independently of the header and appearance controls.
+    await scrollToEnd(settings.locator(".host-settings-body"));
+    await expect(settings.locator(".host-local-links-without-asking-toggle")).toBeInViewport();
+    await shot(page, `${name}-host-settings-end`, [page.locator("body")], { pad: 0 });
+    if (includeEditors) {
+      for (const [label, draft, slug] of [
+        ["Edit alias", "review-box", "alias"],
+        ["Edit destination", "dev@review-box", "destination"],
+      ]) {
+        await settings.getByRole("button", { name: label, exact: true }).click();
+        const editor = settings.locator(".host-destination-form");
+        await expect(editor).toBeVisible();
+        // Editing seeds the actual registry value, bypassing the display
+        // rewrite. Replace it before photographing, without ever saving it.
+        await editor.locator(".host-destination-input").fill(draft);
+        await expect(editor.locator(".host-save-destination")).toHaveText("Save");
+        await expect(editor.locator(".host-cancel-edit")).toHaveText("Cancel");
+        await shot(page, `${name}-host-${slug}-draft`, [page.locator("body")], { pad: 0 });
+        await keyboardFocusControl(page, settings, editor.locator(".host-cancel-edit"));
+        // Unlike the ordinary dialog focus pictures, retain this control's
+        // real help so tooltip spelling also receives visual evidence.
+        await focusedShot(page, `${name}-host-${slug}-cancel-focused`, editor.locator(".host-cancel-edit"));
+        await editor.locator(".host-cancel-edit").click();
+        await expect(editor).toBeHidden();
+        await expect(settings.locator(`[data-setting="${slug}"] .host-settings-value`))
+          .toHaveText(slug === "alias" ? remote.alias : remote.shown_ssh!);
+      }
+    }
+  } finally {
+    if (await settings.isVisible()) await page.keyboard.press("Escape");
+    await expect(settings).toBeHidden();
+  }
+}
+
+/** Photograph the ordinary host list and its real details without mutation.
+ * Details is client disclosure state; restore its exact value so later setup
+ * pictures do not inherit a conveniently expanded premise from this helper.
+ */
+async function hostPanelShots(page: Page, name: string) {
+  await showHostsPanel(page);
+  const details = page.locator(".host-details-toggle");
+  const saved = await details.isChecked();
+  try {
+    await details.uncheck();
+    await shot(page, `${name}-hosts-panel`, [page.locator("body")], { pad: 0 });
+    await details.check();
+    await expect(page.locator(".host-row[data-host-kind='ssh'] .host-detail").first()).toBeVisible();
+    await shot(page, `${name}-hosts-panel-details`, [page.locator("body")], { pad: 0 });
+  } finally {
+    await details.setChecked(saved);
+    await showSessionsPanel(page);
+  }
+}
+
 /** Exercise Settings' actual phone breakpoint, which main-650 does not reach.
  * Long panes must scroll inside the pinned frame; Back returns native focus
  * to the selected list button, and Enter reopens its pane at the top. Both
  * palettes use real controls and the same owned fleet, without saving drafts.
+ * The focused sentence-case selection visits every web section; only panes
+ * whose measured body overflows get an end picture and last-control check.
  */
 async function phoneSettingsShots(page: Page, settings: Locator, name: string) {
   const ordinaryViewport = page.viewportSize()!;
   try {
     await page.setViewportSize({ width: 390, height: 560 });
-    const navigation = settings.getByRole("navigation", { name: "settings sections", exact: true });
+    const navigation = settings.getByRole("navigation", { name: "Settings sections", exact: true });
     const back = settings.getByRole("button", { name: "‹ Settings", exact: true });
     const body = settings.locator(".host-settings-body");
     const close = settings.getByRole("button", { name: "Close", exact: true });
-    for (const section of ["agent trust", "notifications"] as const) {
+    const sections = sentenceHostsSettingsOnly
+      ? ["sessions", "Appearance", "terminal", "hosts", "checkouts", "agent trust", "notifications"] as const
+      : ["agent trust", "notifications"] as const;
+    for (const section of sections) {
       const panel = await selectSettingsSection(page, section);
       const heading = panel.locator(":scope > h3");
       await expect(heading).toBeFocused();
       await expect(navigation).toBeHidden();
       await expect(back).toBeVisible();
       await expect.poll(() => body.evaluate(element => element.scrollTop)).toBe(0);
-      expect(await body.evaluate(element => element.scrollHeight > element.clientHeight),
-        "the real phone pane must overflow before its scroll and frame checks").toBe(true);
+      const overflows = await body.evaluate(element => element.scrollHeight > element.clientHeight + 1);
+      if (section === "agent trust" || section === "notifications") {
+        expect(overflows, "the long phone pane must overflow before its scroll and frame checks").toBe(true);
+      }
       const header = settings.locator(".host-settings-header");
       const footer = settings.locator(".host-settings-footer");
       for (const control of [header, footer, close, back]) await insideViewport(page, control);
       const frame = { header: await header.boundingBox(), footer: await footer.boundingBox() };
-      const slug = section.replace(" ", "-");
+      const slug = section.toLowerCase().replace(" ", "-");
       await shot(page, `${name}-settings-${slug}`, [page.locator("body")], { pad: 0 });
-      await scrollToEnd(body);
-      await expect.poll(() => body.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
-      const lastControl = section === "agent trust"
-        ? panel.locator("#checkout-pi-trust input").first()
-        : panel.locator(".ntfy-settings").getByRole("button", { name: "save", exact: true });
-      await expect(lastControl).toBeInViewport();
-      expect(await header.boundingBox(), "scrolling preserves the pinned Settings header").toEqual(frame.header);
-      expect(await footer.boundingBox(), "scrolling preserves the pinned Settings footer").toEqual(frame.footer);
-      await insideViewport(page, close);
-      await shot(page, `${name}-settings-${slug}-end`, [page.locator("body")], { pad: 0 });
+      if (overflows) {
+        await scrollToEnd(body);
+        await expect.poll(() => body.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+        const lastControl = section === "agent trust"
+          ? panel.locator("#checkout-pi-trust input").first()
+          : section === "notifications"
+          ? panel.locator(".ntfy-settings").getByRole("button", { name: "Save", exact: true })
+          // Segmented controls clip their native input deliberately; the
+          // enclosing label is the painted control whose reachability matters.
+          : panel.locator("button, select, textarea, label:has(input)").last();
+        await expect(lastControl).toBeInViewport();
+        expect(await header.boundingBox(), "scrolling preserves the pinned Settings header").toEqual(frame.header);
+        expect(await footer.boundingBox(), "scrolling preserves the pinned Settings footer").toEqual(frame.footer);
+        await insideViewport(page, close);
+        await shot(page, `${name}-settings-${slug}-end`, [page.locator("body")], { pad: 0 });
+      }
       await keyboardFocusControl(page, settings, back);
       await back.press("Enter");
       await expect(navigation).toBeVisible();
@@ -1254,7 +1363,7 @@ async function showUnavailable(page: Page, request: APIRequestContext, scenario:
     }, { timeout: 30_000, message: "the owned remote records a failed connection to the invalid destination" }).toBe(true);
     await expect(row).toHaveAttribute("data-session-selected", "true");
     await expect(row).toHaveAttribute("data-session-stale", "true");
-    await expect(row.locator(".stale-badge")).toHaveText("waiting for supervisor");
+    await expect(row.locator(".stale-badge")).toHaveText("Waiting for supervisor");
     await expect(row.locator(".status-badge.waiting")).toHaveCount(1);
     await expect(row.locator(".status-dot")).toHaveCSS("animation-name", "none");
     await expect(row.locator(".status-dot")).toHaveCSS("color", "rgb(255, 255, 255)");
@@ -1263,6 +1372,26 @@ async function showUnavailable(page: Page, request: APIRequestContext, scenario:
     await expect(card.locator(".session-unavailable-detail")).toContainText(remote.alias);
     await expect(page.locator("#term-connecting")).toBeHidden();
     await shot(page, `${name}-selected-stale`, [page.locator("body")], { pad: 0 });
+    if (sentenceHostsSettingsOnly) {
+      await showHostsPanel(page);
+      const details = page.locator(".host-details-toggle");
+      const saved = await details.isChecked();
+      const unavailableRow = page.locator(`.host-row[data-host-id="${host.id}"]`);
+      try {
+        await shot(page, `${name}-unavailable-host`, [page.locator("body")], { pad: 0 });
+        await details.check();
+        await expect(unavailableRow.locator(".host-detail")).toBeVisible();
+        // Raw transport diagnostics keep the same privacy gate as every
+        // other shot; there is no new error-text substitution for this state.
+        await shot(page, `${name}-unavailable-host-details`, [page.locator("body")], { pad: 0 });
+        // The ordinary menu already pictures these authored controls. Its
+        // disconnected header substitutes the peer's executable path for its
+        // version in the same slot. This real remote's private path is omitted.
+      } finally {
+        await details.setChecked(saved);
+        await showSessionsPanel(page);
+      }
+    }
   } finally {
     const restore = await request.post(destinationUrl, { data: { ssh: host.destination } });
     expect(restore.ok(), "restore the owned remote's exact original destination").toBe(true);
@@ -1276,12 +1405,52 @@ async function showUnavailable(page: Page, request: APIRequestContext, scenario:
   }
 }
 
+/** Show retained setup steps while their owned run still exists.
+ * Details expands the production presentation. A failed run's menu is only
+ * observed, never activated; opening Hosts also genuinely acknowledges its
+ * rail warning. Restore disclosure before returning to the original lifecycle.
+ */
+async function setupPanelShots(page: Page, id: number, name: string, failed = false) {
+  await showHostsPanel(page);
+  const details = page.locator(".host-details-toggle");
+  const saved = await details.isChecked();
+  const host = page.locator(`.host-row[data-host-id="${id}"]`);
+  const run = host.locator(".provisioning-run");
+  try {
+    await details.check();
+    await expect(run).toHaveAttribute("data-provisioning-status", failed ? "failed" : "running");
+    await expect(run.locator(".provisioning-step").first()).toBeVisible();
+    await run.locator(".provisioning-run-header").scrollIntoViewIfNeeded();
+    await shot(page, `${name}-setup-${failed ? "failed" : "running"}-steps`, [page.locator("body")], { pad: 0 });
+    const last = run.locator(".provisioning-step").last();
+    await last.scrollIntoViewIfNeeded();
+    await expect(last).toBeInViewport();
+    await shot(page, `${name}-setup-${failed ? "failed" : "running"}-steps-end`, [page.locator("body")], { pad: 0 });
+    if (failed) {
+      await expect(run.locator(".provisioning-run-message")).toContainText("Setup could not finish");
+      await openHostMenu(host);
+      const menu = host.locator(".host-row-menu-panel");
+      await expect(menu.locator(".provisioning-rerun .session-row-menu-label")).toHaveText("Re-run");
+      await expect(menu.locator(".provisioning-rerun .session-row-menu-description")).toHaveText("Try the failed setup again");
+      await inspectMenu(page, menu);
+      await shot(page, `${name}-setup-failed-menu`, [page.locator("body")], { pad: 0 });
+      await page.keyboard.press("Escape");
+      await expect(menu).toBeHidden();
+    }
+  } finally {
+    await details.setChecked(saved);
+    await showSessionsPanel(page);
+  }
+}
+
 /** Photograph actual setup progress using the docs stack's existing stand-in.
  * Only its approved invented destination is registered. Restoring the control
  * file releases held work even when a screenshot fails; only the new host is
  * removed, after its ordinary busy guard lets go. Warning review releases the
  * same simulated action to failure, then holds a retry to show that starting
- * work does not acknowledge an unseen failure. No installation runs. */
+ * work does not acknowledge an unseen failure. The sentence-case selection
+ * opens the real failure in Hosts before retry, so that failure is acknowledged.
+ * No installation runs. */
 async function showRailSetup(page: Page, request: APIRequestContext, scenario: Scenario, name: string, warningOnly = false) {
   const destination = scenario.add_host?.ssh;
   if (!destination) throw new Error("setup review needs the approved invented destination");
@@ -1332,8 +1501,14 @@ async function showRailSetup(page: Page, request: APIRequestContext, scenario: S
       await expect(avatar).toHaveAttribute("aria-pressed", "true");
       await shot(page, `${name}-rail-warning-selected`, [page.locator("body")], { pad: 0 });
 
+      if (sentenceHostsSettingsOnly) {
+        await setupPanelShots(page, id, name, true);
+        await expect(avatar).toHaveAttribute("data-host-attention", "false");
+      }
+
       // A later running action shares the real helm's retained progress path.
-      // Keep Hosts closed so the warning's coexistence with its ring is real.
+      // Ordinary warning review keeps Hosts closed. The focused sentence-case
+      // path has already photographed and acknowledged this failure in Hosts.
       await publish(JSON.stringify({ ...config, targets: { ...config.targets, [`ssh:${destination}`]: {
         ...behavior, hold_actions: true,
       } } }));
@@ -1345,16 +1520,17 @@ async function showRailSetup(page: Page, request: APIRequestContext, scenario: S
       expect(retry.status()).toBe(202);
       expect((await retry.json()).host_id).toBe(id);
       await expect(avatar).toHaveAttribute("data-host-progress", "true");
-      await expect(avatar).toHaveAttribute("data-host-attention", "true");
-      await expect(avatar.locator(".host-rail-attention")).toBeVisible();
+      await expect(avatar).toHaveAttribute("data-host-attention", String(!sentenceHostsSettingsOnly));
+      if (!sentenceHostsSettingsOnly) await expect(avatar.locator(".host-rail-attention")).toBeVisible();
       await shot(page, `${name}-rail-warning-retry`, [page.locator("body")], { pad: 0 });
       await chooseHost(page);
       await expect(avatar).toHaveAttribute("aria-pressed", "false");
-      await expect(avatar).toHaveAttribute("data-host-attention", "true");
+      await expect(avatar).toHaveAttribute("data-host-attention", String(!sentenceHostsSettingsOnly));
       await shot(page, `${name}-rail-warning-retry-unselected`, [page.locator("body")], { pad: 0 });
       return;
     }
     await shot(page, `${name}-rail-setup`, [page.locator("body")], { pad: 0 });
+    if (sentenceHostsSettingsOnly) await setupPanelShots(page, id, name);
     await showHostsPanel(page);
     await expect(page.locator(`[data-host-id="${id}"] .provisioning-run`)).toBeVisible();
     await page.mouse.click(0, 0);
@@ -1385,6 +1561,7 @@ for (const colorScheme of ["dark", "light"] as const) {
      * Settings adds its phone breakpoint once per palette after main-650.
      */
     test(`${colorScheme} ${width}`, async ({ page, request }) => {
+      test.skip(sentenceApprovalOnly, "only the pending approval pictures need a repeat");
       await page.emulateMedia({ colorScheme, reducedMotion: "reduce" });
       await page.setViewportSize({ width: 1600, height: 1000 });
       const saved = await readPreferences(request);
@@ -1432,6 +1609,27 @@ for (const colorScheme of ["dark", "light"] as const) {
         await expect(page.locator(".build-skew")).toHaveCount(0);
         const name = `visual-review/${colorScheme}-${width}`;
         const window = [page.locator("body")];
+        if (sentenceHostsSettingsOnly) {
+          await settingsShots(page, name, width === "main-650");
+          await hostPanelShots(page, name);
+          await hostSettingsShots(page, scenario, name, true);
+          const original = await hostHintShots(page, request, scenario, name, true);
+          const refusal = await openLiveUninstallRefusal(page, request, scenario, original);
+          try {
+            await shot(page, `${name}-uninstall-refusal`, window, { pad: 0 });
+          } finally {
+            if (await refusal.isVisible()) await refusal.locator(".host-refusal-close").click();
+            await expect(refusal).toBeHidden();
+            await sameConnectedHost(request, original);
+          }
+          await showSessionsPanel(page);
+          await showRailSetup(page, request, scenario, name);
+          await showRailSetup(page, request, scenario, name, true);
+          const waiting = scenario.sessions.find(session => session.status === "waiting");
+          if (!waiting) throw new Error("the unavailable pictures need the owned waiting session");
+          await showUnavailable(page, request, scenario, waiting, name);
+          return;
+        }
         if (sentenceLauncherOnly) {
           await launcherShots(page, request, name, width === "main-650");
           await sentenceTemplateShots(page, name);
@@ -1697,31 +1895,7 @@ for (const colorScheme of ["dark", "light"] as const) {
 
         await settingsShots(page, name, width === "main-650");
 
-        const remote = scenario.hosts.find((host) => host.kind === "remote");
-        if (!remote) throw new Error("the visual review needs a staged remote host");
-        const host = hostRowByName(page, remote.alias);
-        await openHostMenu(host);
-        await inspectMenu(page, host.locator(".host-row-menu-panel"));
-        await shot(page, `${name}-host-menu`, window, { pad: 0 });
-        await host.locator(".host-settings").click();
-        const hostSettings = page.locator(".host-settings-dialog");
-        await expect(hostSettings).toBeVisible();
-        await expect(hostSettings.locator(".host-links-without-asking-toggle")).toBeEnabled();
-        await shot(page, `${name}-host-settings`, window, { pad: 0 });
-        for (const kind of ["icon", "color"]) {
-          const selected = hostSettings.locator(`.host-${kind}-choice[aria-pressed="true"]`);
-          await expect(selected).toBeEnabled();
-          await keyboardFocusControl(page, hostSettings, selected);
-          await focusedShot(page, `${name}-host-${kind}-focused`, selected, hostSettings);
-          await expect(selected).toHaveAttribute("aria-pressed", "true");
-        }
-        // The ordinary height historically hides the lower permissions. Keep
-        // an explicit second image instead of assuming the new frame fits them.
-        await scrollToEnd(hostSettings.locator(".host-settings-body"));
-        await expect(hostSettings.locator(".host-local-links-without-asking-toggle")).toBeInViewport();
-        await shot(page, `${name}-host-settings-end`, window, { pad: 0 });
-        await page.keyboard.press("Escape");
-        await expect(hostSettings).toBeHidden();
+        await hostSettingsShots(page, scenario, name);
 
         const originalHost = await hostHintShots(page, request, scenario, name, true);
         const refusal = await openLiveUninstallRefusal(page, request, scenario, originalHost);
@@ -1930,3 +2104,158 @@ for (const colorScheme of ["dark", "light"] as const) {
     });
   }
 }
+
+/** Photograph one real request without consuming it between palette/width cases.
+ * A single pending Spawn supplies shared ordinary approval anatomy, not the
+ * distinct queued, late, HostAdd or preapproved-link presentations. The real
+ * GUI/feed must be connected before the authenticated source asks. Deny is
+ * the only answer, and every cleanup step runs after an earlier failure too.
+ */
+test("sentence-case ordinary approval in both themes and widths", async ({ page, request }) => {
+  test.skip(!sentenceHostsSettingsOnly && !sentenceApprovalOnly, "the owned Spawn source is staged only for the focused selection");
+  const fleet = readFleet();
+  const source = fleet.spawnReview;
+  const id = source && fleet.ids.get(source.title);
+  if (!source || !id) throw new Error("the focused capture must stage its owned Spawn source first");
+  let local: Awaited<ReturnType<typeof listHosts>>[number] | undefined;
+  let restore: Parameters<typeof patchPreferences>[1] | undefined;
+  let before: string[] | undefined;
+  let triggered = false;
+  let denied = false;
+  let bodyFailed = true;
+  let feed: import("@playwright/test").WebSocket | undefined;
+  let greeted = false;
+  page.on("websocket", socket => {
+    if (new URL(socket.url()).pathname !== "/api/events") return;
+    feed = socket;
+    greeted = false;
+    socket.on("framereceived", frame => {
+      if (feed === socket) {
+        const revision = JSON.parse(String(frame.payload)).revision;
+        greeted = Number.isSafeInteger(revision) && revision >= 0;
+      }
+    });
+  });
+  /** Read only the real card fields this capture must establish.
+   * Keeping the wire premise beside its use avoids importing a fabricated
+   * approval fixture as a convenient source of presentation state.
+   */
+  type Pending = {
+    id: string; host_id: number; host_name: string; expires_at_ms: number;
+    session: { id: string; title: string; host_name: string };
+    action: { kind: string; verb: string; cwd: string; launch: { kind: string; command: string; yolo: boolean } };
+  };
+  /** Read the helm's real pending table without routing or constructing it. */
+  const pending = async (): Promise<Pending[]> => {
+    const response = await request.get("/api/approvals");
+    expect(response.ok(), "read the real pending requests").toBe(true);
+    return (await response.json()).approvals;
+  };
+  /** Deny only this source's request and observe its real refusal/no-child result.
+   * Keep the check inside the source's lifetime. Its terminal proves Deny
+   * reached the CLI; a vanished GUI card alone could also mean expiry.
+   */
+  const denyAndVerify = async () => {
+    const current = (await pending()).filter(card => card.session.id === id);
+    expect(current.length).toBeLessThanOrEqual(1);
+    if (current.length) {
+      const card = page.locator(`.approval-card[data-approval-id="${current[0].id}"]`);
+      await expect(card).toBeVisible();
+      await card.locator(".approval-deny").click();
+      await expect(card).toHaveCount(0);
+    }
+    if (triggered && !denied) {
+      await waitForTermText(page, "SPAWN-ERROR:");
+      await waitForTermText(page, "declined");
+      expect((await pending()).filter(card => card.session.id === id)).toEqual([]);
+      expect((await listSessions(request)).sessions.map(session => session.id).sort(), "Deny creates no child").toEqual(before);
+      denied = true;
+    }
+  };
+  try {
+    local = (await listHosts(request)).find(host => host.kind === "local");
+    if (!local) throw new Error("the approval requester needs the owned local host");
+    const saved = await readPreferences(request);
+    restore = { list_sort: saved.list_sort ?? null, last_selected: saved.last_selected ?? null, compact: saved.compact ?? null };
+    await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    await open(page, request);
+    await expect.poll(() => greeted && Boolean(feed && !feed.isClosed()), {
+      message: "the genuine app receives its live feed's revision handshake before Spawn",
+    }).toBe(true);
+    await attachSession(page, id);
+    await waitForTermText(page, "FAKE-AGENT READY");
+    await setLocalCommandsWithoutAsking(request, false);
+    await setLocalYoloWithoutAsking(request, true);
+    expect(await pending(), "the dedicated request starts with no competing cards").toEqual([]);
+    before = (await listSessions(request)).sessions.map(session => session.id).sort();
+    triggered = true;
+    await submitPrompt(page, "spawn /tmp", 100);
+    let requestId: string | undefined;
+    await expect.poll(async () => {
+      const cards = await pending();
+      const own = cards.find(card => card.session.id === id);
+      requestId = own?.id;
+      return own?.action.kind;
+    }, { timeout: 20_000, message: "the real Spawn request becomes pending on this source" }).toBe("launch");
+    for (const colorScheme of ["dark", "light"] as const) {
+      for (const width of ["wide", "main-650"] as const) {
+        await page.emulateMedia({ colorScheme, reducedMotion: "reduce" });
+        await page.setViewportSize({ width: 1600, height: 1000 });
+        const main = page.locator(".app-main");
+        if (width === "main-650") {
+          const box = await main.boundingBox();
+          expect(box).not.toBeNull();
+          await page.setViewportSize({ width: Math.round(box!.x + 650), height: 1000 });
+          await expect.poll(async () => (await main.boundingBox())?.width).toBeCloseTo(650, 0);
+        }
+        await page.evaluate(() => document.fonts.ready.then(() => undefined));
+        await expect(page.locator("html")).toHaveAttribute("data-appearance", colorScheme);
+        await expect(page.locator(".build-skew")).toHaveCount(0);
+        const cards = await pending();
+        expect(cards).toHaveLength(1);
+        expect(cards[0]).toMatchObject({
+          id: requestId, host_id: local.id,
+          session: { id, title: source.title },
+          action: { kind: "launch", verb: "spawn_inherited", cwd: "/tmp", launch: { kind: "command", command: "claude {farhelm_args}", yolo: false } },
+        });
+        expect(cards[0].expires_at_ms, "all pictures precede the unchanged production expiry").toBeGreaterThan(Date.now());
+        expect(greeted && Boolean(feed && !feed.isClosed()), "the real GUI/feed remains connected").toBe(true);
+        const card = page.locator(`.approval-card[data-approval-id="${requestId}"]`);
+        await expect(card).toBeVisible();
+        await expect(card.locator(".approval-card-badge")).toHaveText("Agent request");
+        await expect(card.locator(".approval-card-heading")).toHaveText("Start a new session running the asking session's own launch");
+        await expect(card.locator(".approval-card-requester")).toContainText(source.title);
+        await expect(card.locator(".approval-card-requester")).toContainText(id);
+        await expect(card.locator(".approval-card-requester")).toContainText(cards[0].host_name);
+        await expect(card.locator(".approval-card-command")).toContainText("claude {farhelm_args}");
+        await expect(card.locator(".approval-card-rows")).toContainText("/tmp");
+        await expect(card.locator(".approval-allow")).toHaveText("Allow");
+        await expect(card.locator(".approval-always-allow")).toContainText("Always allow from");
+        await expect(card.locator(".approval-deny")).toHaveText("Deny");
+        // The real card briefly disarms its answers after selection. Its
+        // captions alone are not readiness evidence for the pictured action row.
+        for (const selector of [".approval-allow", ".approval-always-allow", ".approval-deny"]) {
+          await expect(card.locator(selector)).toBeEnabled();
+        }
+        expect(cards[0].expires_at_ms, "the armed picture still precedes production expiry").toBeGreaterThan(Date.now());
+        await insideViewport(page, card);
+        await shot(page, `visual-review/${colorScheme}-${width}-ordinary-approval`, [page.locator("body")], { pad: 0 });
+      }
+    }
+    await denyAndVerify();
+    bodyFailed = false;
+  } finally {
+    await cleanupOwnedSteps(bodyFailed, [
+      ["deny the owned pending request and observe refusal/no child", denyAndVerify],
+      // Drain the independent fetches inside admitted route callbacks while
+      // their source still exists; closing alone does not join those callbacks.
+      ["drain the requester view routes before removal", () => page.unrouteAll({ behavior: "wait" })],
+      ["close the requester view before removal", () => page.close()],
+      ["remove only the owned requester", () => cleanupSession(request, id)],
+      ["restore the exact command permission", () => local && setLocalCommandsWithoutAsking(request, local.commands_without_asking)],
+      ["restore the exact YOLO permission", () => local && setLocalYoloWithoutAsking(request, local.yolo_without_asking)],
+      ["restore the exact fleet-opening preferences", () => restore && patchPreferences(request, restore)],
+    ]);
+  }
+});

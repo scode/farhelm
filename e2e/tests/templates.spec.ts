@@ -1122,7 +1122,7 @@ test("initial prompt survives a recent but clears on Clone and Replace prefills"
     const form = await openNew(page);
     await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
     await form.getByLabel("Initial prompt", { exact: true }).fill("keep through recent");
-    await expect(form.getByLabel("host", { exact: true })).toHaveAttribute("data-host-id", String(host!.id));
+    await expect(form.getByLabel("Host", { exact: true })).toHaveAttribute("data-host-id", String(host!.id));
     const recent = form.locator(".launch-composer-recents button");
     await expect(recent).toHaveCount(1);
     await recent.click();

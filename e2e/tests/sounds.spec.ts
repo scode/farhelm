@@ -169,19 +169,19 @@ test.describe("device sounds", () => {
     expect(await starts(page)).toEqual([...bell, ...bell]);
 
     await openSettings(page, "notifications");
-    const dialog = page.getByRole("dialog", { name: "settings", exact: true });
-    await expect(dialog.getByRole("checkbox", { name: "session waiting", exact: true })).toBeChecked();
-    await expect(dialog.getByRole("checkbox", { name: "approval request", exact: true })).toBeChecked();
-    await expect(dialog.getByRole("checkbox", { name: "turn finished", exact: true })).not.toBeChecked();
+    const dialog = page.getByRole("dialog", { name: "Settings", exact: true });
+    await expect(dialog.getByRole("checkbox", { name: "Session waiting", exact: true })).toBeChecked();
+    await expect(dialog.getByRole("checkbox", { name: "Approval request", exact: true })).toBeChecked();
+    await expect(dialog.getByRole("checkbox", { name: "Turn finished", exact: true })).not.toBeChecked();
     await dialog.screenshot({ path: testInfo.outputPath("sound-settings.png") });
-    await dialog.getByRole("checkbox", { name: "session waiting", exact: true }).uncheck();
-    await dialog.getByRole("checkbox", { name: "turn finished", exact: true }).check();
+    await dialog.getByRole("checkbox", { name: "Session waiting", exact: true }).uncheck();
+    await dialog.getByRole("checkbox", { name: "Turn finished", exact: true }).check();
     // Navigation rerenders Settings while JS owns these checked properties.
     // Returning must preserve the local choice instead of restoring defaults.
     await selectSettingsSection(page, "sessions");
     await selectSettingsSection(page, "notifications");
-    await expect(dialog.getByRole("checkbox", { name: "session waiting", exact: true })).not.toBeChecked();
-    await expect(dialog.getByRole("checkbox", { name: "turn finished", exact: true })).toBeChecked();
+    await expect(dialog.getByRole("checkbox", { name: "Session waiting", exact: true })).not.toBeChecked();
+    await expect(dialog.getByRole("checkbox", { name: "Turn finished", exact: true })).toBeChecked();
     await dialog.getByRole("button", { name: "Close", exact: true }).click();
     await chooseHost(page, String(f.remote.id));
     await applied(page, f.session.id, null);
@@ -201,8 +201,8 @@ test.describe("device sounds", () => {
     await applied(page, f.session.id, "idle", "sound-approval");
     expect(await starts(page)).toEqual([]);
     await openSettings(page, "notifications");
-    await expect(dialog.getByRole("checkbox", { name: "session waiting", exact: true })).not.toBeChecked();
-    await expect(dialog.getByRole("checkbox", { name: "turn finished", exact: true })).toBeChecked();
+    await expect(dialog.getByRole("checkbox", { name: "Session waiting", exact: true })).not.toBeChecked();
+    await expect(dialog.getByRole("checkbox", { name: "Turn finished", exact: true })).toBeChecked();
   });
 
   /** The active selected session stays quiet, but moving attention away permits sound. */
@@ -367,7 +367,7 @@ test.describe("device sounds", () => {
       expect(await page.evaluate(() => (window as any).__realSoundStarts)).toBe(0);
       await page.evaluate(() => window.dispatchEvent(new PointerEvent("pointerup", { pointerType: "touch" })));
       expect(await page.evaluate(() => (window as any).__realSoundContext.state)).toBe("suspended");
-      await page.getByRole("button", { name: "settings", exact: true }).tap();
+      await page.getByRole("button", { name: "Settings", exact: true }).tap();
       await expect.poll(() => page.evaluate(() => (window as any).__realSoundContext.state)).toBe("running");
       await observeWaiting();
       expect(await page.evaluate(() => (window as any).__realSoundStarts)).toBe(6);

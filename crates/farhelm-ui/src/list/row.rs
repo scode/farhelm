@@ -495,22 +495,22 @@ struct AgentBadge {
 pub(crate) fn permission_description(permission: PermissionGlyph) -> &'static str {
     match permission {
         PermissionGlyph::Yolo => "YOLO permission bypass",
-        PermissionGlyph::Guarded => "guarded permission mode",
+        PermissionGlyph::Guarded => "Guarded permission mode",
         PermissionGlyph::OwnSetting => {
-            "agent's own setting — not classified; treated as YOLO on hosts that ask before YOLO launches"
+            "Agent's own setting — not classified; treated as YOLO on hosts that ask before YOLO launches"
         }
         PermissionGlyph::Unknown => {
-            "unclassified — a command from before launch kinds, which Farhelm never classified"
+            "Unclassified — a command from before launch kinds, which Farhelm never classified"
         }
         PermissionGlyph::AssertedYolo => {
             "YOLO, as asserted when the command was launched, by the user or by an agent — not checked by Farhelm"
         }
         PermissionGlyph::AssertedNotYolo => {
-            "not YOLO, as asserted when the command was launched, by the user or by an agent — not checked by Farhelm"
+            "Not YOLO, as asserted when the command was launched, by the user or by an agent — not checked by Farhelm"
         }
-        PermissionGlyph::Approve => "approve permission mode",
-        PermissionGlyph::SmartApprove => "smart approve permission mode",
-        PermissionGlyph::Chat => "chat permission mode",
+        PermissionGlyph::Approve => "Approve permission mode",
+        PermissionGlyph::SmartApprove => "Smart approve permission mode",
+        PermissionGlyph::Chat => "Chat permission mode",
     }
 }
 
@@ -4353,7 +4353,7 @@ mod tests {
             let badge = agent_badge(&session);
             assert_eq!(badge.permission, PermissionGlyph::Unknown, "{invocation}");
             assert_eq!(badge.harness, HarnessGlyph::Terminal, "{invocation}");
-            assert!(badge.description.contains("unclassified"));
+            assert!(badge.description.contains("Unclassified"));
         }
         for (permission, expected, explanation) in [
             (

@@ -6,7 +6,7 @@ export async function launcherHostOptions(control: Locator): Promise<Locator> {
   await expect(control).toBeEnabled();
   if (await control.getAttribute("aria-expanded") !== "true") await control.click();
   await expect(control).toHaveAttribute("aria-expanded", "true");
-  const list = control.locator("..").getByRole("listbox", { name: "host", exact: true });
+  const list = control.locator("..").getByRole("listbox", { name: "Host", exact: true });
   await expect(list).toBeVisible();
   return list.getByRole("option");
 }

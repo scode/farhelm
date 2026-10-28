@@ -854,11 +854,11 @@ pub(crate) fn AppBar(
             button {
                 r#type: "button",
                 class: "btn btn-neutral app-settings-toggle",
-                aria_label: "settings",
+                aria_label: "Settings",
                 "data-tooltip": if has_updater {
-                    "settings: choices that apply to every host on this helm, and this app's automatic updates"
+                    "Settings: choices that apply to every host on this helm, and this app's automatic updates"
                 } else {
-                    "settings: choices that apply to every host on this helm"
+                    "Settings: choices that apply to every host on this helm"
                 },
                 aria_haspopup: "dialog",
                 onclick: move |_| settings_open.set(true),
