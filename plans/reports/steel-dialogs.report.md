@@ -1,87 +1,73 @@
 ## Since the last review
 
-All four existing draft PRs were revised after the landing run exposed browser and stylesheet failures. None was added
-or dropped. The layout and keyboard decisions remain: native Tab follows the visual reading order, the YOLO question
-stays inline, and Trash keeps its pinned header without a footer.
+Only the existing session-launcher PR, #2762, changes behavior in this return. Enter in its directory field now closes
+suggestions when it submits, whether the launch succeeds or is refused. The specification and existing changelog
+fragment say so. The regression test keeps its ordinary click on the command tab after a server refusal and now
+explicitly checks that suggestions are gone and the typed directory is preserved. No PR was added or dropped; the other
+three drafts were rebased without changing their diffs.
 
-The returned failures were diagnosed individually. The 34 launcher timeouts happened while an open directory-suggestions
-popup covered the next control, before the consent or held-request behavior began. Their setup now dismisses that popup
-with Escape and verifies the typed path stays unchanged before continuing the original checks. Dedicated popup
-selection, blur, Tab and typed Enter tests remain.
+The desktop overlap is a consequence of this plan's layout change: the launcher previously had two columns and now has
+one, placing controls below the directory field under its floating suggestions. The latest Decision accepts that overlap
+while suggestions are open, with a near-term TODO for reconsideration. The correction here makes submission dismiss them
+consistently so a refused launch leaves those controls reachable. It adds no new focus controller or launch path.
 
-Fresh code review also found a separate product bug the earlier cases missed: at short phone heights just above the
-compact-layout breakpoint, four stacked launcher actions squeezed the YOLO answer region until Cancel was clipped. A
-narrow real-question reproduction failed on both engines at 481 and 500 pixels high. The footer now wraps its existing
-actions through that intermediate phone range, retaining normal-sized buttons above the smallest-height layout and
-preserving the existing notice scrolling and focus handling.
-
-The required whole browser run completed with 2,764 passes, four failures and 14 skips. All original returned failures
-passed. The four remaining failures came from a build-help response interceptor, the losing window's new-tab retry
-fixture on both engines, and a host-menu scenario exhausting its overall time budget. Those fixtures were corrected
-using existing facilities; the affected cases and shared-helper callers then passed 28 checks, followed by two checks of
-a final cleanup correction. The failed whole run remains separate evidence; no clean whole-suite pass is claimed.
+The required exact test passed 20 times on each engine. All seven complete launcher/sidebar spec files then passed
+354/354 cases, 177 per engine, with no skips. The two-hour whole battery was not rerun.
 
 ## What this was about
 
-Settings, session setup, confirmations and menus had inconsistent layouts. This plan applies the shared Steel and Steel
-Light design: section icons and headings in Settings, consistent menu descriptions and destructive grouping, shared
-dialog headers and answers, and labeled launcher fields with actions pinned below them. Existing host dialogs already
-using that structure were reused.
+Settings, session setup, confirmations and menus had inconsistent layouts. This plan applies Steel and Steel Light:
+Settings section icons and headings, consistent menu descriptions and destructive grouping, shared dialog headers and
+answers, and labeled launcher fields with actions pinned below them. Host dialogs already using the shared structure
+were reused.
 
-The launcher keeps its operations and fields. Its footer shows what will launch where beside a compact Launch, Replace
-or Restart button. Long forms scroll above it; long warnings and the inline YOLO question have their own bounded
-scrolling area. Initial focus, Escape, focus return, native choice controls, Enter-to-launch and request guards retain
-their existing owners.
+Long launcher forms scroll above the footer. Long warnings and the inline YOLO question use their existing bounded
+scrolling area. The footer keeps the target and choice summaries beside a compact Launch, Replace or Restart action.
+Native choice controls, request guards, initial focus, Escape and focus return retain their existing owners. Tab follows
+the approved visual reading order: header Close, fields in their existing relative order, then
+Cancel-first/main-action-last footer actions. Trash retains its pinned header and no footer.
 
 ## Things you should know
 
-The footer's complete target now uses Farhelm's shared hover help instead of the browser's native tooltip. Updated tests
-check the visible target beside the compact action and its accessible name. The affected documentation callouts point at
-that separate target summary.
+The previous return fixed the original 34 launcher timeouts by dismissing directory suggestions during ordinary test
+setup, with the typed directory checked afterward. The dedicated popup test retains its actual selection, blur, Tab,
+Escape, typed Enter and phone-pointer checks. This return corrects a separate product boundary exposed at landing:
+suggestions could remain open after a refused Enter, covering the next control in the new single-column layout.
 
-The remaining returned browser failures were test updates: the new exact Trash name, primary Settings heading color,
-compact Browse label, the named-conversation field's actual label-and-input grid, and warning elements that exist only
-when there is something to warn about. The live Replace warning still has its full text and accessible association with
-the main action. All original request, archive, preference and launch assertions were retained.
+Earlier fresh review also found a product bug at short phone heights: stacked actions could squeeze the inline YOLO
+answer region until Cancel was clipped. The existing footer actions now wrap through that height range; normal button
+sizes, notice scrolling and native focus ownership remain. Real answer visibility was checked at heights 480, 481, 500,
+600, 601 and 844 in both engines.
 
-The two WebKit host-switch failures followed a timed-out directory-popup test that failed to restore its host
-preference. Fresh unchanged switch cases passed after fixing that setup. The file-drop case had attempted the drop after
-the tab mounted but before its terminal attachment was ready; it now waits on the existing tab-specific readiness check,
-requires the real upload response, and retains path, file-content and agent-terminal isolation assertions. These
-observations do not establish a new latent flake.
+The other original returned failures were corrected tests for changed names, labels and presentation: Trash, Settings
+heading color, the compact Browse label, the named-conversation grid, compact launch text and conditional warning
+elements. The actual warning text and its accessible association remain. File-drop setup now waits for its own terminal
+attachment before the real upload, retaining content and terminal-isolation assertions. The WebKit host-switch failures
+followed a directory test that timed out before restoring its preference; unchanged switch cases passed after that setup
+was corrected.
 
-The later build-help failure came from removing interception while a response was still being handled. Its fixture now
-uses the existing callback drain, including cleanup after an assertion failure. The takeover test deliberately hides the
-notice from a losing window; its 30-second retry also prevented a new tab from retrying a legitimate temporary refusal
-before a 20-second assertion. It now withholds only future agent connections and lets the tab retry normally, retaining
-the unaware-window premise and proof that the winner still accepts input. The matching recorded flake and sweep
-exclusion are resolved. The host-menu test had completed movement, dismissal and reopening before its 60-second case
-budget expired; only that scenario's overall budget increased, with individual readiness and geometry checks unchanged.
-No production terminal or host-menu behavior changed for these three corrections.
+The prior whole run also exposed fixture defects in build-help interception cleanup, a losing window's new-tab retry and
+a long host-menu scenario. Existing route draining and future-connection withholding fixed the first two without
+production terminal changes; only the last scenario's overall budget increased, with readiness and geometry assertions
+retained. The established takeover flake record and sweep exclusion were resolved. Later focused passes remain separate
+observations from the failed whole runs.
 
-Tab follows header Close, fields in their existing relative order, then Cancel-first/main-action-last footer buttons, as
-approved. Trash keeps its totals, progress, Delete all and Close in its header. Long target summaries may truncate
-visually, with their full content in shared hover help and the action's accessible name.
-
-Appshots use the real staged web UI in both palettes. Earlier native tunnel-consent review used matching markup/CSS
-preview and source, with separate native compilation/controller tests; images do not prove native callbacks or AppKit
-behavior.
+The complete target uses shared hover help, and the main action's accessible name includes it. Updated documentation
+callouts point at that summary beside the compact action. Images show the real staged web UI. Native tunnel consent was
+reviewed using matching markup/CSS and source, with separate native compilation/controller evidence; web images do not
+prove native callbacks or AppKit behavior.
 
 ## Open questions and possible follow-ups
 
-No required decision remains. The existing TODO entries revisiting keyboard order and Trash remain available for later
-review. The broad sentence-case pass and removal of the umbrella Steel TODO entry belong to the next plan.
+No required decision remains. Near-term TODO entries retain the calls on dialog Tab order, Trash's header, desktop
+suggestion overlap and close-on-submission for later reconsideration. The broad sentence-case pass and removal of the
+umbrella Steel TODO belong to the next plan.
 
-Rename still keeps a complete pasted name containing a line break for correction after rejecting it; its existing
-one-row display can look cramped. This plan preserves that field sizing. Existing per-host Trash spacing and unrelated
-label capitalization remain outside this change.
-
-On a short phone, the bounded YOLO explanation and its answers may need scrolling or Tab rather than fitting together. A
-persistent scroll cue remains a possible shared improvement; native scrollbar visibility depends on the platform. The
-second footer line can also truncate late choices, including a permission word after a long model name, and has no
-full-text hover help. The full choices remain editable in the form and any required YOLO confirmation still applies. The
-target's shared help uses the existing single prose font, including its path; markup-aware path styling is another
-optional shared improvement.
+The one-row Rename field can look cramped when showing a rejected pasted name containing a line break. On a short phone,
+the bounded YOLO explanation and answers may require scrolling or Tab; a persistent shared scroll cue remains optional.
+The footer's second summary can truncate late choices, including permissions after a long model, and has no full-text
+help; the choices remain editable and required YOLO confirmation still applies. The target's existing help uses one
+prose font, including its path. These earlier accepted limits remain.
 
 ## The PRs
 
@@ -90,84 +76,88 @@ optional shared improvement.
 - [Dialog layouts and confirmation answers, #2761](https://github.com/scode/farhelm/pull/2761/changes).
 - [Session launcher rows and pinned actions, #2762](https://github.com/scode/farhelm/pull/2762/changes).
 
-All remain drafts; the landing monitor owns merging them.
+All remain drafts; the landing monitor owns merging them. Verified pushed heads are Settings
+`0318b1333aef4a53065eea021c130ed98b791984`, menus `94d1791d3892949cf14e575aef1e1020869b8c0e`, confirmations
+`3e52fe62ac8cc8873be995faaae774d7dbbb59be`, launcher `b160a47c265e9295c2c7ae6fad4fb9d8316c922d`. GitHub shows those
+heads and the original linear bases; the working copy is clean. The aggregate reviewed diff was compared byte-for-byte
+before and after amendment.
 
 ## Checks run, reused and skipped
 
-Runtime commands used the recorder and pinned tmux where needed. Browser behavior ran on Chromium and WebKit with three
-workers, zero retries; appshots used the normal single-worker staged fleet. Counts from overlapping selections are not
-added together.
+New browser behavior runs use the recorder, pinned tmux, Chromium and WebKit, three workers and zero retries. Appshots
+use the normal staged single-worker fleet. Overlapping selections are separate evidence, not an additive denominator.
 
-- `npx playwright test`: run `1c66d7f4-79b2-41bf-b6f1-225f1fc10cf6` completed in 109 minutes with 2,764 passes, three
-  assertion failures, one timeout and 14 skips. Chromium had 1,387 passes, two failures and two skips; WebKit had 1,377
-  passes, one failure, one timeout and 12 skips. All cases started. The recorder retained complete source identity,
-  output with EOF and clean cleanup, but its case-summary collector refused the 19,452,814-byte JSON at its 16 MiB
-  limit. A separate audit reused the same policy/count validator with an explicit 32 MiB bound and reconciled the raw
-  reports. Original report SHA256: `8fceec953c29640c7c1073392fe6c0343bc7085ec3d1d9b031db042cc6acb4a1`. The original
-  manifest remains incomplete and exit 1; the audit does not turn it into a pass. The 14 skips supply no coverage.
-- `npx playwright test <affected specs> -g <affected cases>`: the original returned-case selection passed 66 checks
-  (`8793d734-c986-4fb5-b13a-cbc2eb30a5ad`). A whole-run attempt stopped for visual corrections exposed two setup
-  regressions from an overbroad folder helper (`04755902-4d46-4edc-8312-6860766f33e2`, interrupted); its use was
-  narrowed to ordinary retries. All destination-authority consumers and footer geometry then passed 28 checks
-  (`8e420231-fd4e-4b97-b272-4e16cc2c32b3`).
-- The four later full-run failures were reproduced with three exact titles on both engines: five passed and build-help
-  failed once (`b215889b-1d19-49b0-a522-9b287c8b42c2`). After the fixture corrections, all eleven build-skew helper
-  callers, both adjacent takeover cases and the late host-menu case passed 28 checks
-  (`f7e0bf2f-a13f-48c0-bc16-b7beb93179bc`). A final review found another caller using unsafe route cleanup; its
-  corrected exact case passed both engines (`8a67a3b8-5454-424c-82ce-d39874864984`). These are later observations, not a
-  replacement for the failed full run.
-- The short-phone reproduction failed all four 481/500-height cases (`70b02464-5ef2-4376-a520-7d94b7620f90`). After the
-  action-wrap fix, the 18-case boundary/geometry selection had 17 passes and one later name-edit focus-premise failure
-  (`fa5662e1-19f7-4832-9cb3-5c324d1a02e2`); every answer-visibility check passed at heights 480, 481, 500, 600, 601
-  and 844. Waiting for the existing initial focus handoff before the ordinary edit corrected that test; its original
-  case passed both engines (`a1d0b433-4b08-4005-925f-627cdd8dbe5e`).
-- All UI JavaScript tests, `node --test`, passed 358/358 (`8885b05e-de95-4146-97c8-4cb4ea5b1a51`). The final web build
-  passed (`dad25275-1fe7-4500-8eb7-4eac8073b80a`). These cover product source fingerprint
-  `a214363af51126e765745cd7ddf4c419e719742dd4dc707e8b72a187659393c7`, also used by the whole browser run. Subsequent
-  changes affect browser fixtures and their records only; product bytes are unchanged.
-- Normal `scripts/docs-screenshots.sh --only visual-review --no-build` staging and captures passed five cases and
-  produced 72 launcher PNGs (`d7af20ab-256d-4a9d-9442-4f371c11d002`). The two changed docs annotations passed staging
-  plus both shots (`08d8c628-76c1-40df-a442-c51a3197ef57`). Earlier template-page capture exposed an obsolete effort
-  selector; its corrected exact shot passed (`f6fe643d-6780-4697-9f3f-27c478b5a48b`). The images were inspected locally
-  and not published.
-- UI all-target Clippy, applicable Rust and Markdown formatting, TypeScript parsing and the test-delay checker passed.
-  The latter inspected 322 delays with none missing a rationale. Native/backend build
-  `1ac54cb7-5ea8-4d75-b88c-7c8381473e7f` is reused because this return changes no backend source.
+- `npx playwright test tests/sidebar.spec.ts -g 'composer folder dropdown preserves keyboard launch and grouped history'`
+  passed once per engine, 2/2 (`553331fd-0c8b-457c-b8cd-85435a57a53b`). It checks list closure after the real server
+  refusal, preserved typed directory, exactly one request and the unchanged command-tab click.
+- From `e2e`,
+  `python3 ../scripts/hunt-browser-tests.py --repeat 20 --timeout 180 --execute -- npx playwright test tests/sidebar.spec.ts -g 'composer folder dropdown preserves keyboard launch and grouped history'`
+  passed all 40 checks, 20 on each engine, without failures or skips (batch `05f16d9f-767f-43e6-9fe1-e45a1a71b6ee`;
+  private output-root argument omitted). Every attempt retained a complete structural report, identical source
+  fingerprint, output EOF and clean cleanup. The original exact test and its command-tab click remain unchanged apart
+  from stronger premises and closure assertions.
+- `npx playwright test tests/sidebar.spec.ts tests/sidebar-resize.spec.ts tests/launcher-enter.spec.ts tests/launcher-tabs.spec.ts tests/launcher-template-shortcuts.spec.ts tests/launch-refusal.spec.ts tests/launch-button-alignment.spec.ts`
+  passed 354/354 cases, 177 on each engine, with no failures or skips (`a7a71601-c945-4ea4-876e-6dfb2e1e79de`, 20.2
+  minutes). Source identity matches the web build and repetition batch; reports, output EOF and cleanup are complete.
+  The recorder enforced both engines, three workers and zero retries without project overrides.
+- `dx build --package farhelm-ui --platform web --release` passed (`e1c14e7c-d778-4c12-84b3-439f8447bef9`). Its complete
+  source fingerprint is `c4005d7d6c691b1e207472fcf85faa5c70e9abd6ea72f20d95ed4f1f9d39ca7e`, shared by the first exact
+  regression run. `cargo clippy -p farhelm-ui --all-targets -- -D warnings`, `cargo fmt --all -- --check`,
+  `dprint check SPEC.md releasing/changelog.d/steel-dialogs.md`, `python3 releasing/check-changelog.py format` and
+  `git diff --check` passed. The isolated pinned interpreter ran `python -B scripts/check-test-sleeps.py`: 322 delays,
+  none missing a rationale.
+- Normal `scripts/docs-screenshots.sh --only visual-review --no-build` passed staging and four palette/width legs,
+  producing 76 launcher images (`d7d2fdad-5435-4bf6-b829-a2e425502191`). It uses the same complete source fingerprint as
+  the build and browser checks. All images were inspected locally; eight before/after views went through the new
+  independent visual gate. Nothing was published.
 
-Earlier UI library 805-test evidence (`8177fa16-a156-4da9-b519-d9fa67857d00`), six desktop-feature tunnel tests
-(`728ebe9f-0b39-42ea-a442-4f1df70b34fd`), 52 pure launcher tests (`780e0381-c6f0-481b-95a7-99d9d4bcbc72`) and
-Settings/menu/confirmation visual gates are reused for their unchanged logic and surfaces. They covered the previously
-published four-unit stack ending at `618e6d0013b90b1c3909c7b61d1cdd5918f26ea9`. Its rebase onto claim main had empty
-per-unit interdiffs; intervening main changes were instructions and queue/review records. This return's new CSS, tooltip
-and fixture risks have the fresh checks above. Retained failed runs remain separate; no same-session authoring failure
-was recorded as a latent flake.
+Reused evidence covers unchanged behavior and surfaces. The previously delivered stack ended at
+`430eadd860b4950883d47ffd3403563f11719993`; the fresh four-unit rebase had empty per-unit interdiffs. Intervening main
+changes were queue/goal/review records and TODO decisions, with no product, spec or dependency change. This return's
+five-path delta adds only the submit-time suggestion closure, its specification, regression assertions, capture
+transition and fragment wording. Unchanged `cargo build -p farhelm -p farhelm-fixtures`
+(`1ac54cb7-5ea8-4d75-b88c-7c8381473e7f`), UI JavaScript `node --test` (358/358, `8885b05e-de95-4146-97c8-4cb4ea5b1a51`),
+`cargo nextest run -p farhelm-ui --lib` (805, `8177fa16-a156-4da9-b519-d9fa67857d00`),
+`cargo nextest run -p farhelm-ui --features desktop --lib -E 'test(tunnels::tests::)'` (six,
+`728ebe9f-0b39-42ea-a442-4f1df70b34fd`) and
+`cargo nextest run -p farhelm-ui --lib -E 'test(list::create_form::tests::)'` (52,
+`780e0381-c6f0-481b-95a7-99d9d4bcbc72`) remain relevant to their unchanged code. Those Rust runs used the recorder's
+four-slot, zero-retry policy. The older pure-test runs covered the earlier stack ending
+`618e6d0013b90b1c3909c7b61d1cdd5918f26ea9`; later product changes have their separately identified browser/build/visual
+evidence. No old unit pass is claimed to exercise this new DOM submission behavior.
 
-The final fixture selection covered source `497acae5f91c41aaa81c26f3d8f4e388c658e693ed20d4d29b8ca51d69582cfa`; the final
-header-cleanup run covered `5a8d854e5d0e2f62de017dd9f14bc298e238e34e363fd676a1f5b04e9003bc59`. Only that cleanup and
-evidence bookkeeping changed between them. The complete reviewed stack was compared byte-for-byte before and after
-folding the corrections into the original units.
+The earlier required `npx playwright test` whole browser run, `1c66d7f4-79b2-41bf-b6f1-225f1fc10cf6`, failed with 2,764
+passes, three assertion failures, one timeout and 14 skips. Its original recorder summary exceeded the 16 MiB collection
+cap and remains incomplete; a separate bounded 32 MiB audit reconciled the retained policy and report, whose SHA256 is
+`8fceec953c29640c7c1073392fe6c0343bc7085ec3d1d9b031db042cc6acb4a1`. All original returned failures passed. After the
+four later fixture failures were corrected, `npx playwright test <affected specs> -g <affected cases>` passed 28 checks
+(`f7e0bf2f-a13f-48c0-bc16-b7beb93179bc`), followed by both engines for a final cleanup correction
+(`8a67a3b8-5454-424c-82ce-d39874864984`). These do not turn the failed whole run into a pass.
 
-Verified pushed heads: Settings `1bde3e179e911c8e8faa4b2fc3832998929e1177`, menus
-`52e7051ab9c0b5292f15860b01eeab48ee97251d`, confirmations `b1040dee0816346949d1f3bc5fedd72358730cf7`, launcher
-`430eadd860b4950883d47ffd3403563f11719993`. The working copy is clean and GitHub shows the same four draft heads and
-linear bases.
+At the next landing, `npx playwright test` whole run `e25b17a4-5f3e-447b-9816-b89164862de2` failed the WebKit folder
+test. Generic recorded
+`npx playwright test --project=webkit-sidebar --project=chromium-sidebar tests/sidebar.spec.ts -g 'composer folder dropdown preserves keyboard launch and grouped history' --repeat-each=5 --retries=0`
+(`a187dab9-7564-4944-9202-4f19fe0cae8d`) reproduced it once in five WebKit attempts while Chromium passed five. Both
+retain complete source identity and terminal output. The whole run's original summary again exceeded its collection cap;
+its raw totals are diagnostic, not a newly validated pass denominator. Those retained failures are the reason for this
+correction and the new repetition checks.
 
-Another full browser run was skipped after the final fixture-only corrections: the affected callers and boundaries had
-focused coverage, and no new product or interaction gap was identified. Fresh scope review checked this choice against
-the actual returned Decision. Unrelated Rust, installer, release and CI batteries were skipped because this remains a
-presentation change with bounded fixture repairs. No macOS/AppKit runtime capture was performed and no live installation
-was modified.
+Another whole suite and unrelated Rust, installer, release, desktop and CI batteries were skipped: the latest Decision
+specifically requires repeated exact behavior plus launcher/sidebar coverage and says the rest stands. The new event
+boundary has matching build and browser evidence; unchanged logic retains the checks above. No macOS/AppKit runtime
+capture was performed and no live installation was changed. No images were published.
 
 ## Review gate outcome
 
-Each original unit passed its fresh single gpt-6.1-sol/high code review. The launcher reviewer followed its accepted
-corrections through the final route-cleanup and evidence-record changes; no required finding remains. Fresh own-model
-scope reviews supported the local CSS and existing fixture facilities, without a new controller or production terminal
-change.
+Each original unit retains its exact single gpt-6.1-sol/high code and claude-opus-5-5/high visual gate for unchanged
+surfaces. A fresh single Sol6.1/high reviewer read the full current launcher PR and the five-path correction and
+reported no actionable findings. Fresh own-model scope review supported using the existing form-submit boundary without
+another key handler or speculative focus policy.
 
-The visible units retain their earlier claude-opus-5-5/high multimodal gates. This return's launcher gate inspected 15
-actual images, then the same reviewer inspected eight corrected/new views and reported CLEAR. Actual successful image
-delivery was audited for every requested image, with no truncated text reads. It confirmed tooltip anchoring, full
-long-target help on a phone, readable short-phone answers and corrected docs arrows/copy. Optional findings declined
-with reasons remain in the working log and the follow-ups above. No native callback or AppKit behavior is inferred from
-web images.
+The fresh single claude-opus-5-5/high visual reviewer inspected all eleven requested images: eight new before/after
+views across both palettes and widths, plus three rendered references. Actual successful image delivery and text-read
+completeness were audited, and its terminal result and complete findings were checked. It reported no required fixes.
+The reviewer noted the accepted open-popup overlap and optional elevation styling for a later revisit; existing refusal
+casing belongs to the next sentence-case plan. Static images establish neither timing nor server refusal, which have
+separate browser evidence, and imply no native callback or AppKit coverage. The other 68 unchanged views retain their
+earlier visual gates.
