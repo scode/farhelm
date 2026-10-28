@@ -253,8 +253,8 @@ test("browser Rename chord edits the filtered open session and returns live term
     expect(binary.length, "the input observer must see this attachment's live probe").toBeGreaterThan(0);
     binary.length = 0;
 
-    const dialog = page.getByRole("dialog", { name: "rename session", exact: true });
-    const field = dialog.getByRole("textbox", { name: "new session title", exact: true });
+    const dialog = page.getByRole("dialog", { name: "Rename session", exact: true });
+    const field = dialog.getByRole("textbox", { name: "New session title", exact: true });
     await expect(terminal).toBeFocused();
     await page.keyboard.press("Control+Shift+l");
     await expect(dialog).toBeVisible();

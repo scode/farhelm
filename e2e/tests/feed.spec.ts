@@ -1046,7 +1046,7 @@ test.describe("the invalidation feed", () => {
    * the sampler decays to `idle`.
    *
    * What is asserted is the TRANSITION and only that: the badge was
-   * something other than `idle` first and became `idle` without a reload.
+   * something other than `Idle` first and became `Idle` without a reload.
    * The "something else" is deliberately unpinned — it may be no badge at
    * all (nothing has classified the session yet, and an unclassified status
    * is rendered as nothing) or a live word, and which of the two is observed
@@ -1056,10 +1056,10 @@ test.describe("the invalidation feed", () => {
    *
    * `hideSeenState` keeps the badge text this test polls at the bare status
    * word: a session created here and never opened genuinely earns the
-   * idle-unseen annotation ("idle — new output", SPEC.md, Status) once the
+   * idle-unseen annotation ("Idle — new output", SPEC.md, Status) once the
    * real sampler settles it, which is a real and correct behavior but not
    * this test's subject — it is about the STATUS transition arriving
-   * through the feed, and the annotation would otherwise make `.toBe("idle")`
+   * through the feed, and the annotation would otherwise make `.toBe("Idle")`
    * below fail on a badge that has, in every way this test cares about,
    * already made the transition it exists to prove.
    */
@@ -1095,10 +1095,10 @@ test.describe("the invalidation feed", () => {
           message: "a quiet fake agent must decay to idle, and say so without a refresh",
         },
       )
-      .toBe("idle");
+      .toBe("Idle");
 
     expect(
-      [...seen].filter((state) => state !== "idle").length,
+      [...seen].filter((state) => state !== "Idle").length,
       `the badge must have been something else first (saw ${[...seen].join(", ")})`,
     ).toBeGreaterThan(0);
 

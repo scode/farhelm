@@ -289,7 +289,7 @@ pub(crate) fn session_row_detail(
     if let Some(detail) = &mut ended
         && matches!(&session.status, SessionStatus::Exited { exit_code: None })
     {
-        detail.text = detail.text.replacen("exited", "exited (code unknown)", 1);
+        detail.text = detail.text.replacen("Exited", "Exited (code unknown)", 1);
     }
     SessionRowDetail {
         ended,
@@ -659,11 +659,11 @@ pub(crate) fn no_match_line(listing: &SessionListing) -> Option<&'static str> {
         return None;
     }
     Some(if listing_is_complete(listing) {
-        "no sessions match this filter"
+        "No sessions match this filter"
     } else {
         // SPEC.md's "could not read to the end", scoped to what this line
         // is allowed to claim under a cut list.
-        "no matches among the sessions that could be read — the list could not be read to the end"
+        "No matches among the sessions that could be read — the list could not be read to the end"
     })
 }
 
@@ -1267,7 +1267,7 @@ mod tests {
         assert!(has_detail_line(&row));
         assert_eq!(
             detail.ended.unwrap().text,
-            "exited (code unknown) — peer<U+202E>message"
+            "Exited (code unknown) — peer<U+202E>message"
         );
         assert_eq!(detail.stale_cause, Some("Checking host"));
         assert_eq!(
@@ -1278,7 +1278,7 @@ mod tests {
             )
             .unwrap()
             .text,
-            "exited — peer<U+202E>message"
+            "Exited — peer<U+202E>message"
         );
         let live = session("live", "live");
         let detail = session_row_detail(&live, "host removed");
@@ -1929,13 +1929,13 @@ mod tests {
     fn the_no_match_line_follows_the_matching_count_rather_than_the_rows() {
         assert_eq!(
             no_match_line(&filtered_listing(0, 0, 700, false)),
-            Some("no sessions match this filter"),
+            Some("No sessions match this filter"),
             "the helm counted the matches over a complete listing and counted none"
         );
         assert_eq!(
             no_match_line(&filtered_listing(0, 0, 700, true)),
             Some(
-                "no matches among the sessions that could be read — the list could not be read \
+                "No matches among the sessions that could be read — the list could not be read \
                  to the end"
             ),
             "a cut listing's zero is a count over a prefix, and the line must say so"

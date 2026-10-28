@@ -205,7 +205,7 @@ test("template launcher rows and search carry hover help", async ({ page, reques
     await expect(page.locator(".quick-switcher-template-trigger")).toHaveCount(1);
     const mac = await page.evaluate(() => /Mac/.test(navigator.platform));
     await page.keyboard.press(mac ? "Meta+j" : "Control+Shift+j");
-    const dialog = page.getByRole("dialog", { name: "template launcher", exact: true });
+    const dialog = page.getByRole("dialog", { name: "Template launcher", exact: true });
     await expect(dialog).toBeVisible();
     await dialog.getByRole("combobox").fill(name);
     await expect(dialog.locator(".quick-switcher-template")).toHaveCount(1);
@@ -394,7 +394,7 @@ test("sidebar surfaces give every control hover text", async ({ page, request })
   await expect(page.locator(".quick-switcher-trigger")).toHaveCount(1);
   const mac = await page.evaluate(() => /Mac/.test(navigator.platform));
   await page.keyboard.press(mac ? "Meta+k" : "Control+Shift+k");
-  const switcher = page.getByRole("dialog", { name: "quick switcher", exact: true });
+  const switcher = page.getByRole("dialog", { name: "Quick switcher", exact: true });
   await expect(switcher).toBeVisible();
   await expect(switcher.getByRole("combobox")).toBeFocused();
   await expectTextFieldsCovered(page, "quick switcher", ".quick-switcher-dialog", 1);

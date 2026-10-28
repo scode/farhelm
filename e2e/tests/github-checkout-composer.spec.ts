@@ -969,7 +969,7 @@ test("a fresh-checkout replace-with retry carries the precondition shown at that
     // fixture offers its unnamed path rather than one named after the source.
     await expect(form.getByLabel("Folder", { exact: true })).toHaveValue("/checkout-fixture/bar-1");
     const warning = form.locator(".launch-composer-replace-warning");
-    await expect(warning).toContainText("still running");
+    await expect(warning).toContainText("Still running");
     await expect(form.locator(".create-session-submit")).toBeEnabled();
     await form.locator(".create-session-submit").click();
     await expect(form.locator(".create-session-error")).toContainText("original request is retained");

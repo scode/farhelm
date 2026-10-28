@@ -34,10 +34,10 @@ export {
 // Exact words are still asserted, deliberately, where a test already KNOWS
 // the word: the badge-render test in terminal.spec.ts (which is ABOUT the
 // vocabulary, and waits for the live classification to settle before
-// asserting the word the listing itself carries), and those route fixtures
-// that compare the status they authored verbatim. Neither PREDICTS one — a
-// test that predicts which of the three a real session will be in is the
-// flake this constant exists to prevent, and that is exactly how the
+// asserting the display word for the state the listing carries), and those route fixtures
+// that compare the display wording for the status they authored. Neither
+// PREDICTS one — a test that predicts which of the three a real session will
+// be in is the flake this constant exists to prevent, and that is exactly how the
 // badge-render test used to fail (see `settledSharedSessionRow` in
 // terminal.spec.ts).
 //
@@ -47,31 +47,35 @@ export {
 // `.visually-hidden` in app.css). That is exactly why the hidden word had to stay in
 // the DOM — `toHaveText` reads `textContent`, which includes it, so every
 // assertion below keeps working against a badge nobody can read with their
-// eyes. Ended statuses (`exited`, `interrupted`, `error`) still paint their
+// eyes. Ended statuses (`Exited`, `Interrupted`, `Error`) still paint their
 // word, because an exit code and a stop annotation are facts a dot cannot
 // carry. A change that dropped the hidden word would take this whole family
 // of oracles with it.
-export const LIVE_BADGE = /^(running|waiting|idle)$/;
+export const LIVE_BADGE = /^(Running|Waiting|Idle)$/;
+
+// API state words keep their canonical spelling even when badges change.
+// Separate strict patterns keep display assertions from weakening wire checks.
+export const LIVE_STATE = /^(running|waiting|idle)$/;
 
 // A user-stopped session's badge: SPEC.md's "'stopped' is not a distinct
-// status", so the annotation QUALIFIES `exited` rather than replacing it.
+// status", so the annotation QUALIFIES `Exited` rather than replacing it.
 //
 // The exit code is optional in the pattern because a stopped session may or
 // may not have one — a signal death tmux cannot reduce to a code leaves the
-// badge at plain `exited`, and a shell that ran its EXIT trap first reports
+// badge at plain `Exited`, and a shell that ran its EXIT trap first reports
 // a real code — and no test can predict which it gets. When the code is
 // absent the sidebar spells the absence out ("code unknown", the full-detail
 // contract #648 gave the row), so that wording joins the numeric one here.
 // It is not optional in
-// ORDER: the code leads the annotation ("exited (code 7) — stopped by
+// ORDER: the code leads the annotation ("Exited (code 7) — stopped by
 // user"), because the badge is capped at 32ch and the older code-last
 // wording let a long annotation ellipsize away the one datum the badge
 // exists to report (`status.rs`'s `Exited` arm). Anchored at both ends so a
 // regression back to code-last fails here rather than passing on a prefix.
-export const STOPPED_BADGE = /^exited( \(code (unknown|\d+)\))? — stopped by user$/;
+export const STOPPED_BADGE = /^Exited( \(code (unknown|\d+)\))? — stopped by user$/;
 
-// The same set as `LIVE_BADGE`, for the API-level assertions that read a
-// status out of `/api/sessions` rather than off the DOM.
+// The same states as `LIVE_BADGE`, in protocol spelling, for assertions that
+// read a status out of `/api/sessions` rather than off the DOM.
 export const LIVE_STATES = ["running", "waiting", "idle"];
 
 /**

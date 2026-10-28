@@ -46,9 +46,9 @@ use crate::replace::{PendingReplace, ReplaceAnswer, ReplaceController, ReplaceRe
 
 /// Name the shortcut only where the app installs it; browsers keep Cmd+N for windows.
 const NEW_SESSION_TOOLTIP: &str = if crate::HAS_NEW_SESSION_SHORTCUT {
-    "new session: start an agent or a command on any host (⌘N)"
+    "New session: start an agent or a command on any host (⌘N)"
 } else {
-    "new session: start an agent or a command on any host"
+    "New session: start an agent or a command on any host"
 };
 
 /// Whether a fleet-wide switcher pick needs the sidebar widened to reveal it.
@@ -4162,7 +4162,7 @@ pub(crate) fn ListView(
                         r#type: "button",
                         class: "btn btn-neutral templates-button",
                         aria_label: "Templates",
-                        "data-tooltip": preferences.0.read().quick_launch_template.as_ref().map_or_else(|| format!("templates: mark one with ⚡ for quick launch ({})", crate::launch_sequence::TEMPLATE_SHORTCUTS.bolt.label(crate::launch_sequence::TEMPLATE_SHORTCUTS.mac_desktop)), |name| format!("templates: quick launch {} ({})", name.escaped(), crate::launch_sequence::TEMPLATE_SHORTCUTS.bolt.label(crate::launch_sequence::TEMPLATE_SHORTCUTS.mac_desktop))),
+                        "data-tooltip": preferences.0.read().quick_launch_template.as_ref().map_or_else(|| format!("Templates: mark one with ⚡ for quick launch ({})", crate::launch_sequence::TEMPLATE_SHORTCUTS.bolt.label(crate::launch_sequence::TEMPLATE_SHORTCUTS.mac_desktop)), |name| format!("Templates: quick launch {} ({})", name.escaped(), crate::launch_sequence::TEMPLATE_SHORTCUTS.bolt.label(crate::launch_sequence::TEMPLATE_SHORTCUTS.mac_desktop))),
                         aria_haspopup: "dialog",
                         disabled: busy,
                         onclick: move |_| { opening_generation += 1; quick_launch_pending.set(false); auto_launch.set(false); initial_template.set(None); quick_launch_hint.set(false); number_shortcut_hint.set(false); templates_open.set(true); },

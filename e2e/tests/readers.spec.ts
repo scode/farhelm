@@ -246,7 +246,7 @@ test.describe("read ordering and recovery", () => {
     await feed.waitForConnection(1);
     feed.notify(1);
     await expect(row(page, session.id)).toBeVisible({ timeout: 20_000 });
-    await expect(row(page, session.id).locator(".status-badge")).toHaveText(/running|idle|waiting/, {
+    await expect(row(page, session.id).locator(".status-badge")).toHaveText(/Running|Idle|Waiting/, {
       timeout: 30_000,
     });
 
@@ -289,7 +289,7 @@ test.describe("read ordering and recovery", () => {
     // And it does, on its own.
     reads.releaseAll();
     await expect(page.locator(".status.error")).toHaveCount(0, { timeout: 20_000 });
-    await expect(row(page, session.id).locator(".status-badge")).toHaveText(/exited/, {
+    await expect(row(page, session.id).locator(".status-badge")).toHaveText(/Exited/, {
       timeout: 20_000,
     });
     expect(

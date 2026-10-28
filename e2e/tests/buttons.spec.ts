@@ -93,10 +93,10 @@ test("unavailable filled actions stay quiet and compact questions keep answer or
           await target.locator(`.session-row-${action}`).click();
           const panel = target.locator(".session-row-menu-panel");
           const confirm = panel.locator(`.confirm-${action}`);
-          const cancel = panel.getByRole("button", { name: "cancel", exact: true });
+          const cancel = panel.getByRole("button", { name: "Cancel", exact: true });
           await expect(confirm).toBeEnabled();
           await expect(confirm).toBeFocused();
-          await expect(panel.locator(".dialog-actions button")).toHaveText(["cancel", `confirm ${action}`]);
+          await expect(panel.locator(".dialog-actions button")).toHaveText(["Cancel", `Confirm ${action}`]);
           const cancelBox = (await cancel.boundingBox())!;
           const confirmBox = (await confirm.boundingBox())!;
           if (width <= 560) expect(cancelBox.y + cancelBox.height).toBeLessThanOrEqual(confirmBox.y);
@@ -206,7 +206,7 @@ test("normal, neutral, danger, and exempt buttons keep their deliberate tiers", 
       await expect(el).toHaveCSS("color", onFill);
     }
 
-    // --- Normal primary: the sidebar's standing "new session" control. Checked
+    // --- Normal primary: the sidebar's standing "New session" control. Checked
     // before anything else touches the page, so this is genuinely resting
     // state rather than a post-interaction snapshot.
     await expectPrimary(".new-session-button");
@@ -262,7 +262,7 @@ test("normal, neutral, danger, and exempt buttons keep their deliberate tiers", 
 
     // --- Ghost exemption (row-menu item) and the destructive item, both
     // read straight out of the row's open actions menu without clicking
-    // either — clicking "delete" would open ITS OWN confirmation, which is
+    // either — clicking "Delete" would open ITS OWN confirmation, which is
     // a different control (`.confirm-delete`) than the one under test here.
     await openRowMenu(target);
     await expectGhost(".session-row-stop");

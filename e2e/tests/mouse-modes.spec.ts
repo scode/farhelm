@@ -589,7 +589,7 @@ test("drag-copy notice: shown only for a drag the program kept without copying",
       state.__noticeInput = [];
       state.__farhelmTerm.onData((data: string) => state.__noticeInput.push(data));
     });
-    const dismiss = notice.getByRole("button", { name: "dismiss drag-copy notice" });
+    const dismiss = notice.getByRole("button", { name: "Dismiss drag-copy notice" });
     await expect(dismiss).toHaveAttribute("data-tooltip", "Dismiss this notice");
     await dismiss.hover();
     await expect(page.locator(".farhelm-tooltip")).toHaveText("Dismiss this notice");

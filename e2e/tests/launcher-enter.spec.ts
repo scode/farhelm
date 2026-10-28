@@ -296,7 +296,7 @@ test("launcher container Enter waits for visible session setup loading", async (
     await page.goto("/");
     await expect(page.locator(".quick-switcher-template-trigger")).toHaveCount(1);
     await page.keyboard.press("Control+Shift+j");
-    const list = page.getByRole("dialog", { name: "template launcher" });
+    const list = page.getByRole("dialog", { name: "Template launcher" });
     await expect(list.getByRole("combobox")).toBeFocused();
     await list.getByRole("combobox").fill(name);
     await expect(list.getByRole("option")).toHaveCount(1);

@@ -65,7 +65,7 @@ const RESTART_WITH_DESCRIPTION_ID: &str = "restart-with-description";
 /// but the tooltip is a visual aid outside the accessibility tree. The
 /// `title` it replaced used to double as the button's accessible
 /// description, which also kept the value announced while the button's
-/// contents read only "✓ copied". These visually hidden elements carry the
+/// contents read only "✓ Copied". These visually hidden elements carry the
 /// same text for assistive technology. Fixed ids for the same reason as
 /// [`RESTART_OFFER_DESCRIPTION_ID`].
 const COPY_DIRECTORY_DESCRIPTION_ID: &str = "header-copy-directory-description";
@@ -114,12 +114,12 @@ fn restart_with_unavailable(session: &Session) -> Option<String> {
     if launch.harness.agent_kind() == farhelm_proto::AgentKind::Generic {
         Some(format!(
             "{} sessions can't be resumed",
-            crate::launch_composer::harness_word(launch.harness)
+            crate::launch_composer::harness_label(launch.harness)
         ))
     } else if session.restart_offer == RestartOffer::NotCaptured {
         Some(not_captured_with_reason(session))
     } else {
-        Some("no captured conversation to resume".to_string())
+        Some("No captured conversation to resume".to_string())
     }
 }
 
@@ -135,8 +135,8 @@ fn restart_with_reason(session: &Session) -> Option<String> {
         Some(crate::SessionLaunch::Command(command)) => {
             if command.agent.is_none() || command.resume.is_none() {
                 Some(
-                    "this command launch has no resume command, so it cannot be restarted; use \
-                     replace with"
+                    "This command launch has no resume command, so it cannot be restarted; use \
+                     Replace with"
                         .to_string(),
                 )
             } else {
@@ -148,19 +148,19 @@ fn restart_with_reason(session: &Session) -> Option<String> {
                     RestartOffer::NoConversationReporting => command.agent.map(|agent| {
                         format!(
                             "{} sessions can't be resumed",
-                            crate::launch_composer::harness_word(agent)
+                            crate::launch_composer::harness_label(agent)
                         )
                     }),
                     RestartOffer::NotCaptured => Some(not_captured_with_reason(session)),
                     RestartOffer::NoResumeCommand => {
-                        Some("no captured conversation to resume".to_string())
+                        Some("No captured conversation to resume".to_string())
                     }
                 }
             }
         }
         Some(crate::SessionLaunch::Legacy { .. }) | None => Some(
-            "this session was created before launch kinds, so its launch cannot be changed; use \
-             replace with"
+            "This session was created before launch kinds, so its launch cannot be changed; use \
+             Replace with"
                 .to_string(),
         ),
     }
@@ -1863,11 +1863,13 @@ pub(crate) fn SessionView(
     // component's header docs).
     let offer_explanation =
         restart_offer_text(&shown.status, shown.restart_offer, shown.agent_kind);
-    // The restart control's full accessible name (`resume conversation` or
-    // `restart unavailable`): the button's own VISIBLE glyph is now
-    // the compact "restart" every header action uses (so the cluster fits
+    let offer_continuation =
+        restart_offer_continuation(&shown.status, shown.restart_offer, shown.agent_kind);
+    // The restart control's full accessible name (`Resume conversation` or
+    // `Restart unavailable`): the button's own VISIBLE glyph is now
+    // the compact "Restart" every header action uses (so the cluster fits
     // the header's supported minimum width — see the `.titlebar-actions`
-    // CSS), so this is what actually carries SPEC.md's "restart says so"
+    // CSS), so this is what actually carries SPEC.md's "Restart says so"
     // promise to `aria-label` and to the hover tooltip, in front of the
     // further elaboration `offer_explanation` provides.
     let restart_label = restart_button_label(shown.restart_offer);
@@ -1898,7 +1900,7 @@ pub(crate) fn SessionView(
     let header_deleting = deleting.read().contains(shown.id.raw());
     let with_reason = restart_with_reason(&shown);
     let restart_with_description = with_reason.clone().unwrap_or_else(|| {
-        "resume this session's conversation with changed launch settings".to_string()
+        "Resume this session's conversation with changed launch settings".to_string()
     });
     // Feedback keeps the warning for the bytes copied, even when a session
     // refresh changes the displayed field. Its click id also ensures a
@@ -2068,10 +2070,10 @@ pub(crate) fn SessionView(
                     button {
                         r#type: "button",
                         class: if active_tab.is_none() { "btn tab tab-agent selected" } else { "btn tab tab-agent" },
-                        "data-tooltip": "agent: show the session's agent terminal",
+                        "data-tooltip": "Agent: show the session's agent terminal",
                         "data-terminal": "agent",
                         onclick: move |_| selected.set(None),
-                        "agent"
+                        "Agent"
                     }
                     // `key` is the tab id, not the loop index, and that is
                     // load-bearing rather than a lint: closing a tab shifts
@@ -2095,10 +2097,10 @@ pub(crate) fn SessionView(
                     button {
                         r#type: "button",
                         class: "btn btn-neutral tab-add",
-                        "data-tooltip": "+ terminal: open a shell tab in the session's folder",
+                        "data-tooltip": "+ Terminal: open a shell tab in the session's folder",
                         disabled: opening_tab() || lifecycle.busy(),
                         onclick: on_add_tab,
-                        "+ terminal"
+                        "+ Terminal"
                     }
                 }
                 }
@@ -2137,8 +2139,8 @@ pub(crate) fn SessionView(
                             "data-confirms": "{confirms_restart}",
                             "aria-expanded": "{confirming_restart.is_open()}",
                             "aria-controls": "restart-confirm-panel",
-                            // SPEC.md's "restart says so" (`restart_label`,
-                            // e.g. "resume conversation") is what this
+                            // SPEC.md's "Restart says so" (`restart_label`,
+                            // e.g. "Resume conversation") is what this
                             // control's accessible name carries now that the
                             // visible label stays compact beside the other
                             // always-visible actions. The tooltip repeats the
@@ -2146,7 +2148,7 @@ pub(crate) fn SessionView(
                             // elaboration `offer_explanation` provides
                             // through `aria-describedby` below.
                             "aria-label": "{restart_label}",
-                            "data-tooltip": "{restart_label} — {offer_explanation}",
+                            "data-tooltip": "{restart_label} — {offer_continuation}",
                             "aria-describedby": RESTART_OFFER_DESCRIPTION_ID,
                             // Greyed out rather than removed when the session
                             // cannot resume (SPEC.md): `aria-disabled` keeps
@@ -2201,7 +2203,7 @@ pub(crate) fn SessionView(
                                 button {
                                     r#type: "button",
                                     class: "btn btn-danger restart-confirm",
-                                    "data-tooltip": "confirm restart: stop the running agent, then resume its conversation",
+                                    "data-tooltip": "Confirm restart: stop the running agent, then resume its conversation",
                                     disabled: restarting(),
                                     autofocus: !restarting(),
                                     onkeydown: crate::guard_confirmation_enter,
@@ -2225,21 +2227,21 @@ pub(crate) fn SessionView(
                                             confirm_restart(restart_prompt_stops);
                                         }
                                     },
-                                    "confirm restart"
+                                    "Confirm restart"
                                 }
                                 button {
                                     r#type: "button",
                                     class: "btn btn-neutral restart-cancel",
-                                    "data-tooltip": "cancel: leave the agent running",
+                                    "data-tooltip": "Cancel: leave the agent running",
                                     autofocus: restarting(),
                                     // Dismisses only the opening this render
                                     // drew, dropping the claim it holds. A
-                                    // cancel queued behind "confirm restart"
+                                    // cancel queued behind "Confirm restart"
                                     // finds that opening taken and the claim
                                     // already handed to the running restart,
                                     // so it releases nothing.
                                     onclick: move |_| confirming_restart.cancel_for(&shown_restart),
-                                    "cancel"
+                                    "Cancel"
                                 }
                             }
                         }
@@ -2253,7 +2255,7 @@ pub(crate) fn SessionView(
                         button {
                             r#type: "button",
                             class: "btn btn-neutral header-replace",
-                            "data-tooltip": "replace: swap this session for a fresh conversation with the same settings",
+                            "data-tooltip": "Replace: swap this session for a fresh conversation with the same settings",
                             disabled: lifecycle.busy(),
                             "aria-expanded": "{confirming_header_replace.is_open()}",
                             onclick: move |_| on_replace.call(()),
@@ -2283,7 +2285,7 @@ pub(crate) fn SessionView(
                                     r#type: "button",
                                     class: "btn btn-danger",
                                     disabled: replacing(),
-                                    "data-tooltip": "replace this session now, as described",
+                                    "data-tooltip": "Replace this session now, as described",
                                     autofocus: !replacing(),
                                     onkeydown: crate::guard_confirmation_enter,
                                     onmounted: move |_| crate::focus_confirmation(".header-replace-confirm .btn-danger", ".header-replace-confirm .btn-neutral"),
@@ -2300,19 +2302,19 @@ pub(crate) fn SessionView(
                                             }
                                         }
                                     },
-                                    "replace"
+                                    "Replace"
                                 }
                                 button {
                                     r#type: "button",
                                     class: "btn btn-neutral",
                                     autofocus: replacing(),
-                                    "data-tooltip": "cancel: keep this session as it is",
+                                    "data-tooltip": "Cancel: keep this session as it is",
                                     onclick: move |_| {
                                         if confirming_header_replace.take(&shown_replace).is_some() {
                                             cancel_replace_intent();
                                         }
                                     },
-                                    "cancel"
+                                    "Cancel"
                                 }
                             }
                         }
@@ -2320,7 +2322,7 @@ pub(crate) fn SessionView(
                     button {
                         r#type: "button",
                         class: "btn btn-neutral header-clone",
-                        "data-tooltip": "clone: open the new-session form with these settings; this session keeps running",
+                        "data-tooltip": "Clone: open the new-session form with these settings; this session keeps running",
                         disabled: lifecycle.busy(),
                         onclick: move |_| prefill_request.set(Some(crate::list::HeaderPrefillRequest::Clone(header_session.clone()))),
                         ActionIcon { glyph: ActionGlyph::Clone }
@@ -2341,9 +2343,9 @@ pub(crate) fn SessionView(
                             r#type: "button",
                             class: "btn btn-danger header-delete",
                             "data-tooltip": if skip_session_confirmations {
-                                format!("delete: remove this session and its state ({})", crate::SESSION_DELETE_SHORTCUT)
+                                format!("Delete: remove this session and its state ({})", crate::SESSION_DELETE_SHORTCUT)
                             } else {
-                                format!("delete: remove this session and its state, after you confirm ({})", crate::SESSION_DELETE_SHORTCUT)
+                                format!("Delete: remove this session and its state, after you confirm ({})", crate::SESSION_DELETE_SHORTCUT)
                             },
                             disabled: lifecycle.busy(),
                             "aria-expanded": "{confirming_header_delete.is_open()}",
@@ -2384,7 +2386,7 @@ pub(crate) fn SessionView(
                                 button {
                                     r#type: "button",
                                     class: "btn btn-danger header-delete-confirm-submit",
-                                    "data-tooltip": "delete this session and its state now",
+                                    "data-tooltip": "Delete this session and its state now",
                                     disabled: header_deleting,
                                     autofocus: !header_deleting,
                                     onkeydown: crate::guard_confirmation_enter,
@@ -2403,15 +2405,15 @@ pub(crate) fn SessionView(
                                             }));
                                         }
                                     },
-                                    "delete"
+                                    "Delete"
                                 }
                                 button {
                                     r#type: "button",
                                     class: "btn btn-neutral",
                                     autofocus: header_deleting,
-                                    "data-tooltip": "cancel: keep this session",
+                                    "data-tooltip": "Cancel: keep this session",
                                     onclick: move |_| confirming_header_delete.cancel_for(&shown_delete),
-                                    "cancel"
+                                    "Cancel"
                                 }
                             }
                         }
@@ -2564,7 +2566,7 @@ pub(crate) fn SessionView(
                             // "Restart or Replace" wording; the accessible
                             // name and tooltip keep the conversation promise.
                             "aria-label": "{restart_label}",
-                            "data-tooltip": "{restart_label} — {offer_explanation}",
+                            "data-tooltip": "{restart_label} — {offer_continuation}",
                             disabled: lifecycle.busy(),
                             onclick: move |_| {
                                 if !lifecycle.claim_into(&mut view_claim) {
@@ -2832,7 +2834,7 @@ pub(crate) fn SessionView(
                                 class: "drag-copy-notice-dismiss",
                                 r#type: "button",
                                 tabindex: "-1",
-                                "aria-label": "dismiss drag-copy notice",
+                                "aria-label": "Dismiss drag-copy notice",
                                 "data-tooltip": "Dismiss this notice",
                                 "×"
                             }
@@ -2876,7 +2878,7 @@ pub(crate) fn SessionView(
                                         class: "drag-copy-notice-dismiss",
                                         r#type: "button",
                                         tabindex: "-1",
-                                        "aria-label": "dismiss drag-copy notice",
+                                        "aria-label": "Dismiss drag-copy notice",
                                         "data-tooltip": "Dismiss this notice",
                                         "×"
                                     }
@@ -2953,7 +2955,7 @@ pub(crate) fn SessionView(
                     // because this button shrinks and clips in a crowded
                     // details bar. See `.copy-warning` below.
                     if copied_directory().is_some() {
-                        span { class: "copy-feedback", "✓ copied" }
+                        span { class: "copy-feedback", "✓ Copied" }
                     } else {
                         span { class: "copy-glyph", "📋" }
                         // Visible text folds the home directory like the
@@ -2970,7 +2972,7 @@ pub(crate) fn SessionView(
                     "aria-describedby": COPY_COMMAND_DESCRIPTION_ID,
                     onclick: { let invocation = shown.invocation.raw().to_owned(); move |_| copy_value("command", invocation.clone(), copied_command) },
                     if copied_command().is_some() {
-                        span { class: "copy-feedback", "✓ copied" }
+                        span { class: "copy-feedback", "✓ Copied" }
                     } else {
                         span { class: "copy-glyph", "📋" }
                         span { class: "peer-value", dir: "ltr", "{shown.invocation.escaped()}" }
@@ -3012,7 +3014,7 @@ fn SessionUnavailableCard(notice: SessionUnavailableNotice) -> Element {
     let cause_clause = notice.cause.to_ascii_lowercase();
     rsx! {
         div { class: "session-unavailable-overlay host-stale-notice", role: "region",
-            tabindex: "0", aria_label: "session unavailable",
+            tabindex: "0", aria_label: "Session unavailable",
             div { class: "session-unavailable-card", role: "status",
                 div { class: "session-unavailable-heading",
                     span { class: "delete-spinner", "aria-hidden": "true" }
@@ -3134,8 +3136,28 @@ fn activity_destination(
 /// The status leads for `Interrupted` because that is the one state where
 /// the user needs to know why their terminal is gone before they are asked
 /// to act (SPEC.md: opening an interrupted session offers
-/// restart-with-resume). Everything else states the offer alone.
+/// restart-with-resume). Everything else states the offer alone. Only that
+/// standalone authored clause gains an initial capital; the same clause after
+/// a dash keeps its natural continuation case. Agent names retain their case.
 fn restart_offer_text(
+    status: &SessionStatus,
+    offer: RestartOffer,
+    kind: crate::SessionAgentKind,
+) -> String {
+    let text = restart_offer_continuation(status, offer, kind);
+    let mut chars = text.chars();
+    chars
+        .next()
+        .into_iter()
+        .flat_map(char::to_uppercase)
+        .chain(chars)
+        .collect()
+}
+
+/// Continue Restart's tooltip after its leading action label and em dash.
+/// Build from authored clauses rather than downcasing a finished description:
+/// Farhelm, Restart and harness names must keep their own case in either slot.
+fn restart_offer_continuation(
     status: &SessionStatus,
     offer: RestartOffer,
     kind: crate::SessionAgentKind,
@@ -3183,10 +3205,10 @@ fn session_ended(status: &SessionStatus) -> bool {
 fn feedback_note(offer: RestartOffer, ended: bool) -> &'static str {
     match (offer, ended) {
         (RestartOffer::NotCaptured, false) => {
-            " (If Restart doesn't become available, please send feedback from the help (?) menu.)"
+            " (If Restart doesn't become available, please send feedback from the Help (?) menu.)"
         }
         (RestartOffer::NotCaptured, true) => {
-            " (If you expected Restart here, please send feedback from the help (?) menu.)"
+            " (If you expected Restart here, please send feedback from the Help (?) menu.)"
         }
         (
             RestartOffer::Resume
@@ -3251,7 +3273,7 @@ fn not_captured_with_reason(session: &Session) -> String {
         .and_then(|kind| Some((kind.display_name()?, kind.restart_readiness()?)));
     let reason = match (readiness, ended) {
         (Some((name, readiness)), false) => format!(
-            "for {name} sessions, Restart with becomes available {}",
+            "For {name} sessions, Restart with becomes available {}",
             readiness.clause(farhelm_proto::ReadinessWording::ToTheUser)
         ),
         (None, false) => {
@@ -3283,17 +3305,17 @@ fn not_captured_with_reason(session: &Session) -> String {
 fn offer_clause(offer: RestartOffer, kind: crate::SessionAgentKind, ended: bool) -> String {
     match offer {
         RestartOffer::Resume => "restarting resumes this session's own conversation".to_string(),
-        // No "restart is unavailable" here: the control's accessible name
+        // No "Restart is unavailable" here: the control's accessible name
         // (`restart_button_label`) already says so, and the tooltip joins
         // the two.
         RestartOffer::NotCaptured => not_captured_clause(kind, ended, REPLACE_STARTS_OVER),
         RestartOffer::NoConversationReporting => {
-            "Farhelm has no conversation reporting for this session's agent, so replace starts it \
+            "Farhelm has no conversation reporting for this session's agent, so Replace starts it \
              over"
                 .to_string()
         }
         RestartOffer::NoResumeCommand => {
-            "this command launch did not opt into Resume, so it has no resume command and replace \
+            "this command launch did not opt into Resume, so it has no resume command and Replace \
              starts it over"
                 .to_string()
         }
@@ -3413,15 +3435,15 @@ fn interrupted_surface_text(
 
 /// The restart control's accessible name (`aria-label`, and the front half
 /// of its hover tooltip) — names the OFFER rather than the action, because
-/// "restart" alone (the control's compact VISIBLE glyph, since the header
+/// "Restart" alone (the control's compact VISIBLE glyph, since the header
 /// consolidation) would leave a user guessing whether their conversation
 /// survives, which is the exact question SPEC.md requires an honest answer
 /// to before they click.
 fn restart_button_label(offer: RestartOffer) -> &'static str {
     if offer.can_restart() {
-        "resume conversation"
+        "Resume conversation"
     } else {
-        "restart unavailable"
+        "Restart unavailable"
     }
 }
 
@@ -3508,7 +3530,7 @@ fn TerminalTextSize() -> Element {
                 r#type: "button",
                 class: "btn btn-neutral tab-text-size",
                 "data-text-size": "smaller",
-                "data-tooltip": "smaller terminal text (Cmd/Ctrl+Shift+\u{2212})",
+                "data-tooltip": "Smaller terminal text (Cmd/Ctrl+Shift+\u{2212})",
                 "aria-label": "Smaller terminal text",
                 onclick: move |_| step(-1),
                 "A\u{2212}"
@@ -3517,7 +3539,7 @@ fn TerminalTextSize() -> Element {
                 r#type: "button",
                 class: "btn btn-neutral tab-text-size",
                 "data-text-size": "larger",
-                "data-tooltip": "larger terminal text (Cmd/Ctrl+Shift++)",
+                "data-tooltip": "Larger terminal text (Cmd/Ctrl+Shift++)",
                 "aria-label": "Larger terminal text",
                 onclick: move |_| step(1),
                 "A+"
@@ -3594,7 +3616,7 @@ mod tests {
             resume_template: None,
         });
         assert!(
-            restart_with_reason(&session).is_some_and(|reason| reason.contains("replace with")),
+            restart_with_reason(&session).is_some_and(|reason| reason.contains("Replace with")),
             "{:?}",
             restart_with_reason(&session)
         );
@@ -3622,7 +3644,7 @@ mod tests {
         session.restart_offer = RestartOffer::NotCaptured;
         let waiting = restart_with_reason(&session).expect("unavailable");
         assert!(
-            waiting.contains("for Claude sessions, Restart with becomes available a few seconds")
+            waiting.contains("For Claude sessions, Restart with becomes available a few seconds")
                 && waiting.contains("send feedback"),
             "{waiting}"
         );
@@ -3636,12 +3658,12 @@ mod tests {
         session.restart_offer = RestartOffer::NoConversationReporting;
         assert_eq!(
             restart_with_reason(&session).as_deref(),
-            Some("no captured conversation to resume")
+            Some("No captured conversation to resume")
         );
         session.launch = agent(LaunchHarness::Muse);
         assert_eq!(
             restart_with_reason(&session).as_deref(),
-            Some("muse sessions can't be resumed")
+            Some("Muse sessions can't be resumed")
         );
 
         // A command launch can be edited exactly when it can resume: it
@@ -3661,7 +3683,7 @@ mod tests {
         session.restart_offer = RestartOffer::NotCaptured;
         assert!(
             restart_with_reason(&session)
-                .is_some_and(|reason| reason.contains("for Claude sessions, Restart with becomes")),
+                .is_some_and(|reason| reason.contains("For Claude sessions, Restart with becomes")),
             "{:?}",
             restart_with_reason(&session)
         );
@@ -3669,7 +3691,7 @@ mod tests {
         session.restart_offer = RestartOffer::NoResumeCommand;
         assert_eq!(
             restart_with_reason(&session).as_deref(),
-            Some("no captured conversation to resume")
+            Some("No captured conversation to resume")
         );
         session.launch = Some(crate::SessionLaunch::Command(crate::CommandLaunch {
             command: "muse {farhelm_args}".to_string(),
@@ -3680,7 +3702,7 @@ mod tests {
         session.restart_offer = RestartOffer::NoConversationReporting;
         assert_eq!(
             restart_with_reason(&session).as_deref(),
-            Some("muse sessions can't be resumed"),
+            Some("Muse sessions can't be resumed"),
             "a declared type without conversation reporting never captures one"
         );
         session.launch = command(None);
@@ -4172,6 +4194,39 @@ mod tests {
     #[farhelm_testtrace::test]
     fn the_offer_text_states_what_would_happen_to_the_conversation() {
         use crate::SessionAgentKind as Kind;
+        // A tooltip continues its action label; the menu description starts
+        // its own sentence. Proper names survive both presentation contexts.
+        for (offer, continuation, standalone) in [
+            (
+                RestartOffer::Resume,
+                "restarting resumes",
+                "Restarting resumes",
+            ),
+            (
+                RestartOffer::NoResumeCommand,
+                "this command launch",
+                "This command launch",
+            ),
+            (
+                RestartOffer::NoConversationReporting,
+                "Farhelm has",
+                "Farhelm has",
+            ),
+            (
+                RestartOffer::NotCaptured,
+                "for Codex sessions",
+                "For Codex sessions",
+            ),
+        ] {
+            assert!(
+                restart_offer_continuation(&SessionStatus::Idle, offer, Kind::Codex)
+                    .starts_with(continuation)
+            );
+            assert!(
+                restart_offer_text(&SessionStatus::Idle, offer, Kind::Codex)
+                    .starts_with(standalone)
+            );
+        }
         let resumable = restart_offer_text(
             &SessionStatus::Interrupted,
             RestartOffer::Resume,
@@ -4192,10 +4247,10 @@ mod tests {
             restart_offer_text(&SessionStatus::Idle, RestartOffer::NotCaptured, Kind::Codex);
         assert!(
             waiting.contains(
-                "for Codex sessions, Restart becomes available once you submit your \
+                "For Codex sessions, Restart becomes available once you submit your \
                               first prompt"
             ) && waiting.contains("Replace starts the session over")
-                && waiting.contains("send feedback from the help (?) menu"),
+                && waiting.contains("send feedback from the Help (?) menu"),
             "a running Codex session must say when Restart comes: {waiting}"
         );
         // Every kind that reports names itself and its own moment; a kind
@@ -4204,19 +4259,19 @@ mod tests {
         for (kind, says) in [
             (
                 Kind::Claude,
-                "for Claude sessions, Restart becomes available a few seconds after",
+                "For Claude sessions, Restart becomes available a few seconds after",
             ),
             (
                 Kind::Goose,
-                "for Goose sessions, Restart becomes available as soon as it starts",
+                "For Goose sessions, Restart becomes available as soon as it starts",
             ),
             (
                 Kind::Pi,
-                "for Pi sessions, Restart becomes available after the agent's first reply",
+                "For Pi sessions, Restart becomes available after the agent's first reply",
             ),
             (
                 Kind::Omp,
-                "for OMP sessions, Restart becomes available after the agent's first reply",
+                "For OMP sessions, Restart becomes available after the agent's first reply",
             ),
             (Kind::Grok, "Farhelm's Grok hooks are installed"),
             (
@@ -4255,7 +4310,7 @@ mod tests {
             Kind::Generic,
         );
         assert!(
-            unreported.contains("no conversation reporting") && unreported.contains("replace"),
+            unreported.contains("no conversation reporting") && unreported.contains("Replace"),
             "an agent without reporting must say why Restart is unavailable: {unreported}"
         );
         assert!(!unreported.contains("feedback"), "{unreported}");
@@ -4383,7 +4438,7 @@ mod tests {
         // and which half of it is shown — not just a word.
         let running_badge = Some(StatusBadge {
             class: "running",
-            text: "running".to_string(),
+            text: "Running".to_string(),
             visible: false,
         });
 
@@ -4487,14 +4542,14 @@ mod tests {
         );
     }
 
-    /// The button names the OFFER, not the action: "restart" alone leaves
+    /// The button names the OFFER, not the action: "Restart" alone leaves
     /// the user guessing whether their conversation survives, which is the
     /// exact question SPEC.md requires answered before they click.
     #[farhelm_testtrace::test]
     fn the_restart_button_label_names_the_offer() {
         assert_eq!(
             restart_button_label(RestartOffer::Resume),
-            "resume conversation"
+            "Resume conversation"
         );
         for offer in [
             RestartOffer::NotCaptured,
@@ -4502,7 +4557,7 @@ mod tests {
         ] {
             assert_eq!(
                 restart_button_label(offer),
-                "restart unavailable",
+                "Restart unavailable",
                 "{offer:?}: a session that cannot resume must not be labeled as a resume"
             );
         }

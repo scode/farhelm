@@ -180,7 +180,7 @@ impl ActivityStamp {
         }
         Some(ActivityStamp {
             age: relative_age(now_secs, activity_secs),
-            absolute: format!("last activity {}", utc_stamp(activity_secs)),
+            absolute: format!("Last activity {}", utc_stamp(activity_secs)),
         })
     }
 }
@@ -309,7 +309,7 @@ mod tests {
             .expect("a future stamp is still a positive stamp");
         assert_eq!(skewed.age, "now");
         assert_eq!(
-            skewed.absolute, "last activity 2023-11-15 22:13:20 UTC",
+            skewed.absolute, "Last activity 2023-11-15 22:13:20 UTC",
             "the tooltip records the stamp as it arrived — a day AHEAD of the viewer's now"
         );
     }
@@ -426,7 +426,7 @@ mod tests {
         let stamp = ActivityStamp::new(Some(1_700_000_000), 1_700_000_000 - 7_200)
             .expect("a positive stamp always renders");
         assert_eq!(stamp.age, "2h");
-        assert_eq!(stamp.absolute, "last activity 2023-11-14 20:13:20 UTC");
+        assert_eq!(stamp.absolute, "Last activity 2023-11-14 20:13:20 UTC");
     }
 
     /// A tick advances what is on screen with nothing else happening on the

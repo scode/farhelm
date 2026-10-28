@@ -1,9 +1,9 @@
-// Replace's browser contract: the "replace" menu item (row.rs's
+// Replace's browser contract: the "Replace" menu item (row.rs's
 // `.session-row-replace`) opens an inline confirmation in the same panel
 // clone/delete already use, and confirming creates a fresh session
 // with the source's cwd, title, and invocation, selects it, and removes the
 // source — all in one round trip through `POST /api/sessions/{id}/replace`
-// (SPEC.md's "replace"). The helm-level composition (create-then-delete, the
+// (SPEC.md's "Replace"). The helm-level composition (create-then-delete, the
 // two failure modes) is covered
 // by `sessions_tests.rs`'s own `POST /api/sessions/{id}/replace` suite; this
 // file's job is only what a real browser click chain actually does: the
@@ -13,7 +13,7 @@
 // this file's one property confirm_consequence-shaped unit tests cannot
 // see).
 //
-// This file also covers "replace with" (row.rs's `.session-row-replace-with`,
+// This file also covers "Replace with" (row.rs's `.session-row-replace-with`,
 // SPEC.md's bullet of that name): clone's exact editable create form, seeded
 // from the clicked row, whose launch button sends the same edited fields to
 // `POST /api/sessions/{id}/replace`'s "with" override instead of to
@@ -762,7 +762,7 @@ async function listedSessionsWithLaunch(
 }
 
 /**
- * A "replace with" opening must land focus in search by itself — the same
+ * A "Replace with" opening must land focus in search by itself — the same
  * handoff clone's own opening-focus test pins, through the sibling menu
  * item that shares its teardown. The focus assertions run BEFORE any fill,
  * mode-button click, or result selection: the full replace-with test below
@@ -820,7 +820,7 @@ test("opening replace-with focuses search before any typing or mode click", asyn
 });
 
 /**
- * A keyboard-opened "replace with" must land focus in search by itself.
+ * A keyboard-opened "Replace with" must land focus in search by itself.
  *
  * The trusted-keyboard twin of the pointer test above: open the row menu
  * from its focused toggle with ArrowDown, step down the real menu order
@@ -923,7 +923,7 @@ test("replace with pre-fills clone's form from the source, and editing the harne
   // A structured source, exactly like `clone.spec.ts`'s own structured GUI
   // clone test — the launch composer's search box only renders on the
   // Structured surface, and this is the direct route there: the row menu's
-  // "replace with" click must seed the composer on whatever surface the
+  // "Replace with" click must seed the composer on whatever surface the
   // source itself used, and a structured source is what puts the search box
   // on screen without an extra "back to harnesses" click this test has no
   // reason to make.
@@ -1074,7 +1074,7 @@ test("cancelling a replace-with composer leaves the source untouched and creates
 });
 
 /**
- * Open "replace with" on `sourceId` and return the launcher form, after the
+ * Open "Replace with" on `sourceId` and return the launcher form, after the
  * row's badge matches `badge`: the premise each test below states about what
  * the launcher was opened on.
  */
@@ -1121,7 +1121,7 @@ async function waitForListedState(request: APIRequestContext, id: string, state:
 }
 
 /**
- * Why this matters: "replace with" used to kill a running source's agent
+ * Why this matters: "Replace with" used to kill a running source's agent
  * with nothing in the launcher saying so (SPEC.md "Replace with": the launch
  * button is the confirmation of the source's delete). Spec: on a running
  * source the launcher shows Replace's kill warning, ending with the launched
@@ -1158,7 +1158,7 @@ test("replace with on a running source warns that its agent is killed, then repl
     const form = await openReplaceWith(page, source.id, LIVE_BADGE);
     const warning = form.locator(".launch-composer-replace-warning");
     await expect(warning).toHaveText(
-      "still running — replacing kills the agent and discards the conversation; the session launched here " +
+      "Still running — replacing kills the agent and discards the conversation; the session launched here " +
         "takes its place.",
     );
     // The button that is the confirmation names the warning as its description.
@@ -1209,7 +1209,7 @@ test("replace with keeps a source restarted while its launcher showed nothing al
     await page.goto("/");
     await feed.waitForConnection(1);
     feed.notify(1);
-    const form = await openReplaceWith(page, source.id, /exited/);
+    const form = await openReplaceWith(page, source.id, /Exited/);
     await expect(form.locator(".launch-composer-replace-warning")).toHaveCount(0);
     // Setup reads must retire before the restart, so nothing the page reads
     // afterwards can carry the restarted state into the launcher.
@@ -1266,7 +1266,7 @@ test("replace with's warning follows a source restarted while the launcher is op
     await page.goto("/");
     await feed.waitForConnection(1);
     feed.notify(1);
-    const form = await openReplaceWith(page, source.id, /exited/);
+    const form = await openReplaceWith(page, source.id, /Exited/);
     const warning = form.locator(".launch-composer-replace-warning");
     await expect(warning).toHaveCount(0);
     await expect(form.locator(".create-session-submit")).not.toHaveAttribute("aria-describedby", /./);
@@ -1275,7 +1275,7 @@ test("replace with's warning follows a source restarted while the launcher is op
     expect(restarted.ok(), `restarting the source: ${await restarted.text()}`).toBe(true);
     await waitForListedState(request, source.id, "live");
     feed.notify(2);
-    await expect(warning).toContainText("still running — replacing kills the agent", { timeout: 20_000 });
+    await expect(warning).toContainText("Still running — replacing kills the agent", { timeout: 20_000 });
     const warningId = await warning.getAttribute("id");
     expect(warningId, "the mounted warning must be addressable by the action it describes").toBeTruthy();
     await expect(form.locator(".create-session-submit")).toHaveAttribute("aria-describedby", warningId!);

@@ -250,7 +250,7 @@ for (const kind of ["menu", "bell"] as const) {
     });
     const above = row(page, fixture.above);
     await openRowMenu(above);
-    await above.getByRole("menuitem", { name: "mark read", exact: true }).click();
+    await above.getByRole("menuitem", { name: "Mark read", exact: true }).click();
     await expect.poll(() => requests, { message: "the manual seen write must reach the held route" }).toBe(1);
     await expect(above.locator(".session-row-menu-panel")).toHaveCount(0);
     await expect(above.locator(".session-row-menu")).toBeFocused();
@@ -336,7 +336,7 @@ async function retainRefusal(page: Page, fixture: MovementFixture) {
   });
   const above = row(page, fixture.above);
   await openKeyboardPopup(page, above, "menu");
-  const mark = above.getByRole("menuitem", { name: "mark read", exact: true });
+  const mark = above.getByRole("menuitem", { name: "Mark read", exact: true });
   await mark.focus();
   await expect(mark).toBeFocused();
   await mark.press("Enter");

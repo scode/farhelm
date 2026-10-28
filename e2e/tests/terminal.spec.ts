@@ -282,7 +282,7 @@ async function settledSharedSessionRow(
 //
 // The badge is held to that same standard, which is why this test names an
 // exact status word where the rest of the family accepts `LIVE_BADGE`: the
-// word asserted is the one the listing itself carries, so the row is
+// display word asserted represents the state the listing carries, so the row is
 // pinned to REPORTING the classification rather than to any particular
 // classification. `settledSharedSessionRow` is what makes that sound; see
 // its docs for the flake that taught us the word cannot be assumed in
@@ -315,7 +315,9 @@ test("list renders the session row with title, cwd, invocation, and the status t
   // already rendered, and the status it carries settled before the
   // navigation. A wait longer than the default here would be waiting for
   // something that cannot arrive later.
-  await expect(row.locator(".status-badge")).toHaveText(expected.status.state);
+  await expect(row.locator(".status-badge")).toHaveText(
+    expected.status.state[0].toUpperCase() + expected.status.state.slice(1),
+  );
 });
 
 // Home is the New fallback when no session supplies a destination and the host
@@ -2067,7 +2069,7 @@ test("alive delete opens an inline confirming state with the is-still-running wo
     // own title (rendered as plain Dioxus text — see that doc for why
     // that alone neutralizes anything the title might contain).
     await expect(row.locator(".confirm-consequence")).toHaveText(
-      "still running — deleting kills the agent:",
+      "Still running — deleting kills the agent:",
     );
     await expect(row.locator(".confirm-title")).toHaveText(`"${title}"`);
     // Normal buttons are gone while confirming, not merely hidden behind
@@ -2108,7 +2110,7 @@ test("alive delete opens an inline confirming state with the is-still-running wo
   }
 });
 
-// The other half of the confirm flow: clicking "confirm delete" performs
+// The other half of the confirm flow: clicking "Confirm delete" performs
 // exactly the DELETE the old accepted `window.confirm()` used to trigger —
 // pinned here as EXACTLY one DELETE request, the same request-counting
 // pattern the cancel test above uses to pin exactly zero.
@@ -2196,7 +2198,7 @@ test("exited session deletes immediately with no confirming state", async ({
   try {
     await page.goto("/");
     const row = page.locator(`[data-session-id="${id}"]`);
-    await expect(row.locator(".status-badge")).toHaveText(/^exited/, {
+    await expect(row.locator(".status-badge")).toHaveText(/^Exited/, {
       timeout: 10_000,
     });
 
@@ -2264,7 +2266,7 @@ test("delete confirmation safely displays a title containing executable HTML wit
     await row.locator(".session-row-delete").click();
 
     await expect(row.locator(".confirm-consequence")).toHaveText(
-      "still running — deleting kills the agent:",
+      "Still running — deleting kills the agent:",
     );
     await expect(row.locator(".confirm-title")).toHaveText(`"${title}"`);
     // The title's own row (open button) renders the same untrusted string
@@ -2330,7 +2332,7 @@ test("a legal multi-KB, unbroken title keeps the consequence text intact and cli
     // rule wrongly applied to THIS element instead of just the title)
     // fails immediately.
     await expect(row.locator(".confirm-consequence")).toHaveText(
-      "still running — deleting kills the agent:",
+      "Still running — deleting kills the agent:",
     );
 
     // The title itself IS being clipped — proving the overflow/min-width
@@ -2496,7 +2498,7 @@ test("an inline confirming state survives a listing refresh; cancel still works 
     });
     await expect(row.locator(".session-agent")).toHaveAttribute(
       "data-tooltip",
-      `command — Not YOLO, as asserted when the command was launched, by the user or by an agent — not checked by Farhelm — ${marker}`,
+      `Command — Not YOLO, as asserted when the command was launched, by the user or by an agent — not checked by Farhelm — ${marker}`,
     );
 
     // Still confirming, still the same wording and title — a refresh must
@@ -2651,7 +2653,7 @@ test("an alive-to-exited status change under an open confirm prompt keeps confir
     // picks the exited status up and re-words the SAME open prompt — it does
     // not close it, and does not swap back to the normal stop/delete pair.
     await expect(row.locator(".confirm-consequence")).toHaveText(
-      "delete anyway:",
+      "Delete anyway:",
       { timeout: 10_000 },
     );
     // Cancel's continued presence is the interesting half here — proving
@@ -3021,7 +3023,7 @@ test("deleting a session with unknown status confirms first, with wording that a
   // DELETE this soon could only come from a regression that skipped
   // confirmation outright).
   await expect(row.locator(".confirm-consequence")).toHaveText(
-    "status unknown — the agent may still be running and will be killed:",
+    "Status unknown — the agent may still be running and will be killed:",
   );
   await expect(row.locator(".confirm-title")).toHaveText(`"${sessionId}"`);
   expect(deleteRequests).toBe(0);
@@ -3390,7 +3392,7 @@ test("stop's in-flight guard disables this row's stop, delete, and open, while a
 //   - delete-then-stop: without `on_stop`'s own `confirming` check (see
 //     its doc in lib.rs), a stop queued right behind a delete click could
 //     slip this id into `pending` WHILE the confirm prompt is opening, so
-//     a later, perfectly genuine "confirm delete" click would find
+//     a later, perfectly genuine "Confirm delete" click would find
 //     `pending` already occupied and silently no-op via `do_delete`'s
 //     re-entry guard instead of deleting — a confirmed delete vanishing
 //     with no error at all.
@@ -3706,8 +3708,8 @@ test("list refreshes an existing row from alive to exited, then drops it on dele
     // grace period does: if it does not, the process is still alive at
     // re-enumeration time and gets SIGSTOPped then SIGKILLed instead,
     // turning the eventual death into a signal death tmux cannot reduce
-    // to a code. The badge could legitimately read "exited (code 7)" or
-    // plain "exited" either way; only the COARSE state transition is
+    // to a code. The badge could legitimately read "Exited (code 7)" or
+    // plain "Exited" either way; only the COARSE state transition is
     // asserted here. The exact text each `SessionStatus` renders into is
     // already pinned unconditionally by
     // `status_badge_matches_text_and_class_for_each_status` in lib.rs.
@@ -3805,7 +3807,7 @@ test("an interrupted session shows its badge and deletes without confirming", as
     await page.goto("/");
     const row = page.locator(`[data-session-id="${session.id}"]`);
     await expect(row.locator(".status-badge.interrupted")).toHaveText(
-      "interrupted",
+      "Interrupted",
       { timeout: 10_000 },
     );
 
@@ -3892,7 +3894,7 @@ test("an error session shows its badge with detail and deletes without confirmin
     // explains why the row needs attention, and the class must be the
     // dedicated `error` modifier (red family), never `exited`'s.
     await expect(row.locator(".status-badge.error")).toHaveText(
-      `error — ${detail}`,
+      `Error — ${detail}`,
       { timeout: 10_000 },
     );
 
@@ -3948,7 +3950,7 @@ test("a long error detail wraps completely and compact ended rows stay one line"
   const badge = row.locator(".status-badge.error");
   await expect(badge).toBeVisible();
 
-  await expect(badge).toHaveText(`error — ${detail}`);
+  await expect(badge).toHaveText(`Error — ${detail}`);
   const geometry = await badge.evaluate((el) => {
     const box = el.getBoundingClientRect();
     const row = el.closest(".session-row-open")!.getBoundingClientRect();
@@ -3972,7 +3974,7 @@ test("a long error detail wraps completely and compact ended rows stay one line"
   await setCompact(page, true);
   await expect(row.locator(".session-row-detail")).toHaveCount(0);
   await expect(row.locator('.ended-status-glyph[data-glyph="error"]')).toBeVisible();
-  await expect(row.locator(".compact-ended-status")).toHaveAttribute("data-tooltip", `error — ${detail}`);
+  await expect(row.locator(".compact-ended-status")).toHaveAttribute("data-tooltip", `Error — ${detail}`);
   expect((await row.boundingBox())!.height).toBeLessThan(40);
   } finally {
     await patchPreferences(request, { compact: preferences.compact ?? null });
@@ -4014,12 +4016,17 @@ test("compact rows retain distinct ended and harness glyphs within two character
       await expect(row.locator(`.harness-glyph[data-glyph="${item.harness}"]`)).toBeVisible();
       // Agent, permission and accessible text describe the same stored launch.
       // The agent cases pin the mode and stored command across the shared caveat's blank lines.
-      await expect(row.locator(".harness-glyph").locator("..")).toHaveAttribute("data-tooltip", item.description);
-      await expect(row.locator(".session-agent")).toHaveAttribute("data-tooltip", item.description);
+      // The case objects also go into the mocked reply. Keep those bytes intact;
+      // only the authored Command fallback in the rendered expectation changes.
+      const description = item.id === "unknown"
+        ? "Command — Unclassified — a command from before launch kinds, which Farhelm never classified — codex --yolo"
+        : item.description;
+      await expect(row.locator(".harness-glyph").locator("..")).toHaveAttribute("data-tooltip", description);
+      await expect(row.locator(".session-agent")).toHaveAttribute("data-tooltip", description);
       await expect(row.locator(".permission-glyph")).toHaveCount(1);
       await expect(row.locator(".permission-glyph")).toHaveAttribute("data-glyph", item.permission);
-      await expect(row.locator(".permission-glyph").locator("..")).toHaveAttribute("data-tooltip", item.description);
-      await expect(row.locator(".session-agent .visually-hidden")).toHaveText(item.description);
+      await expect(row.locator(".permission-glyph").locator("..")).toHaveAttribute("data-tooltip", description);
+      await expect(row.locator(".session-agent .visually-hidden")).toHaveText(description);
       // Permission keeps its role color on ordinary rows. A selected row
       // retains the distinguishing shape with an inverse foreground.
       const ordinaryRole = item.permission === "own-setting" ? "--fg-1" : item.permission === "shielded" ? "--ok" : "--warn";
@@ -4069,7 +4076,7 @@ test("an error detail containing executable HTML renders literally in the badge"
 
   await page.goto("/");
   const row = page.locator(`[data-session-id="${session.id}"]`);
-  await expect(row.locator(".status-badge.error")).toHaveText(`error — ${detail}`, {
+  await expect(row.locator(".status-badge.error")).toHaveText(`Error — ${detail}`, {
     timeout: 10_000,
   });
   expect(await page.evaluate(() => (window as any).__pwned)).toBeUndefined();
@@ -4147,16 +4154,16 @@ test("a live session draws a dot with a hidden word and a relative age", async (
   const badge = row.locator(".status-badge.running");
   // The badge's own text content is still exactly the status word: the
   // contract the rest of this suite's status oracles are written against.
-  await expect(badge).toHaveText("running", { timeout: 10_000 });
+  await expect(badge).toHaveText("Running", { timeout: 10_000 });
   // And the word reaches the accessibility tree, which is the claim the
   // dot's existence depends on — a color is not a status anything can read.
-  await expect(openButton).toHaveAccessibleName(/running/);
+  await expect(openButton).toHaveAccessibleName(/Running/);
 
   // The dot is the visible half: present, inside the status-carrying badge,
   // painted, and round rather than a stray square.
   const dot = badge.locator(".status-dot");
   await expect(dot).toHaveCount(1);
-  await expect(dot, "the pointer's own tooltip must name the dot's status").toHaveAttribute("data-tooltip", "running");
+  await expect(dot, "the pointer's own tooltip must name the dot's status").toHaveAttribute("data-tooltip", "Running");
   const dotBox = (await dot.boundingBox())!;
   expect(dotBox).not.toBeNull();
   expect(dotBox.width).toBeGreaterThan(0);
@@ -4199,7 +4206,7 @@ test("a live session draws a dot with a hidden word and a relative age", async (
   await expect(age).toHaveText("2m");
   await expect(age).toHaveAttribute(
     "data-tooltip",
-    /^last activity \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC$/,
+    /^Last activity \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC$/,
   );
   const titleBox = (await row.locator(".session-title").boundingBox())!;
   const badgeBox = (await badge.boundingBox())!;
@@ -4219,16 +4226,16 @@ test("a live session draws a dot with a hidden word and a relative age", async (
   await word.evaluate((element: HTMLElement) => {
     element.style.display = "none";
   });
-  await expect(openButton).not.toHaveAccessibleName(/running/);
+  await expect(openButton).not.toHaveAccessibleName(/Running/);
   await word.evaluate((element: HTMLElement) => {
     element.style.display = "";
     element.setAttribute("aria-hidden", "true");
   });
-  await expect(openButton).not.toHaveAccessibleName(/running/);
+  await expect(openButton).not.toHaveAccessibleName(/Running/);
   await word.evaluate((element: HTMLElement) => {
     element.removeAttribute("aria-hidden");
   });
-  await expect(openButton).toHaveAccessibleName(/running/);
+  await expect(openButton).toHaveAccessibleName(/Running/);
 });
 
 // The idle half of the status dot's four states (SPEC.md, Status), proven
@@ -4263,7 +4270,7 @@ test("an idle session already seen uses its row's status foreground with the pla
     0,
     "a seen idle session must not also carry the unseen modifier class",
   );
-  await expect(badge).toHaveText("idle");
+  await expect(badge).toHaveText("Idle");
   // Seen idle uses the muted ordinary role; selection inverts the mark.
   // Checking the named role catches a swap to another quiet foreground
   // without pinning this test to one palette's numeric value.
@@ -4299,8 +4306,8 @@ test("an idle session with unseen output uses its row's new-output foreground an
   // The text change is as load-bearing as the colour: it is what a screen
   // reader and this very assertion both actually read, where the colour
   // alone carries nothing to either.
-  await expect(badge).toHaveText("idle — new output");
-  await expect(row.locator(".session-row-open")).toHaveAccessibleName(/idle — new output/);
+  await expect(badge).toHaveText("Idle — new output");
+  await expect(row.locator(".session-row-open")).toHaveAccessibleName(/Idle — new output/);
   // New output uses the info role on ordinary rows and an inverse diamond
   // on selection. The accessible words above preserve its meaning there.
   const unseenRole = await row.getAttribute("data-session-selected") === "true" ? "--on-fill" : "--info";

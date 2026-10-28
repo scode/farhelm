@@ -1560,7 +1560,7 @@ test("the actions menu exposes a real menu-button relationship", async ({ page, 
     await expect(target).toBeVisible({ timeout: 20_000 });
     await waitForHostsListSettled(page);
 
-    const toggle = target.getByRole("button", { name: `session actions for ${title}` });
+    const toggle = target.getByRole("button", { name: `Session actions for ${title}` });
     await expect(toggle).toHaveAttribute("aria-haspopup", "menu");
     await expect(toggle).toHaveAttribute("aria-expanded", "false");
 
@@ -1570,12 +1570,12 @@ test("the actions menu exposes a real menu-button relationship", async ({ page, 
     // Located by ROLE and NAME, never by class: the name is what tells a
     // screen-reader user which of the several identical menus in this
     // list they have opened.
-    const menu = target.getByRole("menu", { name: `session actions for ${title}` });
+    const menu = target.getByRole("menu", { name: `Session actions for ${title}` });
     await expect(menu).toBeVisible();
-    // "replace with" sits between clone and replace (row.rs's
+    // "Replace with" sits between Clone and Replace (row.rs's
     // `MENU_ACTIONS`), the row menu's other "make a new session from this
     // one" verb.
-    for (const name of ["rename", "clone", "replace with", "replace", "stop", "delete"]) {
+    for (const name of ["Rename", "Clone", "Replace with", "Replace", "Stop", "Delete"]) {
       await expect(menu.getByRole("menuitem", { name, exact: true })).toHaveCount(1);
     }
     // Descriptions contribute context through aria-describedby; the
@@ -1586,13 +1586,13 @@ test("the actions menu exposes a real menu-button relationship", async ({ page, 
     // The prompt is a named exchange, not a menu with no items in it.
     await expect(target.getByRole("menu")).toHaveCount(0);
     await expect(
-      target.getByRole("dialog", { name: `delete confirmation for ${title}` }),
+      target.getByRole("dialog", { name: `Delete confirmation for ${title}` }),
     ).toBeVisible();
     await expect(toggle).toHaveAttribute("aria-haspopup", "dialog");
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
 
     await target.locator(".confirm-cancel").click();
-    await expect(target.getByRole("menu", { name: `session actions for ${title}` })).toBeVisible();
+    await expect(target.getByRole("menu", { name: `Session actions for ${title}` })).toBeVisible();
     await expect(toggle).toHaveAttribute("aria-haspopup", "menu");
   } finally {
     await cleanupSession(request, session.id);
@@ -1711,8 +1711,8 @@ test("menu arrows follow independent focus during a queued burst (desktop timing
     const items = target.getByRole("menuitem");
     await expect(items).toHaveCount(7);
     await expect(items.nth(0)).toBeFocused();
-    await expect(items.nth(3)).toHaveAccessibleName("replace with");
-    await expect(items.nth(4)).toHaveAccessibleName("replace");
+    await expect(items.nth(3)).toHaveAccessibleName("Replace with");
+    await expect(items.nth(4)).toHaveAccessibleName("Replace");
 
     await items.nth(0).evaluate((first) => {
       const menu = first.closest('[role="menu"]')!;
@@ -1850,8 +1850,8 @@ for (
       await holdNextMenuFocus(page, opening);
       await page.keyboard.press("ArrowDown");
       await expect(items).toHaveCount(7);
-      await expect(items.nth(3)).toHaveAccessibleName("replace with");
-      await expect(items.nth(4)).toHaveAccessibleName("replace");
+      await expect(items.nth(3)).toHaveAccessibleName("Replace with");
+      await expect(items.nth(4)).toHaveAccessibleName("Replace");
       const heldKey = await items.nth(heldIndex).getAttribute("data-menu-focus");
       expect(heldKey, "the held destination has an action-and-opening marker").toBeTruthy();
       await expect.poll(() => page.evaluate(() => (window as HeldMenuFocusWindow).__heldMenuFocus?.entered)).toEqual({
@@ -1942,8 +1942,8 @@ test("menu in-flight focus respects keyboard opening with independent focus (des
     await holdNextMenuFocus(page, true);
     await page.keyboard.press("ArrowDown");
     await expect(items).toHaveCount(7);
-    await expect(items.nth(3)).toHaveAccessibleName("replace with");
-    await expect(items.nth(4)).toHaveAccessibleName("replace");
+    await expect(items.nth(3)).toHaveAccessibleName("Replace with");
+    await expect(items.nth(4)).toHaveAccessibleName("Replace");
     const heldKey = await items.nth(0).getAttribute("data-menu-focus");
     expect(heldKey, "the first opening has a durable target marker").toBeTruthy();
     await expect.poll(() => page.evaluate(() => (window as HeldMenuFocusWindow).__heldMenuFocus?.entered)).toEqual({
@@ -2815,12 +2815,12 @@ test("the session flyout sits beside its row with a titled, described menu", asy
       .toBeGreaterThanOrEqual(600);
     await expect(panel.locator(".session-row-menu-summary")).not.toBeEmpty();
 
-    const menu = target.getByRole("menu", { name: `session actions for ${title}` });
+    const menu = target.getByRole("menu", { name: `Session actions for ${title}` });
     const markName = await panel.locator(".session-row-mark-seen").getAttribute("aria-label");
-    expect(markName).toMatch(/^mark (read|unread)$/);
+    expect(markName).toMatch(/^Mark (read|unread)$/);
     const pinName = await panel.locator(".session-row-pin").getAttribute("aria-label");
     expect(pinName).toMatch(/^(Pin to top|Unpin)$/);
-    for (const name of ["rename", markName!, pinName!, "clone", "replace with", "replace", "stop", "delete"]) {
+    for (const name of ["Rename", markName!, pinName!, "Clone", "Replace with", "Replace", "Stop", "Delete"]) {
       const item = menu.getByRole("menuitem", { name, exact: true });
       const descriptionId = await item.getAttribute("aria-describedby");
       expect(descriptionId, `${name} must refer to its explanation`).toBeTruthy();
@@ -2836,10 +2836,10 @@ test("the session flyout sits beside its row with a titled, described menu", asy
     await menu.getByRole("menuitem").first().press("ArrowDown");
     await expect(menu.getByRole("menuitem").nth(1)).toBeFocused();
     await page.keyboard.press("Home");
-    await expect(menu.getByRole("menuitem", { name: "rename", exact: true })).toBeFocused();
+    await expect(menu.getByRole("menuitem", { name: "Rename", exact: true })).toBeFocused();
     const help = page.locator(".farhelm-tooltip");
     await expect(help).toBeVisible();
-    await expect(help).toContainText("rename: give this session a new title");
+    await expect(help).toContainText("Rename: give this session a new title");
     const helpBox = (await help.boundingBox())!;
     const helpPanelBox = (await panel.boundingBox())!;
     expect(helpBox.y + helpBox.height <= helpPanelBox.y || helpBox.y >= helpPanelBox.y + helpPanelBox.height,
@@ -3906,7 +3906,7 @@ test("narrow rows align fixed facts and reserve only control-sized menu gutters"
   await expect(rows[0].locator(".permission-glyph")).toHaveAttribute("data-glyph", "yolo");
   await expect(rows[1].locator(".permission-glyph")).toHaveAttribute("data-glyph", "unknown");
   await expect(rows[1].locator(".session-status-slot .status-badge")).toHaveCount(0);
-  await expect(rows[1].locator(".session-row-detail .status-badge")).toContainText("exited (code 17)");
+  await expect(rows[1].locator(".session-row-detail .status-badge")).toContainText("Exited (code 17)");
   await expect(rows[2].locator(".session-status-slot .status-badge")).toHaveCount(0);
   await expect(rows[2].locator(".session-locality-slot .host-kind-icon")).toHaveCount(0);
   await expect(rows[2].locator(".session-row-meta")).toBeVisible();
@@ -3986,13 +3986,13 @@ test("narrow rows align fixed facts and reserve only control-sized menu gutters"
   await expect(rows[1].locator(".session-row-detail")).toHaveCount(0);
   await expect(rows[1].locator(".session-row-meta")).toHaveCount(0);
   await expect(rows[1].locator(".ended-status-glyph")).toHaveAttribute("data-glyph", "exited");
-  await expect(rows[1].locator(".compact-ended-status")).toHaveAttribute("data-tooltip", "exited (code 17)");
+  await expect(rows[1].locator(".compact-ended-status")).toHaveAttribute("data-tooltip", "Exited (code 17)");
   await expect(rows[5].locator(".ended-status-glyph")).toHaveAttribute("data-glyph", "stopped");
-  await expect(rows[5].locator(".compact-ended-status")).toHaveAttribute("data-tooltip", "exited (code unknown) — stopped by user");
+  await expect(rows[5].locator(".compact-ended-status")).toHaveAttribute("data-tooltip", "Exited (code unknown) — stopped by user");
   await expect(rows[6].locator(".ended-status-glyph")).toHaveAttribute("data-glyph", "interrupted");
   await expect(rows[7].locator(".ended-status-glyph")).toHaveAttribute("data-glyph", "error");
   await expect(rows[1].locator(".compact-qualifier .qualifier-glyph[data-glyph='stale']")).toHaveCount(1);
-  await expect(rows[1].locator(".session-status-slot .visually-hidden")).toContainText("exited (code 17)");
+  await expect(rows[1].locator(".session-status-slot .visually-hidden")).toContainText("Exited (code 17)");
   const compactRow = (await rows[1].boundingBox())!;
   const compactLive = (await rows[0].boundingBox())!;
   expect(compactRow.height, "compact ended rows have no wrapped second line").toBeLessThanOrEqual(
@@ -8387,7 +8387,7 @@ test("an idle session that was never opened reads unseen, and opening it clears 
     await page.goto("/");
     const target = row(page, session.id);
     await expect(target).toBeVisible({ timeout: 20_000 });
-    await expect(target.locator(".status-badge.idle.unseen")).toHaveText("idle — new output", {
+    await expect(target.locator(".status-badge.idle.unseen")).toHaveText("Idle — new output", {
       timeout: 45_000,
     });
 
@@ -8399,7 +8399,7 @@ test("an idle session that was never opened reads unseen, and opening it clears 
     await target.locator(".session-row-open").click();
     await waitForSessionRevealed(page, session.id);
     await expect(target).toHaveAttribute("data-session-selected", "true");
-    await expect(target.locator(".status-badge.idle")).toHaveText("idle", { timeout: 20_000 });
+    await expect(target.locator(".status-badge.idle")).toHaveText("Idle", { timeout: 20_000 });
     await expect(target.locator(".status-badge.idle.unseen")).toHaveCount(0);
   } finally {
     await cleanupSession(request, session.id);
@@ -8407,7 +8407,7 @@ test("an idle session that was never opened reads unseen, and opening it clears 
 });
 
 /**
- * A manual "mark unread" from the OPEN session's own row menu turns its
+ * A manual "Mark unread" from the OPEN session's own row menu turns its
  * dot blue again while it stays the selected session, and the unseen state
  * STICKS rather than being immediately re-marked seen by the session's own
  * still-mounted auto-mark effect — the whole reason that effect keys on
@@ -8428,15 +8428,15 @@ test("a manual mark-unread on the open session sticks", async ({ page, request }
     await page.goto("/");
     const target = row(page, session.id);
     await expect(target).toBeVisible({ timeout: 20_000 });
-    await expect(target.locator(".status-badge.idle.unseen")).toHaveText("idle — new output", {
+    await expect(target.locator(".status-badge.idle.unseen")).toHaveText("Idle — new output", {
       timeout: 45_000,
     });
 
     await target.locator(".session-row-open").click();
     await waitForSessionRevealed(page, session.id);
-    await expect(target.locator(".status-badge.idle")).toHaveText("idle", { timeout: 20_000 });
+    await expect(target.locator(".status-badge.idle")).toHaveText("Idle", { timeout: 20_000 });
 
-    // The label must already read "mark unread" — the row is currently
+    // The label must already read "Mark unread" — the row is currently
     // seen — and clicking it must turn the dot blue again without moving
     // the selection.
     let automaticMarks = 0;
@@ -8446,7 +8446,7 @@ test("a manual mark-unread on the open session sticks", async ({ page, request }
     });
     await openRowMenu(target);
     const markSeenItem = target.locator(".session-row-mark-seen");
-    await expect(markSeenItem).toHaveAccessibleName("mark unread");
+    await expect(markSeenItem).toHaveAccessibleName("Mark unread");
     const [cleared] = await Promise.all([
       page.waitForResponse((candidate) =>
         candidate.request().method() === "PUT" && new URL(candidate.url()).pathname === `/api/sessions/${encodeURIComponent(session.id)}/seen` &&
@@ -8458,7 +8458,7 @@ test("a manual mark-unread on the open session sticks", async ({ page, request }
     // The write client ignores the success body. Its status and the rendered
     // unread state establish the clear; body completion is not its contract.
     await expect(target.getByRole("menu")).toHaveCount(0);
-    await expect(target.locator(".status-badge.idle.unseen")).toHaveText("idle — new output", {
+    await expect(target.locator(".status-badge.idle.unseen")).toHaveText("Idle — new output", {
       timeout: 20_000,
     });
     await expect(target).toHaveAttribute("data-session-selected", "true");
@@ -8493,7 +8493,7 @@ test("a manual mark-unread on the open session sticks", async ({ page, request }
       requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
     ));
     expect(automaticMarks, "a mounted session must not re-mark a manual unread clear").toBe(0);
-    await expect(target.locator(".status-badge.idle.unseen")).toHaveText("idle — new output");
+    await expect(target.locator(".status-badge.idle.unseen")).toHaveText("Idle — new output");
     await expect(target).toHaveAttribute("data-session-selected", "true");
   } finally {
     await cleanupSession(request, session.id);
@@ -8522,21 +8522,21 @@ test("a manual read toggle reverses under a build mismatch", async ({ page, requ
     await expect(target).not.toHaveAttribute("data-session-selected", "true");
     await openRowMenu(target);
     const toggle = target.locator(".session-row-mark-seen");
-    await expect(toggle).toHaveAccessibleName("mark read");
+    await expect(toggle).toHaveAccessibleName("Mark read");
     const read = page.waitForResponse((reply) => reply.url().endsWith(`/api/sessions/${encodeURIComponent(session.id)}/seen`) &&
       reply.request().method() === "PUT" && reply.request().postDataJSON().seen_activity_at !== null);
     await toggle.click();
     expect((await read).ok()).toBe(true);
     await expect(target.getByRole("menu")).toHaveCount(0);
     await openRowMenu(target);
-    await expect(toggle).toHaveAccessibleName("mark unread");
+    await expect(toggle).toHaveAccessibleName("Mark unread");
     const unread = page.waitForResponse((reply) => reply.url().endsWith(`/api/sessions/${encodeURIComponent(session.id)}/seen`) &&
       reply.request().method() === "PUT" && reply.request().postDataJSON().seen_activity_at === null);
     await toggle.click();
     expect((await unread).ok()).toBe(true);
     await expect(target.getByRole("menu")).toHaveCount(0);
     await openRowMenu(target);
-    await expect(toggle).toHaveAccessibleName("mark read");
+    await expect(toggle).toHaveAccessibleName("Mark read");
     await expect(target).not.toHaveAttribute("data-session-selected", "true");
   } finally {
     await cleanupSession(request, session.id);
@@ -8563,7 +8563,7 @@ test("a manual read toggle reverses under a build mismatch", async ({ page, requ
  * possibly the fleet's newest — is exactly the row `goto`'s own auto-select
  * would attach to (SPEC.md: opening a CLIENT counts as opening a session),
  * which marks it seen before the menu is ever opened and leaves the item
- * reading "mark unread" instead of the "mark read" this test looks for —
+ * reading "Mark unread" instead of the "Mark read" this test looks for —
  * the same race `pinAutoSelect`'s own doc and DECISIONS.md's entry on it
  * already cover for the other seen-state tests above.
  */
@@ -8581,14 +8581,14 @@ test("the mark-seen item is reachable and operable by role and keyboard", async 
     await expect(target).toBeVisible({ timeout: 20_000 });
 
     await openRowMenu(target);
-    const toggle = target.getByRole("button", { name: `session actions for ${title}` });
-    const menu = target.getByRole("menu", { name: `session actions for ${title}` });
+    const toggle = target.getByRole("button", { name: `Session actions for ${title}` });
+    const menu = target.getByRole("menu", { name: `Session actions for ${title}` });
     // Offered only once the real supervisor's classifier settles this
     // fixture into a live status and the helm answers the seen-state
     // question — neither of which `openRowMenu` alone waits for, so this
     // item can legitimately take longer to appear than the others already
     // in the panel.
-    const markRead = menu.getByRole("menuitem", { name: "mark read" });
+    const markRead = menu.getByRole("menuitem", { name: "Mark read" });
     await expect(markRead).toBeVisible({ timeout: 45_000 });
 
     // Driven from OUTSIDE the menu, the same way `the actions menu walks
@@ -8597,7 +8597,7 @@ test("the mark-seen item is reachable and operable by role and keyboard", async 
     await toggle.focus();
     await expect(toggle).toBeFocused();
     await page.keyboard.press("ArrowDown");
-    await expect(menu.getByRole("menuitem", { name: "rename" })).toBeFocused();
+    await expect(menu.getByRole("menuitem", { name: "Rename" })).toBeFocused();
     await page.keyboard.press("ArrowDown");
     await expect(markRead).toBeFocused();
 
@@ -8608,7 +8608,7 @@ test("the mark-seen item is reachable and operable by role and keyboard", async 
     await expect(menu).toHaveCount(0);
     await expect(toggle).toBeFocused();
     await openRowMenu(target);
-    await expect(menu.getByRole("menuitem", { name: "mark unread" })).toBeVisible({
+    await expect(menu.getByRole("menuitem", { name: "Mark unread" })).toBeVisible({
       timeout: 20_000,
     });
   } finally {
@@ -8658,7 +8658,7 @@ test("a failed manual mark closes on acceptance and preserves a newer menu", asy
     }).toBe(true);
     const target = row(page, session.id);
     await openRowMenu(target);
-    const markRead = target.getByRole("menuitem", { name: "mark read" });
+    const markRead = target.getByRole("menuitem", { name: "Mark read" });
     await expect(markRead).toBeVisible({ timeout: 45_000 });
     await page.route(`**/api/sessions/${encodeURIComponent(session.id)}/seen`, async (route) => {
       seenRequests++;
@@ -8675,7 +8675,7 @@ test("a failed manual mark closes on acceptance and preserves a newer menu", asy
 
     const other = row(page, otherId);
     await openRowMenu(other);
-    const rename = other.getByRole("menuitem", { name: "rename" });
+    const rename = other.getByRole("menuitem", { name: "Rename" });
     await expect(rename).toBeFocused();
     releaseSeen();
     await expect(target.locator(".action-error")).toContainText("seen-failure-sentinel");
@@ -8765,15 +8765,15 @@ test("the dot click marks a different row read without moving the selection", as
     try {
       const rowB = row(page, b.id);
       await expect(rowB).toBeVisible({ timeout: 20_000 });
-      await expect(rowB.locator(".status-badge.idle.unseen")).toHaveText("idle — new output", {
+      await expect(rowB.locator(".status-badge.idle.unseen")).toHaveText("Idle — new output", {
         timeout: 45_000,
       });
-      await expect(rowB.locator(".status-dot")).toHaveAttribute("data-tooltip", "idle — new output — mark read");
+      await expect(rowB.locator(".status-dot")).toHaveAttribute("data-tooltip", "Idle — new output — mark read");
 
       await rowB.locator(".status-dot").click();
       await expect(rowA).toHaveAttribute("data-session-selected", "true");
       await expect(rowB).toHaveAttribute("data-session-selected", "false");
-      await expect(rowB.locator(".status-badge.idle")).toHaveText("idle", { timeout: 20_000 });
+      await expect(rowB.locator(".status-badge.idle")).toHaveText("Idle", { timeout: 20_000 });
       await expect(rowB.locator(".status-badge.idle.unseen")).toHaveCount(0);
       // The click never even routed through the row's open handler — the
       // terminal pane on screen must still be A's, not B's.
@@ -8817,7 +8817,7 @@ test("a manual mark-unread is visible to a second client that never touched the 
     await page.goto("/");
     const target = row(page, session.id);
     await expect(target).toBeVisible({ timeout: 20_000 });
-    await expect(target.locator(".status-badge.idle.unseen")).toHaveText("idle — new output", {
+    await expect(target.locator(".status-badge.idle.unseen")).toHaveText("Idle — new output", {
       timeout: 45_000,
     });
 
@@ -8826,10 +8826,10 @@ test("a manual mark-unread is visible to a second client that never touched the 
     // having merely inherited the FIRST client's own never-marked default.
     await target.locator(".session-row-open").click();
     await waitForSessionRevealed(page, session.id);
-    await expect(target.locator(".status-badge.idle")).toHaveText("idle", { timeout: 20_000 });
+    await expect(target.locator(".status-badge.idle")).toHaveText("Idle", { timeout: 20_000 });
     await openRowMenu(target);
     await target.locator(".session-row-mark-seen").click();
-    await expect(target.locator(".status-badge.idle.unseen")).toHaveText("idle — new output", {
+    await expect(target.locator(".status-badge.idle.unseen")).toHaveText("Idle — new output", {
       timeout: 20_000,
     });
 
@@ -8849,7 +8849,7 @@ test("a manual mark-unread is visible to a second client that never touched the 
     await page2.goto("/");
     const target2 = row(page2, session.id);
     await expect(target2).toBeVisible({ timeout: 20_000 });
-    await expect(target2.locator(".status-badge.idle.unseen")).toHaveText("idle — new output", {
+    await expect(target2.locator(".status-badge.idle.unseen")).toHaveText("Idle — new output", {
       timeout: 20_000,
     });
   } finally {

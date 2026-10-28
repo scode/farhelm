@@ -31,7 +31,7 @@ async function saveCommand(request: APIRequestContext, name: string) {
 async function openTemplateList(page: Page, mac = false) {
   await expect(page.locator(".quick-switcher-template-trigger")).toHaveCount(1);
   await page.keyboard.press(mac ? "Meta+j" : "Control+Shift+j");
-  const dialog = page.getByRole("dialog", { name: "template launcher" });
+  const dialog = page.getByRole("dialog", { name: "Template launcher" });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole("combobox")).toBeFocused();
   return dialog;

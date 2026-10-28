@@ -292,7 +292,7 @@ test("skip session confirmations walks row header interrupted card and tab actio
     const first = await createSession(request, { title: "skip-row-delete" });
     owned.add(first.id);
     await expect(row(first.id)).toBeVisible();
-    await expect(row(first.id).locator(".status-badge")).not.toHaveText(/exited|interrupted|error/);
+    await expect(row(first.id).locator(".status-badge")).not.toHaveText(/Exited|Interrupted|Error/);
     await openRowMenu(row(first.id));
     const deleted = page.waitForResponse((reply) => reply.request().method() === "DELETE"
       && new URL(reply.url()).pathname === `/api/sessions/${encodeURIComponent(first.id)}`);
@@ -318,7 +318,7 @@ test("skip session confirmations walks row header interrupted card and tab actio
       await expect(row(next.id)).toHaveAttribute("data-session-selected", "true");
       source = next;
     }
-    await expect(page.locator(".header-delete")).toHaveAttribute("data-tooltip", "delete: remove this session and its state (Ctrl+Shift+Backspace)");
+    await expect(page.locator(".header-delete")).toHaveAttribute("data-tooltip", "Delete: remove this session and its state (Ctrl+Shift+Backspace)");
     const headerDeleted = page.waitForResponse((reply) => reply.request().method() === "DELETE"
       && new URL(reply.url()).pathname === `/api/sessions/${encodeURIComponent(source.id)}`);
     await page.locator(".header-delete").click();

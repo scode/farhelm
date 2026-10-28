@@ -111,7 +111,7 @@ test(`an ${skip ? "opted-out tabs-only" : "unconfirmed"} delete sends the precon
     // The row shows the ended state already verified above. With opt-out off
     // it has no tabs; with it on, the one real tab is what distinguishes the
     // newly skipped question and its AgentEnded guard from NothingAlive.
-    await expect(row.locator(".status-badge")).toHaveText(/exited/, { timeout: 20_000 });
+    await expect(row.locator(".status-badge")).toHaveText(/Exited/, { timeout: 20_000 });
     // Setup reads (the handshake's listing, the selected session's detail)
     // must retire before the baseline below, or one of them could be counted
     // as the refusal's re-read.
@@ -188,11 +188,11 @@ async function confirmDriftedPrompt(
 
   // Premise: the prompt opens on a session the row shows running, so its
   // first wording warns that the agent runs.
-  await expect(row.locator(".status-badge")).not.toHaveText(/exited/, { timeout: 20_000 });
+  await expect(row.locator(".status-badge")).not.toHaveText(/Exited/, { timeout: 20_000 });
   await openRowMenu(row);
   await row.locator(".session-row-delete").click();
   const consequence = row.locator(".confirm-consequence").first();
-  await expect(consequence).toContainText("still running");
+  await expect(consequence).toContainText("Still running");
 
   if (options.openTab) {
     const opened = await request.post(`/api/sessions/${encodeURIComponent(sessionId)}/tabs`);
@@ -247,7 +247,7 @@ test("a delete prompt that drifted to nothing alive sends that precondition", as
   try {
     const url = await confirmDriftedPrompt(page, request, session.id, {
       openTab: false,
-      expectWording: /^delete anyway/,
+      expectWording: /^Delete anyway/,
     });
     expect(url.searchParams.get("only_if_nothing_alive")).toBe("true");
     expect(url.searchParams.get("only_if_agent_ended")).toBeNull();

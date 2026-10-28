@@ -43,7 +43,7 @@ test("header restart and replace refresh the sidebar under build skew", async ({
     await expect(sourceRow.locator(".status-badge")).not.toHaveClass(/\bexited\b/, { timeout: 20_000 });
     await page.locator(".header-replace").click();
     const reply = page.waitForResponse((r) => r.url().endsWith(`/api/sessions/${encodeURIComponent(source.id)}/replace`) && r.request().method() === "POST");
-    await page.locator(".header-replace-confirm").getByRole("button", { name: "replace", exact: true }).click();
+    await page.locator(".header-replace-confirm").getByRole("button", { name: "Replace", exact: true }).click();
     const response = await reply;
     expect(response.ok()).toBe(true);
     const body = await response.json();

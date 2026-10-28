@@ -176,20 +176,20 @@ test("an interrupted session's view leads with the resume offer, and declining c
     "restart-offer-description",
   );
   const offer = page.locator(`#${described}`);
-  await expect(offer).toContainText("interrupted by a host reboot");
+  await expect(offer).toContainText("Interrupted by a host reboot");
   await expect(offer).toContainText("resumes this session's own conversation");
-  // The VISIBLE glyph is the compact "restart" every header action uses —
+  // The VISIBLE glyph is the compact "Restart" every header action uses —
   // the header's supported minimum width has no room for the longest
-  // offer's ~320px of wording on the button's face. SPEC.md's "restart says
+  // offer's ~320px of wording on the button's face. SPEC.md's "Restart says
   // so" instead reaches the accessible name: `aria-label` names the offer,
   // not the mechanism, which is what a screen reader announces regardless
   // of hover.
   await expect(restart).toHaveText("Restart");
-  await expect(restart).toHaveAttribute("aria-label", "resume conversation");
+  await expect(restart).toHaveAttribute("aria-label", "Resume conversation");
   // And the header states the session's last-known status beside the
   // title, which is where the reason a user is being offered a restart now
   // lives (the offer prose used to carry it in a band of its own).
-  await expect(page.locator(".session-details .status-badge")).toHaveText("interrupted");
+  await expect(page.locator(".session-details .status-badge")).toHaveText("Interrupted");
   // An interrupted session has nothing running, so there is no confirm
   // step in front of it.
   await expect(page.locator(".restart-confirm")).toHaveCount(0);
@@ -212,7 +212,7 @@ test("an interrupted session's view leads with the resume offer, and declining c
   await expect(notice).toContainText("resumes this session's own conversation");
   await expect(notice.locator(".restart-from-notice")).toHaveText("restart");
   await expect(notice.locator(".restart-from-notice")).toHaveClass(/btn-primary/);
-  await expect(notice.locator(".restart-from-notice")).toHaveAttribute("aria-label", "resume conversation");
+  await expect(notice.locator(".restart-from-notice")).toHaveAttribute("aria-label", "Resume conversation");
   expect(counter.restartRequests).toBe(0);
 
   // Declining means LEAVING — selecting another session — and the leave
@@ -221,7 +221,7 @@ test("an interrupted session's view leads with the resume offer, and declining c
   await sharedSessionRow(page).click();
   await expect(page.locator(".session-details .title")).toHaveText("e2e-session");
   const row = rowByTitle(page, title);
-  await expect(row.locator(".status-badge")).toHaveText("interrupted");
+  await expect(row.locator(".status-badge")).toHaveText("Interrupted");
   expect(counter.restartRequests).toBe(0);
 });
 
@@ -243,12 +243,12 @@ test("an interrupted session that cannot resume greys out Restart and offers onl
 
   await page.goto("/");
   await rowByTitle(page, title).locator(".session-row-open").click();
-  await expect(page.locator(".session-details .status-badge")).toHaveText("interrupted");
+  await expect(page.locator(".session-details .status-badge")).toHaveText("Interrupted");
 
   const restart = page.locator(".restart-primary");
   await expect(restart).toBeVisible();
   await expect(restart).toHaveAttribute("aria-disabled", "true");
-  await expect(restart).toHaveAttribute("aria-label", "restart unavailable");
+  await expect(restart).toHaveAttribute("aria-label", "Restart unavailable");
   // The injected row names no agent kind and the session has ended, so the
   // reason is the ended wording with no per-agent claim, plus the app's
   // invitation to send feedback.
@@ -842,7 +842,7 @@ test("restarting a working agent confirms first, and only then sends the request
     // consequence text says what restarting would do to the running agent.
     await restartButton.click();
     await expect(page.locator(".restart-offer .confirm-consequence")).toContainText(
-      "still running",
+      "Still running",
     );
     expect(bodies).toHaveLength(0);
     // Open now — this is the state a sidebar row menu opened at the same
@@ -936,11 +936,11 @@ test("a restart prompt that drifted to an exited agent no longer consents to a s
     // Premise: the prompt opens offering to stop the running agent.
     await restartButton.click();
     const consequence = page.locator(".restart-offer .confirm-consequence");
-    await expect(consequence).toContainText("still running");
+    await expect(consequence).toContainText("Still running");
 
     // The agent ends behind the open prompt, which rewords to the exited case.
     await stopSession(request, id);
-    await expect(consequence).toContainText("the agent has exited", { timeout: 20_000 });
+    await expect(consequence).toContainText("The agent has exited", { timeout: 20_000 });
     expect(bodies, "premise: nothing was sent while the prompt was open").toHaveLength(0);
 
     await page.locator(".restart-confirm").click();

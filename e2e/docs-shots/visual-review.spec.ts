@@ -7,8 +7,9 @@
  * Native updater/App controls, loaded SSH-help commands, successful uninstall
  * plans remain uncaptured. Setup progress uses the existing owned backend's
  * held action, with the real helm publishing progress and controlled failures.
- * The focused sentence-case selection also denies one authentic Spawn request
- * after photographing it; the requested child is never launched.
+ * The focused host/settings selection also denies one authentic Spawn request
+ * after photographing it; the requested child is never launched. Ordinary
+ * session review reuses the same staged rows and real resumable header source.
  */
 import { expect, test, type APIRequestContext, type Locator, type Page, type Request as NetworkRequest } from "@playwright/test";
 import { cleanupSession, hostRowByName, listHosts, listSessions, openHostMenu, openRowMenu, patchPreferences, readPreferences, setLocalYoloWithoutAsking, showHostsPanel, showSessionsPanel } from "../tests/helpers/fleet";
@@ -48,6 +49,8 @@ const launcherOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "launcher";
 const sentenceLauncherOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sentence-launcher";
 const sentenceHostsSettingsOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sentence-hosts-settings";
 const sentenceApprovalOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sentence-approval";
+const sentenceSessionsOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sentence-sessions";
+const sentenceSessionHintsOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sentence-session-hints";
 const sentenceHelpOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sentence-help";
 
 /** Photograph native-only chrome with the goal's explicit CSS-only fallback.
@@ -323,8 +326,9 @@ async function numberMenuShots(page: Page, name: string, templates: Locator) {
  * Seen and pin state come from real writes, not reply rewrites. Restore the
  * exact seen stamp after returning to the original terminal, so automatic
  * mark-on-open cannot undo cleanup. The short window must actually overflow.
+ * Session-only review omits the independent template-number menu.
  */
-async function menuShots(page: Page, request: APIRequestContext, scenario: Scenario, name: string) {
+async function menuShots(page: Page, request: APIRequestContext, scenario: Scenario, name: string, includeTemplateNumbers = true) {
   const session = scenario.sessions.find((candidate) => candidate.status === "idle" && candidate.seen === false);
   const initialId = await page.locator('.session-row[data-session-selected="true"]').getAttribute("data-session-id");
   const initial = scenario.sessions.find((candidate) => readFleet().ids.get(candidate.title) === initialId);
@@ -351,6 +355,7 @@ async function menuShots(page: Page, request: APIRequestContext, scenario: Scena
       await expect(panel).toBeHidden();
     }
   };
+  let bodyFailed = true;
   try {
     expect((await request.put(pinUrl, { data: { pinned: false } })).ok()).toBe(true);
     await expect(row).toHaveAttribute("data-session-pinned", "false");
@@ -360,22 +365,29 @@ async function menuShots(page: Page, request: APIRequestContext, scenario: Scena
     await expect(panel.getByRole("menuitem")).toHaveCount(8);
     await expect(panel.locator(".menu-description")).toHaveCount(8);
     await expect(panel.getByRole("separator")).toHaveCount(4);
-    await expect(panel.getByRole("menuitem", { name: "mark unread", exact: true }))
+    await expect(panel.getByRole("menuitem", { name: "Mark unread", exact: true }))
       .toHaveAccessibleDescription("Show new output again");
     await expect(panel.getByRole("menuitem", { name: "Pin to top", exact: true }))
       .toHaveAccessibleDescription("Keep this session above unpinned ones");
     await inspectMenu(page, panel);
     await shot(page, `${name}-session-menu`, window, { pad: 0 });
+    // The repair review needs this actual caller, not another full menu tour.
+    // Returning inside finally still restores selection, pin and seen state.
+    if (sentenceSessionHintsOnly) {
+      await expect(panel.locator(".session-row-menu-summary")).toHaveText("claude · Idle");
+      bodyFailed = false;
+      return;
+    }
     const items = panel.getByRole("menuitem");
     await items.first().press("ArrowDown");
     await expect(items.nth(1)).toBeFocused();
     await items.nth(1).press("Home");
     await focusedShot(page, `${name}-session-menu-focused`, items.first());
-    await panel.getByRole("menuitem", { name: "mark unread", exact: true }).click();
+    await panel.getByRole("menuitem", { name: "Mark unread", exact: true }).click();
     await expect(panel).toBeHidden();
     await expect(row.locator(".status-badge.idle.unseen")).toHaveCount(1);
     await openRowMenu(row);
-    await expect(panel.getByRole("menuitem", { name: "mark read", exact: true }))
+    await expect(panel.getByRole("menuitem", { name: "Mark read", exact: true }))
       .toHaveAccessibleDescription("Treat the latest output as seen");
     await shot(page, `${name}-session-menu-mark-read`, window, { pad: 0 });
     await closeMenu();
@@ -398,13 +410,19 @@ async function menuShots(page: Page, request: APIRequestContext, scenario: Scena
     await shot(page, `${name}-session-menu-short`, window, { pad: 0 });
     await items.first().press("End");
     const last = items.last();
-    await expect(last).toHaveAccessibleName("delete");
+    await expect(last).toHaveAccessibleName("Delete");
     await expect(last).toBeFocused();
     await expect(last).toBeInViewport();
     await focusedShot(page, `${name}-session-menu-short-last-focused`, last);
     await closeMenu();
     await page.setViewportSize(viewport);
 
+    // Ordinary session review owns no template editor. Return inside the
+    // existing restoration boundary so pin and seen stamps still restore.
+    if (!includeTemplateNumbers) {
+      bodyFailed = false;
+      return;
+    }
     await page.locator(".templates-button").click();
     const templates = page.locator(".templates-dialog");
     try {
@@ -415,20 +433,30 @@ async function menuShots(page: Page, request: APIRequestContext, scenario: Scena
       if (await templates.isVisible()) await templates.locator(".templates-close").click();
       await expect(templates).toBeHidden();
     }
+    bodyFailed = false;
   } finally {
-    await closeMenu();
-    await page.setViewportSize(viewport);
-    await showSession(page, initial);
-    expect((await request.put(pinUrl, { data: { pinned: saved.pinned } })).ok()).toBe(true);
-    expect((await request.put(`/api/sessions/${encodeURIComponent(id)}/seen`, {
-      data: { seen_activity_at: saved.seen_activity_at },
-    })).ok()).toBe(true);
-    await expect(row).toHaveAttribute("data-session-pinned", String(saved.pinned));
-    await expect.poll(async () => {
-      const listing = await request.get("/api/sessions");
-      expect(listing.ok()).toBe(true);
-      return (await listing.json()).sessions.find((candidate: { id: string }) => candidate.id === id)?.seen_activity_at;
-    }, { message: "restore the menu fixture's exact original seen stamp" }).toBe(saved.seen_activity_at);
+    // Browser cleanup can fail while the request client still works. Attempt
+    // both backend restorations independently, after selecting the original
+    // terminal so its ordinary mark-on-open cannot overwrite the saved stamp.
+    await cleanupOwnedSteps(bodyFailed, [
+      ["close the owned session menu", closeMenu],
+      ["restore exact menu viewport", () => page.setViewportSize(viewport)],
+      ["restore original selected terminal", () => showSession(page, initial)],
+      ["restore exact menu pin state", async () => {
+        expect((await request.put(pinUrl, { data: { pinned: saved.pinned } })).ok()).toBe(true);
+        await expect(row).toHaveAttribute("data-session-pinned", String(saved.pinned));
+      }],
+      ["restore exact menu seen stamp", async () => {
+        expect((await request.put(`/api/sessions/${encodeURIComponent(id)}/seen`, {
+          data: { seen_activity_at: saved.seen_activity_at },
+        })).ok()).toBe(true);
+        await expect.poll(async () => {
+          const listing = await request.get("/api/sessions");
+          expect(listing.ok()).toBe(true);
+          return (await listing.json()).sessions.find((candidate: { id: string }) => candidate.id === id)?.seen_activity_at;
+        }, { message: "restore the menu fixture's exact original seen stamp" }).toBe(saved.seen_activity_at);
+      }],
+    ]);
   }
 }
 
@@ -843,6 +871,62 @@ async function launcherYoloShots(page: Page, request: APIRequestContext, name: s
   await page.setViewportSize(viewport);
 }
 
+/** Show the ordinary title editor and a real refusal without saving a title.
+ * Both capture paths share the same supervisor validation boundary. Cleanup
+ * cancels the owned dialog and restores its viewport even when capture fails.
+ */
+async function renameShots(page: Page, scenario: Scenario, name: string, includePhone = false) {
+  const viewport = page.viewportSize()!;
+  const window = [page.locator("body")];
+  try {
+    const row = rowOf(page, scenario, (session) => session.status === "idle" && session.seen === false);
+    const id = await row.getAttribute("data-session-id");
+    if (!id) throw new Error("Rename review needs its staged session identity");
+    await openRowMenu(row);
+    await row.locator(".session-row-rename").click();
+    const rename = page.locator(".rename-dialog");
+    await expect(rename).toHaveAccessibleName("Rename session");
+    await expect(rename.locator(".rename-input")).toHaveAccessibleName("New session title");
+    await expect(rename.locator(".rename-input")).toBeFocused();
+    await shot(page, `${name}-rename`, window, { pad: 0 });
+    await rename.locator(".rename-input").fill("review\ninvalid");
+    const [refusal] = await Promise.all([
+      page.waitForResponse((response) => response.request().method() === "POST" && response.url().endsWith(`/api/sessions/${encodeURIComponent(id)}/rename`)),
+      rename.locator(".rename-submit").click(),
+    ]);
+    expect(refusal.status(), "the supervisor rejects the control character without renaming").toBe(400);
+    await expect(rename.locator(".rename-error")).toBeVisible();
+    await shot(page, `${name}-rename-refusal`, window, { pad: 0 });
+    if (includePhone) {
+      await page.setViewportSize({ width: 390, height: 320 });
+      await insideViewport(page, rename.locator(".dialog-header"));
+      await insideViewport(page, rename.locator(".dialog-footer"));
+      await shot(page, `${name}-rename-phone-refusal`, window, { pad: 0 });
+      await scrollToEnd(rename);
+      await insideViewport(page, rename.locator(".rename-input"));
+      await shot(page, `${name}-rename-phone-refusal-end`, window, { pad: 0 });
+      await page.setViewportSize(viewport);
+    }
+    await rename.locator(".rename-cancel").click();
+    await expect(rename).toBeHidden();
+  } finally {
+    try {
+      const rename = page.locator(".rename-dialog");
+      if (await rename.isVisible()) await rename.locator(".rename-cancel").click();
+      await expect(rename).toBeHidden();
+      const menu = rowOf(page, scenario, session => session.status === "idle" && session.seen === false)
+        .locator(".session-row-menu-panel");
+      if (await menu.isVisible()) {
+        await menu.getByRole("menuitem").first().focus();
+        await page.keyboard.press("Escape");
+      }
+      await expect(menu).toBeHidden();
+    } finally {
+      await page.setViewportSize(viewport);
+    }
+  }
+}
+
 /** Photograph changed dialog frames and answers, cancelling every operation.
  * Rename's refusal is real: a newline is an invalid title, whereas an empty
  * title is legal. Templates only edits an unsaved draft. YOLO stops at the
@@ -852,34 +936,7 @@ async function launcherYoloShots(page: Page, request: APIRequestContext, name: s
 async function dialogShots(page: Page, request: APIRequestContext, scenario: Scenario, name: string, includePhone: boolean) {
   const viewport = page.viewportSize()!;
   const window = [page.locator("body")];
-  const row = rowOf(page, scenario, (session) => session.status === "idle" && session.seen === false);
-  const id = await row.getAttribute("data-session-id");
-  if (!id) throw new Error("Rename review needs its staged session identity");
-  await openRowMenu(row);
-  await row.locator(".session-row-rename").click();
-  const rename = page.locator(".rename-dialog");
-  await expect(rename.locator(".rename-input")).toBeFocused();
-  await shot(page, `${name}-rename`, window, { pad: 0 });
-  await rename.locator(".rename-input").fill("review\ninvalid");
-  const [refusal] = await Promise.all([
-    page.waitForResponse((response) => response.request().method() === "POST" && response.url().endsWith(`/api/sessions/${encodeURIComponent(id)}/rename`)),
-    rename.locator(".rename-submit").click(),
-  ]);
-  expect(refusal.status(), "the supervisor rejects the control character without renaming").toBe(400);
-  await expect(rename.locator(".rename-error")).toBeVisible();
-  await shot(page, `${name}-rename-refusal`, window, { pad: 0 });
-  if (includePhone) {
-    await page.setViewportSize({ width: 390, height: 320 });
-    await insideViewport(page, rename.locator(".dialog-header"));
-    await insideViewport(page, rename.locator(".dialog-footer"));
-    await shot(page, `${name}-rename-phone-refusal`, window, { pad: 0 });
-    await scrollToEnd(rename);
-    await insideViewport(page, rename.locator(".rename-input"));
-    await shot(page, `${name}-rename-phone-refusal-end`, window, { pad: 0 });
-    await page.setViewportSize(viewport);
-  }
-  await rename.locator(".rename-cancel").click();
-  await expect(rename).toBeHidden();
+  await renameShots(page, scenario, name, includePhone);
 
   await page.locator(".templates-button").click();
   const templates = page.locator(".templates-dialog");
@@ -1672,6 +1729,361 @@ async function showRailSetup(page: Page, request: APIRequestContext, scenario: S
   }
 }
 
+/** Show real session and template results without picking or launching one.
+ * Search input and mounted rows establish each asynchronous read's premise.
+ * The template-only shortcut is the existing public web shortcut; its Enter
+ * action launches, so only Close is used. Cleanup closes only this dialog.
+ */
+async function sentenceSwitcherShots(page: Page, scenario: Scenario, name: string) {
+  const dialog = page.locator(".quick-switcher-dialog");
+  const window = [page.locator("body")];
+  const close = async () => {
+    if (await dialog.isVisible()) await dialog.locator(".quick-switcher-close").click();
+    await expect(dialog).toBeHidden();
+  };
+  const capture = async (suffix: string) => {
+    // Search owns delayed focus help. Move focus to the actual dialog before
+    // a neutral picture, rather than racing the tooltip's scheduled show.
+    await dialog.focus();
+    await expect(dialog).toBeFocused();
+    await shot(page, `${name}-${suffix}`, window, { pad: 0 });
+  };
+  try {
+    await expect(page.locator(".quick-switcher-trigger")).toBeEnabled();
+    await page.keyboard.press("Control+Shift+k");
+    await expect(dialog).toHaveAccessibleName("Quick switcher");
+    const search = dialog.getByRole("combobox", { name: "Search sessions or templates", exact: true });
+    await expect(search).toBeFocused();
+    await expect(search).toHaveValue("");
+    await expect(dialog.locator(".quick-switcher-heading")).toHaveText("Recent sessions");
+    const opened = scenario.sessions.find(session => session.open);
+    if (!opened) throw new Error("switcher review needs the scenario's initially open session");
+    await expect(dialog.locator(".quick-switcher-title").filter({ hasText: opened.title })).toBeVisible();
+    await capture("switcher-recent");
+
+    await search.fill(opened.title);
+    await expect(search).toHaveValue(opened.title);
+    await expect(dialog.locator(".quick-switcher-heading")).toHaveText("Sessions");
+    await expect(dialog.locator(".quick-switcher-title").filter({ hasText: opened.title })).toBeVisible();
+    await capture("switcher-sessions");
+
+    const unmatched = "review-unmatched-session-name";
+    await search.fill(unmatched);
+    await expect(search).toHaveValue(unmatched);
+    await expect(dialog.locator(".quick-switcher-results").getByRole("option")).toHaveCount(0);
+    await expect(dialog.getByRole("status")).toHaveText("No sessions match");
+    await expect(dialog.locator(".quick-switcher-new")).toHaveText(`New session named "${unmatched}"`);
+    await capture("switcher-no-match");
+
+    const templates = scenario.templates;
+    if (!templates?.length) throw new Error("switcher review needs the real staged templates");
+    await search.fill("tl:");
+    await expect(search).toHaveValue("tl:");
+    await expect(dialog.locator(".quick-switcher-heading")).toHaveText("Templates");
+    await expect(dialog.locator(".quick-switcher-template")).toHaveCount(templates.length);
+    for (const template of templates) {
+      await expect(dialog.locator(".quick-switcher-template-name").getByText(template.name, { exact: true })).toBeVisible();
+    }
+    await capture("switcher-templates");
+    await close();
+
+    await expect(page.locator(".quick-switcher-template-trigger")).toBeEnabled();
+    await page.keyboard.press("Control+Shift+j");
+    await expect(dialog).toHaveAccessibleName("Template launcher");
+    const templateSearch = dialog.getByRole("combobox", { name: "Search templates", exact: true });
+    await expect(templateSearch).toBeFocused();
+    await expect(templateSearch).toHaveValue("");
+    await expect(dialog.locator(".quick-switcher-template")).toHaveCount(templates.length);
+    await expect(dialog.locator(".quick-switcher-heading")).toHaveText("Templates");
+    await capture("template-launcher");
+    await close();
+  } finally {
+    await close();
+  }
+}
+
+/** Review ordinary session wording on the same real fleet and attachments.
+ * All/all-hosts is established before dependent helpers and restored before
+ * returning. The outer case owns exact helm preferences; nested menu/outage
+ * helpers retain their narrower pin, seen-stamp and remote ownership.
+ * No session action, template pick, successful rename or shell-tab creation
+ * belongs here. Live/ended observations come from existing staged sessions.
+ */
+async function sentenceSessionShots(page: Page, request: APIRequestContext, scenario: Scenario, name: string) {
+  const initial = scenario.sessions.find(session => session.open);
+  const waiting = scenario.sessions.find(session => session.status === "waiting");
+  const idle = scenario.sessions.find(session => session.status === "idle" && session.seen === false);
+  const ended = scenario.sessions.find(session => session.status === "exited");
+  if (!initial || !waiting || !idle || !ended) throw new Error("ordinary session review needs real open, waiting, idle and ended sessions");
+  const window = [page.locator("body")];
+  let bodyFailed = true;
+  try {
+    await chooseHost(page);
+    await chooseStatus(page, "All");
+    await expect(hostChoice(page)).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("radio", { name: "All", exact: true })).toBeChecked();
+    await showSession(page, initial);
+    if (!sentenceSessionHintsOnly) await shot(page, `${name}-main`, window, { pad: 0 });
+    await menuShots(page, request, scenario, name, false);
+    if (sentenceSessionHintsOnly) {
+      await toolbarShots(page, name);
+      bodyFailed = false;
+      return;
+    }
+    await renameShots(page, scenario, name);
+
+    const idleRow = rowOf(page, scenario, session => session === idle);
+    const title = idleRow.locator(".session-title");
+    await expect(title).toHaveText(idle.title);
+    await expect(idleRow.locator(".status-badge.idle.unseen")).toHaveCount(1);
+    await title.hover();
+    const tooltip = page.locator(".farhelm-tooltip");
+    const summary = tooltip.locator(".session-summary");
+    await expect(summary).toBeVisible();
+    await expect(summary.locator(".session-summary-title")).toHaveText(idle.title);
+    await expect(summary.locator(".session-summary-state-word")).toHaveText("Idle — new output");
+    await expect(summary.locator(".session-summary-label")).toContainText(["Host", "Directory", "Started", "Last active"]);
+    await expect(summary.locator(".session-summary-footer")).toHaveText("Click to open⋯ For actions");
+    await insideViewport(page, tooltip);
+    await captureShot(page, `${name}-row-summary`, window, { pad: 0, keepPointer: true });
+    await page.mouse.move(0, 0);
+    await expect(tooltip).toBeHidden();
+
+    const age = idleRow.locator(".status-time");
+    await expect(age).toBeVisible();
+    const ageHelp = await age.getAttribute("data-tooltip");
+    expect(ageHelp, "the real activity stamp owns its absolute-time help").toMatch(/^Last activity /);
+    await age.hover();
+    await expect(tooltip).toBeVisible();
+    await expect(tooltip).toHaveText(ageHelp!);
+    await insideViewport(page, tooltip);
+    await captureShot(page, `${name}-last-activity`, window, { pad: 0, keepPointer: true });
+    await page.mouse.move(0, 0);
+    await expect(tooltip).toBeHidden();
+
+    await toolbarShots(page, name);
+    // This is the reporting source selected by toolbarShots. It has a real
+    // resume offer; only Replace/Delete questions are opened and cancelled.
+    for (const action of ["replace", "delete"] as const) {
+      const trigger = page.locator(`.header-${action}`);
+      const question = page.locator(`.header-${action}-confirm`);
+      try {
+        await expect(trigger).toBeEnabled();
+        await expect(trigger).not.toHaveAttribute("aria-disabled", "true");
+        await trigger.click();
+        await expect(question).toBeVisible();
+        await expect(question.locator(".btn-danger")).toBeFocused();
+        await expect(question.locator(".btn-neutral")).toHaveText("Cancel");
+        await insideViewport(page, question);
+        await clickDialogGap(page, question);
+        await shot(page, `${name}-header-${action}-question`, window, { pad: 0 });
+        await question.locator(".btn-neutral").click();
+        await expect(question).toBeHidden();
+      } finally {
+        if (await question.isVisible()) await question.locator(".btn-neutral").click();
+        await expect(question).toBeHidden();
+      }
+    }
+
+    const waitingRow = await showSession(page, waiting);
+    await expect(waitingRow.locator(".status-badge.waiting")).toHaveCount(1);
+    await shot(page, `${name}-selected-waiting`, window, { pad: 0 });
+    await rowQuestionShots(page, waitingRow, name);
+    const endedRow = await showSession(page, ended);
+    await expect(endedRow.locator(".session-row-detail .status-badge")).toContainText("Exited");
+    await expect(page.locator(".session-details .status-badge")).toContainText("Exited");
+    await shot(page, `${name}-selected-ended`, window, { pad: 0 });
+    await showUnavailable(page, request, scenario, waiting, name);
+
+    // The public controls dispatch to the browser's clipboard. Observe the
+    // product's caption only; that caption does not prove OS clipboard delivery.
+    expect(await page.evaluate(() => typeof navigator.clipboard?.writeText === "function"),
+      "copy evidence needs the browser's actual clipboard-write facility").toBe(true);
+    const copies = page.locator(".session-details .header-copy");
+    await expect(copies).toHaveCount(2);
+    for (const [index, suffix] of [[0, "directory"], [1, "command"]] as const) {
+      const copy = copies.nth(index);
+      await expect(copy).toBeVisible();
+      await copy.click();
+      await expect(copy.locator(".copy-feedback")).toHaveText("✓ Copied");
+      await page.mouse.click(0, 0);
+      await shot(page, `${name}-copied-${suffix}`, window, { pad: 0 });
+    }
+
+    try {
+      await chooseStatus(page, "Waiting");
+      await expect(waitingRow).toBeVisible();
+      await expect(page.locator(".session-count")).toHaveText(/^\d+ of \d+$/);
+      await shot(page, `${name}-status-waiting`, window, { pad: 0 });
+      const local = (await realHosts(request)).find(host => host.kind === "local");
+      if (!local) throw new Error("ordinary filter review needs the owned local host");
+      await chooseHost(page, local.id);
+      await expect(page.locator(".filter-empty")).toHaveText("No sessions match this filter");
+      await expect(page.locator(".session-count")).toHaveText(/^0 of \d+$/);
+      await shot(page, `${name}-status-empty`, window, { pad: 0 });
+    } finally {
+      await chooseHost(page);
+      await chooseStatus(page, "All");
+      await expect(waitingRow).toBeVisible();
+    }
+    await sentenceSwitcherShots(page, scenario, name);
+    bodyFailed = false;
+  } finally {
+    await cleanupOwnedSteps(bodyFailed, [
+      ["restore all hosts", () => chooseHost(page)],
+      ["restore All status", () => chooseStatus(page, "All")],
+      ["restore original selected staged terminal", () => showSession(page, initial)],
+    ]);
+  }
+}
+
+/** Keep row questions on the selected real waiting session, with Cancel only.
+ * Menu-owned focus is restored before Escape because a cancelled answer is
+ * removed from the DOM. No lifecycle action is ever confirmed.
+ */
+async function rowQuestionShots(page: Page, waitingRow: Locator, name: string) {
+  const window = [page.locator("body")];
+  try {
+    await expect(waitingRow).toHaveAttribute("data-session-selected", "true");
+    await expect(waitingRow.locator(".status-badge.waiting")).toHaveCount(1);
+    // A real unanswered confirmation disables the selected open button.
+    // Its identity must remain readable through that ancestor, too.
+    await openRowMenu(waitingRow);
+    await waitingRow.locator(".session-row-delete").click();
+    await expect(waitingRow.locator(".confirm-consequence")).toBeVisible();
+    await expect(waitingRow.locator(".session-row-open")).toBeDisabled();
+    await expect(waitingRow.locator(".session-row-open")).toHaveCSS("opacity", "1");
+    await clickDialogGap(page, waitingRow.locator(".session-row-menu-panel"));
+    await shot(page, `${name}-selected-confirmation`, window, { pad: 0 });
+    const deleteAnswer = waitingRow.locator(".confirm-delete");
+    await expect(deleteAnswer).toBeEnabled();
+    await keyboardFocusControl(page, waitingRow.locator(".session-row-menu-panel"), deleteAnswer);
+    await focusedShot(page, `${name}-danger-focused`, deleteAnswer, waitingRow.locator(".session-row-menu-panel"));
+    await waitingRow.locator(".confirm-cancel").click();
+    await expect(waitingRow.locator(".confirm-consequence")).toBeHidden();
+    await expect(waitingRow.locator(".session-row-open")).toBeEnabled();
+    await waitingRow.locator(".session-row-replace").click();
+    const replaceAnswer = waitingRow.locator(".confirm-replace");
+    await expect(replaceAnswer).toBeEnabled();
+    await keyboardFocusControl(page, waitingRow.locator(".session-row-menu-panel"), replaceAnswer);
+    await focusedShot(page, `${name}-replace-confirmation-focused`, replaceAnswer, waitingRow.locator(".session-row-menu-panel"));
+    await waitingRow.locator(".replace-cancel").click();
+    await expect(replaceAnswer).toBeHidden();
+    // Cancel removes its focused answer. Restore an ordinary menu owner
+    // before Escape, matching the menu's supported keyboard handoff.
+    const firstMenuItem = waitingRow.locator(".session-row-menu-panel [role='menuitem']").first();
+    await expect(firstMenuItem).toBeVisible();
+    await firstMenuItem.focus();
+    await expect(firstMenuItem).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(waitingRow.locator(".session-row-menu-panel")).toBeHidden();
+    // Escape returns focus to the row-menu toggle and its help. The menu
+    // is closed now, so a neutral press dismisses help before the main shot.
+    await page.mouse.click(0, 0);
+  } finally {
+    const panel = waitingRow.locator(".session-row-menu-panel");
+    if (await panel.isVisible()) {
+      for (const selector of [".confirm-cancel", ".replace-cancel"]) {
+        const cancel = panel.locator(selector);
+        if (await cancel.isVisible()) await cancel.click();
+      }
+      await panel.getByRole("menuitem").first().focus();
+      await page.keyboard.press("Escape");
+    }
+    await expect(panel).toBeHidden();
+  }
+}
+
+/** Show real split menus and genuine unavailable/available Restart controls.
+ * The reporting source is staged once by the existing setup condition. Never
+ * activate its idle Restart: that would act immediately rather than ask.
+ */
+async function toolbarShots(page: Page, name: string) {
+  const main = page.locator(".app-main");
+  await expect(page.locator(".header-action-menu:visible, .session-row-menu-panel:visible")).toHaveCount(0);
+  try {
+    // The fixed actions must fit the measured main pane. A nominal
+    // viewport width alone would miss clipping beside a wider sidebar.
+    const actions = page.locator(".titlebar-actions");
+    await expect(actions.locator("button:visible")).toHaveCount(8);
+    const pane = (await main.boundingBox())!;
+    for (const button of await actions.locator("button:visible").all()) {
+      const box = (await button.boundingBox())!;
+      expect(box.x).toBeGreaterThanOrEqual(pane.x);
+      expect(box.x + box.width).toBeLessThanOrEqual(pane.x + pane.width);
+    }
+    for (const action of (sentenceSessionHintsOnly ? [] : ["Restart", "Replace"] as const)) {
+      const caret = page.getByRole("button", { name: `${action} options`, exact: true });
+      await keyboardFocusControl(page, page.locator("body"), caret);
+      await focusedShot(page, `${name}-${action.toLowerCase()}-caret-focused`, caret);
+      await caret.press("ArrowDown");
+      const menu = page.getByRole("menu", { name: action, exact: true });
+      const panel = page.locator(".header-action-menu");
+      await expect(menu).toBeVisible();
+      await inspectMenu(page, panel);
+      await menu.getByRole("menuitem").first().press("End");
+      const withAction = menu.getByRole("menuitem", { name: `${action} with…`, exact: true });
+      await expect(withAction).toBeFocused();
+      await focusedShot(page, `${name}-${action.toLowerCase()}-menu-focused`, withAction);
+      await withAction.press("Escape");
+      await expect(menu).toBeHidden();
+      await expect(caret).toBeFocused();
+    }
+    const restart = page.locator(".restart-primary");
+    await expect(restart).toHaveAttribute("aria-disabled", "true");
+    await expect(restart).toHaveAttribute("data-tooltip", /^Restart unavailable — this command launch/);
+    await keyboardFocusControl(page, page.locator("body"), restart);
+    await focusedShot(page, `${name}-toolbar-unavailable-restart`, restart);
+    const fleet = readFleet();
+    expect(fleet.toolbarReview, "the ordinary stage must provide the genuine reporting fixture").toBeDefined();
+    const reviewId = fleet.ids.get(fleet.toolbarReview!.title)!;
+    await attachSession(page, reviewId);
+    await waitForSessionRevealed(page, reviewId);
+    if (fleet.toolbarReview!.transcript) {
+      await waitForTermText(page, lastTranscriptLine(DOCS_SHOTS_DIR, fleet.toolbarReview!.transcript));
+    }
+    await expect(restart).toHaveAttribute("aria-disabled", "false");
+    await expect(restart).toHaveAttribute("data-tooltip", "Resume conversation — restarting resumes this session's own conversation.");
+    await keyboardFocusControl(page, page.locator("body"), restart);
+    await focusedShot(page, `${name}-toolbar-available-restart`, restart);
+    if (!sentenceSessionHintsOnly) {
+      const caret = page.locator(".restart-menu-toggle");
+      await keyboardFocusControl(page, page.locator("body"), caret);
+      await caret.press("ArrowDown");
+      const menu = page.getByRole("menu", { name: "Restart", exact: true });
+      const plain = menu.getByRole("menuitem", { name: "Restart", exact: true });
+      await expect(plain).toHaveAttribute("aria-disabled", "false");
+      await expect(menu.getByRole("menuitem", { name: "Restart with…", exact: true })).toHaveAttribute("aria-disabled", "false");
+      await expect(plain).toBeFocused();
+      await focusedShot(page, `${name}-restart-menu-available-focused`, plain);
+      await plain.press("Escape");
+    }
+    const reviewRow = page.locator(`[data-session-id="${reviewId}"]`);
+    await openRowMenu(reviewRow);
+    const rowPanel = page.locator(".session-row-menu-flyout");
+    await expect(rowPanel).toBeVisible();
+    await shot(page, `${name}-row-replace-glyph`, [page.locator("body")], { pad: 0 });
+    await page.keyboard.press("Escape");
+    await expect(rowPanel).toBeHidden();
+  } finally {
+    // A failed menu assertion still leaves a mounted input owner. Dismiss
+    // only the menus this helper opens before caller restoration touches rail
+    // controls or attempts another attachment.
+    const headerMenu = page.locator(".header-action-menu");
+    if (await headerMenu.isVisible()) {
+      await headerMenu.getByRole("menuitem").first().focus();
+      await page.keyboard.press("Escape");
+    }
+    await expect(headerMenu).toBeHidden();
+    const rowMenu = page.locator(".session-row-menu-panel:visible");
+    if (await rowMenu.count()) {
+      await rowMenu.getByRole("menuitem").first().focus();
+      await page.keyboard.press("Escape");
+    }
+    await expect(rowMenu).toHaveCount(0);
+  }
+}
+
 for (const colorScheme of ["dark", "light"] as const) {
   for (const width of ["wide", "main-650"] as const) {
     /**
@@ -1729,6 +2141,10 @@ for (const colorScheme of ["dark", "light"] as const) {
         await expect(page.locator(".build-skew")).toHaveCount(0);
         const name = `visual-review/${colorScheme}-${width}`;
         const window = [page.locator("body")];
+        if (sentenceSessionsOnly || sentenceSessionHintsOnly) {
+          await sentenceSessionShots(page, request, scenario, name);
+          return;
+        }
         if (sentenceHelpOnly) {
           await sentenceHelpShots(page, name);
           return;
@@ -1807,64 +2223,7 @@ for (const colorScheme of ["dark", "light"] as const) {
         }
         await shot(page, `${name}-main`, window, { pad: 0 });
         if (toolbarOnly) {
-          // The fixed actions must fit the measured main pane. A nominal
-          // viewport width alone would miss clipping beside a wider sidebar.
-          const actions = page.locator(".titlebar-actions");
-          await expect(actions.locator("button:visible")).toHaveCount(8);
-          const pane = (await main.boundingBox())!;
-          for (const button of await actions.locator("button:visible").all()) {
-            const box = (await button.boundingBox())!;
-            expect(box.x).toBeGreaterThanOrEqual(pane.x);
-            expect(box.x + box.width).toBeLessThanOrEqual(pane.x + pane.width);
-          }
-          for (const action of ["Restart", "Replace"] as const) {
-            const caret = page.getByRole("button", { name: `${action} options`, exact: true });
-            await keyboardFocusControl(page, page.locator("body"), caret);
-            await focusedShot(page, `${name}-${action.toLowerCase()}-caret-focused`, caret);
-            await caret.press("ArrowDown");
-            const menu = page.getByRole("menu", { name: action, exact: true });
-            const panel = page.locator(".header-action-menu");
-            await expect(menu).toBeVisible();
-            await inspectMenu(page, panel);
-            await menu.getByRole("menuitem").first().press("End");
-            const withAction = menu.getByRole("menuitem", { name: `${action} with…`, exact: true });
-            await expect(withAction).toBeFocused();
-            await focusedShot(page, `${name}-${action.toLowerCase()}-menu-focused`, withAction);
-            await withAction.press("Escape");
-            await expect(menu).toBeHidden();
-            await expect(caret).toBeFocused();
-          }
-          const restart = page.locator(".restart-primary");
-          await expect(restart).toHaveAttribute("aria-disabled", "true");
-          await keyboardFocusControl(page, page.locator("body"), restart);
-          await focusedShot(page, `${name}-toolbar-unavailable-restart`, restart);
-          const fleet = readFleet();
-          expect(fleet.toolbarReview, "the ordinary stage must provide the genuine reporting fixture").toBeDefined();
-          const reviewId = fleet.ids.get(fleet.toolbarReview!.title)!;
-          await attachSession(page, reviewId);
-          await waitForSessionRevealed(page, reviewId);
-          if (fleet.toolbarReview!.transcript) {
-            await waitForTermText(page, lastTranscriptLine(DOCS_SHOTS_DIR, fleet.toolbarReview!.transcript));
-          }
-          await expect(restart).toHaveAttribute("aria-disabled", "false");
-          await keyboardFocusControl(page, page.locator("body"), restart);
-          await focusedShot(page, `${name}-toolbar-available-restart`, restart);
-          const caret = page.locator(".restart-menu-toggle");
-          await keyboardFocusControl(page, page.locator("body"), caret);
-          await caret.press("ArrowDown");
-          const menu = page.getByRole("menu", { name: "Restart", exact: true });
-          const plain = menu.getByRole("menuitem", { name: "Restart", exact: true });
-          await expect(plain).toHaveAttribute("aria-disabled", "false");
-          await expect(menu.getByRole("menuitem", { name: "Restart with…", exact: true })).toHaveAttribute("aria-disabled", "false");
-          await expect(plain).toBeFocused();
-          await focusedShot(page, `${name}-restart-menu-available-focused`, plain);
-          await plain.press("Escape");
-          const reviewRow = page.locator(`[data-session-id="${reviewId}"]`);
-          await openRowMenu(reviewRow);
-          const rowPanel = page.locator(".session-row-menu-flyout");
-          await expect(rowPanel).toBeVisible();
-          await shot(page, `${name}-row-replace-glyph`, [page.locator("body")], { pad: 0 });
-          await page.keyboard.press("Escape");
+          await toolbarShots(page, name);
           return;
         }
         if (sidebarWarningOnly) {
@@ -2134,47 +2493,14 @@ for (const colorScheme of ["dark", "light"] as const) {
         await expect(waitingRow.locator(".status-badge.waiting")).toHaveCount(1);
         await expect(waitingRow.locator(".status-dot")).toHaveCSS("color", "rgb(255, 255, 255)");
         await shot(page, `${name}-selected-waiting`, window, { pad: 0 });
-        // A real unanswered confirmation disables the selected open button.
-        // Its identity must remain readable through that ancestor, too.
-        await openRowMenu(waitingRow);
-        await waitingRow.locator(".session-row-delete").click();
-        await expect(waitingRow.locator(".confirm-consequence")).toBeVisible();
-        await expect(waitingRow.locator(".session-row-open")).toBeDisabled();
-        await expect(waitingRow.locator(".session-row-open")).toHaveCSS("opacity", "1");
-        await clickDialogGap(page, waitingRow.locator(".session-row-menu-panel"));
-        await shot(page, `${name}-selected-confirmation`, window, { pad: 0 });
-        const deleteAnswer = waitingRow.locator(".confirm-delete");
-        await expect(deleteAnswer).toBeEnabled();
-        await keyboardFocusControl(page, waitingRow.locator(".session-row-menu-panel"), deleteAnswer);
-        await focusedShot(page, `${name}-danger-focused`, deleteAnswer, waitingRow.locator(".session-row-menu-panel"));
-        await waitingRow.locator(".confirm-cancel").click();
-        await expect(waitingRow.locator(".confirm-consequence")).toBeHidden();
-        await expect(waitingRow.locator(".session-row-open")).toBeEnabled();
-        await waitingRow.locator(".session-row-replace").click();
-        const replaceAnswer = waitingRow.locator(".confirm-replace");
-        await expect(replaceAnswer).toBeEnabled();
-        await keyboardFocusControl(page, waitingRow.locator(".session-row-menu-panel"), replaceAnswer);
-        await focusedShot(page, `${name}-replace-confirmation-focused`, replaceAnswer, waitingRow.locator(".session-row-menu-panel"));
-        await waitingRow.locator(".replace-cancel").click();
-        await expect(replaceAnswer).toBeHidden();
-        // Cancel removes its focused answer. Restore an ordinary menu owner
-        // before Escape, matching the menu's supported keyboard handoff.
-        const firstMenuItem = waitingRow.locator(".session-row-menu-panel [role='menuitem']").first();
-        await expect(firstMenuItem).toBeVisible();
-        await firstMenuItem.focus();
-        await expect(firstMenuItem).toBeFocused();
-        await page.keyboard.press("Escape");
-        await expect(waitingRow.locator(".session-row-menu-panel")).toBeHidden();
-        // Escape returns focus to the row-menu toggle and its help. The menu
-        // is closed now, so a neutral press dismisses help before the main shot.
-        await page.mouse.click(0, 0);
+        await rowQuestionShots(page, waitingRow, name);
         await showUnavailable(page, request, scenario, waiting, name);
         const idleRow = await showSession(page, idle);
         await expect(idleRow.locator(".status-badge.idle:not(.unseen)")).toHaveCount(1);
         await expect(idleRow.locator(".status-dot")).toHaveCSS("color", "rgb(255, 255, 255)");
         await shot(page, `${name}-selected-seen`, window, { pad: 0 });
         await openRowMenu(idleRow);
-        const unread = idleRow.getByRole("menuitem", { name: "mark unread", exact: true });
+        const unread = idleRow.getByRole("menuitem", { name: "Mark unread", exact: true });
         await expect(unread).toBeVisible();
         await unread.click();
         await expect(idleRow.locator(".session-row-menu-panel")).toBeHidden();

@@ -582,7 +582,7 @@ test("a session without a terminal anchors approval below its top row", async ({
   const target = page.locator(`[data-session-id="${session!.id}"] .session-row-open`);
   await expect(target).toBeVisible();
   await target.click();
-  await expect(page.locator(".session-details .status-badge")).toHaveText("interrupted");
+  await expect(page.locator(".session-details .status-badge")).toHaveText("Interrupted");
   await expect(page.locator(".terminal-panes")).toHaveCount(0);
   // The recovery card replaces the flexible terminal area. A full-pane
   // minimum height would leave the session identity below the window edge.
@@ -675,7 +675,7 @@ test("approval remains answerable while the quick switcher is open", async ({ pa
   await expect(terminal).toBeFocused();
   const mac = await page.evaluate(() => navigator.platform.includes("Mac"));
   await page.keyboard.press(mac ? "Meta+k" : "Control+Shift+k");
-  const dialog = page.getByRole("dialog", { name: "quick switcher" });
+  const dialog = page.getByRole("dialog", { name: "Quick switcher" });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole("combobox")).toBeFocused();
   await expect(page.locator(".app-main")).toHaveAttribute("inert", "");

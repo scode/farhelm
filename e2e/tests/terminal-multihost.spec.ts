@@ -70,6 +70,7 @@ import {
   installTerminalSuiteHooks,
   reconnectTimingsFromNextLoad,
   LIVE_BADGE,
+  LIVE_STATE,
   rowByTitle,
   sharedSessionRow,
 } from "./helpers/terminal-suite";
@@ -3151,7 +3152,7 @@ test.describe("multi-host", () => {
         // observation rather than the create-time placeholder. Asserting
         // one exact word here would fail the moment the classifier decided
         // a quiet agent was idle.
-        .toMatch(LIVE_BADGE);
+        .toMatch(LIVE_STATE);
 
       // The one thing no API can do. SIGTERM rather than SIGKILL so the
       // supervisor unwinds; either way the helm loses its connection when
@@ -3387,11 +3388,11 @@ test.describe("multi-host", () => {
       };
       await expect.poll(liveSession, { timeout: 30_000 }).toEqual({
         stale: false,
-        state: expect.stringMatching(LIVE_BADGE),
+        state: expect.stringMatching(LIVE_STATE),
       });
       // sleep-ok: cover delivery of a wrongly queued Stop and the subsequent listing refresh; this sleep agent exits on its first SIGTERM.
       await new Promise((resolve) => setTimeout(resolve, 5_000));
-      expect(await liveSession()).toEqual({ stale: false, state: expect.stringMatching(LIVE_BADGE) });
+      expect(await liveSession()).toEqual({ stale: false, state: expect.stringMatching(LIVE_STATE) });
     });
   });
 
@@ -3438,7 +3439,7 @@ test.describe("multi-host", () => {
           },
           { timeout: 30_000, message: `waiting for the helm to see ${title} running` },
         )
-        .toMatch(LIVE_BADGE);
+        .toMatch(LIVE_STATE);
       return id;
     }
 
@@ -3533,7 +3534,7 @@ test.describe("multi-host", () => {
       const notice = page.locator(".interrupted-card");
       await expect(notice).toBeVisible({ timeout: 60_000 });
       await expect(notice).toContainText("host restart paused this session");
-      await expect(page.locator(".session-details .status-badge")).toHaveText("interrupted");
+      await expect(page.locator(".session-details .status-badge")).toHaveText("Interrupted");
       await expect(page.locator("#terminal")).toHaveCount(0);
       await expect(page.locator("#term-connecting")).toHaveCount(0);
       await expect(page.locator(".host-stale-notice")).toHaveCount(0);
@@ -3544,7 +3545,7 @@ test.describe("multi-host", () => {
       await page.waitForTimeout(5_000);
       await expect(page.locator("#terminal")).toHaveCount(0);
       await expect(page.locator("#term-connecting")).toHaveCount(0);
-      await expect(page.locator(".session-details .status-badge")).toHaveText("interrupted");
+      await expect(page.locator(".session-details .status-badge")).toHaveText("Interrupted");
     });
 
     // Opening a session that was ALREADY interrupted when the view loads,
@@ -3556,7 +3557,7 @@ test.describe("multi-host", () => {
       requireFleet();
       await page.goto("/");
       const row = rowByTitle(page, closedTitle);
-      await expect(row.locator(".status-badge")).toHaveText("interrupted", { timeout: 60_000 });
+      await expect(row.locator(".status-badge")).toHaveText("Interrupted", { timeout: 60_000 });
       await row.locator(".session-row-open").click();
       await expect(page.locator(".interrupted-card")).toBeVisible();
       await expect(page.locator("#terminal")).toHaveCount(0);
@@ -3566,7 +3567,7 @@ test.describe("multi-host", () => {
       // classifies the session as interrupted and the row still says so.
       await sharedSessionRow(page).click();
       await expect(page.locator(".session-details .title")).toHaveText("e2e-session");
-      await expect(rowByTitle(page, closedTitle).locator(".status-badge")).toHaveText("interrupted");
+      await expect(rowByTitle(page, closedTitle).locator(".status-badge")).toHaveText("Interrupted");
       const listing = await (await request.get("/api/sessions")).json();
       const still = listing.sessions.find((s: any) => s.title === closedTitle);
       expect(still?.status?.state, "declining must leave the session interrupted").toBe("interrupted");
@@ -3688,7 +3689,7 @@ test.describe("multi-host", () => {
       // the removal reached past the registry.
       // Rediscovery can also reveal unseen output from the surviving agent.
       // That qualifies idle without changing whether the agent is alive.
-      await expect(rediscovered.locator(".status-badge")).toHaveText(/^(running|waiting|idle(?: — new output)?)$/);
+      await expect(rediscovered.locator(".status-badge")).toHaveText(/^(Running|Waiting|Idle(?: — new output)?)$/);
       const listing = await (await request.get("/api/sessions")).json();
       const survivor = listing.sessions.find((s: any) => s.title === title);
       // Re-adding creates a new host entry, so the reference changes while the
