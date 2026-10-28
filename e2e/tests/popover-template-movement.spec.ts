@@ -45,7 +45,7 @@ async function withTemplates(
     await page.goto("/");
     // The sidebar icon and the dialog keep distinct accessible names.
     await page.getByRole("button", { name: "Templates", exact: true }).click();
-    const dialog = page.getByRole("dialog", { name: "templates", exact: true });
+    const dialog = page.getByRole("dialog", { name: "Templates", exact: true });
     await expect(dialog.locator(".templates-sidebar")).toHaveAttribute("aria-busy", "false");
     for (const name of names) await expect(numberToggle(dialog, name)).toBeEnabled();
     await expect(dialog.locator(".templates-retry")).toHaveCount(0);
@@ -79,12 +79,12 @@ async function withTemplates(
 
 /** Accessible identities use the real raw owned name, independent of list index. */
 function numberToggle(dialog: Locator, name: string) {
-  return dialog.getByRole("button", { name: `number shortcut ${name}`, exact: true });
+  return dialog.getByRole("button", { name: `Number shortcut ${name}`, exact: true });
 }
 
 /** The popup remains inside Templates' isolation, as the production menu does. */
 function numberMenu(dialog: Locator, name: string) {
-  return dialog.getByRole("menu", { name: `number key for ${name}`, exact: true });
+  return dialog.getByRole("menu", { name: `Number key for ${name}`, exact: true });
 }
 
 /** The exact name span identifies the saved card, not an option owner label. */
@@ -170,7 +170,7 @@ for (const scenario of transfers) {
       await page.reload();
       await page.getByRole("button", { name: "Templates", exact: true }).click();
       await expect(dialog.locator(".templates-sidebar")).toHaveAttribute("aria-busy", "false");
-      await expect(dialog.getByRole("button", { name: `quick launch ${from}`, exact: true })).toHaveAttribute("aria-pressed", "true");
+      await expect(dialog.getByRole("button", { name: `Quick launch ${from}`, exact: true })).toHaveAttribute("aria-pressed", "true");
       await expect(templateRow(dialog, from).locator(".templates-quick-chord")).toHaveCount(1);
       await page.mouse.move(1090, 1090);
       await openNumber(page, dialog, target);

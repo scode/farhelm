@@ -295,25 +295,25 @@ mod tests {
         assert!(!session.screen_yolo);
         assert_eq!(
             crate::peer::detail_text(&summary_parts(&session)),
-            "claude · guarded"
+            "Claude · Guarded"
         );
         session.screen_yolo = true;
         assert_eq!(
             crate::peer::detail_text(&summary_parts(&session)),
-            "claude · guarded, YOLO observed"
+            "Claude · Guarded, YOLO observed"
         );
         let rendered = text_values(&render(session.clone(), HostLocality::Unknown, None)).join("");
         assert!(rendered.contains(", YOLO observed"), "{rendered}");
         assert_eq!(
             crate::peer::detail_text(&menu_header_summary_parts(&session, None)),
-            "claude · guarded"
+            "Claude · Guarded"
         );
         if let Some(crate::SessionLaunch::Agent { selection, .. }) = &mut session.launch {
             selection.permissions = Some(crate::LaunchPermission::Yolo);
         }
         assert_eq!(
             crate::peer::detail_text(&summary_parts(&session)),
-            "claude · yolo, YOLO observed"
+            "Claude · YOLO, YOLO observed"
         );
         session.launch = None;
         assert!(!crate::peer::detail_text(&summary_parts(&session)).contains("YOLO observed"));

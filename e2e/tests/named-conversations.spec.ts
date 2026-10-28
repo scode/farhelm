@@ -22,14 +22,14 @@ test("initial prompt launcher follows capabilities and binds literal request ret
   await page.goto("/");
   await page.locator(".new-session-button").click();
   const form = page.locator(".create-session-form");
-  const prompt = form.getByLabel("initial prompt", { exact: true });
+  const prompt = form.getByLabel("Initial prompt", { exact: true });
   await expect(prompt).toHaveCount(0);
   for (const [agent, supported] of [["Claude", true], ["Codex", true], ["Cursor", true], ["Grok", true], ["Muse", true], ["OMP", true], ["OpenCode", true], ["Goose", false], ["Pi", false]] as const) {
     await form.locator(".launch-composer-harness-choice").getByRole("button", { name: agent, exact: true }).click();
     await expect(prompt).toHaveCount(supported ? 1 : 0);
   }
   await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
-  await form.getByLabel("folder", { exact: true }).fill("/tmp");
+  await form.getByLabel("Folder", { exact: true }).fill("/tmp");
   await prompt.fill("--literal {farhelm_args}");
   await prompt.focus();
   await expect(prompt).toBeFocused();
@@ -40,7 +40,7 @@ test("initial prompt launcher follows capabilities and binds literal request ret
   // Tab moves focus normally; the input value still contains the new line.
   const message = "--literal {farhelm_args}\n\tsecond";
   await prompt.fill(message);
-  await expect(form.locator(".launch-composer-summary")).toContainText("prompt: 2 lines");
+  await expect(form.locator(".launch-composer-summary")).toContainText("Prompt: 2 lines");
   expect(bodies).toHaveLength(0);
   for (const [name, width, height] of [["desktop", 1280, 900], ["phone", 390, 844]] as const) {
     await page.setViewportSize({ width, height });
@@ -71,9 +71,9 @@ test("initial prompt launcher follows capabilities and binds literal request ret
   expect(bodies[2]).toMatchObject({ prompt: "changed message", conversation: "known-target" });
   expect(bodies[2].intent_key).not.toBe(bodies[1].intent_key);
   await expect(form.locator(".create-session-submit")).toBeEnabled();
-  await form.getByRole("tab", { name: "command", exact: true }).click();
+  await form.getByRole("tab", { name: "Command", exact: true }).click();
   await expect(prompt).toHaveCount(0);
-  await form.getByRole("tab", { name: "agent", exact: true }).click();
+  await form.getByRole("tab", { name: "Agent", exact: true }).click();
   await expect(prompt).toHaveValue("changed message");
 });
 
@@ -87,10 +87,10 @@ test("named conversation labels and reporting help follow the selected agent", a
   const form = page.locator(".create-session-form");
   await expect(form).toBeVisible();
   for (const [agent, label, captures] of [
-    ["Claude", "conversation id", true], ["Codex", "conversation id", true],
-    ["Grok", "conversation id", true], ["Muse", "conversation id", false],
-    ["Cursor", "chat id", false], ["Goose", "session id", false],
-    ["OpenCode", "session id", false], ["Pi", "session file", true], ["OMP", "session file", true],
+    ["Claude", "Conversation ID", true], ["Codex", "Conversation ID", true],
+    ["Grok", "Conversation ID", true], ["Muse", "Conversation ID", false],
+    ["Cursor", "Chat ID", false], ["Goose", "Session ID", false],
+    ["OpenCode", "Session ID", false], ["Pi", "Session file", true], ["OMP", "Session file", true],
   ] as const) {
     await form.locator(".launch-composer-harness-choice").getByRole("button", { name: agent, exact: true }).click();
     const choice = form.locator(".named-conversation-choice");
@@ -133,7 +133,7 @@ test("named conversation labels and reporting help follow the selected agent", a
     await form.screenshot({ path, animations: "disabled" });
     await testInfo.attach(`named launcher ${name}`, { path, contentType: "image/png" });
   }
-  await form.getByRole("tab", { name: "command", exact: true }).click();
+  await form.getByRole("tab", { name: "Command", exact: true }).click();
   await expect(form.locator(".named-conversation-choice")).toHaveCount(0);
 });
 
@@ -153,8 +153,8 @@ test("New sends a named conversation outside the reusable launch and preserves r
   const form = page.locator(".create-session-form");
   await expect(form).toBeVisible();
   await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Claude", exact: true }).click();
-  await form.getByLabel("folder", { exact: true }).fill("/tmp");
-  await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true }).click();
+  await form.getByLabel("Folder", { exact: true }).fill("/tmp");
+  await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "Guarded", exact: true }).click();
   await form.locator(".named-conversation").fill("known-target");
   await expect(form.locator(".create-session-submit")).toBeEnabled();
   await form.locator(".create-session-submit").click();

@@ -5,7 +5,7 @@
 //! inline panel is open, even if the surrounding launcher changes.
 
 use super::templates::{
-    Field, NAME_KIND_HELP, NameKindControl, new_name_refusal, saved_fields_refusal, word,
+    Field, NAME_KIND_HELP, NameKindControl, new_name_refusal, saved_fields_refusal,
 };
 use crate::modal_dialog::{RecoveryDelay, RecoveryFocus};
 use crate::{ApiBase, api, peer::display_peer};
@@ -134,9 +134,14 @@ fn choice_text(field: Field, fields: &TemplateFields, host_label: &str) -> Strin
                 Some((first, _)) => format!("{first}…"),
                 None => prompt.clone(),
             }),
-        Field::Agent => fields.agent.map(word),
+        Field::Agent => fields
+            .agent
+            .map(|agent| crate::launch_composer::harness_label(agent).into()),
         Field::Model => fields.model.clone().flatten(),
-        Field::Effort => fields.effort.flatten().map(word),
+        Field::Effort => fields
+            .effort
+            .flatten()
+            .map(|effort| crate::launch_composer::effort_label(Some(effort)).into()),
         Field::Permissions => Some(format!(
             "{}{}",
             crate::launch_composer::permission_label(fields.agent, fields.permissions.flatten()),
@@ -152,12 +157,12 @@ fn choice_text(field: Field, fields: &TemplateFields, host_label: &str) -> Strin
                 .as_ref()
                 .and_then(|prefix| prefix.as_ref())
                 .map(shell_words::join)
-                .unwrap_or_else(|| "none".into()),
+                .unwrap_or_else(|| "None".into()),
         ),
         Field::Command => fields.command.clone(),
         Field::Yolo => fields
             .yolo
-            .map(|v| if v { "YOLO" } else { "keeps safety checks" }.into()),
+            .map(|v| if v { "YOLO" } else { "Keeps safety checks" }.into()),
         Field::Resume => fields.resume_command.clone().flatten(),
         // The identity is the persisted binding, but the launcher label is
         // what lets a user recognize the host they are choosing to keep.
@@ -168,7 +173,7 @@ fn choice_text(field: Field, fields: &TemplateFields, host_label: &str) -> Strin
         }),
         Field::Name => fields.name.clone(),
     };
-    display_peer(value.as_deref().unwrap_or("default"))
+    display_peer(value.as_deref().unwrap_or("Default"))
 }
 
 /// Return a refused save's keyboard focus without taking it from another field.
@@ -224,7 +229,7 @@ pub(super) fn SaveTemplatePanel(
         };
         let refusal = check_template_shape(&template)
             .err()
-            .map(|e| e.to_string())
+            .map(crate::local_validation_notice)
             .or_else(|| saved_fields_refusal(&template, catalog.as_deref()));
         if let Some(refusal) = refusal {
             error.set(Some(refusal));
@@ -259,7 +264,7 @@ pub(super) fn SaveTemplatePanel(
         });
     });
     rsx! {
-        section { class: "save-template-panel", aria_label: "save as template",
+        section { class: "save-template-panel", aria_label: "Save as template",
             onkeydown: move |event| {
                 if event.key() == Key::Escape {
                     // The launcher also handles Escape. Keep the IME's key
@@ -271,11 +276,11 @@ pub(super) fn SaveTemplatePanel(
                     }
                 }
             },
-            label { "template name"
+            label { "Template name"
                 input { class: "save-template-name", r#type: "text", value: "{name}",
                     // Keep the chosen tl: search key, including its casing.
                     autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
-                    aria_label: "template name", "data-tooltip": "template name: choose a new name for this setup",
+                    aria_label: "Template name", "data-tooltip": "Template name: choose a new name for this setup",
                     disabled: saving(), oninput: move |event| name.set(event.value()),
                     onkeydown: move |event| {
                         // Enter belongs to the IME until its candidate is committed;
@@ -289,11 +294,11 @@ pub(super) fn SaveTemplatePanel(
                     },
                 }
             }
-            p { "choose which parts of this setup the template keeps" }
+            p { "Choose which parts of this setup the template keeps" }
             for field in Field::ALL.into_iter().filter(|f| f.is_set(&candidate.fields)) {
                 div { class: "save-template-field",
                     div { class: "template-name-label",
-                        label { class: "save-template-choice", "data-tooltip": "keep this {field.label()} in the template",
+                        label { class: "save-template-choice", "data-tooltip": "Keep this {field.label().to_ascii_lowercase()} in the template",
                             input { r#type: "checkbox", "data-field": field.key(), checked: checked().contains(&field),
                                 disabled: saving(), onchange: move |event| {
                                     checked.with_mut(|fields| {
@@ -321,17 +326,17 @@ pub(super) fn SaveTemplatePanel(
                 }
             }
             if candidate.fields.host.is_none() {
-                p { "this host has not been identified, so it cannot be saved in a template" }
+                p { "This host has not been identified, so it cannot be saved in a template" }
             }
             if let Some(message) = error() { p { class: "save-template-error", role: "alert", "{message}" } }
             div { class: "save-template-actions",
                 button { r#type: "button", class: "btn btn-primary save-template-save", disabled: saving(),
-                    "data-tooltip": "save: keep the checked choices and open the new template",
-                    onclick: move |_| save.call(()), if saving() { "saving…" } else { "save" }
+                    "data-tooltip": "Save: keep the checked choices and open the new template",
+                    onclick: move |_| save.call(()), if saving() { "Saving…" } else { "Save" }
                 }
                 button { r#type: "button", class: "btn btn-neutral save-template-cancel", disabled: saving(),
-                    "data-tooltip": "cancel: return to the launcher without saving a template",
-                    onclick: move |_| { if !saving() { on_cancel.call(()); } }, "cancel"
+                    "data-tooltip": "Cancel: return to the launcher without saving a template",
+                    onclick: move |_| { if !saving() { on_cancel.call(()); } }, "Cancel"
                 }
             }
         }
@@ -412,7 +417,7 @@ mod tests {
         );
         assert_eq!(
             choice_text(Field::Wrapper, &explicit.fields, "host"),
-            "none"
+            "None"
         );
     }
 

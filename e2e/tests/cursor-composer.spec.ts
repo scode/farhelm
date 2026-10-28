@@ -24,12 +24,12 @@ test("Cursor launches without claiming session tracking", async ({ page, request
   // Only mode choices have pressed state. The adjacent help button is
   // independently reachable, but does not add another permission mode.
   await expect(permissions.locator("button[aria-pressed]")).toHaveText([
-    "agent's own setting", "yolo", "custom",
+    "Agent's own setting", "YOLO", "Custom",
   ]);
-  await permissions.getByRole("button", { name: "yolo", exact: true }).click();
-  await form.getByRole("combobox", { name: "model", exact: true }).fill("composer-2.5");
+  await permissions.getByRole("button", { name: "YOLO", exact: true }).click();
+  await form.getByRole("combobox", { name: "Model", exact: true }).fill("composer-2.5");
   await form.getByRole("option", { name: "composer-2.5", exact: true }).click();
-  await form.getByLabel("folder", { exact: true }).fill("/tmp");
+  await form.getByLabel("Folder", { exact: true }).fill("/tmp");
   await expect(form.locator(".create-session-submit")).toBeEnabled();
   await page.route("**/api/sessions", async (route) => {
     if (route.request().method() !== "POST") return route.continue();
@@ -46,6 +46,6 @@ test("Cursor launches without claiming session tracking", async ({ page, request
 
   // The inactive structured draft must not leak its notice into the
   // command path.
-  await form.getByRole("tab", { name: "command", exact: true }).click();
+  await form.getByRole("tab", { name: "Command", exact: true }).click();
   await expect(form).not.toContainText("Cursor session tracking and Resume are not supported.");
 });

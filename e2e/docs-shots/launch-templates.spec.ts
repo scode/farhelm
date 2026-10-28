@@ -76,18 +76,18 @@ test("edit form", async ({ page, request }) => {
   const { director } = await open(page, request);
   const dialog = await openPanel(page);
   await templateRow(dialog, "codex-deep").click();
-  await expect(dialog.locator(".templates-editor-heading h3")).toHaveText("edit template");
-  await expect(dialog.getByLabel("agent type", { exact: true })).toHaveValue("codex");
+  await expect(dialog.locator(".templates-editor-heading h3")).toHaveText("Edit template");
+  await expect(dialog.getByLabel("Agent type", { exact: true })).toHaveValue("codex");
   await expect(dialog.locator(".templates-model")).toHaveValue("gpt-6.1-sol");
-  await expect(dialog.getByRole("group", { name: "effort", exact: true })
-    .getByRole("button", { name: "high", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(dialog.getByRole("group", { name: "Effort", exact: true })
+    .getByRole("button", { name: "High", exact: true })).toHaveAttribute("aria-pressed", "true");
   // Focus the dialog itself so the name field's help does not enter the crop.
   await dialog.focus();
   await expect(dialog).toBeFocused();
   // Place callouts below the list's rows so the selected template remains
   // visible alongside the editor's fields, removal buttons and footer.
   await director.callout(
-    dialog.getByRole("group", { name: "switches launcher to" }),
+    dialog.getByRole("group", { name: "Switches launcher to" }),
     "Applying this template opens the agent tab, with Codex, this model, and this effort. Fields not shown stay as they are.",
     { side: "left", dy: 220 },
   );

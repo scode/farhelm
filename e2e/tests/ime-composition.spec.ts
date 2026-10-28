@@ -251,7 +251,7 @@ test("composition-ending Enter leaves a model choice uncommitted", async ({ page
   await page.locator(".new-session-button").click();
   const form = page.locator(".create-session-form");
   await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
-  const field = form.getByRole("combobox", { name: "model", exact: true });
+  const field = form.getByRole("combobox", { name: "Model", exact: true });
   await field.fill("ime-custom-model");
   await expect(field).toHaveAttribute("aria-expanded", "true");
   await endComposition(field, "Enter", 229);

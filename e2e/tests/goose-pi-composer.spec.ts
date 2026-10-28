@@ -24,30 +24,30 @@ test("Goose and Pi permission transitions update the rendered draft", async ({ p
   const status = form.getByRole("status");
 
   // Premise: the passive helm-wide memory reached the mounted component.
-  await expect(form.locator(".launch-composer-summary")).toContainText("permissions: smart approve");
-  await form.getByRole("button", { name: "reset choices", exact: true }).click();
-  await expect(form.locator(".launch-composer-summary")).toContainText("permissions: smart approve");
+  await expect(form.locator(".launch-composer-summary")).toContainText("Permissions: Smart approve");
+  await form.getByRole("button", { name: "Reset choices", exact: true }).click();
+  await expect(form.locator(".launch-composer-summary")).toContainText("Permissions: Smart approve");
 
   await harnesses.getByRole("button", { name: "Pi", exact: true }).click();
-  await expect(permissions.locator("button[aria-pressed]")).toHaveText(["yolo"]);
-  await expect(permissions.getByRole("button", { name: "yolo", exact: true })).toHaveAttribute(
+  await expect(permissions.locator("button[aria-pressed]")).toHaveText(["YOLO"]);
+  await expect(permissions.getByRole("button", { name: "YOLO", exact: true })).toHaveAttribute(
     "aria-pressed",
     "true",
   );
-  await expect(permissions.getByRole("button", { name: "default", exact: true })).toHaveCount(0);
-  await expect(form.locator(".launch-composer-summary")).toContainText("permissions: yolo");
+  await expect(permissions.getByRole("button", { name: "Default", exact: true })).toHaveCount(0);
+  await expect(form.locator(".launch-composer-summary")).toContainText("Permissions: YOLO");
   await expect(status, "normalizing a passive remembered mode must stay silent").toHaveCount(0);
 
   await harnesses.getByRole("button", { name: "Goose", exact: true }).click();
   const search = form.locator('.launch-composer-search input[role="combobox"]');
   await search.fill("perms:smart approve");
-  const smartApprove = form.getByRole("option", { name: "Permissions: smart approve", exact: true });
+  const smartApprove = form.getByRole("option", { name: "Permissions: Smart approve", exact: true });
   await expect(smartApprove).toHaveAttribute("aria-selected", "true");
-  await expect(smartApprove).toHaveAttribute("data-tooltip", "smart approve: the agent asks only before actions it judges risky");
+  await expect(smartApprove).toHaveAttribute("data-tooltip", "Smart approve: the agent asks only before actions it judges risky");
   await search.press("Enter");
-  await expect(permissions.getByRole("button", { name: "smart approve", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(permissions.getByRole("button", { name: "Smart approve", exact: true })).toHaveAttribute("aria-pressed", "true");
   await harnesses.getByRole("button", { name: "Pi", exact: true }).click();
-  await expect(permissions.getByRole("button", { name: "yolo", exact: true })).toHaveAttribute(
+  await expect(permissions.getByRole("button", { name: "YOLO", exact: true })).toHaveAttribute(
     "aria-pressed",
     "true",
   );
@@ -58,11 +58,11 @@ test("Goose and Pi permission transitions update the rendered draft", async ({ p
   // Search activation uses a separate handler from the harness buttons. Its
   // reconciled permission must land in the same signal.
   await harnesses.getByRole("button", { name: "Goose", exact: true }).click();
-  await permissions.getByRole("button", { name: "chat", exact: true }).click();
+  await permissions.getByRole("button", { name: "Chat", exact: true }).click();
   await search.fill("Pi");
   await form.getByRole("option", { name: "Harness: Pi", exact: true }).click();
-  await expect(permissions.locator("button[aria-pressed]")).toHaveText(["yolo"]);
-  await expect(permissions.getByRole("button", { name: "yolo", exact: true })).toHaveAttribute(
+  await expect(permissions.locator("button[aria-pressed]")).toHaveText(["YOLO"]);
+  await expect(permissions.getByRole("button", { name: "YOLO", exact: true })).toHaveAttribute(
     "aria-pressed",
     "true",
   );
@@ -71,17 +71,17 @@ test("Goose and Pi permission transitions update the rendered draft", async ({ p
   // must keep the Pi owner carried by that row and apply Pi's permission
   // normalization through the model callback.
   await harnesses.getByRole("button", { name: "Goose", exact: true }).click();
-  await permissions.getByRole("button", { name: "approve", exact: true }).click();
-  const model = form.getByRole("combobox", { name: "model", exact: true });
+  await permissions.getByRole("button", { name: "Approve", exact: true }).click();
+  const model = form.getByRole("combobox", { name: "Model", exact: true });
   await model.focus();
-  await form.getByRole("option", { name: "show every harness's models", exact: true }).click();
+  await form.getByRole("option", { name: "Show every harness's models", exact: true }).click();
   await form.getByRole("option", { name: "x-ai/grok-4.6 (Pi)", exact: true }).click();
   await expect(harnesses.getByRole("button", { name: "Pi", exact: true })).toHaveAttribute(
     "aria-pressed",
     "true",
   );
-  await expect(permissions.locator("button[aria-pressed]")).toHaveText(["yolo"]);
-  await expect(permissions.getByRole("button", { name: "yolo", exact: true })).toHaveAttribute(
+  await expect(permissions.locator("button[aria-pressed]")).toHaveText(["YOLO"]);
+  await expect(permissions.getByRole("button", { name: "YOLO", exact: true })).toHaveAttribute(
     "aria-pressed",
     "true",
   );
@@ -89,7 +89,7 @@ test("Goose and Pi permission transitions update the rendered draft", async ({ p
   // transition. Goose appears first in the catalog and lacks these levels.
   // Pi's longer vocabulary is a native dropdown; its committed value must
   // survive the same-model-owner edit just as a selected segment would.
-  const effort = form.getByRole("combobox", { name: "effort", exact: true });
+  const effort = form.getByRole("combobox", { name: "Effort", exact: true });
   await expect(effort).toBeVisible();
   for (const level of ["minimal", "xhigh"]) {
     // selectOption changes the value without moving focus. A real dropdown
@@ -143,8 +143,8 @@ for (const rememberedTrust of [true, false]) {
       await harnesses.getByRole("button", { name: label, exact: true }).click();
       await expect(harnesses.getByRole("button", { name: label, exact: true })).toHaveAttribute("aria-pressed", "true");
       await expect(form.locator(".launch-composer-trust-choice")).toHaveCount(0);
-      if (harness === "pi") await expect(permissions.getByRole("button", { name: "yolo", exact: true })).toHaveAttribute("aria-pressed", "true");
-      else await permissions.getByRole("button", { name: "guarded", exact: true }).click();
+      if (harness === "pi") await expect(permissions.getByRole("button", { name: "YOLO", exact: true })).toHaveAttribute("aria-pressed", "true");
+      else await permissions.getByRole("button", { name: "Guarded", exact: true }).click();
       for (const query of ["trust:", "trust:true", "trust:false"]) {
         await search.fill(query);
         await expect(form.getByRole("option", { name: /^Trust workspace:/ })).toHaveCount(0);

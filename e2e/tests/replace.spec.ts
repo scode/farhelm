@@ -172,16 +172,16 @@ for (const surface of ["sidebar", "header", "new", "clone", "replace-with"] as c
       const form = page.locator(".create-session-form");
       if (surface === "new") {
         await page.locator(".new-session-button").click();
-        await form.getByRole("tab", { name: "command", exact: true }).click();
-        await form.getByLabel("agent command").fill(FAKE_AGENT);
-        await form.getByLabel("folder", { exact: true }).fill(cwd);
+        await form.getByRole("tab", { name: "Command", exact: true }).click();
+        await form.getByLabel("Agent command").fill(FAKE_AGENT);
+        await form.getByLabel("Folder", { exact: true }).fill(cwd);
         await answerYolo(form);
       } else if (surface === "clone" || surface === "replace-with") {
         await openRowMenu(row(page, source.id));
         await row(page, source.id).locator(`.session-row-${surface}`).click();
       }
       if (surface !== "sidebar" && surface !== "header") {
-        await form.getByLabel("name (optional)").fill(title);
+        await form.getByLabel("Name (optional)").fill(title);
         await expect(form.locator(".create-session-submit")).toBeEnabled();
       }
       fs.renameSync(cwd, hidden);
@@ -950,18 +950,18 @@ test("replace with pre-fills clone's form from the source, and editing the harne
     // Clone's exact prefill: this row's own title and directory, filled
     // without any edit yet, and the launch button already naming the
     // destructive half of what pressing it will do.
-    await expect(form.getByLabel("folder", { exact: true })).toHaveValue(cwd);
-    await expect(form.getByLabel("name (optional)")).toHaveValue(title);
+    await expect(form.getByLabel("Folder", { exact: true })).toHaveValue(cwd);
+    await expect(form.getByLabel("Name (optional)")).toHaveValue(title);
     await expect(form.locator(".create-session-submit")).toHaveText("Replace");
 
     // Replace with has the same shell as New and Clone: switching launch
     // modes cannot change the fixed source destination or its editable name.
-    await form.getByRole("tab", { name: "command", exact: true }).click();
+    await form.getByRole("tab", { name: "Command", exact: true }).click();
     await expect(form).toHaveAttribute("data-composer-mode", "command");
     await expect(form.locator('.launch-composer-search input[role="combobox"]')).toBeFocused();
-    await expect(form.getByLabel("folder", { exact: true })).toHaveValue(cwd);
-    await expect(form.getByLabel("name (optional)")).toHaveValue(title);
-    await form.getByRole("tab", { name: "agent", exact: true }).click();
+    await expect(form.getByLabel("Folder", { exact: true })).toHaveValue(cwd);
+    await expect(form.getByLabel("Name (optional)")).toHaveValue(title);
+    await form.getByRole("tab", { name: "Agent", exact: true }).click();
     await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
     await expect(form).toHaveAttribute("data-composer-mode", "structured");
 
@@ -986,7 +986,7 @@ test("replace with pre-fills clone's form from the source, and editing the harne
     await search.press("Enter");
     // Claude's longer effort list uses a dropdown. Search still commits the
     // choice without moving focus from the launcher's search box.
-    await expect(form.getByRole("combobox", { name: "effort", exact: true })).toHaveValue("medium");
+    await expect(form.getByRole("combobox", { name: "Effort", exact: true })).toHaveValue("medium");
     await expect(search).toHaveValue("");
     await expect(search).toBeFocused();
 
@@ -1057,9 +1057,9 @@ test("cancelling a replace-with composer leaves the source untouched and creates
 
     const form = page.locator('.create-session-form[role="dialog"]');
     await expect(form).toBeVisible();
-    await expect(form.getByLabel("name (optional)")).toHaveValue(title);
+    await expect(form.getByLabel("Name (optional)")).toHaveValue(title);
 
-    await form.getByRole("button", { name: "cancel", exact: true }).click();
+    await form.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(form).toHaveCount(0);
 
     expect(posts).toEqual([]);
@@ -1128,7 +1128,7 @@ async function waitForListedState(request: APIRequestContext, id: string, state:
  * session rather than "the same settings"; launching sends neither
  * precondition flag, since the warning covered the running agent, and the
  * source is replaced. A recent setup's row, whose Enter submits the same
- * replace, says "⏎ replace", leads its accessible name with "replace: ", and
+ * Replace, says "⏎ Replace", leads its accessible name with "Replace: ", and
  * names the warning as its description, as the replace button does.
  */
 test("replace with on a running source warns that its agent is killed, then replaces it", async ({
@@ -1165,8 +1165,8 @@ test("replace with on a running source warns that its agent is killed, then repl
     await expect(form.locator(".create-session-submit")).toHaveAttribute("aria-describedby", "launch-composer-replace-warning");
     const recent = form.locator(".launch-composer-recent-slots").getByRole("button").first();
     await expect(recent, "premise: the seeded recent setup is offered").toBeVisible();
-    await expect(recent.locator(".launch-composer-recent-hint")).toHaveText("⏎ replace");
-    await expect(recent).toHaveAttribute("aria-label", /^replace: /);
+    await expect(recent.locator(".launch-composer-recent-hint")).toHaveText("⏎ Replace");
+    await expect(recent).toHaveAttribute("aria-label", /^Replace: /);
     await expect(recent).toHaveAttribute("aria-describedby", "launch-composer-replace-warning");
 
     const { body, response } = await pressReplace(page, form, source.id);

@@ -28,11 +28,11 @@ for (const [label, harness, permission] of [
     const form = page.locator(".create-session-form");
     await expect(form).toBeVisible();
     await form.locator(".launch-composer-harness-choice").getByRole("button", { name: label, exact: true }).click();
-    await form.getByLabel("folder", { exact: true }).fill("/tmp");
-    await expect(form.getByRole("combobox", { name: "model", exact: true })).toHaveValue("harness default");
+    await form.getByLabel("Folder", { exact: true }).fill("/tmp");
+    await expect(form.getByRole("combobox", { name: "Model", exact: true })).toHaveValue("Harness default");
     const permissions = form.locator(".launch-composer-permissions-choice");
-    await expect(permissions.getByRole("button", { name: "default", exact: true })).toHaveCount(0);
-    await expect(permissions.getByRole("button", { name: permission, exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(permissions.getByRole("button", { name: "Default", exact: true })).toHaveCount(0);
+    await expect(permissions.getByRole("button", { name: permission === "yolo" ? "YOLO" : "Guarded", exact: true })).toHaveAttribute("aria-pressed", "true");
     await expect(form.locator(".create-session-submit")).toBeEnabled();
 
     await page.route("**/api/sessions", async (route) => {

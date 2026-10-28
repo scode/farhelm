@@ -139,12 +139,12 @@ test("repository keyboard navigation keeps the active suggestion visible through
     } });
   });
   const form = await openComposer(page, host);
-  await form.getByRole("group", { name: "destination type", exact: true })
-    .getByRole("button", { name: "managed checkout", exact: true }).click();
-  const repository = form.getByRole("combobox", { name: "repository", exact: true });
+  await form.getByRole("group", { name: "Destination type", exact: true })
+    .getByRole("button", { name: "Managed checkout", exact: true }).click();
+  const repository = form.getByRole("combobox", { name: "Repository", exact: true });
   await repository.focus();
   await expect(repository).toBeFocused();
-  const list = form.getByRole("listbox", { name: "repositories", exact: true });
+  const list = form.getByRole("listbox", { name: "Repositories", exact: true });
   await expect(list.getByRole("option")).toHaveCount(repos.length);
   expect(await list.evaluate((element) => element.scrollHeight > element.clientHeight), "fixture suggestions must overflow").toBe(true);
 
@@ -229,11 +229,11 @@ test("inline checkout folder setup refreshes discovery and preview and respects 
     const form = await openComposer(page, host);
     await feed.waitForConnection(1);
     expect(feed.openSockets()).toBeGreaterThan(0);
-    await form.getByRole("group", { name: "destination type", exact: true })
-      .getByRole("button", { name: "managed checkout", exact: true }).click();
+    await form.getByRole("group", { name: "Destination type", exact: true })
+      .getByRole("button", { name: "Managed checkout", exact: true }).click();
     await expect(form.locator(".launch-composer-repository-note")).toBeVisible();
     const field = form.locator(".checkout-root-field");
-    const folder = field.getByRole("textbox", { name: "checkout folder", exact: true });
+    const folder = field.getByRole("textbox", { name: "Checkout folder", exact: true });
     await expect(folder).toBeEditable();
     await expect(folder).toHaveValue("");
     await expect(field).toContainText("Settings");
@@ -243,7 +243,7 @@ test("inline checkout folder setup refreshes discovery and preview and respects 
       expect(await field.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
     }
     await folder.fill("relative-folder");
-    await field.getByRole("button", { name: "save", exact: true }).click();
+    await field.getByRole("button", { name: "Save", exact: true }).click();
     await expect(field.getByRole("alert")).toContainText("not the relative path 'relative-folder'");
     expect(await (await request.get("/api/checkout-root")).json()).toEqual({ root: null });
     await page.setViewportSize({ width: 1280, height: 900 });
@@ -295,7 +295,7 @@ test("inline checkout folder setup refreshes discovery and preview and respects 
       && (await response.json()).needs_checkout_root === false
     );
     await folder.fill(root);
-    await field.getByRole("button", { name: "save", exact: true }).click();
+    await field.getByRole("button", { name: "Save", exact: true }).click();
     const discovered = await (await discoveryAfterSave).json();
     expect(discovered.repos).toContainEqual({ owner: "acme", name: "bar" });
     await expect(field).toHaveCount(0);
@@ -310,7 +310,7 @@ test("inline checkout folder setup refreshes discovery and preview and respects 
     // A new title needs a new preview, but the accepted folder observation
     // remains valid until configuration changes. No rescan should start.
     const scansBeforeTitle = discoveryRequests;
-    await form.getByLabel("name (optional)", { exact: true }).fill("edited title");
+    await form.getByLabel("Name (optional)", { exact: true }).fill("edited title");
     await expect(preview).toContainText("bar-edited-title");
     await expect(preview).toHaveAttribute("data-preview-state", "ready");
     // sleep-ok: observe beyond discovery's 150ms debounce; a title-triggered scan must stay absent.
@@ -333,7 +333,7 @@ test("inline checkout folder setup refreshes discovery and preview and respects 
     await expect(folder).toHaveValue("");
     await expect(preview).toHaveAttribute("data-preview-state", "failed");
     await expect(form.locator(".create-session-submit")).toBeDisabled();
-    await form.getByRole("button", { name: "cancel", exact: true }).click();
+    await form.getByRole("button", { name: "Cancel", exact: true }).click();
 
     overrideSet = true;
     await cli("set-root", root, "--host", String(host.id));
@@ -346,9 +346,9 @@ test("inline checkout folder setup refreshes discovery and preview and respects 
     expect(discovery.ok(), await discovery.text()).toBe(true);
     expect((await discovery.json()).needs_checkout_root).toBe(false);
     const overriddenForm = await openComposer(page, host);
-    await overriddenForm.getByRole("group", { name: "destination type", exact: true })
-      .getByRole("button", { name: "managed checkout", exact: true }).click();
-    await overriddenForm.getByRole("combobox", { name: "repository", exact: true }).focus();
+    await overriddenForm.getByRole("group", { name: "Destination type", exact: true })
+      .getByRole("button", { name: "Managed checkout", exact: true }).click();
+    await overriddenForm.getByRole("combobox", { name: "Repository", exact: true }).focus();
     await expect(overriddenForm.getByRole("option", { name: "acme/bar", exact: true })).toBeVisible();
     await expect(overriddenForm.locator(".checkout-root-field")).toHaveCount(0);
     expect((await cli("show", "--host", String(host.id))).stdout).toContain(`${root} (host override)`);
@@ -399,8 +399,8 @@ test("managed checkout setup notes use ordinary helper styling", async ({ page, 
   expect(discovery.ok(), await discovery.text()).toBe(true);
   expect((await discovery.json()).scan_error).toMatch(/^no checkout (root|folder) is configured/);
   const form = await openComposer(page, host);
-  await form.getByRole("group", { name: "destination type", exact: true })
-    .getByRole("button", { name: "managed checkout", exact: true }).click();
+  await form.getByRole("group", { name: "Destination type", exact: true })
+    .getByRole("button", { name: "Managed checkout", exact: true }).click();
   const note = form.locator(".launch-composer-repository-note");
   await expect(note).toBeVisible();
   await expect(form.locator(".create-session-submit")).toBeDisabled();
@@ -441,19 +441,19 @@ test("destination type keeps unselected repositories separate from the folder", 
     await unaccepted(route);
   });
   const form = await openComposer(page, host);
-  const types = form.getByRole("group", { name: "destination type", exact: true });
-  const folder = form.getByLabel("folder", { exact: true });
+  const types = form.getByRole("group", { name: "Destination type", exact: true });
+  const folder = form.getByLabel("Folder", { exact: true });
   await folder.fill("/tmp/retained-folder");
   await expect(form.locator(".create-session-submit")).toBeEnabled();
-  await types.getByRole("button", { name: "managed checkout", exact: true }).click();
-  await expect(types.getByRole("button", { name: "managed checkout", exact: true })).toHaveAttribute("aria-pressed", "true");
-  const repository = form.getByRole("combobox", { name: "repository", exact: true });
+  await types.getByRole("button", { name: "Managed checkout", exact: true }).click();
+  await expect(types.getByRole("button", { name: "Managed checkout", exact: true })).toHaveAttribute("aria-pressed", "true");
+  const repository = form.getByRole("combobox", { name: "Repository", exact: true });
   await expect(repository).toHaveValue("");
   await expect(folder).toHaveValue("");
   await expect(form.locator(".create-session-submit")).toBeDisabled();
   const globalSearch = form.locator(".launch-composer-search input");
   await globalSearch.fill("host:no-host-for-repository-dismissal");
-  await expect(form.locator("#launch-composer-search-results")).toHaveText("no host matches");
+  await expect(form.locator("#launch-composer-search-results")).toHaveText("No host matches");
   await repository.click();
   await expect(form.locator("#launch-composer-search-results")).toHaveCount(0);
   await expect(form.locator("#checkout-repository-options")).toBeVisible();
@@ -461,24 +461,24 @@ test("destination type keeps unselected repositories separate from the folder", 
   await globalSearch.fill("");
   await repository.fill("invalid!");
   const repositoryArea = form.locator("#checkout-repository-options");
-  await expect(repositoryArea).toHaveText("no repository matches; enter owner/repo");
+  await expect(repositoryArea).toHaveText("No repository matches; enter owner/repo");
   await repository.press("Enter");
-  await expect(repositoryArea).toHaveText("no repository matches; enter owner/repo");
-  await form.getByLabel("name (optional)", { exact: true }).click();
+  await expect(repositoryArea).toHaveText("No repository matches; enter owner/repo");
+  await form.getByLabel("Name (optional)", { exact: true }).click();
   await expect(repositoryArea).toHaveCount(0);
   await repository.focus();
-  await expect(repositoryArea).toHaveText("no repository matches; enter owner/repo");
+  await expect(repositoryArea).toHaveText("No repository matches; enter owner/repo");
   await repository.press("Escape");
   await expect(repositoryArea).toHaveCount(0);
   await repository.press("Enter");
-  await expect(repositoryArea).toHaveText("no repository matches; enter owner/repo");
+  await expect(repositoryArea).toHaveText("No repository matches; enter owner/repo");
   await expect(form.locator(".launch-composer-refusal")).toHaveCount(0);
   await expect(form.locator(".create-session-submit")).toBeDisabled();
   await repository.fill("acme/bar");
   // A typed owner/repo suggestion exists before discovery answers. Observe
   // the fixture warning first so its disappearance actually tests selection.
   await expect(form.locator(".launch-composer-destination .launch-composer-repository-note")).toContainText("fixture scan unavailable");
-  await expect(form.getByRole("listbox", { name: "repositories" }).getByRole("option", { name: "acme/bar", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(form.getByRole("listbox", { name: "Repositories" }).getByRole("option", { name: "acme/bar", exact: true })).toHaveAttribute("aria-selected", "true");
   await expect(form.locator(".launch-composer-refusal")).toHaveCount(0);
   await expect(form.locator(".create-session-submit")).toBeDisabled();
   // A hidden suggestion must become visible before a separate Enter can
@@ -496,7 +496,7 @@ test("destination type keeps unselected repositories separate from the folder", 
   await expect(form.locator(".launch-composer-refusal")).toHaveCount(0);
   await expect(form.locator(".launch-composer-checkout-explanation")).toContainText("last session using it is deleted");
   await expect(form.locator(".launch-composer-repository-note")).toHaveCount(0);
-  await form.getByLabel("name (optional)", { exact: true }).fill("renamed");
+  await form.getByLabel("Name (optional)", { exact: true }).fill("renamed");
   await expect(form.locator(".launch-composer-checkout-preview")).toContainText("/checkout-fixture/bar-renamed");
   await expect(form.locator(".launch-composer-repository-note")).toHaveCount(0);
   await expect(form.locator(".create-session-submit")).toBeEnabled();
@@ -510,7 +510,7 @@ test("destination type keeps unselected repositories separate from the folder", 
   // A deliberate field selection retires the older global gh: query. The
   // ready preview alone must not leave the launcher blocked on hidden search.
   await repository.fill("acme/bar");
-  await expect(form.getByRole("listbox", { name: "repositories" }).getByRole("option", { name: "acme/bar", exact: true })).toBeVisible();
+  await expect(form.getByRole("listbox", { name: "Repositories" }).getByRole("option", { name: "acme/bar", exact: true })).toBeVisible();
   await repository.press("Enter");
   await expect(search).toHaveValue("");
   await expect(form.locator(".launch-composer-checkout-preview")).toHaveAttribute("data-preview-state", "ready");
@@ -518,7 +518,7 @@ test("destination type keeps unselected repositories separate from the folder", 
   await repository.fill("");
   await expect(form.locator(".launch-composer-checkout-preview")).toHaveCount(0);
   await expect(form.locator(".create-session-submit")).toBeDisabled();
-  await types.getByRole("button", { name: "folder", exact: true }).click();
+  await types.getByRole("button", { name: "Folder", exact: true }).click();
   await expect(folder).toHaveValue("/tmp/retained-folder");
   await expect(folder).toHaveJSProperty("readOnly", false);
   await expect(repository).toHaveCount(0);
@@ -553,11 +553,11 @@ test("manual checkout needs selection and explicit resubmit after a proven refus
   expect(creates).toHaveLength(0);
   await selectRepo(page);
   await expect(form.locator(".launch-composer-checkout-preview")).toContainText("/checkout-fixture/bar-1");
-  const folder = form.getByLabel("folder", { exact: true });
+  const folder = form.getByLabel("Folder", { exact: true });
   await expect(folder).toHaveJSProperty("readOnly", true);
   await expect(folder).toHaveValue("/checkout-fixture/bar-1");
-  await expect(form.getByRole("group", { name: "destination type" }).getByRole("button", { name: "managed checkout", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await expect(form.getByRole("button", { name: "browse this path" })).toHaveCount(0);
+  await expect(form.getByRole("group", { name: "Destination type" }).getByRole("button", { name: "Managed checkout", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(form.getByRole("button", { name: "Browse this path" })).toHaveCount(0);
   await expect(form.locator(".create-session-submit")).toBeEnabled();
   await form.locator(".create-session-submit").click();
   await expect(form.locator(".create-session-error")).toContainText("nothing was accepted");
@@ -565,7 +565,7 @@ test("manual checkout needs selection and explicit resubmit after a proven refus
   await expect(folder).toHaveValue("/checkout-fixture/bar-2");
   expect(creates).toHaveLength(1);
   expect(creates[0]).toMatchObject({ github_checkout: { repo: "acme/bar" }, launch: { harness: "codex" } });
-  await form.getByRole("button", { name: "folder", exact: true }).click();
+  await form.getByRole("button", { name: "Folder", exact: true }).click();
   await expect(folder).toHaveJSProperty("readOnly", false);
   await folder.fill("/tmp");
   await expect(form.locator(".launch-composer-checkout-preview")).toHaveCount(0);
@@ -622,9 +622,9 @@ for (const outcome of ["submit", "edit", "close"] as const) {
 
     try {
       const form = await openComposer(page, host);
-      const name = form.getByLabel("name (optional)", { exact: true });
+      const name = form.getByLabel("Name (optional)", { exact: true });
       await name.fill("");
-      await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true }).click();
+      await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "YOLO", exact: true }).click();
       await selectRepo(page);
       const preview = form.locator(".launch-composer-checkout-preview");
       await expect(preview).toHaveAttribute("data-preview-state", "ready");
@@ -645,7 +645,7 @@ for (const outcome of ["submit", "edit", "close"] as const) {
       expect(previews.length, "changing permission requests a fresh checkout preview").toBeGreaterThan(previewsBefore);
       await expect(preview).toHaveAttribute("data-preview-state", "pending");
       await expect(submit).toBeDisabled();
-      await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true }))
+      await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "Guarded", exact: true }))
         .toHaveAttribute("aria-pressed", "true");
       expect(creates, "a guarded answer waits while its fresh preview is held").toHaveLength(1);
 
@@ -675,7 +675,7 @@ for (const outcome of ["submit", "edit", "close"] as const) {
           await expect(form).toBeVisible();
           await fillLauncherFolder(form, "/tmp");
           await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
-          await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true }).click();
+          await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "Guarded", exact: true }).click();
           await expect(submit).toBeEnabled();
         }
         expect(creates, "the obsolete preview cannot submit after an edit or close").toHaveLength(1);
@@ -721,17 +721,17 @@ test("checkout folder shows pending and failed preview states without a stale pa
   });
   try {
     const form = await openComposer(page, host);
-    const priorFolder = await form.getByLabel("folder", { exact: true }).inputValue();
+    const priorFolder = await form.getByLabel("Folder", { exact: true }).inputValue();
     expect(priorFolder, "the existing-folder seed must be present before checkout mode hides it").not.toBe("");
     await selectRepo(page);
     await expect.poll(() => started).toBe(true);
-    const folder = form.getByLabel("folder", { exact: true });
+    const folder = form.getByLabel("Folder", { exact: true });
     await expect(folder).toHaveJSProperty("readOnly", true);
     await expect(folder).toHaveValue("");
-    await expect(folder).toHaveAttribute("placeholder", "waiting for checkout preview");
+    await expect(folder).toHaveAttribute("placeholder", "Waiting for checkout preview");
     await expect(form.locator(".create-session-submit")).toBeDisabled();
     release();
-    await expect(folder).toHaveAttribute("placeholder", "checkout preview unavailable");
+    await expect(folder).toHaveAttribute("placeholder", "Checkout preview unavailable");
     const error = form.locator(".launch-composer-checkout-preview .create-session-error");
     await expect(error).toBeVisible();
     await form.screenshot({ path: testInfo.outputPath("checkout-preview-error.png") });
@@ -746,7 +746,7 @@ test("checkout folder shows pending and failed preview states without a stale pa
     expect(errorStyle.paddingLeft).toBe("0px");
     expect(errorStyle.lineHeight).toBe("18px");
     await expect(folder).toHaveValue("");
-    await form.getByRole("button", { name: "folder", exact: true }).click();
+    await form.getByRole("button", { name: "Folder", exact: true }).click();
     await expect(folder).toHaveJSProperty("readOnly", false);
     await expect(folder).toHaveValue(priorFolder);
     await expect(form.locator(".launch-composer-checkout-preview")).toHaveCount(0);
@@ -820,13 +820,13 @@ test("Clone discloses unsafe inherited repository text without changing its prev
     await sourceRow.locator(".session-row-clone").click();
     const form = page.locator('.create-session-form[role="dialog"]');
     await expect(form).toBeVisible();
-    const repository = form.getByRole("combobox", { name: "repository", exact: true });
+    const repository = form.getByRole("combobox", { name: "Repository", exact: true });
     const preview = form.locator(".launch-composer-checkout-preview");
     const launch = form.locator(".create-session-submit");
     await expect.poll(() => previews.length).toBeGreaterThan(0);
     expect(previews.every((input) => input.repo === raw)).toBe(true);
     await expect(preview).toHaveAttribute("data-preview-state", "pending");
-    await expect(preview).toContainText(`managed checkout of ${shown} on`);
+    await expect(preview).toContainText(`Managed checkout of ${shown} on`);
     // The compact action and its visible footer context disclose the same
     // escaped target; the literal repository in the request remains separate.
     await expect(form.locator(".launch-composer-launch-context")).toContainText(`gh:${shown} (preview pending)`);
@@ -842,7 +842,7 @@ test("Clone discloses unsafe inherited repository text without changing its prev
     expect(await form.textContent()).not.toContain(repo.name);
     release();
     await expect(preview).toHaveAttribute("data-preview-state", "failed");
-    await expect(preview).toContainText(`managed checkout of ${shown} on`);
+    await expect(preview).toContainText(`Managed checkout of ${shown} on`);
     await expect(preview).toContainText("fixture invalid repository");
     await expect(form.locator(".launch-composer-launch-context")).toContainText(`gh:${shown} (preview pending)`);
     expect(await launch.getAttribute("aria-label")).toContain(`gh:${shown} (preview pending)`);
@@ -852,7 +852,7 @@ test("Clone discloses unsafe inherited repository text without changing its prev
     expect(previews.every((input) => input.repo === raw)).toBe(true);
     expect(creates).toBe(0);
 
-    await form.getByRole("button", { name: "clear repository", exact: true }).click();
+    await form.getByRole("button", { name: "Clear repository", exact: true }).click();
     await expect(repository).toHaveValue("");
     await expect(repository).toBeEditable();
     await expect(preview).toHaveCount(0);
@@ -897,7 +897,7 @@ test("ambiguous checkout retries retain the exact original body after a later re
   });
   const form = await openComposer(page, host);
   await selectRepo(page);
-  await expect(form.getByLabel("folder", { exact: true })).toHaveValue("/checkout-fixture/bar-1");
+  await expect(form.getByLabel("Folder", { exact: true })).toHaveValue("/checkout-fixture/bar-1");
   await expect(form.locator(".create-session-submit")).toBeEnabled();
   await form.locator(".create-session-submit").click();
   await expect(form.locator(".create-session-error")).toContainText("original request is retained");
@@ -906,9 +906,9 @@ test("ambiguous checkout retries retain the exact original body after a later re
   revision = 2;
   await selectRepo(page);
   await expect.poll(() => previews).toBeGreaterThan(before);
-  await expect(form.locator(".launch-composer-checkout-preview")).toContainText("retry reconciles the original request");
+  await expect(form.locator(".launch-composer-checkout-preview")).toContainText("Retry reconciles the original request");
   await expect(form.locator(".launch-composer-checkout-preview")).toContainText("/checkout-fixture/bar-1");
-  await expect(form.getByLabel("folder", { exact: true })).toHaveValue("/checkout-fixture/bar-1");
+  await expect(form.getByLabel("Folder", { exact: true })).toHaveValue("/checkout-fixture/bar-1");
   for (const count of [2, 3]) {
     await expect(form.locator(".create-session-submit")).toBeEnabled();
     await form.locator(".create-session-submit").click();
@@ -962,12 +962,12 @@ test("a fresh-checkout replace-with retry carries the precondition shown at that
     const form = page.locator('.create-session-form[role="dialog"]');
     await expect(form).toBeVisible();
     // A command-launch source opens the command tab.
-    await form.getByRole("tab", { name: "agent", exact: true }).click();
+    await form.getByRole("tab", { name: "Agent", exact: true }).click();
     await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
     await selectRepo(page);
     // The copied source title is not a name for a fresh checkout, so the
     // fixture offers its unnamed path rather than one named after the source.
-    await expect(form.getByLabel("folder", { exact: true })).toHaveValue("/checkout-fixture/bar-1");
+    await expect(form.getByLabel("Folder", { exact: true })).toHaveValue("/checkout-fixture/bar-1");
     const warning = form.locator(".launch-composer-replace-warning");
     await expect(warning).toContainText("still running");
     await expect(form.locator(".create-session-submit")).toBeEnabled();
@@ -1034,10 +1034,10 @@ for (const action of ["clone", "replace-with"] as const) {
       const form = page.locator('.create-session-form[role="dialog"]');
       await expect(form).toBeVisible();
       // A command-launch source opens the command tab.
-      await form.getByRole("tab", { name: "agent", exact: true }).click();
+      await form.getByRole("tab", { name: "Agent", exact: true }).click();
       await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
-      const name = form.getByLabel("name (optional)", { exact: true });
-      const folder = form.getByLabel("folder", { exact: true });
+      const name = form.getByLabel("Name (optional)", { exact: true });
+      const folder = form.getByLabel("Folder", { exact: true });
       // Premise: the dialog opened as a Clone/Replace with, carrying the title.
       await expect(name).toHaveValue(title);
 
@@ -1055,7 +1055,7 @@ for (const action of ["clone", "replace-with"] as const) {
       });
 
       // A folder destination makes the copied title the session's name again.
-      await form.getByRole("button", { name: "folder", exact: true }).click();
+      await form.getByRole("button", { name: "Folder", exact: true }).click();
       await expect(folder).toHaveJSProperty("readOnly", false);
       await expect(name).toHaveValue(title);
       await expect(name).toHaveJSProperty("placeholder", "");
@@ -1145,12 +1145,12 @@ test("a late checkout preview cannot overwrite a newer title or steal focus", as
     await selectRepo(page);
     await expect.poll(() => oldStarted).toBe(true);
     await expect(form.locator(".create-session-submit")).toBeDisabled();
-    const name = form.getByLabel("name (optional)", { exact: true });
+    const name = form.getByLabel("Name (optional)", { exact: true });
     await name.fill("new-title");
     await expect(name).toBeFocused();
     await expect.poll(() => currentFinished).toBe(true);
     await expect(form.locator(".launch-composer-checkout-preview")).toContainText("/checkout-fixture/bar-new-title");
-    await expect(form.getByLabel("folder", { exact: true })).toHaveValue("/checkout-fixture/bar-new-title");
+    await expect(form.getByLabel("Folder", { exact: true })).toHaveValue("/checkout-fixture/bar-new-title");
     await expect(form.locator(".create-session-submit")).toBeEnabled();
     releaseOld();
     await expect.poll(() => oldFinished).toBe(true);
@@ -1194,11 +1194,11 @@ test("a late checkout preview cannot replace an existing folder destination", as
     await selectRepo(page);
     await expect.poll(() => started).toBe(true);
     await expect(form.locator(".create-session-submit")).toBeDisabled();
-    const folder = form.getByLabel("folder", { exact: true });
+    const folder = form.getByLabel("Folder", { exact: true });
     await expect(folder).toHaveJSProperty("readOnly", true);
     await expect(folder).toHaveValue("");
-    await expect(folder).toHaveAttribute("placeholder", "waiting for checkout preview");
-    await form.getByRole("button", { name: "folder", exact: true }).click();
+    await expect(folder).toHaveAttribute("placeholder", "Waiting for checkout preview");
+    await form.getByRole("button", { name: "Folder", exact: true }).click();
     await expect(folder).toHaveJSProperty("readOnly", false);
     await folder.fill("/tmp");
     await expect(folder).toBeFocused();
@@ -1310,7 +1310,7 @@ test("switching hosts rejects the old checkout preview and checks setup for the 
     // setup check. Its pending preview supplies no setup signal; discovery's
     // host-bound flag is the only authority for this field.
     await expect(form.locator(".checkout-root-field")
-      .getByRole("textbox", { name: "checkout folder", exact: true })).toBeEditable();
+      .getByRole("textbox", { name: "Checkout folder", exact: true })).toBeEditable();
     releaseLocal();
     await expect.poll(() => localFinished).toBe(true);
     await expect(form.locator(".create-session-submit")).toBeDisabled();
@@ -1408,7 +1408,7 @@ for (const { feedUnavailable, ambiguous } of [
       await expect.poll(() => historyFailed, { timeout: 10_000 }).toBe(true);
       await expect.poll(() => changedPreviewStarted, { timeout: 10_000 }).toBe(true);
       if (ambiguous) {
-        await expect(form.locator(".launch-composer-checkout-preview")).toContainText("retry reconciles the original request");
+        await expect(form.locator(".launch-composer-checkout-preview")).toContainText("Retry reconciles the original request");
         await expect(form.locator(".create-session-submit")).toBeEnabled();
       } else await expect(form.locator(".create-session-submit")).toBeDisabled();
       expect(creates).toHaveLength(ambiguous ? 1 : 0);

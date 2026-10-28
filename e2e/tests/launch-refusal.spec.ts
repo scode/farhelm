@@ -78,7 +78,7 @@ test("a missing folder is refused as an alert and marks the folder until the des
   const form = await fillCreateForm(page, { cwd: missing, invocation: "true", title });
   const hostPicker = form.locator(".create-session-host");
   await expect(hostPicker, "the refusal must come from the local host").toHaveAttribute("data-host-id", String(local));
-  const folder = form.getByLabel("folder", { exact: true });
+  const folder = form.getByLabel("Folder", { exact: true });
   await expect(folder, "nothing is marked before an attempt").not.toHaveAttribute("aria-invalid", "true");
 
   await form.locator(".create-session-submit").click();
@@ -123,8 +123,8 @@ test("a missing folder is refused as an alert and marks the folder until the des
 
   await chooseLauncherHost(hostPicker, String(local));
   await expect(folder).toHaveAttribute("aria-invalid", "true");
-  await form.getByRole("group", { name: "destination type", exact: true })
-    .getByRole("button", { name: "managed checkout", exact: true }).click();
+  await form.getByRole("group", { name: "Destination type", exact: true })
+    .getByRole("button", { name: "Managed checkout", exact: true }).click();
   await expect(folder, "a checkout preview is not the dormant plain folder").toHaveValue("");
   await expect(folder).not.toHaveAttribute("aria-invalid", "true");
   await expect(notice).toHaveCount(0);
@@ -146,7 +146,7 @@ test("folder checks warn before Launch and never prevent an attempt", async ({ p
   const form = await fillCreateForm(page, { cwd: "/tmp", invocation: "true", title: "advisory-refusal" });
   expect((await checked).ok(), "the real existing folder must pass the host's check").toBe(true);
   await expect(form).toHaveAttribute("data-folder-check-pending", "false");
-  const folder = form.getByLabel("folder", { exact: true });
+  const folder = form.getByLabel("Folder", { exact: true });
   const notice = form.locator(".launch-composer-folder-problem");
   await expect(notice).toHaveCount(0);
   await folder.fill(`/nonexistent/advisory-${Date.now()}`);
@@ -187,8 +187,8 @@ test("a stale check is dropped and checks remain serial while a reply is held", 
     const form = await fillCreateForm(page, { cwd: old, invocation: "true", title: "serial-check" });
     await expect.poll(() => paths).toEqual([old]);
     const completedBefore = Number(await form.getAttribute("data-folder-check-completions"));
-    await form.getByLabel("folder", { exact: true }).fill("/tmp");
-    await expect(form.getByLabel("folder", { exact: true })).toHaveValue("/tmp");
+    await form.getByLabel("Folder", { exact: true }).fill("/tmp");
+    await expect(form.getByLabel("Folder", { exact: true })).toHaveValue("/tmp");
     // sleep-ok: hold the first reply past the 150ms debounce to expose an overlapping second read.
     await page.waitForTimeout(300);
     expect(paths, "a debounce restart must not overlap the held request").toEqual([old]);
@@ -198,7 +198,7 @@ test("a stale check is dropped and checks remain serial while a reply is held", 
     await expect(form.locator(".launch-composer-folder-problem"), "the stale missing-folder response must not mark /tmp").toHaveCount(0);
     second.release();
     await expect.poll(async () => Number(await form.getAttribute("data-folder-check-completions"))).toBe(completedBefore + 2);
-    await expect(form.getByLabel("folder", { exact: true })).not.toHaveAttribute("aria-invalid", "true");
+    await expect(form.getByLabel("Folder", { exact: true })).not.toHaveAttribute("aria-invalid", "true");
   } finally {
     first.release();
     second.release();
@@ -228,7 +228,7 @@ test("an inconclusive folder check shows no warning", async ({ page }) => {
     answer.release();
     await expect(form).toHaveAttribute("data-folder-check-completions", String(before + 1));
     await expect(form.locator(".launch-composer-folder-problem")).toHaveCount(0);
-    await expect(form.getByLabel("folder", { exact: true })).not.toHaveAttribute("aria-invalid", "true");
+    await expect(form.getByLabel("Folder", { exact: true })).not.toHaveAttribute("aria-invalid", "true");
   } finally {
     answer.release();
     await stop();
@@ -263,7 +263,7 @@ test("failed asynchronous launch preparation is an announced refusal", async ({ 
     expect(await page.evaluate(() => crypto.randomUUID())).toBe("");
     await form.locator(".create-session-submit").click();
     const alert = form.getByRole("alert");
-    await expect(alert).toContainText("Not launched. could not generate an idempotency key");
+    await expect(alert).toContainText("Not launched. Could not generate an idempotency key");
     await expect(alert).toContainText("so it was not sent");
     expect(creates, "the failure must precede host dispatch").toBe(0);
   } finally {
@@ -285,17 +285,17 @@ test("failed asynchronous launch preparation is an announced refusal", async ({ 
 test("a save-as-template refusal is not labelled Not launched", async ({ page }) => {
   const form = await openNew(page);
   await form.getByRole("button", { name: "Codex", exact: true }).click();
-  await form.getByLabel("folder", { exact: true }).fill("/tmp");
+  await form.getByLabel("Folder", { exact: true }).fill("/tmp");
   const wrapper = form.locator(".launch-composer-wrapper");
   await expect(wrapper).toBeVisible();
   await wrapper.fill("with-endpoint 'unfinished");
   await form.locator(".create-session-submit").click({ force: true });
   const alert = form.locator(".launch-composer-refusal-alert");
-  await expect(alert, "a refused launch press is an alert").toContainText("Not launched. invalid wrapper prefix");
+  await expect(alert, "a refused launch press is an alert").toContainText("Not launched. Invalid wrapper prefix");
 
-  await form.getByRole("button", { name: "save as template", exact: true }).click();
+  await form.getByRole("button", { name: "Save as template", exact: true }).click();
 
-  await expect(form.locator(".launch-composer-refusal")).toContainText("invalid wrapper prefix");
+  await expect(form.locator(".launch-composer-refusal")).toContainText("Invalid wrapper prefix");
   await expect(alert).toHaveCount(0);
   await expect(form.locator(".launch-composer-refusal")).not.toContainText("Not launched.");
 });

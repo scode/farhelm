@@ -269,15 +269,15 @@ test("template name numbering yields to typed and fixed names", async ({ page, r
     const search = form.locator('.launch-composer-search input[role="combobox"]');
     await search.fill(`tl:${names[0]}`);
     await form.getByRole("option", { name: `Template: ${names[0]}`, exact: true }).click();
-    const field = form.getByLabel("name (optional)", { exact: true });
+    const field = form.getByLabel("Name (optional)", { exact: true });
     await expect(field).toHaveValue(`${base}-2`);
-    await expect(form.locator(".launch-composer-name-policy")).toHaveText("from template · numbered if taken");
+    await expect(form.locator(".launch-composer-name-policy")).toHaveText("From template · numbered if taken");
     await expect(form.locator(".launch-composer-name-taken")).toHaveText(`(${base} is taken)`);
     await expect(form.locator(".create-session-submit")).toBeEnabled();
-    await form.getByRole("group", { name: "destination type" }).getByRole("button", { name: "folder", exact: true }).click();
+    await form.getByRole("group", { name: "Destination type" }).getByRole("button", { name: "Folder", exact: true }).click();
     await expect(field).toHaveValue(base);
     await expect(form.locator(".launch-composer-name-policy")).toHaveCount(0);
-    await form.getByRole("group", { name: "destination type" }).getByRole("button", { name: "managed checkout", exact: true }).click();
+    await form.getByRole("group", { name: "Destination type" }).getByRole("button", { name: "Managed checkout", exact: true }).click();
     await selectRepo(form, fixture.repo);
     await expect(field).toHaveValue(`${base}-2`);
     await field.fill(base);
@@ -296,7 +296,7 @@ test("template name numbering yields to typed and fixed names", async ({ page, r
     await expect(field).toHaveValue(`${base}-2`);
     await expect(form.locator(".launch-composer-name-policy")).toBeVisible();
     await expect(form.locator(".create-session-submit")).toBeEnabled();
-    await form.getByRole("button", { name: "cancel", exact: true }).click();
+    await form.getByRole("button", { name: "Cancel", exact: true }).click();
     await patchPreferences(request, { quick_launch_template: names[1] });
     let creates = 0;
     await page.route("**/api/sessions", async route => {
@@ -354,13 +354,13 @@ for (const fixed of [false, true]) {
       const form = await openComposer(page, local!.id);
       await form.locator('.launch-composer-search input[role="combobox"]').fill(`tl:${original}`);
       await form.getByRole("option", { name: `Template: ${original}`, exact: true }).click();
-      await expect(form.getByLabel("name (optional)", { exact: true })).toHaveValue(fixed ? base : `${base}-2`);
+      await expect(form.getByLabel("Name (optional)", { exact: true })).toHaveValue(fixed ? base : `${base}-2`);
       if (fixed) await expect(form.locator(".launch-composer-checkout-preview")).toContainText("a directory with that checkout name already exists");
       else await expect(form.locator(".create-session-submit")).toBeEnabled();
       await form.locator(".launch-composer-save-template").click();
       const panel = form.locator(".save-template-panel");
       await expect(panel.locator('[data-field="name"]')).toBeChecked();
-      await expect(panel.getByRole("group", { name: "session name kind", exact: true }).getByRole("button", { name: fixed ? "fixed name" : "base name", exact: true }))
+      await expect(panel.getByRole("group", { name: "Session name kind", exact: true }).getByRole("button", { name: fixed ? "Fixed name" : "Base name", exact: true }))
         .toHaveAttribute("aria-pressed", "true");
       await expect(panel.locator(".save-template-choice").filter({ has: page.locator('[data-field="name"]') })).toContainText(base);
       await panel.locator(".save-template-name").fill(saved);
@@ -743,7 +743,7 @@ async function assertManagedMark(page: Page, id: string, repo: string, root: str
   await expect(row.locator(".session-repository")).toHaveText(repo);
   const mark = row.locator(".managed-checkout-mark");
   await expect(mark.locator('svg[data-glyph="branch"]')).toHaveAttribute("aria-hidden", "true");
-  await expect(mark.locator(".visually-hidden").first()).toHaveText("managed checkout");
+  await expect(mark.locator(".visually-hidden").first()).toHaveText("Managed checkout");
   const location = cwd === root ? "" : ` Session folder: ${cwd}.`;
   const description = `at ${root}.${location} Farhelm made the checkout folder for its first session. When the last session using it is deleted, the checkout moves to the trash.`;
   await expect(mark).toHaveAttribute("data-tooltip", `managed checkout of ${repo} ${description}`);
@@ -837,7 +837,7 @@ test("structured checkout previews, launches, and reuses a recent as a fresh clo
     await selectRepo(form, fixture.repo);
     const unnamed = path.join(fixture.root, `${fixture.repoName}-1`);
     await expect(form.locator(".launch-composer-checkout-preview")).toContainText(unnamed);
-    await form.getByLabel("name (optional)").fill("fix");
+    await form.getByLabel("Name (optional)").fill("fix");
     const named = path.join(fixture.root, `${fixture.repoName}-fix`);
     await expect(form.locator(".launch-composer-checkout-preview")).toContainText(named);
     expect(await fs.readdir(fixture.root), "preview must not allocate either offered path").toEqual([]);
@@ -871,8 +871,8 @@ test("a typed command survives a real managed checkout", async ({ page, request 
   try {
     const host = await localHostId(request);
     const form = await openComposer(page, host);
-    await form.getByRole("tab", { name: "command", exact: true }).click();
-    await form.getByLabel("agent command").fill(FAKE_AGENT);
+    await form.getByRole("tab", { name: "Command", exact: true }).click();
+    await form.getByLabel("Agent command").fill(FAKE_AGENT);
     await answerYolo(form);
     await selectRepo(form, fixture.repo);
     await expect(form).toHaveAttribute("data-composer-mode", "command");
@@ -903,15 +903,15 @@ test("an unlabeled folder result replaces fresh intent without cloning", async (
     expect(history.ok()).toBe(true);
     expect((await history.json()).folders.some((folder: any) => folder.display_cwd === fixture.root)).toBe(true);
     const form = await openComposer(page, host);
-    await form.getByRole("tab", { name: "command", exact: true }).click();
-    await form.getByLabel("agent command").fill(FAKE_AGENT);
+    await form.getByRole("tab", { name: "Command", exact: true }).click();
+    await form.getByLabel("Agent command").fill(FAKE_AGENT);
     await answerYolo(form);
     await selectRepo(form, fixture.repo);
     await expect(form.locator(".launch-composer-checkout-preview")).toContainText(`${fixture.repoName}-1`);
     const search = form.locator('.launch-composer-search input[role="combobox"]');
     await search.fill(path.basename(path.dirname(fixture.root)));
     await form.getByRole("option", { name: `Use this path: ${fixture.root}`, exact: true }).click();
-    await expect(form.getByLabel("folder", { exact: true })).toHaveValue(fixture.root);
+    await expect(form.getByLabel("Folder", { exact: true })).toHaveValue(fixture.root);
     await expect(form.locator(".launch-composer-checkout-preview")).toHaveCount(0);
     await expect(form).toHaveAttribute("data-composer-mode", "command");
     const created = await launch(page, form, ids);
@@ -939,8 +939,8 @@ test("borrowers retain the checkout until the final stopped session is deleted",
   try {
     const host = await localHostId(request);
     const form = await openComposer(page, host);
-    await form.getByRole("tab", { name: "command", exact: true }).click();
-    await form.getByLabel("agent command").fill(FAKE_AGENT);
+    await form.getByRole("tab", { name: "Command", exact: true }).click();
+    await form.getByLabel("Agent command").fill(FAKE_AGENT);
     await answerYolo(form);
     await selectRepo(form, fixture.repo);
     const { session: origin } = await launch(page, form, ids);
@@ -971,10 +971,10 @@ test("borrowers retain the checkout until the final stopped session is deleted",
     await sourceRow.locator(".session-row-menu").click();
     await sourceRow.locator(".session-row-clone").click();
     const cloneForm = page.locator('.create-session-form[role="dialog"]');
-    await cloneForm.getByRole("button", { name: "folder", exact: true }).click();
-    await expect(cloneForm.getByLabel("folder", { exact: true })).toHaveValue(origin.cwd);
+    await cloneForm.getByRole("button", { name: "Folder", exact: true }).click();
+    await expect(cloneForm.getByLabel("Folder", { exact: true })).toHaveValue(origin.cwd);
     await expect(cloneForm.locator(".launch-composer-checkout-preview")).toHaveCount(0);
-    await cloneForm.getByLabel("name (optional)").fill("same-cwd-borrower");
+    await cloneForm.getByLabel("Name (optional)").fill("same-cwd-borrower");
     const cloned = await launch(page, cloneForm, ids);
     expect(cloned.body.github_checkout).toBeUndefined();
     const same = cloned.session;
@@ -1052,8 +1052,8 @@ test("replacement preserves borrowers and archives only the released checkout", 
   try {
     const host = await localHostId(request);
     const form = await openComposer(page, host);
-    await form.getByRole("tab", { name: "command", exact: true }).click();
-    await form.getByLabel("agent command").fill(FAKE_AGENT);
+    await form.getByRole("tab", { name: "Command", exact: true }).click();
+    await form.getByLabel("Agent command").fill(FAKE_AGENT);
     await answerYolo(form);
     await selectRepo(form, fixture.repo);
     const { session: origin } = await launch(page, form, ids);
@@ -1144,8 +1144,8 @@ test("clone defaults to managed checkouts and searches only untouched names", as
   try {
     const host = await localHostId(request);
     const sourceForm = await openComposer(page, host);
-    await sourceForm.getByRole("tab", { name: "command", exact: true }).click();
-    await sourceForm.getByLabel("agent command").fill(FAKE_AGENT);
+    await sourceForm.getByRole("tab", { name: "Command", exact: true }).click();
+    await sourceForm.getByLabel("Agent command").fill(FAKE_AGENT);
     await answerYolo(sourceForm);
     await selectRepo(sourceForm, fixture.repo);
     const { session: origin } = await launch(page, sourceForm, ids);
@@ -1165,7 +1165,7 @@ test("clone defaults to managed checkouts and searches only untouched names", as
     }
     const first = path.join(fixture.root, `${sourceTitle}-clone`);
     const form = await clone(origin.id);
-    await expect(form.getByLabel("name (optional)", { exact: true })).toHaveValue(`${sourceTitle}-clone`);
+    await expect(form.getByLabel("Name (optional)", { exact: true })).toHaveValue(`${sourceTitle}-clone`);
     await expect(form.locator(".launch-composer-checkout-preview")).toContainText(first);
     await expect(fs.stat(first)).rejects.toMatchObject({ code: "ENOENT" });
     const created = await launch(page, form, ids);
@@ -1177,20 +1177,20 @@ test("clone defaults to managed checkouts and searches only untouched names", as
     const second = path.join(fixture.root, `${sourceTitle}-clone-2`);
     const again = await clone(origin.id);
     await expect(again.locator(".launch-composer-checkout-preview")).toContainText(second);
-    await expect(again.getByLabel("name (optional)", { exact: true })).toHaveValue(`${sourceTitle}-clone-2`);
-    await again.getByRole("button", { name: "folder", exact: true }).click();
-    await expect(again.getByLabel("folder", { exact: true })).toHaveValue(origin.cwd);
-    await expect(again.getByLabel("name (optional)", { exact: true })).toHaveValue(sourceTitle);
+    await expect(again.getByLabel("Name (optional)", { exact: true })).toHaveValue(`${sourceTitle}-clone-2`);
+    await again.getByRole("button", { name: "Folder", exact: true }).click();
+    await expect(again.getByLabel("Folder", { exact: true })).toHaveValue(origin.cwd);
+    await expect(again.getByLabel("Name (optional)", { exact: true })).toHaveValue(sourceTitle);
     await selectRepo(again, "fixture/other-repository");
-    await expect(again.getByLabel("name (optional)", { exact: true })).toHaveValue("");
+    await expect(again.getByLabel("Name (optional)", { exact: true })).toHaveValue("");
     await expect(again.locator(".launch-composer-checkout-preview")).toContainText("other-repository-1");
     await selectRepo(again, fixture.repo);
     await expect(again.locator(".launch-composer-checkout-preview")).toContainText(second);
     // The directory really exists before the explicit-name conflict is tested.
     expect((await fs.stat(first)).isDirectory()).toBe(true);
-    await again.getByLabel("name (optional)", { exact: true }).fill(`${sourceTitle}-clone`);
+    await again.getByLabel("Name (optional)", { exact: true }).fill(`${sourceTitle}-clone`);
     await expect(again.locator(".create-session-error")).toContainText("a directory with that checkout name already exists");
-    await expect(again.getByLabel("name (optional)", { exact: true })).toHaveValue(`${sourceTitle}-clone`);
+    await expect(again.getByLabel("Name (optional)", { exact: true })).toHaveValue(`${sourceTitle}-clone`);
     await expect(again.locator(".create-session-submit")).toBeDisabled();
     await page.keyboard.press("Escape");
     await expect(again).toHaveCount(0);
@@ -1206,9 +1206,9 @@ test("clone defaults to managed checkouts and searches only untouched names", as
     const nested = await clone(borrower.id);
     await expect(nested.locator(".launch-composer-checkout-preview"))
       .toContainText(path.join(fixture.root, `${fixture.repoName}-borrower-clone`));
-    await nested.getByRole("button", { name: "folder", exact: true }).click();
-    await expect(nested.getByLabel("folder", { exact: true })).toHaveValue(subdir);
-    await expect(nested.getByLabel("name (optional)", { exact: true })).toHaveValue("borrower");
+    await nested.getByRole("button", { name: "Folder", exact: true }).click();
+    await expect(nested.getByLabel("Folder", { exact: true })).toHaveValue(subdir);
+    await expect(nested.getByLabel("Name (optional)", { exact: true })).toHaveValue("borrower");
     await page.keyboard.press("Escape");
   } finally {
     for (const id of ids.reverse()) await cleanupSession(request, id);
@@ -1232,8 +1232,8 @@ test("clone lost race re-previews a suffix and waits for another launch click", 
   try {
     const host = await localHostId(request);
     const sourceForm = await openComposer(page, host);
-    await sourceForm.getByRole("tab", { name: "command", exact: true }).click();
-    await sourceForm.getByLabel("agent command").fill(FAKE_AGENT);
+    await sourceForm.getByRole("tab", { name: "Command", exact: true }).click();
+    await sourceForm.getByLabel("Agent command").fill(FAKE_AGENT);
     await answerYolo(sourceForm);
     await selectRepo(sourceForm, fixture.repo);
     const { session: origin } = await launch(page, sourceForm, ids);
@@ -1270,7 +1270,7 @@ test("clone lost race re-previews a suffix and waits for another launch click", 
     const [, refused] = await Promise.all([form.locator(".create-session-submit").click(), refusal]);
     expect(refused.status, refused.text).toBe(409);
     await expect(form.locator(".launch-composer-checkout-preview")).toContainText(next);
-    await expect(form.getByLabel("name (optional)", { exact: true })).toHaveValue(`${name}-2`);
+    await expect(form.getByLabel("Name (optional)", { exact: true })).toHaveValue(`${name}-2`);
     await expect(form.locator(".create-session-submit")).toBeEnabled();
     expect(bodies).toHaveLength(1);
     await expect(fs.stat(next)).rejects.toMatchObject({ code: "ENOENT" });
@@ -1303,8 +1303,8 @@ test("clone retains its name and key after a lost success and occupied re-previe
   try {
     const host = await localHostId(request);
     const sourceForm = await openComposer(page, host);
-    await sourceForm.getByRole("tab", { name: "command", exact: true }).click();
-    await sourceForm.getByLabel("agent command").fill(FAKE_AGENT);
+    await sourceForm.getByRole("tab", { name: "Command", exact: true }).click();
+    await sourceForm.getByLabel("Agent command").fill(FAKE_AGENT);
     await answerYolo(sourceForm);
     await selectRepo(sourceForm, fixture.repo);
     const { session: origin } = await launch(page, sourceForm, ids);
@@ -1355,7 +1355,7 @@ test("clone retains its name and key after a lost success and occupied re-previe
     // The retained path and enabled button also exist while pending. Wait
     // until the resource effect consumes the occupied response before retrying.
     await expect(form.locator(".launch-composer-checkout-preview")).toHaveAttribute("data-preview-state", "failed");
-    await expect(form.getByLabel("name (optional)", { exact: true })).toHaveValue(name);
+    await expect(form.getByLabel("Name (optional)", { exact: true })).toHaveValue(name);
     await expect(form.locator(".launch-composer-checkout-preview")).toContainText(destination);
     await expect(form.locator(".create-session-submit")).toBeEnabled();
     const recovered = await launch(page, form, ids);
@@ -1418,12 +1418,12 @@ test("replace with into a managed checkout of the source's repository gets the n
     await openRowMenu(sourceRow);
     await sourceRow.locator(".session-row-replace-with").click();
     const replaceForm = page.locator('.create-session-form[role="dialog"]');
-    await expect(replaceForm.getByLabel("name (optional)", { exact: true })).toHaveValue(`${fixture.repoName}-1`);
+    await expect(replaceForm.getByLabel("Name (optional)", { exact: true })).toHaveValue(`${fixture.repoName}-1`);
     await selectRepo(replaceForm, fixture.repo);
     const second = path.join(fixture.root, `${fixture.repoName}-2`);
     await expect(replaceForm.locator(".launch-composer-checkout-preview")).toContainText(second);
-    await expect(replaceForm.getByLabel("name (optional)", { exact: true })).toHaveValue("");
-    await expect(replaceForm.getByLabel("name (optional)", { exact: true })).toHaveAttribute("placeholder", `${fixture.repoName}-2`);
+    await expect(replaceForm.getByLabel("Name (optional)", { exact: true })).toHaveValue("");
+    await expect(replaceForm.getByLabel("Name (optional)", { exact: true })).toHaveAttribute("placeholder", `${fixture.repoName}-2`);
     await expect(replaceForm.locator(".create-session-submit")).toBeEnabled();
     const [response] = await Promise.all([
       page.waitForResponse((r) => r.request().method() === "POST" && r.url().endsWith(`/api/sessions/${encodeURIComponent(origin.id)}/replace`)),

@@ -309,13 +309,12 @@ fn menu_label(title: &crate::peer::PeerText) -> String {
 /// interface labels and keep Inter, including in the hover card's reuse.
 pub(super) fn menu_header_summary_parts(session: &Session, state: Option<&str>) -> Vec<DetailPart> {
     let values = if let Some(launch) = session.agent_selection() {
-        let mut values =
-            vec![crate::launch_composer::harness_label(launch.harness).to_ascii_lowercase()];
+        let mut values = vec![crate::launch_composer::harness_label(launch.harness).to_string()];
         let permission = launch
             .harness
             .stored_permission(launch.permissions)
-            .map(crate::launch_composer::permission_value)
-            .unwrap_or("agent's own setting");
+            .map(crate::launch_composer::permission_display_value)
+            .unwrap_or("Agent's own setting");
         values.push(permission.to_string());
         values.extend(selection_explicit_before_permissions(launch));
         values
@@ -3016,7 +3015,7 @@ mod tests {
         };
         assert_eq!(
             detail_text(&menu_header_summary_parts(&structured, Some("running"))),
-            "claude · yolo · running"
+            "Claude · YOLO · running"
         );
 
         let legacy = Session {
@@ -4246,7 +4245,7 @@ mod tests {
             agent_badge(&goose).permission,
             PermissionGlyph::SmartApprove
         );
-        assert!(agent_badge(&goose).description.contains("smart approve"));
+        assert!(agent_badge(&goose).description.contains("Smart approve"));
 
         let pi = Session {
             launch: agent_launch(crate::LaunchSelection {
@@ -4275,7 +4274,7 @@ mod tests {
             (
                 None,
                 PermissionGlyph::OwnSetting,
-                "Not classified · agent's own setting",
+                "Not classified · Agent's own setting",
             ),
             (
                 Some(crate::LaunchPermission::Guarded),
@@ -4360,17 +4359,17 @@ mod tests {
             (
                 crate::LaunchPermission::Approve,
                 PermissionGlyph::Approve,
-                "approve: the agent asks before every tool action",
+                "Approve: the agent asks before every tool action",
             ),
             (
                 crate::LaunchPermission::SmartApprove,
                 PermissionGlyph::SmartApprove,
-                "smart approve: the agent asks only before actions it judges risky",
+                "Smart approve: the agent asks only before actions it judges risky",
             ),
             (
                 crate::LaunchPermission::Chat,
                 PermissionGlyph::Chat,
-                "chat: the agent only talks and uses no tools",
+                "Chat: the agent only talks and uses no tools",
             ),
         ] {
             let session = Session {

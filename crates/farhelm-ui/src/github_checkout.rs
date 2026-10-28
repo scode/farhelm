@@ -122,14 +122,14 @@ impl GithubRepo {
                 name: repo.name.into(),
             }),
             Err(RepoError::Empty | RepoError::MissingSeparator) => {
-                Err("enter a GitHub repository as owner/repo".into())
+                Err("Enter a GitHub repository as owner/repo".into())
             }
             Err(
                 RepoError::ExtraSeparator
                 | RepoError::InvalidOwner
                 | RepoError::InvalidRepo
                 | RepoError::TooLong,
-            ) => Err("enter a valid GitHub owner/repo pair without a URL or branch suffix".into()),
+            ) => Err("Enter a valid GitHub owner/repo pair without a URL or branch suffix".into()),
         }
     }
 
@@ -424,11 +424,11 @@ mod tests {
         // a missing pair asks for one, anything else malformed says why not.
         assert_eq!(
             GithubRepo::parse("bar").unwrap_err(),
-            "enter a GitHub repository as owner/repo"
+            "Enter a GitHub repository as owner/repo"
         );
         assert_eq!(
             GithubRepo::parse("acme/bar/extra").unwrap_err(),
-            "enter a valid GitHub owner/repo pair without a URL or branch suffix"
+            "Enter a valid GitHub owner/repo pair without a URL or branch suffix"
         );
     }
 

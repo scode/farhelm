@@ -45,7 +45,7 @@ async function openYoloLaunch(page: Page, cwd: string): Promise<Locator> {
   await expect(form).toBeVisible();
   await fillLauncherFolder(form, cwd);
   await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
-  await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true }).click();
+  await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "YOLO", exact: true }).click();
   return form;
 }
 
@@ -77,7 +77,7 @@ test(`a YOLO launch asks first and starts only when confirmed${height === 844 ? 
     await expect(form).toBeVisible();
     await fillLauncherFolder(form, cwd);
     await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
-    await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true }).click();
+    await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "YOLO", exact: true }).click();
 
     // The first submit is refused and turned into the question.
     const [refused] = await Promise.all([
@@ -134,11 +134,11 @@ test(`a YOLO launch asks first and starts only when confirmed${height === 844 ? 
     // Mounting precedes the deferred initial focus. Finish that handoff
     // before an ordinary edit, rather than racing it with WebKit's fill.
     await expect(confirmation.locator(".yolo-cancel")).toBeFocused();
-    const name = form.getByLabel("name (optional)");
+    const name = form.getByLabel("Name (optional)");
     await name.fill("edited after the question");
     await expect(name).toHaveValue("edited after the question");
     await expect(confirmation).toHaveCount(0);
-    await form.getByLabel("name (optional)").fill("");
+    await form.getByLabel("Name (optional)").fill("");
 
     // Asking again and confirming retries with the override and launches.
     await form.locator(".create-session-submit").click();
@@ -164,7 +164,7 @@ test(`a YOLO launch asks first and starts only when confirmed${height === 844 ? 
     await expect(form).toBeVisible();
     await fillLauncherFolder(form, cwd);
     await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
-    await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true }).click();
+    await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "YOLO", exact: true }).click();
     const [safe] = await Promise.all([
       page.waitForResponse(
         (candidate) => candidate.request().method() === "POST" && candidate.url().endsWith("/api/sessions"),
@@ -229,7 +229,7 @@ test("the YOLO question can launch guarded and remember that permission", async 
     await search.fill(`tl:${template}`);
     await form.getByRole("option", { name: `Template: ${template}`, exact: true }).click();
     const permissions = form.locator(".launch-composer-permissions-choice");
-    await expect(permissions.getByRole("button", { name: "yolo", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(permissions.getByRole("button", { name: "YOLO", exact: true })).toHaveAttribute("aria-pressed", "true");
     const [refused] = await Promise.all([page.waitForResponse(isCreate), form.locator(".create-session-submit").click()]);
     expect(refused.status()).toBe(409);
     const confirmation = form.locator(".yolo-confirmation");
@@ -257,7 +257,7 @@ test("the YOLO question can launch guarded and remember that permission", async 
     const launched = page.waitForResponse(isCreate);
     await guarded.click();
     await expect.poll(() => createBodies.length).toBe(2);
-    await expect(permissions.getByRole("button", { name: "guarded", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(permissions.getByRole("button", { name: "Guarded", exact: true })).toHaveAttribute("aria-pressed", "true");
     // The launcher has no stored-launch baseline marker. Its selected
     // permission and the held request expose the actual template edit.
     expect(createBodies[1].launch).toMatchObject({ harness: "codex", permissions: "guarded" });
@@ -280,7 +280,7 @@ test("the YOLO question can launch guarded and remember that permission", async 
 
     await page.locator(".new-session-button").click();
     await expect(form).toBeVisible();
-    await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true }))
+    await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "Guarded", exact: true }))
       .toHaveAttribute("aria-pressed", "true");
     await form.locator(".launch-composer-cancel").click();
   } finally {
@@ -350,7 +350,7 @@ test("the YOLO question offers no guarded answer for custom permission flags", a
     await setLocalYoloWithoutAsking(request, false);
     await page.goto("/");
     const form = await openYoloLaunch(page, cwd);
-    await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "custom", exact: true }).click();
+    await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "Custom", exact: true }).click();
     await form.locator(".custom-permission-flags").fill("--sandbox workspace-write");
     const [refused] = await Promise.all([
       page.waitForResponse((candidate) => candidate.request().method() === "POST" && candidate.url().endsWith("/api/sessions")),
@@ -433,7 +433,7 @@ test("cancel and an answer to the launcher's YOLO question in one burst start no
       expect(answerWasLive, `premise: ${answer} was still live when clicked`).toBe(true);
       await expect(confirmation).toHaveCount(0);
       await expect(form, `cancel keeps the launcher open (${answer})`).toBeVisible();
-      await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true }))
+      await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "YOLO", exact: true }))
         .toHaveAttribute("aria-pressed", "true");
 
       // A plain Launch is the observation point: its reply proves the page
@@ -542,7 +542,7 @@ test("don't ask again marks the host safe before launching, and a failed mark la
     // A refused mark: the question, which the answer took down, comes back
     // with its reason, and no create is sent.
     await confirmation.locator(".yolo-confirm-stop-asking").click();
-    await expect(confirmation.locator(".yolo-confirmation-error")).toContainText("could not stop asking for");
+    await expect(confirmation.locator(".yolo-confirmation-error")).toContainText("Could not stop asking for");
     await expect(confirmation.locator(".yolo-confirmation-error")).toContainText("held by the test");
     await expect(page.locator(".build-skew"), "a current-build refusal must preserve the normal page lifecycle").toHaveCount(0);
     expect(markPosts).toEqual([{ yolo_without_asking: true }]);
@@ -916,8 +916,8 @@ test("template edits retain an unchanged YOLO question and retire a changed one"
     await expect(form).toHaveAttribute("data-initial-templates-ready", "true");
     const search = form.locator('.launch-composer-search input[role="combobox"]');
     const permissions = form.locator(".launch-composer-permissions-choice");
-    const yolo = permissions.getByRole("button", { name: "yolo", exact: true });
-    const guarded = permissions.getByRole("button", { name: "guarded", exact: true });
+    const yolo = permissions.getByRole("button", { name: "YOLO", exact: true });
+    const guarded = permissions.getByRole("button", { name: "Guarded", exact: true });
     const question = form.locator(".yolo-confirmation");
     const launch = form.locator(".create-session-submit");
     const isCreate = (candidate: { request(): { method(): string }; url(): string }) =>
@@ -960,7 +960,7 @@ test("template edits retain an unchanged YOLO question and retire a changed one"
 
     // A new name ends the confirmed request before obtaining a fresh real
     // question. Otherwise the retained one-off consent would bypass it.
-    const name = form.getByLabel("name (optional)", { exact: true });
+    const name = form.getByLabel("Name (optional)", { exact: true });
     await name.focus();
     await expect(name).toBeFocused();
     await name.fill(`template-question-${suffix}`);
@@ -1099,7 +1099,7 @@ test("command templates preserve equal YOLO questions and retire changed command
     await expect(form).toBeVisible();
     await chooseLauncherHost(form.locator(".create-session-host"), String(local));
     await expect(form.locator(".create-session-host")).toHaveAttribute("data-host-id", String(local));
-    await form.getByLabel("folder", { exact: true }).fill(cwd);
+    await form.getByLabel("Folder", { exact: true }).fill(cwd);
     await expect(form).toHaveAttribute("data-initial-templates-ready", "true");
     const search = form.locator('.launch-composer-search input[role="combobox"]');
     const question = form.locator(".yolo-confirmation");
@@ -1118,9 +1118,9 @@ test("command templates preserve equal YOLO questions and retire changed command
       await form.getByRole("option", { name: `Template: ${template.name}`, exact: true }).click();
       await expect(search).toHaveValue("");
       await expect(search).toBeFocused();
-      await expect(form.getByRole("tab", { name: "command", exact: true })).toHaveAttribute("aria-selected", "true");
-      await expect(form.getByLabel("agent command", { exact: true })).toHaveValue(template.command);
-      await expect(form.getByRole("group", { name: "runs in YOLO mode" }).getByLabel("yes (YOLO)", { exact: true })).toBeChecked();
+      await expect(form.getByRole("tab", { name: "Command", exact: true })).toHaveAttribute("aria-selected", "true");
+      await expect(form.getByLabel("Agent command", { exact: true })).toHaveValue(template.command);
+      await expect(form.getByRole("group", { name: "Runs in YOLO mode" }).getByLabel("Yes (YOLO)", { exact: true })).toBeChecked();
       expect(bodies, "template acceptance itself cannot launch").toHaveLength(count);
       expect(policyWrites, "template acceptance cannot change host consent policy").toHaveLength(0);
     };

@@ -2803,12 +2803,12 @@ test.describe("multi-host", () => {
       await expect(form.locator(".create-session-host")).toHaveAttribute("data-host-id", String(remote.id), {
         timeout: 20_000,
       });
-      await expect(form.getByLabel("agent command")).toHaveValue(FAKE_AGENT_INVOCATION, {
+      await expect(form.getByLabel("Agent command")).toHaveValue(FAKE_AGENT_INVOCATION, {
         timeout: 20_000,
       });
 
       const newCwd = stackScratchDir("clone-remote-e2e-");
-      await form.getByLabel("folder", { exact: true }).fill(newCwd);
+      await form.getByLabel("Folder", { exact: true }).fill(newCwd);
       const [response] = await Promise.all([
         page.waitForResponse(
           (r) => r.request().method() === "POST" && r.url().endsWith("/api/sessions"),
@@ -2893,7 +2893,7 @@ test.describe("multi-host", () => {
       const form = page.locator(".create-session-form");
       await expect(form).toBeVisible();
       await expect(form.locator(".create-session-host")).toHaveAttribute("data-host-id", "");
-      const command = form.getByLabel("agent command");
+      const command = form.getByLabel("Agent command");
       await expect(command).toHaveValue(FAKE_AGENT_INVOCATION, { timeout: 20_000 });
       await command.fill(explicitCommand);
 
@@ -2907,7 +2907,7 @@ test.describe("multi-host", () => {
       await expect(command).toHaveValue(explicitCommand);
 
       const newCwd = stackScratchDir("clone-remote-explicit-e2e-");
-      await form.getByLabel("folder", { exact: true }).fill(newCwd);
+      await form.getByLabel("Folder", { exact: true }).fill(newCwd);
       const [response] = await Promise.all([
         page.waitForResponse(
           (r) => r.request().method() === "POST" && r.url().endsWith("/api/sessions"),
@@ -4830,7 +4830,7 @@ test.describe("multi-host", () => {
       });
       await form.locator('button[type="submit"]').click();
       await expect(form.locator(".create-session-host")).toBeDisabled();
-      await expect(form.getByLabel("folder", { exact: true })).toBeDisabled();
+      await expect(form.getByLabel("Folder", { exact: true })).toBeDisabled();
       release?.();
       await waitForSessionRevealed(page, await sessionIdFor(rowByTitle(page, title)));
     } finally {
@@ -4872,12 +4872,12 @@ test.describe("multi-host", () => {
       await showSessionsPanel(page);
       await page.locator(".new-session-button").click();
       const form = page.locator(".create-session-form");
-      await form.getByRole("tab", { name: "command", exact: true }).click();
+      await form.getByRole("tab", { name: "Command", exact: true }).click();
       await chooseLauncherHost(form.locator(".create-session-host"), String(down));
-      await form.getByLabel("folder", { exact: true }).fill("/tmp");
-      await form.getByLabel("agent command").fill(FAKE_AGENT_INVOCATION);
+      await form.getByLabel("Folder", { exact: true }).fill("/tmp");
+      await form.getByLabel("Agent command").fill(FAKE_AGENT_INVOCATION);
       await answerYolo(form);
-      await form.getByLabel("name (optional)").fill(title);
+      await form.getByLabel("Name (optional)").fill(title);
       await page.route("**/api/sessions", async (route) => {
         if (route.request().method() === "POST") createPosts += 1;
         await route.continue();
@@ -4885,7 +4885,7 @@ test.describe("multi-host", () => {
       const submit = form.locator('button[type="submit"]');
       await expect(submit).toBeDisabled();
       await expect(form.locator(".create-session-host-note")).toContainText(
-        "the selected host is unavailable; choose a connected host before launching",
+        "The selected host is unavailable; choose a connected host before launching",
       );
       expect(createPosts, "an unavailable host disables submit before any create POST").toBe(0);
 

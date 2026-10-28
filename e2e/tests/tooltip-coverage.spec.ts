@@ -363,11 +363,11 @@ test("sidebar surfaces give every control hover text", async ({ page, request })
   await expect(templates.locator(".templates-name")).toBeVisible();
   await expectTextFieldsCovered(page, "new template name", ".templates-editor", 1);
   await templates.locator(".templates-add").click();
-  await expect(templates.getByRole("group", { name: "add field", exact: true })).toBeVisible();
+  await expect(templates.getByRole("group", { name: "Add field", exact: true })).toBeVisible();
   await expectCovered(page, "templates add-field menu", ".templates-add-menu", 3);
-  await templates.locator(".templates-add-menu").getByRole("button", { name: "agent type", exact: true }).click();
-  await templates.getByLabel("agent type", { exact: true }).selectOption("codex");
-  for (const name of ["model", "effort", "approvals"]) {
+  await templates.locator(".templates-add-menu").getByRole("button", { name: "Agent type", exact: true }).click();
+  await templates.getByLabel("Agent type", { exact: true }).selectOption("codex");
+  for (const name of ["Model", "Effort", "Approvals"]) {
     await templates.locator(".templates-add").click();
     await templates.locator(".templates-add-menu").getByRole("button", { name, exact: true }).click();
   }
@@ -375,8 +375,8 @@ test("sidebar surfaces give every control hover text", async ({ page, request })
   await expectTextFieldsCovered(page, "templates agent editor", ".templates-editor", 2);
   // Incompatible fields stay mounted on a kind switch; check them too, and
   // reveal every command/path/name field absent from the original hover walk.
-  await templates.getByRole("group", { name: "switches launcher to", exact: true }).getByRole("button", { name: "command", exact: true }).click();
-  for (const name of ["command", "resume command", "session name", "destination"]) {
+  await templates.getByRole("group", { name: "Switches launcher to", exact: true }).getByRole("button", { name: "Command", exact: true }).click();
+  for (const name of ["Command", "Resume command", "Session name", "Destination"]) {
     await templates.locator(".templates-add").click();
     await templates.locator(".templates-add-menu").getByRole("button", { name, exact: true }).click();
   }
@@ -405,9 +405,9 @@ test("sidebar surfaces give every control hover text", async ({ page, request })
   const form = page.locator(".create-session-form");
   await expect(form).toBeVisible();
   await expectCovered(page, "new session form, agent tab", ".create-session-form", 8);
-  await expect(form.getByLabel("folder", { exact: true })).toBeVisible();
-  await expect(form.getByLabel("name (optional)", { exact: true })).toBeVisible();
-  await expect(form.getByRole("combobox", { name: "search folders, harnesses, models, and efforts", exact: true })).toBeVisible();
+  await expect(form.getByLabel("Folder", { exact: true })).toBeVisible();
+  await expect(form.getByLabel("Name (optional)", { exact: true })).toBeVisible();
+  await expect(form.getByRole("combobox", { name: "Search folders, harnesses, models, and efforts", exact: true })).toBeVisible();
   await expectTextFieldsCovered(page, "new session form, agent tab", ".create-session-form", 3);
   // Picking an agent reveals the agent-dependent choices (model, effort,
   // permissions), and the search box offers results; both carry hover text.
@@ -415,7 +415,7 @@ test("sidebar surfaces give every control hover text", async ({ page, request })
   await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
   await expect(form.locator(".launch-composer-trust-choice")).toHaveCount(0);
   await expectCovered(page, "new session form, Codex picked", ".create-session-form", 15);
-  await expect(form.getByRole("combobox", { name: "model", exact: true })).toBeVisible();
+  await expect(form.getByRole("combobox", { name: "Model", exact: true })).toBeVisible();
   await expectTextFieldsCovered(page, "new session form, Codex picked", ".create-session-form", 4);
   await form.locator(".launch-composer-save-template").click();
   await expect(form.locator(".save-template-panel")).toBeVisible();
@@ -430,8 +430,8 @@ test("sidebar surfaces give every control hover text", async ({ page, request })
     await expectCovered(page, `new session form, search "${query}"`, "#launch-composer-search-results", 2);
   }
   await search.fill("");
-  await form.getByRole("tab", { name: "command", exact: true }).click();
-  await expect(form.getByRole("tab", { name: "command", exact: true })).toHaveAttribute("aria-selected", "true");
+  await form.getByRole("tab", { name: "Command", exact: true }).click();
+  await expect(form.getByRole("tab", { name: "Command", exact: true })).toHaveAttribute("aria-selected", "true");
   await expectCovered(page, "new session form, command tab", ".create-session-form", 5);
   await expectTextFieldsCovered(page, "new session form, command tab", ".create-session-form", 4);
   // The command tab declares its own agent, independent of the agent tab;

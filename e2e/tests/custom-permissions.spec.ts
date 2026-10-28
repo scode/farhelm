@@ -29,7 +29,7 @@ test("custom permission search focuses literal words and switching agents clears
   const form = await openNew(page);
   const search = form.locator('.launch-composer-search input[role="combobox"]');
   await search.fill("perms:custom");
-  await form.getByRole("option", { name: "Permissions: custom", exact: true }).click();
+  await form.getByRole("option", { name: "Permissions: Custom", exact: true }).click();
   const flags = form.locator(".custom-permission-flags");
   await expect(flags).toBeFocused();
   await flags.fill("  ");
@@ -37,16 +37,16 @@ test("custom permission search focuses literal words and switching agents clears
   await expect(form.locator(".create-session-submit")).toBeDisabled();
   await flags.fill("--mode '");
   await expect(flags).toHaveValue("--mode '");
-  await expect(form.locator(".custom-permission-choice [role=alert]")).toContainText("invalid permission flags");
+  await expect(form.locator(".custom-permission-choice [role=alert]")).toContainText("Invalid permission flags");
   await expect(form.locator(".create-session-submit")).toBeDisabled();
   await flags.fill('--mode "ask me" "$HOME"');
   await expect(form.locator(".custom-permission-words code")).toHaveText(["--mode", "ask me", "$HOME"]);
   await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
   await expect(flags).toHaveCount(0);
-  await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "custom", exact: true }).click();
+  await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "Custom", exact: true }).click();
   await expect(flags).toHaveValue("");
   await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Goose", exact: true }).click();
-  await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "custom", exact: true })).toHaveCount(0);
+  await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "Custom", exact: true })).toHaveCount(0);
 });
 
 /** An input queued behind Launch cannot replace its permission words or retire
@@ -77,9 +77,9 @@ test("queued custom permission edits cannot change an in-flight launch", async (
   await page.route(endpoint, refuseCreate);
   try {
     const form = await openNew(page);
-    await form.getByLabel("folder", { exact: true }).fill("/tmp");
+    await form.getByLabel("Folder", { exact: true }).fill("/tmp");
     const custom = form.locator(".launch-composer-permissions-choice")
-      .getByRole("button", { name: "custom", exact: true });
+      .getByRole("button", { name: "Custom", exact: true });
     await custom.click();
     const flags = form.locator(".custom-permission-flags");
     const words = form.locator(".custom-permission-words code");
@@ -167,8 +167,8 @@ test("reset then agent search cannot restore another agent's custom flags", asyn
     await page.route(endpoint, refuseCreate);
     const form = await openNew(page);
     const permissions = form.locator(".launch-composer-permissions-choice");
-    const custom = permissions.getByRole("button", { name: "custom", exact: true });
-    const yolo = permissions.getByRole("button", { name: "yolo", exact: true });
+    const custom = permissions.getByRole("button", { name: "Custom", exact: true });
+    const yolo = permissions.getByRole("button", { name: "YOLO", exact: true });
     const flags = form.locator(".custom-permission-flags");
     const words = form.locator(".custom-permission-words code");
     const search = form.locator('.launch-composer-search input[role="combobox"]');
@@ -192,7 +192,7 @@ test("reset then agent search cannot restore another agent's custom flags", asyn
     await expect(flags).toHaveValue(original);
     await expect(custom).toHaveAttribute("aria-pressed", "true");
 
-    await form.getByRole("button", { name: "reset choices", exact: true }).click();
+    await form.getByRole("button", { name: "Reset choices", exact: true }).click();
     await expect(claude).toHaveAttribute("aria-pressed", "false");
     await expect(form.locator('.launch-composer-harness-choice button[aria-pressed="true"]')).toHaveCount(0);
     await expect(yolo).toHaveAttribute("aria-pressed", "true");
@@ -215,7 +215,7 @@ test("reset then agent search cannot restore another agent's custom flags", asyn
     // launching a vendor process; the DOM buffer alone is not the oracle.
     await flags.fill('--mode "codex only"');
     await expect(words).toHaveText(["--mode", "codex only"]);
-    const folder = form.getByLabel("folder", { exact: true });
+    const folder = form.getByLabel("Folder", { exact: true });
     await folder.fill("/tmp");
     await expect(folder).toHaveValue("/tmp");
     await expect(flags).toHaveValue('--mode "codex only"');
@@ -255,14 +255,14 @@ test("same-agent search and chips preserve custom permission drafts byte for byt
   expect(model, "the owned stack must offer a Claude model for same-agent selection").toBeTruthy();
   const form = await openNew(page);
   const search = form.locator('.launch-composer-search input[role="combobox"]');
-  const custom = form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "custom", exact: true });
+  const custom = form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "Custom", exact: true });
   await custom.click();
   const flags = form.locator(".custom-permission-flags");
   for (const draft of ["--permission-mode 'ask me", '  --mode "ask me"   \'$HOME\'  ']) {
     await flags.fill(draft);
     await expect(flags).toHaveValue(draft);
     if (draft.startsWith("--permission-mode")) {
-      await expect(form.locator(".custom-permission-choice [role=alert]")).toContainText("invalid permission flags");
+      await expect(form.locator(".custom-permission-choice [role=alert]")).toContainText("Invalid permission flags");
     } else {
       await expect(form.locator(".custom-permission-words code")).toHaveText(["--mode", "ask me", "$HOME"]);
     }
@@ -309,13 +309,13 @@ test("custom model acceptance keeps compatible effort with incomplete permission
   const catalog = await response.json() as { harness: string; efforts: string[] }[];
   expect(catalog.some(entry => entry.harness === "claude" && entry.efforts.includes("high"))).toBe(true);
   const form = await openNew(page);
-  await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "custom", exact: true }).click();
+  await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "Custom", exact: true }).click();
   const flags = form.locator(".custom-permission-flags");
   // Claude's default plus five explicit levels use the shared native dropdown.
   // Selecting through it must preserve the same draft as a short effort row.
-  const effort = form.getByRole("combobox", { name: "effort", exact: true });
+  const effort = form.getByRole("combobox", { name: "Effort", exact: true });
   await expect(effort).toBeVisible();
-  const model = form.getByRole("combobox", { name: "model", exact: true });
+  const model = form.getByRole("combobox", { name: "Model", exact: true });
   for (const [round, draft] of ["", "--mode '"].entries()) {
     await flags.fill(draft);
     await effort.selectOption("high");
@@ -343,7 +343,7 @@ test("custom choice Enter focuses its empty editor without submitting", async ({
   const form = await openNew(page);
   const posts: string[] = [];
   page.on("request", request => { if (request.method() === "POST") posts.push(request.url()); });
-  const custom = form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "custom", exact: true });
+  const custom = form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "Custom", exact: true });
   await custom.focus();
   await expect(custom).toBeFocused();
   await custom.press("Enter");
@@ -388,7 +388,7 @@ for (const action of ["clone", "replace-with"] as const) {
     await expect(shield).toHaveAttribute("data-glyph", "yolo");
     await shield.hover();
     const help = page.locator("body > .farhelm-tooltip");
-    await expect(help).toContainText("custom permission flags");
+    await expect(help).toContainText("Custom permission flags");
     await expect(help).toContainText("treats this as YOLO");
     await expect(help).toContainText("hidden<U+200B>word");
     await expect(help).toContainText("Launched with: claude");
@@ -420,8 +420,8 @@ test("custom permission words reach the real YOLO refusal with their own explana
   try {
     await setLocalYoloWithoutAsking(request, false);
     const form = await openNew(page);
-    await form.getByLabel("folder", { exact: true }).fill("/tmp");
-    await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "custom", exact: true }).click();
+    await form.getByLabel("Folder", { exact: true }).fill("/tmp");
+    await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "Custom", exact: true }).click();
     await form.locator(".custom-permission-flags").fill("--permission-mode auto");
     await expect(form.locator(".create-session-submit")).toBeEnabled();
     const [response] = await Promise.all([
@@ -469,7 +469,7 @@ test("custom template words round trip into the launcher and clear on a stacked 
     await search.fill(`tl:${later}`);
     await form.getByRole("option", { name: `Template: ${later}`, exact: true }).click();
     await expect(form.locator(".custom-permission-flags")).toHaveCount(0);
-    await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "custom", exact: true }).click();
+    await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "Custom", exact: true }).click();
     await expect(form.locator(".custom-permission-flags")).toHaveValue("");
     await form.locator(".launch-composer-cancel").click();
     await page.getByRole("button", { name: "Templates", exact: true }).click();
@@ -483,9 +483,9 @@ test("custom template words round trip into the launcher and clear on a stacked 
       if (request.method() === "PUT" && new URL(request.url()).pathname.startsWith("/api/templates/")) writes++;
     });
     await flags.fill("--mode '");
-    await expect(dialog.locator(".custom-permission-choice [role=alert]")).toContainText("invalid permission flags");
+    await expect(dialog.locator(".custom-permission-choice [role=alert]")).toContainText("Invalid permission flags");
     await dialog.locator(".templates-save").click();
-    await expect(dialog.locator('.templates-error[role="status"]')).toContainText("custom permissions need permission flags");
+    await expect(dialog.locator('.templates-error[role="status"]')).toContainText("Custom permissions need permission flags");
     expect(writes, "an invalid draft must be refused before its API write").toBe(0);
     await flags.fill('--mode "edited template words"');
     await expect(dialog.locator(".templates-save")).toBeEnabled();
@@ -501,7 +501,7 @@ test("custom template words round trip into the launcher and clear on a stacked 
     await expect(flags).toHaveValue("--mode 'second template words'");
     await expect(dialog.locator(".custom-permission-words code")).toHaveText(otherWords);
     await dialog.locator(".templates-add").click();
-    await dialog.locator(".templates-add-menu").getByRole("button", { name: "model", exact: true }).click();
+    await dialog.locator(".templates-add-menu").getByRole("button", { name: "Model", exact: true }).click();
     await expect(dialog.locator(".templates-save")).toBeEnabled();
     await dialog.locator(".templates-save").click();
     await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
@@ -511,7 +511,7 @@ test("custom template words round trip into the launcher and clear on a stacked 
       .toEqual(otherWords);
     await flags.fill("--broken '");
     await expect(flags).toHaveValue("--broken '");
-    await expect(dialog.locator(".custom-permission-choice [role=alert]")).toContainText("invalid permission flags");
+    await expect(dialog.locator(".custom-permission-choice [role=alert]")).toContainText("Invalid permission flags");
     await dialog.locator(".templates-row-name").filter({ hasText: new RegExp(`^${name}$`) }).click();
     await dialog.locator(".templates-discard").click();
     await expect(flags).toHaveValue("--mode 'edited template words'");

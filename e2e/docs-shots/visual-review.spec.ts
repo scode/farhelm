@@ -8,7 +8,7 @@
  * plans remain uncaptured. Setup progress uses the existing owned backend's
  * held action, with the real helm publishing progress and controlled failures.
  */
-import { expect, test, type APIRequestContext, type Locator, type Page } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Locator, type Page, type Request as NetworkRequest } from "@playwright/test";
 import { hostRowByName, listHosts, openHostMenu, openRowMenu, patchPreferences, readPreferences, showHostsPanel, showSessionsPanel } from "../tests/helpers/fleet";
 import { chooseLauncherHost } from "../tests/helpers/host-picker";
 import { openSettings, selectSettingsSection } from "../tests/helpers/settings";
@@ -40,6 +40,7 @@ const settingsOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "settings";
 const menusOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "menus";
 const dialogsOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "dialogs";
 const launcherOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "launcher";
+const sentenceLauncherOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sentence-launcher";
 
 /** Photograph native-only chrome with the goal's explicit CSS-only fallback.
  * The ordinary staged web app supplies the surrounding frame and terminals.
@@ -257,9 +258,9 @@ async function inspectMenu(page: Page, panel: Locator) {
  * The full review and focused menu review share the same popup lifecycle.
  */
 async function numberMenuShots(page: Page, name: string, templates: Locator) {
-  await templates.getByRole("button", { name: "number shortcut codex-deep", exact: true }).click();
+  await templates.getByRole("button", { name: "Number shortcut codex-deep", exact: true }).click();
   const panel = templates.locator(".templates-number-flyout .host-row-menu-panel");
-  const menu = panel.getByRole("menu", { name: "number key for codex-deep", exact: true });
+  const menu = panel.getByRole("menu", { name: "Number key for codex-deep", exact: true });
   try {
     await expect(menu).toBeVisible();
     await expect(menu.getByRole("menuitem")).toHaveCount(11);
@@ -530,13 +531,13 @@ async function launcherShots(page: Page, request: APIRequestContext, name: strin
   const populateAgent = async () => {
     // Scenario history has invented paths; use a real portable destination
     // so ordinary draft pictures do not start with an unrelated folder error.
-    await launcher.getByLabel("folder", { exact: true }).fill("~");
-    await launcher.getByLabel("folder", { exact: true }).press("Escape");
-    await expect(launcher.getByRole("listbox", { name: "folders" })).toHaveCount(0);
+    await launcher.getByLabel("Folder", { exact: true }).fill("~");
+    await launcher.getByLabel("Folder", { exact: true }).press("Escape");
+    await expect(launcher.getByRole("listbox", { name: "Folders" })).toHaveCount(0);
     await launcher.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
     await launcher.locator(".named-conversation").fill("review-conversation");
     await launcher.locator(".initial-prompt").fill("Review the session launcher.\nKeep the action footer visible.\nExplain the result.");
-    await expect(launcher.locator(".launch-composer-summary")).toContainText("prompt: 3 lines");
+    await expect(launcher.locator(".launch-composer-summary")).toContainText("Prompt: 3 lines");
   };
   try {
     await populateAgent();
@@ -556,8 +557,8 @@ async function launcherShots(page: Page, request: APIRequestContext, name: strin
     // A refused folder Enter must clear the floating suggestions above the
     // next controls. Use the real client refusal without launching a session.
     await expect(launcher.locator(".create-session-submit")).toHaveAttribute("aria-disabled", "true");
-    const folder = launcher.getByRole("combobox", { name: "folder", exact: true });
-    const folderOptions = launcher.getByRole("listbox", { name: "folders", exact: true });
+    const folder = launcher.getByRole("combobox", { name: "Folder", exact: true });
+    const folderOptions = launcher.getByRole("listbox", { name: "Folders", exact: true });
     await folder.focus();
     await expect(folderOptions).toBeVisible();
     await expect(folderOptions.locator('[aria-selected="true"]')).toHaveCount(0);
@@ -578,15 +579,15 @@ async function launcherShots(page: Page, request: APIRequestContext, name: strin
 
     // The staged fleet has no cloned repository. Show the real destination
     // editor, while ordinary managed-checkout tests cover its preview states.
-    const destination = launcher.getByRole("group", { name: "destination type", exact: true });
-    await destination.getByRole("button", { name: "managed checkout", exact: true }).click();
-    await expect(launcher.getByRole("combobox", { name: "repository", exact: true })).toBeVisible();
+    const destination = launcher.getByRole("group", { name: "Destination type", exact: true });
+    await destination.getByRole("button", { name: "Managed checkout", exact: true }).click();
+    await expect(launcher.getByRole("combobox", { name: "Repository", exact: true })).toBeVisible();
     await capture("launcher-managed-checkout");
-    await destination.getByRole("button", { name: "folder", exact: true }).click();
+    await destination.getByRole("button", { name: "Folder", exact: true }).click();
 
     await showOmpEffort(page, request, launcher);
     await capture("launcher-omp-effort");
-    await launcher.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true }).click();
+    await launcher.locator(".launch-composer-permissions-choice").getByRole("button", { name: "Guarded", exact: true }).click();
     await launcher.locator(".launch-composer-harness-choice").getByRole("button", { name: "Pi", exact: true }).click();
     const banner = launcher.locator(".permission-escalation-banner");
     await expect(banner).toContainText("Permission changed: Guarded → YOLO");
@@ -599,15 +600,15 @@ async function launcherShots(page: Page, request: APIRequestContext, name: strin
     await captureShot(page, `${name}-launcher-permission-banner`, window,
       { pad: 0, keepPointer: true, keepAnimations: true });
     await expect(banner).toBeVisible();
-    await banner.getByRole("button", { name: "undo", exact: true }).click();
+    await banner.getByRole("button", { name: "Undo", exact: true }).click();
     await expect(banner).toBeHidden();
 
-    await launcher.getByRole("tab", { name: "command", exact: true }).click();
-    await launcher.getByLabel("agent command", { exact: true }).fill("claude {farhelm_args}");
-    await launcher.getByRole("radio", { name: "no", exact: true }).check();
-    await launcher.getByRole("combobox", { name: "agent type", exact: true }).selectOption("claude");
+    await launcher.getByRole("tab", { name: "Command", exact: true }).click();
+    await launcher.getByLabel("Agent command", { exact: true }).fill("claude {farhelm_args}");
+    await launcher.getByRole("radio", { name: "No", exact: true }).check();
+    await launcher.getByRole("combobox", { name: "Agent type", exact: true }).selectOption("claude");
     await launcher.locator(".launch-command-resume-toggle").check();
-    await launcher.getByLabel("resume command", { exact: true }).fill("claude --resume {conversation} {farhelm_args}");
+    await launcher.getByLabel("Resume command", { exact: true }).fill("claude --resume {conversation} {farhelm_args}");
     await capture("launcher-command");
     await launcher.locator(".launch-composer-save-template").click();
     const panel = launcher.locator(".save-template-panel");
@@ -645,10 +646,10 @@ async function launcherShots(page: Page, request: APIRequestContext, name: strin
       // A typed draft needs no filesystem or API staging: never Launch it.
       // Require actual truncation so this view proves why full help matters.
       const longPath = "~/work/projects/a-long-directory-name-for-launch-summary";
-      const folder = launcher.getByLabel("folder", { exact: true });
+      const folder = launcher.getByLabel("Folder", { exact: true });
       await folder.fill(longPath);
       await folder.press("Escape");
-      await expect(launcher.getByRole("listbox", { name: "folders" })).toHaveCount(0);
+      await expect(launcher.getByRole("listbox", { name: "Folders" })).toHaveCount(0);
       await clickDialogGap(page, launcher);
       const target = launcher.locator(".launch-composer-launch-context");
       await expect(target).toContainText(longPath);
@@ -669,6 +670,102 @@ async function launcherShots(page: Page, request: APIRequestContext, name: strin
   }
 }
 
+/** Show the editor's independent field labels and local refusals without saving.
+ * The stored scenario template supplies the initial agent fields. Added fields
+ * remain an ordinary unsaved draft, and every departure takes Discard. Command
+ * fields use a separate new draft so incompatible agent fields do not obscure
+ * their normal layout. The invalid wrapper's Save attempt must refuse locally,
+ * with no template mutation request. No reply or catalog entry is rewritten.
+ */
+async function sentenceTemplateShots(page: Page, name: string) {
+  const templates = page.locator(".templates-dialog");
+  const window = [page.locator("body")];
+  const mutations: string[] = [];
+  const observe = (request: NetworkRequest) => {
+    if (new URL(request.url()).pathname.startsWith("/api/templates") && request.method() !== "GET") {
+      mutations.push(request.method());
+    }
+  };
+  page.on("request", observe);
+  const add = async (label: string) => {
+    await templates.locator(".templates-add").click();
+    const menu = templates.locator(".templates-add-menu");
+    await expect(menu).toBeVisible();
+    await menu.getByRole("button", { name: label, exact: true }).click();
+    await expect(menu).toBeHidden();
+  };
+  const discard = async () => {
+    await templates.locator(".templates-close").click();
+    const answer = templates.locator(".templates-discard");
+    await expect(answer).toBeVisible();
+    await answer.click();
+    await expect(templates).toBeHidden();
+  };
+  const fieldShot = async (key: string, suffix = key) => {
+    const field = templates.locator(`.templates-set-field[data-field="${key}"]`);
+    await field.scrollIntoViewIfNeeded();
+    await templates.focus();
+    await expect(templates).toBeFocused();
+    await shot(page, `${name}-template-${suffix}`, window, { pad: 0 });
+  };
+  try {
+    await page.locator(".templates-button").click();
+    await expect(templates.locator(".templates-sidebar")).toHaveAttribute("aria-busy", "false");
+    await templates.locator(".templates-row").filter({ has: page.getByText("codex-deep", { exact: true }) }).click();
+    for (const label of ["Approvals", "Wrapper prefix", "Initial prompt", "Host", "Destination", "Session name"]) {
+      await add(label);
+    }
+    await templates.locator('[data-field="permissions"]').getByRole("group", { name: "Approvals", exact: true })
+      .getByRole("button", { name: "Custom", exact: true }).click();
+    await templates.locator(".custom-permission-flags").fill("--permission-mode ask");
+    await templates.locator(".templates-wrapper").fill("review-wrapper --");
+    await templates.locator(".templates-prompt").fill("Review the labels.\nKeep user text unchanged.");
+    const host = templates.locator('[data-field="host"]').getByRole("group", { name: "Host", exact: true });
+    await expect(host.getByRole("button", { name: "build-box", exact: true })).toBeVisible();
+    await host.getByRole("button", { name: "build-box", exact: true }).click();
+    await templates.locator(".templates-destination").fill("~/work/review");
+    await templates.locator(".templates-session-name").fill("review-labels");
+    for (const key of ["agent", "model", "effort", "permissions", "wrapper", "prompt", "host", "destination", "name"]) {
+      await fieldShot(key);
+    }
+    await templates.locator(".templates-wrapper").fill("review-wrapper 'unfinished");
+    await expect(templates.locator(".templates-save")).toBeEnabled();
+    await templates.locator(".templates-save").click();
+    const refusal = templates.locator(".templates-error").filter({ hasText: "missing closing quote" });
+    await expect(refusal).toBeVisible();
+    expect(mutations, "an unfinished wrapper must refuse before any template write").toEqual([]);
+    await refusal.scrollIntoViewIfNeeded();
+    await templates.focus();
+    await shot(page, `${name}-template-wrapper-refusal`, window, { pad: 0 });
+    await discard();
+
+    await page.locator(".templates-button").click();
+    await expect(templates.locator(".templates-sidebar")).toHaveAttribute("aria-busy", "false");
+    await templates.locator(".templates-new").click();
+    await templates.getByRole("group", { name: "Switches launcher to", exact: true })
+      .getByRole("button", { name: "Command", exact: true }).click();
+    for (const label of ["Command", "Approvals", "Resume command"]) await add(label);
+    await templates.locator(".templates-command").fill("review-tool {farhelm_args}");
+    await templates.locator(".templates-resume").fill("review-tool --resume {conversation} {farhelm_args}");
+    await templates.locator('[data-field="yolo"]').getByRole("group", { name: "Approvals", exact: true })
+      .getByRole("button", { name: "Keeps safety checks", exact: true }).click();
+    for (const key of ["command", "yolo", "resume"]) await fieldShot(key, `command-${key}`);
+    await discard();
+  } finally {
+    try {
+      if (await templates.isVisible()) {
+        await templates.locator(".templates-close").click();
+        const answer = templates.locator(".templates-discard");
+        if (await answer.isVisible()) await answer.click();
+        await expect(templates).toBeHidden();
+      }
+    } finally {
+      page.off("request", observe);
+      expect(mutations, "review only edits drafts and photographs a local refusal").toEqual([]);
+    }
+  }
+}
+
 /** Photograph the real refusal and both ends of its bounded answer region.
  * The host must ask first; no affirmative answer is sent. On phones, the
  * question can scroll while the ordinary launcher actions stay visible.
@@ -679,13 +776,13 @@ async function launcherYoloShots(page: Page, request: APIRequestContext, name: s
   const local = (await listHosts(request)).find((host) => host.kind === "local");
   expect(local?.yolo_without_asking, "the staged host must ask before a YOLO launch").toBe(false);
   const launcher = await openLauncher(page);
-  await launcher.getByRole("tab", { name: "agent", exact: true }).click();
+  await launcher.getByRole("tab", { name: "Agent", exact: true }).click();
   await chooseLauncherHost(launcher.getByRole("combobox", { name: "host", exact: true }), String(local!.id));
-  await launcher.getByLabel("folder", { exact: true }).fill("~");
-  await launcher.getByLabel("folder", { exact: true }).press("Escape");
-  await expect(launcher.getByRole("listbox", { name: "folders" })).toHaveCount(0);
+  await launcher.getByLabel("Folder", { exact: true }).fill("~");
+  await launcher.getByLabel("Folder", { exact: true }).press("Escape");
+  await expect(launcher.getByRole("listbox", { name: "Folders" })).toHaveCount(0);
   await launcher.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
-  await launcher.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true }).click();
+  await launcher.locator(".launch-composer-permissions-choice").getByRole("button", { name: "YOLO", exact: true }).click();
   const [refusal] = await Promise.all([
     page.waitForResponse((response) => response.request().method() === "POST" && response.url().endsWith("/api/sessions")),
     // Native keyboard submission gives the initial safe answer visible
@@ -1064,17 +1161,17 @@ async function showOmpEffort(page: Page, request: APIRequestContext, launcher: L
   expect(model, "the real OMP model must exist before its picker is used").toBeDefined();
   expect(model!.efforts).toEqual(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
   await launcher.locator(".launch-composer-harness-choice button", { hasText: /^OMP$/ }).click();
-  const picker = launcher.getByRole("combobox", { name: "model", exact: true });
+  const picker = launcher.getByRole("combobox", { name: "Model", exact: true });
   await picker.fill(model!.id);
   await launcher.getByRole("option", { name: model!.id, exact: true }).click();
-  const effort = launcher.getByRole("combobox", { name: "effort", exact: true });
+  const effort = launcher.getByRole("combobox", { name: "Effort", exact: true });
   await expect(effort).toHaveClass(/launch-composer-effort-select/);
   expect(await effort.locator("option").evaluateAll((options) => options.map((option) => (option as HTMLOptionElement).value)))
     .toEqual(["default", ...model!.efforts]);
-  await expect(launcher.getByRole("group", { name: "effort", exact: true })).toHaveCount(0);
+  await expect(launcher.getByRole("group", { name: "Effort", exact: true })).toHaveCount(0);
   await effort.selectOption("high");
   await expect(effort).toHaveValue("high");
-  const permissions = launcher.getByRole("group", { name: "permission mode", exact: true });
+  const permissions = launcher.getByRole("group", { name: "Permission mode", exact: true });
   await expect(permissions.getByRole("button")).toHaveCount(4);
   await permissions.scrollIntoViewIfNeeded();
   await expect(effort).toBeInViewport();
@@ -1335,6 +1432,14 @@ for (const colorScheme of ["dark", "light"] as const) {
         await expect(page.locator(".build-skew")).toHaveCount(0);
         const name = `visual-review/${colorScheme}-${width}`;
         const window = [page.locator("body")];
+        if (sentenceLauncherOnly) {
+          await launcherShots(page, request, name, width === "main-650");
+          await sentenceTemplateShots(page, name);
+          // These two checkout fields also appear in Settings. Its surrounding
+          // controls retain the head's exact current spelling and real state.
+          await settingsShots(page, name, width === "main-650");
+          return;
+        }
         if (settingsOnly) {
           await settingsShots(page, name, width === "main-650");
           return;
@@ -1629,8 +1734,8 @@ for (const colorScheme of ["dark", "light"] as const) {
         const templates = page.locator(".templates-dialog");
         await expect(templates.locator(".templates-sidebar")).toHaveAttribute("aria-busy", "false");
         await templates.locator(".templates-row").filter({ has: page.getByText("codex-deep", { exact: true }) }).click();
-        await expect(templates.locator(".templates-editor-heading h3")).toHaveText("edit template");
-        await expect(templates.getByRole("button", { name: "number shortcut codex-deep", exact: true }))
+        await expect(templates.locator(".templates-editor-heading h3")).toHaveText("Edit template");
+        await expect(templates.getByRole("button", { name: "Number shortcut codex-deep", exact: true }))
           .toHaveCSS("font-family", /JetBrains Mono/);
         await shot(page, `${name}-template-editor`, window, { pad: 0 });
         const selectedTemplate = templates.locator('.templates-row[aria-pressed="true"]');
@@ -1712,7 +1817,7 @@ for (const colorScheme of ["dark", "light"] as const) {
         });
         await shot(page, `${name}-launcher-end`, window, { pad: 0 });
         await showOmpEffort(page, request, launcher);
-        await expect(launcher.getByRole("combobox", { name: "model", exact: true })).toHaveCSS("font-family", /JetBrains Mono/);
+        await expect(launcher.getByRole("combobox", { name: "Model", exact: true })).toHaveCSS("font-family", /JetBrains Mono/);
         await shot(page, `${name}-launcher-omp-effort`, window, { pad: 0 });
         await page.keyboard.press("Escape");
         await expect(launcher).toBeHidden();

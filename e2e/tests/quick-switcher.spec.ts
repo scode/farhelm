@@ -66,7 +66,7 @@ test("opening a template reports the launcher's catalog read failure", async ({ 
     await expect(error).toContainText("launcher template list unavailable");
     await expect(error).not.toContainText("deleted");
     expect(reads).toBe(2);
-    await expect(form.getByLabel("name (optional)")).toBeEnabled();
+    await expect(form.getByLabel("Name (optional)")).toBeEnabled();
   } catch (error) {
     bodyFailed = true;
     throw error;
@@ -316,7 +316,7 @@ test("loading has no selection and a failed listing says so", async ({ page }) =
     await expect(reopened.locator(".quick-switcher-new")).toHaveAttribute("aria-selected", "true");
     await page.keyboard.press("Enter");
     await expect(dialog).toHaveCount(0);
-    await expect(page.locator(".create-session-form").getByLabel("name (optional)")).toHaveValue("name-after-failed-read");
+    await expect(page.locator(".create-session-form").getByLabel("Name (optional)")).toHaveValue("name-after-failed-read");
   } finally { gate.release(); }
 });
 
@@ -398,8 +398,8 @@ test("the pinned name action opens ordinary New with remembered defaults", async
     const form = page.locator(".create-session-form");
     await expect(form).toBeVisible();
     const ordinaryHost = await form.getByRole("combobox", { name: "host", exact: true }).getAttribute("data-host-id");
-    const ordinaryCwd = await form.getByLabel("folder", { exact: true }).inputValue();
-    await form.getByRole("button", { name: "cancel", exact: true }).click();
+    const ordinaryCwd = await form.getByLabel("Folder", { exact: true }).inputValue();
+    await form.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(form).toHaveCount(0);
     const dialog = await openSwitcher(page);
     await dialog.getByRole("combobox").fill(name);
@@ -409,14 +409,14 @@ test("the pinned name action opens ordinary New with remembered defaults", async
     await expect(dialog.locator(".quick-switcher-template")).toHaveCount(0);
     await page.keyboard.press("Enter");
     await expect(dialog).toHaveCount(0);
-    await expect(form.getByLabel("name (optional)")).toHaveValue(name);
+    await expect(form.getByLabel("Name (optional)")).toHaveValue(name);
     await expect(form.getByRole("combobox", { name: "host", exact: true })).toHaveAttribute("data-host-id", ordinaryHost);
-    await expect(form.getByLabel("folder", { exact: true })).toHaveValue(ordinaryCwd);
-    await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(form.getByLabel("Folder", { exact: true })).toHaveValue(ordinaryCwd);
+    await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "YOLO", exact: true })).toHaveAttribute("aria-pressed", "true");
     await expect(form.locator('.launch-composer-search input[role="combobox"]')).toHaveValue("");
     await expect(form.locator('.launch-composer-search input[role="combobox"]')).toBeFocused();
     expect(creates).toBe(0);
-    await form.getByRole("button", { name: "cancel", exact: true }).click();
+    await form.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(page.locator(".new-session-button")).toBeFocused();
     // A consumed name belongs to one New opening. Clone must retain its
     // source title after its own resources and mount seeding complete.
@@ -424,9 +424,9 @@ test("the pinned name action opens ordinary New with remembered defaults", async
     await expect(source).toBeVisible();
     await openRowMenu(source);
     await source.locator(".session-row-clone").click();
-    await expect(form.getByLabel("name (optional)")).toHaveValue(origin.title);
+    await expect(form.getByLabel("Name (optional)")).toHaveValue(origin.title);
     await expect(form).toHaveAttribute("data-initial-templates-ready", "true");
-    await expect(form.getByLabel("name (optional)")).toHaveValue(origin.title);
+    await expect(form.getByLabel("Name (optional)")).toHaveValue(origin.title);
   } finally { await cleanupSession(request, origin.id); }
 });
 
@@ -493,31 +493,31 @@ test("a template pick waits for launcher inputs before applying the template", a
     await expect(form).toBeVisible();
     await expect.poll(() => templateReads).toBe(2);
     await expect.poll(() => catalogRequested).toBe(true);
-    await expect(form.getByRole("status")).toHaveText("loading session setup…");
-    await expect(form.getByLabel("name (optional)")).toHaveCount(0);
+    await expect(form.getByRole("status")).toHaveText("Loading session setup…");
+    await expect(form.getByLabel("Name (optional)")).toHaveCount(0);
     await expect(form.locator(".launch-composer-template-error")).toHaveCount(0);
     templateGate.release();
     await expect.poll(() => templatesCompleted).toBe(true);
     await expect(form).toHaveAttribute("data-initial-templates-ready", "true");
     // The catalog gate is still held: a template reply alone cannot apply.
-    await expect(form.getByRole("status")).toHaveText("loading session setup…");
-    await expect(form.getByLabel("name (optional)")).toHaveCount(0);
+    await expect(form.getByRole("status")).toHaveText("Loading session setup…");
+    await expect(form.getByLabel("Name (optional)")).toHaveCount(0);
     catalogGate.release();
-    await expect(form.getByLabel("name (optional)")).toHaveValue("template-owned-name");
-    await expect(form.getByRole("combobox", { name: "model", exact: true })).toHaveValue(model.id);
+    await expect(form.getByLabel("Name (optional)")).toHaveValue("template-owned-name");
+    await expect(form.getByRole("combobox", { name: "Model", exact: true })).toHaveValue(model.id);
     await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true })).toHaveAttribute("aria-pressed", "true");
-    await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: model.efforts[0], exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: model.efforts[0][0].toUpperCase() + model.efforts[0].slice(1), exact: true })).toHaveAttribute("aria-pressed", "true");
     await expect(form.getByRole("combobox", { name: "host", exact: true })).toHaveAttribute("data-host-id", String(local!.id));
-    await expect(form.getByLabel("folder", { exact: true })).toHaveValue("/tmp");
+    await expect(form.getByLabel("Folder", { exact: true })).toHaveValue("/tmp");
     // Null resets to the harness's current default. For Codex that is guarded;
     // applying a template must not revive the removed default-mode control.
-    await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "Guarded", exact: true })).toHaveAttribute("aria-pressed", "true");
     await expect(form.locator(".launch-composer-trust-choice")).toHaveCount(0);
     await expect(form.locator(".launch-composer-summary")).not.toContainText("trust:");
     await expect(form.locator(".launch-composer-template-error")).toHaveCount(0);
-    await form.getByLabel("name (optional)").fill("user-edited-name");
-    await form.getByLabel("folder", { exact: true }).fill("/tmp/edited");
-    await expect(form.getByLabel("name (optional)")).toHaveValue("user-edited-name");
+    await form.getByLabel("Name (optional)").fill("user-edited-name");
+    await form.getByLabel("Folder", { exact: true }).fill("/tmp/edited");
+    await expect(form.getByLabel("Name (optional)")).toHaveValue("user-edited-name");
     expect(creates).toBe(0);
     await test.info().attach("switcher-template-launcher", { body: await form.screenshot(), contentType: "image/png" });
   } finally {

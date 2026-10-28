@@ -74,18 +74,18 @@ for (const harness of ["goose", "codex"]) {
       const agent = form.locator(".launch-composer-harness-choice").getByRole("button", { name: harness === "goose" ? "Goose" : "Codex", exact: true });
       await agent.click();
       const permissions = form.locator(".launch-composer-permissions-choice");
-      const opposite = permissions.getByRole("button", { name: harness === "goose" ? "approve" : "yolo", exact: true });
+      const opposite = permissions.getByRole("button", { name: harness === "goose" ? "Approve" : "YOLO", exact: true });
       await opposite.click();
       await expect(opposite, "premise: only the template reset can change this explicit choice").toHaveAttribute("aria-pressed", "true");
-      const search = form.getByRole("combobox", { name: "search folders, harnesses, models, and efforts" });
+      const search = form.getByRole("combobox", { name: "Search folders, harnesses, models, and efforts" });
       await search.fill(`tl:${title}`);
       await search.press("Enter");
       await expect(search).toHaveValue("");
       await expect(agent).toHaveAttribute("aria-pressed", "true");
       await expect(opposite).toHaveAttribute("aria-pressed", "false");
-      await expect(permissions.getByRole("button", { name: harness === "goose" ? "yolo" : "guarded", exact: true }))
+      await expect(permissions.getByRole("button", { name: harness === "goose" ? "YOLO" : "Guarded", exact: true }))
         .toHaveAttribute("aria-pressed", "true");
-      await form.getByLabel("name (optional)").fill(title);
+      await form.getByLabel("Name (optional)").fill(title);
       await form.locator(".create-session-submit").click();
       if (harness === "goose") {
         const confirmation = form.locator(".yolo-confirmation");
@@ -146,9 +146,9 @@ test("Enter on an unchanged permission retries a lost reply with one key and one
     const form = page.locator(".create-session-form");
     await expect(form).toBeVisible();
     await form.getByRole("button", { name: "Codex", exact: true }).click();
-    await form.getByLabel("folder", { exact: true }).fill("/tmp");
-    await form.getByLabel("name (optional)").fill(title);
-    const choice = form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true });
+    await form.getByLabel("Folder", { exact: true }).fill("/tmp");
+    await form.getByLabel("Name (optional)").fill(title);
+    const choice = form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "Guarded", exact: true });
     await choice.click();
     await expect(choice).toHaveAttribute("aria-pressed", "true");
     await form.locator(".create-session-submit").click();
@@ -196,10 +196,10 @@ test("searching for unchanged default effort preserves a lost reply's key", asyn
     const form = page.locator(".create-session-form");
     await expect(form).toBeVisible();
     await form.getByRole("button", { name: "Codex", exact: true }).click();
-    await form.getByLabel("folder", { exact: true }).fill("/tmp");
-    await form.getByLabel("name (optional)").fill(title);
+    await form.getByLabel("Folder", { exact: true }).fill("/tmp");
+    await form.getByLabel("Name (optional)").fill(title);
     const defaultEffort = form.locator(".launch-composer-effort-choice")
-      .getByRole("button", { name: "default", exact: true });
+      .getByRole("button", { name: "Default", exact: true });
     await expect(defaultEffort).toHaveAttribute("aria-pressed", "true");
 
     await form.locator(".create-session-submit").click();
@@ -208,7 +208,7 @@ test("searching for unchanged default effort preserves a lost reply's key", asyn
 
     const search = form.locator('.launch-composer-search input[role="combobox"]');
     await search.fill("effort:default");
-    await expect(form.getByRole("option", { name: "Effort: default", exact: true, selected: true })).toBeVisible();
+    await expect(form.getByRole("option", { name: "Effort: Default", exact: true, selected: true })).toBeVisible();
     await search.press("Enter");
     await expect(defaultEffort).toHaveAttribute("aria-pressed", "true");
     await form.locator(".create-session-submit").click();
@@ -324,8 +324,8 @@ test("a create whose reply is lost is retried with the same key and yields one s
 // the key alone rather than about whether the corrected request happens to
 // succeed — and so both attempts land in the same observable state.
 for (const field of [
-  { name: "working directory", label: "folder", edit: "/nonexistent/also/not/here" },
-  { name: "agent command", label: "agent command", edit: "also-not-an-agent" },
+  { name: "working directory", label: "Folder", edit: "/nonexistent/also/not/here" },
+  { name: "agent command", label: "Agent command", edit: "also-not-an-agent" },
 ]) {
   test(`editing the ${field.name} after a failed create mints a new intent key`, async ({
     page,
@@ -400,7 +400,7 @@ test("editing the title after a failed create mints a new intent key", async ({
     await form.locator('button[type="submit"]').click();
     await expect(form.locator(".create-session-error")).toBeVisible();
 
-    await form.getByLabel("name (optional)").fill(`${title}-renamed`);
+    await form.getByLabel("Name (optional)").fill(`${title}-renamed`);
     const [retry] = await Promise.all([
       page.waitForResponse((response) =>
         response.request().method() === "POST" && new URL(response.url()).pathname === "/api/sessions"
@@ -459,7 +459,7 @@ test("the create form's inputs are disabled while a create is in flight", async 
       ),
       form.locator('button[type="submit"]').click(),
     ]);
-    for (const label of ["name (optional)", "folder", "agent command"]) {
+    for (const label of ["Name (optional)", "Folder", "Agent command"]) {
       await expect(form.getByLabel(label, { exact: true })).toBeDisabled();
     }
     release(true);
@@ -556,10 +556,10 @@ async function placementFolderOptions(form: Locator) {
   const anchor = form.locator(".create-session-submit");
   await anchor.focus();
   await expect(anchor).toBeFocused();
-  const folder = form.getByRole("combobox", { name: "folder", exact: true });
+  const folder = form.getByRole("combobox", { name: "Folder", exact: true });
   await folder.focus();
   await expect(folder).toBeFocused();
-  const list = form.getByRole("listbox", { name: "folders", exact: true });
+  const list = form.getByRole("listbox", { name: "Folders", exact: true });
   await expect(list).toBeVisible();
   return list;
 }
@@ -586,9 +586,9 @@ test("reapplying Home after a lost command-create reply reconciles one session",
     await page.goto("/");
     const form = await fillCreateForm(page, { cwd: "~", invocation: FAKE_AGENT_INVOCATION, title });
     let list = await placementFolderOptions(form);
-    await list.getByRole("option", { name: "reset folder to home", exact: true }).click();
+    await list.getByRole("option", { name: "Reset folder to home", exact: true }).click();
     await expect(list).toHaveCount(0);
-    await expect(form.getByLabel("folder", { exact: true })).toHaveValue("~");
+    await expect(form.getByLabel("Folder", { exact: true })).toHaveValue("~");
     expect(bodies).toEqual([]);
     await form.locator(".create-session-submit").click();
     await expect(form.locator(".create-session-error")).toBeVisible();
@@ -605,9 +605,9 @@ test("reapplying Home after a lost command-create reply reconciles one session",
 
     await expect(form.locator(".create-session-submit")).toHaveAttribute("aria-disabled", "false");
     list = await placementFolderOptions(form);
-    await list.getByRole("option", { name: "reset folder to home", exact: true }).click();
+    await list.getByRole("option", { name: "Reset folder to home", exact: true }).click();
     await expect(list).toHaveCount(0);
-    await expect(form.getByLabel("folder", { exact: true })).toHaveValue("~");
+    await expect(form.getByLabel("Folder", { exact: true })).toHaveValue("~");
     expect(bodies, "Home itself does not send a create").toHaveLength(1);
     // The first accepted session may already be visible in the sidebar.
     // Wait for the retry's own reply before using that row as its result.

@@ -29,14 +29,14 @@ test("the Grok composer clears and hides unsupported model and effort choices", 
 
   const harnesses = form.locator(".launch-composer-harness-choice");
   await harnesses.getByRole("button", { name: "Codex", exact: true }).click();
-  const model = form.getByRole("combobox", { name: "model", exact: true });
+  const model = form.getByRole("combobox", { name: "Model", exact: true });
   await model.fill("stale-custom-model");
   await model.press("Enter");
   await expect(model).toHaveAttribute("aria-expanded", "false");
   await expect(model).toHaveValue("stale-custom-model");
   const highEffort = form
     .locator(".launch-composer-effort-choice")
-    .getByRole("button", { name: "high", exact: true });
+    .getByRole("button", { name: "High", exact: true });
   await highEffort.click();
   await expect(highEffort).toHaveAttribute("aria-pressed", "true");
 
@@ -52,11 +52,11 @@ test("the Grok composer clears and hides unsupported model and effort choices", 
   await expect(form.locator(".launch-composer-effort-choice")).toHaveCount(0);
   const permissions = form.locator(".launch-composer-permissions-choice");
   await expect(permissions.locator("button[aria-pressed]")).toHaveText([
-    "guarded", "yolo", "custom",
+    "Guarded", "YOLO", "Custom",
   ]);
-  await permissions.getByRole("button", { name: "guarded", exact: true }).click();
+  await permissions.getByRole("button", { name: "Guarded", exact: true }).click();
 
-  await form.getByLabel("folder", { exact: true }).fill("/tmp");
+  await form.getByLabel("Folder", { exact: true }).fill("/tmp");
   await page.route("**/api/sessions", async (route) => {
     if (route.request().method() !== "POST") return route.continue();
     await route.fulfill({

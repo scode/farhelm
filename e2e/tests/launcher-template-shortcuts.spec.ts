@@ -109,8 +109,8 @@ test("back-to-back bolt and number chords stack on New without submitting", asyn
     await expect.poll(() => heldRead, { message: "the first shortcut's fresh read is held" }).toBe(true);
     await number(page, "1");
     gate.release();
-    await expect(form.getByLabel("name (optional)")).toHaveValue("from number");
-    await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: "low", exact: true }))
+    await expect(form.getByLabel("Name (optional)")).toHaveValue("from number");
+    await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: "Low", exact: true }))
       .toHaveAttribute("aria-pressed", "true");
     await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }))
       .toHaveAttribute("aria-pressed", "true");
@@ -149,7 +149,7 @@ test("launcher sequences apply from buttons and unselected search text", async (
     await patchPreferences(request, { template_shortcuts: { "1": first, "2": second } });
     expect((await readPreferences(request)).template_shortcuts).toEqual({ "1": first, "2": second });
     const form = await openNew(page);
-    const button = form.getByRole("tab", { name: "agent", exact: true });
+    const button = form.getByRole("tab", { name: "Agent", exact: true });
     await button.focus();
     await expect(button).toBeFocused();
     await page.keyboard.press("Control+Shift+KeyX");
@@ -159,8 +159,8 @@ test("launcher sequences apply from buttons and unselected search text", async (
     await page.keyboard.press("Digit2");
     await page.keyboard.press("Enter");
     await expect(indicator).toHaveCount(0);
-    await expect(form.getByLabel("name (optional)")).toHaveValue("second sequence");
-    await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: "low", exact: true }))
+    await expect(form.getByLabel("Name (optional)")).toHaveValue("second sequence");
+    await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: "Low", exact: true }))
       .toHaveAttribute("aria-pressed", "true");
     await expect(button).toBeFocused();
 
@@ -190,7 +190,7 @@ test("launcher sequences apply from buttons and unselected search text", async (
     await expect(indicator).toBeVisible();
     await page.keyboard.press("Digit1");
     await page.keyboard.press("Enter");
-    await expect(form.getByLabel("name (optional)")).toHaveValue("first sequence");
+    await expect(form.getByLabel("Name (optional)")).toHaveValue("first sequence");
     await expect(search).toHaveValue("keep selected text");
     await expect(search).toBeFocused();
     bodyFailed = false;
@@ -226,7 +226,7 @@ test("a number shortcut applies to Clone's draft", async ({ page, request }) => 
       if (sent.method() === "POST" && new URL(sent.url()).pathname === "/api/sessions") creates++;
     });
     await number(page, "1");
-    await expect(form.getByLabel("name (optional)")).toHaveValue("cloned by shortcut");
+    await expect(form.getByLabel("Name (optional)")).toHaveValue("cloned by shortcut");
     await expect(search).toBeFocused();
     expect(creates, "applying a template never submits Clone").toBe(0);
     bodyFailed = false;
@@ -261,7 +261,7 @@ test("Replace with refuses a whole sequence and yields to another modal", async 
     await row.locator(".session-row-replace-with").click();
     const form = page.locator('.create-session-form[role="dialog"]');
     await expect(form).toBeVisible();
-    const nameField = form.getByLabel("name (optional)");
+    const nameField = form.getByLabel("Name (optional)");
     const before = await nameField.inputValue();
     await number(page, "1");
     await expect(form.locator(".launch-composer-template-error"))
@@ -390,7 +390,7 @@ test("a template shortcut preserves editor focus when clearing a quick-launch YO
     await expect(form).toBeVisible();
     const question = form.locator(".yolo-confirmation");
     const search = form.locator('.launch-composer-search input[role="combobox"]');
-    const name = form.getByLabel("name (optional)", { exact: true });
+    const name = form.getByLabel("Name (optional)", { exact: true });
     await expect(question).toBeVisible();
     await expect(question.locator(".yolo-cancel")).toBeFocused();
     await expect(name).toHaveValue(initialName);
@@ -440,7 +440,7 @@ test("a template shortcut preserves editor focus when clearing a quick-launch YO
     expect(bodies).toHaveLength(2);
 
     await number(page, "1");
-    await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true }))
+    await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "Guarded", exact: true }))
       .toHaveAttribute("aria-pressed", "true");
     await expect(question).toHaveCount(0);
     await afterFocusFrames();

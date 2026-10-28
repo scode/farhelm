@@ -244,7 +244,7 @@ test("normal, neutral, danger, and exempt buttons keep their deliberate tiers", 
     // further business with it.
     await page
       .locator(".create-session-form")
-      .getByRole("button", { name: "cancel", exact: true })
+      .getByRole("button", { name: "Cancel", exact: true })
       .click();
     await expect(page.locator(".create-session-form")).toHaveCount(0);
 

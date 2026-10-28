@@ -72,8 +72,8 @@ async function openComposer(page: Page): Promise<Locator> {
   await page.locator(".new-session-button").click();
   const form = page.locator(".create-session-form");
   await expect(form).toBeVisible();
-  await form.getByLabel("folder", { exact: true }).fill(launches[0].cwd);
-  await form.getByLabel("folder", { exact: true }).press("Escape");
+  await form.getByLabel("Folder", { exact: true }).fill(launches[0].cwd);
+  await form.getByLabel("Folder", { exact: true }).press("Escape");
   await expect(form.locator(".launch-composer-recent-slots > button")).toHaveCount(3);
   return form;
 }
@@ -112,12 +112,12 @@ test("F20 visual capture matrix", async ({ page, browserName }, testInfo) => {
   const desktop = { width: 1280, height: 900 };
   const narrow = { width: 390, height: 844 };
   const selectExplicit = async (form: Locator) => {
-    const model = form.getByRole("combobox", { name: "model", exact: true });
+    const model = form.getByRole("combobox", { name: "Model", exact: true });
     await model.fill("gpt-6-astra");
     // No harness is chosen yet, so the row carries its owner's suffix.
     await form.locator("#launch-composer-model-results").getByRole("option", { name: "gpt-6-astra (Codex)", exact: true }).click();
-    await form.locator(".launch-composer-effort-choice").getByRole("button", { name: "high", exact: true }).click();
-    await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true }).click();
+    await form.locator(".launch-composer-effort-choice").getByRole("button", { name: "High", exact: true }).click();
+    await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "YOLO", exact: true }).click();
   };
   const prefillSavedDefaults = async (form: Locator) => {
     // Ordinary recents honour the complete explicit draft and therefore
@@ -151,7 +151,7 @@ test("F20 visual capture matrix", async ({ page, browserName }, testInfo) => {
   await capture("prefill-default-over-explicit", desktop, async (form) => {
     await selectExplicit(form);
     await prefillSavedDefaults(form);
-    await expect(form.locator(".launch-composer-summary")).toContainText("model: default · effort: default · permissions: guarded");
+    await expect(form.locator(".launch-composer-summary")).toContainText("Model: Default · Effort: Default · Permissions: Guarded");
   }, ["explicit Codex draft", "saved default recent applied without launch"]);
   await capture("keyboard-active-hover", desktop, async (form) => {
     const search = form.locator('.launch-composer-search input[role="combobox"]');
@@ -172,22 +172,22 @@ test("F20 visual capture matrix", async ({ page, browserName }, testInfo) => {
     await expect.poll(() => form.locator(".launch-composer-body").evaluate((node) => node.scrollTop)).toBe(0);
     // The caption claims the explicit choices are visible; prove the draft
     // holds them before the screenshot rather than trusting the clicks.
-    await expect(form.locator(".launch-composer-summary")).toHaveText("model: gpt-6-astra · effort: high · permissions: yolo");
-    await expect(form.getByText("recent setups", { exact: true })).toBeVisible();
+    await expect(form.locator(".launch-composer-summary")).toHaveText("Model: gpt-6-astra · Effort: High · Permissions: YOLO");
+    await expect(form.getByText("Recent setups", { exact: true })).toBeVisible();
     await expect(form.locator(".launch-composer-recent-slots > button").first()).toBeVisible();
   }, ["Codex/Astra/High/YOLO summary", "recent heading and first row at scrollTop 0"]);
   await capture("complete-recent-prefill-upper-strip", narrow, async (form) => {
     await prefillCompleteRecent(form);
     await form.locator(".launch-composer-body").evaluate((node) => { node.scrollTop = 0; });
     await expect.poll(() => form.locator(".launch-composer-body").evaluate((node) => node.scrollTop)).toBe(0);
-    await expect(form.locator(".launch-composer-summary")).toHaveText("model: gpt-6-astra · effort: high · permissions: yolo");
-    await expect(form.getByText("recent setups", { exact: true })).toBeVisible();
+    await expect(form.locator(".launch-composer-summary")).toHaveText("Model: gpt-6-astra · Effort: High · Permissions: YOLO");
+    await expect(form.getByText("Recent setups", { exact: true })).toBeVisible();
     await expect(form.locator(".launch-composer-recent-slots > button").first()).toBeVisible();
   }, ["complete recent prefill", "recent heading and first row at scrollTop 0"]);
   await capture("focus-wrap-launch-visible", narrow, async (form) => {
     // The approved native order wraps between the header Close and footer
     // Launch. Overflowing fields must not hide either concrete boundary.
-    const launch = form.getByRole("button", { name: /^launch\b/ });
+    const launch = form.getByRole("button", { name: /^Launch\b/ });
     const close = form.locator(".launch-composer-close");
     const body = form.locator(".launch-composer-body");
     await selectExplicit(form);
@@ -210,7 +210,7 @@ test("F20 visual capture matrix", async ({ page, browserName }, testInfo) => {
   await capture("prefill-default-over-explicit", narrow, async (form) => {
     await selectExplicit(form);
     await prefillSavedDefaults(form);
-    await expect(form.locator(".launch-composer-summary")).toContainText("model: default · effort: default · permissions: guarded");
+    await expect(form.locator(".launch-composer-summary")).toContainText("Model: Default · Effort: Default · Permissions: Guarded");
   }, ["saved defaults replace explicit draft", "composer remains editable"], true);
   await capture("claude-search-recents", narrow, async (form) => {
     await form.locator('.launch-composer-search input[role="combobox"]').fill("Claude");

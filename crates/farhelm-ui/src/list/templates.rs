@@ -382,7 +382,7 @@ fn NumberShortcutMenu(
         span { class: "templates-number-control", "data-row-menu-key": "{menu_key}",
             button { r#type: "button", class: "templates-number-key font-mono",
                 disabled,
-                aria_label: "number shortcut {display_peer(&name)}", aria_haspopup: "menu", aria_expanded: open(),
+                aria_label: "Number shortcut {display_peer(&name)}", aria_haspopup: "menu", aria_expanded: open(),
                 "data-bound": bound.is_some(),
                 "data-tooltip": "{tooltip}",
                 onmounted: move |element| toggle.set(Some(element.data())),
@@ -406,7 +406,7 @@ fn NumberShortcutMenu(
                             title: rsx! { span { class: "peer-value", dir: "ltr", "{display_peer(&name)}" } },
                             summary: rsx! { "Number shortcut" },
                         }
-                        div { class: "session-row-menu-items", role: "menu", aria_label: "number key for {display_peer(&name)}",
+                        div { class: "session-row-menu-items", role: "menu", aria_label: "Number key for {display_peer(&name)}",
                             // A delayed outside relay can leave two menus mounted.
                             // Reuse the opaque mount identity so one menu cannot
                             // supply another's spoken ownership description.
@@ -543,17 +543,17 @@ impl Field {
     /// separate edits so switching kind cannot silently reinterpret either.
     pub(super) fn label(self) -> &'static str {
         match self {
-            Self::Prompt => "initial prompt",
-            Self::Agent => "agent type",
-            Self::Model => "model",
-            Self::Effort => "effort",
-            Self::Permissions | Self::Yolo => "approvals",
-            Self::Wrapper => "wrapper prefix",
-            Self::Command => "command",
-            Self::Resume => "resume command",
-            Self::Host => "host",
-            Self::Destination => "destination",
-            Self::Name => "session name",
+            Self::Prompt => "Initial prompt",
+            Self::Agent => "Agent type",
+            Self::Model => "Model",
+            Self::Effort => "Effort",
+            Self::Permissions | Self::Yolo => "Approvals",
+            Self::Wrapper => "Wrapper prefix",
+            Self::Command => "Command",
+            Self::Resume => "Resume command",
+            Self::Host => "Host",
+            Self::Destination => "Destination",
+            Self::Name => "Session name",
         }
     }
 
@@ -790,8 +790,13 @@ fn effort_options(
         ),
         _ => farhelm_proto::launcher::EFFORT_ORDER.to_vec(),
     };
-    let mut options = vec![(DEFAULT.into(), "default".into())];
-    options.extend(efforts.into_iter().map(|v| (word(v), word(v))));
+    let mut options = vec![(DEFAULT.into(), "Default".into())];
+    options.extend(efforts.into_iter().map(|v| {
+        (
+            word(v),
+            crate::launch_composer::effort_label(Some(v)).into(),
+        )
+    }));
     options
 }
 
@@ -842,8 +847,9 @@ impl Draft {
             return Some(
                 farhelm_proto::split_wrapper_prefix(text)
                     .err()
+                    .map(crate::local_validation_notice)
                     .unwrap_or_else(|| {
-                        "wrapper prefix changed while saving; review it and try again".to_string()
+                        "Wrapper prefix changed while saving; review it and try again".to_string()
                     }),
             );
         }
@@ -851,7 +857,7 @@ impl Draft {
             self.fields.permissions.flatten(),
             self.fields.permission_flags.as_deref(),
         ) {
-            return Some(reason);
+            return Some(crate::local_validation_notice(reason));
         }
         for field in Field::ALL.into_iter().filter(|k| k.is_set(&self.fields)) {
             if let Some(message) = field.refusal(&self.fields, catalog) {
@@ -876,7 +882,7 @@ impl Draft {
             ),
         ] {
             if value == Some("") {
-                let verb = if label == "host" { "choose" } else { "type" };
+                let verb = if label == "host" { "Choose" } else { "Type" };
                 return Some(format!("{verb} the {label}, or remove its field"));
             }
         }
@@ -918,17 +924,17 @@ fn save_name_refusal(previous: Option<&str>, name: &str, listed: &ListedNames) -
     }
     match listed {
         ListedNames::Loading => Some(
-            "the template list is still loading, so Farhelm cannot check that no other template has this name; \
+            "The template list is still loading, so Farhelm cannot check that no other template has this name; \
              wait for it to load, then save again"
                 .to_string(),
         ),
         ListedNames::Failed => Some(
-            "the template list could not be loaded, so Farhelm cannot check that no other template has this name; \
+            "The template list could not be loaded, so Farhelm cannot check that no other template has this name; \
              retry loading it above, then save again"
                 .to_string(),
         ),
         ListedNames::Loaded(names) => names.contains(&name).then(|| {
-            format!("a template named {name:?} already exists; edit that one, or choose another name")
+            format!("A template named {name:?} already exists; edit that one, or choose another name")
         }),
     }
 }
@@ -975,10 +981,16 @@ fn template_summary_parts(fields: &TemplateFields) -> Vec<DetailPart> {
         parts.extend(runs);
     };
     if fields.prompt.is_some() {
-        push(vec![DetailPart::text("initial prompt")]);
+        push(vec![DetailPart::text("Initial prompt")]);
     }
     if let Some(kind) = fields.kind {
-        push(vec![DetailPart::text(format!("{} launch", word(kind)))]);
+        push(vec![DetailPart::text(format!(
+            "{} launch",
+            match kind {
+                LauncherKind::Agent => "Agent",
+                LauncherKind::Command => "Command",
+            }
+        ))]);
     }
     if let Some(agent) = fields.agent {
         push(vec![DetailPart::text(
@@ -988,15 +1000,18 @@ fn template_summary_parts(fields: &TemplateFields) -> Vec<DetailPart> {
     if let Some(model) = &fields.model {
         push(vec![match model {
             Some(model) => DetailPart::peer(model.clone()),
-            None => DetailPart::text("model default"),
+            None => DetailPart::text("Model default"),
         }]);
     }
     if let Some(effort) = fields.effort {
-        push(vec![DetailPart::text(choice("effort", effort.map(word)))]);
+        push(vec![DetailPart::text(choice(
+            "Effort",
+            effort.map(|effort| crate::launch_composer::effort_label(Some(effort)).to_string()),
+        ))]);
     }
     if let Some(permissions) = fields.permissions {
         push(vec![DetailPart::text(format!(
-            "approvals {}",
+            "Approvals {}",
             crate::launch_composer::permission_label(fields.agent, permissions)
         ))]);
     }
@@ -1006,43 +1021,43 @@ fn template_summary_parts(fields: &TemplateFields) -> Vec<DetailPart> {
     if let Some(prefix) = &fields.wrapper_prefix {
         push(match prefix {
             Some(words) => vec![
-                DetailPart::text("wrapper prefix "),
+                DetailPart::text("Wrapper prefix "),
                 DetailPart::mono_peer(shell_words::join(words)),
             ],
-            None => vec![DetailPart::text("wrapper prefix none")],
+            None => vec![DetailPart::text("Wrapper prefix none")],
         });
     }
     if fields.command.is_some() {
-        push(vec![DetailPart::text("command")]);
+        push(vec![DetailPart::text("Command")]);
     }
     if let Some(yolo) = fields.yolo {
         push(vec![DetailPart::text(if yolo {
             "YOLO"
         } else {
-            "not YOLO"
+            "Not YOLO"
         })]);
     }
     if let Some(resume) = &fields.resume_command {
         push(vec![DetailPart::text(if resume.is_some() {
-            "resume command"
+            "Resume command"
         } else {
-            "resume default"
+            "Resume default"
         })]);
     }
     if fields.host.is_some() {
-        push(vec![DetailPart::text("host")]);
+        push(vec![DetailPart::text("Host")]);
     }
     if fields.destination.is_some() {
-        push(vec![DetailPart::text("destination")]);
+        push(vec![DetailPart::text("Destination")]);
     }
     if let Some(name) = &fields.name {
         push(vec![
-            DetailPart::text("name "),
+            DetailPart::text("Name "),
             DetailPart::peer(name.clone()),
         ]);
     }
     if parts.is_empty() {
-        vec![DetailPart::text("sets nothing yet")]
+        vec![DetailPart::text("Sets nothing yet")]
     } else {
         parts
     }
@@ -1092,10 +1107,10 @@ pub(super) fn NameKindControl(
 ) -> Element {
     let fixed = kind == Some(TemplateNameKind::Fixed);
     rsx! {
-        div { class: "segmented-control template-name-kind", role: "group", aria_label: "session name kind",
-            for (value, text) in [(None, "base name"), (Some(TemplateNameKind::Fixed), "fixed name")] {
+        div { class: "segmented-control template-name-kind", role: "group", aria_label: "Session name kind",
+            for (value, text) in [(None, "Base name"), (Some(TemplateNameKind::Fixed), "Fixed name")] {
                 button { r#type: "button", disabled, aria_pressed: fixed == value.is_some(),
-                    "data-tooltip": "session name: {text}. {NAME_KIND_HELP}",
+                    "data-tooltip": "Session name: {text}. {NAME_KIND_HELP}",
                     onclick: move |_| on_change.call(value), "{text}"
                 }
             }
@@ -1174,8 +1189,13 @@ fn FieldEditor(
         .map(shell_words::join)
         .unwrap_or_default();
     let mut permission_flags_text = use_signal(move || flags_seed);
-    let refusal = field.refusal(&current, catalog.as_deref());
+    let refusal = field
+        .refusal(&current, catalog.as_deref())
+        .map(crate::local_validation_notice);
     let label = field.label();
+    // These are fixed application nouns. Standalone headings start a sentence,
+    // while Remove and Add compose the same names into an existing sentence.
+    let noun = label.to_ascii_lowercase();
     let controls = match field {
         Field::Wrapper => {
             let value = escaped.unwrap_or_else(|| {
@@ -1190,11 +1210,11 @@ fn FieldEditor(
             });
             rsx! {
                 label { class: "templates-field",
-                    span { "wrapper prefix" }
+                    span { "Wrapper prefix" }
                     input { class: "templates-wrapper templates-code", r#type: "text", value,
                         disabled, readonly: text_read_only, autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
                         placeholder: "with-endpoint --profile work --",
-                        "data-tooltip": "wrapper prefix: words placed before Farhelm's agent command; no placeholders",
+                        "data-tooltip": "Wrapper prefix: words placed before Farhelm's agent command; no placeholders",
                         oninput: move |event| {
                             let text = event.value();
                             if !text_read_only { draft.with_mut(|d| {
@@ -1219,12 +1239,12 @@ fn FieldEditor(
         }
         Field::Prompt => rsx! {
             label { class: "templates-field",
-                span { "initial prompt" }
+                span { "Initial prompt" }
                 textarea { class: "templates-prompt", rows: 4,
                     value: escaped.unwrap_or_else(|| current.prompt.clone().unwrap_or_default()),
                     disabled, readonly: text_read_only,
                     autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
-                    "data-tooltip": "initial prompt: the first message on each launch from this template",
+                    "data-tooltip": "Initial prompt: the first message on each launch from this template",
                     oninput: move |event| { if !text_read_only { draft.with_mut(|draft| draft.fields.prompt = Some(event.value())); } },
                 }
             }
@@ -1260,18 +1280,18 @@ fn FieldEditor(
                 .unwrap_or_default();
             rsx! {
                 label { class: "templates-field",
-                    span { "model" }
-                    input { class: "templates-model", r#type: "text", value: "{value}", disabled, readonly: text_read_only, placeholder: "default, or type any model",
+                    span { "Model" }
+                    input { class: "templates-model", r#type: "text", value: "{value}", disabled, readonly: text_read_only, placeholder: "Default, or type any model",
                         autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
-                        "data-tooltip": "model: type any model; suggestions follow the agent type this template sets",
+                        "data-tooltip": "Model: type any model; suggestions follow the agent type this template sets",
                         oninput: move |event| { if !text_read_only { draft.with_mut(|d| d.fields.model = Some((!event.value().is_empty()).then(|| event.value()))); } },
                     }
                 }
                 if !suggestions.is_empty() {
-                    div { class: "templates-model-suggestions", role: "group", aria_label: "model suggestions",
+                    div { class: "templates-model-suggestions", role: "group", aria_label: "Model suggestions",
                         for id in suggestions {
                             button { r#type: "button", class: "templates-suggestion", disabled,
-                                "data-tooltip": "set model to {display_peer(&id)}", onclick: move |_| draft.with_mut(|d| d.fields.model = Some(Some(id.clone()))), "{display_peer(&id)}"
+                                "data-tooltip": "Set model to {display_peer(&id)}", onclick: move |_| draft.with_mut(|d| d.fields.model = Some(Some(id.clone()))), "{display_peer(&id)}"
                             }
                         }
                     }
@@ -1303,27 +1323,27 @@ fn FieldEditor(
         },
         Field::Yolo => rsx! {
             Choice { label, value: current.yolo.map(|v| v.to_string()).unwrap_or_default(),
-                options: vec![("false".into(), "keeps safety checks".into()), ("true".into(), "YOLO".into())], disabled,
+                options: vec![("false".into(), "Keeps safety checks".into()), ("true".into(), "YOLO".into())], disabled,
                 on_change: move |v: String| draft.with_mut(|d| d.fields.yolo = v.parse().ok()),
             }
             span { class: "templates-hint", "Your statement about this command; Farhelm does not inspect it." }
         },
         Field::Command => rsx! {
             label { class: "templates-field",
-                span { "command" }
+                span { "Command" }
                 input { class: "templates-command templates-code", value: escaped.unwrap_or_else(|| current.command.unwrap_or_default()), disabled, readonly: text_read_only, placeholder: "agent-tool {{farhelm_args}}",
                     autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
-                    "data-tooltip": "command: the command this template puts in the launcher", oninput: move |e| { if !text_read_only { draft.with_mut(|d| d.fields.command = Some(e.value())); } },
+                    "data-tooltip": "Command: the command this template puts in the launcher", oninput: move |e| { if !text_read_only { draft.with_mut(|d| d.fields.command = Some(e.value())); } },
                 }
             }
             span { class: "templates-hint", "Placeholders: {{cwd}} for the folder and {{farhelm_args}} for Farhelm's integration arguments; each must be a whole argument." }
         },
         Field::Resume => rsx! {
             label { class: "templates-field",
-                span { "resume command" }
-                input { class: "templates-resume templates-code", value: escaped.unwrap_or_else(|| current.resume_command.flatten().unwrap_or_default()), disabled, readonly: text_read_only, placeholder: "default, or agent-tool --resume {{conversation}} {{farhelm_args}}",
+                span { "Resume command" }
+                input { class: "templates-resume templates-code", value: escaped.unwrap_or_else(|| current.resume_command.flatten().unwrap_or_default()), disabled, readonly: text_read_only, placeholder: "Default, or agent-tool --resume {{conversation}} {{farhelm_args}}",
                     autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
-                    "data-tooltip": "resume command: an empty input resets it to the default", oninput: move |e| { if !text_read_only { draft.with_mut(|d| d.fields.resume_command = Some((!e.value().is_empty()).then(|| e.value()))); } },
+                    "data-tooltip": "Resume command: an empty input resets it to the default", oninput: move |e| { if !text_read_only { draft.with_mut(|d| d.fields.resume_command = Some((!e.value().is_empty()).then(|| e.value()))); } },
                 }
             }
             span { class: "templates-hint", "An empty input sets the default. Placeholders: {{cwd}}, {{farhelm_args}}, {{conversation}}; each must be a whole argument." }
@@ -1335,23 +1355,23 @@ fn FieldEditor(
                 .filter_map(|h| h.identity.map(|id| (id, display_peer(&h.name))))
                 .collect();
             if value.is_empty() {
-                options.insert(0, (String::new(), "choose a host".into()));
+                options.insert(0, (String::new(), "Choose a host".into()));
             } else if !options.iter().any(|(id, _)| id == &value) {
-                options.push((value.clone(), "an install no host here has".into()));
+                options.push((value.clone(), "An install no host here has".into()));
             }
             rsx! { Choice { label, value, options, disabled, on_change: move |v: String| draft.with_mut(|d| d.fields.host = Some(v)) } }
         }
         Field::Name => rsx! {
             div { class: "templates-field",
                 div { class: "template-name-label",
-                    label { r#for: "template-session-name", "session name" }
+                    label { r#for: "template-session-name", "Session name" }
                     NameKindControl { kind: current.name_kind, disabled,
                         on_change: move |kind| draft.with_mut(|d| d.fields.name_kind = kind)
                     }
                 }
-                input { id: "template-session-name", aria_label: "session name", class: "templates-session-name", value: escaped.unwrap_or_else(|| current.name.unwrap_or_default()), disabled, readonly: text_read_only, placeholder: "review",
+                input { id: "template-session-name", aria_label: "Session name", class: "templates-session-name", value: escaped.unwrap_or_else(|| current.name.unwrap_or_default()), disabled, readonly: text_read_only, placeholder: "review",
                     autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
-                    "data-tooltip": "session name: the name this template puts in the launcher", oninput: move |e| { if !text_read_only { draft.with_mut(|d| d.fields.name = Some(e.value())); } },
+                    "data-tooltip": "Session name: the name this template puts in the launcher", oninput: move |e| { if !text_read_only { draft.with_mut(|d| d.fields.name = Some(e.value())); } },
                 }
                 p { class: "templates-hint", "{NAME_KIND_HELP}" }
             }
@@ -1364,7 +1384,7 @@ fn FieldEditor(
             };
             rsx! {
                 div { class: "templates-field",
-                    span { "destination" }
+                    span { "Destination" }
                     crate::launch_controls::DestinationTypeControl { managed: github, disabled,
                         on_change: move |is_github| draft.with_mut(|d| {
                             let value = match d.fields.destination.take() {
@@ -1375,10 +1395,10 @@ fn FieldEditor(
                         }),
                     }
                     label {
-                        span { if github { "repository" } else { "folder path" } }
+                        span { if github { "Repository" } else { "Folder path" } }
                         input { class: if github { "templates-destination" } else { "templates-destination templates-code" }, value: escaped.unwrap_or(value), disabled, readonly: text_read_only, placeholder: if github { "owner/name" } else { "/path/to/project" },
                             autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
-                            "data-tooltip": if github { "repository: each session gets a managed checkout" } else { "folder path: the working folder on the selected host" },
+                            "data-tooltip": if github { "Repository: each session gets a managed checkout" } else { "Folder path: the working folder on the selected host" },
                             oninput: move |e| { if !text_read_only { draft.with_mut(|d| d.fields.destination=Some(if github { TemplateDestination::Github(e.value()) } else { TemplateDestination::Folder(e.value()) })); } },
                         }
                     }
@@ -1393,7 +1413,7 @@ fn FieldEditor(
                 if text_read_only { p { class: "templates-hint templates-value-readonly", "This field contains characters this editor cannot show directly; they are shown as escapes. Remove this field with ✕ and add it again to replace its value." } }
                 if let Some(ref message)=refusal { p { class: "templates-error", "{message}" } }
             }
-            button { class: "templates-remove", r#type: "button", disabled, aria_label: "remove {label}", "data-tooltip": "remove {label}: this template will leave it as is",
+            button { class: "templates-remove", r#type: "button", disabled, aria_label: "Remove {noun}", "data-tooltip": "Remove {noun}: this template will leave it as is",
                 onclick: move |_| draft.with_mut(|d| { field.remove(&mut d.fields); if field == Field::Wrapper { d.wrapper_input = None; } }), "✕"
             }
         }
@@ -1640,16 +1660,16 @@ fn TemplateDeleteButtons(
         button {
             r#type: "button", class: "btn btn-danger templates-delete templates-delete-restorable",
             hidden: kind != DeleteKind::Restorable, disabled,
-            "data-tooltip": "delete this template now; undo is available here for about ten seconds",
+            "data-tooltip": "Delete this template now; undo is available here for about ten seconds",
             onclick: move |_| on_delete.call(DeleteKind::Restorable),
-            "delete"
+            "Delete"
         }
         button {
             r#type: "button", class: "btn btn-danger templates-delete templates-delete-permanent",
             hidden: kind != DeleteKind::Permanent, disabled,
-            "data-tooltip": "delete this template now; it fails current save rules, so undo is not available",
+            "data-tooltip": "Delete this template now; it fails current save rules, so undo is not available",
             onclick: move |_| on_delete.call(DeleteKind::Permanent),
-            "delete permanently"
+            "Delete permanently"
         }
     }
 }
@@ -1815,7 +1835,7 @@ pub(super) fn TemplatesDialog(
                                 "quick-launch mark"
                             };
                             error.set(Some(format!(
-                                "the {binding} may not have been saved; {detail}"
+                                "The {binding} may not have been saved; {detail}"
                             )));
                         }
                     }
@@ -1931,7 +1951,8 @@ pub(super) fn TemplatesDialog(
             name: value.name.clone(),
             fields: value.fields.clone(),
         })
-        .err();
+        .err()
+        .map(crate::local_validation_notice);
         if let Some(message) = shape_refusal
             .or_else(|| value.refusal(catalog_rows))
             .or_else(|| name_refusal(templates, previous().as_deref(), &value.name))
@@ -1961,7 +1982,7 @@ pub(super) fn TemplatesDialog(
                         save_name_refusal(None, &value.name, &ListedNames::Loaded(names))
                     }
                     Err(message) => Some(format!(
-                        "cannot check that no other template has this name: {message}"
+                        "Cannot check that no other template has this name: {message}"
                     )),
                 },
             };
@@ -1980,7 +2001,7 @@ pub(super) fn TemplatesDialog(
                         Ok(fetched) => fetched,
                         Err(message) => {
                             busy.set(false);
-                            error.set(Some(format!("the new name was saved, but shortcut bindings could not be read; the old template was kept: {message}")));
+                            error.set(Some(format!("The new name was saved, but shortcut bindings could not be read; the old template was kept: {message}")));
                             templates.restart();
                             return;
                         }
@@ -2011,7 +2032,7 @@ pub(super) fn TemplatesDialog(
                             // The failed mark is discarded; show the helm's again.
                             preferences.0.write().quick_launch_template = Some(old.clone().into());
                             busy.set(false);
-                            error.set(Some("the new name was saved, but the quick launch mark could not be moved; the old template was kept".into()));
+                            error.set(Some("The new name was saved, but the quick launch mark could not be moved; the old template was kept".into()));
                             templates.restart();
                             return;
                         }
@@ -2030,7 +2051,7 @@ pub(super) fn TemplatesDialog(
                             // The failed map is discarded; show the helm's keys again.
                             preferences.0.write().template_shortcuts = before;
                             busy.set(false);
-                            error.set(Some("the new name was saved, but its number key could not be moved; the old template was kept".into()));
+                            error.set(Some("The new name was saved, but its number key could not be moved; the old template was kept".into()));
                             templates.restart();
                             return;
                         }
@@ -2038,7 +2059,7 @@ pub(super) fn TemplatesDialog(
                     let deleting_request = crate::api::delete_template(&base, &old);
                     if !crate::api::prepare_template_delete().await {
                         busy.set(false);
-                        error.set(Some("the new name was saved, but a shortcut write was interrupted; the old template was kept".into()));
+                        error.set(Some("The new name was saved, but a shortcut write was interrupted; the old template was kept".into()));
                         templates.restart();
                         return;
                     }
@@ -2102,7 +2123,7 @@ pub(super) fn TemplatesDialog(
             .cloned()
         else {
             error.set(Some(
-                "reload the template list before deleting this template".into(),
+                "Reload the template list before deleting this template".into(),
             ));
             return;
         };
@@ -2114,7 +2135,7 @@ pub(super) fn TemplatesDialog(
             if !crate::api::prepare_template_delete().await {
                 busy.set(false);
                 error.set(Some(
-                    "a shortcut write was interrupted; try deleting the template again".into(),
+                    "A shortcut write was interrupted; try deleting the template again".into(),
                 ));
                 return;
             }
@@ -2175,7 +2196,7 @@ pub(super) fn TemplatesDialog(
                     // resolves what is present; no reply justifies Undo.
                     undo.set(None);
                     error.set(Some(
-                        "the template may have been deleted; reloading the template list".into(),
+                        "The template may have been deleted; reloading the template list".into(),
                     ));
                     templates.restart();
                 }
@@ -2213,7 +2234,7 @@ pub(super) fn TemplatesDialog(
                     }
                 }
                 Err(message) => Err(format!(
-                    "cannot check the deleted template's name: {message}"
+                    "Cannot check the deleted template's name: {message}"
                 )),
             };
             busy.set(false);
@@ -2257,7 +2278,7 @@ pub(super) fn TemplatesDialog(
             // The capped dialog can move while keeping its own size. Its
             // full-window backdrop also observes width-only viewport changes.
             onresize: move |_| dialog_epoch += 1,
-            ModalDialog { class: if opened() { "templates-dialog templates-editor-open" } else { "templates-dialog" }, role: "dialog", aria_modal: "true", aria_label: "templates",
+            ModalDialog { class: if opened() { "templates-dialog templates-editor-open" } else { "templates-dialog" }, role: "dialog", aria_modal: "true", aria_label: "Templates",
                 handle: DialogHandle::new(DIALOG_SELECTOR),
                 // The existing dialog itself scrolls. Busy entry must not add
                 // a nested region or replace its dialog role and name.
@@ -2296,10 +2317,10 @@ pub(super) fn TemplatesDialog(
                     p { class: "templates-number-hint", role: "status", "Give a template a number key with the key button beside its ⚡; {number_launch_chord} launches it directly." }
                 }
                 div { class: "templates-panes",
-                    aside { class: "templates-sidebar", aria_label: "template list", aria_busy: templates.pending(),
-                        button { r#type: "button", class: "btn btn-neutral templates-new", disabled, "data-tooltip": "start a new template; unsaved changes ask before leaving", onclick: move |_| depart.call(Departure::New), "+ new template" }
+                    aside { class: "templates-sidebar", aria_label: "Template list", aria_busy: templates.pending(),
+                        button { r#type: "button", class: "btn btn-neutral templates-new", disabled, "data-tooltip": "Start a new template; unsaved changes ask before leaving", onclick: move |_| depart.call(Departure::New), "+ New template" }
                         match list.clone() {
-                            None => rsx! { p { class: "templates-hint", "loading templates" } },
+                            None => rsx! { p { class: "templates-hint", "Loading templates" } },
                             Some(Err(_)) => rsx! {},
                             Some(Ok(_)) => rsx! {
                                 ul { class: "templates-list",
@@ -2312,7 +2333,7 @@ pub(super) fn TemplatesDialog(
                                                 // the lit bolt is how a mark is cleared, and a disabled one
                                                 // would leave an unusable mark with no way to turn it off.
                                                 disabled: disabled || templates.pending() || (!quick_launch_eligible(&row.template.fields) && !row.anchor.marked),
-                                                aria_label: "quick launch {display_peer(&row.template.name)}",
+                                                aria_label: "Quick launch {display_peer(&row.template.name)}",
                                                 aria_pressed: row.anchor.marked,
                                                 "data-tooltip": if row.anchor.marked { format!("{quick_launch_chord} starts a session from this template right away, without opening New. Only one template can hold ⚡. Click to turn off.") } else if !quick_launch_eligible(&row.template.fields) { format!("{quick_launch_chord} starts a session from the ⚡ template right away, without opening New. Only one template can hold ⚡. Can't mark this one: an agent launch needs an agent; a command launch needs a nonblank command.") } else { format!("{quick_launch_chord} starts a session from the ⚡ template right away, without opening New. Only one template can hold ⚡. Click to mark this one.") },
                                                 onclick: { let name = row.template.name.clone(); move |_| { let lit = preferences.0.read().quick_launch_template.as_ref().map(PeerText::raw) == Some(name.as_str()); edit_binding.call(BindingEdit::Bolt(name.clone(), !lit)) } },
@@ -2326,7 +2347,7 @@ pub(super) fn TemplatesDialog(
                                                 layout_epoch, dialog_epoch,
                                                 on_choose: { let name = row.template.name.clone(); move |key| edit_binding.call(BindingEdit::Number(name.clone(), key)) },
                                             }
-                                            button { r#type: "button", class: "templates-row", disabled: disabled || templates.pending(), aria_pressed: previous().as_ref()==Some(&row.template.name), "data-tooltip": "edit template {display_peer(&row.template.name)}", onclick: move |_| depart.call(Departure::Open(Box::new(row.template.clone()))),
+                                            button { r#type: "button", class: "templates-row", disabled: disabled || templates.pending(), aria_pressed: previous().as_ref()==Some(&row.template.name), "data-tooltip": "Edit template {display_peer(&row.template.name)}", onclick: move |_| depart.call(Departure::Open(Box::new(row.template.clone()))),
                                                 span { class: "templates-row-name peer-value", dir: "ltr", "{display_peer(&row.template.name)}" }
                                                 TemplateSummary { class: "templates-row-summary", fields: row.template.fields.clone() }
                                                 if row.anchor.marked { span { class: "templates-quick-chord font-mono", "{quick_launch_chord}" } }
@@ -2341,29 +2362,29 @@ pub(super) fn TemplatesDialog(
                             p { class: "templates-count", "{rows.len()} " if rows.len() == 1 { "template" } else { "templates" } }
                         }
                     }
-                    section { class: "templates-editor", aria_label: "template editor",
+                    section { class: "templates-editor", aria_label: "Template editor",
                         if opened() {
-                            button { r#type: "button", class: "templates-back", disabled, "data-tooltip": "back to templates; unsaved changes ask before leaving", onclick: move |_| depart.call(Departure::Back), "‹ templates" }
+                            button { r#type: "button", class: "templates-back", disabled, "data-tooltip": "Back to templates; unsaved changes ask before leaving", onclick: move |_| depart.call(Departure::Back), "‹ Templates" }
                             div { class: "templates-editor-heading",
-                                h3 { if previous().is_some() { "edit template" } else { "new template" } }
-                                if dirty { span { class: "templates-unsaved", "unsaved changes" } }
+                                h3 { if previous().is_some() { "Edit template" } else { "New template" } }
+                                if dirty { span { class: "templates-unsaved", "Unsaved changes" } }
                             }
                             label { class: "templates-field",
-                                span { "name" }
+                                span { "Name" }
                                 // The name is a literal tl: search key; browser
                                 // correction would change what the user chose.
                                 input { class: "templates-name", value: shown_name, readonly: name_read_only, disabled, placeholder: "my-claude",
                                     autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
-                                    "data-tooltip": "template name: use tl:name to apply it in New session", oninput: move |e| { if !name_read_only { draft.with_mut(|d| d.name=e.value()); } } }
+                                    "data-tooltip": "Template name: use tl:name to apply it in New session", oninput: move |e| { if !name_read_only { draft.with_mut(|d| d.name=e.value()); } } }
                             }
                             if name_read_only {
                                 p { class: "templates-hint", "This name contains invisible formatting, shown as escapes. It stays unchanged until replaced." }
                                 button { r#type: "button", class: "btn btn-neutral templates-replace-name", disabled,
-                                    onclick: move |_| { draft.with_mut(|d| d.name.clear()); focus_template_control(".templates-name"); }, "replace name" }
+                                    onclick: move |_| { draft.with_mut(|d| d.name.clear()); focus_template_control(".templates-name"); }, "Replace name" }
                             }
                             p { class: "templates-quick-state",
                                 if previous().is_some() && preferences.0.read().quick_launch_template.as_ref().map(PeerText::raw) == previous().as_deref() {
-                                    "⚡ quick launch: {quick_launch_chord} starts a session from this saved template."
+                                    "⚡ Quick launch: {quick_launch_chord} starts a session from this saved template."
                                 } else if quick_launch_eligible(&current.fields) {
                                     "Not the quick launch. The ⚡ in the list makes it one."
                                 } else {
@@ -2371,24 +2392,24 @@ pub(super) fn TemplatesDialog(
                                 }
                             }
                             div { class: "templates-field",
-                                span { "switches launcher to" }
-                                div { class: "segmented-control", role: "group", aria_label: "switches launcher to",
-                                    for (kind,text) in [(Some(LauncherKind::Agent),"agent"),(Some(LauncherKind::Command),"command"),(None,"don't switch")] {
-                                        button { r#type: "button", disabled, aria_pressed: current.fields.kind==kind, "data-tooltip": "switches launcher to: {text}; incompatible fields stay visible", onclick: move |_| { draft.with_mut(|d| d.fields.kind=kind); add_open.set(false); }, "{text}" }
+                                span { "Switches launcher to" }
+                                div { class: "segmented-control", role: "group", aria_label: "Switches launcher to",
+                                    for (kind,text) in [(Some(LauncherKind::Agent),"Agent"),(Some(LauncherKind::Command),"Command"),(None,"Don't switch")] {
+                                        button { r#type: "button", disabled, aria_pressed: current.fields.kind==kind, "data-tooltip": "Switches launcher to: {text}; incompatible fields stay visible", onclick: move |_| { draft.with_mut(|d| d.fields.kind=kind); add_open.set(false); }, "{text}" }
                                     }
                                 }
                             }
                             if inferred { p { class: "templates-hint templates-inferred", "This stored template does not switch the launcher yet. Saving will store the switch inferred from its fields." } }
-                            h4 { class: "templates-sets-heading", "sets" }
+                            h4 { class: "templates-sets-heading", "Sets" }
                             for field in Field::ALL.into_iter().filter(|f| f.is_set(&current.fields)) {
                                 FieldEditor { key: "{editor_source}-{field.key()}", field, draft, hosts: hosts.clone(), catalog: catalog_rows.clone(), disabled }
                             }
                             div { class: "templates-add-area",
-                                button { r#type: "button", class: "btn btn-neutral templates-add", disabled, aria_expanded: add_open(), "data-tooltip": "add a field this template will set; fields not shown are left as is", onclick: move |_| add_open.toggle(), "+ add field" }
+                                button { r#type: "button", class: "btn btn-neutral templates-add", disabled, aria_expanded: add_open(), "data-tooltip": "Add a field this template will set; fields not shown are left as is", onclick: move |_| add_open.toggle(), "+ Add field" }
                                 if add_open() {
-                                    div { class: "templates-add-menu", role: "group", aria_label: "add field",
+                                    div { class: "templates-add-menu", role: "group", aria_label: "Add field",
                                         for field in Field::ALL.into_iter().filter(|f| !f.is_set(&current.fields) && f.offered(&current.fields)) {
-                                            button { r#type: "button", disabled, "data-tooltip": "add {field.label()} to the template", onclick: move |_| { draft.with_mut(|d| field.add(&mut d.fields)); add_open.set(false); }, "{field.label()}" }
+                                            button { r#type: "button", disabled, "data-tooltip": "Add {field.label().to_ascii_lowercase()} to the template", onclick: move |_| { draft.with_mut(|d| field.add(&mut d.fields)); add_open.set(false); }, "{field.label()}" }
                                         }
                                     }
                                 }
@@ -2402,18 +2423,18 @@ pub(super) fn TemplatesDialog(
                                         onmounted: move |_| { document::eval("requestAnimationFrame(() => { const prompt = document.querySelector('.templates-departure'); prompt?.closest('.templates-editor-footer')?.scrollIntoView({block: 'end'}); prompt?.querySelector('.templates-save-leave')?.focus({preventScroll: true}); })"); },
                                         p { "Save these changes before leaving?" }
                                         DialogActions { class: "templates-actions",
-                                            button { r#type: "button", class: "btn btn-neutral templates-keep-editing", disabled, "data-tooltip": "stay here with the unsaved draft", onclick: { let shown=shown.clone(); move |_| { if answer_keep_editing(&mut leave_prompt,&shown,busy()) { focus_template_control(".templates-name"); } } }, "Keep editing" }
-                                            button { r#type: "button", class: "btn btn-neutral templates-discard", disabled, "data-tooltip": "discard these changes, then continue", onclick: { let names=names.clone(); let shown=shown.clone(); move |_| { if let Some(action)=answer_discard(&mut leave_prompt,&shown,busy()) { leave_editor(action,draft,baseline,previous,opened,leave_prompt,error,names.clone(),on_close) } } }, "Discard" }
-                                            button { r#type: "button", class: "btn btn-primary templates-save-leave", disabled, "data-tooltip": "save these changes, then continue", onclick: move |_| save.call(Some(shown.clone())), "Save" }
+                                            button { r#type: "button", class: "btn btn-neutral templates-keep-editing", disabled, "data-tooltip": "Stay here with the unsaved draft", onclick: { let shown=shown.clone(); move |_| { if answer_keep_editing(&mut leave_prompt,&shown,busy()) { focus_template_control(".templates-name"); } } }, "Keep editing" }
+                                            button { r#type: "button", class: "btn btn-neutral templates-discard", disabled, "data-tooltip": "Discard these changes, then continue", onclick: { let names=names.clone(); let shown=shown.clone(); move |_| { if let Some(action)=answer_discard(&mut leave_prompt,&shown,busy()) { leave_editor(action,draft,baseline,previous,opened,leave_prompt,error,names.clone(),on_close) } } }, "Discard" }
+                                            button { r#type: "button", class: "btn btn-primary templates-save-leave", disabled, "data-tooltip": "Save these changes, then continue", onclick: move |_| save.call(Some(shown.clone())), "Save" }
                                         }
                                     }
                                 } else {
                                     DialogActions { class: "templates-actions",
                                         if previous().is_some() {
-                                            button { r#type: "button", class: "btn btn-neutral templates-duplicate", disabled: disabled || templates.pending(), "data-tooltip": "open a new unsaved copy with a free name", onclick: move |_| depart.call(Departure::Duplicate), "Duplicate" }
+                                            button { r#type: "button", class: "btn btn-neutral templates-duplicate", disabled: disabled || templates.pending(), "data-tooltip": "Open a new unsaved copy with a free name", onclick: move |_| depart.call(Departure::Duplicate), "Duplicate" }
                                             TemplateDeleteButtons { kind: delete_kind, disabled: disabled || templates.pending(), on_delete: delete }
                                         }
-                                        button { r#type: "button", class: "btn btn-primary templates-save", disabled, "data-tooltip": "save the template's name, switch and shown fields", onclick: move |_| save.call(None), "Save" }
+                                        button { r#type: "button", class: "btn btn-primary templates-save", disabled, "data-tooltip": "Save the template's name, switch and shown fields", onclick: move |_| save.call(None), "Save" }
                                     }
                                 }
                             }
@@ -2424,15 +2445,15 @@ pub(super) fn TemplatesDialog(
                 // hidden while editing on a phone, but its name guard still applies.
                 if let Some(Err(message)) = list {
                     div { class: "templates-list-error",
-                        p { class: "templates-error", "templates unavailable: {message}" }
-                        button { r#type: "button", class: "btn btn-neutral templates-retry", disabled, "data-tooltip": "load the template list again without discarding this draft", onclick: move |_| templates.restart(), "retry" }
+                        p { class: "templates-error", "Templates unavailable: {message}" }
+                        button { r#type: "button", class: "btn btn-neutral templates-retry", disabled, "data-tooltip": "Load the template list again without discarding this draft", onclick: move |_| templates.restart(), "Retry" }
                     }
                 }
                 if let Some(message)=error() { p { class: "templates-error", role: "status", "{message}" } }
                 if let Some(value)=undo() {
                     div { class: "templates-undo-notice", role: "status",
                         span { "Deleted {display_peer(&value.template.name)}." }
-                        button { r#type: "button", class: "btn btn-neutral templates-undo", disabled, "data-tooltip": "restore the deleted template if its old name is still free", onclick: restore, "undo" }
+                        button { r#type: "button", class: "btn btn-neutral templates-undo", disabled, "data-tooltip": "Restore the deleted template if its old name is still free", onclick: restore, "Undo" }
                     }
                 }
                 }
@@ -2806,9 +2827,9 @@ mod tests {
         assert!(!Field::Wrapper.is_set(&fields));
         Field::Wrapper.add(&mut fields);
         assert_eq!(fields.wrapper_prefix, Some(None));
-        assert!(template_summary(&fields).contains("wrapper prefix none"));
+        assert!(template_summary(&fields).contains("Wrapper prefix none"));
         fields.wrapper_prefix = Some(Some(vec!["wrapper".into(), "--".into()]));
-        assert!(template_summary(&fields).contains("wrapper prefix wrapper --"));
+        assert!(template_summary(&fields).contains("Wrapper prefix wrapper --"));
         fields.wrapper_prefix = Some(Some(vec!["wrapper\u{202e}".into()]));
         assert!(
             Field::Wrapper
@@ -2853,7 +2874,7 @@ mod tests {
         assert_eq!(names, vec!["model\u{202e}", "review\u{200b}"]);
         assert_eq!(
             template_summary(&fields),
-            "model<U+202E> · --mode 'ask me' · wrapper prefix wrapper -- · name review<U+200B>"
+            "model<U+202E> · --mode 'ask me' · Wrapper prefix wrapper -- · Name review<U+200B>"
         );
     }
 
@@ -2869,7 +2890,7 @@ mod tests {
         assert!(Field::Prompt.is_set(&fields));
         fields.prompt = Some("first\n\tsecond".into());
         assert_eq!(Field::Prompt.escaped_read_only_value(&fields), None);
-        assert!(template_summary(&fields).contains("initial prompt"));
+        assert!(template_summary(&fields).contains("Initial prompt"));
         for harness in LaunchHarness::ALL {
             fields.agent = Some(*harness);
             assert_eq!(
@@ -3128,7 +3149,7 @@ mod tests {
         };
         assert_eq!(
             template_summary(&fields),
-            "model<U+200B><U+202E> · approvals yolo"
+            "model<U+200B><U+202E> · Approvals YOLO"
         );
         let ordinary = TemplateFields {
             model: Some(Some("ordinary-model".into())),
@@ -3139,7 +3160,7 @@ mod tests {
             model: Some(None),
             ..Default::default()
         };
-        assert_eq!(template_summary(&reset), "model default");
+        assert_eq!(template_summary(&reset), "Model default");
     }
 
     /// Opening a kindless record changes only the draft. It must be visibly
@@ -3247,7 +3268,7 @@ mod tests {
         );
         draft.fields.kind = Some(LauncherKind::Agent);
         assert!(Field::Model.offered(&draft.fields));
-        assert!(draft.refusal(None).unwrap().contains("command"));
+        assert!(draft.refusal(None).unwrap().contains("Command"));
         assert_eq!(draft.fields.command.as_deref(), Some("tool {farhelm_args}"));
         Field::Command.remove(&mut draft.fields);
         Field::Yolo.remove(&mut draft.fields);
@@ -3272,7 +3293,7 @@ mod tests {
         };
         assert_eq!(draft.refusal(None), None);
         draft.fields.agent = Some(LaunchHarness::Claude);
-        assert!(draft.refusal(None).unwrap().contains("approvals"));
+        assert!(draft.refusal(None).unwrap().contains("Approvals"));
         assert_eq!(
             draft.fields.permissions,
             Some(Some(LaunchPermission::SmartApprove))
@@ -3287,8 +3308,8 @@ mod tests {
                     "Guarded · Claude auto mode (reset)".into()
                 ),
                 ("guarded".into(), "Guarded · Claude auto mode".into()),
-                ("yolo".into(), "yolo".into()),
-                ("custom".into(), "custom".into())
+                ("yolo".into(), "YOLO".into()),
+                ("custom".into(), "Custom".into())
             ]
         );
         assert!(
@@ -3499,7 +3520,7 @@ mod tests {
                     on_delete: move |kind| recorded.calls.borrow_mut().push(kind),
                 }
                 if matches!(list, Some(Err(_))) {
-                    button { class: "templates-retry", onclick: move |_| templates.restart(), "retry" }
+                    button { class: "templates-retry", onclick: move |_| templates.restart(), "Retry" }
                 }
             }
         }
@@ -3694,7 +3715,7 @@ mod tests {
                 .send(Ok(vec![valid.clone()]))
                 .unwrap();
             render_delete_frame(&mut dom, &fixture, DeleteFrame::Plain);
-            visible_delete_fixture_target(&dom, "templates-delete", "delete");
+            visible_delete_fixture_target(&dom, "templates-delete", "Delete");
 
             let mut resource = fixture.resource.get().expect("resource mounted");
             dom.in_runtime(|| resource.restart());
@@ -3704,8 +3725,8 @@ mod tests {
                 .send(Err("follow-up list read failed".into()))
                 .unwrap();
             render_delete_frame(&mut dom, &fixture, DeleteFrame::Failed);
-            let old_plain = visible_delete_fixture_target(&dom, "templates-delete", "delete");
-            let retry = visible_delete_fixture_target(&dom, "templates-retry", "retry");
+            let old_plain = visible_delete_fixture_target(&dom, "templates-delete", "Delete");
+            let retry = visible_delete_fixture_target(&dom, "templates-retry", "Retry");
             let renders = fixture.renders.get();
             click_delete_fixture(&dom, retry);
             dom.process_events();
@@ -3728,7 +3749,7 @@ mod tests {
             // The new state is now the conceptual painted frame. Its permanent
             // element must not inherit the ordinary handler from a later render.
             let old_permanent =
-                visible_delete_fixture_target(&dom, "templates-delete", "delete permanently");
+                visible_delete_fixture_target(&dom, "templates-delete", "Delete permanently");
             dom.in_runtime(|| resource.restart());
             replies
                 .next()

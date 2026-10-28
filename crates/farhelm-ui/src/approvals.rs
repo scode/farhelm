@@ -1920,7 +1920,7 @@ mod tests {
             permissions_of(Some(farhelm_proto::LaunchPermission::Guarded)),
             "Guarded · Claude auto mode"
         );
-        assert_eq!(permissions_of(None), "Not classified · agent's own setting");
+        assert_eq!(permissions_of(None), "Not classified · Agent's own setting");
     }
 
     /// Launch and Restart must explain stored trust without asking the user

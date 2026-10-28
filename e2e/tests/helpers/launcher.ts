@@ -8,8 +8,8 @@ import { expect } from "./evidence";
  * setup; tests of the open list, typed Enter or blur keep their own input.
  */
 export async function fillLauncherFolder(form: Locator, path: string): Promise<void> {
-  const folder = form.getByLabel("folder", { exact: true });
-  const suggestions = form.getByRole("listbox", { name: "folders", exact: true });
+  const folder = form.getByLabel("Folder", { exact: true });
+  const suggestions = form.getByRole("listbox", { name: "Folders", exact: true });
   await folder.fill(path);
   await expect(folder).toBeFocused();
   await expect(suggestions).toBeVisible();

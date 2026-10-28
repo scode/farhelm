@@ -37,13 +37,13 @@ pub(crate) fn screen_yolo_mode(harness: LaunchHarness) -> Option<&'static str> {
 /// existence verification by Farhelm.
 pub(crate) const fn conversation_label(harness: LaunchHarness) -> &'static str {
     match harness {
-        LaunchHarness::Pi | LaunchHarness::Omp => "session file",
-        LaunchHarness::Goose | LaunchHarness::OpenCode => "session id",
-        LaunchHarness::Cursor => "chat id",
+        LaunchHarness::Pi | LaunchHarness::Omp => "Session file",
+        LaunchHarness::Goose | LaunchHarness::OpenCode => "Session ID",
+        LaunchHarness::Cursor => "Chat ID",
         LaunchHarness::Claude
         | LaunchHarness::Codex
         | LaunchHarness::Muse
-        | LaunchHarness::Grok => "conversation id",
+        | LaunchHarness::Grok => "Conversation ID",
     }
 }
 
@@ -57,10 +57,9 @@ pub(crate) use farhelm_proto::launcher::{
 
 /// Return the stable lowercase word used for an effort in the composer.
 ///
-/// The wire enum and the visible control labels use the same words. Keeping
-/// that spelling here lets renderer-free search and the component controls share
-/// one protocol vocabulary instead of drifting through separate `Debug` or
-/// display conversions.
+/// Search matching and native option values share this canonical spelling.
+/// Visible choices use [`effort_label`] instead; changing display case must
+/// not change exact-word preselection or a native select's round trip.
 pub(crate) const fn effort_value(effort: LaunchEffort) -> &'static str {
     match effort {
         LaunchEffort::Off => "off",
@@ -74,10 +73,10 @@ pub(crate) const fn effort_value(effort: LaunchEffort) -> &'static str {
     }
 }
 
-/// Give the default search row and explicit effort rows their visible word.
+/// Give default and explicit effort actions their canonical search word.
 ///
-/// The row label and exact-word selection must agree with the button, even
-/// though default has no explicit wire value.
+/// Default has no explicit wire value, but still participates in substring
+/// matching and exact-word selection. Display case belongs to [`effort_label`].
 pub(crate) const fn effort_search_word(effort: Option<LaunchEffort>) -> &'static str {
     match effort {
         Some(effort) => effort_value(effort),
@@ -85,12 +84,29 @@ pub(crate) const fn effort_search_word(effort: Option<LaunchEffort>) -> &'static
     }
 }
 
-/// Return the lowercase phrase used for a permission in visible summaries.
+/// Name an effort choice for display without changing its search or wire value.
+///
+/// `None` is the explicit Default action. Callers must use [`effort_value`]
+/// for native option values and [`effort_search_word`] for query matching.
+pub(crate) const fn effort_label(effort: Option<LaunchEffort>) -> &'static str {
+    match effort {
+        Some(LaunchEffort::Off) => "Off",
+        Some(LaunchEffort::Minimal) => "Minimal",
+        Some(LaunchEffort::Low) => "Low",
+        Some(LaunchEffort::Medium) => "Medium",
+        Some(LaunchEffort::High) => "High",
+        Some(LaunchEffort::Xhigh) => "Xhigh",
+        Some(LaunchEffort::Max) => "Max",
+        Some(LaunchEffort::Ultra) => "Ultra",
+        None => "Default",
+    }
+}
+
+/// Return the canonical lowercase phrase used to search for a permission.
 ///
 /// The wire spelling for `SmartApprove` uses an underscore, while people see
-/// the same spaced phrase as Goose's segmented control. Keeping that choice
-/// here prevents recent rows and the live summary from falling back to Rust's
-/// `Debug` spelling.
+/// the spaced phrase a person types. Display labels use
+/// [`permission_display_value`] so their case cannot change search matching.
 pub(crate) const fn permission_value(permission: LaunchPermission) -> &'static str {
     match permission {
         LaunchPermission::Guarded => "guarded",
@@ -99,6 +115,21 @@ pub(crate) const fn permission_value(permission: LaunchPermission) -> &'static s
         LaunchPermission::Approve => "approve",
         LaunchPermission::SmartApprove => "smart approve",
         LaunchPermission::Chat => "chat",
+    }
+}
+
+/// Name a permission choice without changing its canonical search spelling.
+///
+/// This is the short mode label; [`permission_label`] adds a harness-specific
+/// guarded heading where the surface needs to explain the selected behavior.
+pub(crate) const fn permission_display_value(permission: LaunchPermission) -> &'static str {
+    match permission {
+        LaunchPermission::Guarded => "Guarded",
+        LaunchPermission::Yolo => "YOLO",
+        LaunchPermission::Custom => "Custom",
+        LaunchPermission::Approve => "Approve",
+        LaunchPermission::SmartApprove => "Smart approve",
+        LaunchPermission::Chat => "Chat",
     }
 }
 
@@ -111,17 +142,17 @@ pub(crate) const fn permission_value(permission: LaunchPermission) -> &'static s
 pub(crate) const fn permission_tooltip(permission: LaunchPermission) -> &'static str {
     match permission {
         LaunchPermission::Guarded => {
-            "guarded: the agent can approve actions through a safety mechanism that may refuse or ask you"
+            "Guarded: the agent can approve actions through a safety mechanism that may refuse or ask you"
         }
         LaunchPermission::Yolo => "YOLO: the agent bypasses its approval and sandbox safety checks",
         LaunchPermission::Custom => {
-            "custom permission flags: your flags replace Farhelm's permission flags; Farhelm does not check them and treats this as YOLO"
+            "Custom permission flags: your flags replace Farhelm's permission flags; Farhelm does not check them and treats this as YOLO"
         }
-        LaunchPermission::Approve => "approve: the agent asks before every tool action",
+        LaunchPermission::Approve => "Approve: the agent asks before every tool action",
         LaunchPermission::SmartApprove => {
-            "smart approve: the agent asks only before actions it judges risky"
+            "Smart approve: the agent asks only before actions it judges risky"
         }
-        LaunchPermission::Chat => "chat: the agent only talks and uses no tools",
+        LaunchPermission::Chat => "Chat: the agent only talks and uses no tools",
     }
 }
 
@@ -159,7 +190,7 @@ pub(crate) fn permission_help(
         },
         Some(value) => permission_tooltip(value),
         None => {
-            "Not classified · agent's own setting\nFarhelm did not force a guarded permission mode for this launch. The agent's configuration decides; hosts that ask before YOLO launches treat it as YOLO."
+            "Not classified · Agent's own setting\nFarhelm did not force a guarded permission mode for this launch. The agent's configuration decides; hosts that ask before YOLO launches treat it as YOLO."
         }
     };
     let mut help = explanation.to_string();
@@ -183,8 +214,8 @@ pub(crate) fn permission_label(
 ) -> String {
     let Some(harness) = harness else {
         return permission
-            .map(permission_value)
-            .unwrap_or("agent-dependent mode")
+            .map(permission_display_value)
+            .unwrap_or("Agent-dependent mode")
             .to_string();
     };
     match harness.request_permission(permission) {
@@ -195,8 +226,8 @@ pub(crate) fn permission_label(
                 .expect("permission help has a heading")
                 .to_string()
         }
-        Some(value) => permission_value(value).to_string(),
-        None => "agent's own setting".to_string(),
+        Some(value) => permission_display_value(value).to_string(),
+        None => "Agent's own setting".to_string(),
     }
 }
 
@@ -255,11 +286,14 @@ pub(crate) const fn normalized_workspace_trust(
     }
 }
 
-/// Return the permission phrase a complete selection presents to the user.
+/// Return the display label a complete selection presents to the user.
+///
+/// This label is not a classification key. Callers that style a mode must
+/// compare [`normalized_permissions`] to the enum rather than parsing this text.
 pub(crate) fn selection_permission_value(selection: &LaunchSelection) -> &'static str {
     normalized_permissions(selection.harness, selection.permissions)
-        .map(permission_value)
-        .unwrap_or("agent's own setting")
+        .map(permission_display_value)
+        .unwrap_or("Agent's own setting")
 }
 
 /// The order the composer's search lists harnesses in (the `harness:` results
@@ -404,10 +438,10 @@ pub(crate) enum ComposerPermission {
 }
 
 impl ComposerPermission {
-    /// The word a person sees and types for this search choice.
+    /// The canonical word a person types for this search choice.
     ///
     /// Own-setting has no wire permission, while explicit modes share the
-    /// launcher's visible spelling. Search matching and exact preselection
+    /// launcher's vocabulary in lowercase. Search matching and exact preselection
     /// must use this same word or Enter can select a different row.
     const fn search_word(self) -> &'static str {
         match self {
@@ -733,7 +767,7 @@ pub(crate) fn selection_summary(selection: &LaunchSelection) -> String {
 /// disagreeing about which saved defaults a row will apply.
 pub(crate) fn selection_summary_without_harness(selection: &LaunchSelection) -> String {
     let mut summary = format!(
-        "{} · permissions: {}",
+        "{} · Permissions: {}",
         selection_summary_before_permissions(selection),
         selection_permission_value(selection),
     );
@@ -750,7 +784,7 @@ pub(crate) fn selection_summary_without_harness(selection: &LaunchSelection) -> 
 /// permission.
 ///
 /// The composer's SEARCH result for a recent setup spells the permission
-/// itself, so it can color "yolo" as a warning without cutting that word back
+/// itself, so it can color "YOLO" as a warning without cutting that word back
 /// out of a formatted string; this is the prefix it renders in front of that
 /// word. Every other complete summary appends the permission through
 /// [`selection_summary_without_harness`], so the two never disagree about the
@@ -762,12 +796,9 @@ pub(crate) fn selection_summary_without_harness(selection: &LaunchSelection) -> 
 /// problem of three identical one-line summaries hiding the one that differs.
 pub(crate) fn selection_summary_before_permissions(selection: &LaunchSelection) -> String {
     format!(
-        "model: {} · effort: {}",
-        selection.model.as_deref().unwrap_or("default"),
-        selection
-            .effort
-            .map(|effort| format!("{effort:?}"))
-            .unwrap_or_else(|| "default".to_string()),
+        "Model: {} · Effort: {}",
+        selection.model.as_deref().unwrap_or("Default"),
+        effort_label(selection.effort),
     )
 }
 
@@ -783,18 +814,20 @@ pub(crate) fn selection_summary_before_permissions(selection: &LaunchSelection) 
 /// names every default on purpose, so that absence is never mistaken for an
 /// invisible retained value, and the row's title and accessible name still
 /// carry that complete summary. The row itself keeps the same promise another
-/// way: when nothing at all is explicit it says `defaults`, where a blank
+/// way: when nothing at all is explicit it says `Defaults`, where a blank
 /// would leave a reader guessing (see [`RECENT_ALL_DEFAULTS`]).
 ///
 /// Permission is left out because the row spells it itself, so that it
-/// can color "yolo" as a warning without cutting the word back out of a
+/// can color "YOLO" as a warning without cutting the word back out of a
 /// formatted string. Trust is decided from Settings for the new destination.
 pub(crate) fn selection_explicit_before_permissions(selection: &LaunchSelection) -> Vec<String> {
     let model = selection
         .model
         .as_deref()
-        .map(|model| format!("model: {model}"));
-    let effort = selection.effort.map(|effort| format!("effort: {effort:?}"));
+        .map(|model| format!("Model: {model}"));
+    let effort = selection
+        .effort
+        .map(|effort| format!("Effort: {}", effort_label(Some(effort))));
     model.into_iter().chain(effort).collect()
 }
 
@@ -804,7 +837,7 @@ pub(crate) fn selection_explicit_before_permissions(selection: &LaunchSelection)
 /// A word and not a blank, because a blank cell cannot be told apart from
 /// one that failed to render, and because saying so keeps the summary's
 /// promise that a default is always named.
-pub(crate) const RECENT_ALL_DEFAULTS: &str = "defaults";
+pub(crate) const RECENT_ALL_DEFAULTS: &str = "Defaults";
 
 /// The bounded kinds understood by composer search.
 ///
@@ -931,23 +964,23 @@ pub(crate) fn empty_search_message(
     }
     let (scope, value) = scoped_query(query);
     if query_needs_harness(query, agent_without_harness) {
-        return Some("choose a harness first");
+        return Some("Choose a harness first");
     }
     Some(match scope {
-        SearchScope::All => "type a search or clear the search box to launch",
-        SearchScope::Name => "type a session name after name:",
-        SearchScope::Host => "no host matches",
-        SearchScope::Harness => "no harness matches",
-        SearchScope::Model if models_loading => "loading models…",
-        SearchScope::Model => "no model matches; enter a custom model id in the model field",
-        SearchScope::Effort => "no effort matches",
-        SearchScope::Permissions => "no permissions match",
-        SearchScope::Folder => "no folder matches",
-        SearchScope::Recent => "no recent setup matches",
-        SearchScope::Github if value.is_empty() => "type owner/repo to choose a repository",
-        SearchScope::Github => "no repository matches; enter owner/repo",
-        SearchScope::Template if templates_loading => "loading templates…",
-        SearchScope::Template => "no template matches",
+        SearchScope::All => "Type a search or clear the search box to launch",
+        SearchScope::Name => "Type a session name after name:",
+        SearchScope::Host => "No host matches",
+        SearchScope::Harness => "No harness matches",
+        SearchScope::Model if models_loading => "Loading models…",
+        SearchScope::Model => "No model matches; enter a custom model ID in the model field",
+        SearchScope::Effort => "No effort matches",
+        SearchScope::Permissions => "No permissions match",
+        SearchScope::Folder => "No folder matches",
+        SearchScope::Recent => "No recent setup matches",
+        SearchScope::Github if value.is_empty() => "Type owner/repo to choose a repository",
+        SearchScope::Github => "No repository matches; enter owner/repo",
+        SearchScope::Template if templates_loading => "Loading templates…",
+        SearchScope::Template => "No template matches",
     })
 }
 
@@ -1682,14 +1715,14 @@ pub(crate) fn reconciliation_reset_reason(
     // notice must never report a choice the person did not make.
     let mut cleared = Vec::new();
     if before.model.is_some() && after.model.is_none() {
-        cleared.push("the selected model is not in this harness's Farhelm offering");
+        cleared.push("selected model is not in this harness's Farhelm offering");
     }
     if before.effort.is_some() && after.effort.is_none() {
-        cleared.push("the selected effort is not in Farhelm's offering for that model or harness");
+        cleared.push("selected effort is not in Farhelm's offering for that model or harness");
     }
     let mut notices = Vec::new();
     if !cleared.is_empty() {
-        notices.push(format!("{}, so it was cleared", cleared.join("; ")));
+        notices.push(format!("The {}, so it was cleared", cleared.join("; the ")));
     }
     if let Some(permission) = before.permissions
         && !after.harness.offers_permission(permission)
@@ -1705,8 +1738,11 @@ pub(crate) fn reconciliation_reset_reason(
             ) => "replaced by this harness's supported mode",
             None => "cleared",
         };
+        // Clauses share one sentence. Only the first one starts a new label;
+        // later semicolon-separated clauses retain grammatical lowercase.
+        let article = if notices.is_empty() { "The" } else { "the" };
         notices.push(format!(
-            "the selected permission is unavailable for this harness, so it was {disposition}"
+            "{article} selected permission is unavailable for this harness, so it was {disposition}"
         ));
     }
     (!notices.is_empty()).then(|| notices.join("; "))
@@ -1833,7 +1869,7 @@ mod tests {
             );
             assert_eq!(
                 empty_search_message(query, true, false, false),
-                Some("choose a harness first")
+                Some("Choose a harness first")
             );
             if scoped_query(query).0 == SearchScope::All {
                 assert_eq!(
@@ -1850,21 +1886,21 @@ mod tests {
     fn empty_search_messages_cover_labels_and_loading() {
         assert_eq!(empty_search_message("", false, false, false), None);
         for (query, expected) in [
-            (" ", "type a search or clear the search box to launch"),
-            ("name:", "type a session name after name:"),
-            ("host:missing", "no host matches"),
-            ("harness:xyz", "no harness matches"),
-            ("folder:", "no folder matches"),
-            ("recent:missing", "no recent setup matches"),
-            ("effort:bogus", "no effort matches"),
-            ("perms:bogus", "no permissions match"),
+            (" ", "Type a search or clear the search box to launch"),
+            ("name:", "Type a session name after name:"),
+            ("host:missing", "No host matches"),
+            ("harness:xyz", "No harness matches"),
+            ("folder:", "No folder matches"),
+            ("recent:missing", "No recent setup matches"),
+            ("effort:bogus", "No effort matches"),
+            ("perms:bogus", "No permissions match"),
             (
                 "model:custom",
-                "no model matches; enter a custom model id in the model field",
+                "No model matches; enter a custom model ID in the model field",
             ),
-            ("gh:", "type owner/repo to choose a repository"),
-            ("gh:bad", "no repository matches; enter owner/repo"),
-            ("tl:bad", "no template matches"),
+            ("gh:", "Type owner/repo to choose a repository"),
+            ("gh:bad", "No repository matches; enter owner/repo"),
+            ("tl:bad", "No template matches"),
         ] {
             assert_eq!(
                 empty_search_message(query, false, false, false),
@@ -1874,11 +1910,11 @@ mod tests {
         }
         assert_eq!(
             empty_search_message("model:x", false, true, false),
-            Some("loading models…")
+            Some("Loading models…")
         );
         assert_eq!(
             empty_search_message("tl:", false, false, true),
-            Some("loading templates…")
+            Some("Loading templates…")
         );
     }
 
@@ -1904,15 +1940,15 @@ mod tests {
     #[test]
     fn named_conversation_labels_follow_each_agents_selector() {
         for (harness, label) in [
-            (LaunchHarness::Claude, "conversation id"),
-            (LaunchHarness::Codex, "conversation id"),
-            (LaunchHarness::Grok, "conversation id"),
-            (LaunchHarness::Muse, "conversation id"),
-            (LaunchHarness::Cursor, "chat id"),
-            (LaunchHarness::Goose, "session id"),
-            (LaunchHarness::OpenCode, "session id"),
-            (LaunchHarness::Pi, "session file"),
-            (LaunchHarness::Omp, "session file"),
+            (LaunchHarness::Claude, "Conversation ID"),
+            (LaunchHarness::Codex, "Conversation ID"),
+            (LaunchHarness::Grok, "Conversation ID"),
+            (LaunchHarness::Muse, "Conversation ID"),
+            (LaunchHarness::Cursor, "Chat ID"),
+            (LaunchHarness::Goose, "Session ID"),
+            (LaunchHarness::OpenCode, "Session ID"),
+            (LaunchHarness::Pi, "Session file"),
+            (LaunchHarness::Omp, "Session file"),
         ] {
             assert_eq!(conversation_label(harness), label);
             assert!(harness.offers_named_conversation());
@@ -2320,15 +2356,15 @@ mod tests {
 
         assert_eq!(
             selection_summary_before_permissions(&selection),
-            "model: gpt-6-astra · effort: High"
+            "Model: gpt-6-astra · Effort: High"
         );
         assert_eq!(
             selection_summary_without_harness(&selection),
-            "model: gpt-6-astra · effort: High · permissions: yolo"
+            "Model: gpt-6-astra · Effort: High · Permissions: YOLO"
         );
         assert_eq!(
             selection_summary(&selection),
-            "Codex · model: gpt-6-astra · effort: High · permissions: yolo"
+            "Codex · Model: gpt-6-astra · Effort: High · Permissions: YOLO"
         );
     }
 
@@ -2357,11 +2393,11 @@ mod tests {
         assert!(selection_explicit_before_permissions(&selection(None, None)).is_empty());
         assert_eq!(
             selection_explicit_before_permissions(&selection(Some("gpt-6-astra"), None)),
-            ["model: gpt-6-astra"]
+            ["Model: gpt-6-astra"]
         );
         assert_eq!(
             selection_explicit_before_permissions(&selection(None, Some(LaunchEffort::High))),
-            ["effort: High"]
+            ["Effort: High"]
         );
 
         let both = selection(Some("gpt-6-astra"), Some(LaunchEffort::High));
@@ -2961,7 +2997,7 @@ mod tests {
         assert_eq!(
             reconciliation_reset_reason(&goose, &pi).as_deref(),
             Some(
-                "the selected permission is unavailable for this harness, so it was replaced by YOLO, this harness's default"
+                "The selected permission is unavailable for this harness, so it was replaced by YOLO, this harness's default"
             )
         );
 
@@ -2991,7 +3027,7 @@ mod tests {
         assert_eq!(
             reconciliation_reset_reason(&goose, &codex_from_goose).as_deref(),
             Some(
-                "the selected permission is unavailable for this harness, so it was replaced by guarded, this harness's default"
+                "The selected permission is unavailable for this harness, so it was replaced by guarded, this harness's default"
             )
         );
     }
@@ -3107,7 +3143,7 @@ mod tests {
             assert_eq!(
                 reconciliation_reset_reason(&goose, &omp).as_deref(),
                 Some(
-                    "the selected permission is unavailable for this harness, so it was replaced by guarded, this harness's default"
+                    "The selected permission is unavailable for this harness, so it was replaced by guarded, this harness's default"
                 )
             );
             assert!(
@@ -3162,15 +3198,15 @@ mod tests {
             wrapper_prefix: None,
             workspace_trust: None,
         };
-        assert_eq!(selection_permission_value(&omitted), "guarded");
-        assert!(selection_summary(&omitted).ends_with("permissions: guarded"));
+        assert_eq!(selection_permission_value(&omitted), "Guarded");
+        assert!(selection_summary(&omitted).ends_with("Permissions: Guarded"));
         let approve = LaunchSelection {
             permissions: Some(LaunchPermission::Approve),
             wrapper_prefix: None,
             workspace_trust: None,
             ..omitted
         };
-        assert_eq!(selection_permission_value(&approve), "approve");
+        assert_eq!(selection_permission_value(&approve), "Approve");
     }
 
     /// Goose's omitted mode is YOLO, but an explicit approval choice must
@@ -3201,8 +3237,8 @@ mod tests {
             wrapper_prefix: None,
             workspace_trust: None,
         };
-        assert_eq!(selection_permission_value(&pi), "yolo");
-        assert!(selection_summary(&pi).ends_with("permissions: yolo"));
+        assert_eq!(selection_permission_value(&pi), "YOLO");
+        assert!(selection_summary(&pi).ends_with("Permissions: YOLO"));
 
         let goose = LaunchSelection {
             permission_flags: None,
@@ -3212,8 +3248,8 @@ mod tests {
             workspace_trust: None,
             ..pi
         };
-        assert_eq!(selection_permission_value(&goose), "smart approve");
-        assert!(selection_summary(&goose).ends_with("permissions: smart approve"));
+        assert_eq!(selection_permission_value(&goose), "Smart approve");
+        assert!(selection_summary(&goose).ends_with("Permissions: Smart approve"));
     }
 
     /// A harness's default YOLO is not a choice to bypass another harness's

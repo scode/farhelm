@@ -127,7 +127,7 @@ test("quick launch shows New when the host's recent setups cannot be read", asyn
     const form = page.locator(".create-session-form");
     await expect(form).toBeVisible();
     await expect(form.locator(".create-session-error")).toContainText("this host's recent setups could not be read");
-    await expect(form.getByLabel("folder", { exact: true })).toHaveValue("~");
+    await expect(form.getByLabel("Folder", { exact: true })).toHaveValue("~");
     expect(creates, "nothing is launched into the fallback folder").toBe(0);
   } finally {
     await page.unrouteAll({ behavior: "wait" });
@@ -406,7 +406,7 @@ test("launch sequence cancellation leaves ordinary terminal input and modals in 
     }, { message: "the apply pill keeps its bottom position above the details bar" }).toBe("ok");
     await page.keyboard.press("Escape");
     await expect(indicator).toHaveCount(0);
-    await form.getByRole("button", { name: "cancel", exact: true }).click();
+    await form.getByRole("button", { name: "Cancel", exact: true }).click();
   } finally {
     await cleanupSession(request, source.id);
   }
@@ -748,7 +748,7 @@ test("a sequence refused at its prefix leaves later sequences their own bindings
       }),
       "the app refused Begin: no sequence pill appeared",
     ).toBe(false);
-    await form.getByRole("button", { name: "cancel", exact: true }).click();
+    await form.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(form).toHaveCount(0);
 
     await patchPreferences(request, { template_shortcuts: { "1": fresh } });
@@ -886,7 +886,7 @@ for (const takeover of ["New", "settings", "Rename"]) {
         } else {
           await page.locator(".new-session-button").click();
           await expect(form).toBeVisible();
-          await form.getByRole("button", { name: "cancel", exact: true }).click();
+          await form.getByRole("button", { name: "Cancel", exact: true }).click();
         }
         await expect(form).toHaveCount(0);
         gate.release();
@@ -972,7 +972,7 @@ test("hidden preparation isolates keys and a queued Replace with requires Launch
     await expect(replaceMenu).toHaveCount(0);
     await expect(form).toBeVisible();
     gate.release();
-    await expect(form.getByLabel("name (optional)")).toHaveValue(`${name}-source`);
+    await expect(form.getByLabel("Name (optional)")).toHaveValue(`${name}-source`);
     await expect(form.locator(".create-session-submit")).toHaveText("Replace");
     await expect(form.locator(".create-session-submit")).toBeEnabled();
     expect(bodies).toHaveLength(0);
@@ -1029,8 +1029,8 @@ for (const recover of [false, true]) {
         const form = page.locator(".create-session-form");
         await expect(form).toBeVisible();
         await expect(form.locator(".create-session-error")).toContainText("the host list failed");
-        await expect(form.getByRole("button", { name: "cancel", exact: true })).toBeEnabled();
-        await expect(form.getByRole("button", { name: "cancel", exact: true })).toBeFocused();
+        await expect(form.getByRole("button", { name: "Cancel", exact: true })).toBeEnabled();
+        await expect(form.getByRole("button", { name: "Cancel", exact: true })).toBeFocused();
         expect(creates).toBe(0);
         if (!recover) {
           await page.keyboard.press("Tab");
@@ -1044,11 +1044,11 @@ for (const recover of [false, true]) {
         await expect.poll(() => feed.openSockets(), { message: "the owned feed is live before recovery notification" })
           .toBeGreaterThan(0);
         feed.notify(2);
-        await expect(form.getByLabel("agent command", { exact: true })).toHaveValue(FAKE_AGENT);
+        await expect(form.getByLabel("Agent command", { exact: true })).toHaveValue(FAKE_AGENT);
         await expect(form.locator(".create-session-submit")).toBeEnabled();
         await expect(form).toBeVisible();
         expect(creates).toBe(0);
-        await form.getByRole("button", { name: "cancel", exact: true }).click();
+        await form.getByRole("button", { name: "Cancel", exact: true }).click();
       } finally {
         await page.unroute("**/api/hosts");
         await page.unroute("**/api/sessions");
@@ -1096,10 +1096,10 @@ for (const failed of [false, true]) {
       await patchPreferences(request, { quick_launch_template: old });
       await page.goto("/");
       await page.locator(".templates-button").click();
-      const dialog = page.getByRole("dialog", { name: "templates", exact: true });
-      const oldMark = dialog.getByRole("button", { name: `quick launch ${old}`, exact: true });
+      const dialog = page.getByRole("dialog", { name: "Templates", exact: true });
+      const oldMark = dialog.getByRole("button", { name: `Quick launch ${old}`, exact: true });
       await expect(oldMark).toHaveAttribute("aria-pressed", "true");
-      const mark = dialog.getByRole("button", { name: `quick launch ${chosen}`, exact: true });
+      const mark = dialog.getByRole("button", { name: `Quick launch ${chosen}`, exact: true });
       await mark.click();
       await expect.poll(() => held).toBe(1);
       expect((await readPreferences(request)).quick_launch_template).toBe(old);
@@ -1234,7 +1234,7 @@ test("a refusal after target change reveals the spent quick-launch draft", async
       "Not launched. a launch for an earlier setup was refused",
     );
     await expect(form).not.toContainText("old-target fixture refusal");
-    await expect(form.getByLabel("agent command", { exact: true })).toHaveValue(FAKE_AGENT);
+    await expect(form.getByLabel("Agent command", { exact: true })).toHaveValue(FAKE_AGENT);
     expect(creates).toBe(1);
   } finally {
     gate.release();
@@ -1257,8 +1257,8 @@ for (const movedAway of [false, true]) {
       if (movedAway) await patchPreferences(request, { quick_launch_template: old });
       await page.goto("/");
       await page.locator(".templates-button").click();
-      const dialog = page.getByRole("dialog", { name: "templates", exact: true });
-      await expect(dialog.getByRole("button", { name: `quick launch ${old}`, exact: true })).toHaveAttribute(
+      const dialog = page.getByRole("dialog", { name: "Templates", exact: true });
+      await expect(dialog.getByRole("button", { name: `Quick launch ${old}`, exact: true })).toHaveAttribute(
         "aria-pressed",
         String(movedAway),
       );
@@ -1588,8 +1588,8 @@ test(`${numbered ? "number shortcut" : "quick launch"} reveals the ordinary YOLO
     expect(posts).toHaveLength(1);
     await form.locator(".yolo-cancel").click();
     await expect(form.locator(".yolo-confirmation")).toHaveCount(0);
-    await expect(form.getByLabel("agent command", { exact: true })).toHaveValue(FAKE_AGENT);
-    await expect(form.getByLabel("name (optional)")).toHaveValue(`${name}-session`);
+    await expect(form.getByLabel("Agent command", { exact: true })).toHaveValue(FAKE_AGENT);
+    await expect(form.getByLabel("Name (optional)")).toHaveValue(`${name}-session`);
     expect(posts).toHaveLength(1);
     await form.locator(".create-session-submit").click();
     await expect(form.locator(".yolo-confirmation")).toBeVisible();
@@ -1645,7 +1645,7 @@ test(`${numbered ? "number shortcut" : "quick launch"} ${retry === "refusal" ? "
     await expect(form).toBeVisible();
     await expect(form.locator(".create-session-error")).toBeVisible();
     if (retry === "refusal") await expect(form.locator(".create-session-error")).toContainText("quick fixture refusal");
-    await expect(form.getByLabel("agent command", { exact: true })).toHaveValue(FAKE_AGENT);
+    await expect(form.getByLabel("Agent command", { exact: true })).toHaveValue(FAKE_AGENT);
     expect(bodies).toHaveLength(1);
     if (retry !== "refusal") {
       expect(created).toHaveLength(1);
@@ -1662,7 +1662,7 @@ test(`${numbered ? "number shortcut" : "quick launch"} ${retry === "refusal" ? "
       // Template acceptance invalidates browsing synchronously with its edits;
       // unchanged field text alone would not prove the replay finished.
       await expect(form).not.toHaveAttribute("data-browse-generation", generation!);
-      await expect(form.getByLabel("name (optional)")).toHaveValue(title);
+      await expect(form.getByLabel("Name (optional)")).toHaveValue(title);
       expect(bodies).toHaveLength(1);
     }
     await form.locator(".create-session-submit").click();
@@ -1712,7 +1712,7 @@ test("number shortcuts respect modals and explain unbound or incomplete template
     expect((await readPreferences(request)).template_shortcuts).toEqual({ "1": runnable });
     await page.goto("/");
     await page.locator(".templates-button").click();
-    const dialog = page.getByRole("dialog", { name: "templates", exact: true });
+    const dialog = page.getByRole("dialog", { name: "Templates", exact: true });
     await expect(dialog).toBeVisible();
     await expect(dialog.locator(".templates-new")).toBeFocused();
     await dialog.evaluate(node => {
@@ -1784,7 +1784,7 @@ test("quick launch reveals an offline host without dispatching a create", async 
     await expect(form).toBeVisible();
     await expect(form.locator(".create-session-host-note")).toContainText("the selected host is unavailable");
     await expect(form.locator(".create-session-submit")).toBeDisabled();
-    await expect(form.getByLabel("agent command", { exact: true })).toHaveValue(FAKE_AGENT);
+    await expect(form.getByLabel("Agent command", { exact: true })).toHaveValue(FAKE_AGENT);
     expect(creates).toBe(0);
   } finally {
     await page.unroute("**/api/hosts");
@@ -1808,14 +1808,14 @@ test("quick launch keeps modal ownership and explains missing or incomplete temp
     await patchPreferences(request, { quick_launch_template: name });
     await page.goto("/");
     await page.locator(".templates-button").click();
-    await expect(page.getByRole("dialog", { name: "templates", exact: true })).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "Templates", exact: true })).toBeVisible();
     await chord(page);
     expect(creates).toBe(0);
     await expect(page.locator(".create-session-form")).toHaveCount(0);
-    await page.getByRole("dialog", { name: "templates", exact: true }).locator(".templates-close").click();
+    await page.getByRole("dialog", { name: "Templates", exact: true }).locator(".templates-close").click();
     // Each chord below must meet a page with no dialog left over, or a
     // dialog still rendering out could swallow it and pass for the guard.
-    await expect(page.getByRole("dialog", { name: "templates", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("dialog", { name: "Templates", exact: true })).toHaveCount(0);
     expect((await request.put(`/api/templates/${encodeURIComponent(name)}`, { data: { effort: "high" } })).ok()).toBe(
       true,
     );
@@ -1825,7 +1825,7 @@ test("quick launch keeps modal ownership and explains missing or incomplete temp
     await expect(form.locator(".create-session-submit")).toBeDisabled();
     await expect(form.locator(".partial-template-banner")).toHaveText(`${name} needs more choices before it can launch; complete it below.`);
     expect(creates).toBe(0);
-    await form.getByRole("button", { name: "cancel", exact: true }).click();
+    await form.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(form).toHaveCount(0);
     expect((await request.delete(`/api/templates/${encodeURIComponent(name)}`)).ok()).toBe(true);
     await chord(page);
@@ -1848,11 +1848,11 @@ test("the template mark moves, survives rename, and stays cleared after undo", a
     expect((await request.put(`/api/templates/${partial}`, { data: { effort: "high" } })).ok()).toBe(true);
     await page.goto("/");
     await page.locator(".templates-button").click();
-    const dialog = page.getByRole("dialog", { name: "templates", exact: true });
-    await expect(dialog.getByRole("button", { name: `quick launch ${partial}`, exact: true })).toBeDisabled();
-    await dialog.getByRole("button", { name: `quick launch ${a}`, exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Templates", exact: true });
+    await expect(dialog.getByRole("button", { name: `Quick launch ${partial}`, exact: true })).toBeDisabled();
+    await dialog.getByRole("button", { name: `Quick launch ${a}`, exact: true }).click();
     await expect.poll(async () => (await readPreferences(request)).quick_launch_template).toBe(a);
-    await dialog.getByRole("button", { name: `quick launch ${b}`, exact: true }).click();
+    await dialog.getByRole("button", { name: `Quick launch ${b}`, exact: true }).click();
     await expect.poll(async () => (await readPreferences(request)).quick_launch_template).toBe(b);
     await expect(dialog.locator('.templates-quick-mark[aria-pressed="true"]')).toHaveCount(1);
     await dialog.getByText(b, { exact: true }).click();
@@ -1862,9 +1862,9 @@ test("the template mark moves, survives rename, and stays cleared after undo", a
     await expect.poll(async () => (await readPreferences(request)).quick_launch_template).toBe(renamed);
     await expect(dialog.getByText(renamed, { exact: true })).toBeVisible();
     await expect(dialog.getByText(b, { exact: true })).toHaveCount(0);
-    await dialog.getByRole("button", { name: "delete", exact: true }).click();
+    await dialog.getByRole("button", { name: "Delete", exact: true }).click();
     await expect.poll(async () => (await readPreferences(request)).quick_launch_template).toBeUndefined();
-    await dialog.getByRole("button", { name: "undo", exact: true }).click();
+    await dialog.getByRole("button", { name: "Undo", exact: true }).click();
     await expect(dialog.getByText(renamed, { exact: true })).toBeVisible();
     await expect(dialog.locator('.templates-quick-mark[aria-pressed="true"]')).toHaveCount(0);
     expect((await readPreferences(request)).quick_launch_template).toBeUndefined();
@@ -1902,11 +1902,11 @@ test("deletion waits for an in-flight quick mark before clearing it", async ({ p
     await commandTemplate(request, name);
     await page.goto("/");
     await page.locator(".templates-button").click();
-    const dialog = page.getByRole("dialog", { name: "templates", exact: true });
+    const dialog = page.getByRole("dialog", { name: "Templates", exact: true });
     await dialog.getByText(name, { exact: true }).click();
-    const remove = dialog.getByRole("button", { name: "delete", exact: true });
+    const remove = dialog.getByRole("button", { name: "Delete", exact: true });
     await expect(remove, "premise: an idle editor offers Delete").toBeEnabled();
-    const bolt = dialog.getByRole("button", { name: `quick launch ${name}`, exact: true });
+    const bolt = dialog.getByRole("button", { name: `Quick launch ${name}`, exact: true });
     await bolt.click();
     await expect.poll(() => held, { message: "the mark committed and its response is held" }).toBe(1);
     expect((await readPreferences(request)).quick_launch_template).toBe(name);
@@ -1924,7 +1924,7 @@ test("deletion waits for an in-flight quick mark before clearing it", async ({ p
     await expect(dialog.getByText(name, { exact: true })).toHaveCount(0);
     expect(deletes).toBe(1);
     expect((await readPreferences(request)).quick_launch_template).toBeUndefined();
-    await dialog.getByRole("button", { name: "undo", exact: true }).click();
+    await dialog.getByRole("button", { name: "Undo", exact: true }).click();
     await expect(dialog.getByText(name, { exact: true })).toBeVisible();
     await expect(dialog.locator('.templates-quick-mark[aria-pressed="true"]')).toHaveCount(0);
     expect((await readPreferences(request)).quick_launch_template).toBeUndefined();
@@ -1953,8 +1953,8 @@ test("a marked template that became ineligible can still be unmarked", async ({ 
     expect((await readPreferences(request)).quick_launch_template, "premise: the mark survives the edit").toBe(name);
     await page.goto("/");
     await page.locator(".templates-button").click();
-    const dialog = page.getByRole("dialog", { name: "templates", exact: true });
-    const bolt = dialog.getByRole("button", { name: `quick launch ${name}`, exact: true });
+    const dialog = page.getByRole("dialog", { name: "Templates", exact: true });
+    const bolt = dialog.getByRole("button", { name: `Quick launch ${name}`, exact: true });
     await expect(bolt).toHaveAttribute("aria-pressed", "true");
     await expect(bolt).toBeEnabled();
     await bolt.click();

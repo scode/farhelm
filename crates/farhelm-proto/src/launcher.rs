@@ -561,6 +561,8 @@ pub struct TemplateContext<'a> {
 
 /// Why a template was not applied, naming the field (SPEC.md: "refused with
 /// a message naming the field, and nothing from it is applied").
+/// Display owns the sentence's opening; field and reason complete that sentence
+/// and retain their own spelling, as does the user-supplied template name.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TemplateRefusal {
     pub template: String,
@@ -572,7 +574,7 @@ impl std::fmt::Display for TemplateRefusal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "template {:?} was not applied: its {} {}",
+            "Template {:?} was not applied: its {} {}",
             self.template, self.field, self.reason
         )
     }

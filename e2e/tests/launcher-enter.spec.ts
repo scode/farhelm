@@ -40,7 +40,7 @@ test("Clone search Enter picks an unmatched name before a second Enter launches"
     await search.fill("asdf");
     await expect(form.getByRole("option", { name: "Set session name: asdf", exact: true, selected: true })).toBeVisible();
     await search.press("Enter");
-    await expect(form.getByLabel("name (optional)", { exact: true })).toHaveValue("asdf");
+    await expect(form.getByLabel("Name (optional)", { exact: true })).toHaveValue("asdf");
     await expect(search).toHaveValue("");
     await expect(search).toBeFocused();
     expect(creates, "accepting a name must not create the clone").toEqual([]);
@@ -81,14 +81,14 @@ test("launcher search explains empty results and Enter reopens before picking", 
   const search = form.locator(".launch-composer-search input");
   const area = form.locator("#launch-composer-search-results");
   await search.fill("host:no-such-host-for-enter");
-  await expect(area).toHaveText("no host matches");
+  await expect(area).toHaveText("No host matches");
   await search.press("Escape");
   await expect(area).toHaveCount(0);
   await expect(search).toBeFocused();
   await search.press("Enter");
-  await expect(area).toHaveText("no host matches");
+  await expect(area).toHaveText("No host matches");
   await search.press("Enter");
-  await expect(area).toHaveText("no host matches");
+  await expect(area).toHaveText("No host matches");
   await search.fill("asdf");
   await expect(form.getByRole("option", { name: "Set session name: asdf", exact: true })).toBeVisible();
   await search.press("Escape");
@@ -96,10 +96,10 @@ test("launcher search explains empty results and Enter reopens before picking", 
   await search.press("Enter");
   await expect(form.getByRole("option", { name: "Set session name: asdf", exact: true })).toBeVisible();
   await expect(search).toHaveValue("asdf");
-  await expect(form.getByLabel("name (optional)", { exact: true })).toHaveValue("");
+  await expect(form.getByLabel("Name (optional)", { exact: true })).toHaveValue("");
   await search.press("Enter");
   await expect(search).toHaveValue("");
-  await expect(form.getByLabel("name (optional)", { exact: true })).toHaveValue("asdf");
+  await expect(form.getByLabel("Name (optional)", { exact: true })).toHaveValue("asdf");
   expect(creates).toBe(0);
 });
 
@@ -132,10 +132,10 @@ for (const attempt of ["Enter", "Launch"] as const) {
     await expect(form).toBeVisible();
     const launch = form.locator(".create-session-submit");
     await expect(launch).toHaveAttribute("aria-disabled", "true");
-    await expect(launch).toHaveAttribute("data-tooltip", "choose a structured harness before launching");
+    await expect(launch).toHaveAttribute("data-tooltip", "Choose a structured harness before launching");
     await expect(form.locator(".launch-composer-refusal"), "opening an unfinished draft is not an error").toHaveCount(0);
     if (attempt === "Enter") {
-      const search = form.getByRole("combobox", { name: "search folders, harnesses, models, and efforts", exact: true });
+      const search = form.getByRole("combobox", { name: "Search folders, harnesses, models, and efforts", exact: true });
       await expect(search).toHaveValue("");
       await search.focus();
       await expect(search).toBeFocused();
@@ -145,7 +145,7 @@ for (const attempt of ["Enter", "Launch"] as const) {
       // activation alive. Playwright otherwise refuses this real pointer input.
       await launch.click({ force: true });
     }
-    await expectReasonByLaunch(form, "choose a structured harness before launching");
+    await expectReasonByLaunch(form, "Choose a structured harness before launching");
     expect(posts, "a visible prerequisite refusal must post no create").toBe(0);
     await form.getByRole("button", { name: "Codex", exact: true }).click();
     await expect(launch).toHaveAttribute("aria-disabled", "false");
@@ -168,7 +168,7 @@ test("launcher gap keeps focus and container Enter explains an incomplete draft"
   await page.locator(".new-session-button").click();
   const form = page.locator(".create-session-form");
   await expect(form).toBeVisible();
-  const search = form.getByRole("combobox", { name: "search folders, harnesses, models, and efforts", exact: true });
+  const search = form.getByRole("combobox", { name: "Search folders, harnesses, models, and efforts", exact: true });
   await search.focus();
   await expect(search).toBeFocused();
   const gap = await clickDialogGap(page, form);
@@ -183,7 +183,7 @@ test("launcher gap keeps focus and container Enter explains an incomplete draft"
   await expect(form).toBeFocused();
   expect(await form.evaluate((node) => getComputedStyle(node).outlineStyle)).toBe("none");
   await form.press("Enter");
-  await expectReasonByLaunch(form, "choose a structured harness before launching");
+  await expectReasonByLaunch(form, "Choose a structured harness before launching");
   expect(posts, "a container refusal must not create a session").toBe(0);
 });
 
@@ -198,15 +198,15 @@ test("launcher text-field Enter explains an empty command beside Launch", async 
   await page.locator(".new-session-button").click();
   const form = page.locator(".create-session-form");
   await expect(form).toBeVisible();
-  await form.getByRole("tab", { name: "command", exact: true }).click();
-  await form.getByRole("radio", { name: "no", exact: true }).check();
-  const command = form.getByLabel("agent command", { exact: true });
+  await form.getByRole("tab", { name: "Command", exact: true }).click();
+  await form.getByRole("radio", { name: "No", exact: true }).check();
+  const command = form.getByLabel("Agent command", { exact: true });
   await expect(command).toHaveValue("");
   await expect(form.locator(".create-session-submit")).toHaveAttribute("aria-disabled", "false");
   await command.focus();
   await expect(command).toBeFocused();
   await command.press("Enter");
-  await expectReasonByLaunch(form, "enter an agent command before launching");
+  await expectReasonByLaunch(form, "Enter an agent command before launching");
   expect(posts, "the local empty-command refusal must post no create").toBe(0);
 });
 
@@ -225,8 +225,8 @@ test("launcher shows the helm's refusal beside Launch", async ({ page, request }
   const form = page.locator(".create-session-form");
   await expect(form).toBeVisible();
   await form.getByRole("button", { name: "Codex", exact: true }).click();
-  await form.getByLabel("folder", { exact: true }).fill("/tmp");
-  await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true }).click();
+  await form.getByLabel("Folder", { exact: true }).fill("/tmp");
+  await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "Guarded", exact: true }).click();
   const launch = form.locator(".create-session-submit");
   await expect(launch).toHaveAttribute("aria-disabled", "false");
   await launch.click();
@@ -248,8 +248,8 @@ test("launcher Enter names invalid custom permission flags", async ({ page }) =>
   await page.locator(".new-session-button").click();
   const form = page.locator(".create-session-form");
   await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
-  await form.getByLabel("folder", { exact: true }).fill("/tmp");
-  await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "custom", exact: true }).click();
+  await form.getByLabel("Folder", { exact: true }).fill("/tmp");
+  await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "Custom", exact: true }).click();
   const flags = form.locator(".custom-permission-flags");
   for (const draft of ["", "  ", "--mode '"]) {
     await flags.fill(draft);
@@ -259,7 +259,7 @@ test("launcher Enter names invalid custom permission flags", async ({ page }) =>
     await flags.focus();
     await expect(flags).toBeFocused();
     await flags.press("Enter");
-    await expectReasonByLaunch(form, "enter valid custom permission flags before launching");
+    await expectReasonByLaunch(form, "Enter valid custom permission flags before launching");
     await expect(form).not.toContainText("choose a compatible model or effort");
     expect(posts).toBe(0);
   }
@@ -302,7 +302,7 @@ test("launcher container Enter waits for visible session setup loading", async (
     await expect(list.getByRole("option")).toHaveCount(1);
     await list.getByRole("combobox").press("Enter");
     const form = page.locator(".create-session-form");
-    const loading = form.getByRole("status").filter({ hasText: "loading session setup…" });
+    const loading = form.getByRole("status").filter({ hasText: "Loading session setup…" });
     await expect(form).toBeVisible();
     await expect(loading).toBeVisible();
     await expect.poll(() => reads, { message: "the catalog reply is held during setup replay" }).toBeGreaterThan(0);
@@ -322,7 +322,7 @@ test("launcher container Enter waits for visible session setup loading", async (
     expect(posts).toBe(0);
     gate.release();
     await expect(loading).toHaveCount(0);
-    await expect(form.getByLabel("name (optional)", { exact: true })).toHaveValue(sessionName);
+    await expect(form.getByLabel("Name (optional)", { exact: true })).toHaveValue(sessionName);
     expect(posts).toBe(0);
   } catch (error) {
     bodyFailed = true;
@@ -376,8 +376,8 @@ test("launcher shows a generic refusal after its target changes", async ({ page,
     await page.locator(".new-session-button").click();
     const form = page.locator(".create-session-form");
     await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
-    await form.getByLabel("folder", { exact: true }).fill("/tmp");
-    await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true }).click();
+    await form.getByLabel("Folder", { exact: true }).fill("/tmp");
+    await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "Guarded", exact: true }).click();
     const launch = form.locator(".create-session-submit");
     await expect(launch).toHaveAttribute("aria-disabled", "false");
     const original = await form.getAttribute("data-create-target-fingerprint");
@@ -390,7 +390,7 @@ test("launcher shows a generic refusal after its target changes", async ({ page,
     await expect(form).not.toHaveAttribute("data-create-target-fingerprint", original!);
     await expect(form).not.toHaveAttribute("data-create-target-fingerprint", "");
     gate.release();
-    await expectReasonByLaunch(form, "a launch for an earlier setup was refused");
+    await expectReasonByLaunch(form, "A launch for an earlier setup was refused");
     await expect(form).not.toContainText("old-target private refusal");
     expect(posts).toBe(1);
   } finally {
@@ -435,7 +435,7 @@ async function observeChoiceCreates(
   await expect(form).toBeVisible();
   await fillLauncherFolder(form, "/tmp");
   if (seedGuarded) {
-    await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true }).click();
+    await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "Guarded", exact: true }).click();
   }
   return { form, bodies, build };
 }
@@ -471,9 +471,9 @@ test("launcher effort dropdown keyboard edits submit the new value exactly once"
     { id: "controls-omp-model", harness: "omp", efforts: levels },
   ]);
   await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "OMP", exact: true }).click();
-  const effort = form.getByRole("combobox", { name: "effort", exact: true });
+  const effort = form.getByRole("combobox", { name: "Effort", exact: true });
   await expect(effort).toBeVisible();
-  await expect(effort.locator("option")).toHaveText(["default", ...levels]);
+  await expect(effort.locator("option")).toHaveText(["Default", ...levels.map(level => level[0].toUpperCase() + level.slice(1))]);
   await expect(effort).toHaveValue("default");
   await expect(form.locator(".create-session-submit")).toHaveAttribute("aria-disabled", "false");
   for (const flags of [{ repeat: true }, { isComposing: true }]) {
@@ -536,7 +536,7 @@ test("launcher effort dropdown preserves an unsupported inherited choice until a
     } });
   });
   try {
-    await form.getByRole("button", { name: "cancel", exact: true }).click();
+    await form.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(form).toHaveCount(0);
     await page.reload();
     const row = page.locator(`[data-session-id="${id}"]`);
@@ -545,14 +545,14 @@ test("launcher effort dropdown preserves an unsupported inherited choice until a
     await openRowMenu(row);
     await row.locator(".session-row-clone").click();
     await expect(form).toBeVisible();
-    const effort = form.getByRole("combobox", { name: "effort", exact: true });
+    const effort = form.getByRole("combobox", { name: "Effort", exact: true });
     await expect(effort).toHaveValue("ultra");
-    await expect(effort.locator('option[value="ultra"]')).toHaveText("ultra");
+    await expect(effort.locator('option[value="ultra"]')).toHaveText("Ultra");
     await expect(form.locator(".create-session-submit")).toHaveAttribute("aria-disabled", "true");
     await effort.focus();
     await expect(effort).toBeFocused();
     await effort.press("Enter");
-    await expectReasonByLaunch(form, "this saved choice is no longer supported by the current catalog; choose a compatible model or effort");
+    await expectReasonByLaunch(form, "This saved choice is no longer supported by the current catalog; choose a compatible model or effort");
     expect(bodies, "the visible incompatible effort cannot launch").toHaveLength(0);
     expect(await enterCreateChoice(form, effort, bodies, "ArrowUp"))
       .toMatchObject({ launch: { harness: "omp", model: "controls-omp-model", effort: "max", permissions: "guarded" } });
@@ -577,8 +577,8 @@ test("launcher choice retries preserve keys only for unchanged values", async ({
   expect(previous.intent_key).toBeTruthy();
   const unchanged = [
     codex,
-    form.getByRole("tab", { name: "agent", exact: true }),
-    form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true }),
+    form.getByRole("tab", { name: "Agent", exact: true }),
+    form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "Guarded", exact: true }),
   ];
   for (const control of unchanged) {
     const retry = await enterCreateChoice(form, control, bodies);
@@ -586,8 +586,8 @@ test("launcher choice retries preserve keys only for unchanged values", async ({
     previous = retry;
   }
   for (const control of [
-    form.locator(".launch-composer-effort-choice").getByRole("button", { name: "low", exact: true }),
-    form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true }),
+    form.locator(".launch-composer-effort-choice").getByRole("button", { name: "Low", exact: true }),
+    form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "YOLO", exact: true }),
   ]) {
     const changed = await enterCreateChoice(form, control, bodies);
     expect(changed.intent_key).toBeTruthy();
@@ -603,16 +603,16 @@ test("launcher choice-button Enter applies then launches", async ({ page, reques
   const { form, bodies } = await observeChoiceCreates(page, request);
   expect(await enterCreateChoice(form, form.getByRole("button", { name: "Codex", exact: true }), bodies))
     .toMatchObject({ launch: { harness: "codex" } });
-  expect(await enterCreateChoice(form, form.locator(".launch-composer-effort-choice").getByRole("button", { name: "low", exact: true }), bodies))
+  expect(await enterCreateChoice(form, form.locator(".launch-composer-effort-choice").getByRole("button", { name: "Low", exact: true }), bodies))
     .toMatchObject({ launch: { harness: "codex", effort: "low" } });
-  expect(await enterCreateChoice(form, form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true }), bodies))
+  expect(await enterCreateChoice(form, form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "YOLO", exact: true }), bodies))
     .toMatchObject({ launch: { permissions: "yolo" } });
   await expect(form.locator(".launch-composer-trust-choice")).toHaveCount(0);
-  const commandTab = form.getByRole("tab", { name: "command", exact: true });
-  const agentTab = form.getByRole("tab", { name: "agent", exact: true });
+  const commandTab = form.getByRole("tab", { name: "Command", exact: true });
+  const agentTab = form.getByRole("tab", { name: "Agent", exact: true });
   await commandTab.click();
-  await form.getByLabel("agent command", { exact: true }).fill("printf hello");
-  await form.getByRole("radio", { name: "no", exact: true }).check();
+  await form.getByLabel("Agent command", { exact: true }).fill("printf hello");
+  await form.getByRole("radio", { name: "No", exact: true }).check();
   await agentTab.click();
   expect(await enterCreateChoice(form, commandTab, bodies)).toMatchObject({ command: { command: "printf hello", yolo: false } });
   expect(bodies.at(-1)).not.toHaveProperty("launch");
@@ -630,9 +630,9 @@ test("launcher value-control Enter keeps the shown choices", async ({ page, requ
   expect(hostId, "the connected host selection must have settled").not.toBe("");
   expect(await enterCreateChoice(form, host, bodies)).toMatchObject({ host: Number(hostId) });
   await expect(host).toHaveAttribute("data-host-id", hostId);
-  await form.getByRole("tab", { name: "command", exact: true }).click();
-  await form.getByLabel("agent command", { exact: true }).fill("claude {farhelm_args}");
-  await form.getByRole("radio", { name: "no", exact: true }).check();
+  await form.getByRole("tab", { name: "Command", exact: true }).click();
+  await form.getByLabel("Agent command", { exact: true }).fill("claude {farhelm_args}");
+  await form.getByRole("radio", { name: "No", exact: true }).check();
   const agent = form.locator(".launch-command-agent");
   await agent.selectOption("claude");
   expect(await enterCreateChoice(form, agent, bodies)).toMatchObject({ command: { agent: "claude", yolo: false } });
@@ -645,10 +645,10 @@ test("launcher value-control Enter keeps the shown choices", async ({ page, requ
   // Space remains the value-setting key; Enter acts on the value it set.
   await resume.press("Space");
   await expect(resume).toBeChecked();
-  await form.getByLabel("resume command", { exact: true }).fill("claude --resume {conversation} {farhelm_args}");
+  await form.getByLabel("Resume command", { exact: true }).fill("claude --resume {conversation} {farhelm_args}");
   expect(await enterCreateChoice(form, resume, bodies)).toMatchObject({ command: { resume: "claude --resume {conversation} {farhelm_args}" } });
   await expect(resume).toBeChecked();
-  const yes = form.getByRole("radio", { name: "yes (YOLO)", exact: true });
+  const yes = form.getByRole("radio", { name: "Yes (YOLO)", exact: true });
   await expect(yes).not.toBeChecked();
   expect(await enterCreateChoice(form, yes, bodies)).toMatchObject({ command: { yolo: false } });
   await expect(yes).not.toBeChecked();
@@ -664,11 +664,11 @@ test("launcher choice Enter explains an incomplete draft", async ({ page }) => {
   await page.goto("/");
   await page.locator(".new-session-button").click();
   const form = page.locator(".create-session-form");
-  const effort = form.locator(".launch-composer-effort-choice").getByRole("button", { name: "default", exact: true });
+  const effort = form.locator(".launch-composer-effort-choice").getByRole("button", { name: "Default", exact: true });
   await effort.focus();
   await expect(effort).toBeFocused();
   await effort.press("Enter");
-  await expectReasonByLaunch(form, "choose a structured harness before launching");
+  await expectReasonByLaunch(form, "Choose a structured harness before launching");
   expect(posts).toBe(0);
 });
 
@@ -693,9 +693,9 @@ test("launcher repeated Enter never launches", async ({ page, request }) => {
   await expect(recent).toContainText("High");
   await expect(form.locator(".create-session-submit")).toHaveAttribute("aria-disabled", "false");
   for (const control of [
-    form.locator(".launch-composer-effort-choice").getByRole("button", { name: "low", exact: true }),
+    form.locator(".launch-composer-effort-choice").getByRole("button", { name: "Low", exact: true }),
     form.getByLabel("host", { exact: true }),
-    form.getByLabel("folder", { exact: true }),
+    form.getByLabel("Folder", { exact: true }),
     form.locator(".create-session-submit"),
     recent,
   ]) {
@@ -706,9 +706,9 @@ test("launcher repeated Enter never launches", async ({ page, request }) => {
     const uncanceled = await control.evaluate((node) => node.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", repeat: true, bubbles: true, cancelable: true })));
     expect(uncanceled, "a repeated key must cancel native activation as well as explicit submission").toBe(false);
   }
-  await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: "low", exact: true })).toHaveAttribute("aria-pressed", "false");
-  await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: "default", exact: true }), "repeated recent Enter must not apply its high-effort choice").toHaveAttribute("aria-pressed", "true");
-  const cancel = form.getByRole("button", { name: "cancel", exact: true });
+  await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: "Low", exact: true })).toHaveAttribute("aria-pressed", "false");
+  await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: "Default", exact: true }), "repeated recent Enter must not apply its high-effort choice").toHaveAttribute("aria-pressed", "true");
+  const cancel = form.getByRole("button", { name: "Cancel", exact: true });
   await cancel.focus();
   await expect(cancel).toBeFocused();
   await cancel.press("Enter");
@@ -720,23 +720,23 @@ test("launcher repeated Enter never launches", async ({ page, request }) => {
 test("launcher action-button Enter keeps reset browse and cancel", async ({ page, request }) => {
   const { form, bodies } = await observeChoiceCreates(page, request);
   await form.getByRole("button", { name: "Codex", exact: true }).click();
-  const reset = form.getByRole("button", { name: "reset choices", exact: true });
+  const reset = form.getByRole("button", { name: "Reset choices", exact: true });
   await reset.focus();
   await expect(reset).toBeFocused();
   await reset.press("Enter");
   await expect(form.getByRole("button", { name: "Codex", exact: true })).toHaveAttribute("aria-pressed", "false");
-  const browse = form.getByRole("button", { name: "browse this path", exact: true });
+  const browse = form.getByRole("button", { name: "Browse this path", exact: true });
   await browse.focus();
   await expect(browse).toBeFocused();
   await browse.press("Enter");
-  const use = form.locator(".launch-composer-browser").getByRole("button", { name: "use /tmp", exact: true });
+  const use = form.locator(".launch-composer-browser").getByRole("button", { name: "Use /tmp", exact: true });
   await expect(use).toBeVisible();
   await use.focus();
   await expect(use).toBeFocused();
   await use.press("Enter");
   await expect(form.locator(".launch-composer-browser")).toHaveCount(0);
-  await expect(form.getByLabel("folder", { exact: true })).toHaveValue("/tmp");
-  const cancel = form.getByRole("button", { name: "cancel", exact: true });
+  await expect(form.getByLabel("Folder", { exact: true })).toHaveValue("/tmp");
+  const cancel = form.getByRole("button", { name: "Cancel", exact: true });
   await cancel.focus();
   await expect(cancel).toBeFocused();
   await cancel.press("Enter");
@@ -754,7 +754,7 @@ test("launcher action-button Enter keeps retry and Launch", async ({ page, reque
     await route.fulfill({ response, status: 500, body: "choice fixture catalog unavailable" });
   });
   const { form, bodies } = await observeChoiceCreates(page, request);
-  const retry = form.locator(".create-catalog-error").getByRole("button", { name: "retry", exact: true });
+  const retry = form.locator(".create-catalog-error").getByRole("button", { name: "Retry", exact: true });
   await expect(retry).toBeVisible();
   expect(catalogReads).toBe(1);
   await retry.focus();
@@ -779,7 +779,7 @@ test("launcher choice Enter leaves the YOLO question's Enter rules intact", asyn
     }, body: "choice fixture requires YOLO confirmation" });
   });
   await form.getByRole("button", { name: "Codex", exact: true }).click();
-  const yolo = form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true });
+  const yolo = form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "YOLO", exact: true });
   await yolo.focus();
   await expect(yolo).toBeFocused();
   await yolo.press("Enter");
@@ -819,8 +819,8 @@ async function acceptScalarSearch(form: Locator, query: string, label: string) {
  * that leaves the submitted model unchanged.
  */
 async function acceptScalarModelRow(form: Locator, id: string) {
-  const folder = form.getByLabel("folder", { exact: true });
-  const model = form.getByRole("combobox", { name: "model", exact: true });
+  const folder = form.getByLabel("Folder", { exact: true });
+  const model = form.getByRole("combobox", { name: "Model", exact: true });
   await folder.focus();
   await expect(folder).toBeFocused();
   await model.focus();
@@ -839,8 +839,8 @@ async function acceptScalarModelRow(form: Locator, id: string) {
  * Keep the picker un-navigated so no active option overrides the typed id.
  */
 async function acceptScalarCustomModel(form: Locator, id: string) {
-  const folder = form.getByLabel("folder", { exact: true });
-  const model = form.getByRole("combobox", { name: "model", exact: true });
+  const folder = form.getByLabel("Folder", { exact: true });
+  const model = form.getByRole("combobox", { name: "Model", exact: true });
   await folder.focus();
   await expect(folder).toBeFocused();
   await model.focus();
@@ -884,8 +884,8 @@ function expectScalarChange(previous: Record<string, unknown>, next: Record<stri
 test("unchanged launcher tab, harness, permissions and default model retain the retry", async ({ page, request }) => {
   const { form, bodies } = await observeChoiceCreates(page, request, scalarRetryCatalog);
   await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
-  const model = form.getByRole("combobox", { name: "model", exact: true });
-  await expect(model).toHaveValue("harness default");
+  const model = form.getByRole("combobox", { name: "Model", exact: true });
+  await expect(model).toHaveValue("Harness default");
   const launch = form.locator(".create-session-submit");
   let previous = await enterCreateChoice(form, launch, bodies);
   expect(previous.intent_key).toEqual(expect.any(String));
@@ -896,7 +896,7 @@ test("unchanged launcher tab, harness, permissions and default model retain the 
     await test.step(choice, async () => {
       const before = bodies.length;
       if (choice === "selected Agent Home") {
-        const agent = form.getByRole("tab", { name: "agent", exact: true });
+        const agent = form.getByRole("tab", { name: "Agent", exact: true });
         await expect(agent).toHaveAttribute("aria-selected", "true");
         await agent.focus();
         await expect(agent).toBeFocused();
@@ -908,11 +908,11 @@ test("unchanged launcher tab, harness, permissions and default model retain the 
         await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }))
           .toHaveAttribute("aria-pressed", "true");
       } else if (choice === "same permissions search") {
-        await acceptScalarSearch(form, "perms:guarded", "Permissions: guarded");
-        await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true }))
+        await acceptScalarSearch(form, "perms:guarded", "Permissions: Guarded");
+        await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "Guarded", exact: true }))
           .toHaveAttribute("aria-pressed", "true");
       } else {
-        await acceptScalarModelRow(form, "harness default");
+        await acceptScalarModelRow(form, "Harness default");
       }
       await expect(launch).toHaveAttribute("aria-disabled", "false");
       expect(bodies, "acceptance itself must not submit").toHaveLength(before);
@@ -930,13 +930,13 @@ test("unchanged launcher tab, harness, permissions and default model retain the 
 test("launcher model reselection retains retries while real scalar changes replace them", async ({ page, request }) => {
   const { form, bodies } = await observeChoiceCreates(page, request, scalarRetryCatalog);
   await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
-  const model = form.getByRole("combobox", { name: "model", exact: true });
+  const model = form.getByRole("combobox", { name: "Model", exact: true });
   const effort = form.locator(".launch-composer-effort-choice");
   const permissions = form.locator(".launch-composer-permissions-choice");
   const launch = form.locator(".create-session-submit");
   await acceptScalarModelRow(form, "scalar-alpha");
-  await effort.getByRole("button", { name: "high", exact: true }).click();
-  await expect(effort.getByRole("button", { name: "high", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await effort.getByRole("button", { name: "High", exact: true }).click();
+  await expect(effort.getByRole("button", { name: "High", exact: true })).toHaveAttribute("aria-pressed", "true");
   expect(bodies, "setting the initial choices does not launch").toEqual([]);
   let previous = await enterCreateChoice(form, launch, bodies);
   expect(previous.intent_key).toEqual(expect.any(String));
@@ -962,7 +962,7 @@ test("launcher model reselection retains retries while real scalar changes repla
 
   let before = bodies.length;
   await acceptScalarModelRow(form, "scalar-beta");
-  await expect(effort.getByRole("button", { name: "default", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(effort.getByRole("button", { name: "Default", exact: true })).toHaveAttribute("aria-pressed", "true");
   expect(bodies, "a changed model still only edits").toHaveLength(before);
   let next = await enterCreateChoice(form, launch, bodies);
   expect(next).toMatchObject({ launch: { model: "scalar-beta", effort: null } });
@@ -977,8 +977,8 @@ test("launcher model reselection retains retries while real scalar changes repla
   previous = next;
 
   before = bodies.length;
-  await effort.getByRole("button", { name: "low", exact: true }).click();
-  await expect(effort.getByRole("button", { name: "low", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await effort.getByRole("button", { name: "Low", exact: true }).click();
+  await expect(effort.getByRole("button", { name: "Low", exact: true })).toHaveAttribute("aria-pressed", "true");
   expect(bodies, "effort click does not auto-submit").toHaveLength(before);
   next = await enterCreateChoice(form, launch, bodies);
   expect(next).toMatchObject({ launch: { model: "scalar-beta", effort: "low" } });
@@ -987,8 +987,8 @@ test("launcher model reselection retains retries while real scalar changes repla
 
   for (const changed of [true, false]) {
     before = bodies.length;
-    await acceptScalarSearch(form, "perms:yolo", "Permissions: yolo");
-    await expect(permissions.getByRole("button", { name: "yolo", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await acceptScalarSearch(form, "perms:yolo", "Permissions: YOLO");
+    await expect(permissions.getByRole("button", { name: "YOLO", exact: true })).toHaveAttribute("aria-pressed", "true");
     expect(bodies, "permission search does not auto-submit").toHaveLength(before);
     next = await enterCreateChoice(form, launch, bodies);
     expect(next).toMatchObject({ launch: { permissions: "yolo" } });
@@ -1016,7 +1016,7 @@ test("launcher model reselection retains retries while real scalar changes repla
 test("ordinary title no-ops preserve retries without trimming nonblank names", async ({ page, request }) => {
   const { form, bodies } = await observeChoiceCreates(page, request, []);
   await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
-  const name = form.getByLabel("name (optional)", { exact: true });
+  const name = form.getByLabel("Name (optional)", { exact: true });
   const launch = form.locator(".create-session-submit");
   await expect(name).toHaveValue("");
   let previous = await enterCreateChoice(form, launch, bodies);
@@ -1073,7 +1073,7 @@ for (const editor of ["wrapper", "custom flags"] as const) {
     const { form, bodies } = await observeChoiceCreates(page, request, []);
     await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
     if (editor === "custom flags") {
-      await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "custom", exact: true }).click();
+      await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "Custom", exact: true }).click();
     }
     const field = form.locator(editor === "wrapper" ? ".launch-composer-wrapper" : ".custom-permission-flags");
     const original = editor === "wrapper" ? "wrapper --" : "--mode ask";
@@ -1138,7 +1138,7 @@ test("effective Guarded reacceptance preserves a template-default request", asyn
     await codex.click();
     await expect(form).toHaveAttribute("data-initial-templates-ready", "true");
     const permissions = form.locator(".launch-composer-permissions-choice");
-    const guarded = permissions.getByRole("button", { name: "guarded", exact: true });
+    const guarded = permissions.getByRole("button", { name: "Guarded", exact: true });
     const launch = form.locator(".create-session-submit");
     let previous: Record<string, unknown> | undefined;
     for (const surface of ["pointer", "choice Enter", "search"] as const) {
@@ -1160,7 +1160,7 @@ test("effective Guarded reacceptance preserves a template-default request", asyn
           next = await enterCreateChoice(form, guarded, bodies);
         } else {
           if (surface === "pointer") await guarded.click();
-          else await acceptScalarSearch(form, "perms:guarded", "Permissions: guarded");
+          else await acceptScalarSearch(form, "perms:guarded", "Permissions: Guarded");
           await expect(guarded).toHaveAttribute("aria-pressed", "true");
           expect(bodies, "pointer/search only accepts the effective permission").toHaveLength(count);
           next = await enterCreateChoice(form, launch, bodies);
@@ -1170,7 +1170,7 @@ test("effective Guarded reacceptance preserves a template-default request", asyn
       });
     }
     const count = bodies.length;
-    const yolo = permissions.getByRole("button", { name: "yolo", exact: true });
+    const yolo = permissions.getByRole("button", { name: "YOLO", exact: true });
     await yolo.click();
     await expect(yolo).toHaveAttribute("aria-pressed", "true");
     expect(bodies).toHaveLength(count);
@@ -1239,15 +1239,15 @@ for (const kind of ["title", "folder", "command", "resume", "prompt", "conversat
     let initial: string;
     let edited: string;
     if (kind === "command" || kind === "resume") {
-      await form.getByRole("tab", { name: "command", exact: true }).click();
-      await form.getByRole("radio", { name: "no", exact: true }).check();
-      const invocation = form.getByLabel("agent command", { exact: true });
+      await form.getByRole("tab", { name: "Command", exact: true }).click();
+      await form.getByRole("radio", { name: "No", exact: true }).check();
+      const invocation = form.getByLabel("Agent command", { exact: true });
       if (kind === "resume") {
         await form.locator(".launch-command-agent").selectOption("claude");
         await invocation.fill("claude {farhelm_args}");
         await form.locator(".launch-command-resume-toggle").check();
         await expect(form.locator(".launch-command-resume-toggle")).toBeChecked();
-        field = form.getByLabel("resume command", { exact: true });
+        field = form.getByLabel("Resume command", { exact: true });
         initial = "claude --resume {conversation} {farhelm_args}";
       } else {
         field = invocation;
@@ -1259,15 +1259,15 @@ for (const kind of ["title", "folder", "command", "resume", "prompt", "conversat
     } else {
       await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
       if (kind === "title") {
-        field = form.getByLabel("name (optional)", { exact: true });
+        field = form.getByLabel("Name (optional)", { exact: true });
         initial = "work";
         edited = " work ";
       } else if (kind === "folder") {
-        field = form.getByLabel("folder", { exact: true });
+        field = form.getByLabel("Folder", { exact: true });
         initial = "/tmp";
         edited = "/var/tmp";
       } else if (kind === "prompt") {
-        field = form.getByLabel("initial prompt", { exact: true });
+        field = form.getByLabel("Initial prompt", { exact: true });
         initial = "hello";
         edited = "hello ";
         await expect(form.locator(".named-conversation")).toHaveValue("");
@@ -1275,7 +1275,7 @@ for (const kind of ["title", "folder", "command", "resume", "prompt", "conversat
         field = form.locator(".named-conversation");
         initial = "conversation-1";
         edited = "conversation-2";
-        await expect(form.getByLabel("initial prompt", { exact: true })).toHaveValue("");
+        await expect(form.getByLabel("Initial prompt", { exact: true })).toHaveValue("");
       }
     }
     await expect(field).toBeVisible();

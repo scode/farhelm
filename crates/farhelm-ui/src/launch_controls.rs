@@ -25,11 +25,11 @@ pub(crate) fn DestinationTypeControl(
     on_change: EventHandler<bool>,
 ) -> Element {
     rsx! {
-        div { class: "segmented-control destination-type-control", role: "group", aria_label: "destination type",
-            for (choice, label) in [(false, "folder"), (true, "managed checkout")] {
+        div { class: "segmented-control destination-type-control", role: "group", aria_label: "Destination type",
+            for (choice, label) in [(false, "Folder"), (true, "Managed checkout")] {
                 button { r#type: "button", disabled, class: if choice == managed { "selected" } else { "" },
                     aria_pressed: choice == managed, onclick: move |_| on_change.call(choice),
-                    "data-tooltip": if choice { "managed checkout: Farhelm clones a repository into a new folder for this session" } else { "folder: start in an existing folder on this host" },
+                    "data-tooltip": if choice { "Managed checkout: Farhelm clones a repository into a new folder for this session" } else { "Folder: start in an existing folder on this host" },
                     if choice { crate::icons::BranchIcon {} } else { crate::icons::FolderIcon {} }
                     "{label}"
                 }
@@ -68,6 +68,8 @@ pub(crate) fn enter_choice(
 ///
 /// The marker compares wire values, so restoring a choice clears it even if
 /// the person visited other options while editing.
+/// App-authored baseline words complete the `was …` clause in lowercase;
+/// acronym spelling such as YOLO still applies inside that clause.
 ///
 /// `old_label` arrives as a [`DetailPart`] because the fields differ in who
 /// wrote it. Effort, permissions, and the `default` placeholder are
@@ -82,7 +84,7 @@ fn changed_marker<T: PartialEq>(
     baseline: &T,
     old_label: DetailPart,
 ) -> Option<Vec<DetailPart>> {
-    (current != baseline).then(|| vec![DetailPart::text("● changed · was "), old_label])
+    (current != baseline).then(|| vec![DetailPart::text("● Changed · was "), old_label])
 }
 
 /// The old-value run for a model marker: the stored id is a peer value, while
@@ -183,7 +185,7 @@ pub(crate) fn LaunchControls(
                 .as_deref()
                 .map(display_peer)
                 .unwrap_or_else(|| model.clone()),
-            None => "harness default".to_string(),
+            None => "Harness default".to_string(),
         }
     };
     let model_hint = harness
@@ -197,7 +199,7 @@ pub(crate) fn LaunchControls(
                 harness_label(harness)
             )
         })
-        .unwrap_or_else(|| "choose a harness".to_string());
+        .unwrap_or_else(|| "Choose a harness".to_string());
     let model_results_id = format!("{model_id_prefix}-results");
     // Templates may supply formatting controls. Preserve the raw message for
     // submission, but never let an invisible value masquerade as ordinary text.
@@ -229,14 +231,18 @@ pub(crate) fn LaunchControls(
             &old.permissions,
             DetailPart::text(
                 old.permissions
-                    .map(launch_composer::permission_value)
+                    .map(|permission| match permission {
+                        LaunchPermission::Yolo => "YOLO",
+                        value => launch_composer::permission_value(value),
+                    })
                     .unwrap_or("agent's own setting"),
             ),
         )
     });
     let wrapper_error = (!wrapper_prefix.is_empty())
         .then(|| farhelm_proto::split_wrapper_prefix(&wrapper_prefix).err())
-        .flatten();
+        .flatten()
+        .map(crate::local_validation_notice);
     // Prefixes can come from another host or an agent-written template. Show
     // unsafe characters as text, while keeping the original words untouched
     // until the user explicitly clears this inherited choice.
@@ -252,14 +258,14 @@ pub(crate) fn LaunchControls(
     rsx! {
         if harness.is_none_or(LaunchHarness::offers_model) {
             div { class: "launch-composer-choice launch-composer-model-choice",
-                span { class: "launch-composer-section-label", "model" }
+                span { class: "launch-composer-section-label", "Model" }
                 if let Some(parts) = model_change { PeerLine { class: "launch-composer-changed-marker", parts } }
                 div { class: "launch-composer-model",
                     input {
                         r#type: "text",
                         class: "font-mono",
                         role: "combobox",
-                        aria_label: "model",
+                        aria_label: "Model",
                         aria_expanded: model_open,
                         aria_controls: "{model_results_id}",
                         aria_activedescendant: model_open
@@ -333,7 +339,7 @@ pub(crate) fn LaunchControls(
                                     role: "option",
                                     dir: "ltr",
                                     aria_selected: model_active == Some(index),
-                                    "data-tooltip": "use this model for the session",
+                                    "data-tooltip": "Use this model for the session",
                                     class: if model_active == Some(index) { "selected" } else { "" },
                                     disabled: busy,
                                     // Rows are not sequential tab stops. The keyboard reaches
@@ -352,16 +358,16 @@ pub(crate) fn LaunchControls(
                                         move |_| on_model_option.call(option.clone())
                                     },
                                     match &option {
-                                        ModelOption::HarnessDefault => rsx! { "harness default" },
+                                        ModelOption::HarnessDefault => rsx! { "Harness default" },
                                         ModelOption::Model { id, harness: owner } => rsx! {
                                             "{display_peer(id)}"
                                             if model_show_all || harness.is_none() { " ({harness_label(*owner)})" }
                                         },
                                         ModelOption::ShowAll => rsx! {
                                             if model_show_all {
-                                                "show chosen harness's models"
+                                                "Show chosen harness's models"
                                             } else {
-                                                "show every harness's models"
+                                                "Show every harness's models"
                                             }
                                         },
                                     }
@@ -380,12 +386,12 @@ pub(crate) fn LaunchControls(
         div { class: "launch-composer-choice-pair",
             if harness.is_none_or(LaunchHarness::offers_effort) {
                 div { class: "launch-composer-choice launch-composer-effort-choice",
-                    span { class: "launch-composer-section-label", "effort" }
+                    span { class: "launch-composer-section-label", "Effort" }
                     if let Some(parts) = effort_change { PeerLine { class: "launch-composer-changed-marker", parts } }
                     if efforts.len() + 1 > 5 {
                         select {
                             class: "launch-composer-effort-select",
-                            aria_label: "effort",
+                            aria_label: "Effort",
                             value: effort.map(launch_composer::effort_value).unwrap_or("default"),
                             disabled: busy,
                             // The native input event must update the caller
@@ -406,38 +412,38 @@ pub(crate) fn LaunchControls(
                             // this render's `effort` could undo an input whose
                             // callback ran before the next render completed.
                             onkeydown: move |event| enter_choice(event, busy, || {}, on_choice_enter),
-                            option { value: "default", selected: effort.is_none(), "default" }
+                            option { value: "default", selected: effort.is_none(), "Default" }
                             for offered in efforts {
                                 option {
                                     value: launch_composer::effort_value(offered),
                                     selected: effort == Some(offered),
-                                    "{launch_composer::effort_value(offered)}"
+                                    "{launch_composer::effort_label(Some(offered))}"
                                 }
                             }
                         }
                     } else {
-                        div { class: "segmented-control", role: "group", aria_label: "effort",
+                        div { class: "segmented-control", role: "group", aria_label: "Effort",
                             button {
                                 r#type: "button",
                                 class: if effort.is_none() { "selected" } else { "" },
-                                "data-tooltip": "use the agent's default reasoning effort",
+                                "data-tooltip": "Use the agent's default reasoning effort",
                                 aria_pressed: effort.is_none(),
                                 disabled: busy,
                                 onkeydown: move |event| enter_choice(event, busy, || on_effort.call(None), on_choice_enter),
                                 onclick: move |_| on_effort.call(None),
-                                "default"
+                                "Default"
                             }
                             for offered in efforts {
                                 button {
                                     key: "{launch_composer::effort_value(offered)}",
                                     r#type: "button",
                                     class: if effort == Some(offered) { "selected" } else { "" },
-                                    "data-tooltip": "use {launch_composer::effort_value(offered)} reasoning effort",
+                                    "data-tooltip": "Use {launch_composer::effort_value(offered)} reasoning effort",
                                     aria_pressed: effort == Some(offered),
                                     disabled: busy,
                                     onkeydown: move |event| enter_choice(event, busy, || on_effort.call(Some(offered)), on_choice_enter),
                                     onclick: move |_| on_effort.call(Some(offered)),
-                                    "{launch_composer::effort_value(offered)}"
+                                    "{launch_composer::effort_label(Some(offered))}"
                                 }
                             }
                         }
@@ -445,12 +451,12 @@ pub(crate) fn LaunchControls(
                 }
             }
             div { class: "launch-composer-choice launch-composer-permissions-choice",
-                span { class: "launch-composer-section-label", "permissions" }
+                span { class: "launch-composer-section-label", "Permissions" }
                 if let Some(parts) = permission_change { PeerLine { class: "launch-composer-changed-marker", parts } }
                 div { class: "launch-composer-permission-controls",
                     // Search results have a separate Permissions group. Name
                     // these choices by their role while keeping the visible label.
-                    div { class: "segmented-control", role: "group", aria_label: "permission mode",
+                    div { class: "segmented-control", role: "group", aria_label: "Permission mode",
                         if harness.is_some_and(|harness| harness.omitted_permission().is_none()) {
                             span { class: "visually-hidden", id: "{own_help_id}",
                                 {launch_composer::permission_help(harness.expect("own-setting has a harness"), None)}
@@ -458,24 +464,24 @@ pub(crate) fn LaunchControls(
                             button {
                                 r#type: "button",
                                 class: if permissions.is_none() { "selected" } else { "" },
-                                "data-tooltip": "agent's own setting: Farhelm cannot force or classify this permission mode",
+                                "data-tooltip": "Agent's own setting: Farhelm cannot force or classify this permission mode",
                                 aria_describedby: "{own_help_id}",
                                 aria_pressed: permissions.is_none(),
                                 disabled: busy,
                                 onkeydown: move |event| enter_choice(event, busy, || on_permissions.call(None), on_choice_enter),
                                 onclick: move |_| on_permissions.call(None),
-                                "agent's own setting"
+                                "Agent's own setting"
                             }
                         }
                         if harness.is_none_or(|harness| harness.offers_permission(LaunchPermission::Guarded)) {
                             span { class: "visually-hidden", id: "{guarded_help_id}",
-                                {harness.map(|harness| launch_composer::permission_help(harness, Some(LaunchPermission::Guarded))).unwrap_or_else(|| "guarded: choose an agent to see its automatic safety mode".to_string())}
+                                {harness.map(|harness| launch_composer::permission_help(harness, Some(LaunchPermission::Guarded))).unwrap_or_else(|| "Guarded: choose an agent to see its automatic safety mode".to_string())}
                             }
                             button {
                                 r#type: "button",
                                 class: if permissions == Some(LaunchPermission::Guarded)
                                     || (permissions.is_none() && (harness.is_none() || omitted_permission == Some(LaunchPermission::Guarded))) { "selected" } else { "" },
-                                "data-tooltip": harness.map(|harness| launch_composer::permission_help(harness, Some(LaunchPermission::Guarded))).unwrap_or_else(|| "guarded: choose an agent to see its automatic safety mode".to_string()),
+                                "data-tooltip": harness.map(|harness| launch_composer::permission_help(harness, Some(LaunchPermission::Guarded))).unwrap_or_else(|| "Guarded: choose an agent to see its automatic safety mode".to_string()),
                                 "data-tooltip-paragraphs": "true",
                                 aria_describedby: "{guarded_help_id}",
                                 aria_pressed: permissions == Some(LaunchPermission::Guarded)
@@ -483,7 +489,7 @@ pub(crate) fn LaunchControls(
                                 disabled: busy,
                                 onkeydown: move |event| enter_choice(event, busy, || on_permissions.call(Some(LaunchPermission::Guarded)), on_choice_enter),
                                 onclick: move |_| on_permissions.call(Some(LaunchPermission::Guarded)),
-                                "guarded"
+                                "Guarded"
                             }
                         }
                         if harness.is_none_or(|harness| harness.offers_permission(LaunchPermission::Yolo)) {
@@ -501,7 +507,7 @@ pub(crate) fn LaunchControls(
                                 disabled: busy,
                                 onkeydown: move |event| enter_choice(event, busy, || on_permissions.call(Some(LaunchPermission::Yolo)), on_choice_enter),
                                 onclick: move |_| on_permissions.call(Some(LaunchPermission::Yolo)),
-                                "yolo"
+                                "YOLO"
                             }
                         }
                         if harness.is_some_and(|harness| harness.offers_permission(LaunchPermission::Custom)) {
@@ -516,7 +522,7 @@ pub(crate) fn LaunchControls(
                                 // This choice opens an editor. Native button Enter
                                 // follows the same focus handoff as a click, rather
                                 // than invoking primary on an incomplete choice.
-                                "custom"
+                                "Custom"
                             }
                         }
                         // The approval modes after guarded and YOLO, in their
@@ -542,7 +548,7 @@ pub(crate) fn LaunchControls(
                                 disabled: busy,
                                 onkeydown: move |event| enter_choice(event, busy, || on_permissions.call(Some(permission)), on_choice_enter),
                                 onclick: move |_| on_permissions.call(Some(permission)),
-                                "{launch_composer::permission_value(permission)}"
+                                "{launch_composer::permission_display_value(permission)}"
                             }
                         }
                     }
@@ -571,13 +577,13 @@ pub(crate) fn LaunchControls(
                         input {
                             class: "named-conversation", r#type: "text", value: conversation,
                             disabled: busy, autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
-                            placeholder: if conversation_required { "required for this restart" } else { "optional, this start only" },
+                            placeholder: if conversation_required { "Required for this restart" } else { "Optional, this start only" },
                             oninput: move |event| { if !busy { on_change.call(event.value()); } },
                             onkeydown: move |event| enter_choice(event, busy, || {}, on_choice_enter),
                         }
                     }
                     if conversation_required {
-                        p { "Farhelm has no captured conversation to resume. Enter its id or session file to restart here." }
+                        p { "Farhelm has no captured conversation to resume. Enter its ID or session file to restart here." }
                     }
                     if !harness.captures_named_conversation() {
                         p { "Farhelm will not capture this conversation after a named start, so Restart will not be available." }
@@ -587,7 +593,7 @@ pub(crate) fn LaunchControls(
             if let (Some(harness), Some(on_change)) = (harness.filter(|h| h.supports_initial_prompt(false)), on_prompt) {
                 div { class: "launch-composer-choice initial-prompt-choice",
                     label {
-                        span { class: "launch-composer-section-label", "initial prompt" }
+                        span { class: "launch-composer-section-label", "Initial prompt" }
                         // Extra intrinsic rows would defeat the compact
                         // minimum height of .initial-prompt in app.css.
                         textarea {
@@ -595,7 +601,7 @@ pub(crate) fn LaunchControls(
                             value: if prompt_read_only { display_peer(&prompt) } else { prompt.clone() },
                             readonly: prompt_read_only,
                             disabled: busy, autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
-                            "data-tooltip": "initial prompt: sent once when this session starts",
+                            "data-tooltip": "Initial prompt: sent once when this session starts",
                             oninput: move |event| { if !busy && !prompt_read_only { on_change.call(event.value()); } },
                             // Enter belongs to the message, including held or IME
                             // Enter. The form's single-line guard must not eat it.
@@ -608,8 +614,8 @@ pub(crate) fn LaunchControls(
                     }
                     if !prompt.is_empty() {
                         button { r#type: "button", class: "btn btn-neutral initial-prompt-clear", disabled: busy,
-                            "data-tooltip": "clear initial prompt: remove this first message from the draft",
-                            onclick: move |_| { if !busy { on_change.call(String::new()); } }, "clear initial prompt"
+                            "data-tooltip": "Clear initial prompt: remove this first message from the draft",
+                            onclick: move |_| { if !busy { on_change.call(String::new()); } }, "Clear initial prompt"
                         }
                     }
                 }
@@ -619,13 +625,13 @@ pub(crate) fn LaunchControls(
             }
             div { class: "launch-composer-choice launch-composer-wrapper-choice",
                 label {
-                    span { class: "launch-composer-section-label", "wrapper prefix" }
+                    span { class: "launch-composer-section-label", "Wrapper prefix" }
                     input {
                         class: "launch-composer-wrapper", r#type: "text", value: shown_wrapper,
                         disabled: busy, readonly: wrapper_unsafe, aria_invalid: wrapper_error.is_some(),
                         autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
                         placeholder: "with-endpoint --profile work --",
-                        "data-tooltip": "wrapper prefix: shell-style words before Farhelm's agent command; no placeholders",
+                        "data-tooltip": "Wrapper prefix: shell-style words before Farhelm's agent command; no placeholders",
                         oninput: move |event| { if !busy { on_wrapper_prefix.call(event.value()); } },
                         onkeydown: move |event| enter_choice(event, busy, || {}, on_choice_enter),
                     }
@@ -634,9 +640,9 @@ pub(crate) fn LaunchControls(
                     button {
                         class: "btn btn-neutral launch-composer-wrapper-clear",
                         r#type: "button", disabled: busy,
-                        "data-tooltip": "clear wrapper prefix: remove this value before editing",
+                        "data-tooltip": "Clear wrapper prefix: remove this value before editing",
                         onclick: move |_| on_wrapper_prefix.call(String::new()),
-                        "clear wrapper prefix"
+                        "Clear wrapper prefix"
                     }
                 }
                 p { class: "launch-composer-choice-help", "Runs before agent command; blank means none." }
@@ -673,7 +679,8 @@ pub(crate) fn CustomPermissionFlags(
     harness: Option<LaunchHarness>,
     on_change: EventHandler<String>,
 ) -> Element {
-    let parsed = farhelm_proto::split_permission_flags(&text);
+    let parsed =
+        farhelm_proto::split_permission_flags(&text).map_err(crate::local_validation_notice);
     // Stored words may be relayed by a host or an agent request. Show hidden
     // characters visibly, while untouched props retain their exact bytes for
     // parsing and submission. An input event replaces them with the edited text.
@@ -685,7 +692,7 @@ pub(crate) fn CustomPermissionFlags(
         .unwrap_or("the agent");
     rsx! {
         div { class: "launch-composer-choice custom-permission-choice",
-            label { "permission flags"
+            label { "Permission flags"
                 input { class: "custom-permission-flags", value: "{shown_text}", disabled: busy,
                     autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
                     oninput: move |event| on_change.call(event.value()),
@@ -693,7 +700,7 @@ pub(crate) fn CustomPermissionFlags(
             }
             p { "Passed to {agent} instead of Farhelm's permission flags. You are responsible for ensuring they only change permissions. Farhelm does not check them, so this session counts as YOLO." }
             match parsed {
-                Ok(words) => rsx! { div { class: "custom-permission-words", aria_label: "permission arguments",
+                Ok(words) => rsx! { div { class: "custom-permission-words", aria_label: "Permission arguments",
                     for word in words { code { dir: "auto", "{crate::peer::display_peer(&word)}" } }
                 } },
                 Err(error) => rsx! { p { class: "launch-composer-error", role: "alert", "{error}" } },
@@ -717,7 +724,7 @@ mod tests {
         );
         let marker = changed_marker(&Some(true), &None, DetailPart::text("default"))
             .expect("a changed field is marked");
-        assert_eq!(detail_text(&marker), "● changed · was default");
+        assert_eq!(detail_text(&marker), "● Changed · was default");
     }
 
     /// The old model id in a changed marker is someone else's string, so it
@@ -741,12 +748,12 @@ mod tests {
         .expect("a changed model is marked");
         assert_eq!(
             marker,
-            vec![DetailPart::text("● changed · was "), DetailPart::peer(raw)],
+            vec![DetailPart::text("● Changed · was "), DetailPart::peer(raw)],
             "the raw id stays intact in its own peer run; only rendering escapes it"
         );
         assert_eq!(
             detail_text(&marker),
-            "● changed · was gpt-6-<U+200B>astra<U+202E>x"
+            "● Changed · was gpt-6-<U+200B>astra<U+202E>x"
         );
         assert_eq!(model_marker_label(None), DetailPart::text("default"));
     }

@@ -24,7 +24,7 @@ test("guarded choices explain each agent and Cursor keeps its own setting", asyn
     ["OMP", "OMP write mode", "--approval-mode write"],
   ]) {
     await form.locator(".launch-composer-harness-choice").getByRole("button", { name: agent, exact: true }).click();
-    const guarded = form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true });
+    const guarded = form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "Guarded", exact: true });
     await expect(guarded, `${agent} must actually offer the mode before its help is inspected`).toBeVisible();
     await expect(guarded).toHaveAccessibleDescription(new RegExp(mode));
     await expect(guarded).toHaveAccessibleDescription(/Flags:[\s\S]*can't guarantee how it behaves/);
@@ -62,7 +62,7 @@ test("guarded choices explain each agent and Cursor keeps its own setting", asyn
     if (agent === "Claude") {
       const search = form.locator('.launch-composer-search input[role="combobox"]');
       await search.fill("perms:guarded");
-      const result = form.getByRole("option", { name: "Permissions: guarded", exact: true });
+      const result = form.getByRole("option", { name: "Permissions: Guarded", exact: true });
       await expect(result).toBeVisible();
       await expect(result).toHaveAccessibleDescription(/Flags:[\s\S]*can't guarantee how it behaves/);
       await result.hover();
@@ -92,10 +92,10 @@ test("guarded choices explain each agent and Cursor keeps its own setting", asyn
   }
   await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Cursor", exact: true }).click();
   const permissions = form.locator(".launch-composer-permissions-choice");
-  await expect(permissions.getByRole("button", { name: "guarded", exact: true })).toHaveCount(0);
-  await permissions.getByRole("button", { name: "agent's own setting", exact: true }).click();
-  await expect(permissions.getByRole("button", { name: "agent's own setting", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await expect(permissions.getByRole("button", { name: "agent's own setting", exact: true })).toHaveAccessibleDescription(/Not classified.*agent's own setting/);
+  await expect(permissions.getByRole("button", { name: "Guarded", exact: true })).toHaveCount(0);
+  await permissions.getByRole("button", { name: "Agent's own setting", exact: true }).click();
+  await expect(permissions.getByRole("button", { name: "Agent's own setting", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(permissions.getByRole("button", { name: "Agent's own setting", exact: true })).toHaveAccessibleDescription(/Not classified.*Agent's own setting/);
   const help = form.getByRole("button", { name: "About permission modes", exact: true });
   await help.hover();
   await expect(page.locator("body > .farhelm-tooltip")).toContainText("Not classified");
@@ -138,7 +138,7 @@ test("guarded and older own-setting shields show their actual launch provenance"
   await expect(tooltip).toContainText("Launched with: codex -a on-request -s workspace-write");
   await expect(tooltip).not.toContainText("contradictory-display");
   await older.hover();
-  await expect(tooltip).toContainText("Not classified · agent's own setting");
+  await expect(tooltip).toContainText("Not classified · Agent's own setting");
   await expect(tooltip).toContainText("Launched with: codex --older-flag");
   await expect(tooltip).not.toContainText("Guarded · Codex");
 });
