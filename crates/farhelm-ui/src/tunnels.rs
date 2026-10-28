@@ -21,7 +21,8 @@ use crate::menu_panel::{
     MenuHeader, MenuSeparator, ROW_MENU_OUTSIDE_RELAY, install_row_menu_outside_dismiss,
 };
 use crate::modal_dialog::{
-    DialogFocus, DialogHandle, ModalDialog, RecoveryDelay, RecoveryFocus, ScrollRegion,
+    DialogActions, DialogFocus, DialogFooter, DialogHandle, DialogHeader, ModalDialog,
+    RecoveryDelay, RecoveryFocus, ScrollRegion,
 };
 use crate::ops::{ConfirmSlot, ConfirmToken, use_confirm_slot};
 use crate::peer::display_peer;
@@ -64,7 +65,7 @@ enum Source {
 type WarningSlot = ConfirmSlot<Source, oneshot::Sender<Result<bool, String>>>;
 
 /// One showing of the security warning, as the render that drew its Allow,
-/// Cancel and Escape captured it.
+/// Cancel, header Close and Escape captured it.
 type WarningToken = ConfirmToken<Source>;
 
 /// Page-owned controller, provided above both cards and keyed session views.
@@ -450,8 +451,8 @@ pub(crate) fn TunnelControls() -> Element {
         document::eval("delete window.farhelmTunnelOpen;");
     });
     // The dialog draws the opening this render read and moves that token into
-    // Escape, Cancel and Allow, so each answer names the showing it was drawn
-    // for. The text is the same for every source; the token's source decides
+    // Escape, Close, Cancel and Allow, so each answer names the showing it
+    // was drawn for. The text is the same for every source; the token's source decides
     // which action an Allow lets proceed.
     let shown = controller.warning.current();
     rsx! {
@@ -480,15 +481,33 @@ pub(crate) fn TunnelControls() -> Element {
                             }
                         }
                     },
-                    ScrollRegion { class: "host-settings-body",
+                    DialogHeader {
+                        title: rsx! { span { id: "tunnel-consent-heading", "Allow tunnels from remote sessions?" } },
+                        summary: rsx! { "Remote pages share this Mac's local browser trust" },
+                        tile: rsx! { ActionIcon { glyph: ActionGlyph::Tunnel } },
+                        close: rsx! {
+                            button { r#type: "button", class: "dialog-close tunnel-close",
+                                aria_label: "Close tunnel warning", "data-tooltip": "Close without allowing tunnels",
+                                disabled: (controller.saving)(),
+                                onclick: {
+                                    let shown = shown.clone();
+                                    move |_| {
+                                        if !*controller.saving.peek() { controller.finish_warning(&shown, Ok(false)); }
+                                    }
+                                }, "×"
+                            }
+                        },
+                    }
+                    ScrollRegion { class: "dialog-body host-settings-body",
                         handle: DIALOG, selector: ".host-settings-body", name: "tunnel security warning",
                         recovery: RecoveryFocus::new(".tunnel-cancel", None, true, RecoveryDelay::OneFrame),
-                        h2 { id: "tunnel-consent-heading", "Allow tunnels from remote sessions?" }
                         p { strong { "A remote page opened through a tunnel runs at 127.0.0.1 on this Mac. It can read cookies set by other services on 127.0.0.1; different ports do not keep those cookies separate." } }
                         p { "Your browser treats it as a local page, so its private-network checks do not apply. Any program on this Mac can connect to an open tunnel." }
                         p { "Ordinary links from other 127.0.0.1 pages into the standalone Farhelm helm are refused." }
                         p { "Allow this only for remote pages you trust. You can turn tunnels off in Settings, which closes every open tunnel." }
-                        div { class: "approval-card-actions",
+                    }
+                    DialogFooter {
+                        DialogActions {
                             button { r#type: "button", class: "btn btn-neutral tunnel-cancel", disabled: (controller.saving)(),
                                 onclick: {
                                     let shown = shown.clone();
@@ -512,7 +531,7 @@ pub(crate) fn TunnelControls() -> Element {
                                             controller.finish_save(&shown, result);
                                         });
                                     }
-                                }, "Allow tunnels" }
+                                }, if (controller.saving)() { "Saving…" } else { "Allow tunnels" } }
                         }
                     }
                 }

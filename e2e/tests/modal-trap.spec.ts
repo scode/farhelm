@@ -191,8 +191,10 @@ test("ordinary New isolates the page and wraps its concrete command controls", a
  * Rename gets page isolation without losing its independent approval owner.
  * The real card's enabled answer must receive native Enter while Rename is
  * open; merely placing a fabricated exempt element beside it proves less.
+ * The header-to-footer Tab order must coexist with the textarea's initial
+ * focus; adding Close must not hand the opening keystroke to a new target.
  */
-test("Rename wraps its textarea and cancel while a real approval remains usable", async ({ page, request }) => {
+test("Rename wraps Close through Save while a real approval remains usable", async ({ page, request }) => {
   const session = await createSession(request, { title: `modal-trap-rename-${Date.now()}` });
   let bodyFailed = true;
   let waiting = false;
@@ -228,13 +230,25 @@ test("Rename wraps its textarea and cancel while a real approval remains usable"
     await row.locator(".session-row-rename").click();
     const dialog = page.getByRole("dialog", { name: "rename session" });
     const field = dialog.getByRole("textbox", { name: "new session title" });
-    const cancel = dialog.getByRole("button", { name: "cancel", exact: true });
+    const close = dialog.getByRole("button", { name: "Close rename", exact: true });
+    const cancel = dialog.getByRole("button", { name: "Cancel", exact: true });
+    const save = dialog.getByRole("button", { name: "Save", exact: true });
     await expect(dialog).toBeVisible();
     await expect(field).toBeFocused();
     await expect(field).toHaveValue(session.title);
     await expect.poll(() => row.evaluate((node) => node.closest("[inert]") !== null)).toBe(true);
     expect(await dialog.evaluate((node) => node.closest("[inert]") !== null)).toBe(false);
-    await expectBoundaries(page, dialog, field, cancel);
+    await expect(dialog.locator(".dialog-header .rename-close")).toHaveCount(1);
+    await expect(dialog.locator(".dialog-footer .dialog-actions button")).toHaveText(["Cancel", "Save"]);
+    await expectBoundaries(page, dialog, close, save);
+    await close.focus();
+    await expect(close).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(field).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(cancel).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(save).toBeFocused();
 
     // Deliver the card after isolation is installed, through the real reader.
     waiting = true;
@@ -296,7 +310,7 @@ test("busy Templates contains Tab on its root with no enabled descendant", async
     await expect(dialog.locator(".templates-retry")).toHaveCount(0);
     await dialog.locator(".templates-row").filter({ has: page.getByText(name, { exact: true }) }).click();
     await dialog.getByLabel("session name", { exact: true }).fill("after");
-    const save = dialog.getByRole("button", { name: "save", exact: true });
+    const save = dialog.getByRole("button", { name: "Save", exact: true });
     await expect(save).toBeEnabled();
     await save.click();
     await expect.poll(() => held, { message: "the owned PUT must remain held during keyboard assertions" }).toBe(true);

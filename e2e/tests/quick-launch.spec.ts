@@ -1266,7 +1266,7 @@ for (const movedAway of [false, true]) {
       await dialog.locator(".templates-name").fill(renamed);
       await patchPreferences(request, { quick_launch_template: movedAway ? other : old });
       expect((await readPreferences(request)).quick_launch_template).toBe(movedAway ? other : old);
-      await dialog.getByRole("button", { name: "save", exact: true }).click();
+      await dialog.getByRole("button", { name: "Save", exact: true }).click();
       await expect(dialog.getByText(renamed, { exact: true })).toBeVisible();
       await expect(dialog.getByText(old, { exact: true })).toHaveCount(0);
       expect((await readPreferences(request)).quick_launch_template).toBe(movedAway ? other : renamed);
@@ -1812,10 +1812,7 @@ test("quick launch keeps modal ownership and explains missing or incomplete temp
     await chord(page);
     expect(creates).toBe(0);
     await expect(page.locator(".create-session-form")).toHaveCount(0);
-    await page.getByRole("dialog", { name: "templates", exact: true }).getByRole("button", {
-      name: "close",
-      exact: true,
-    }).click();
+    await page.getByRole("dialog", { name: "templates", exact: true }).locator(".templates-close").click();
     // Each chord below must meet a page with no dialog left over, or a
     // dialog still rendering out could swallow it and pass for the guard.
     await expect(page.getByRole("dialog", { name: "templates", exact: true })).toHaveCount(0);
@@ -1861,7 +1858,7 @@ test("the template mark moves, survives rename, and stays cleared after undo", a
     await dialog.getByText(b, { exact: true }).click();
     await expect(dialog.locator(".templates-quick-state")).toContainText("quick launch");
     await dialog.locator(".templates-name").fill(renamed);
-    await dialog.getByRole("button", { name: "save", exact: true }).click();
+    await dialog.getByRole("button", { name: "Save", exact: true }).click();
     await expect.poll(async () => (await readPreferences(request)).quick_launch_template).toBe(renamed);
     await expect(dialog.getByText(renamed, { exact: true })).toBeVisible();
     await expect(dialog.getByText(b, { exact: true })).toHaveCount(0);

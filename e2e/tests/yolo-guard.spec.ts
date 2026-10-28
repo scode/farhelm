@@ -211,10 +211,21 @@ test("the YOLO question can launch guarded and remember that permission", async 
     await expect(confirmation).toBeVisible();
     await expect(confirmation.locator(".yolo-cancel")).toBeFocused();
     const guarded = confirmation.locator(".yolo-launch-guarded");
-    await expect(guarded).toHaveText("start guarded session instead");
+    await expect(guarded).toHaveText("Start guarded session instead");
     await expect(guarded).toHaveAttribute("type", "button");
     await expect(guarded).toHaveClass(/\bbtn-primary\b/);
-    await expect(confirmation.locator("button").first()).toHaveClass(/\byolo-launch-guarded\b/);
+    await expect(confirmation.locator(".dialog-actions button")).toHaveText([
+      "Cancel", "Start guarded session instead", "Start, and don't ask again on this host", "Start YOLO session anyway",
+    ]);
+    await expect(confirmation.locator(".yolo-confirm-stop-asking")).toHaveClass(/\bbtn-danger btn-outline\b/);
+    // These are still inline native answers. Starting from the established
+    // safe focus must reach guarded, permanent YOLO, then the one-time answer.
+    await page.keyboard.press("Tab");
+    await expect(guarded).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(confirmation.locator(".yolo-confirm-stop-asking")).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(confirmation.locator(".yolo-confirm")).toBeFocused();
     expect(createBodies).toHaveLength(1);
     expect((await listSessions(request)).sessions.filter((row) => row.cwd === cwd)).toHaveLength(0);
 

@@ -773,6 +773,8 @@ for (const width of [1000, 360]) {
     await expect(all).toBeEnabled();
     await test.info().attach("trash-header-top", { body: await page.screenshot(), contentType: "image/png" });
     await expect(dialog.locator(".checkout-trash-header .trash-delete-all")).toHaveCount(1);
+    await expect(dialog.locator(".dialog-header .dialog-title")).toHaveText("Trash");
+    await expect(dialog.locator(".dialog-footer, footer")).toHaveCount(0);
     const body = dialog.locator(".checkout-trash-body");
     expect(await body.evaluate((node) => node.scrollHeight > node.clientHeight + 1), "archives overflow the body").toBe(true);
     await page.mouse.move(0, 0);

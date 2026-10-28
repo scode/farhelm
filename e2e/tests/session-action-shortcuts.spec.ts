@@ -279,7 +279,7 @@ test("browser Rename chord edits the filtered open session and returns live term
       await expect(field).toHaveValue(shown);
       if (nextTitle === edited) await field.fill(edited);
       const saved = page.waitForResponse((reply) => reply.request().method() === "POST" && isRename(new URL(reply.url())));
-      await dialog.getByRole("button", { name: "save", exact: true }).click();
+      await dialog.getByRole("button", { name: "Save", exact: true }).click();
       const reply = await saved;
       expect(reply.request().postDataJSON().title).toBe(nextTitle);
       expect(reply.ok(), await reply.text()).toBe(true);

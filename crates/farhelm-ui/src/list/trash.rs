@@ -954,8 +954,11 @@ pub(super) fn TrashControl(
                     handle: DialogHandle::new(DIALOG),
                     focus: DialogFocus::remembered(".trash-close", Some(".trash-confirm-cancel, .trash-close"), false, Some(".trash-confirm-submit")),
                     on_escape: { let mut close = close.clone(); move |event: KeyboardEvent| { if !event.is_composing() { event.prevent_default(); event.stop_propagation(); close(); } } },
-                    div { class: "checkout-trash-header",
-                        h2 { id: "checkout-trash-title", span { class: if busy { "trash-delete-icon deleting" } else { "trash-delete-icon" }, TrashIcon { full } } "trash" }
+                    // Trash deliberately keeps its global controls with its
+                    // totals. Shared heading styling must not cost archive
+                    // height or move those controls into a new footer.
+                    div { class: "dialog-header checkout-trash-header",
+                        h2 { id: "checkout-trash-title", class: "dialog-title", span { class: if busy { "trash-delete-icon deleting" } else { "trash-delete-icon" }, TrashIcon { full } } "Trash" }
                         span { class: "checkout-trash-total", "{count} {checkouts(count)} · {space(total_bytes, total_partial)} on reachable hosts" }
                         div { class: "checkout-trash-header-actions",
                             button { class: "btn btn-danger trash-delete-all", disabled: busy || !all_ready || targets.is_empty(), onclick: move |_| { if deletion.peek().is_none() { confirmation.open(Confirmation { host: None, targets: targets.clone() }, ()); } }, "delete all" }

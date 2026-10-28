@@ -413,7 +413,7 @@ for (const surface of ["sidebar", "header"] as const) {
       expect(keys).toHaveLength(3);
       expect(keys[2]).not.toBe(keys[0]);
       await expect(question).toHaveCount(1);
-      await question.getByRole("button", { name: "cancel", exact: true }).click();
+    await question.locator(".yolo-cancel").click();
       await expect(question).toHaveCount(0);
       await confirmSidebarReplace(sourceRow);
       await expect(sourceRow.locator(".action-error").first()).toContainText("new intent answered");
@@ -428,7 +428,7 @@ for (const surface of ["sidebar", "header"] as const) {
       await attachSession(page, source.id);
       await confirmSidebarReplace(sourceRow);
       await expect(question).toHaveCount(1);
-      await question.getByRole("button", { name: "cancel", exact: true }).click();
+    await question.locator(".yolo-cancel").click();
       await expect(question).toHaveCount(0);
     } catch (error) {
       bodyFailed = true;
