@@ -459,38 +459,61 @@ the TODO.md entry quoted above. Open, not merged. If a `## Decisions` section ex
 satisfied. Then close the plan per `plans/.agents/executing.md`, "Executing one plan" (steps 11 and 12): deliver its
 report through the queue script, write a closing entry in its log, and stop the watchdog. Never edit `plans/` yourself.
 
-## Blocked
+## Decisions
 
-Blocked on 2026-10-28 (claim 54e43d).
+### 2026-10-28: answer to a blocked question
 
-### Sentence case needs a capture decision for the remaining screens
+The question, as the executor put it:
 
-The session launcher and template wording can proceed independently. The remaining sentence-case changes include desktop
-App settings and update notices, the Terminal settings for file types opened in native apps, loaded SSH connection help,
-and the confirmation that removes Farhelm from a host. The plan requires actual screenshots of every changed screen in
-both themes and at the relevant widths, reviewed by Opus 5.5 at high effort.
+> Blocked on 2026-10-28 (claim 54e43d).
+>
+> ### Sentence case needs a capture decision for the remaining screens
+>
+> The session launcher and template wording can proceed independently. The remaining sentence-case changes include
+> desktop App settings and update notices, the Terminal settings for file types opened in native apps, loaded SSH
+> connection help, and the confirmation that removes Farhelm from a host. The plan requires actual screenshots of every
+> changed screen in both themes and at the relevant widths, reviewed by Opus 5.5 at high effort.
+>
+> The agreed browser capture cannot show those native settings or update states. SSH help's real commands include the
+> capture machine's private paths, which the screenshot privacy check correctly rejects. The staged hosts have running
+> sessions, so removing Farhelm stops at the running-session refusal before showing a removal plan. The current
+> screenshot contract does not allow the substitutions or staging changes needed to reach those states.
+>
+> Approve these three bounded additions to the capture contract?
+>
+> - Use the existing isolated native test runner to photograph the actual desktop components, including native file-type
+>   settings. Supply private, controlled updater inputs for the update states. This requires a small new test mode; it
+>   would show component presentation, not prove a real signed update or a macOS installation.
+> - In the real SSH-help reply, replace only the known private capture path and staged SSH destination with declared
+>   invented equivalents. Preserve the remaining command arguments and their order, and keep the privacy check.
+> - After the other fleet pictures finish, remove only the capture's own staged session from one host, then use the
+>   existing simulated installation inspection to have the real helm generate its removal plan. Photograph the
+>   confirmation and cancel it. Never execute the removal.
+>
+> I recommend these additions. They retain real component rendering, the exact reviewer, both themes and the required
+> widths, while avoiding a new installation or a general native automation service. Captures remain private and
+> unpublished; the operator's installation, services and sessions stay untouched.
+>
+> The alternative is to keep the current capture contract and explicitly allow source-only review for these named
+> surfaces, which weakens the plan's visual guarantee. Leaving their wording unchanged would instead leave the requested
+> sentence-case sweep incomplete. A scope review cannot authorize either change, so the affected remainder waits for a
+> recorded decision.
 
-The agreed browser capture cannot show those native settings or update states. SSH help's real commands include the
-capture machine's private paths, which the screenshot privacy check correctly rejects. The staged hosts have running
-sessions, so removing Farhelm stops at the running-session refusal before showing a removal plan. The current screenshot
-contract does not allow the substitutions or staging changes needed to reach those states.
+The maintainer's answer:
 
-Approve these three bounded additions to the capture contract?
+Answered by the landing monitor on the maintainer's behalf under `plans/.agents/landing.md`, "Answering blocks".
 
-- Use the existing isolated native test runner to photograph the actual desktop components, including native file-type
-  settings. Supply private, controlled updater inputs for the update states. This requires a small new test mode; it
-  would show component presentation, not prove a real signed update or a macOS installation.
-- In the real SSH-help reply, replace only the known private capture path and staged SSH destination with declared
-  invented equivalents. Preserve the remaining command arguments and their order, and keep the privacy check.
-- After the other fleet pictures finish, remove only the capture's own staged session from one host, then use the
-  existing simulated installation inspection to have the real helm generate its removal plan. Photograph the
-  confirmation and cancel it. Never execute the removal.
+Decision: keep the current capture contract and allow source-only review for the named surfaces.
 
-I recommend these additions. They retain real component rendering, the exact reviewer, both themes and the required
-widths, while avoiding a new installation or a general native automation service. Captures remain private and
-unpublished; the operator's installation, services and sessions stay untouched.
+- The desktop App settings and update notices, the Terminal settings for file types opened in native apps, the loaded
+  SSH connection help, and the confirmation that removes Farhelm from a host get their sentence-case wording changes
+  reviewed from source instead of from screenshots. Every other changed screen keeps the plan's screenshot and visual
+  review requirement as written.
+- Do not add the proposed capture changes (a native test mode for desktop components, substituted SSH-help paths, or
+  staging a host removal plan). This plan changes wording only, and new capture machinery is not worth building for it.
+- In the report, name each surface reviewed from source and say what the source review checked (the exact new wording,
+  that nothing else in those components changed, and that any length change cannot clip the text).
+- Proceed with the launcher and template wording and the rest of the sweep.
 
-The alternative is to keep the current capture contract and explicitly allow source-only review for these named
-surfaces, which weakens the plan's visual guarantee. Leaving their wording unchanged would instead leave the requested
-sentence-case sweep incomplete. A scope review cannot authorize either change, so the affected remainder waits for a
-recorded decision.
+This judgment call is recorded as a near-term TODO.md entry so the maintainer can revisit it; a later change of mind is
+a follow-up, not a reason to stop this plan.
