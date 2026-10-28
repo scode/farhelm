@@ -609,3 +609,40 @@ Decision: send it back to its executor.
   stand.
 
 No judgment call is made here, so no TODO entry is recorded.
+
+## Blocked
+
+Blocked while landing on 2026-10-28 (claim 314dfb).
+
+### Landing stopped again: one launcher folder test fails intermittently on WebKit
+
+The landing monitor did not merge this plan. None of its four PRs (#2756, #2757, #2761, #2762) has merged, and main
+holds nothing of it. The plan restyles Settings, menus, confirmations and the session launcher for Steel; among other
+things, the launcher, which had two columns on desktop, now has one.
+
+The redelivery fixed what the previous landing found. At this landing the whole browser suite (`npx playwright test`,
+Chromium and WebKit, no retries, run `e25b17a4-5f3e-447b-9816-b89164862de2`) passed 2767 tests, skipped 14 and failed
+one; the UI's JavaScript tests (358), its Rust tests (805, and 988 with desktop features), the source checks, the builds
+and the desktop asset check all passed. A fresh-context review found the fixes honest and the previous answer's
+instructions carried out, with one gap: the report does not say that the folder suggestions now covering controls on
+desktop is a change the single-column layout causes.
+
+The one failure is an existing launcher test that passes on main, "composer folder dropdown preserves keyboard launch
+and grouped history" (`e2e/tests/sidebar.spec.ts`), on WebKit. Repeated alone it failed once in five WebKit runs and
+passed five of five on Chromium (run `a187dab9-7564-4944-9202-4f19fe0cae8d`), so it is intermittent. In the test, the
+user types a folder, the folder suggestions open, Enter submits and the launch is refused; the test then clicks the
+launcher's "command" tab. After the refused Enter, the suggestions sometimes close and sometimes stay open; when they
+stay open, the click lands on their "reset" heading instead of the tab. On main the "command" tab sat in the other
+column, out of the suggestions' way; in the single-column launcher they cover it. So the plan turns a passing test into
+an intermittent one. Whether the suggestions should stay open after Enter submits is not specified (SPEC.md covers Tab,
+blur, a choice and Escape), so there is no obvious fix at landing; a blind Escape in the test would close the whole
+launcher when they are already closed.
+
+### What should happen to this plan?
+
+- **Send it back to its executor (recommended).** Answer with: decide whether the folder suggestions stay open after
+  Enter submits and the launch is refused, make them do so consistently, and specify it; fix the product or the test so
+  this test passes reliably on both engines; run it at least 20 times on WebKit and Chromium; keep the rest of the
+  delivery as it is.
+- **Land it now and record an open flake.** A test that passes on main would become intermittent there, a regression
+  this plan introduces rather than a latent flake.
