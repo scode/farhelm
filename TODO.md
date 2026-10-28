@@ -24,6 +24,15 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Revisit the launcher's folder suggestions covering its controls.** Decided on the maintainer's behalf on 2026-10-28
+  for the Steel dialogs plan: with the launcher now one column on desktop too, the open folder suggestions cover the
+  Agent row and other controls below them until dismissed, so a click aimed at Agent can choose a suggestion such as
+  "local home". The alternative is placing or sizing the suggestions so they never cover other launcher controls.
+
+- **Revisit folder suggestions closing when Enter launches.** Decided on the maintainer's behalf on 2026-10-28 for the
+  Steel dialogs plan: when Enter in the launcher's folder field submits the launch, the folder suggestions close,
+  whether the launch is accepted or refused. The alternative was keeping them open after a refused launch.
+
 - **Revisit Steel dialog keyboard order.** Decided on the maintainer's behalf on 2026-10-28 to unblock the Steel dialogs
   plan: the session launcher, Rename, Templates' unsaved-edit question and tunnel consent now move through Tab in visual
   order (header Close, the fields, then the footer actions with Cancel first and the main action last). Before, the
