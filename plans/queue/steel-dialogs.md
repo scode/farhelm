@@ -465,3 +465,52 @@ the TODO.md entry; `steel-sentence-case.md` does, last. Open, not merged. If a `
 entry must also be satisfied. Then close the plan per `plans/.agents/executing.md`, "Executing one plan" (steps 11 and
 12): deliver its report through the queue script, write a closing entry in its log, and stop the watchdog. Never edit
 `plans/` yourself.
+
+## Blocked
+
+Blocked on 2026-10-28 (claim c0c30e).
+
+### Dialog layout and keyboard order
+
+This plan gives the session launcher and other dialogs a shared header, scrolling body and pinned action footer, with
+Cancel first and the main action last. It also promises that keyboard focus order stays unchanged. Those requirements
+conflict. Today the launcher's Launch, Cancel, Reset choices and Save as template buttons precede its fields; Rename has
+Save before Cancel. Moving those actions into the approved order and adding a header Close changes the sequence reached
+by Tab. The existing keyboard tests explicitly check those endpoints.
+
+May these dialogs adopt the new visual reading order for Tab: header Close, fields in their existing relative order,
+then footer actions with Cancel first and the main action last? The same permission is needed for Rename, Templates'
+unsaved-edit question and tunnel consent. The inline YOLO question needs the new answer order only; it stays inline and
+gains no modal frame or header Close. Their existing initial focus, Escape behavior, focus return, modal isolation,
+native radio/checkbox keys and Enter-to-launch behavior would remain unchanged. Where YOLO offers a separate guarded
+start, it would remain an action between Cancel and the permanent/one-time YOLO answers.
+
+I recommend approving that order. It uses the existing native controls and focus trap, and keeps visual and keyboard
+reading order together. If the exact old Tab sequence is required, the common action order and added Close control need
+explicit exceptions; visual-only reordering would make keyboard traversal disagree with what is on screen.
+
+### Trash's pinned actions
+
+Trash currently keeps its title, totals, Delete all and Close in a pinned header while the archive list scrolls. The
+product specification deliberately says there is no footer, and its tests verify that layout. The plan's generic footer
+requirement conflicts with it.
+
+Should Trash retain that header-action exception while adopting the shared title and styling, or move its global actions
+into a pinned footer and amend the product specification and keyboard-order tests? I recommend retaining the exception:
+its totals, progress and global actions remain together, and the archive list keeps its current usable height. Either
+choice preserves the existing deletion, confirmation and busy-state rules.
+
+### Finished independent work
+
+The independent work is finished in two draft PRs:
+[Settings icons and consistent headings, #2756](https://github.com/scode/farhelm/pull/2756/changes), and
+[command-menu descriptions and destructive grouping, #2757](https://github.com/scode/farhelm/pull/2757/changes). The
+latter also corrects the gear-location hints and menu tooltip overlap. No conflicting structural dialog changes have
+been implemented; the plan is not complete and neither draft has merged.
+
+Both drafts passed fresh Sol 6.1/high code review and Opus 5.5/high visual review in both palettes. Targeted browser
+checks ran on Chromium and WebKit; `playwright test <selected menu, template, hover-help and host cases>` passed ten
+cases (run `be69d882-faa6-48be-8768-83d00719fe75`). `scripts/docs-screenshots.sh --only visual-review --no-build`
+completed staging and dark/light captures at both widths (run `ac476805-6377-412d-af9e-de04dcd7a61a`). Settings' native
+App section was reviewed from source only. The full runtime battery was skipped because these bounded presentation
+changes did not warrant it.
