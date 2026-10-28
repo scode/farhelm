@@ -153,6 +153,20 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Make auto-tunneling safe.** Figure out how to make auto-tunneling properly safe: can we use some hostname trick so
   the service does not present as localhost? TBD. Pinggy? TBD.
 
+- **Session tracking for Muse Code.** Add what Muse Code still lacks beyond being a launchable terminal agent:
+  per-launch hooks/instructions, capture of the correct conversation identity for resume, and recognition of its
+  waiting/status signals. The built-in `muse` and `muse-yolo` profiles currently run with generic activity status and no
+  hooks or conversation resume; these are Farhelm integration gaps, not established limitations of Muse.
+
+- **Support Kimi Code.** Add Moonshot's Kimi Code CLI as an agent type: terminal launches with guarded and YOLO
+  permission flags, model, effort and prompt choices once their command-line contracts are verified, a harness mark and
+  docs page, then session tracking — per-launch hooks/instructions, conversation capture for resume, and waiting/status
+  recognition.
+
+- **Support DeepSeek's coding agent.** DeepSeek publishes models, but no clearly official terminal coding agent was
+  found on 2026-10-28; the DeepSeek CLIs that turn up are third-party. Confirm the product and its binary first, then
+  add it the way Kimi Code is to be added.
+
 ## Doc todo
 
 - Tell users that a working-copy (checkout) root must be a location only they can write: Farhelm is not designed for
@@ -432,11 +446,6 @@ are not.
 - Reconsider the first-use configuration experience for `gh:` launches when no working-copy root is configured. The
   first version refuses the launch and points to the CLI command; consider an inline GUI flow on initial use or another
   improvement that makes setup easier. Keep the general preference for CLI configuration of rarely changed settings.
-
-- Extend Muse beyond basic terminal launching: integrate per-launch hooks/instructions, capture the correct conversation
-  identity for resume, and recognize Muse's waiting/status signals. Built-in `muse` and `muse-yolo` profiles currently
-  use generic activity status without hooks or conversation resume; these are Farhelm integration gaps, not established
-  limitations of Muse.
 
 - Reconsider agent parent/child relationships: either remove them or make them useful. Current parent tracking is
   optional, and fleet `agent create`/`clone` do not record the asking session, so the parent filter cannot reliably
