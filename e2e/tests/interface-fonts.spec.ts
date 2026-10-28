@@ -125,11 +125,11 @@ test("archive metadata keeps labels in Inter and only known timestamps in mono",
     const metadata = (name: string) => dialog.locator(".checkout-trash-entry")
       .filter({ has: page.getByText(name, { exact: true }) }).locator(".checkout-trash-entry-meta > span:last-child");
     const known = metadata("font archive 0");
-    await expect(known).toHaveText("archived 2023-11-14 22:13 UTC");
+    await expect(known).toHaveText("Archived 2023-11-14 22:13 UTC");
     await expectLoadedFont(known, "Inter");
     await expectLoadedFont(known.locator(".font-mono"), "JetBrains Mono");
     const unknown = metadata("font archive 1");
-    await expect(unknown).toHaveText("archive time unknown");
+    await expect(unknown).toHaveText("Archive time unknown");
     await expectLoadedFont(unknown, "Inter");
     await expect(unknown.locator(".font-mono")).toHaveCount(0);
     await page.keyboard.press("Escape");

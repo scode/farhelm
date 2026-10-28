@@ -1537,7 +1537,7 @@ test("trash count and cue follow the final reference, including another client",
     await expect(band.locator(".checkout-trash-entry")).toHaveCount(1);
     await expect(band.locator(".trash-host-delete")).toBeEnabled();
     await expect(band.locator(".checkout-trash-entry-meta")).toContainText(fixture.repo);
-    await expect(band.locator(".checkout-trash-entry-meta")).toContainText(/archived .* UTC/);
+    await expect(band.locator(".checkout-trash-entry-meta")).toContainText(/Archived .* UTC/);
     await expect(band.locator(".checkout-trash-path")).toContainText(path.join(fixture.root, ".farhelm-trash"));
     await expect(band.locator(".checkout-trash-host-header")).toContainText(/KiB|MiB/);
     await band.locator(".trash-host-delete").click();
@@ -1593,7 +1593,7 @@ test("trash global confirmation freezes archives and reports preserved recovery 
     const dialog = page.getByRole("dialog", {name: "Trash", exact: true});
     const unreachable = dialog.locator(`.checkout-trash-host[data-host-id="${down}"]`);
     await expect(unreachable).toHaveClass(/unreachable/);
-    await expect(unreachable).toContainText("not reachable");
+    await expect(unreachable).toContainText("Not reachable");
     await expect(unreachable.locator(".trash-host-delete")).toBeDisabled();
     await expect(dialog.locator(".trash-delete-all")).toBeEnabled();
     await dialog.locator(".trash-delete-all").click();
@@ -1693,7 +1693,7 @@ test("single trash delete removes one real archive and preserves its neighbour",
     await page.locator(".checkout-trash-button").click();
     const dialog = page.getByRole("dialog", {name: "Trash", exact: true});
     const band = dialog.locator(`.checkout-trash-host[data-host-id="${host}"]`);
-    const button = band.getByRole("button", {name: `delete ${selected.name} permanently`, exact: true});
+    const button = band.getByRole("button", {name: `Delete ${selected.name} permanently`, exact: true});
     await expect(button).toBeEnabled();
     const [response] = await Promise.all([
       page.waitForResponse(r => new URL(r.url()).pathname === "/api/checkout-trash/delete"),
