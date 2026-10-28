@@ -660,3 +660,23 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`landing-baseline-delays-new-block.md`](landing-baseline-delays-new-block.md) — A plan question raised during a
   landing round can wait another 110 minutes before automatic handling. Whether the operational-artifact exclusion
   covers this scheduling defect is ambiguous.
+
+- [`short-launcher-notice-reachability.md`](short-launcher-notice-reachability.md) — An extremely short window can
+  exhaust the launcher's notice-height budget; supported native sizing, actual reachability and recovery remain
+  unverified after investigation.
+
+- [`launcher-live-draft-submission-source-gap.md`](launcher-live-draft-submission-source-gap.md) — Submission reads
+  current launcher choices, but a shipped sequence accepting a harmful action different from the one shown remains
+  unverified after investigation. Fresh choice-and-Enter behavior is explicitly supported.
+
+- [`folder-refusal-fixture-enters-version-skew.md`](folder-refusal-fixture-enters-version-skew.md) — A folder-dropdown
+  test's refusal mock omits the build stamp, so later recovery checks run with a version-mismatch notice and live
+  updates withdrawn. No actual test failure or false pass is claimed.
+
+- [`launcher-target-hover-merges-direction-runs.md`](launcher-target-hover-merges-direction-runs.md) — The launcher
+  target hover merges separately isolated host and folder text. Misleading grouping of ordinary right-to-left names
+  remains unverified after investigation.
+
+- [`tunnel-allow-keyboard-guard-source-gap.md`](tunnel-allow-keyboard-guard-source-gap.md) — The focused Allow tunnels
+  button lacks the repeated/composing-Enter guard. A complete input sequence causing unintended consent remains
+  unverified after investigation; Cancel-first focus and container Enter retain their separate protections.
