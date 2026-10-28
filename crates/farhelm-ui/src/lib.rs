@@ -153,6 +153,10 @@ mod dialog_focus;
 mod feed;
 mod feedback;
 mod github_checkout;
+// Browser-free component tests (see the module docs). Native only: the
+// harness serves its fake helm from a Tokio listener.
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod headless;
 mod hosts;
 mod icons;
 mod launch_composer;

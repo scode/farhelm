@@ -172,6 +172,13 @@ desktop = [
 ]
 
 [dev-dependencies]
+# The headless test harness (src/headless): axum serves its fake helm, and
+# dioxus-html's `serialize` feature supplies the event converter that turns
+# the harness's event data into Dioxus's typed events. Desktop builds already
+# enable `serialize`; turning it on here lets those tests run in the plain
+# native test build, without the desktop feature and its system packages.
+axum.workspace = true
+dioxus-html = { version = "0.7.10", features = ["serialize"] }
 farhelm-teststate.workspace = true
 # Per-test tracing capture stays out of every shipped UI feature. The attribute
 # owns an isolated dispatcher and, for async tests, a Tokio runtime.
