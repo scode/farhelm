@@ -177,10 +177,10 @@ impl InlineStatus {
     /// The same words are visible and announced by the mounted live region.
     pub(crate) fn text(self) -> &'static str {
         match self {
-            Self::Checking => "checking…",
-            Self::Installing => "installing…",
-            Self::UpToDate => "up to date",
-            Self::Failed => "check failed",
+            Self::Checking => "Checking…",
+            Self::Installing => "Installing…",
+            Self::UpToDate => "Up to date",
+            Self::Failed => "Check failed",
         }
     }
 
@@ -372,7 +372,7 @@ pub(crate) fn UpdateCheckStatus(
                             button {
                                 r#type: "button",
                                 class: "app-update-failure",
-                                aria_label: "check failed; dismiss update check status",
+                                aria_label: "Check failed; dismiss update check status",
                                 "data-tooltip": "{readout.tooltip}",
                                 onclick: move |_| {
                                     feedback.write().dismiss(&readout.activity, readout.notice_id);
@@ -389,7 +389,7 @@ pub(crate) fn UpdateCheckStatus(
                             span { class: "app-update-status-text", "{shown.text()}" }
                         }
                     } else if announce_ready {
-                        span { class: "visually-hidden", "update ready" }
+                        span { class: "visually-hidden", "Update ready" }
                     }
                 }
             }
@@ -963,10 +963,10 @@ mod tests {
                 );
             }
         }
-        assert_eq!(InlineStatus::Checking.text(), "checking…");
-        assert_eq!(InlineStatus::Installing.text(), "installing…");
-        assert_eq!(InlineStatus::UpToDate.text(), "up to date");
-        assert_eq!(InlineStatus::Failed.text(), "check failed");
+        assert_eq!(InlineStatus::Checking.text(), "Checking…");
+        assert_eq!(InlineStatus::Installing.text(), "Installing…");
+        assert_eq!(InlineStatus::UpToDate.text(), "Up to date");
+        assert_eq!(InlineStatus::Failed.text(), "Check failed");
         for status in [
             InlineStatus::Checking,
             InlineStatus::Installing,

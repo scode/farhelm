@@ -48,6 +48,7 @@ const launcherOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "launcher";
 const sentenceLauncherOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sentence-launcher";
 const sentenceHostsSettingsOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sentence-hosts-settings";
 const sentenceApprovalOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sentence-approval";
+const sentenceHelpOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sentence-help";
 
 /** Photograph native-only chrome with the goal's explicit CSS-only fallback.
  * The ordinary staged web app supplies the surrounding frame and terminals.
@@ -1225,7 +1226,7 @@ async function phoneSettingsShots(page: Page, settings: Locator, name: string) {
 async function openHelp(page: Page) {
   await page.locator(".app-help-toggle").click();
   const panel = page.locator('.bar-menu-flyout[data-bar-menu="help"] .bar-menu-panel');
-  await expect(panel.getByRole("menu", { name: "help", exact: true }).getByRole("menuitem")).toHaveCount(5);
+  await expect(panel.getByRole("menu", { name: "Help", exact: true }).getByRole("menuitem")).toHaveCount(5);
   await inspectMenu(page, panel);
   return panel;
 }
@@ -1236,7 +1237,7 @@ async function openHelp(page: Page) {
  */
 async function openEmptyFeedback(page: Page) {
   const help = await openHelp(page);
-  await help.locator('[data-bar-menu-item="send feedback"]').click();
+  await help.locator('[data-bar-menu-item="Send feedback"]').click();
   const dialog = page.locator(".feedback-dialog");
   await expect(dialog).toBeVisible();
   await expect(dialog.locator(".feedback-version")).not.toBeEmpty();
@@ -1244,6 +1245,125 @@ async function openEmptyFeedback(page: Page) {
   await expect(dialog.locator(".feedback-contact")).toHaveValue("");
   await expect(dialog.locator(".feedback-send")).toBeDisabled();
   return dialog;
+}
+
+/** Photograph Help's real local forms without sending or opening external pages.
+ * Drafts belong only to their dialog instance. The short form establishes real
+ * overflow before testing its pinned chrome; cleanup closes every owned surface,
+ * restores the caller's viewport and observes requests through those close paths.
+ * Shared preferences remain the enclosing capture case's responsibility.
+ */
+async function sentenceHelpShots(page: Page, name: string) {
+  const viewport = page.viewportSize()!;
+  const window = [page.locator("body")];
+  const feedback = page.locator(".feedback-dialog");
+  const welcome = page.locator(".welcome-dialog");
+  const help = page.locator('.bar-menu-flyout[data-bar-menu="help"] .bar-menu-panel');
+  let feedbackRequests = 0;
+  const observe = (request: NetworkRequest) => {
+    if (new URL(request.url()).pathname === "/api/feedback") feedbackRequests++;
+  };
+  page.on("request", observe);
+  let bodyFailed = true;
+  try {
+    await openHelp(page);
+    await shot(page, `${name}-help-menu`, window, { pad: 0 });
+    await page.keyboard.press("Escape");
+    await expect(help).toBeHidden();
+
+    await openEmptyFeedback(page);
+    await shot(page, `${name}-feedback`, window, { pad: 0 });
+    await feedback.locator(".feedback-cancel").click();
+    await expect(feedback).toBeHidden();
+
+    await openEmptyFeedback(page);
+    const message = feedback.locator(".feedback-message");
+    const overlong = "x".repeat(4001);
+    await message.fill(overlong);
+    // Establish the input premise before relying on its local validation. No
+    // submission or intercepted response is needed to mount this actual alert.
+    await expect(message).toHaveValue(overlong);
+    const alert = feedback.getByRole("alert");
+    await expect(alert).toHaveText("The message is longer than 4000 characters");
+    await expect(feedback.locator(".feedback-send")).toBeDisabled();
+    await alert.scrollIntoViewIfNeeded();
+    await expect(alert).toBeInViewport();
+    expect(feedbackRequests, "local validation has sent no feedback request").toBe(0);
+    await shot(page, `${name}-feedback-invalid`, window, { pad: 0 });
+    await feedback.locator(".feedback-cancel").click();
+    await expect(feedback).toBeHidden();
+
+    await openHelp(page);
+    await help.locator('[data-bar-menu-item="Welcome"]').click();
+    await expect(welcome).toBeVisible();
+    await shot(page, `${name}-welcome`, window, { pad: 0 });
+    await welcome.locator(".welcome-dismiss").click();
+    await expect(welcome).toBeHidden();
+
+    // Keep the case's width, including its measured 650px main pane. Reopen at
+    // the short height so the actual modal owner lays out its initial frame.
+    await page.setViewportSize({ ...viewport, height: 320 });
+    await openEmptyFeedback(page);
+    await feedback.locator(".feedback-message").fill("Feedback in a short window.");
+    await feedback.locator(".feedback-contact").fill("contact@example.test");
+    const reuse = feedback.getByRole("checkbox", { name: "Re-use for future feedback", exact: true });
+    await expect(reuse).toBeChecked();
+    await expect(feedback.locator(".feedback-send")).toBeEnabled();
+    const body = feedback.locator(".dialog-body");
+    await expect.poll(() => body.evaluate(element => element.scrollHeight > element.clientHeight), {
+      message: "the short form must actually overflow before testing its scroll contract",
+    }).toBe(true);
+    await expect(body).toHaveCSS("overflow-y", /^(auto|scroll)$/);
+    // The end view can leave this conditional label above the scrollport.
+    // Photograph it explicitly rather than treating a mounted node as pixels.
+    await reuse.scrollIntoViewIfNeeded();
+    await expect(reuse).toBeInViewport();
+    await shot(page, `${name}-feedback-short-fields`, window, { pad: 0 });
+    await body.evaluate(element => { element.scrollTop = 0; });
+    await expect.poll(() => body.evaluate(element => element.scrollTop)).toBe(0);
+    const header = feedback.locator(".dialog-header");
+    const footer = feedback.locator(".dialog-footer");
+    const frame = { header: await header.boundingBox(), footer: await footer.boundingBox() };
+    await body.evaluate(element => { element.scrollTop = element.scrollHeight; });
+    await expect.poll(() => body.evaluate(element => element.scrollTop), {
+      message: "the owned feedback body scrolls while its header and footer remain pinned",
+    }).toBeGreaterThan(0);
+    expect(await header.boundingBox()).toEqual(frame.header);
+    expect(await footer.boundingBox()).toEqual(frame.footer);
+    for (const part of [header, footer, feedback.locator(".feedback-dismiss"), feedback.locator(".feedback-cancel"), feedback.locator(".feedback-send")]) {
+      await insideViewport(page, part);
+    }
+    for (const selector of [".feedback-dismiss", ".feedback-cancel", ".feedback-send"]) {
+      expect(await feedback.locator(selector).evaluate(element => {
+        const box = element.getBoundingClientRect();
+        return element.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
+      }), "the pinned feedback controls remain reachable after body scrolling").toBe(true);
+    }
+    await shot(page, `${name}-feedback-short`, window, { pad: 0 });
+    await feedback.locator(".feedback-cancel").click();
+    await expect(feedback).toBeHidden();
+    bodyFailed = false;
+  } finally {
+    await cleanupOwnedSteps(bodyFailed, [
+      ["close owned feedback", async () => {
+        if (await feedback.isVisible()) await feedback.locator(".feedback-cancel").click();
+        await expect(feedback).toBeHidden();
+      }],
+      ["close owned Welcome", async () => {
+        if (await welcome.isVisible()) await welcome.locator(".welcome-dismiss").click();
+        await expect(welcome).toBeHidden();
+      }],
+      ["close owned Help menu", async () => {
+        if (await help.isVisible()) await page.keyboard.press("Escape");
+        await expect(help).toBeHidden();
+      }],
+      ["restore exact viewport", () => page.setViewportSize(viewport)],
+      ["remove observer and verify no feedback request", () => {
+        page.off("request", observe);
+        expect(feedbackRequests, "none of these local forms sends feedback").toBe(0);
+      }],
+    ]);
+  }
 }
 
 /** Require Cancel to preserve the exact remote this capture opened a question for.
@@ -1609,6 +1729,10 @@ for (const colorScheme of ["dark", "light"] as const) {
         await expect(page.locator(".build-skew")).toHaveCount(0);
         const name = `visual-review/${colorScheme}-${width}`;
         const window = [page.locator("body")];
+        if (sentenceHelpOnly) {
+          await sentenceHelpShots(page, name);
+          return;
+        }
         if (sentenceHostsSettingsOnly) {
           await settingsShots(page, name, width === "main-650");
           await hostPanelShots(page, name);
@@ -1841,10 +1965,10 @@ for (const colorScheme of ["dark", "light"] as const) {
           await page.keyboard.press("Escape");
           await expect(settings).toBeHidden();
           await page.locator(".app-help-toggle").click();
-          await expect(page.getByRole("menu", { name: "help", exact: true })).toBeVisible();
+          await expect(page.getByRole("menu", { name: "Help", exact: true })).toBeVisible();
           await shot(page, `${name}-rail-help`, window, { pad: 0 });
           await page.keyboard.press("Escape");
-          await expect(page.getByRole("menu", { name: "help", exact: true })).toBeHidden();
+          await expect(page.getByRole("menu", { name: "Help", exact: true })).toBeHidden();
           // Escape returns keyboard focus to Help. Use the ordinary chrome
           // gap to dismiss that control's help before the unrelated setup shot.
           await page.mouse.click(0, 0);
@@ -1927,7 +2051,7 @@ for (const colorScheme of ["dark", "light"] as const) {
         await feedback.locator(".feedback-cancel").click();
         await expect(feedback).toBeHidden();
         await openHelp(page);
-        await page.locator('[data-bar-menu="help"] [data-bar-menu-item="welcome"]').click();
+        await page.locator('[data-bar-menu="help"] [data-bar-menu-item="Welcome"]').click();
         const welcome = page.locator(".welcome-dialog");
         await expect(welcome).toBeVisible();
         await shot(page, `${name}-welcome`, window, { pad: 0 });

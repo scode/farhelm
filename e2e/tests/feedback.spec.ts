@@ -36,9 +36,9 @@ test.afterEach(async ({ request }) => {
 
 /** Open through the user's toggle and wait for its menu before choosing an item. */
 async function openHelpMenu(page: Page) {
-  const toggle = page.getByRole("button", { name: "help", exact: true });
+  const toggle = page.getByRole("button", { name: "Help", exact: true });
   await toggle.click();
-  const menu = page.getByRole("menu", { name: "help", exact: true });
+  const menu = page.getByRole("menu", { name: "Help", exact: true });
   await expect(menu).toBeVisible();
   return { toggle, menu };
 }
@@ -46,8 +46,8 @@ async function openHelpMenu(page: Page) {
 /** Exercise the help-menu entry so dialog checks include its real mounting and focus lifecycle. */
 async function openFeedbackDialog(page: Page) {
   const { menu } = await openHelpMenu(page);
-  await menu.locator('[data-bar-menu-item="send feedback"]').click();
-  const dialog = page.getByRole("dialog", { name: "send feedback", exact: true });
+  await menu.locator('[data-bar-menu-item="Send feedback"]').click();
+  const dialog = page.getByRole("dialog", { name: "Send feedback", exact: true });
   await expect(dialog).toBeVisible();
   return dialog;
 }
@@ -78,7 +78,7 @@ test("feedback uses dark fields and pinned chrome at normal and short heights", 
   await expect(dialog.locator(".host-settings-title")).toHaveCSS("font-size", "18px");
   await expect(dialog.locator(".feedback-send")).toBeDisabled();
   await expect(dialog.locator(".feedback-send")).toHaveCSS("opacity", "1");
-  await expect(dialog.locator(".feedback-hint")).toHaveText("nothing is sent until you press send");
+  await expect(dialog.locator(".feedback-hint")).toHaveText("Nothing is sent until you press Send");
   const cancel = (await dialog.locator(".feedback-cancel").boundingBox())!;
   const send = (await dialog.locator(".feedback-send").boundingBox())!;
   const hint = (await dialog.locator(".feedback-hint").boundingBox())!;
@@ -136,7 +136,7 @@ test("feedback uses dark fields and pinned chrome at normal and short heights", 
   await dialog.screenshot({ path: testInfo.outputPath("feedback-narrow.png") });
   await dialog.locator(".feedback-dismiss").click();
   await expect(dialog).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "help", exact: true })).toBeFocused();
+  await expect(page.getByRole("button", { name: "Help", exact: true })).toBeFocused();
 });
 
 /** Route every feedback POST to `answer`, recording each JSON body sent. */
@@ -170,11 +170,11 @@ test("the help menu sits below the gear and follows the menu conventions", async
   await expect(toggle).toHaveAttribute("aria-expanded", "true");
   const items = menu.getByRole("menuitem");
   await expect(items).toHaveCount(5);
-  await expect(items.nth(0)).toContainText("send feedback");
-  await expect(items.nth(1)).toContainText("documentation");
-  await expect(items.nth(2)).toContainText("release notes");
-  await expect(items.nth(3)).toContainText("ssh needs 2FA?");
-  await expect(items.nth(4)).toContainText("welcome");
+  await expect(items.nth(0)).toContainText("Send feedback");
+  await expect(items.nth(1)).toContainText("Documentation");
+  await expect(items.nth(2)).toContainText("Release notes");
+  await expect(items.nth(3)).toContainText("SSH needs 2FA?");
+  await expect(items.nth(4)).toContainText("Welcome");
   await toggle.click();
   await expect(menu).toHaveCount(0);
 
@@ -329,10 +329,10 @@ test("sidebar menu flyouts sit under no stacking context inside the sidebar", as
  * opener is replaced with a recorder so the test checks the target and the
  * call without navigating anywhere.
  */
-for (const [label, url] of [["documentation", DOCS_URL], ["release notes", RELEASE_NOTES_URL]]) {
+for (const [label, url] of [["Documentation", DOCS_URL], ["Release notes", RELEASE_NOTES_URL]]) {
   test(`${label} opens the docs site through the shared link opener`, async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("button", { name: "help", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Help", exact: true })).toBeVisible();
     // The opener is its own script asset, loaded asynchronously; replace it
     // only once it exists, or the help menu would use its fallback instead.
     await page.waitForFunction(() => "farhelmTerminalLinks" in window);
@@ -365,13 +365,13 @@ test("send feedback sends exactly what the dialog shows, then thanks and closes"
   const sent = await interceptFeedback(page, (route) => route.fulfill({ status: 204 }));
   await page.goto("/");
   const dialog = await openFeedbackDialog(page);
-  const send = dialog.getByRole("button", { name: "send", exact: true });
+  const send = dialog.getByRole("button", { name: "Send", exact: true });
   await expect(send).toBeDisabled();
   await expect(dialog).toContainText("privately to Farhelm's maintainer");
 
   await dialog.locator(".feedback-message").fill("The sidebar is great.\nSecond line.");
   await dialog.locator(".feedback-contact").fill("someone@example.com");
-  const reuse = dialog.getByRole("checkbox", { name: "re-use for future feedback", exact: true });
+  const reuse = dialog.getByRole("checkbox", { name: "Re-use for future feedback", exact: true });
   await expect(reuse).toBeVisible();
   await expect(dialog.locator(".app-settings-choice")).toHaveCSS("font-size", "13px");
   await page.evaluate(() => document.fonts.ready);
@@ -389,7 +389,7 @@ test("send feedback sends exactly what the dialog shows, then thanks and closes"
   expect(reuseLayout.textLeft).toBeGreaterThan(reuseLayout.controlRight);
   expect(reuseLayout.textLeft - reuseLayout.controlRight).toBeLessThanOrEqual(16);
   expect(reuseLayout.appearance).not.toBe("none");
-  await expect(dialog.locator(".feedback-surface")).toHaveText("web UI");
+  await expect(dialog.locator(".feedback-surface")).toHaveText("Web UI");
   // The operating system is read asynchronously; wait until it is no longer
   // the placeholder before reading the value the dialog will send.
   await expect(dialog.locator(".feedback-os")).not.toHaveText("unknown");
@@ -417,7 +417,7 @@ test("send feedback sends exactly what the dialog shows, then thanks and closes"
     },
   ]);
   await expect(dialog).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "help", exact: true })).toBeFocused();
+  await expect(page.getByRole("button", { name: "Help", exact: true })).toBeFocused();
   await expect(notice).toContainText("Thanks");
   expect(await notice.evaluate((el) => el.closest("[inert]") === null)).toBe(true);
 });
@@ -432,7 +432,7 @@ test("successful feedback remembers the sent contact and writes it again from a 
   const sent = await interceptFeedback(page, (route) => route.fulfill({ status: 204 }));
   await page.goto("/");
   let dialog = await openFeedbackDialog(page);
-  const reuse = dialog.getByRole("checkbox", { name: "re-use for future feedback" });
+  const reuse = dialog.getByRole("checkbox", { name: "Re-use for future feedback" });
   await expect(reuse).toHaveCount(0);
   const contact = "  contact@example.test  ";
   await dialog.locator(".feedback-contact").fill(contact);
@@ -445,7 +445,7 @@ test("successful feedback remembers the sent contact and writes it again from a 
 
   dialog = await openFeedbackDialog(page);
   await expect(dialog.locator(".feedback-contact")).toHaveValue(contact);
-  await expect(dialog.getByRole("checkbox", { name: "re-use for future feedback" })).toBeChecked();
+  await expect(dialog.getByRole("checkbox", { name: "Re-use for future feedback" })).toBeChecked();
   await patchPreferences(request, { feedback_contact: "other-client@example.test" });
   expect((await readPreferences(request)).feedback_contact).toBe("other-client@example.test");
   await dialog.locator(".feedback-message").fill("Keep my contact.");
@@ -455,7 +455,7 @@ test("successful feedback remembers the sent contact and writes it again from a 
   await page.reload();
   dialog = await openFeedbackDialog(page);
   await expect(dialog.locator(".feedback-contact")).toHaveValue(contact);
-  await expect(dialog.getByRole("checkbox", { name: "re-use for future feedback" })).toBeChecked();
+  await expect(dialog.getByRole("checkbox", { name: "Re-use for future feedback" })).toBeChecked();
   await dialog.locator(".feedback-cancel").click();
 });
 
@@ -473,7 +473,7 @@ test("successful feedback clears contact when reuse is unchecked or the field is
     await page.goto("/");
     const dialog = await openFeedbackDialog(page);
     await expect(dialog.locator(".feedback-contact")).toHaveValue("remembered@example.test");
-    const reuse = dialog.getByRole("checkbox", { name: "re-use for future feedback" });
+    const reuse = dialog.getByRole("checkbox", { name: "Re-use for future feedback" });
     await expect(reuse).toBeChecked();
     if (choice === "unchecked") {
       await reuse.uncheck();
@@ -518,7 +518,7 @@ test("failed feedback and cancel preserve remembered contact without a preferenc
   const dialog = await openFeedbackDialog(page);
   await expect(dialog.locator(".feedback-contact")).toHaveValue("remembered@example.test");
   await dialog.locator(".feedback-contact").fill("new@example.test");
-  await dialog.getByRole("checkbox", { name: "re-use for future feedback" }).uncheck();
+  await dialog.getByRole("checkbox", { name: "Re-use for future feedback" }).uncheck();
   await dialog.locator(".feedback-message").fill("Keep memory if sending fails.");
   await dialog.locator(".feedback-send").click();
   await expect(dialog.getByRole("alert")).toContainText("Couldn't send feedback");
@@ -560,7 +560,7 @@ test("a failed send keeps the text and says it failed", async ({ page }, testInf
   const dialog = await openFeedbackDialog(page);
   const message = dialog.locator(".feedback-message");
   await message.fill("Keep this text.");
-  const send = dialog.getByRole("button", { name: "send", exact: true });
+  const send = dialog.getByRole("button", { name: "Send", exact: true });
 
   await send.click();
   await expect(dialog.getByRole("alert")).toContainText(
@@ -568,7 +568,7 @@ test("a failed send keeps the text and says it failed", async ({ page }, testInf
   );
   await expect(message).toHaveValue("Keep this text.");
   await expect(send).toBeEnabled();
-  await expect(dialog.locator(".feedback-hint")).toHaveText("nothing was sent");
+  await expect(dialog.locator(".feedback-hint")).toHaveText("Nothing was sent");
   await dialog.screenshot({ path: testInfo.outputPath("feedback-failed.png") });
 
   await send.click();
@@ -644,7 +644,7 @@ test("a close queued behind send waits for the send", async ({ page }, testInfo)
     }, close);
     expect(closeWasLive, `premise: the ${close} path was still live behind send`).toBe(true);
     await expect.poll(() => sent.length, { message: "the send reached the route" }).toBe(round + 1);
-    await expect(dialog.getByRole("button", { name: "sending…", exact: true })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Sending…", exact: true })).toBeVisible();
     await expect(dialog, `${close} behind send leaves the dialog open`).toBeVisible();
     await expect(dialog.locator(".feedback-cancel")).toBeDisabled();
     await expect(dialog.locator(".feedback-dismiss")).toBeDisabled();
@@ -678,7 +678,7 @@ test("the dialog refuses blank and over-long messages without sending", async ({
   const sent = await interceptFeedback(page, (route) => route.fulfill({ status: 204 }));
   await page.goto("/");
   const dialog = await openFeedbackDialog(page);
-  const send = dialog.getByRole("button", { name: "send", exact: true });
+  const send = dialog.getByRole("button", { name: "Send", exact: true });
   const message = dialog.locator(".feedback-message");
 
   // Enabled first, so the blank check below shows the refusal rather than
@@ -702,7 +702,7 @@ test("the dialog refuses blank and over-long messages without sending", async ({
   await expect(dialog.getByRole("alert")).toHaveCount(0);
   await expect(send).toBeEnabled();
 
-  await dialog.getByRole("button", { name: "cancel", exact: true }).click();
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
   await expect(dialog).toHaveCount(0);
   expect(sent).toEqual([]);
 });

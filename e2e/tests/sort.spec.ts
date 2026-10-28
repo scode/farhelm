@@ -686,7 +686,7 @@ test.describe("session list ordering", () => {
 
     await expect(page.locator(".sort-title")).toHaveAttribute("data-sort", "activity");
     expect(asked.length, "loading the list must read it").toBeGreaterThan(0);
-    await expect(page.getByRole("dialog", { name: "welcome to farhelm", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("dialog", { name: "Welcome to Farhelm", exact: true })).toHaveCount(0);
     for (const sort of asked) {
       expect(sort, "an unusable preference must not reach the helm").toBe("activity");
     }
@@ -845,7 +845,7 @@ test.describe("session list ordering", () => {
     await feed.waitForConnection(1);
     feed.notify(1);
     await expect(page.locator(".sort-title")).toHaveAttribute("data-sort", "title", { timeout: 20_000 });
-    await expect(page.getByRole("dialog", { name: "welcome to farhelm", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("dialog", { name: "Welcome to Farhelm", exact: true })).toHaveCount(0);
     await expect(page.locator(".session-details .title")).toContainText(`sortfix-${stamp}-mmm`, {
       timeout: 20_000,
     });

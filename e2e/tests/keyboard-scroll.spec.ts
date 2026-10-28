@@ -25,9 +25,9 @@ test.afterEach(async ({ request }) => {
 });
 
 /** The help menu is the ordinary mounting path, including modal focus handoff. */
-async function openHelpDialog(page: Page, item: "ssh needs 2FA?" | "send feedback") {
-  await page.getByRole("button", { name: "help", exact: true }).click();
-  const menu = page.getByRole("menu", { name: "help", exact: true });
+async function openHelpDialog(page: Page, item: "SSH needs 2FA?" | "Send feedback") {
+  await page.getByRole("button", { name: "Help", exact: true }).click();
+  const menu = page.getByRole("menu", { name: "Help", exact: true });
   await expect(menu).toBeVisible();
   await menu.locator(`[data-bar-menu-item="${item}"]`).click();
   const dialog = page.getByRole("dialog", { name: item, exact: true });
@@ -59,8 +59,8 @@ test("help menu keeps keyboard focus through a late terminal reveal", async ({ p
     message: "the selected terminal must hold replay while the menu opens",
   }).toMatchObject({ heldReason: "marker", revealed: false });
 
-  await page.getByRole("button", { name: "help", exact: true }).click();
-  const menu = page.getByRole("menu", { name: "help", exact: true });
+  await page.getByRole("button", { name: "Help", exact: true }).click();
+  const menu = page.getByRole("menu", { name: "Help", exact: true });
   const first = menu.getByRole("menuitem").first();
   await expect(first).toBeFocused();
   await page.evaluate(() => (window as any).__farhelmIslands.terminal.test.releaseCatchUp());
@@ -116,17 +116,17 @@ for (const state of ["loading", "error", "no hosts", "no commands"] as const) {
     try {
       await page.setViewportSize({ width: 360, height: 320 });
       await page.goto("/");
-      const dialog = await openHelpDialog(page, "ssh needs 2FA?");
+      const dialog = await openHelpDialog(page, "SSH needs 2FA?");
       const body = dialog.locator(".ssh-help-body");
       await expect.poll(() => requested, { message: "help requested its controlled response" }).toBe(true);
-      if (state === "loading") await expect(body.getByRole("status")).toHaveText("loading connection commands…");
+      if (state === "loading") await expect(body.getByRole("status")).toHaveText("Loading connection commands…");
       if (state === "error") await expect(body.locator(".create-session-error")).toBeVisible();
-      if (state === "no hosts") await expect(body).toContainText("No ssh hosts are registered");
+      if (state === "no hosts") await expect(body).toContainText("No SSH hosts are registered");
       if (state === "no commands") await expect(body.locator(".ssh-help-host")).toContainText(HOST);
       await expect(body.getByRole("button")).toHaveCount(0);
       await expectKeyboardScroll(page, dialog.locator(".host-settings-dismiss"), body);
       if (state === "loading") await expect(body.getByRole("status"), "keyboard input did not release the held read")
-        .toHaveText("loading connection commands…");
+        .toHaveText("Loading connection commands…");
     } finally {
       release();
       await page.unrouteAll({ behavior: "wait" });
@@ -153,7 +153,7 @@ test("long SSH commands wrap while Copy preserves their exact bytes", async ({ p
       return Promise.resolve();
     };
   });
-  const dialog = await openHelpDialog(page, "ssh needs 2FA?");
+  const dialog = await openHelpDialog(page, "SSH needs 2FA?");
   const commands = dialog.locator(".ssh-help-command pre");
   await expect(commands).toHaveText([sessions, setup]);
   await page.evaluate(() => document.fonts.ready);
@@ -166,8 +166,8 @@ test("long SSH commands wrap while Copy preserves their exact bytes", async ({ p
       return new Set(Array.from(range.getClientRects(), (rect) => Math.round(rect.top))).size;
     }), "a command longer than the card uses multiple text lines").toBeGreaterThan(1);
   }
-  await dialog.getByRole("button", { name: "copy sessions connection", exact: true }).click();
-  await dialog.getByRole("button", { name: "copy setup and updates connection", exact: true }).click();
+  await dialog.getByRole("button", { name: "Copy sessions connection", exact: true }).click();
+  await dialog.getByRole("button", { name: "Copy setup and updates connection", exact: true }).click();
   await expect.poll(() => page.evaluate(() => (window as any).__keyboardScrollCopies)).toEqual([sessions, setup]);
 });
 
@@ -371,11 +371,11 @@ for (const focus of ["body", "dismiss", "backdrop"] as const) {
     });
     try {
       await page.goto("/");
-      const dialog = await openHelpDialog(page, "ssh needs 2FA?");
+      const dialog = await openHelpDialog(page, "SSH needs 2FA?");
       const body = dialog.locator(".ssh-help-body");
       const dismiss = dialog.locator(".host-settings-dismiss");
       await expect.poll(() => requested).toBe(true);
-      await expect(body.getByRole("status")).toHaveText("loading connection commands…");
+      await expect(body.getByRole("status")).toHaveText("Loading connection commands…");
       await expect(body).toHaveAttribute("tabindex", "0");
       await dismiss.focus();
       await expect(dismiss).toBeFocused();
@@ -393,18 +393,18 @@ for (const focus of ["body", "dismiss", "backdrop"] as const) {
           "the native backdrop click left no chosen control").toBe(true);
       }
       release();
-      await expect(dialog.getByRole("button", { name: "copy setup and updates connection", exact: true })).toBeVisible();
+      await expect(dialog.getByRole("button", { name: "Copy setup and updates connection", exact: true })).toBeVisible();
       await expect(body).not.toHaveAttribute("tabindex", "0");
       if (focus === "backdrop") {
         await expect(dialog.locator(".ssh-help-close")).toBeFocused();
         await page.keyboard.press("Enter");
         await expect(dialog).toHaveCount(0);
-        await expect(page.getByRole("button", { name: "help", exact: true })).toBeFocused();
+        await expect(page.getByRole("button", { name: "Help", exact: true })).toBeFocused();
       } else {
         await expect(focus === "body" ? dialog.locator(".ssh-help-close") : dismiss).toBeFocused();
         await page.keyboard.press(focus === "body" ? "Shift+Tab" : "Tab");
         await expect(dialog.getByRole("button", {
-          name: focus === "body" ? "copy setup and updates connection" : "copy sessions connection", exact: true,
+          name: focus === "body" ? "Copy setup and updates connection" : "Copy sessions connection", exact: true,
         })).toBeFocused();
       }
     } finally {
@@ -431,7 +431,7 @@ test("sending feedback gains a body stop and refusal restores editor entry", asy
   try {
     await page.setViewportSize({ width: 360, height: 320 });
     await page.goto("/");
-    const dialog = await openHelpDialog(page, "send feedback");
+    const dialog = await openHelpDialog(page, "Send feedback");
     const body = dialog.locator(".host-settings-body");
     const field = dialog.locator(".feedback-message");
     await expect(body).not.toHaveAttribute("tabindex");
@@ -439,11 +439,11 @@ test("sending feedback gains a body stop and refusal restores editor entry", asy
     await dialog.locator(".feedback-send").click();
     await expect.poll(() => submissions.length).toBe(1);
     expect(submissions[0]).toMatchObject({ message });
-    await expect(dialog.locator(".feedback-send")).toHaveText("sending…");
+    await expect(dialog.locator(".feedback-send")).toHaveText("Sending…");
     const controls = dialog.locator("button, input, textarea");
     expect(await controls.count()).toBeGreaterThan(0);
     for (const control of await controls.all()) await expect(control).toBeDisabled();
-    await expect(body).toHaveAccessibleName("feedback");
+    await expect(body).toHaveAccessibleName("Feedback");
     // Header and footer answers are disabled too. The real focusable dialog
     // supplies the origin; Tab must enter the body rather than repair body focus.
     await expectKeyboardScroll(page, dialog, body);
@@ -503,10 +503,10 @@ test("SSH command arrival preserves an independent approval owner", async ({ pag
   });
   try {
     await page.goto("/");
-    const dialog = await openHelpDialog(page, "ssh needs 2FA?");
+    const dialog = await openHelpDialog(page, "SSH needs 2FA?");
     const body = dialog.locator(".ssh-help-body");
     await expect.poll(() => requested).toBe(true);
-    await expect(body.getByRole("status")).toHaveText("loading connection commands…");
+    await expect(body.getByRole("status")).toHaveText("Loading connection commands…");
     await expect(body).toHaveAttribute("tabindex", "0");
     const answer = page.locator(`.approval-card[data-approval-id="${approvalId}"]`).getByRole("button", { name: "Allow", exact: true });
     await expect(answer).toBeVisible();
@@ -516,7 +516,7 @@ test("SSH command arrival preserves an independent approval owner", async ({ pag
     await answer.focus();
     await expect(answer).toBeFocused();
     gate.release();
-    await expect(dialog.getByRole("button", { name: "copy setup and updates connection", exact: true })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Copy setup and updates connection", exact: true })).toBeVisible();
     await expect(body).not.toHaveAttribute("tabindex");
     await expect(body).not.toHaveAttribute("role");
     await expect(body).not.toHaveAttribute("aria-label");
@@ -568,7 +568,7 @@ test("SSH help closed before its reply leaves a reopened region independent", as
   });
   try {
     await page.goto("/");
-    let dialog = await openHelpDialog(page, "ssh needs 2FA?");
+    let dialog = await openHelpDialog(page, "SSH needs 2FA?");
     await expect.poll(() => requested).toBe(1);
     let body = dialog.locator(".ssh-help-body");
     await expect(body).toHaveAttribute("tabindex", "0");
@@ -581,12 +581,12 @@ test("SSH help closed before its reply leaves a reopened region independent", as
     await page.keyboard.press("Escape");
     await expect(dialog).toHaveCount(0);
     expect(await oldRoot!.evaluate((node) => node.isConnected)).toBe(false);
-    await expect(page.getByRole("button", { name: "help", exact: true })).toBeFocused();
-    dialog = await openHelpDialog(page, "ssh needs 2FA?");
+    await expect(page.getByRole("button", { name: "Help", exact: true })).toBeFocused();
+    dialog = await openHelpDialog(page, "SSH needs 2FA?");
     await expect.poll(() => requested).toBe(2);
     body = dialog.locator(".ssh-help-body");
     const dismiss = dialog.locator(".host-settings-dismiss");
-    await expect(body.getByRole("status")).toHaveText("loading connection commands…");
+    await expect(body.getByRole("status")).toHaveText("Loading connection commands…");
     await expect(body).toHaveAttribute("tabindex", "0");
     await dismiss.focus();
     await expect(dismiss).toBeFocused();
@@ -594,7 +594,7 @@ test("SSH help closed before its reply leaves a reopened region independent", as
     await expect.poll(() => drained[0], { message: "the old request is delivered or observably cancelled" }).toBeDefined();
     await afterFocusRecovery(page);
     expect(await oldRoot!.evaluate((node) => node.isConnected)).toBe(false);
-    await expect(body.getByRole("status")).toHaveText("loading connection commands…");
+    await expect(body.getByRole("status")).toHaveText("Loading connection commands…");
     await expect(body).toHaveAttribute("tabindex", "0");
     await expect(body.getByRole("button")).toHaveCount(0);
     await expect(dismiss).toBeFocused();
@@ -605,10 +605,10 @@ test("SSH help closed before its reply leaves a reopened region independent", as
     await expect(body).not.toHaveAttribute("tabindex");
     await expect(dialog.locator(".ssh-help-close")).toBeFocused();
     await page.keyboard.press("Shift+Tab");
-    await expect(dialog.getByRole("button", { name: "copy setup and updates connection", exact: true })).toBeFocused();
+    await expect(dialog.getByRole("button", { name: "Copy setup and updates connection", exact: true })).toBeFocused();
     await page.keyboard.press("Escape");
     await expect(dialog).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "help", exact: true })).toBeFocused();
+    await expect(page.getByRole("button", { name: "Help", exact: true })).toBeFocused();
     bodyFailed = false;
   } finally {
     await cleanupOwnedSteps(bodyFailed, [
@@ -630,7 +630,7 @@ test("sent feedback is keyboard-scrollable without changing the editing Tab orde
   await page.clock.install();
   await page.setViewportSize({ width: 360, height: 500 });
   await page.goto("/");
-  const dialog = await openHelpDialog(page, "send feedback");
+  const dialog = await openHelpDialog(page, "Send feedback");
   const body = dialog.locator(".host-settings-body");
   await expect(body).not.toHaveAttribute("tabindex", "0");
   await dialog.locator(".feedback-dismiss").focus();
@@ -638,7 +638,7 @@ test("sent feedback is keyboard-scrollable without changing the editing Tab orde
   await expect(dialog.locator(".feedback-message")).toBeFocused();
   await dialog.locator(".feedback-message").fill("Keyboard scrolling fixture.");
   await page.clock.pauseAt(new Date(Date.now() + 5_000));
-  await dialog.getByRole("button", { name: "send", exact: true }).click();
+  await dialog.getByRole("button", { name: "Send", exact: true }).click();
   await expect(dialog.locator(".feedback-thanks")).toContainText("Thanks. Your feedback is on its way");
   await expect(body.locator("input, textarea, button")).toHaveCount(0);
   // Apply the cap after the form has gone, so an editor's old scroll offset
@@ -649,7 +649,7 @@ test("sent feedback is keyboard-scrollable without changing the editing Tab orde
   // pauseAt also holds requestAnimationFrame. Fifty milliseconds lets the
   // queued content/resize reconciliation run, well before the 1500 ms close.
   await page.clock.runFor(50);
-  await expect(body).toHaveAccessibleName("feedback sent");
+  await expect(body).toHaveAccessibleName("Feedback sent");
   await expectKeyboardScroll(page, dialog.locator(".feedback-dismiss"), body);
   await expect(dialog.locator(".feedback-thanks"), "the close timer remains held during keyboard input").toBeVisible();
 });

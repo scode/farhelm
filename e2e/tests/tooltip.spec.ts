@@ -555,7 +555,7 @@ test("an Escape dismissal ends when focus leaves the control", async ({ page }) 
   await expect(tooltip(page)).toBeHidden();
   await help.focus();
   await expect(help).toBeFocused();
-  await expect(tooltip(page)).toHaveText(/^help/);
+  await expect(tooltip(page)).toHaveText(/^Help/);
   await gear.focus();
   await expect(gear).toBeFocused();
   await expect(tooltip(page), "the dismissal must not outlive the focus").toHaveText(/^Settings/);
@@ -664,7 +664,7 @@ test("quiet focus survives asset reinstall and allows the first later hover", as
   const help = page.locator(".app-help-toggle");
   await help.focus();
   await expect(help).toBeFocused();
-  await expect(tooltip(page)).toHaveText(/^help/);
+  await expect(tooltip(page)).toHaveText(/^Help/);
   await gear.evaluate((element) => {
     (window as unknown as { farhelmTooltip: { focusWithoutTooltip(element: Element): void } }).farhelmTooltip.focusWithoutTooltip(element);
   });

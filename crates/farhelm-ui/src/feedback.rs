@@ -57,11 +57,11 @@ fn surface() -> FeedbackSurface {
     }
 }
 
-/// How the dialog names the surface to the user.
+/// How the dialog names the surface to the user, separate from its wire enum.
 fn surface_label(surface: FeedbackSurface) -> &'static str {
     match surface {
-        FeedbackSurface::Desktop => "desktop app",
-        FeedbackSurface::Web => "web UI",
+        FeedbackSurface::Desktop => "Desktop app",
+        FeedbackSurface::Web => "Web UI",
     }
 }
 
@@ -192,7 +192,9 @@ pub(crate) fn FeedbackDialog(
             os: os(),
         }
     };
-    let validity = submission().validate();
+    let validity = submission()
+        .validate()
+        .map_err(crate::local_validation_notice);
     let sending = state() == SendState::Sending;
     // An empty message just disables Send; a message that is too long (or a
     // contact) says why, since nothing else on screen would.
@@ -249,7 +251,7 @@ pub(crate) fn FeedbackDialog(
                 class: "app-settings-dialog feedback-dialog host-dialog-framed",
                 role: "dialog",
                 aria_modal: "true",
-                aria_label: "send feedback",
+                aria_label: "Send feedback",
                 tabindex: "-1",
                 // Closing while a send is in flight would cancel it with no
                 // word on whether it arrived and lose the text, so Escape
@@ -266,14 +268,14 @@ pub(crate) fn FeedbackDialog(
                 // Presentation is shared, but every dismiss path still asks
                 // the live send state, including already queued clicks.
                 crate::modal_dialog::DialogHeader {
-                    title: rsx! { "send feedback" },
-                    summary: rsx! { "goes privately to Farhelm's maintainer, not a public tracker" },
+                    title: rsx! { "Send feedback" },
+                    summary: rsx! { "Goes privately to Farhelm's maintainer, not a public tracker" },
                     tile: rsx! { crate::icons::ActionIcon { glyph: crate::icons::ActionGlyph::Feedback, size: 28, class: "feedback-glyph" } },
                     close: rsx! { button {
                         r#type: "button",
                         class: "dialog-close host-settings-dismiss feedback-dismiss",
-                        aria_label: "close send feedback",
-                        "data-tooltip": "close: leave this feedback dialog",
+                        aria_label: "Close send feedback",
+                        "data-tooltip": "Close: leave this feedback dialog",
                         disabled: sending,
                         onclick: move |_| {
                             if may_close(&state.peek()) {
@@ -287,7 +289,7 @@ pub(crate) fn FeedbackDialog(
                     handle: DialogHandle::new(DIALOG_SELECTOR), selector: ".host-settings-body",
                     // Sending disables the editors too; native eligibility
                     // keeps that retained message reachable before success.
-                    name: if state() == SendState::Sent { "feedback sent" } else { "feedback" },
+                    name: if state() == SendState::Sent { "Feedback sent" } else { "Feedback" },
                     // A refusal returns to the retained message, including
                     // when sending parked focus on the temporary body stop.
                     recovery: RecoveryFocus::new(".feedback-message", Some(".feedback-cancel"), false, RecoveryDelay::OneFrame),
@@ -295,7 +297,7 @@ pub(crate) fn FeedbackDialog(
                         p { class: "feedback-thanks", "{THANKS}" }
                     } else {
                         label { class: "feedback-field",
-                            "message"
+                            "Message"
                             textarea {
                                 class: "feedback-message",
                                 // Feedback can contain commands or paths too; the
@@ -312,7 +314,7 @@ pub(crate) fn FeedbackDialog(
                             }
                         }
                         label { class: "feedback-field",
-                            "how to reach you (optional)"
+                            "How to reach you (optional)"
                             input {
                                 r#type: "text",
                                 class: "feedback-contact",
@@ -330,7 +332,7 @@ pub(crate) fn FeedbackDialog(
                         if !is_blank(&contact.read()) {
                             label {
                                 class: "app-settings-choice",
-                                "data-tooltip": "reuse: remember this contact on the helm after a successful send, for the desktop app and web UI",
+                                "data-tooltip": "Reuse: remember this contact on the helm after a successful send, for the desktop app and web UI",
                                 input {
                                     r#type: "checkbox",
                                     class: "feedback-reuse",
@@ -338,21 +340,21 @@ pub(crate) fn FeedbackDialog(
                                     disabled: sending,
                                     onchange: move |event| remember.set(event.checked()),
                                 }
-                                "re-use for future feedback"
+                                "Re-use for future feedback"
                             }
                         }
                         div { class: "feedback-attached",
-                            p { class: "host-settings-help", "sent with it, and nothing else" }
+                            p { class: "host-settings-help", "Sent with it, and nothing else" }
                             dl {
-                                dt { "version" }
+                                dt { "Version" }
                                 dd {
                                     class: "feedback-version peer-value",
                                     dir: "ltr",
                                     "{version}"
                                 }
-                                dt { "app" }
+                                dt { "App" }
                                 dd { class: "feedback-surface", "{surface_label(surface)}" }
-                                dt { "operating system" }
+                                dt { "Operating system" }
                                 dd {
                                     class: "feedback-os peer-value",
                                     dir: "ltr",
@@ -374,9 +376,9 @@ pub(crate) fn FeedbackDialog(
                     if matches!(state(), SendState::Editing | SendState::Failed(_)) {
                         span { class: "dialog-footer-hint feedback-hint",
                             if matches!(state(), SendState::Failed(_)) {
-                                "nothing was sent"
+                                "Nothing was sent"
                             } else {
-                                "nothing is sent until you press send"
+                                "Nothing is sent until you press Send"
                             }
                         }
                     }
@@ -384,7 +386,7 @@ pub(crate) fn FeedbackDialog(
                         button {
                             r#type: "button",
                             class: "btn btn-neutral feedback-cancel",
-                            "data-tooltip": if state() == SendState::Sent { "close: your message was sent" } else { "cancel: close without sending" },
+                            "data-tooltip": if state() == SendState::Sent { "Close: your message was sent" } else { "Cancel: close without sending" },
                             disabled: sending,
                             onclick: move |_| {
                                 if may_close(&state.peek()) {
@@ -392,22 +394,22 @@ pub(crate) fn FeedbackDialog(
                                 }
                             },
                             if state() == SendState::Sent {
-                                "close"
+                                "Close"
                             } else {
-                                "cancel"
+                                "Cancel"
                             }
                         }
                         if state() != SendState::Sent {
                             button {
                                 r#type: "button",
                                 class: "btn btn-primary feedback-send",
-                                "data-tooltip": "send: deliver this message privately to the maintainer",
+                                "data-tooltip": "Send: deliver this message privately to the maintainer",
                                 disabled: !can_send,
                                 onclick: send,
                                 if sending {
-                                    "sending…"
+                                    "Sending…"
                                 } else {
-                                    "send"
+                                    "Send"
                                 }
                             }
                         }
