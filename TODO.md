@@ -24,13 +24,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- **Revisit screenshots for the screens the sentence-case sweep reviewed from source.** Decided on the maintainer's
-  behalf on 2026-10-28 for the Steel sentence-case plan: the desktop App settings and update notices, the native
-  file-type settings, the loaded SSH connection help and the host-removal confirmation had their wording reviewed from
-  source instead of photographed, because the screenshot setup cannot reach them. The alternative was extending it: a
-  native test mode for desktop components, invented stand-ins for SSH help's private paths, and staging a host removal
-  plan that is never executed.
-
 - **Revisit the launcher's folder suggestions covering its controls.** Decided on the maintainer's behalf on 2026-10-28
   for the Steel dialogs plan: with the launcher now one column on desktop too, the open folder suggestions cover the
   Agent row and other controls below them until dismissed, so a click aimed at Agent can choose a suggestion such as
