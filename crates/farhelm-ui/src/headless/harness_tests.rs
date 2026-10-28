@@ -72,3 +72,30 @@ async fn settle_fails_when_quiet_cannot_come_within_the_deadline() {
     page.set_wait(std::time::Duration::from_millis(100));
     page.settle().await;
 }
+
+/// A select the test cannot reach because the page disabled it.
+fn disabled_select() -> Element {
+    rsx! {
+        select { disabled: true, onchange: move |_| {},
+            option { value: "a", "a" }
+            option { value: "b", "b" }
+        }
+    }
+}
+
+/// Spec: choosing an option in a disabled `<select>` fails the test instead
+/// of delivering the change.
+///
+/// Why: a browser never lets a person change a disabled select, and the
+/// page's own handler may not check `disabled` again, so a harness that
+/// delivered the change would let a port pass where its browser original
+/// fails. The ported tests only ever select from enabled controls, so
+/// nothing else shows the refusal.
+#[farhelm_testtrace::test]
+#[should_panic(expected = "select on a disabled control")]
+async fn selecting_in_a_disabled_select_fails() {
+    let helm = FakeHelm::start().await;
+    let mut page = Page::mount(&helm, disabled_select);
+    let select = page.wait_for("select").await;
+    page.select_option(select, "b");
+}

@@ -131,3 +131,57 @@ pub fn yolo_refusal() -> Reply {
         .header(YOLO_CONFIRMATION_HEADER, YOLO_CONFIRMATION_REQUIRED)
         .header(CREATE_OUTCOME_HEADER, CREATE_OUTCOME_DEFINITELY_UNACCEPTED)
 }
+
+/// The template name a `/api/templates/{name}` request is about. The UI
+/// percent-encodes the name into the path and the helm decodes it, so the
+/// store must too, or a name with a space or a dot would be stored under its
+/// encoded spelling.
+fn template_name(path: &str) -> String {
+    let segment = path.rsplit('/').next().unwrap_or_default();
+    percent_encoding::percent_decode_str(segment)
+        .decode_utf8()
+        .unwrap_or_else(|error| panic!("template name {segment:?} is not UTF-8: {error}"))
+        .into_owned()
+}
+
+/// The helm's template store, held in the fake: `GET /api/templates` lists
+/// what `PUT /api/templates/{name}` stored (the body is the template's
+/// fields), and `DELETE` removes it. Returns the store so a test can read
+/// what was saved, the way the browser specs read `/api/templates` back.
+pub fn template_store(
+    helm: &FakeHelm,
+    initial: Vec<Value>,
+) -> std::sync::Arc<std::sync::Mutex<Vec<Value>>> {
+    use std::sync::{Arc, Mutex};
+    let store = Arc::new(Mutex::new(initial));
+    let list = store.clone();
+    helm.route("GET", "/api/templates", move |_| {
+        Reply::json(200, json!({ "templates": *list.lock().unwrap() }))
+    });
+    let put = store.clone();
+    helm.route("PUT", "/api/templates/*", move |request| {
+        let name = template_name(&request.path);
+        // Refuse a body the helm would refuse, as a reply the page shows,
+        // rather than panicking inside the server task where no test sees it.
+        let stored = json!({ "name": name, "fields": request.json.clone().unwrap_or_default() });
+        if let Err(error) =
+            serde_json::from_value::<farhelm_proto::launcher::LaunchTemplate>(stored.clone())
+        {
+            return Reply::text(400, &format!("not a template: {error}"));
+        }
+        let mut templates = put.lock().unwrap();
+        templates.retain(|t| t["name"] != name.as_str());
+        templates.push(stored);
+        Reply::json(200, json!({}))
+    });
+    let delete = store.clone();
+    helm.route("DELETE", "/api/templates/*", move |request| {
+        let name = template_name(&request.path);
+        delete
+            .lock()
+            .unwrap()
+            .retain(|t| t["name"] != name.as_str());
+        Reply::json(200, json!({}))
+    });
+    store
+}
