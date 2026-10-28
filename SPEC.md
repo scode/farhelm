@@ -1296,8 +1296,8 @@ submission and focus-return behavior.
   running and the dialog open with the reason. A refusal leaves the dialog and its edits visible with the reason. The
   held folder never uses or updates the per-host folder default; its advisory check still applies. Restart with runs the
   resume command, so an edited start command of a command launch takes effect the next time it is cloned or replaced.
-  Command launches offer this action exactly when Restart is. Its header button remains visible but greyed out
-  otherwise, with a hover tooltip and accessible description explaining why.
+  Command launches offer this action exactly when Restart is. Its entry in the header's Restart menu remains visible but
+  greyed out otherwise, with a hover tooltip and accessible description explaining why.
 - **Clone** opens an ordinary, editable create form pre-filled from an existing session's host, title, and launch — the
   fresh-conversation counterpart to restart's resumed one unless the user names a conversation for this start. A session
   in a managed checkout starts on a managed checkout of the same repository, named `<title>-clone` with the first free
@@ -1920,9 +1920,9 @@ whatever the agent renders is what you see. There is no composer, no message abs
   line editing — stock emacs-mode zsh inserts a newline, bash's default quietly ignores the pair — the same outcomes
   those shells give under a reference terminal that encodes the chord identically (Ghostty).
 - Terminal text size is adjustable: Cmd+Shift with + or − on macOS, Ctrl+Shift elsewhere, or the A− / A+ buttons at the
-  right end of the session's terminal tab strip, step every open terminal's text size together, hidden tabs included,
-  within a fixed range, and each terminal is resized so the program inside sees its new rows and columns. While a
-  terminal is open the shortcut works wherever focus is and never reaches the terminal's program or the browser;
+  start of the action group on the right of the session's top row, step every open terminal's text size together, hidden
+  tabs included, within a fixed range, and each terminal is resized so the program inside sees its new rows and columns.
+  While a terminal is open the shortcut works wherever focus is and never reaches the terminal's program or the browser;
   Cmd/Ctrl with = or − and no Shift stay the browser's own page zoom. On Linux this takes over Ctrl+Shift+− (Ctrl+_,
   undo in readline and emacs) inside the terminal, accepted 2026-10-02. The keys are the ones at the US-layout positions
   of = and −. The size is remembered per device, deliberately unlike the session list's preference: it is about the
@@ -1959,33 +1959,38 @@ whatever the agent renders is what you see. There is no composer, no message abs
   interacting with is readable at a glance rather than only from the bottom bar's session name. A filter that excludes
   the selected session leaves no row to mark — the bottom bar's session name remains the identifier in that state, and
   the main pane deliberately stays put (filtering the list is not deselecting).
-- The typical session view has one top row, with terminal tabs on the left and Restart, Restart with, Replace, Clone,
-  Replace with, and Delete on the right, followed by the terminal and a slim details bar below it. All six actions
-  remain fully visible and keyboard reachable from a 650px main pane; the tab strip takes the remaining width and
-  scrolls horizontally when needed. Narrower panes may clip the row, which never wraps. The bottom bar is about one
-  tab-strip row high and shows, in order, status, session name, host, age, the managed-checkout branch mark when
-  present, directory, and command line. The host's icon and name follow the session list's rules, with the host
-  prominent beside the session name; a missing host name omits the host rather than inventing one. Directory display
-  still abbreviates the home directory to `~`. Keyboard order follows the top row, terminal, then bottom bar. The
-  terminal loses no height in the steady state. Conditional notices and the desktop tunnel strip stay between the top
-  row and terminal, notices first; a stale session's status appears only in its stale notice, not again in the bottom
-  bar. Restart and Restart with are greyed out when the session cannot resume its conversation (see Lifecycle
-  operations); their tooltips and accessible descriptions explain the specific reason, such as an agent type without
-  conversation reporting, a command launch that declared no agent type or did not opt into Resume, or a conversation not
-  captured yet. For an agent that reports conversations, a running session's explanation says, naming the agent, when
-  Restart normally becomes available for it (Codex, for instance, once the first prompt is submitted), and an ended
-  session's says its conversation was never captured; both invite the user to send feedback if that is not what
-  happened, since Farhelm cannot tell a report still to come from one that never will. The supervisor's refusal of such
-  a restart and the agent instructions state the same timing, without the invitation. Directory and command line are
-  muted click-to-copy buttons that take the width their values need and ellipsize before the session name or host when
-  the bar runs out of room; a click confirms locally for about 1.5 seconds. A hidden-characters copy warning opens
-  upward from the bar and stays within the window. Clipboard writes use the native bridge first and
-  `navigator.clipboard` second, with JSON serialization and silent failures. Replace has its own anchored danger
-  confirmation and neutral cancellation. Delete is styled as the danger action and asks first in the same anchored way,
-  even for a session that has ended, with the same consequence text the row's delete prompt shows. Restart's
-  confirmation is likewise anchored under its top-row button; Escape cancels these questions and returns focus to the
-  terminal. The session-confirmation setting skips the top row's Delete, Replace and Restart questions, the
-  interrupted-card Replace question, and tab Close, using the screen's consent and existing guards.
+- The typical session view has one top row, with terminal tabs on the left and text size (A−, A+), Restart ▾, Replace ▾,
+  Clone and Delete on the right, followed by the terminal and a slim details bar below it. Restart and Replace are split
+  buttons: the main part performs the ordinary action, including its existing confirmation; the caret opens a menu
+  offering that action and Restart with… or Replace with…. The icon-and-label controls keep their compact height. Text
+  size, both parts of each split button, Clone and Delete remain fully visible and keyboard reachable from a 650px main
+  pane; only the tab strip takes the remaining width and scrolls horizontally when needed. Narrower panes may clip the
+  row, which never wraps. The bottom bar is about one tab-strip row high and shows, in order, status, session name,
+  host, age, the managed-checkout branch mark when present, directory, and command line. The host's icon and name follow
+  the session list's rules, with the host prominent beside the session name; a missing host name omits the host rather
+  than inventing one. Directory display still abbreviates the home directory to `~`. Keyboard order follows the top row,
+  terminal, then bottom bar. The terminal loses no height in the steady state. Conditional notices and the desktop
+  tunnel strip stay between the top row and terminal, notices first; a stale session's status appears only in its stale
+  notice, not again in the bottom bar. Restart and its menu's matching entries are greyed out when the session cannot
+  resume its conversation (see Lifecycle operations); their tooltips and accessible descriptions explain the specific
+  reason, such as an agent type without conversation reporting, a command launch that declared no agent type or did not
+  opt into Resume, or a conversation not captured yet. For an agent that reports conversations, a running session's
+  explanation says, naming the agent, when Restart normally becomes available for it (Codex, for instance, once the
+  first prompt is submitted), and an ended session's says its conversation was never captured; both invite the user to
+  send feedback if that is not what happened, since Farhelm cannot tell a report still to come from one that never will.
+  The supervisor's refusal of such a restart and the agent instructions state the same timing, without the invitation.
+  Directory and command line are muted click-to-copy buttons that take the width their values need and ellipsize before
+  the session name or host when the bar runs out of room; a click confirms locally for about 1.5 seconds. A
+  hidden-characters copy warning opens upward from the bar and stays within the window. Clipboard writes use the native
+  bridge first and `navigator.clipboard` second, with JSON serialization and silent failures. Replace has its own
+  anchored danger confirmation and neutral cancellation. Delete is styled as the danger action and asks first in the
+  same anchored way, even for a session that has ended, with the same consequence text the row's delete prompt shows.
+  Restart's confirmation is likewise anchored under its top-row button; Escape cancels these questions and returns focus
+  to the terminal. The session-confirmation setting skips the top row's Delete, Replace and Restart questions, the
+  interrupted-card Replace question, and tab Close, using the screen's consent and existing guards. Split menus follow
+  the app's shared keyboard rules: arrows and Home/End move between choices, Escape or Tab closes the menu and returns
+  focus to its caret. Cancelling Restart with returns to that persistent caret. An unavailable plain Restart does not
+  hide an independently available Restart with; the menu remains available to inspect reasons.
 - One attached client per session, enforced by the supervisor: attaching from a second client visibly detaches the
   first, which keeps a non-live snapshot and an explicit take-control action. No shared-input mirroring in v1.
 - A viewer that is slow is served slowly, for as long as it takes. Honoring that can briefly slow the agent's OUTPUT — a

@@ -559,10 +559,10 @@ zero-specificity rule in app.css makes them inherit `font-family`, and a control
 platform sans-serif the way most of the launch composer's buttons once did. The rule leaves font size alone, and it
 excludes xterm.js's own helper textarea, which belongs to the vendored widget.
 
-The open session's chrome has one top row with terminal tabs on the left and Restart, Restart with, Replace, Clone,
-Replace with, and Delete on the right, and a slim details bar below the terminal. The bottom bar is ordered status,
-title, host, age, managed-checkout branch mark when present, copyable `{cwd}`, and copyable invocation. The host uses
-the same label component as the session list, reading the shared `Signal<HostsRead>` context rather than starting
+The open session's chrome has one top row with terminal tabs on the left and fixed text-size controls, split Restart and
+Replace buttons, Clone and Delete on the right, and a slim details bar below the terminal. The bottom bar is ordered
+status, title, host, age, managed-checkout branch mark when present, copyable `{cwd}`, and copyable invocation. The host
+uses the same label component as the session list, reading the shared `Signal<HostsRead>` context rather than starting
 another host request; its name remains visible when locality is unknown, and only a missing name omits it. Identity
 moved below the terminal to make the active session and host easier to see while keeping the bottom bar small and
 leaving room for the tabs and actions together at the top. The terminal keeps at least its previous steady-state height.
@@ -580,20 +580,26 @@ keyboard focus. Their hidden-characters copy warning opens upward from the botto
 Copy feedback snapshots that warning from the copied value alongside its click id. A metadata refresh leaves the warning
 and its existing expiry unchanged; an older click's timer cannot clear newer feedback.
 
-The six action buttons remain fully visible and in DOM order from a 650px main pane; the tab strip shrinks into the
-remaining width and scrolls horizontally. The app's 320px main-pane floor is unchanged; between those widths the row may
-clip its trailing actions rather than wrapping or hiding them. The restart confirmation became a popover anchored under
-the button that opened it, still confirm-in-place with focus on the enabled confirming answer (Cancel while disabled);
-the consequence sentence they lead with is the one line standing between a click and a killed process tree, and a header
-that kept it in flow would have to either wrap or truncate it. Header Replace has a separate anchored confirmation state
-so it cannot accidentally open the interrupted card's confirmation. The top row owns their Escape handler alongside the
-action buttons; keyboard order is top row, terminal, then bottom bar. Everything conditional — a refused restart's
-prose, the last-known-status band and the "helm stopped listing this session" line — is still a full-width band, because
-a band that only appears when it has something to say costs the steady state nothing. These notices, the interrupted
-card, trust hint and tab errors remain between the top row and terminal, followed by the desktop tunnel strip. A
-classified status renders in at most one place: the bottom bar normally, the stale notice's own metadata band for a
-stale session (where SPEC.md's title/directory/last-known-status triple is assembled), and nowhere at all for a session
-nothing has classified yet.
+The action group remains fully visible and in DOM order from a 650px main pane: A−, A+, Restart and its caret, Replace
+and its caret, Clone, Delete. Text size does not scroll with tabs; it retains the tab surface's stale/inert condition.
+The two split menus use the shared menu anatomy, focus queue, keyboard handling and outside-pointer relay, with one open
+family per session view. Their absolute below-caret placement follows toolbar layout without a separate async
+measurement lifecycle. Main halves and repeated plain menu choices call the same lifecycle-admission callbacks; opening
+a menu takes no claim. Restart with keeps its independent availability and accessible explanation. The launcher returns
+to the persistent caret rather than its unmounted menu entry. The tab strip shrinks into the remaining width and scrolls
+horizontally. The app's 320px main-pane floor is unchanged; between those widths the row may clip its trailing actions
+rather than wrapping or hiding them. The restart confirmation became a popover anchored under the button that opened it,
+still confirm-in-place with focus on the enabled confirming answer (Cancel while disabled); the consequence sentence
+they lead with is the one line standing between a click and a killed process tree, and a header that kept it in flow
+would have to either wrap or truncate it. Header Replace has a separate anchored confirmation state so it cannot
+accidentally open the interrupted card's confirmation. The top row owns their Escape handler alongside the action
+buttons; keyboard order is top row, terminal, then bottom bar. Everything conditional — a refused restart's prose, the
+last-known-status band and the "helm stopped listing this session" line — is still a full-width band, because a band
+that only appears when it has something to say costs the steady state nothing. These notices, the interrupted card,
+trust hint and tab errors remain between the top row and terminal, followed by the desktop tunnel strip. A classified
+status renders in at most one place: the bottom bar normally, the stale notice's own metadata band for a stale session
+(where SPEC.md's title/directory/last-known-status triple is assembled), and nowhere at all for a session nothing has
+classified yet.
 
 An unavailable session uses one accent card over the terminal scrim, sharing Delete's card geometry and spinner.
 `hosts::session_unavailable_cause` maps the existing host read to a stable phrase for both row densities and the card;
@@ -1084,8 +1090,11 @@ target with a 6 px gap and, only without room there, below with a 28 px gap: a p
 standard cursors extend downward from their hot spot, so space above a control is never under the cursor while a box
 just below a small icon would be. It is `position: fixed` from the target's measured rectangle so no scroll container
 clips it, wears the row menu panels' background, border and shadow, wraps at about 280 px and clamps to eight lines.
-Peer text still goes through `display_peer` before it becomes tooltip text, which the script sets with `textContent`;
-the card copies nodes already rendered by Rust and never parses its serialized change signature as markup. The tooltip
+Split-action menu items opt into their enclosing panel as the placement rectangle, so their full reasons do not cover
+neighboring choices at normal window heights. The item retains tooltip ownership and dismissal; the existing watch tick
+also follows panel-size changes. Missing panels fall back to the item, and the ordinary short-window clamp remains. Peer
+text still goes through `display_peer` before it becomes tooltip text, which the script sets with `textContent`; the
+card copies nodes already rendered by Rust and never parses its serialized change signature as markup. The tooltip
 element is a visual aid kept out of the accessibility tree (`aria-hidden`); icon-only controls and status marks keep
 accessible text of their own (an `aria-label` or a `.visually-hidden` copy), and the hover texts that carry information
 a screen-reader user needs (the header copy buttons' full values, a host's update urgency, a too-new host's remedy) are
@@ -1219,8 +1228,8 @@ held aside during a reconnect or kept after a takeover keeps its old size: it is
 shortcut is one capture-phase `keydown` listener on `window`, matched on `event.code` (`Equal`, `Minus`, so the
 US-layout key positions) with Shift and Meta on macOS or Ctrl elsewhere, by a platform-string test that agrees with
 xterm.js's own Mac check; capture on `window` runs before xterm's handler, so its custom key handler is untouched, and
-preventDefault keeps the browser out. With no terminal mounted the listener lets the keys through. The tab strip's A− /
-A+ buttons are stateless Rust buttons that call the same function, which hands focus back to the terminal the view last
+preventDefault keeps the browser out. With no terminal mounted the listener lets the keys through. The top row's A− / A+
+buttons are stateless Rust buttons that call the same function, which hands focus back to the terminal the view last
 focused when the click left it on a button; nothing about the size flows back to Rust, so they have no disabled state at
 the ends of the range. In the desktop app the size persists as far as the webview keeps its local storage across
 restarts; that was verified on Linux, not on macOS, where a webview that does not keep it would fall back to the default

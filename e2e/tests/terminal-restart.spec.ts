@@ -20,6 +20,7 @@ import {
   agentLaunchRow,
 } from "./helpers/fleet";
 import { cleanupSession, restartIdleAgent, termText, waitForTermText } from "./helpers/term";
+import { openSessionActionMenu } from "./helpers/session-actions";
 import { waitForSessionRevealed } from "./helpers/terminal-readiness";
 import {
   findSessionIdByTitle,
@@ -183,7 +184,7 @@ test("an interrupted session's view leads with the resume offer, and declining c
   // so" instead reaches the accessible name: `aria-label` names the offer,
   // not the mechanism, which is what a screen reader announces regardless
   // of hover.
-  await expect(restart).toHaveText("restart");
+  await expect(restart).toHaveText("Restart");
   await expect(restart).toHaveAttribute("aria-label", "resume conversation");
   // And the header states the session's last-known status beside the
   // title, which is where the reason a user is being offered a restart now
@@ -258,7 +259,16 @@ test("an interrupted session that cannot resume greys out Restart and offers onl
   await expect(page.locator("#restart-offer-description")).toContainText(
     "Farhelm never captured this session's conversation",
   );
-  await expect(page.locator(".restart-with-trigger")).toHaveAttribute("aria-disabled", "true");
+  // Neither resume action is available, but the caret still lets keyboard
+  // users inspect the individual items and their reasons.
+  const menu = await openSessionActionMenu(page, "Restart");
+  await expect(menu.locator(".restart-with-trigger")).toHaveAttribute("aria-disabled", "true");
+  const unavailableWith = menu.getByRole("menuitem", { name: "Restart with…", exact: true });
+  await unavailableWith.focus();
+  await expect(unavailableWith).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(menu).toHaveCount(0);
+  await expect(page.locator(".restart-menu-toggle")).toBeFocused();
 
   const notice = page.locator(".interrupted-card");
   await expect(notice).toBeVisible();

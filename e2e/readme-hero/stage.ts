@@ -88,12 +88,22 @@ function shellQuote(value: string): string {
  * execs this file from `$PWD`, which is how sessions with identical
  * invocations replay different transcripts. The `"$@"` tail is where the
  * scenario's permission flags and supervisor's per-launch vendor flags
- * land; the fixture tolerates them.
+ * land; the fixture tolerates them. An optional development-review conversation
+ * reports through the real vendor hook before replay, without changing a reply.
  */
-function writeAgentScript(info: StackInfo, scenarioDir: string, cwd: string, session: ScenarioSession): void {
+export function writeAgentScript(
+  info: StackInfo,
+  scenarioDir: string,
+  cwd: string,
+  session: ScenarioSession,
+  reportConversation?: string,
+): void {
   // The dialect makes the fixture's menus the shape the session's own
   // screen reader recognises as a question (see `ReplayDialect`).
   const argv = [info.fixtures, "fake-agent", "--script", "replay", "--dialect", session.wrapper];
+  // Development-review fixtures may report through the real vendor hook;
+  // the ordinary media scenarios keep their existing replay behavior.
+  if (reportConversation) argv.push("--report-conversation", reportConversation);
   if (session.transcript) argv.push("--transcript", path.join(scenarioDir, session.transcript));
   argv.push(...replayMode(session));
   const file = path.join(cwd, ".hero-agent");

@@ -84,6 +84,10 @@
 // 16 px icon would sit under the cursor's body. `placeTooltip` is a pure
 // function, exported for js-tests/tooltip.test.js, so this rule is tested
 // without a browser.
+// Split-menu items may opt into their enclosing panel's rectangle with
+// `data-tooltip-anchor="panel"`. The item still owns the help and dismissal;
+// only placement clears the other choices. The existing short-window clamp
+// still applies when neither side of the whole panel has enough room.
 //
 // ## Testability
 //
@@ -178,6 +182,13 @@
       el = el.parentElement;
     }
     return null;
+  }
+
+  /** Keep an opted-in item's help outside its panel without changing ownership. */
+  function tooltipAnchor(target) {
+    return target.getAttribute("data-tooltip-anchor") === "panel"
+      ? target.closest("[data-tooltip-panel]") || target
+      : target;
   }
 
   /** `:focus-visible`, with a false answer from an engine that cannot evaluate it. */
@@ -304,7 +315,7 @@
       box.style.left = "0px";
       box.style.top = "0px";
       const size = box.getBoundingClientRect();
-      const rect = target.getBoundingClientRect();
+      const rect = tooltipAnchor(target).getBoundingClientRect();
       placedAt = { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
       const place = placeTooltip(
         rect,
@@ -348,7 +359,7 @@
         hide();
         return;
       }
-      const rect = target.getBoundingClientRect();
+      const rect = tooltipAnchor(target).getBoundingClientRect();
       const moved = rect.left !== placedAt.left || rect.top !== placedAt.top
         || rect.width !== placedAt.width || rect.height !== placedAt.height;
       if (moved || content.signature !== placedContent) position(content);
