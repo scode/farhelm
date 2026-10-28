@@ -848,39 +848,39 @@ title and a muted summary of its stored launch selection, followed by the concis
 launch-choice wording as the session launcher; a legacy session uses its command's program name, and an unclassified
 session omits the state word. The pointer is hidden when horizontal clamping makes the panel overlap the sidebar, where
 it could no longer indicate the opening row. Commands have small decorative line icons and form groups separated by
-non-focusable rules: rename and mark read/unread; clone, replace with, and replace; stop; delete. Only groups with
-available commands contribute rules. Clone, replace with, replace, stop, and delete each have a visible muted
-description exposed as an accessible description, so the accessible command name remains the action word. Hover and
-focus fill each command inside the panel with rounded inset corners. **One at a time:** at most one row's menu is open,
-and it closes on any layout change that could have moved the row it was measured against (a sidebar scroll or resize,
-the host list's shape changing, the create form opening, the row reordering under a refresh), because the panel's
-coordinates are a one-time snapshot. **Keyboard:** it is a real `role="menu"` and behaves like one — opening it
-(pointer, Enter, Space, ArrowDown) lands focus on the first command and ArrowUp opens onto the last; arrows step and
-wrap, Home/End jump; the whole menu is a single tab stop via roving `tabindex`, so Tab leaves rather than walking the
-commands; Escape closes; and every close that took the menu away from a focused item hands focus back to the toggle
-rather than dropping it on the document body — except the two transfers, Rename and a clone/replace-with acceptance,
-whose newly mounted dialogs own focus instead, so the teardown retires its return rather than racing their mount
-handoff. An item made inert by an in-flight operation stays focusable and refuses on activation (`aria-disabled`) rather
-than going natively `disabled`, because a browser cannot focus a disabled control and a menu that went busy under the
-user would otherwise swallow every navigation key. Arrows step from whichever item actually has focus, including one the
-user focused by pointer or screen reader in the middle of an arrow burst. A page-side check rejects navigation focus
-moves after independent focus, including requests already sent across the desktop webview. Each request retains the
-page's independent-focus epoch from its key press; a synchronous input relay updates Rust with the current focus event's
-source before the original event, so a user landing at the in-flight target also retires older requested destinations.
-Initial menu focus uses the same function without that check and does not invalidate navigation. Nothing activates
-without Enter or Space on the visibly focused item. The row tint is owned by the menu's open state, not by
-`:focus-within`: a dismissal may return focus to the toggle while the pointer is elsewhere, and that focused toggle must
-not make the row look as though its menu is still open. The focused toggle or menu item retains the normal
-`:focus-visible` indicator, so pointer-return focus and keyboard focus remain visually distinct without changing the
-dismissal or focus-return contract. **Confirm in place:** a destructive item swaps the panel's own contents for the
-consequence line and a confirm/cancel pair with focus on the enabled confirming answer, or Cancel while busy, rather
-than opening a second surface; that sub-state is a `role="dialog"` inside the same positioned box, and it survives the
-panel closing, which is why it deliberately does not answer Escape. The one exception is a pointer going down outside
-the open menu: that closes the menu and answers a showing confirmation with cancel, since a click elsewhere is the user
-leaving the question, and a prompt kept for the next open would greet them with a question they already walked away
-from. Every other dismissal still preserves it. Outside dismissal also never takes focus back from the control the
-pointer went to: the toggle handback only reclaims focus that is on nothing, on the document body, or still inside a row
-menu.
+non-focusable rules: rename, mark read/unread and pin/unpin; clone and replace with; replace; stop; delete. Only groups
+with available commands contribute rules. Replace, stop and delete are red; replace with stays neutral because it opens
+the editable session launcher. Every command has a visible muted description exposed as an accessible description, so
+the accessible command name remains the action word. Hover and focus fill each command inside the panel with rounded
+inset corners. **One at a time:** at most one row's menu is open, and it closes on any layout change that could have
+moved the row it was measured against (a sidebar scroll or resize, the host list's shape changing, the create form
+opening, the row reordering under a refresh), because the panel's coordinates are a one-time snapshot. **Keyboard:** it
+is a real `role="menu"` and behaves like one — opening it (pointer, Enter, Space, ArrowDown) lands focus on the first
+command and ArrowUp opens onto the last; arrows step and wrap, Home/End jump; the whole menu is a single tab stop via
+roving `tabindex`, so Tab leaves rather than walking the commands; Escape closes; and every close that took the menu
+away from a focused item hands focus back to the toggle rather than dropping it on the document body — except the two
+transfers, Rename and a clone/replace-with acceptance, whose newly mounted dialogs own focus instead, so the teardown
+retires its return rather than racing their mount handoff. An item made inert by an in-flight operation stays focusable
+and refuses on activation (`aria-disabled`) rather than going natively `disabled`, because a browser cannot focus a
+disabled control and a menu that went busy under the user would otherwise swallow every navigation key. Arrows step from
+whichever item actually has focus, including one the user focused by pointer or screen reader in the middle of an arrow
+burst. A page-side check rejects navigation focus moves after independent focus, including requests already sent across
+the desktop webview. Each request retains the page's independent-focus epoch from its key press; a synchronous input
+relay updates Rust with the current focus event's source before the original event, so a user landing at the in-flight
+target also retires older requested destinations. Initial menu focus uses the same function without that check and does
+not invalidate navigation. Nothing activates without Enter or Space on the visibly focused item. The row tint is owned
+by the menu's open state, not by `:focus-within`: a dismissal may return focus to the toggle while the pointer is
+elsewhere, and that focused toggle must not make the row look as though its menu is still open. The focused toggle or
+menu item retains the normal `:focus-visible` indicator, so pointer-return focus and keyboard focus remain visually
+distinct without changing the dismissal or focus-return contract. **Confirm in place:** a destructive item swaps the
+panel's own contents for the consequence line and a confirm/cancel pair with focus on the enabled confirming answer, or
+Cancel while busy, rather than opening a second surface; that sub-state is a `role="dialog"` inside the same positioned
+box, and it survives the panel closing, which is why it deliberately does not answer Escape. The one exception is a
+pointer going down outside the open menu: that closes the menu and answers a showing confirmation with cancel, since a
+click elsewhere is the user leaving the question, and a prompt kept for the next open would greet them with a question
+they already walked away from. Every other dismissal still preserves it. Outside dismissal also never takes focus back
+from the control the pointer went to: the toggle handback only reclaims focus that is on nothing, on the document body,
+or still inside a row menu.
 
 Each session confirmation mount schedules focus on its enabled confirming answer, falling back to Cancel if disabled.
 The script supplements native autofocus because browsers can ignore it after a document's first prompt, including when
@@ -1110,22 +1110,23 @@ target with a 6 px gap and, only without room there, below with a 28 px gap: a p
 standard cursors extend downward from their hot spot, so space above a control is never under the cursor while a box
 just below a small icon would be. It is `position: fixed` from the target's measured rectangle so no scroll container
 clips it, wears the row menu panels' background, border and shadow, wraps at about 280 px and clamps to eight lines.
-Split-action menu items opt into their enclosing panel as the placement rectangle, so their full reasons do not cover
-neighboring choices at normal window heights. The item retains tooltip ownership and dismissal; the existing watch tick
-also follows panel-size changes. Missing panels fall back to the item, and the ordinary short-window clamp remains. Peer
-text still goes through `display_peer` before it becomes tooltip text, which the script sets with `textContent`; the
-card copies nodes already rendered by Rust and never parses its serialized change signature as markup. The tooltip
-element is a visual aid kept out of the accessibility tree (`aria-hidden`); icon-only controls and status marks keep
-accessible text of their own (an `aria-label` or a `.visually-hidden` copy), and the hover texts that carry information
-a screen-reader user needs (the header copy buttons' full values, a host's update urgency, a too-new host's remedy) are
-also exposed as accessible descriptions. Plain timestamps and the client build string are hover-only. Two hover displays
-keep their own shape and carry no `data-tooltip`, so two popups never stack: a host's update-progress popup and the
-terminal's link-target display. Coverage is guarded by a browser sweep (`e2e/tests/tooltip-coverage.spec.ts`) that
-visits the states the suite's fixtures reach and fails on any visible `button`, `[role=button]`, `[role=tab]`,
-`[role=menuitem]`, `a[href]`, `select`, `summary`, checkbox or radio button without hover text (for the last two, on the
-`label` that wraps them), exempting only described items in the session and host rows' menus. The local and remote host
-marks carry their hover text inside the icon component itself, so the session rows and the host rows both get it without
-either row's layout changing.
+Split-action menu items and session Rename opt into their enclosing panel as the placement rectangle, so their full
+reasons and shortcut help do not cover neighboring choices at normal window heights. Other described row-menu commands
+and template-number options need no duplicate tooltip. The item retains tooltip ownership and dismissal; the existing
+watch tick also follows panel-size changes. Missing panels fall back to the item, and the ordinary short-window clamp
+remains. Peer text still goes through `display_peer` before it becomes tooltip text, which the script sets with
+`textContent`; the card copies nodes already rendered by Rust and never parses its serialized change signature as
+markup. The tooltip element is a visual aid kept out of the accessibility tree (`aria-hidden`); icon-only controls and
+status marks keep accessible text of their own (an `aria-label` or a `.visually-hidden` copy), and the hover texts that
+carry information a screen-reader user needs (the header copy buttons' full values, a host's update urgency, a too-new
+host's remedy) are also exposed as accessible descriptions. Plain timestamps and the client build string are hover-only.
+Two hover displays keep their own shape and carry no `data-tooltip`, so two popups never stack: a host's update-progress
+popup and the terminal's link-target display. Coverage is guarded by a browser sweep
+(`e2e/tests/tooltip-coverage.spec.ts`) that visits the states the suite's fixtures reach and fails on any visible
+`button`, `[role=button]`, `[role=tab]`, `[role=menuitem]`, `a[href]`, `select`, `summary`, checkbox or radio button
+without hover text (for the last two, on the `label` that wraps them), exempting only described items in the session and
+host rows' menus and described template-number options. The local and remote host marks carry their hover text inside
+the icon component itself, so the session rows and the host rows both get it without either row's layout changing.
 
 Known risks, accepted deliberately:
 

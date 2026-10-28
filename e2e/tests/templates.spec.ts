@@ -246,6 +246,8 @@ for (const [field, value] of [
  * surrounding dialog isolates the rest of the page. Partial templates retain
  * the same complete key menu.
  * An external move made while this dialog stays open must survive its next edit.
+ * Every option's binding help is a separate accessible description, keeping
+ * the chord-only name stable when a peer template owns the key.
  */
 test("number keys move, follow rename, and stay freed after undo", async ({ page, request }) => {
   const prefix = `number-bindings-${Date.now()}`;
@@ -269,11 +271,24 @@ test("number keys move, follow rename, and stay freed after undo", async ({ page
     await expect(keyButton(a)).toBeFocused();
     await page.keyboard.press("ArrowDown");
     const menu = dialog.getByRole("menu", { name: `number key for ${a}`, exact: true });
-    await expect(menu.getByRole("menuitem", { name: "no shortcut", exact: true })).toBeFocused();
+    const none = menu.getByRole("menuitem", { name: "No shortcut", exact: true });
+    await expect(none).toBeFocused();
+    await expect(none).toHaveAccessibleDescription("Remove this template's number shortcut");
+    const unbound = menu.getByRole("menuitem", { name: "Ctrl+Shift+1", exact: true });
+    await expect(unbound).toHaveAccessibleDescription("No template uses this key");
+    // Every choice keeps help outside its action name, including unbound keys.
+    await expect(menu.getByRole("menuitem")).toHaveCount(11);
+    for (const option of await menu.getByRole("menuitem").all()) {
+      const descriptionId = await option.getAttribute("aria-describedby");
+      expect(descriptionId).toMatch(/^template-number-\d+-(none|[0-9])-description$/);
+      await expect(option).toHaveAccessibleName((await option.locator(".menu-label").innerText()).trim());
+      await expect(option).toHaveAccessibleDescription((await option.locator(".menu-description").innerText()).trim());
+      await expect(menu.locator(`[id="${descriptionId}"]`)).toHaveCount(1);
+    }
     await page.keyboard.press("ArrowDown");
     await expect(menu.getByRole("menuitem", { name: "Ctrl+Shift+1", exact: true })).toBeFocused();
     await page.keyboard.press("ArrowUp");
-    await expect(menu.getByRole("menuitem", { name: "no shortcut", exact: true })).toBeFocused();
+    await expect(none).toBeFocused();
     await page.keyboard.press("Escape");
     await expect(menu).toHaveCount(0);
     await expect(dialog).toBeVisible();
@@ -281,10 +296,17 @@ test("number keys move, follow rename, and stay freed after undo", async ({ page
     await keyButton(a).click();
     await menu.getByRole("menuitem", { name: "Ctrl+Shift+1", exact: true }).click();
     await expect.poll(async () => (await readPreferences(request)).template_shortcuts).toEqual({ "1": a });
+    await keyButton(a).click();
+    await expect(menu.getByRole("menuitem", { name: "Ctrl+Shift+1", exact: true }))
+      .toHaveAccessibleDescription("This template");
+    await page.keyboard.press("Escape");
+    await expect(keyButton(a)).toBeFocused();
     await keyButton(b).click();
     const other = dialog.getByRole("menu", { name: `number key for ${b}`, exact: true });
-    await expect(other.getByRole("menuitem", { name: `Ctrl+Shift+1 ${a} (moves here)`, exact: true })).toBeVisible();
-    await other.getByRole("menuitem", { name: `Ctrl+Shift+1 ${a} (moves here)`, exact: true }).click();
+    const moving = other.getByRole("menuitem", { name: "Ctrl+Shift+1", exact: true });
+    await expect(moving).toBeVisible();
+    await expect(moving).toHaveAccessibleDescription(`${a} (moves here)`);
+    await moving.click();
     await expect.poll(async () => (await readPreferences(request)).template_shortcuts).toEqual({ "1": b });
     await keyButton(b).click();
     await other.getByRole("menuitem", { name: "Ctrl+Shift+0", exact: true }).click();
@@ -324,7 +346,7 @@ test("number keys move, follow rename, and stay freed after undo", async ({ page
     await keyButton(partial).click();
     const remove = dialog.getByRole("menu", { name: `number key for ${partial}`, exact: true });
     await expect(remove.getByRole("menuitem")).toHaveCount(11);
-    await remove.getByRole("menuitem", { name: "no shortcut", exact: true }).click();
+    await remove.getByRole("menuitem", { name: "No shortcut", exact: true }).click();
     await expect.poll(async () => (await readPreferences(request)).template_shortcuts ?? {}).toEqual({});
     await expect(keyButton(partial)).toBeEnabled();
   } finally {
@@ -588,7 +610,7 @@ for (const movement of ["scroll", "resize", "width-only resize"]) {
       await dialog.getByRole("button", { name: `number shortcut ${names[0]}`, exact: true }).click();
       const menu = dialog.getByRole("menu", { name: `number key for ${names[0]}`, exact: true });
       await expect(menu).toBeVisible();
-      await expect(menu.getByRole("menuitem", { name: "no shortcut", exact: true })).toBeFocused();
+      await expect(menu.getByRole("menuitem", { name: "No shortcut", exact: true })).toBeFocused();
       if (movement === "scroll") {
         await dialog.evaluate(node => { node.scrollTop = 120; });
         await expect.poll(() => dialog.evaluate(node => node.scrollTop)).toBe(120);
@@ -616,11 +638,16 @@ for (const movement of ["scroll", "resize", "width-only resize"]) {
 /** A delayed outside relay can arrive after another popup owns focus, especially
  * across the desktop bridge. Open both by keyboard to hold that ordering without
  * a timer race, then deliver the old relay twice: neither arrival may take focus.
+ * Simultaneously mounted menus must also announce their own binding ownership;
+ * document-wide description IDs cannot let the old menu describe the new one.
  */
 test("number popup delayed close keeps another popup's focus", async ({ page, request }) => {
   const names = ["a", "b"].map(s => `number-focus-${Date.now()}-${s}`);
+  const previous = await readPreferences(request);
   try {
     for (const name of names) await putTemplate(request, name, { kind: "agent", agent: "claude" });
+    await patchPreferences(request, { template_shortcuts: { "1": names[0] } });
+    expect((await readPreferences(request)).template_shortcuts).toEqual({ "1": names[0] });
     await page.goto("/");
     await page.locator(".templates-button").click();
     const dialog = page.getByRole("dialog", { name: "templates", exact: true });
@@ -630,10 +657,20 @@ test("number popup delayed close keeps another popup's focus", async ({ page, re
       await toggle.focus();
       await expect(toggle).toBeFocused();
       await page.keyboard.press("ArrowDown");
-      await expect(menu(name).getByRole("menuitem", { name: "no shortcut", exact: true })).toBeFocused();
+      await expect(menu(name).getByRole("menuitem", { name: "No shortcut", exact: true })).toBeFocused();
     }
     await expect(menu(names[0])).toBeVisible();
-    const current = menu(names[1]).getByRole("menuitem", { name: "no shortcut", exact: true });
+    const own = menu(names[0]).getByRole("menuitem", { name: "Ctrl+Shift+1", exact: true });
+    const moving = menu(names[1]).getByRole("menuitem", { name: "Ctrl+Shift+1", exact: true });
+    await expect(own).toHaveAccessibleDescription("This template");
+    await expect(moving).toHaveAccessibleDescription(`${names[0]} (moves here)`);
+    const ownDescription = await own.getAttribute("aria-describedby");
+    const movingDescription = await moving.getAttribute("aria-describedby");
+    expect(ownDescription).not.toBe(movingDescription);
+    for (const id of [ownDescription, movingDescription]) {
+      await expect(dialog.locator(`[id="${id}"]`)).toHaveCount(1);
+    }
+    const current = menu(names[1]).getByRole("menuitem", { name: "No shortcut", exact: true });
     const relay = dialog.locator(`[data-row-menu="template-number:${names[0]}"]`);
     await expect(relay).toHaveCount(1);
     for (let delivery = 0; delivery < 2; delivery++) {
@@ -641,11 +678,13 @@ test("number popup delayed close keeps another popup's focus", async ({ page, re
       await relay.evaluate(node => (node as HTMLButtonElement).click());
       await expect(menu(names[0])).toHaveCount(0);
       await expect(current).toBeFocused();
+      await expect(moving).toHaveAccessibleDescription(`${names[0]} (moves here)`);
     }
     await page.keyboard.press("Escape");
     await expect(menu(names[1])).toHaveCount(0);
     await expect(dialog).toBeVisible();
   } finally {
+    await patchPreferences(request, { template_shortcuts: previous.template_shortcuts ?? null });
     for (const name of names) await deleteTemplate(request, name);
   }
 });

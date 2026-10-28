@@ -3904,11 +3904,6 @@ a:any-link,
 .host-dialog-answers { display: flex; justify-content: flex-end; align-items: baseline; gap: 8px; }
 .host-dialog-answers .btn { font-size: 12px; line-height: 1.4; padding: 7px 12px; margin: 0; }
 .host-dialog-permanent-hint { color: var(--fg-1); font-size: 11px; margin: 0; }
-/* Removal keeps its narrower 480px card. Leave enough room for the full hint
-   even while the vendored face is loading and the engine uses a fallback. */
-@media (min-width: 561px) {
-  .host-remove-dialog .host-dialog-permanent-hint { font-size: 10px; }
-}
 .host-dialog-help { color: var(--fg-1); font-size: 12px; line-height: 1.5; margin: 0; }
 @media (max-width: 560px) {
   .host-dialog-answers { flex-direction: column-reverse; align-items: stretch; }

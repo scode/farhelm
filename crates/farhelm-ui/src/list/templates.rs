@@ -241,6 +241,9 @@ fn use_template_anchor_movement(
 /// A row-local popup stays inside modal isolation while using the app's menu
 /// keyboard, placement and outside-dismiss machinery. Escape closes this menu
 /// without bubbling into the containing Templates dialog.
+/// Option names stay concise; binding ownership and the consequence of clearing
+/// a shortcut are visible and accessible descriptions on the same native items.
+/// Those descriptions replace option tooltips; the toggle retains launch help.
 #[component]
 fn NumberShortcutMenu(
     name: String,
@@ -396,23 +399,32 @@ fn NumberShortcutMenu(
                             summary: rsx! { "Number shortcut" },
                         }
                         div { class: "session-row-menu-items", role: "menu", aria_label: "number key for {display_peer(&name)}",
+                            // A delayed outside relay can leave two menus mounted.
+                            // Reuse the opaque mount identity so one menu cannot
+                            // supply another's spoken ownership description.
                             for key in order.actions() {
                                 button { r#type: "button", class: "btn menu-item session-row-menu-item templates-number-option", role: "menuitem",
+                                    aria_label: key.map(|key| TEMPLATE_SHORTCUTS.number_chord(key)).unwrap_or_else(|| "No shortcut".into()),
+                                    aria_describedby: format!("template-number-{instance}-{}-description", key.unwrap_or("none")),
                                     tabindex: if focused().and_then(|position| order.get(position)).or(order.get(0)) == Some(key) { "0" } else { "-1" },
                                     "data-menu-focus": crate::menu_panel::menu_item_focus_key(wiring, key),
-                                    "data-tooltip": if let Some(key) = key { format!("give this template {}", TEMPLATE_SHORTCUTS.number_chord(key)) } else { "remove this template's number shortcut".into() },
                                     onmounted: move |element| remember_menu_item(wiring, key, element.data()),
                                     onfocusin: move |_| record_menu_item_focus(wiring, key), onfocusout: move |_| focused.set(None),
                                     onkeydown: move |event| { event.stop_propagation(); handle_menu_key(&event, order.position(key), wiring, &()); },
                                     onclick: move |_| { close_menu.call(()); on_choose.call(key.map(str::to_string)); },
                                     crate::icons::ActionIcon { glyph: crate::icons::ActionGlyph::Templates, class: "menu-icon session-row-menu-icon" }
                                     crate::menu_panel::MenuItemCopy {
-                                        label: rsx! { if let Some(key) = key { span { class: "font-mono", "{TEMPLATE_SHORTCUTS.number_chord(key)}" } } else { "no shortcut" } },
-                                        description: key.and_then(|key| bindings.get(key)).map(|owner| rsx! {
-                                            span { class: "templates-number-owner peer-value", dir: "ltr",
-                                                if owner.raw() == name { "this template" } else { "{owner.escaped()} (moves here)" }
-                                            }
-                                        }),
+                                        label: rsx! { if let Some(key) = key { span { class: "font-mono", "{TEMPLATE_SHORTCUTS.number_chord(key)}" } } else { "No shortcut" } },
+                                        description_id: format!("template-number-{instance}-{}-description", key.unwrap_or("none")),
+                                        description: rsx! {
+                                            if let Some(key) = key {
+                                                if let Some(owner) = bindings.get(key) {
+                                                    span { class: "templates-number-owner peer-value", dir: "ltr",
+                                                        if owner.raw() == name { "This template" } else { "{owner.escaped()} (moves here)" }
+                                                    }
+                                                } else { "No template uses this key" }
+                                            } else { "Remove this template's number shortcut" }
+                                        },
                                     }
                                 }
                             }

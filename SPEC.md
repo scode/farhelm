@@ -832,20 +832,21 @@ agent choice is independent of that destination:
   Templates with a binding hint; an incomplete template, refusal or YOLO question uses quick launch's ordinary New
   fallback. Other visible modals retain the keyboard, held keys act once, and the chord never reaches the terminal.
   Matching uses the physical digit key, independent of the printed character; the numeric keypad is excluded. Each row's
-  key button opens a menu with no shortcut, then 1–9 and 0; occupied keys name their template, and choosing one moves
-  it. A template has at most one key and each key has at most one template. Any template can hold a number key,
-  including one that cannot launch alone; only the combined setup must be launchable. Pressing such a key alone opens
-  New with the template applied and a prominent alert banner at the top explaining that it cannot launch on its own and
-  how to combine it with the sequence prefix. The banner expires about six seconds after application finishes, or when
-  the user starts editing. Both key and bolt hover explain launching, their uniqueness and the current choice;
-  partial-template key hover explains composition. The bolt retains its existing eligibility rule. Bindings are a
-  whole-map shared preference, replaced on write; concurrent windows may lose one map edit, and a GUI save, which
-  re-reads the bindings first, can undo an agent's or the command line's binding change that lands between that read and
-  its write (One GUI at a time). Names must be syntactically valid but need not exist at write time. Rename keeps a key,
-  delete frees it through both delete paths, and Undo never restores it. A browser that reserves a chord keeps its
-  behavior. An agent may assign or clear a number key through the same template verbs and approval card. Assigning an
-  occupied key moves it from its previous template, as the Templates editor does; a key can still belong to a partial
-  template.
+  key button opens a menu with No shortcut, then 1–9 and 0; every option has a description, occupied keys name their
+  template there, and choosing one moves it. Accessible command names remain No shortcut or the key chord; ownership and
+  binding help are separate accessible descriptions. A template has at most one key and each key has at most one
+  template. Any template can hold a number key, including one that cannot launch alone; only the combined setup must be
+  launchable. Pressing such a key alone opens New with the template applied and a prominent alert banner at the top
+  explaining that it cannot launch on its own and how to combine it with the sequence prefix. The banner expires about
+  six seconds after application finishes, or when the user starts editing. Both key and bolt hover explain launching,
+  their uniqueness and the current choice; partial-template key hover explains composition. The bolt retains its
+  existing eligibility rule. Bindings are a whole-map shared preference, replaced on write; concurrent windows may lose
+  one map edit, and a GUI save, which re-reads the bindings first, can undo an agent's or the command line's binding
+  change that lands between that read and its write (One GUI at a time). Names must be syntactically valid but need not
+  exist at write time. Rename keeps a key, delete frees it through both delete paths, and Undo never restores it. A
+  browser that reserves a chord keeps its behavior. An agent may assign or clear a number key through the same template
+  verbs and approval card. Assigning an occupied key moves it from its previous template, as the Templates editor does;
+  a key can still belong to a partial template.
 - Quick-launch sequences compose templates without changing the single-chord shortcuts. Cmd+X in the Mac desktop app, or
   Ctrl+Shift+X everywhere else, starts a sequence, except in a text field outside the launcher where it retains its
   normal meaning. In the launcher's own text fields it starts a sequence only when no text is selected; with a selection

@@ -128,19 +128,19 @@ pub(crate) fn MenuSeparator(#[props(default)] class: String) -> Element {
 /// Height kept free below the session flyout's clamped top, sized to show
 /// the full menu near the viewport bottom without internal scrolling.
 ///
-/// Measured, not derived: the tallest ordinary menu (header, then rename,
+/// Measured, not derived: the tallest ordinary menu has a header, then rename,
 /// mark read/unread, pin to top, clone, replace with, replace, stop and
-/// delete, with the five descriptions and three separators) renders 415.33px
+/// delete, with eight descriptions and four separators. It renders 488.89px
 /// tall in both Chromium and WebKit with loaded Inter, a one-line subject
-/// and a short invocation. 464px leaves the 8px viewport bottom gap plus
-/// about 40px for font-metric differences between renderers and platforms.
-/// Re-measure when an item, description, or the header changes height.
+/// and a short invocation. 528px leaves the 8px viewport bottom gap plus
+/// about 31px for font-metric differences between renderers and platforms.
+/// Re-measure when an item, description or the header changes height.
 /// Wrapped peer-authored headers may still scroll; the reserve describes
 /// the ordinary menu, not an upper bound on arbitrary subject text.
 /// Shorter menus and the confirm prompts fit inside the same reserve;
 /// `max-height` with internal scrolling is what keeps a viewport shorter
 /// than the reserve safe.
-const SESSION_MENU_PANEL_MIN_RESERVE_PX: f64 = 464.0;
+const SESSION_MENU_PANEL_MIN_RESERVE_PX: f64 = 528.0;
 
 /// Where the actions panel currently believes its own screen position is,
 /// while an async `get_client_rect()` measurement races the render that
@@ -1514,7 +1514,7 @@ mod tests {
         let placement = PanelPlacement::Measured(rect);
         let style = session_menu_placement_style(placement);
         assert!(style.contains("--menu-left: max(8px, min(344px, calc(100vw - 254px)))"));
-        assert!(style.contains("min(46px, calc(100vh - 464px))"));
+        assert!(style.contains("min(46px, calc(100vh - 528px))"));
         assert!(style.contains("right: auto"));
         assert!(
             session_menu_pointer_style(placement)
