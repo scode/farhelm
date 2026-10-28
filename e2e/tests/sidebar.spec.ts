@@ -1574,7 +1574,7 @@ test("the actions menu exposes a real menu-button relationship", async ({ page, 
     }
     // Descriptions contribute context through aria-describedby; the
     // action words remain concise accessible names for quick navigation.
-    await expect(menu.getByRole("separator")).toHaveCount(3);
+    await expect(menu.getByRole("separator")).toHaveCount(4);
 
     await target.locator(".session-row-delete").click();
     // The prompt is a named exchange, not a menu with no items in it.
@@ -2710,15 +2710,24 @@ test("the actions menu has a raised surface and inset choices", async ({ page, r
     await expect(clone).toHaveCSS("background-color", highlightFill);
     await expect(clone).toHaveCSS("color", highlightText);
 
-    // Three rules separate rename, creation/replacement, stop, and delete.
+    // Replace has its own destructive boundary; the editable launcher stays
+    // with Clone. Stop and Delete retain their existing group boundaries.
     const separator = panel.locator(".session-row-menu-separator");
-    await expect(separator).toHaveCount(3);
+    await expect(separator).toHaveCount(4);
     expect(
       await separator.first().evaluate((element) => getComputedStyle(element).backgroundColor),
     ).toBe(await tokenColor(page, "--border-dim"));
     const separatorBox = (await separator.last().boundingBox())!;
     const deleteBox = (await panel.locator(".session-row-delete").boundingBox())!;
     expect(separatorBox.y).toBeLessThanOrEqual(deleteBox.y);
+    for (const action of ["replace", "stop", "delete"]) {
+      const destructive = panel.locator(`.session-row-${action}`);
+      await expect(destructive).toHaveClass(/\bmenu-danger\b/);
+      await expect(destructive).toHaveCSS("color", await tokenColor(page, "--danger"));
+      expect(await destructive.evaluate((element) => element.previousElementSibling?.getAttribute("role")))
+        .toBe("separator");
+    }
+    await expect(panel.locator(".session-row-replace-with")).not.toHaveClass(/\bmenu-danger\b/);
   } finally {
     await cleanupSession(request, session.id);
   }
@@ -2726,13 +2735,13 @@ test("the actions menu has a raised surface and inset choices", async ({ page, r
 
 /**
  * The session flyout must preserve the visible list and point to its row
- * while giving each action a short name and optional spoken explanation.
+ * while giving every action a short name and a separate spoken explanation.
  * This measures a row with room for the whole menu below it, where
  * viewport clamping does not have to move the panel away from its
  * row-aligned position.
  *
  * The shared stack's list can be longer than the viewport, so the row is
- * not assumed to be on screen: it is brought to the sidebar's middle and
+ * not assumed to be on screen: it is brought to the sidebar's top and
  * its toggle hovered (the pointer move `openRowMenu` makes) before anything
  * is measured. A WebKit run once failed here because that hover scrolled
  * a far-down row to the viewport's bottom edge, where the clamp correctly
@@ -2750,14 +2759,14 @@ test("the session flyout sits beside its row with a titled, described menu", asy
     await expect(target).toBeVisible({ timeout: 20_000 });
     await waitForHostsListSettled(page);
     await page.evaluate(() => document.fonts.ready);
-    await target.evaluate((element) => element.scrollIntoView({ block: "center" }));
+    await target.evaluate((element) => element.scrollIntoView({ block: "start" }));
     await target.locator(".session-row-menu").hover();
-    // The flyout keeps SESSION_MENU_PANEL_MIN_RESERVE_PX (464px) below its
+    // The flyout keeps SESSION_MENU_PANEL_MIN_RESERVE_PX (528px) below its
     // top before clamping upward; a row lower than that is the clamp's
     // case, which the scrolled-list tests below own.
     const restingRow = (await target.boundingBox())!;
     expect(
-      restingRow.y + 464,
+      restingRow.y + 528,
       "the row must leave the full menu's reserve below it, or this test measures the clamp",
     ).toBeLessThanOrEqual(1000);
     await openRowMenu(target);
@@ -2801,17 +2810,34 @@ test("the session flyout sits beside its row with a titled, described menu", asy
     await expect(panel.locator(".session-row-menu-summary")).not.toBeEmpty();
 
     const menu = target.getByRole("menu", { name: `session actions for ${title}` });
-    for (const name of ["clone", "replace with", "replace", "stop", "delete"]) {
+    const markName = await panel.locator(".session-row-mark-seen").getAttribute("aria-label");
+    expect(markName).toMatch(/^mark (read|unread)$/);
+    const pinName = await panel.locator(".session-row-pin").getAttribute("aria-label");
+    expect(pinName).toMatch(/^(Pin to top|Unpin)$/);
+    for (const name of ["rename", markName!, pinName!, "clone", "replace with", "replace", "stop", "delete"]) {
       const item = menu.getByRole("menuitem", { name, exact: true });
       const descriptionId = await item.getAttribute("aria-describedby");
       expect(descriptionId, `${name} must refer to its explanation`).toBeTruthy();
       await expect(panel.locator(`[id="${descriptionId}"]`)).toHaveClass(/session-row-menu-description/);
       await expect(panel.locator(`[id="${descriptionId}"]`)).not.toBeEmpty();
+      await expect(item).toHaveAccessibleName(name);
+      await expect(item).toHaveAccessibleDescription((await panel.locator(`[id="${descriptionId}"]`).innerText()).trim());
     }
-    await expect(menu.getByRole("menuitem", { name: "rename", exact: true })).not.toHaveAttribute(
-      "aria-describedby",
-      /.+/,
-    );
+    await expect(panel.locator(".session-row-menu-description")).toHaveCount(8);
+    // Rename's shortcut help is still required. At this roomy height it must
+    // clear the entire panel, rather than cover the subject or another choice.
+    await page.mouse.move(0, 0);
+    await menu.getByRole("menuitem").first().press("ArrowDown");
+    await expect(menu.getByRole("menuitem").nth(1)).toBeFocused();
+    await page.keyboard.press("Home");
+    await expect(menu.getByRole("menuitem", { name: "rename", exact: true })).toBeFocused();
+    const help = page.locator(".farhelm-tooltip");
+    await expect(help).toBeVisible();
+    await expect(help).toContainText("rename: give this session a new title");
+    const helpBox = (await help.boundingBox())!;
+    const helpPanelBox = (await panel.boundingBox())!;
+    expect(helpBox.y + helpBox.height <= helpPanelBox.y || helpBox.y >= helpPanelBox.y + helpPanelBox.height,
+      "Rename help must leave its header and menu choices readable").toBe(true);
   } finally {
     await cleanupSession(request, session.id);
   }
@@ -8432,7 +8458,7 @@ test("a manual mark-unread on the open session sticks", async ({ page, request }
     });
     await openRowMenu(target);
     const markSeenItem = target.locator(".session-row-mark-seen");
-    await expect(markSeenItem).toHaveText("mark unread");
+    await expect(markSeenItem).toHaveAccessibleName("mark unread");
     const [cleared] = await Promise.all([
       page.waitForResponse((candidate) =>
         candidate.request().method() === "PUT" && new URL(candidate.url()).pathname === `/api/sessions/${encodeURIComponent(session.id)}/seen` &&
@@ -8508,21 +8534,21 @@ test("a manual read toggle reverses under a build mismatch", async ({ page, requ
     await expect(target).not.toHaveAttribute("data-session-selected", "true");
     await openRowMenu(target);
     const toggle = target.locator(".session-row-mark-seen");
-    await expect(toggle).toHaveText("mark read");
+    await expect(toggle).toHaveAccessibleName("mark read");
     const read = page.waitForResponse((reply) => reply.url().endsWith(`/api/sessions/${encodeURIComponent(session.id)}/seen`) &&
       reply.request().method() === "PUT" && reply.request().postDataJSON().seen_activity_at !== null);
     await toggle.click();
     expect((await read).ok()).toBe(true);
     await expect(target.getByRole("menu")).toHaveCount(0);
     await openRowMenu(target);
-    await expect(toggle).toHaveText("mark unread");
+    await expect(toggle).toHaveAccessibleName("mark unread");
     const unread = page.waitForResponse((reply) => reply.url().endsWith(`/api/sessions/${encodeURIComponent(session.id)}/seen`) &&
       reply.request().method() === "PUT" && reply.request().postDataJSON().seen_activity_at === null);
     await toggle.click();
     expect((await unread).ok()).toBe(true);
     await expect(target.getByRole("menu")).toHaveCount(0);
     await openRowMenu(target);
-    await expect(toggle).toHaveText("mark read");
+    await expect(toggle).toHaveAccessibleName("mark read");
     await expect(target).not.toHaveAttribute("data-session-selected", "true");
   } finally {
     await cleanupSession(request, session.id);

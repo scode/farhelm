@@ -1204,13 +1204,6 @@ pub(super) fn SessionRow(
     } else {
         "mark unread"
     };
-    // The menu item has no description line, so its hover text says what
-    // the toggle changes: the dot's new-output color, in every client.
-    let mark_seen_tooltip = if unseen == Some(true) {
-        "mark read: treat this session's latest output as seen"
-    } else {
-        "mark unread: show this session as having new output again"
-    };
     // The value this row's toggle click sends: clearing the seen stamp
     // (`None`) when marking unread, or the row's current effective activity
     // (`Some`) when marking read — `api::mark_seen`'s own contract.
@@ -2104,6 +2097,9 @@ pub(super) fn SessionRow(
                             } else {
                                 "session-row-menu-panel menu-prompt"
                             },
+                        // Rename retains shortcut help. Clear the whole panel,
+                        // including its header, through the existing tooltip anchor.
+                        "data-tooltip-panel": "true",
                         // The confirm sub-states ARE a small named exchange:
                         // one consequence sentence and its two answers,
                         // with focus on the confirming answer when enabled,
@@ -2334,6 +2330,8 @@ pub(super) fn SessionRow(
                                         class: "btn menu-item session-row-menu-item session-row-rename",
                                         role: "menuitem",
                                         aria_label: "rename",
+                                        aria_describedby: "session-menu-rename-description",
+                                        "data-tooltip-anchor": "panel",
                                         "data-tooltip": if selected {
                                             format!("rename: give this session a new title ({})", crate::SESSION_RENAME_SHORTCUT)
                                         } else {
@@ -2368,7 +2366,11 @@ pub(super) fn SessionRow(
                                             on_rename_start.call(rename_start.clone());
                                         },
                                         MenuActionIcon { action: MenuAction::Rename }
-                                        menu_panel::MenuItemCopy { label: rsx! { "rename" } }
+                                        menu_panel::MenuItemCopy {
+                                            label: rsx! { "rename" },
+                                            description_id: "session-menu-rename-description",
+                                            description: rsx! { "Give this session a new title" },
+                                        }
                                     }
                                 }
                                 // Offered whenever `offers_mark_seen` says so
@@ -2386,7 +2388,7 @@ pub(super) fn SessionRow(
                                         class: "btn menu-item session-row-menu-item session-row-mark-seen",
                                         role: "menuitem",
                                         aria_label: "{mark_seen_label}",
-                                        "data-tooltip": "{mark_seen_tooltip}",
+                                        aria_describedby: "session-menu-mark-seen-description",
                                         aria_disabled: if busy { "true" },
                                         tabindex: if menu_tab_stop == Some(MenuAction::MarkSeen) { "0" } else { "-1" },
                                         "data-menu-focus": menu_panel::menu_item_focus_key(menu_wiring, MenuAction::MarkSeen),
@@ -2416,7 +2418,14 @@ pub(super) fn SessionRow(
                                             on_mark_seen.call(mark_seen_target.clone());
                                         },
                                         MenuActionIcon { action: MenuAction::MarkSeen }
-                                        menu_panel::MenuItemCopy { label: rsx! { "{mark_seen_label}" } }
+                                        menu_panel::MenuItemCopy {
+                                            label: rsx! { "{mark_seen_label}" },
+                                            description_id: "session-menu-mark-seen-description",
+                                            description: rsx! {
+                                                if unseen == Some(true) { "Treat the latest output as seen" }
+                                                else { "Show new output again" }
+                                            },
+                                        }
                                     }
                                 }
                                 button {
@@ -2424,11 +2433,7 @@ pub(super) fn SessionRow(
                                     class: "btn menu-item session-row-menu-item session-row-pin",
                                     role: "menuitem",
                                     aria_label: "{pin_label}",
-                                    "data-tooltip": if session.pinned {
-                                        "unpin: sort this session with the others again"
-                                    } else {
-                                        "pin to top: keep this session above unpinned ones, in the same sort order"
-                                    },
+                                    aria_describedby: "session-menu-pin-description",
                                     aria_disabled: if busy { "true" },
                                     tabindex: if menu_tab_stop == Some(MenuAction::TogglePin) { "0" } else { "-1" },
                                     "data-menu-focus": menu_panel::menu_item_focus_key(menu_wiring, MenuAction::TogglePin),
@@ -2440,7 +2445,14 @@ pub(super) fn SessionRow(
                                         if !busy { on_pin.call(pin_target.clone()); }
                                     },
                                     MenuActionIcon { action: MenuAction::TogglePin }
-                                    menu_panel::MenuItemCopy { label: rsx! { "{pin_label}" } }
+                                    menu_panel::MenuItemCopy {
+                                        label: rsx! { "{pin_label}" },
+                                        description_id: "session-menu-pin-description",
+                                        description: rsx! {
+                                            if session.pinned { "Sort this session with the others again" }
+                                            else { "Keep this session above unpinned ones" }
+                                        },
+                                    }
                                 }
                                 menu_panel::MenuSeparator { class: "session-row-menu-separator" }
                                 // Offered on every row, unconditionally —
@@ -2541,7 +2553,11 @@ pub(super) fn SessionRow(
                                         description: rsx! { "edit settings, then swap" },
                                     }
                                 }
-                                // Also unconditional, directly beside the
+                                // Replace with only opens an editable launcher;
+                                // plain Replace begins a destructive group in
+                                // the existing native command order.
+                                menu_panel::MenuSeparator { class: "session-row-menu-separator" }
+                                // Also unconditional, directly after the
                                 // two above — the row's LAST "make a new
                                 // session from this one" action, and the
                                 // one difference from replace-with is the
@@ -2554,7 +2570,7 @@ pub(super) fn SessionRow(
                                 // calls the API.
                                 button {
                                     r#type: "button",
-                                    class: "btn menu-item session-row-menu-item session-row-replace",
+                                    class: "btn menu-item menu-danger session-row-menu-item session-row-replace",
                                     role: "menuitem",
                                     aria_label: "replace",
                                     aria_describedby: "session-menu-replace-description",

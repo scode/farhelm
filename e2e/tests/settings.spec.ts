@@ -1707,7 +1707,7 @@ test("settings reverses a permanent removal answer without reloading", async ({ 
     await first.locator(".host-remove").click();
     const removal = page.locator(".host-remove-dialog");
     await expect(removal).toBeVisible();
-    await expect(removal.getByText(`undo "don't ask again" with the gear at the top of the sidebar`)).toBeVisible();
+    await expect(removal.getByText(`Undo "don't ask again" with the gear at the foot of the host rail`)).toBeVisible();
     await removal.getByRole("button", { name: "remove, don't ask again", exact: true }).click();
     await expect(first).toHaveCount(0);
     await expect.poll(async () => (await readPreferences(request)).skip_host_remove_confirmation).toBe(true);

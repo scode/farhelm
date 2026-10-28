@@ -36,6 +36,7 @@ const sidebarWarningOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sidebar-
 const toolbarOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "session-toolbar";
 const tunnelOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "session-tunnels";
 const settingsOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "settings";
+const menusOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "menus";
 
 /** Photograph native-only chrome with the goal's explicit CSS-only fallback.
  * The ordinary staged web app supplies the surrounding frame and terminals.
@@ -246,6 +247,235 @@ async function inspectMenu(page: Page, panel: Locator) {
   expect(lastBox.y + lastBox.height).toBeLessThanOrEqual(panelBox.y + panelBox.height + 1);
   await panel.evaluate((element, top) => { element.scrollTop = top; }, scrollTop);
   await expect(menu).toBeVisible();
+}
+
+/** Show shortcut help as separate copy, including both real seeded owners.
+ * No choice is activated: these pictures cannot change a binding or template.
+ * The full review and focused menu review share the same popup lifecycle.
+ */
+async function numberMenuShots(page: Page, name: string, templates: Locator) {
+  await templates.getByRole("button", { name: "number shortcut codex-deep", exact: true }).click();
+  const panel = templates.locator(".templates-number-flyout .host-row-menu-panel");
+  const menu = panel.getByRole("menu", { name: "number key for codex-deep", exact: true });
+  try {
+    await expect(menu).toBeVisible();
+    await expect(menu.getByRole("menuitem")).toHaveCount(11);
+    await expect(panel.locator(".templates-number-owner")).toHaveCount(2);
+    await inspectMenu(page, panel);
+    const choices = [
+      ["No shortcut", "Remove this template's number shortcut", "none"],
+      ["Ctrl+Shift+1", "This template", "own"],
+      ["Ctrl+Shift+2", "No template uses this key", "unbound"],
+      ["Ctrl+Shift+8", "quick-claude (moves here)", "moving"],
+    ];
+    for (const [label, description] of choices) {
+      await expect(menu.getByRole("menuitem", { name: label, exact: true })).toHaveAccessibleDescription(description);
+    }
+    await shot(page, `${name}-templates-number-menu`, [page.locator("body")], { pad: 0 });
+    for (const [label, , suffix] of choices) {
+      // Home gives every traversal a known menu-owned origin. Arrow input
+      // supplies keyboard modality without activating any option.
+      await menu.getByRole("menuitem").first().press("ArrowDown");
+      await expect(menu.getByRole("menuitem").nth(1)).toBeFocused();
+      await page.keyboard.press("Home");
+      await expect(menu.getByRole("menuitem").first()).toBeFocused();
+      const option = menu.getByRole("menuitem", { name: label, exact: true });
+      for (let step = 0; step < 11 && !await option.evaluate((element) => document.activeElement === element); step++) {
+        await page.keyboard.press("ArrowDown");
+      }
+      await expect(option).toBeFocused();
+      await focusedShot(page, `${name}-templates-number-${suffix}-focused`, option);
+    }
+    // The final key is 0. Native End must reveal it through the panel's own
+    // scrolling; explicitly scrolling first would conceal a keyboard failure.
+    await page.keyboard.press("End");
+    const last = menu.getByRole("menuitem").last();
+    await expect(last).toHaveAccessibleName("Ctrl+Shift+0");
+    await expect(last).toBeFocused();
+    await insideViewport(page, last);
+    const lastBox = (await last.boundingBox())!;
+    const panelBox = (await panel.boundingBox())!;
+    expect(lastBox.y).toBeGreaterThanOrEqual(panelBox.y);
+    expect(lastBox.y + lastBox.height).toBeLessThanOrEqual(panelBox.y + panelBox.height);
+    await focusedShot(page, `${name}-templates-number-last-focused`, last);
+  } finally {
+    if (await menu.isVisible()) {
+      await menu.getByRole("menuitem").first().focus();
+      await page.keyboard.press("Escape");
+      await expect(menu).toBeHidden();
+    }
+  }
+}
+
+/** Capture every changed session-menu state on one owned quiet session.
+ * Seen and pin state come from real writes, not reply rewrites. Restore the
+ * exact seen stamp after returning to the original terminal, so automatic
+ * mark-on-open cannot undo cleanup. The short window must actually overflow.
+ */
+async function menuShots(page: Page, request: APIRequestContext, scenario: Scenario, name: string) {
+  const session = scenario.sessions.find((candidate) => candidate.status === "idle" && candidate.seen === false);
+  const initialId = await page.locator('.session-row[data-session-selected="true"]').getAttribute("data-session-id");
+  const initial = scenario.sessions.find((candidate) => readFleet().ids.get(candidate.title) === initialId);
+  if (!session || !initial) throw new Error("menu review needs its quiet staged session and original selected terminal");
+  const row = rowOf(page, scenario, (candidate) => candidate === session);
+  const id = await row.getAttribute("data-session-id");
+  if (!id) throw new Error("the menu row must have a staged session identity");
+  const response = await request.get("/api/sessions");
+  expect(response.ok()).toBe(true);
+  const saved = (await response.json()).sessions.find((candidate: { id: string }) => candidate.id === id);
+  expect(saved?.status.state, "read/unread pictures need the quiet live fixture").toBe("idle");
+  expect(Object.hasOwn(saved, "seen_activity_at")).toBe(true);
+  expect(typeof saved.pinned).toBe("boolean");
+  const viewport = page.viewportSize()!;
+  const pinUrl = `/api/sessions/${encodeURIComponent(id)}/pin`;
+  const panel = row.locator(".session-row-menu-panel");
+  const window = [page.locator("body")];
+  // Cleanup can run after pointer activation. Re-establish menu-owned focus
+  // before Escape so dismissal follows the same supported handoff as a user.
+  const closeMenu = async () => {
+    if (await panel.isVisible()) {
+      await panel.getByRole("menuitem").first().focus();
+      await page.keyboard.press("Escape");
+      await expect(panel).toBeHidden();
+    }
+  };
+  try {
+    expect((await request.put(pinUrl, { data: { pinned: false } })).ok()).toBe(true);
+    await expect(row).toHaveAttribute("data-session-pinned", "false");
+    // Selecting establishes read state through the ordinary reveal path.
+    await showSession(page, session);
+    await openRowMenu(row);
+    await expect(panel.getByRole("menuitem")).toHaveCount(8);
+    await expect(panel.locator(".menu-description")).toHaveCount(8);
+    await expect(panel.getByRole("separator")).toHaveCount(4);
+    await expect(panel.getByRole("menuitem", { name: "mark unread", exact: true }))
+      .toHaveAccessibleDescription("Show new output again");
+    await expect(panel.getByRole("menuitem", { name: "Pin to top", exact: true }))
+      .toHaveAccessibleDescription("Keep this session above unpinned ones");
+    await inspectMenu(page, panel);
+    await shot(page, `${name}-session-menu`, window, { pad: 0 });
+    const items = panel.getByRole("menuitem");
+    await items.first().press("ArrowDown");
+    await expect(items.nth(1)).toBeFocused();
+    await items.nth(1).press("Home");
+    await focusedShot(page, `${name}-session-menu-focused`, items.first());
+    await panel.getByRole("menuitem", { name: "mark unread", exact: true }).click();
+    await expect(panel).toBeHidden();
+    await expect(row.locator(".status-badge.idle.unseen")).toHaveCount(1);
+    await openRowMenu(row);
+    await expect(panel.getByRole("menuitem", { name: "mark read", exact: true }))
+      .toHaveAccessibleDescription("Treat the latest output as seen");
+    await shot(page, `${name}-session-menu-mark-read`, window, { pad: 0 });
+    await closeMenu();
+    expect((await request.put(pinUrl, { data: { pinned: true } })).ok()).toBe(true);
+    await expect(row).toHaveAttribute("data-session-pinned", "true");
+    await openRowMenu(row);
+    await expect(panel.getByRole("menuitem", { name: "Unpin", exact: true }))
+      .toHaveAccessibleDescription("Sort this session with the others again");
+    await inspectMenu(page, panel);
+    await shot(page, `${name}-session-menu-unpin`, window, { pad: 0 });
+    await closeMenu();
+
+    await page.setViewportSize({ ...viewport, height: 400 });
+    await row.scrollIntoViewIfNeeded();
+    await openRowMenu(row);
+    await expect(panel.getByRole("menuitem")).toHaveCount(8);
+    expect(await panel.evaluate((element) => element.scrollHeight > element.clientHeight + 1),
+      "the short-menu picture must exercise actual panel overflow").toBe(true);
+    await inspectMenu(page, panel);
+    await shot(page, `${name}-session-menu-short`, window, { pad: 0 });
+    await items.first().press("End");
+    const last = items.last();
+    await expect(last).toHaveAccessibleName("delete");
+    await expect(last).toBeFocused();
+    await expect(last).toBeInViewport();
+    await focusedShot(page, `${name}-session-menu-short-last-focused`, last);
+    await closeMenu();
+    await page.setViewportSize(viewport);
+
+    await page.locator(".templates-button").click();
+    const templates = page.locator(".templates-dialog");
+    try {
+      await expect(templates.locator(".templates-sidebar")).toHaveAttribute("aria-busy", "false");
+      expect((await readPreferences(request)).template_shortcuts).toEqual({ "1": "codex-deep", "8": "quick-claude" });
+      await numberMenuShots(page, name, templates);
+    } finally {
+      if (await templates.isVisible()) await templates.locator(".templates-close").click();
+      await expect(templates).toBeHidden();
+    }
+  } finally {
+    await closeMenu();
+    await page.setViewportSize(viewport);
+    await showSession(page, initial);
+    expect((await request.put(pinUrl, { data: { pinned: saved.pinned } })).ok()).toBe(true);
+    expect((await request.put(`/api/sessions/${encodeURIComponent(id)}/seen`, {
+      data: { seen_activity_at: saved.seen_activity_at },
+    })).ok()).toBe(true);
+    await expect(row).toHaveAttribute("data-session-pinned", String(saved.pinned));
+    await expect.poll(async () => {
+      const listing = await request.get("/api/sessions");
+      expect(listing.ok()).toBe(true);
+      return (await listing.json()).sessions.find((candidate: { id: string }) => candidate.id === id)?.seen_activity_at;
+    }, { message: "restore the menu fixture's exact original seen stamp" }).toBe(saved.seen_activity_at);
+  }
+}
+
+/** Photograph the two changed permanent-answer hints, cancelling both plans.
+ * The connected host keeps its exact identity. Setup uses only the approved
+ * invented destination and never submits either affirmative answer.
+ */
+async function hostHintShots(page: Page, request: APIRequestContext, scenario: Scenario, name: string, includeAdd = false) {
+  const remote = scenario.hosts.find((host) => host.kind === "remote");
+  if (!remote || !scenario.add_host) throw new Error("host hint review needs the staged remote and invented setup destination");
+  const originalHost = (await realHosts(request)).find((candidate) => candidate.destination === remote.ssh);
+  if (!originalHost?.identity) throw new Error("the host question needs the connected staged install");
+  expect(originalHost.state.phase).toBe("connected");
+  expect((await readPreferences(request)).skip_host_remove_confirmation).toBe(false);
+  const host = hostRowByName(page, remote.alias);
+  const remove = page.locator(".host-remove-dialog");
+  const window = [page.locator("body")];
+  const hint = 'Undo "don\'t ask again" with the gear at the foot of the host rail';
+  try {
+    await openHostMenu(host);
+    await host.locator(".host-remove").click();
+    await expect(remove).toBeVisible();
+    await expect(remove.locator(".dialog-actions button")).toHaveText(["cancel", "remove, don't ask again", "remove"]);
+    await expect(remove.locator(".btn-outline")).toHaveClass(/btn-danger/);
+    await expect(remove.locator("#host-remove-permanent-hint")).toHaveText(hint);
+    await insideViewport(page, remove.locator("#host-remove-permanent-hint"));
+    await shot(page, `${name}-remove-host`, window, { pad: 0 });
+  } finally {
+    if (await remove.isVisible()) await remove.locator(".host-settings-close").click();
+    await expect(remove).toBeHidden();
+    await sameConnectedHost(request, originalHost);
+  }
+
+  expect((await readPreferences(request)).skip_host_setup_confirmation).toBe(false);
+  const beforeAdd = (await realHosts(request)).map((candidate) => candidate.id).sort((a, b) => a - b);
+  const add = page.locator(".host-add-dialog");
+  try {
+    await showHostsPanel(page);
+    await page.locator(".add-host-button").click();
+    await expect(add).toBeVisible();
+    await add.locator(".add-host-ssh").fill(scenario.add_host.ssh);
+    await expect(add.locator(".add-host-ssh")).toHaveCSS("font-family", /JetBrains Mono/);
+    await expect(add.locator(".add-host-submit")).toBeEnabled();
+    if (includeAdd) await shot(page, `${name}-add-host`, window, { pad: 0 });
+    await add.locator(".add-host-submit").click();
+    await expect(add.locator(".provisioning-plan")).toContainText(scenario.add_host.ssh);
+    await expect(add.locator(".provisioning-confirm")).toBeVisible();
+    await expect(add.locator(".host-setup-permanent")).toHaveClass(/btn-outline/);
+    await expect(add.locator(".dialog-actions button")).toHaveText(["cancel", "set up, don't ask again", "set up"]);
+    await expect(add.locator("#host-setup-permanent-hint")).toHaveText(hint);
+    await insideViewport(page, add.locator("#host-setup-permanent-hint"));
+    await shot(page, `${name}-setup-plan`, window, { pad: 0 });
+  } finally {
+    if (await add.isVisible()) await add.locator(".add-host-cancel").click();
+    await expect(add).toBeHidden();
+    expect((await realHosts(request)).map((candidate) => candidate.id).sort((a, b) => a - b)).toEqual(beforeAdd);
+    await showSessionsPanel(page);
+  }
+  return originalHost;
 }
 
 /** Scroll only the product's existing scrollports, preserving frame ownership.
@@ -746,6 +976,11 @@ for (const colorScheme of ["dark", "light"] as const) {
           await settingsShots(page, name, width === "main-650");
           return;
         }
+        if (menusOnly) {
+          await menuShots(page, request, scenario, name);
+          await hostHintShots(page, request, scenario, name);
+          return;
+        }
         const row = rowOf(page, scenario, (session) => session.status === "idle" && session.seen === false);
         const hostName = row.locator(".session-row-meta .session-host");
         await expect(hostName).toHaveText("gpu-1");
@@ -982,20 +1217,7 @@ for (const colorScheme of ["dark", "light"] as const) {
         await keyboardFocusControl(page, page.locator(".tab-strip"), selectedTab);
         await focusedShot(page, `${name}-selected-tab-focused`, selectedTab);
 
-        await openRowMenu(row);
-        const menu = page.locator(".session-row-menu-panel");
-        await inspectMenu(page, menu);
-        await shot(page, `${name}-session-menu`, window, { pad: 0 });
-        // Opening already focuses the first item. Leave it and return through
-        // the menu owner so keyboard focusin schedules its actual tooltip.
-        const menuItems = menu.getByRole("menuitem");
-        await menuItems.first().press("ArrowDown");
-        await expect(menuItems.nth(1)).toBeFocused();
-        await menuItems.nth(1).press("Home");
-        await expect(menuItems.first()).toBeFocused();
-        await focusedShot(page, `${name}-session-menu-focused`, menu.getByRole("menuitem").first());
-        await page.keyboard.press("Escape");
-        await expect(menu).toBeHidden();
+        await menuShots(page, request, scenario, name);
 
         await settingsShots(page, name, width === "main-650");
 
@@ -1025,45 +1247,7 @@ for (const colorScheme of ["dark", "light"] as const) {
         await page.keyboard.press("Escape");
         await expect(hostSettings).toBeHidden();
 
-        // Remove has a genuine question only with the observed false preference.
-        // Cancel must retain the same remote, not just a row with the same alias.
-        const originalHost = (await realHosts(request)).find((candidate) => candidate.destination === remote.ssh);
-        if (!originalHost?.identity) throw new Error("the host question needs the connected staged install");
-        expect(originalHost.state.phase).toBe("connected");
-        expect((await readPreferences(request)).skip_host_remove_confirmation).toBe(false);
-        await openHostMenu(host);
-        await host.locator(".host-remove").click();
-        const remove = page.locator(".host-remove-dialog");
-        await expect(remove).toBeVisible();
-        await expect(remove.locator(".dialog-actions button")).toHaveText(["cancel", "remove, don't ask again", "remove"]);
-        await expect(remove.locator(".btn-outline")).toHaveClass(/btn-danger/);
-        await shot(page, `${name}-remove-host`, window, { pad: 0 });
-        await remove.locator(".host-settings-close").click();
-        await expect(remove).toBeHidden();
-        await sameConnectedHost(request, originalHost);
-
-        // Only the existing invented add-host check is staged. Nothing is ever
-        // submitted from its real setup question, including the permanent answer.
-        if (!scenario.add_host) throw new Error("the approved docs add-host check needs its scenario destination");
-        expect((await readPreferences(request)).skip_host_setup_confirmation).toBe(false);
-        const beforeAdd = (await realHosts(request)).map((candidate) => candidate.id).sort((a, b) => a - b);
-        await showHostsPanel(page);
-        await page.locator(".add-host-button").click();
-        const add = page.locator(".host-add-dialog");
-        await expect(add).toBeVisible();
-        await add.locator(".add-host-ssh").fill(scenario.add_host.ssh);
-        await expect(add.locator(".add-host-ssh")).toHaveCSS("font-family", /JetBrains Mono/);
-        await expect(add.locator(".add-host-submit")).toBeEnabled();
-        await shot(page, `${name}-add-host`, window, { pad: 0 });
-        await add.locator(".add-host-submit").click();
-        await expect(add.locator(".provisioning-plan")).toContainText(scenario.add_host.ssh);
-        await expect(add.locator(".provisioning-confirm")).toBeVisible();
-        await expect(add.locator(".host-setup-permanent")).toHaveClass(/btn-outline/);
-        await expect(add.locator(".dialog-actions button")).toHaveText(["cancel", "set up, don't ask again", "set up"]);
-        await shot(page, `${name}-setup-plan`, window, { pad: 0 });
-        await add.locator(".add-host-cancel").click();
-        await expect(add).toBeHidden();
-        expect((await realHosts(request)).map((candidate) => candidate.id).sort((a, b) => a - b)).toEqual(beforeAdd);
+        const originalHost = await hostHintShots(page, request, scenario, name, true);
         const refusal = await openLiveUninstallRefusal(page, request, scenario, originalHost);
         await shot(page, `${name}-uninstall-refusal`, window, { pad: 0 });
         await refusal.locator(".host-refusal-close").click();
@@ -1081,14 +1265,6 @@ for (const colorScheme of ["dark", "light"] as const) {
         const selectedTemplate = templates.locator('.templates-row[aria-pressed="true"]');
         await keyboardFocusControl(page, templates, selectedTemplate);
         await focusedShot(page, `${name}-selected-template-focused`, selectedTemplate);
-        await templates.getByRole("button", { name: "number shortcut codex-deep", exact: true }).click();
-        const numberMenu = templates.locator(".templates-number-flyout .host-row-menu-panel");
-        await expect(numberMenu.getByRole("menu", { name: "number key for codex-deep", exact: true })).toBeVisible();
-        await expect(numberMenu.locator(".templates-number-owner")).toHaveCount(2);
-        await inspectMenu(page, numberMenu);
-        await shot(page, `${name}-templates-number-menu`, window, { pad: 0 });
-        await page.keyboard.press("Escape");
-        await expect(numberMenu).toBeHidden();
         await page.keyboard.press("Escape");
         await expect(templates).toBeHidden();
 
@@ -1123,35 +1299,6 @@ for (const colorScheme of ["dark", "light"] as const) {
           await shot(page, `${name}-feedback-short`, window, { pad: 0 });
           await shortFeedback.locator(".feedback-cancel").click();
           await expect(shortFeedback).toBeHidden();
-          const waitingForMenu = rowOf(page, scenario, (session) => session.status === "waiting");
-          const waitingSession = scenario.sessions.find((session) => session.status === "waiting");
-          if (!waitingSession) throw new Error("the short menu needs the staged waiting session");
-          // Selecting the real session marks it read. Its actual menu label,
-          // checked again just before capture, proves this won any prior output.
-          await showSession(page, waitingSession);
-          await waitingForMenu.scrollIntoViewIfNeeded();
-          await openRowMenu(waitingForMenu);
-          const shortMenu = waitingForMenu.locator(".session-row-menu-panel");
-          await inspectMenu(page, shortMenu);
-          // Four staged rows do not guarantee a scrolled-list bottom premise.
-          // Assert the actual anchor is inside its sidebar, without claiming
-          // the strict bottom-clamp regression coverage owned by sidebar.spec.
-          const sidebarBox = (await page.locator(".app-sidebar").boundingBox())!;
-          const rowBox = (await waitingForMenu.boundingBox())!;
-          expect(rowBox.y).toBeGreaterThanOrEqual(sidebarBox.y - 1);
-          expect(rowBox.y + rowBox.height).toBeLessThanOrEqual(sidebarBox.y + sidebarBox.height + 1);
-          await expect(waitingForMenu.locator(".session-row-menu")).toBeInViewport();
-          const pointer = waitingForMenu.locator(".session-row-menu-pointer");
-          await expect(pointer).toBeVisible();
-          const pointerBox = (await pointer.boundingBox())!;
-          const panelBox = (await shortMenu.boundingBox())!;
-          expect(pointerBox.y).toBeLessThan(panelBox.y + panelBox.height);
-          expect(pointerBox.y + pointerBox.height).toBeGreaterThan(panelBox.y);
-          await expect(shortMenu.getByRole("menuitem", { name: "mark unread", exact: true })).toBeVisible();
-          await expect(shortMenu.getByRole("menuitem", { name: "mark read", exact: true })).toHaveCount(0);
-          await shot(page, `${name}-session-menu-short`, window, { pad: 0 });
-          await page.keyboard.press("Escape");
-          await expect(shortMenu).toBeHidden();
         } finally {
           await page.setViewportSize(ordinaryViewport);
         }

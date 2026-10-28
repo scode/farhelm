@@ -1551,7 +1551,7 @@ test("a permanent setup answer is reversible through settings after the next add
   await settings.getByRole("button", { name: "Close", exact: true }).click();
   await probeRemote(page, third);
   await expect(page.locator(".provisioning-plan")).toBeVisible();
-  await expect(page.getByText(`undo "don't ask again" with the gear at the top of the sidebar`)).toBeVisible();
+  await expect(page.getByText(`Undo "don't ask again" with the gear at the foot of the host rail`)).toBeVisible();
   expect((await hosts(request)).some((host) => host.destination === third)).toBe(false);
   await page.getByRole("button", { name: "cancel", exact: true }).click();
   await openSettings(page, "hosts");
