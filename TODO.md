@@ -24,6 +24,15 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Revisit Steel dialog keyboard order.** Decided on the maintainer's behalf on 2026-10-28 to unblock the Steel dialogs
+  plan: the session launcher, Rename, Templates' unsaved-edit question and tunnel consent now move through Tab in visual
+  order (header Close, the fields, then the footer actions with Cancel first and the main action last). Before, the
+  launcher's actions came before its fields and Rename had Save before Cancel. Revisit if the old order mattered.
+
+- **Revisit Trash's pinned header actions.** Decided on the maintainer's behalf on 2026-10-28 for the Steel dialogs
+  plan: Trash keeps its totals, progress, Delete all and Close in its pinned header instead of moving them to the shared
+  dialog footer. Revisit whether Trash should get the footer like the other dialogs.
+
 - Initial version of agent2agent comms.
 
 - **Crappy model warning.** Let the user pick a list of models they never want to run. Warn when an agent's TUI
