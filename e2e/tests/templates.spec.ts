@@ -2192,12 +2192,17 @@ test("launcher template save refuses a taken name and Escape keeps the launcher"
   }
 });
 
-/** Body Escape must resolve the innermost Cancel even though the launcher's
- * Cancel precedes it in the DOM. The next Escape may close the launcher. */
+/** Body Escape resolves the inline editor before the launcher. Both Escape
+ * and its Cancel return to visible search after a populated body scrolled;
+ * owning offscreen focus would leave a keyboard user typing into hidden UI. */
 test("save as template handles body Escape before the launcher", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
   const form = await openNew(page);
   const codex = form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true });
   await codex.click();
+  await form.locator(".initial-prompt").fill("A populated prompt\nwith several lines\nto retain the scrolling body.");
+  const body = form.locator(".launch-composer-body");
+  expect(await body.evaluate((node) => node.scrollHeight > node.clientHeight + 1), "the fields remain taller than the body without the editor").toBe(true);
   await form.locator(".launch-composer-save-template").click();
   const panel = form.locator(".save-template-panel");
   await expect(panel).toBeVisible();
@@ -2207,6 +2212,16 @@ test("save as template handles body Escape before the launcher", async ({ page }
   await expect(panel).toHaveCount(0);
   await expect(form).toBeVisible();
   await expect(codex).toHaveAttribute("aria-pressed", "true");
+  const search = form.locator(".launch-composer-search input");
+  await expect(search).toBeFocused();
+  await expect(search).toBeInViewport({ ratio: 0.99 });
+  await form.locator(".launch-composer-save-template").click();
+  await expect(panel.locator(".save-template-name")).toBeFocused();
+  await expect.poll(() => body.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
+  await panel.locator(".save-template-cancel").click();
+  await expect(panel).toHaveCount(0);
+  await expect(search).toBeFocused();
+  await expect(search).toBeInViewport({ ratio: 0.99 });
   await blurTemplateFocusToBody(page);
   await page.keyboard.press("Escape");
   await expect(form).toHaveCount(0);

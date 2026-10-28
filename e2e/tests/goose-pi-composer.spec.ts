@@ -1,5 +1,6 @@
 import { expect, test } from "./helpers/evidence";
 import { patchPreferences } from "./helpers/fleet";
+import { fillLauncherFolder } from "./helpers/launcher";
 
 /**
  * Pi's only mode is a normalized draft value, not a display-only label. This
@@ -134,7 +135,7 @@ for (const rememberedTrust of [true, false]) {
     const form = page.locator(".create-session-form");
     await expect(form).toBeVisible();
     await expect.poll(() => seeded, { message: "the page received the historical preference" }).toBe(true);
-    await form.getByLabel("folder", { exact: true }).fill("/tmp");
+    await fillLauncherFolder(form, "/tmp");
     const harnesses = form.locator(".launch-composer-harness-choice");
     const permissions = form.locator(".launch-composer-permissions-choice");
     const search = form.locator('.launch-composer-search input[role="combobox"]');

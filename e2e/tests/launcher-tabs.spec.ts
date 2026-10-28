@@ -57,6 +57,9 @@ test("New opens on the agent tab, and each tab keeps its own fields and draft", 
 
   await commandTab.click();
   await expect(form.getByLabel("agent command")).toHaveValue("sleep 300");
+  await expect(form.locator(".launch-composer-launch-context")).toContainText("Command · ");
+  await expect(form.locator(".launch-composer-launch-context")).not.toContainText("Claude");
+  await expect(form.locator(".create-session-submit")).toHaveAccessibleName(/^launch Command · /);
   await expect(
     form.getByRole("group", { name: "runs in YOLO mode" }).getByLabel("yes (YOLO)", { exact: true }),
   ).toBeChecked();

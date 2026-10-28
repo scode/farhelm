@@ -742,6 +742,9 @@ async function beginAliasCollision(page: Page, fixture: Fixture, alias: string) 
  * mutation API. Panel growth is allowed; unit tests isolate causal delivery.
  */
 test("a real late settings refusal moves and closes the lower host menu", async ({ page, request, browserName }) => {
+  // Real host setup, a held write and three menu traversals share this
+  // budget. Keep the individual readiness and movement deadlines unchanged.
+  test.setTimeout(120_000);
   const aId = await registerHost(request, browserName, "alias-source");
   const cId = await registerHost(request, browserName, "alias-rival");
   const alias = `layout conflict ${browserName} ${Date.now()} retained evidence`;

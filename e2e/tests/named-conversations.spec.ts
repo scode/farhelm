@@ -98,6 +98,9 @@ test("named conversation labels and reporting help follow the selected agent", a
     await expect(choice.locator(".named-conversation")).toHaveValue("");
     await expect(choice.getByText("Farhelm will not capture", { exact: false })).toHaveCount(captures ? 0 : 1);
   }
+  // Include the reporting warning in the width proof, so its wrapping is
+  // checked beside the same labeled field rather than only through copy.
+  await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Muse", exact: true }).click();
   // Retain both layouts for visual inspection; the narrow input must stay
   // inside the launcher even when its label and reporting help wrap.
   for (const [name, width, height] of [["desktop", 1280, 900], ["phone", 390, 844]] as const) {
@@ -112,7 +115,20 @@ test("named conversation labels and reporting help follow the selected agent", a
     expect(input).not.toBeNull();
     expect(input!.x).toBeGreaterThanOrEqual(bounds!.x);
     expect(input!.x + input!.width).toBeLessThanOrEqual(bounds!.x + bounds!.width);
-    expect(input!.width).toBeGreaterThanOrEqual(choiceBounds!.width * 0.9);
+    // Desktop reserves a label column; phone stacks that label above the
+    // field. Compare with the actual field cell, not the whole labeled row.
+    const fieldWidth = await choice.evaluate((node) => {
+      const columns = getComputedStyle(node).gridTemplateColumns.split(/\s+/).map(Number.parseFloat);
+      return columns[columns.length - 1];
+    });
+    expect(Number.isFinite(fieldWidth)).toBe(true);
+    expect(Math.abs(input!.width - fieldWidth)).toBeLessThanOrEqual(1);
+    expect(Math.abs(input!.x + input!.width - choiceBounds!.x - choiceBounds!.width)).toBeLessThanOrEqual(1);
+    const help = await choice.locator("p").boundingBox();
+    expect(help).not.toBeNull();
+    expect(help!.y).toBeGreaterThanOrEqual(input!.y + input!.height);
+    expect(help!.x).toBeGreaterThanOrEqual(bounds!.x);
+    expect(help!.x + help!.width).toBeLessThanOrEqual(bounds!.x + bounds!.width);
     const path = testInfo.outputPath(`named-launcher-${name}.png`);
     await form.screenshot({ path, animations: "disabled" });
     await testInfo.attach(`named launcher ${name}`, { path, contentType: "image/png" });

@@ -546,7 +546,7 @@ test("a file dropped on the agent terminal uploads and inserts its host path at 
 test("a file dropped on a tab inserts its path in that tab, leaving the agent terminal untouched", async ({
   page,
   request,
-}) => {
+}, testInfo) => {
   test.setTimeout(150_000);
   const stamp = Date.now();
   let id: string | undefined;
@@ -559,10 +559,18 @@ test("a file dropped on a tab inserts its path in that tab, leaving the agent te
     const island = `terminal-${tabId}`;
     await waitForIslandMounted(page, island);
     await selectTerminal(page, tabId);
-
-    await dispatchPayload(page, island, "drop", {
-      entries: [{ name: "from-tab.txt", mime: "text/plain", content: body }],
-    });
+    // A selected, mounted pane can still be replaying after a remount. Drop
+    // acceptance requires this tab's live socket and revealed attachment.
+    await waitForSessionRevealed(page, id, { tabId });
+    const [uploaded, dispatched] = await Promise.all([
+      page.waitForResponse((response) => response.request().method() === "POST"
+        && new URL(response.url()).pathname === `/api/sessions/${encodeURIComponent(id!)}/attachments`),
+      dispatchPayload(page, island, "drop", {
+        entries: [{ name: "from-tab.txt", mime: "text/plain", content: body }],
+      }),
+    ]);
+    expect(dispatched.event.defaultPrevented).toBe(true);
+    expect(uploaded.ok(), "this tab must admit and complete the real upload").toBe(true);
 
     const match = await waitForIslandMatch(
       page,
@@ -577,6 +585,15 @@ test("a file dropped on a tab inserts its path in that tab, leaving the agent te
       await islandLogicalText(page, "terminal"),
       "the agent terminal received no drop, so nothing may have been inserted into it",
     ).not.toContain("/attachments/");
+  } catch (error) {
+    // Retain the attachment status before deleting the owned session; an
+    // automatic end-of-test screenshot would only show the cleaned page.
+    if (!page.isClosed()) {
+      await page.screenshot().then((body) => testInfo.attach("tab drop before cleanup", {
+        body, contentType: "image/png",
+      })).catch(() => {});
+    }
+    throw error;
   } finally {
     if (id) await cleanupSession(request, id);
   }

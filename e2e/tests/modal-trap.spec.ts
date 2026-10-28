@@ -146,14 +146,17 @@ test("ordinary New isolates the page and wraps its concrete command controls", a
 
     await form.getByRole("tab", { name: "command", exact: true }).click();
     await expect(form).toHaveAttribute("data-composer-mode", "command");
-    const first = form.locator(".create-session-submit");
-    const last = form.getByRole("combobox", { name: "agent type", exact: true });
-    await expect(last).toBeVisible();
-    await expect(last).toBeEnabled();
-    await last.selectOption("");
+    // The shared frame follows reading order: Close, fields, then the footer
+    // with its primary last. Keep native wrapping rather than old top actions.
+    const first = form.locator(".launch-composer-close");
+    const last = form.locator(".create-session-submit");
+    const agentType = form.getByRole("combobox", { name: "agent type", exact: true });
+    await expect(agentType).toBeVisible();
+    await expect(agentType).toBeEnabled();
+    await agentType.selectOption("");
     await form.getByLabel("agent command", { exact: true }).fill(FAKE_AGENT);
     await form.getByRole("radio", { name: "no", exact: true }).check();
-    await expect(last).toHaveValue("");
+    await expect(agentType).toHaveValue("");
     await expect(form.locator(".launch-command-resume-toggle, .launch-composer-browser")).toHaveCount(0);
     await expectBoundaries(page, form, first, last);
 

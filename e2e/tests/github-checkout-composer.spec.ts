@@ -1,4 +1,5 @@
 import { chooseLauncherHost } from "./helpers/host-picker";
+import { fillLauncherFolder } from "./helpers/launcher";
 /**
  * Mounted composer authority tests. The real helm supplies the host identity
  * and catalog; intercepted checkout replies exercise UI races without network
@@ -568,7 +569,8 @@ test("manual checkout needs selection and explicit resubmit after a proven refus
   await expect(folder).toHaveJSProperty("readOnly", false);
   await folder.fill("/tmp");
   await expect(form.locator(".launch-composer-checkout-preview")).toHaveCount(0);
-  await expect(form.locator(".create-session-submit")).toContainText("/tmp");
+  await expect(form.locator(".launch-composer-launch-context")).toContainText("/tmp");
+  await expect(form.locator(".create-session-submit")).toHaveAccessibleName(/ · \/tmp$/);
 });
 
 for (const outcome of ["submit", "edit", "close"] as const) {
@@ -671,7 +673,7 @@ for (const outcome of ["submit", "edit", "close"] as const) {
         } else {
           await page.locator(".new-session-button").click();
           await expect(form).toBeVisible();
-          await form.getByLabel("folder", { exact: true }).fill("/tmp");
+          await fillLauncherFolder(form, "/tmp");
           await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
           await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true }).click();
           await expect(submit).toBeEnabled();
@@ -825,7 +827,10 @@ test("Clone discloses unsafe inherited repository text without changing its prev
     expect(previews.every((input) => input.repo === raw)).toBe(true);
     await expect(preview).toHaveAttribute("data-preview-state", "pending");
     await expect(preview).toContainText(`managed checkout of ${shown} on`);
-    await expect(launch).toContainText(`gh:${shown} (preview pending)`);
+    // The compact action and its visible footer context disclose the same
+    // escaped target; the literal repository in the request remains separate.
+    await expect(form.locator(".launch-composer-launch-context")).toContainText(`gh:${shown} (preview pending)`);
+    expect(await launch.getAttribute("aria-label")).toContain(`gh:${shown} (preview pending)`);
     await expect(repository).toHaveValue(shown);
     await expect(repository).toHaveJSProperty("readOnly", true);
     await repository.focus();
@@ -839,7 +844,8 @@ test("Clone discloses unsafe inherited repository text without changing its prev
     await expect(preview).toHaveAttribute("data-preview-state", "failed");
     await expect(preview).toContainText(`managed checkout of ${shown} on`);
     await expect(preview).toContainText("fixture invalid repository");
-    await expect(launch).toContainText(`gh:${shown} (preview pending)`);
+    await expect(form.locator(".launch-composer-launch-context")).toContainText(`gh:${shown} (preview pending)`);
+    expect(await launch.getAttribute("aria-label")).toContain(`gh:${shown} (preview pending)`);
     await expect(repository).toHaveValue(shown);
     await expect(repository).toHaveJSProperty("readOnly", true);
     await expect(launch).toBeDisabled();

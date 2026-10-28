@@ -2970,3 +2970,69 @@ Timeout:  5000ms
 Class: pointer-focus
 
 Cause: hypothesis
+
+## 2026-10-28 — build-help rewrite disposal (e2e/tests/sidebar.spec.ts)
+
+`the sidebar app bar explains the helm and window builds` failed on Chromium in full browser run
+`1c66d7f4-79b2-41bf-b6f1-225f1fc10cf6`, then failed again in the exact-title, both-engine selection
+`b215889b-1d19-49b0-a522-9b287c8b42c2` (one failure, five passes). The trace shows a build-stamp rewrite's fulfillment
+losing route ownership during wait-style interception removal. This matches the build-help entries from 2026-09-03; the
+existing drained-route helper already handles the same Playwright lifecycle for other fixtures. PR #2762 reuses that
+helper and drains callback work in finally before restoring normal replies. All build-help assertions remain. The
+corrected helper's eleven callers and the adjacent takeover and host-menu cases passed 28 checks on both engines in
+`f7e0bf2f-a13f-48c0-bc16-b7beb93179bc`; this is a separate observation, not a full-suite pass or proof of flake absence.
+The full run's other failures were two takeover cases and one exhausted host-menu test budget.
+
+```text
+Error: route.fulfill: Route is already handled!
+```
+
+The full run and unchanged reproduction used commit `e98183606018a86cfc3fb0c6b9a7dcb5756ae4e0`, dirty with the dialog
+return's presentation and fixture corrections, source fingerprint
+`a214363af51126e765745cd7ddf4c419e719742dd4dc707e8b72a187659393c7`. The corrected selection used dirty fingerprint
+`497acae5f91c41aaa81c26f3d8f4e388c658e693ed20d4d29b8ca51d69582cfa`. All used Linux x86-64, kernel 6.8.0-147-generic,
+Node 26.12.1, Playwright 1.64.0, three workers with one stack each, zero retries, and locale C.UTF-8. Actual pinned tmux
+was 3.7c, executable SHA256 `7ffdb77af092113ce3a777e581bbe9751c15504105404a68828a598cbf3e6bc1`. The recorder scrubbed
+ambient `FARHELM_*` and supplied only `FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR`. Compiler and
+browser build identities and other machine load are unavailable; no other owned build or runtime command overlapped
+these runs. Whole failed UUID directories remain private temporary evidence and may expire. The full JSON exceeded the
+recorder's 16 MiB inspection bound; a separate 32 MiB audit reconciled it without changing its manifest or failed exit.
+
+Class: peer-lifecycle
+
+Cause: established
+
+## 2026-10-28 — takeover tab retry premise (e2e/tests/terminal-reconnect.spec.ts)
+
+`a-tab-opened-unaware-of-a-takeover-does-not-take-the-session-back` failed on both engines in full browser run
+`1c66d7f4-79b2-41bf-b6f1-225f1fc10cf6`, matching the empty-banner symptom already reproduced on main in the 2026-10-20
+entry. Both current traces show the losing tab receiving an ordinary lifecycle Conflict before the ownership check; the
+winner meets the same refusal, retries promptly and reaches replay completion. The fixture instead delays every
+losing-page retry 30 seconds while expecting a final takeover notice within 20 seconds. PR #2762 withholds only future
+agent sockets using the existing fixture helper, retaining the original swallowed takeover notice and unaware-view
+premise, while allowing tab retries every second. The actual losing-tab refusal, reclaim control, closed attachment and
+winner's echoed input remain required. The unchanged exact selection passed both engines in
+`b215889b-1d19-49b0-a522-9b287c8b42c2`; after correction, this case and its recovering-view neighbor passed both engines
+within the 28-case selection `f7e0bf2f-a13f-48c0-bc16-b7beb93179bc`. Neither observation erases the original failure or
+proves general flake absence. The matching TODO entry and sweep exclusion are removed with the correction.
+
+```text
+Expected substring: "Detached"
+Received string:    ""
+Timeout: 20000ms
+```
+
+The full run's other failures were Chromium's build-help route disposal and WebKit's host-menu overall budget. Tested
+commit was `e98183606018a86cfc3fb0c6b9a7dcb5756ae4e0`, dirty with the dialog return's corrections; the full run and
+unchanged selection had fingerprint `a214363af51126e765745cd7ddf4c419e719742dd4dc707e8b72a187659393c7`, and the
+corrected selection had `497acae5f91c41aaa81c26f3d8f4e388c658e693ed20d4d29b8ca51d69582cfa`. Linux x86-64, kernel
+6.8.0-147-generic, Node 26.12.1, Playwright 1.64.0, three workers with one stack each, zero retries, locale C.UTF-8.
+Actual tmux was 3.7c, executable SHA256 `7ffdb77af092113ce3a777e581bbe9751c15504105404a68828a598cbf3e6bc1`. The recorder
+scrubbed ambient `FARHELM_*` and supplied only `FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR`.
+Compiler/browser build identities and unrelated machine load are unavailable; no other owned runtime or build
+overlapped. Whole failed UUID directories and socket traces remain private temporary evidence and may expire. The
+oversized full JSON was reconciled in a separately bounded audit; its original recorder summary remains incomplete.
+
+Class: fixture-premise
+
+Cause: established

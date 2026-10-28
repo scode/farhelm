@@ -8,6 +8,7 @@ import { expect, test } from "./helpers/evidence";
 import { type APIRequestContext, type Locator, type Page } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import { clickDialogGap } from "./helpers/dialog-gap";
+import { fillLauncherFolder } from "./helpers/launcher";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { drainedRoute } from "./helpers/drained-route";
 import { agentLaunchRow, cleanupSession, createSession, listHosts, openRowMenu, SESSION_LISTING, stubFeed } from "./helpers/fleet";
@@ -432,7 +433,7 @@ async function observeChoiceCreates(
   await page.locator(".new-session-button").click();
   const form = page.locator(".create-session-form");
   await expect(form).toBeVisible();
-  await form.getByLabel("folder", { exact: true }).fill("/tmp");
+  await fillLauncherFolder(form, "/tmp");
   if (seedGuarded) {
     await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true }).click();
   }

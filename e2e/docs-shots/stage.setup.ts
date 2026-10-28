@@ -18,7 +18,10 @@ test("stage the docs fleet", async ({ page, request }) => {
   const scenario = loadScenario(DOCS_SHOTS_DIR);
   const fleet = await stageFleet(page, request, scenario, DOCS_SHOTS_DIR, readStackInfo(DOCS_STACK_INFO_PATH));
   await stageTemplates(request, scenario);
-  const toolbarReview = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "session-toolbar"
+  // The launcher also needs this real resumable session for Restart/Replace
+  // drafts. Reuse its reporting fixture rather than inventing those replies.
+  const scope = process.env.FARHELM_VISUAL_REVIEW_SCOPE;
+  const toolbarReview = scope === "session-toolbar" || scope === "launcher"
     ? await stageToolbarReviewSession(request, scenario, fleet)
     : undefined;
   writeFleet(fleet, toolbarReview);

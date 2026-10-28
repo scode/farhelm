@@ -203,6 +203,8 @@ fn scroll_into_view(instance: u64) {
 /// `only_if_lost` limits it to recovering focus that fell to the page body
 /// (a button the user pressed was disabled while its request ran), so it
 /// never pulls focus away from a control the user moved to on purpose.
+/// Reveal the answer itself: a bounded notice region can clip Cancel even
+/// after the larger question block has scrolled into view.
 fn focus_cancel(instance: u64, only_if_lost: bool) {
     let selector = instance_selector(instance);
     let guard = if only_if_lost {
@@ -211,7 +213,7 @@ fn focus_cancel(instance: u64, only_if_lost: bool) {
         ""
     };
     document::eval(&format!(
-        "requestAnimationFrame(() => {{ {guard} document.querySelector({selector})?.querySelector('.yolo-cancel')?.focus({{ preventScroll: true }}); }})"
+        "requestAnimationFrame(() => {{ {guard} const cancel = document.querySelector({selector})?.querySelector('.yolo-cancel'); cancel?.focus({{ preventScroll: true }}); cancel?.scrollIntoView({{ block: 'nearest', inline: 'nearest', behavior: 'instant' }}); }})"
     ));
 }
 

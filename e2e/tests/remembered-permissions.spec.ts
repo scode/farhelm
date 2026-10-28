@@ -14,6 +14,7 @@
 // the shared stack's memory cleared at its own start.
 import { expect, test } from "./helpers/evidence";
 import { answerYolo } from "./helpers/term";
+import { fillLauncherFolder } from "./helpers/launcher";
 import { FAKE_AGENT, agentLaunchRow, cleanupSession, patchPreferences, readPreferences, setLocalYoloWithoutAsking } from "./helpers/fleet";
 import { stackScratchDir } from "./helpers/scratch";
 
@@ -62,7 +63,7 @@ test("the remembered structured-launch permissions mode survives an open, a rese
     );
 
     // A successful structured launch with yolo.
-    await form.getByLabel("folder", { exact: true }).fill(cwd);
+    await fillLauncherFolder(form, cwd);
     await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
     await permissions().getByRole("button", { name: "yolo", exact: true }).click();
     const [yoloResponse] = await Promise.all([
@@ -199,7 +200,7 @@ test("a create reply claiming yolo does not change what the next New dialog pres
 
     // A structured create that asked for the default permissions.
     await page.locator(".new-session-button").click();
-    await form.getByLabel("folder", { exact: true }).fill(cwd);
+    await fillLauncherFolder(form, cwd);
     await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
     await permissions().getByRole("button", { name: "guarded", exact: true }).click();
     const submitted = (await submit()).launch;

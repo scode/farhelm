@@ -1,5 +1,6 @@
 import { chooseHost, hostChoice } from "./helpers/host-rail";
 import { chooseLauncherHost } from "./helpers/host-picker";
+import { fillLauncherFolder } from "./helpers/launcher";
 // Destination snapshots must survive sidebar projection changes without
 // letting a remembered path follow a registry row onto another installation.
 import { expect, test } from "./helpers/evidence";
@@ -149,7 +150,10 @@ async function historyFixture(page: Page, request: APIRequestContext, ordinaryRe
   const form = page.locator(".create-session-form");
   await chooseLauncherHost(form.locator(".create-session-host"), String(fixture.remote.id));
   await expect(form, "the actual remote connection must reach the mounted composer").toHaveAttribute("data-browse-live-connection", String(fixture.remote.incarnation));
-  await form.getByLabel("folder", { exact: true }).fill("/tmp");
+  // Retry cases next use controls outside the floating suggestions. The
+  // authority cases deliberately retain those options for saved callbacks.
+  if (ordinaryRetry) await fillLauncherFolder(form, "/tmp");
+  else await form.getByLabel("folder", { exact: true }).fill("/tmp");
   return { ...fixture, state, posts, feed, form };
 }
 

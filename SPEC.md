@@ -698,14 +698,14 @@ agent choice is independent of that destination:
   paths may be absolute or relative to the session directory; a leading tilde is refused because it does not expand. New
   managed-checkout destinations and command launches refuse a selector. Goose, Muse, Cursor and OpenCode show that
   Farhelm will not capture the named conversation and later Restart will be unavailable.
-- Initial prompt: the agent tab's right column offers a resizable multiline **initial prompt** box directly after the
-  conversation selector for supported agents. Its help says "Sent once, as &lt;agent&gt;'s first message when it starts.
-  Restart, Clone and Replace do not send it again." The summary adds `prompt: N lines` for a nonempty message. Enter
-  edits the message without launching. Goose, Pi and command launches offer no box. The draft survives recent-setup
-  selection and switching tabs; unsupported selections omit it from the request. A Clone or Replace-with prefill clears
-  it. Template messages with invisible formatting are shown escaped and read-only until explicitly cleared; ordinary
-  newlines and tabs remain editable. The message travels with the create request, including managed checkouts and named
-  conversations where supported, and its exact value is part of retry identity.
+- Initial prompt: the agent tab offers a resizable multiline **initial prompt** box directly after the conversation
+  selector for supported agents. Its help says "Sent once, as &lt;agent&gt;'s first message when it starts. Restart,
+  Clone and Replace do not send it again." The summary adds `prompt: N lines` for a nonempty message. Enter edits the
+  message without launching. Goose, Pi and command launches offer no box. The draft survives recent-setup selection and
+  switching tabs; unsupported selections omit it from the request. A Clone or Replace-with prefill clears it. Template
+  messages with invisible formatting are shown escaped and read-only until explicitly cleared; ordinary newlines and
+  tabs remain editable. The message travels with the create request, including managed checkouts and named conversations
+  where supported, and its exact value is part of retry identity.
 - Command launch: a command launch takes a command line, which may reference the session's working directory as `{cwd}`
   as a whole argument, and a required YOLO assertion: the user states whether the command bypasses human, classifier,
   AI-reviewer and sandbox safety checks, and Farhelm believes the statement. Farhelm never reads a command line to
@@ -881,7 +881,8 @@ agent choice is independent of that destination:
   eight; typing filters by case-insensitive substring. Long labels retain the path's end, with the whole path accessible
   and available on hover. Only arrow navigation highlights an entry. Choosing fills the destination without launching;
   local home also pins the local host. Escape closes an open dropdown first, then can close the launcher. Tab, blur and
-  choosing close the list; typing reopens it. Managed-checkout mode has no folder dropdown.
+  choosing close the list; typing reopens it. Enter that submits a launch also closes the list, whether the launch is
+  accepted or refused, leaving a refused launch's controls reachable. Managed-checkout mode has no folder dropdown.
 - Folder check: in plain-folder mode on a connected host, the launcher checks the folder 150 ms after the host or path
   stops changing. A missing folder or a path that is not a directory marks the field and says so underneath, naming the
   host. The warning is advisory and never disables Launch; the supervisor still validates the folder at launch time.
@@ -903,10 +904,18 @@ send a message into an already-running Claude or Codex session, is turned off in
 has the refusal and the design kept for re-enabling it.
 
 A custom model id is typed into the model field and applied with Enter; it needs a chosen harness. The optional session
-name sits in the destination block under host and folder, visible without any disclosure. Launch and Cancel are the
-first controls in the launcher, above everything else, and Launch's label names the chosen agent type (or command),
-host, and folder. Project registration (associating metadata with a directory) is optional convenience and never a
-prerequisite.
+name sits in the destination block under host and folder, visible without any disclosure. The launcher has a shared
+header with Close, a scrolling body and a pinned footer. Search and recent setups precede labeled destination rows
+(Where, Host, Folder or Repository, Name), followed by the Agent and Command tabs and their fields. The footer shows the
+chosen agent type or command, host and destination beside a compact Launch, Replace or Restart action; its accessible
+name retains that operation and target. Agent launches also retain the model, effort, permissions and nonempty prompt's
+line count in the footer summary. Long summaries may truncate visually; their full text remains accessible. Cancel comes
+first in the action row, then Reset choices where offered, Save as template where offered, and the main action last.
+Native Tab follows Close, the fields in their existing relative order, then the footer actions. Ordinary launches still
+start focus on search; Restart starts on Cancel. Refusals, destructive warnings and the inline YOLO question remain
+adjacent to the actions in a bounded scroll region, so long content cannot displace those actions. The save-as-template
+panel remains inline in the scrolling body. Project registration (associating metadata with a directory) is optional
+convenience and never a prerequisite.
 
 Creation guards against accidental double submission (a double-click, a retry after a timeout): one intended create
 yields one session or a clear error, never two silently. Deliberately creating several sessions with identical

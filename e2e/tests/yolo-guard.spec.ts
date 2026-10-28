@@ -14,6 +14,7 @@ import { type APIRequestContext, type Locator, type Page, type Route } from "@pl
 import { expect, test } from "./helpers/evidence";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { chooseLauncherHost } from "./helpers/host-picker";
+import { fillLauncherFolder } from "./helpers/launcher";
 import {
   cleanupSession,
   createResumableYoloSession,
@@ -42,13 +43,16 @@ async function openYoloLaunch(page: Page, cwd: string): Promise<Locator> {
   const form = page.locator(".create-session-form");
   await page.locator(".new-session-button").click();
   await expect(form).toBeVisible();
-  await form.getByLabel("folder", { exact: true }).fill(cwd);
+  await fillLauncherFolder(form, cwd);
   await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
   await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true }).click();
   return form;
 }
 
-test("a YOLO launch asks first and starts only when confirmed", async ({ page, request }) => {
+// Check both sides of the compact-chrome and phone-action breakpoints.
+// A tall-phone pass cannot prove that stacked actions leave room for answers.
+for (const height of [844, 601, 600, 500, 481, 480]) {
+test(`a YOLO launch asks first and starts only when confirmed${height === 844 ? "" : ` at 390x${height}`}`, async ({ page, request }, testInfo) => {
   const previous = await readPreferences(request);
   const cwd = stackScratchDir("yolo-guard-");
   const created: string[] = [];
@@ -58,6 +62,7 @@ test("a YOLO launch asks first and starts only when confirmed", async ({ page, r
     // Premise, made true rather than assumed: the suite shares one helm,
     // and a spec that marks the host safe puts it back, but say so here.
     await setLocalYoloWithoutAsking(request, false);
+    await page.setViewportSize({ width: 390, height });
     await page.goto("/");
     const form = page.locator(".create-session-form");
     const confirmation = form.locator(".yolo-confirmation");
@@ -70,7 +75,7 @@ test("a YOLO launch asks first and starts only when confirmed", async ({ page, r
 
     await page.locator(".new-session-button").click();
     await expect(form).toBeVisible();
-    await form.getByLabel("folder", { exact: true }).fill(cwd);
+    await fillLauncherFolder(form, cwd);
     await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
     await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true }).click();
 
@@ -91,12 +96,25 @@ test("a YOLO launch asks first and starts only when confirmed", async ({ page, r
     await expect(confirmation).toContainText("This launch uses YOLO permissions.");
     await expect(confirmation).toContainText("asks before every YOLO launch. Nothing has been started.");
     await expect(confirmation).not.toContainText("--confirm-yolo");
-    // Right under Launch, where the click happened, and on screen: it used to
-    // render after every other section, below the launcher's visible edge.
+    // The bounded notice follows the pinned action row. Its safe initial
+    // answer must actually be visible inside that clip, not merely focused.
+    const notices = form.locator(".launch-composer-notices");
     expect(
-      await confirmation.evaluate((node) => node.previousElementSibling?.classList.contains("launch-composer-actions")),
-      "the question renders directly under the Launch row",
+      await notices.evaluate((node) => node.previousElementSibling?.classList.contains("launch-composer-footer-row")),
+      "the notice region follows the pinned Launch row",
     ).toBe(true);
+    expect(await notices.evaluate((node) => node.scrollHeight > node.clientHeight + 1), "the phone question genuinely overflows its notice region").toBe(true);
+    await expect(confirmation.locator(".yolo-cancel")).toBeFocused();
+    // Keep the live question before cleanup, including when its scrollport
+    // is too short for the first answer and the following assertion fails.
+    await testInfo.attach("initial YOLO question", { body: await form.screenshot(), contentType: "image/png" });
+    await expect(confirmation.locator(".yolo-cancel")).toBeInViewport({ ratio: 0.99 });
+    const answers = await confirmation.locator(".yolo-confirmation-actions button:not(:disabled)").all();
+    for (const [index, answer] of answers.entries()) {
+      await expect(answer).toBeFocused();
+      await expect(answer).toBeInViewport({ ratio: 0.99 });
+      if (index < answers.length - 1) await page.keyboard.press("Tab");
+    }
     await expect(confirmation).toBeInViewport();
     expect(
       (await listSessions(request)).sessions.filter((row) => row.cwd === cwd),
@@ -113,13 +131,19 @@ test("a YOLO launch asks first and starts only when confirmed", async ({ page, r
     // along with a launch the user was not asked about.
     await form.locator(".create-session-submit").click();
     await expect(confirmation).toBeVisible();
-    await form.getByLabel("name (optional)").fill("edited after the question");
+    // Mounting precedes the deferred initial focus. Finish that handoff
+    // before an ordinary edit, rather than racing it with WebKit's fill.
+    await expect(confirmation.locator(".yolo-cancel")).toBeFocused();
+    const name = form.getByLabel("name (optional)");
+    await name.fill("edited after the question");
+    await expect(name).toHaveValue("edited after the question");
     await expect(confirmation).toHaveCount(0);
     await form.getByLabel("name (optional)").fill("");
 
     // Asking again and confirming retries with the override and launches.
     await form.locator(".create-session-submit").click();
     await expect(confirmation).toBeVisible();
+    await expect(confirmation.locator(".yolo-cancel")).toBeFocused();
     const [confirmed] = await Promise.all([
       page.waitForResponse(
         (candidate) => candidate.request().method() === "POST" && candidate.url().endsWith("/api/sessions"),
@@ -138,7 +162,7 @@ test("a YOLO launch asks first and starts only when confirmed", async ({ page, r
     await setLocalYoloWithoutAsking(request, true);
     await page.locator(".new-session-button").click();
     await expect(form).toBeVisible();
-    await form.getByLabel("folder", { exact: true }).fill(cwd);
+    await fillLauncherFolder(form, cwd);
     await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
     await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true }).click();
     const [safe] = await Promise.all([
@@ -158,6 +182,7 @@ test("a YOLO launch asks first and starts only when confirmed", async ({ page, r
     for (const id of created) await cleanupSession(request, id);
   }
 });
+}
 
 /**
  * Guarded is a new launch choice, not approval of the refused YOLO request.

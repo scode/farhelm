@@ -28,28 +28,31 @@ test("new button", async ({ page, request }) => {
 });
 
 test("launch button", async ({ page, request }) => {
+  // Put annotations above the pinned footer at docs width. Left-margin
+  // callouts would clamp together at the viewport's bottom edge.
+  await page.setViewportSize({ width: 930, height: 1100 });
   const { director } = await open(page, request);
   const form = await openLauncher(page);
   await form.locator(".launch-composer-harness-choice button", { hasText: /^Codex$/ }).click();
   const submit = form.locator(".create-session-submit");
   await expect(submit).toBeEnabled();
   await director.highlight(submit, { pad: 3 });
-  // In the margin left of the launcher, pointing in at the button.
+  // Explain the visible target in the footer, rather than
+  // claiming the button itself repeats the complete destination.
   await director.callout(
-    submit,
-    "Spells out what it will start: the agent, the host, and the directory. Greyed out until the launch is complete; hover it to see what is missing.",
-    { side: "left" },
+    form.locator(".launch-composer-launch-context"),
+    "What Launch will start: the agent, host and directory. Launch stays grey until the setup is complete; hover it to see what is missing.",
+    { side: "top", dx: -50 },
   );
-  // Also in the left margin, under the first, so the crop stays narrow.
+  // Beside the first callout, clear of the target and action hit areas.
   await director.callout(
     form.locator(".launch-composer-summary"),
     "The choices the launch will use. Check it before launching: yolo shows in red.",
-    { side: "left", dy: 90 },
+    { side: "top", dx: 350 },
   );
-  // Just the button, its neighbour, and the summary: the launcher is wider
-  // than the docs' text column, and a crop that wide would be shrunk until
-  // it is hard to read.
-  await shot(page, `${PAGE}/launch-button`, [submit, form.locator(".launch-composer-cancel")], { pad: 28 });
+  // Keep the complete target, choices and compact action together. This
+  // viewport makes the whole annotated footer fit the docs' text column.
+  await shot(page, `${PAGE}/launch-button`, [submit, form.locator(".launch-composer-launch-context"), form.locator(".launch-composer-summary")], { pad: 28, maxWidth: 930 });
 });
 
 test("destination", async ({ page, request }) => {
