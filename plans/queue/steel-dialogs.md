@@ -544,47 +544,68 @@ Decisions, taking the Blocked question's recommendations:
 Both are recorded as near-term TODO.md entries so the maintainer can revisit them; a later change of mind is a
 follow-up, not a reason to stop this plan.
 
-## Blocked
+### 2026-10-28: answer to a blocked question
 
-Blocked while landing on 2026-10-28 (claim 13764e).
+The question, as the executor put it:
 
-### Landing stopped: the Steel dialogs break part of the browser test suite
+> Blocked while landing on 2026-10-28 (claim 13764e).
+>
+> ### Landing stopped: the Steel dialogs break part of the browser test suite
+>
+> The landing monitor did not merge this plan. None of its four PRs (#2756, #2757, #2761, #2762) has merged, and main
+> holds nothing of it. The plan restyles Settings, menus, confirmations and the session launcher for Steel, with the Tab
+> order and Trash layout decided in the previous answer.
+>
+> Its executor ran selected browser tests only. At landing, the whole browser suite (`npx playwright test`, Chromium and
+> WebKit, no retries) ran against this plan on current main, with nothing else landing, in run
+> `3092e14a-46a0-403f-b084-4a1eb0571c87`: 2701 passed, 57 failed and 14 skipped. One of the UI's own stylesheet tests
+> (`node --test` in `crates/farhelm-ui/js-tests`, run `bd6be3c2-d9a5-4e60-b3b0-e204db02298d`) also failed: "solid
+> selection uses inverse roles at actual owners, metadata, marks and focus". The source checks, builds, the UI's Rust
+> tests and the desktop asset check passed. In product terms:
+>
+> - 34 failures are launcher and YOLO-question tests that time out on both engines: the YOLO question's answers,
+>   remembered permissions, OpenCode, Goose and Pi launcher options, a template's Guarded request, unchanged destination
+>   choices, a guarded checkout answer and launching a recent setup with Enter. The tests do find their controls by
+>   name, but those controls never become visible, enabled and steady enough to click. That points at the launcher's new
+>   layout, where only its body scrolls, rather than at old names; whether users would hit it is not established.
+> - Some fail on names or text the plan changed and tests outside its diff still use, as a fresh-context review
+>   predicted: the Trash dialog is now named "Trash" rather than "trash" (managed-checkout Trash tests), the Launch
+>   button no longer carries the target in its text (checkout composer tests), the destination block shows "Browse"
+>   where a test expects "local (this machine)", and the Settings heading's color changed (appearance test). A docs
+>   screenshot spec has the same old Launch text and would fail at the next docs capture.
+> - The rest: Replace with's tests look for a warning element that the restyled launcher no longer has, the hover-text
+>   sweep finds a launcher control with the browser's native tooltip, two host-settings switches fail on WebKit, the
+>   named-conversation help's layout check fails, and one file-drop test fails on Chromium. That last one has no clear
+>   link to dialogs and may not be the plan's; no run without the plan was made.
+>
+> The review found that the plan otherwise follows the previous answer exactly (Tab order, the inline YOLO question,
+> Trash's header), and that SPEC_impl.md still quotes the permanent YOLO answer in lowercase and does not list
+> number-key options among the hover-text exemptions. It also noted that a launcher test no longer guarantees the
+> launcher fits a 1440×900 window without scrolling; the pinned footer now keeps Launch reachable instead.
+>
+> ### What should happen to this plan?
+>
+> - **Send it back to its executor (recommended).** Answer with: run the whole browser suite on both engines and the
+>   UI's JavaScript tests against the stack; fix the product or the test for each failure, saying in the report which;
+>   update the docs screenshot spec and the two SPEC_impl.md phrases.
+> - **Land it now and fix the failures afterwards.** Main would carry about 28 failing browser tests per engine and a
+>   failing stylesheet test until a follow-up lands.
 
-The landing monitor did not merge this plan. None of its four PRs (#2756, #2757, #2761, #2762) has merged, and main
-holds nothing of it. The plan restyles Settings, menus, confirmations and the session launcher for Steel, with the Tab
-order and Trash layout decided in the previous answer.
+The maintainer's answer:
 
-Its executor ran selected browser tests only. At landing, the whole browser suite (`npx playwright test`, Chromium and
-WebKit, no retries) ran against this plan on current main, with nothing else landing, in run
-`3092e14a-46a0-403f-b084-4a1eb0571c87`: 2701 passed, 57 failed and 14 skipped. One of the UI's own stylesheet tests
-(`node --test` in `crates/farhelm-ui/js-tests`, run `bd6be3c2-d9a5-4e60-b3b0-e204db02298d`) also failed: "solid
-selection uses inverse roles at actual owners, metadata, marks and focus". The source checks, builds, the UI's Rust
-tests and the desktop asset check passed. In product terms:
+Answered by the landing monitor on the maintainer's behalf under `plans/.agents/landing.md`, "Answering blocks": a
+landing that failed mainly because tests fail goes back with an instruction to fix them.
 
-- 34 failures are launcher and YOLO-question tests that time out on both engines: the YOLO question's answers,
-  remembered permissions, OpenCode, Goose and Pi launcher options, a template's Guarded request, unchanged destination
-  choices, a guarded checkout answer and launching a recent setup with Enter. The tests do find their controls by name,
-  but those controls never become visible, enabled and steady enough to click. That points at the launcher's new layout,
-  where only its body scrolls, rather than at old names; whether users would hit it is not established.
-- Some fail on names or text the plan changed and tests outside its diff still use, as a fresh-context review predicted:
-  the Trash dialog is now named "Trash" rather than "trash" (managed-checkout Trash tests), the Launch button no longer
-  carries the target in its text (checkout composer tests), the destination block shows "Browse" where a test expects
-  "local (this machine)", and the Settings heading's color changed (appearance test). A docs screenshot spec has the
-  same old Launch text and would fail at the next docs capture.
-- The rest: Replace with's tests look for a warning element that the restyled launcher no longer has, the hover-text
-  sweep finds a launcher control with the browser's native tooltip, two host-settings switches fail on WebKit, the
-  named-conversation help's layout check fails, and one file-drop test fails on Chromium. That last one has no clear
-  link to dialogs and may not be the plan's; no run without the plan was made.
+Decision: send it back to its executor.
 
-The review found that the plan otherwise follows the previous answer exactly (Tab order, the inline YOLO question,
-Trash's header), and that SPEC_impl.md still quotes the permanent YOLO answer in lowercase and does not list number-key
-options among the hover-text exemptions. It also noted that a launcher test no longer guarantees the launcher fits a
-1440×900 window without scrolling; the pinned footer now keeps Launch reachable instead.
+- Run the whole browser suite on both engines (`npx playwright test`) and the UI's JavaScript tests against the stack.
+- For each failure in the Blocked question, find whether the product or the test is wrong and fix that one, and say in
+  the report which it was. Start with the 34 launcher and YOLO-question tests that time out because their controls never
+  become clickable: if the restyled launcher's scrolling body makes real controls hard or impossible to reach, that is a
+  product fix, not a test update.
+- Update the docs screenshot spec that still expects the old Launch button text, and the two SPEC_impl.md phrases (the
+  permanent YOLO answer's wording and the hover-text exemption for number-key options).
+- The decisions already recorded for this plan (the dialogs' Tab order, the inline YOLO question, Trash's pinned header)
+  stand.
 
-### What should happen to this plan?
-
-- **Send it back to its executor (recommended).** Answer with: run the whole browser suite on both engines and the UI's
-  JavaScript tests against the stack; fix the product or the test for each failure, saying in the report which; update
-  the docs screenshot spec and the two SPEC_impl.md phrases.
-- **Land it now and fix the failures afterwards.** Main would carry about 28 failing browser tests per engine and a
-  failing stylesheet test until a follow-up lands.
+No judgment call is made here, so no TODO entry is recorded.
