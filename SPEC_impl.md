@@ -981,6 +981,14 @@ legacy source opens the command tab with only its stored command. One `LaunchTab
 field groups in `LaunchDraft`, so switching shows and submits the other kind without copying anything between them.
 Destination, folder browser, optional name, search, and submission remain shared; only the tab's own controls differ.
 
+The agent group's ContainerDraft keeps its switch and raw path/port inputs in that same owner. Stateless controls emit
+individual field edits against the live draft so two browser events before a render cannot overwrite each other. Enabled
+invalid input is a refusal, never an absent container selection. Copied paths retain their bytes with escaped, read-only
+presentation where needed. The template editor retains an invalid raw draft until corrected or removed; its wire field
+keeps absent/set/null semantics. Restart holds container settings fixed. Replace with's copied managed directory remains
+eligible on the same confirmed host installation without turning it into a new checkout request; the supervisor remains
+the actual membership authority.
+
 The prefill keeps the source's raw directory and title while separately carrying its repository, preferring checkout
 membership over launch provenance. Clone seeds that repository as a fresh destination; Replace with keeps the folder.
 The untouched Clone name is computed at every launch-related read, so display, preview, retry binding and submission

@@ -796,9 +796,14 @@ pub(crate) fn selection_summary_without_harness(selection: &LaunchSelection) -> 
 /// problem of three identical one-line summaries hiding the one that differs.
 pub(crate) fn selection_summary_before_permissions(selection: &LaunchSelection) -> String {
     format!(
-        "Model: {} · Effort: {}",
+        "Model: {} · Effort: {}{}",
         selection.model.as_deref().unwrap_or("Default"),
         effort_label(selection.effort),
+        if selection.container.is_some() {
+            " · container"
+        } else {
+            ""
+        },
     )
 }
 
@@ -828,7 +833,16 @@ pub(crate) fn selection_explicit_before_permissions(selection: &LaunchSelection)
     let effort = selection
         .effort
         .map(|effort| format!("Effort: {}", effort_label(Some(effort))));
-    model.into_iter().chain(effort).collect()
+    model
+        .into_iter()
+        .chain(effort)
+        .chain(
+            selection
+                .container
+                .as_ref()
+                .map(|_| "container".to_string()),
+        )
+        .collect()
 }
 
 /// The word a compact recent row shows when its setup sets nothing

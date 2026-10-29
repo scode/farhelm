@@ -694,6 +694,16 @@ agent choice is independent of that destination:
   The search box, model field, YOLO confirmation, and save-as-template panel keep their own Enter rules. In the editable
   folder field, Enter chooses an arrow-highlighted dropdown entry without launching; with no highlighted entry it
   launches as before. A held Enter never launches.
+- Containerized launches: the Agent tab shows an experimental **Containerized** switch directly after the wrapper
+  prefix. It is available only for a managed checkout; a plain folder destination shows the reason. An unchanged managed
+  directory copied from a session remains eligible on that same confirmed host. Turning it on reveals **Image file**, a
+  required absolute OCI-archive path on the session's host; **API proxy port**, required from 1–65535; and **GitHub
+  token file**, an optional absolute host path. Each explains its purpose. Invalid enabled settings block launch with
+  the reason beside the actions, and the footer adds `container`. New starts off with empty fields; nothing is
+  remembered. Recent setups, Clone, Replace with and templates carry the complete choice. Command launches offer no
+  switch. Templates and Save as template include the choice as one field: absent leaves it alone, present settings
+  replace it, and null turns it off. Restart with holds container settings fixed and cannot introduce containerization
+  into an ordinary session. See [Containerized sessions](#containerized-sessions) for the isolation and lifecycle rules.
 - Conversation selector: New, Clone and Replace with offer an optional one-time selector for every agent launch. Claude,
   Codex, Grok and Muse label it conversation id; Goose and OpenCode session id; Cursor chat id; Pi and OMP session file.
   Empty preserves an ordinary fresh start. The selector is not saved in templates, history, defaults or the session's
@@ -3476,13 +3486,17 @@ operation refuses without cancelling creation or signalling processes and asks t
 finishes. Once Stop or Delete revokes creation, an earlier delayed creator cannot recreate the container. After a host
 reboot the session terminal is gone and Restart remains unavailable, so the session can only be replaced or deleted.
 
-This isolates host filesystem capabilities, not memory or CPU use. Internet access, LAN and tailnet addresses, and cloud
-metadata remain reachable. A localhost tunnel reaches the selected host's port, not an in-container port. The host's
-`containers.conf` still applies. Podman's ordinary privileges, including working sudo inside an appropriately prepared
-image, remain available. Files written as the uid-1000 image user belong to the host user through keep-id mapping;
-container-root files belong to a subordinate host uid. The user may need `podman unshare` to edit or remove them. A
-container-root-owned folder can likewise prevent Empty Trash until removed with `podman unshare rm -rf`. Delete removes
-the container but leaves the imported image in the user's Podman storage until they prune it.
+This isolates host filesystem capabilities, not memory or CPU use, and it does not protect the checkout itself: the
+agent can write anything there, including Git hooks and Git configuration under `.git` and an agent's own project
+settings, which can run with the host account's full access when Git or an agent later runs in that checkout outside the
+container (from a terminal or a shell prompt that shows Git status, an editor, or a later ordinary session reusing the
+checkout). Internet access, LAN and tailnet addresses, and cloud metadata remain reachable. A localhost tunnel reaches
+the selected host's port, not an in-container port. The host's `containers.conf` still applies. Podman's ordinary
+privileges, including working sudo inside an appropriately prepared image, remain available. Files written as the
+uid-1000 image user belong to the host user through keep-id mapping; container-root files belong to a subordinate host
+uid. The user may need `podman unshare` to edit or remove them. A container-root-owned folder can likewise prevent Empty
+Trash until removed with `podman unshare rm -rf`. Delete removes the container but leaves the imported image in the
+user's Podman storage until they prune it.
 
 ### Local authority and trust between hosts
 

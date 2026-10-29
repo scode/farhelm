@@ -640,9 +640,8 @@ are not.
   because GitLab lets the token creation be automated, while GitHub's scoped tokens have to be created by hand in a
   browser.
 
-- Containerize agents on remote hosts or locally on the desktop, with Docker, cgroup-based isolation, or something
-  similar. The cgroup scopes Farhelm already launches into track and reap an agent's processes; they do not isolate it.
-  Plan: `plans/queue/podman-sandbox.md`.
+- Extend containerized sessions to the macOS desktop, help users prepare or obtain images, and consider stronger
+  isolation beyond the experimental Linux rootless Podman support. Plan: `plans/queue/podman-sandbox.md`.
 
 - Replace xterm.js with libghostty via WebAssembly, assessed 2026-09-12 in `lore/2026-09-12-libghostty-assessment.md`.
   Native libghostty on macOS is ruled out there: it owns its own PTY and renders into an NSView, neither of which fits a

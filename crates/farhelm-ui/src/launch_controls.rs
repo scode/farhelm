@@ -127,6 +127,9 @@ pub(crate) fn LaunchControls(
     permissions: Option<LaunchPermission>,
     permission_flags: String,
     wrapper_prefix: String,
+    #[props(default)] container: crate::container_controls::ContainerDraft,
+    #[props(default = true)] container_available: bool,
+    #[props(default)] on_container: Option<EventHandler<crate::container_controls::ContainerEdit>>,
     catalog: Vec<LaunchCatalogModel>,
     busy: bool,
     model_draft: String,
@@ -650,6 +653,11 @@ pub(crate) fn LaunchControls(
                     div { class: "launch-composer-choice-error", role: "status", "{reason}" }
                 }
             }
+        if let Some(on_change) = on_container {
+            crate::container_controls::ContainerControls {
+                value: container, busy, available: container_available, on_change,
+            }
+        }
         if let Some(reason) = choice_error {
             div { class: "launch-composer-choice-error", "{reason}" }
         }

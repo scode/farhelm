@@ -513,6 +513,7 @@ pub(super) enum Field {
     Effort,
     Permissions,
     Wrapper,
+    Container,
     Command,
     Yolo,
     Resume,
@@ -524,7 +525,7 @@ pub(super) enum Field {
 impl Field {
     // Command-only fields lead when present; their absence keeps the agent
     // editor in its usual agent/model/effort order without a second ordering table.
-    pub(super) const ALL: [Self; 12] = [
+    pub(super) const ALL: [Self; 13] = [
         Self::Command,
         Self::Yolo,
         Self::Agent,
@@ -532,6 +533,7 @@ impl Field {
         Self::Effort,
         Self::Permissions,
         Self::Wrapper,
+        Self::Container,
         Self::Resume,
         Self::Prompt,
         Self::Host,
@@ -549,6 +551,7 @@ impl Field {
             Self::Effort => "Effort",
             Self::Permissions | Self::Yolo => "Approvals",
             Self::Wrapper => "Wrapper prefix",
+            Self::Container => "Containerized",
             Self::Command => "Command",
             Self::Resume => "Resume command",
             Self::Host => "Host",
@@ -567,6 +570,7 @@ impl Field {
             Self::Effort => "effort",
             Self::Permissions => "permissions",
             Self::Wrapper => "wrapper",
+            Self::Container => "container",
             Self::Yolo => "yolo",
             Self::Command => "command",
             Self::Resume => "resume",
@@ -586,6 +590,7 @@ impl Field {
             Self::Effort => f.effort.is_some(),
             Self::Permissions => f.permissions.is_some(),
             Self::Wrapper => f.wrapper_prefix.is_some(),
+            Self::Container => f.container.is_some(),
             Self::Command => f.command.is_some(),
             Self::Yolo => f.yolo.is_some(),
             Self::Resume => f.resume_command.is_some(),
@@ -644,6 +649,7 @@ impl Field {
             Self::Effort => f.effort = Some(None),
             Self::Permissions => f.permissions = Some(None),
             Self::Wrapper => f.wrapper_prefix = Some(None),
+            Self::Container => f.container = Some(None),
             Self::Command => f.command = Some(String::new()),
             Self::Yolo => f.yolo = Some(false),
             Self::Resume => f.resume_command = Some(None),
@@ -670,6 +676,7 @@ impl Field {
                 f.permission_flags = None;
             }
             Self::Wrapper => f.wrapper_prefix = None,
+            Self::Container => f.container = None,
             Self::Command => f.command = None,
             Self::Yolo => f.yolo = None,
             Self::Resume => f.resume_command = None,
@@ -705,7 +712,7 @@ impl Field {
             Self::Permissions => {
                 f.kind == Some(LauncherKind::Agent) && f.agent.is_none_or(|a| !a.offers_only_yolo())
             }
-            Self::Wrapper => f.kind == Some(LauncherKind::Agent),
+            Self::Wrapper | Self::Container => f.kind == Some(LauncherKind::Agent),
         }
     }
 
@@ -722,6 +729,11 @@ impl Field {
             return Some(
                 "does not fit this launcher switch or agent type; remove it to save".into(),
             );
+        }
+        if self == Self::Container
+            && let Some(Some(config)) = &f.container
+        {
+            return config.validate().err();
         }
         if self == Self::Permissions
             && let Some(Some(value)) = f.permissions
@@ -809,6 +821,9 @@ struct Draft {
     /// An incomplete shell quote stays visible and blocks save without
     /// replacing the last valid word list in the wire fields.
     wrapper_input: Option<String>,
+    /// Keep an invalid port or incomplete path visible without losing the last
+    /// valid wire choice. Save must refuse until corrected or removed.
+    container_input: Option<crate::container_controls::ContainerDraft>,
 }
 impl Default for Draft {
     fn default() -> Self {
@@ -819,6 +834,7 @@ impl Default for Draft {
                 ..Default::default()
             },
             wrapper_input: None,
+            container_input: None,
         }
     }
 }
@@ -837,12 +853,16 @@ impl Draft {
             name: t.name.clone(),
             fields,
             wrapper_input: None,
+            container_input: None,
         }
     }
 
     /// Refuse incompatible or unfinished fields without requiring a complete
     /// launch. Another stacked template may supply the missing agent or command.
     fn refusal(&self, catalog: Option<&[LaunchCatalogModel]>) -> Option<String> {
+        if let Some(value) = &self.container_input {
+            return value.config().err();
+        }
         if let Some(text) = &self.wrapper_input {
             return Some(
                 farhelm_proto::split_wrapper_prefix(text)
@@ -950,6 +970,7 @@ pub(super) fn saved_fields_refusal(
         name: template.name.clone(),
         fields: template.fields.clone(),
         wrapper_input: None,
+        container_input: None,
     }
     .refusal(catalog)
 }
@@ -1029,6 +1050,13 @@ fn template_summary_parts(fields: &TemplateFields) -> Vec<DetailPart> {
     }
     if fields.command.is_some() {
         push(vec![DetailPart::text("Command")]);
+    }
+    if let Some(container) = &fields.container {
+        push(vec![DetailPart::text(if container.is_some() {
+            "Containerized"
+        } else {
+            "Containerized off"
+        })]);
     }
     if let Some(yolo) = fields.yolo {
         push(vec![DetailPart::text(if yolo {
@@ -1197,6 +1225,23 @@ fn FieldEditor(
     // while Remove and Add compose the same names into an existing sentence.
     let noun = label.to_ascii_lowercase();
     let controls = match field {
+        Field::Container => rsx! {
+            crate::container_controls::ContainerControls {
+                value: draft().container_input.unwrap_or_else(|| crate::container_controls::ContainerDraft::from_config(current.container.as_ref().and_then(Option::as_ref))),
+                busy: disabled,
+                on_change: move |edit: crate::container_controls::ContainerEdit| {
+                    if disabled { return; }
+                    draft.with_mut(|d| {
+                        let mut value = d.container_input.take().unwrap_or_else(|| crate::container_controls::ContainerDraft::from_config(d.fields.container.as_ref().and_then(Option::as_ref)));
+                        value.apply(edit);
+                        match value.config() {
+                            Ok(config) => { d.fields.container = Some(config); }
+                            Err(_) => d.container_input = Some(value),
+                        }
+                    });
+                },
+            }
+        },
         Field::Wrapper => {
             let value = escaped.unwrap_or_else(|| {
                 draft().wrapper_input.unwrap_or_else(|| {
@@ -1414,7 +1459,11 @@ fn FieldEditor(
                 if let Some(ref message)=refusal { p { class: "templates-error", "{message}" } }
             }
             button { class: "templates-remove", r#type: "button", disabled, aria_label: "Remove {noun}", "data-tooltip": "Remove {noun}: this template will leave it as is",
-                onclick: move |_| draft.with_mut(|d| { field.remove(&mut d.fields); if field == Field::Wrapper { d.wrapper_input = None; } }), "✕"
+                onclick: move |_| draft.with_mut(|d| {
+                    field.remove(&mut d.fields);
+                    if field == Field::Wrapper { d.wrapper_input = None; }
+                    if field == Field::Container { d.container_input = None; }
+                }), "✕"
             }
         }
     }
@@ -1489,6 +1538,7 @@ fn leave_editor(
                 name: template.name.clone(),
                 fields: template.fields.clone(),
                 wrapper_input: None,
+                container_input: None,
             });
             draft.set(Draft::from_template(&template));
             previous.set(Some(template.name));
@@ -2843,6 +2893,42 @@ mod tests {
         assert!(!Field::Wrapper.offered(&fields));
     }
 
+    /// Container edits distinguish absence from an explicit off reset. Partial
+    /// templates need no agent or destination, but invalid configuration and
+    /// command-tab use must refuse instead of silently dropping isolation.
+    #[test]
+    fn container_field_preserves_presence_and_refuses_invalid_choices() {
+        let mut draft = Draft::default();
+        assert!(!Field::Container.is_set(&draft.fields));
+        Field::Container.add(&mut draft.fields);
+        assert_eq!(draft.fields.container, Some(None));
+        assert_eq!(draft.refusal(None), None);
+        let config = farhelm_proto::ContainerConfig {
+            engine: farhelm_proto::ContainerEngine::Podman,
+            image_file: "/images/agent.oci".into(),
+            api_proxy_port: 43210,
+            github_token_file: Some("/tokens/github".into()),
+        };
+        draft.fields.container = Some(Some(config.clone()));
+        assert_eq!(draft.refusal(None), None);
+        assert!(template_summary(&draft.fields).contains("Containerized"));
+        draft
+            .fields
+            .container
+            .as_mut()
+            .unwrap()
+            .as_mut()
+            .unwrap()
+            .api_proxy_port = 0;
+        assert!(draft.refusal(None).unwrap().contains("65535"));
+        draft.fields.container = Some(Some(config));
+        draft.fields.kind = Some(LauncherKind::Command);
+        assert!(draft.refusal(None).unwrap().contains("Containerized"));
+        Field::Container.remove(&mut draft.fields);
+        assert_eq!(draft.fields.container, None);
+        assert_eq!(draft.refusal(None), None);
+    }
+
     /// Visible summaries preserve raw peer bytes until rendering, and only
     /// command arguments use mono. Names and model choices remain interface
     /// text even when they carry escaping and bidi requirements.
@@ -3211,6 +3297,7 @@ mod tests {
                         name: stored.name,
                         fields: stored.fields,
                         wrapper_input: None,
+                        container_input: None,
                     },
                 kind.is_some()
             );
@@ -3259,6 +3346,7 @@ mod tests {
                 ..Default::default()
             },
             wrapper_input: None,
+            container_input: None,
         };
         assert!(Field::Resume.offered(&draft.fields));
         assert!(!Field::Effort.offered(&draft.fields));
@@ -3291,6 +3379,7 @@ mod tests {
                 ..Default::default()
             },
             wrapper_input: None,
+            container_input: None,
         };
         assert_eq!(draft.refusal(None), None);
         draft.fields.agent = Some(LaunchHarness::Claude);
@@ -3351,6 +3440,7 @@ mod tests {
                     ..Default::default()
                 },
                 wrapper_input: None,
+                container_input: None,
             };
             assert_eq!(draft.refusal(None), None);
             check_template_shape(&LaunchTemplate {
