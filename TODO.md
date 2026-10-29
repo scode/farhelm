@@ -226,6 +226,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   which only managed checkouts get today. Git breaks inside the container for a folder that is a git worktree or a
   subfolder of a repository, since only the folder itself is mounted.
 
+- **Replace the A−/A+ terminal text-size buttons with zoom icons.** The two buttons at the right end of a session's tab
+  strip label the text-size step as "A−" and "A+", which does not read as an action. Use recognizable zoom-out and
+  zoom-in icons (a magnifier with − / +) instead, keeping the tooltips and keyboard-shortcut help.
+
 ## Doc todo
 
 - Tell users that a working-copy (checkout) root must be a location only they can write: Farhelm is not designed for
