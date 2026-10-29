@@ -26,19 +26,19 @@ Hover over the session's name or the open area of its row to see its full title,
 activity in one summary; the marks keep their own explanations.
 
 A branch mark means the session uses a [managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout),
-a clone Farhelm made for a session. Its repository appears where other rows show a directory. With **compact** ticked,
+a clone Farhelm made for a session. Its repository appears where other rows show a directory. With **Compact** ticked,
 the branch mark follows the session's name instead. Hover it to see the full directory and what happens when you delete
 the last session using it. The same mark appears beside the directory in the bar under an open session's terminal.
 
 ## Ntfy alerts
 
 To hear when a session needs you away from Farhelm, subscribe to a private topic in the
-[ntfy app](https://docs.ntfy.sh/subscribe/phone/), then configure **ntfy alerts** under **notifications** in Farhelm's
+[ntfy app](https://docs.ntfy.sh/subscribe/phone/), then configure **ntfy alerts** under **Notifications** in Farhelm's
 settings. The server defaults to ntfy.sh; use the same server and topic you subscribed to. For a server that requires authentication, add
-an access token; changing the server later clears the saved token when you save, unless you enter a new one. Priority controls how urgently ntfy announces the alert. **save** keeps these choices for every
+an access token; changing the server later clears the saved token when you save, unless you enter a new one. Priority controls how urgently ntfy announces the alert. **Save** keeps these choices for every
 window using your [helm](/docs/how-it-works/the-pieces/), the program that shows you all your hosts' sessions.
-**send test** uses the saved choices, including while alerts are switched off, and says whether it succeeded.
-When ready to receive automatic alerts, turn on **send ntfy alerts** and select **save**.
+**Send test** uses the saved choices, including while alerts are switched off, and says whether it succeeded.
+When ready to receive automatic alerts, turn on **Send ntfy alerts** and select **Save**.
 
 Choose a hard-to-guess topic and keep it private: anyone who knows an ntfy.sh topic can read its alerts. An alert
 contains the session's title and host, so avoid sensitive text in titles if you do not want it sent to that server.
@@ -50,7 +50,7 @@ you can close every browser window. See [The pieces](/docs/how-it-works/the-piec
 
 ## Managed checkout trash
 
-The trash can immediately left of **new** holds [managed
+The trash can immediately left of **New** holds [managed
 checkouts](/docs/using/start-a-session/#start-from-a-managed-checkout) whose last session was deleted.
 
 <Screenshot
@@ -65,16 +65,16 @@ Open it to see the checkouts grouped by host, newest first, with their repositor
   alt="The trash dialog listing archived checkouts on two hosts, with where they are on disk explained."
 />
 
-**delete all** at the top deletes the trash on every reachable host, and **delete all on** a host only on that one. Each
+**Delete all** at the top deletes the trash on every reachable host, and **Delete all on** a host only on that one. Each
 asks you to confirm, and work in the trash that was never committed or pushed is lost. Each checkout also has its own
-**delete** button, which deletes just that checkout at once, without asking; any work in it that was never committed or
-pushed is lost. An unreachable host stays greyed out and is skipped by **delete all**, which waits until every reachable
+**Delete** button, which deletes just that checkout at once, without asking; any work in it that was never committed or
+pushed is lost. An unreachable host stays greyed out and is skipped by **Delete all**, which waits until every reachable
 host can be read. Sizes can be partial when some directories cannot be measured. If an archive directory was replaced or
 moved since Farhelm archived it, it stays untouched and the dialog explains what was left behind. Changing the files
 inside it does not protect it: copy anything you want to keep out of the archive first. Cleanup can partially remove a
 directory before failing; the dialog tells you when that happened.
 
-While it deletes, the dialog says how many hosts are still working, and each host shows **deleting…** until its
+While it deletes, the dialog says how many hosts are still working, and each host shows **Deleting…** until its
 result, success or failure, replaces it.
 
 Nothing empties the trash automatically. A deletion in another window updates the count when its managed session
@@ -95,12 +95,12 @@ An agent can also be waiting on Farhelm itself, when it asks to start, stop, cha
 change, or remove a host, with the `farhelm` command. That request shows as a compact card near the top of the window, not in the session list, and you answer it on
 the card; [Approve what agents do](/docs/using/approve-agent-requests/) covers it.
 
-A session that has ended says how in words under its name, instead of a coloured dot (with **compact** ticked, as an
+A session that has ended says how in words under its name, instead of a coloured dot (with **Compact** ticked, as an
 icon you can hover over):
 
-- **exited**, with the agent's exit code. "stopped by user" is added when you stopped it.
-- **interrupted**: the host rebooted, which ended the agent. The session waits for you to start it again.
-- **error**: the agent could not start; the reason follows the word. An agent that starts and then quits shows exited.
+- **Exited**, with the agent's exit code. "stopped by user" is added when you stopped it.
+- **Interrupted**: the host rebooted, which ended the agent. The session waits for you to start it again.
+- **Error**: the agent could not start; the reason follows the word. An agent that starts and then quits shows exited.
 
 An exited session's terminal stays readable for as long as its host stays up. A reboot clears it, so an interrupted
 session has no terminal until you start it again. [Stop, restart, and resume](/docs/using/stop-restart-resume/) covers
@@ -108,23 +108,23 @@ starting either kind again.
 
 ## Terminal links
 
-Open **settings** from the gear beside the sidebar version and choose **terminal**. By default, Farhelm opens
+Open **Settings** from the gear beside the sidebar version and choose **Terminal**. By default, Farhelm opens
 a web link and keeps the click from reaching the program, so agents such as Codex do not open it a second time.
 
-Choose **open in Farhelm and also pass the click on** if your program needs link clicks; it may open a second browser
-tab. Choose **pass the click on only** to leave links entirely to the program. If that program does not handle mouse
+Choose **Open in Farhelm and also pass the click on** if your program needs link clicks; it may open a second browser
+tab. Choose **Pass the click on only** to leave links entirely to the program. If that program does not handle mouse
 clicks, clicking opens nothing. This choice does not change file downloads. This choice applies to every client of your helm; other
 open windows pick it up when they reload.
 
-In the desktop app, this section also has **file types to open with Cmd-click** (**Ctrl-click** on Linux). The field
+In the desktop app, this section also has **File types to open with Cmd-click** (**Ctrl-click** on Linux). The field
 defaults to `md, txt, json`; save a comma-separated list to change which downloaded files open in their default app.
 Save an empty field to download without opening. A warning appears beside each type Farhelm does not recognize as safe.
 
 ## Sounds when an agent needs you
 
 Farhelm plays a bell when a session starts waiting and a ding-dong when an agent asks for your approval. You can also
-turn on a soft pluck when an agent finishes its turn and becomes idle. Open **settings** from the gear beside the sidebar
-version and choose **notifications** to turn each sound on or off under **sounds**; your choices stay on this device.
+turn on a soft pluck when an agent finishes its turn and becomes idle. Open **Settings** from the gear beside the sidebar
+version and choose **Notifications** to turn each sound on or off under **Sounds**; your choices stay on this device.
 
 The session you have open stays quiet while you are looking at its window. Waiting and finished-turn sounds follow the
 sessions in your current list; changing its host selector or filters does not beep for a session already waiting. New
@@ -152,7 +152,7 @@ If the host filter hid it, Farhelm changes the filter to ALL. Escape or a click 
 focus to where you were. The shortcut does nothing while another dialog is open. If you have more sessions than Farhelm can
 list at once, the switcher tells you it searched only the most recently active ones.
 
-To start something new, type its name and choose **new session named "…"** below the matches. It opens the
+To start something new, type its name and choose **New session named "…"** below the matches. It opens the
 [session launcher](/docs/using/start-a-session/) with that name and your usual defaults. Type `tl:` to search
 [templates](/docs/using/launch-templates/) instead; `tl:` on its own lists them all. Choosing one opens the
 launcher with the template applied. These choices leave the launcher open for you to review and press **Launch**.
@@ -180,7 +180,7 @@ templates to the current draft instead; you decide when to press **Launch**.
   alt="A session's menu, opened from the row's three dots, with rename and mark read explained."
 />
 
-Clicking the blue dot does the same as **mark read**. The rest of the menu clones, replaces, stops, or deletes the
+Clicking the blue dot does the same as **Mark read**. The rest of the menu clones, replaces, stops, or deletes the
 session, and is covered in [Stop, restart, and resume](/docs/using/stop-restart-resume/).
 
 **Cmd+L** in the Mac app, or **Ctrl+Shift+L** in a browser, opens Rename for the open session, even if a filter hides its
@@ -198,20 +198,20 @@ every browser and the desktop app connected to it see the same pins, and they wo
 ## When a row shows a bell
 
 A bell appears on a row, just left of its age, when Farhelm has noticed something about that session that you can act
-on. For now these are all about following the agent's conversation, which is what lets **restart** pick that
+on. For now these are all about following the agent's conversation, which is what lets **Restart** pick that
 conversation up again later. For example, the agent has been working for a while and never told Farhelm which
-conversation it is in, so **restart** cannot pick it up. Each notification says what happened and what you can do about
-it, such as starting the session over with **replace with**, or, when nothing can be done, what you lose.
+conversation it is in, so **Restart** cannot pick it up. Each notification says what happened and what you can do about
+it, such as starting the session over with **Replace with**, or, when nothing can be done, what you lose.
 
 A red, filled bell means at least one notification is new. Click it to list them, newest first, with the ones you have
-not seen before marked **new**. Clicking the bell does not open the session. Closing the list, by clicking elsewhere,
-pressing Escape, or clicking the bell again, marks everything in it read, and the bell turns grey. **clear all** removes
+not seen before marked **New**. Clicking the bell does not open the session. Closing the list, by clicking elsewhere,
+pressing Escape, or clicking the bell again, marks everything in it read, and the bell turns grey. **Clear all** removes
 them, and the bell goes away until something new happens. Read and cleared notifications are the same in every window
 connected to the same [helm](/docs/how-it-works/the-pieces/), and a session keeps only its 10 most recent ones.
 
 If the agent later tells Farhelm which conversation it is in, or its missing conversation record comes back, and
-**restart** can resume again, the warning stays in the list but is greyed and marked **resolved**. It counts as read even if you have never opened it. If
-the same problem returns before that agent is relaunched, the warning moves back to the top as **new** and makes the
+**Restart** can resume again, the warning stays in the list but is greyed and marked **Resolved**. It counts as read even if you have never opened it. If
+the same problem returns before that agent is relaunched, the warning moves back to the top as **New** and makes the
 bell red again, even if you had cleared it.
 
 ## Next

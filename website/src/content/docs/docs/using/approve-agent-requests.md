@@ -35,7 +35,7 @@ that matter:
   [managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout), the card also names the repository it
   would clone, such as `GitHub: acme/web`, above the exact directory the clone would go into;
 - for a Codex, Muse or Pi launch or restart, whether it trusts the directory as a
-  [managed checkout](/docs/using/start-a-session/#trust-in-managed-checkouts) under **agent trust** in Settings, which
+  [managed checkout](/docs/using/start-a-session/#trust-in-managed-checkouts) under **Agent trust** in Settings, which
   lets the repository's own hooks, settings and commands run without asking;
 - for a template change, the whole template as it would be saved, including any command line. If the agent changes its
   **⚡** mark or number key, the card shows the change and which other template loses the mark or key;
@@ -47,17 +47,17 @@ words, not Farhelm's; each one sits under its own label.
 
 Most cards offer three buttons:
 
-- **allow** lets this one request go ahead.
-- **always allow from** the host lets this request go ahead and turns on that host's **Run farhelm commands without
+- **Allow** lets this one request go ahead.
+- **Always allow from** the host lets this request go ahead and turns on that host's **Run farhelm commands without
   asking** setting for a session or template change, so agents there stop asking (see below). A link card turns on only
   that link's permission instead. Other cards from that host that are already waiting stay up until you answer them.
-- **deny** refuses it, and the agent is told you declined.
+- **Deny** refuses it, and the agent is told you declined.
 
 An agent-supplied [wrapper prefix](/docs/agents/agent-wrappers/) on a host that asks before YOLO is a special case: its
-launch card offers **allow** and **deny** only, even if you turned on **Run farhelm commands without asking** for that
+launch card offers **Allow** and **Deny** only, even if you turned on **Run farhelm commands without asking** for that
 host. The prefix is the agent's own command text, which Farhelm cannot check; allowing one request does not approve
-later prefixes. An agent that creates or edits a template so that it carries a wrapper prefix gets the same **allow**
-and **deny** card on every host, because launches from that template later treat the prefix as yours.
+later prefixes. An agent that creates or edits a template so that it carries a wrapper prefix gets the same **Allow**
+and **Deny** card on every host, because launches from that template later treat the prefix as yours.
 
 The oldest waiting request opens first. Other requests appear as headers below it; click one to read and answer that
 request instead. The card shows how many requests are waiting, and the request you chose stays open until it is answered
@@ -72,22 +72,22 @@ double-click cannot answer a request you have not read.
 ## Host changes
 
 An agent can ask to add, edit or remove a host. Each request needs your approval, every time. **Run farhelm commands
-without asking** never covers host changes, and they never offer **always allow from**.
+without asking** never covers host changes, and they never offer **Always allow from**.
 
 - `farhelm agent host add build-box --alias build` asks to add an ssh destination, with an optional display alias.
 - `farhelm agent host edit build --icon flask --color teal` asks to change a host's appearance. It can also set an alias
   with `--alias` or clear it with `--no-alias`. Edits cover only the alias, icon and color; an agent cannot change a
   host's destination or permissions. The card shows each changed field's old and new value.
 - `farhelm agent host remove build` asks Farhelm to [forget that host](/docs/using/manage-hosts/#remove-a-host). An
-  agent cannot remove the host its own session runs on or **local (this machine)**.
+  agent cannot remove the host its own session runs on or **Local (this machine)**.
 
-For edit and remove, use the host's name from `farhelm agent hosts`. Both offer **allow** and **deny**.
+For edit and remove, use the host's name from `farhelm agent hosts`. Both offer **Allow** and **Deny**.
 
-An add request opens the ordinary **add host** dialog in your focused Farhelm window, with the destination and alias
-filled in and the asking session and host shown. You can change either field before choosing **add** to approve, or
-**cancel** to decline. Other windows show a card that opens the dialog there. Approval starts the ordinary
+An add request opens the ordinary **Add host** dialog in your focused Farhelm window, with the destination and alias
+filled in and the asking session and host shown. You can change either field before choosing **Add** to approve, or
+**Cancel** to decline. Other windows show a card that opens the dialog there. Approval starts the ordinary
 [add host flow](/docs/get-started/add-a-remote-host/) with the values you chose. If Farhelm needs to be installed on the
-host, it still asks you to confirm setup, even with **set up new hosts without asking** turned on. The settings that
+host, it still asks you to confirm setup, even with **Set up new hosts without asking** turned on. The settings that
 skip setup or removal questions apply to actions you start in the UI; they do not approve an agent's request.
 
 The agent gets `accepted` when you approve and Farhelm starts adding the host. That does not mean Farhelm is installed
@@ -118,25 +118,25 @@ templates, without asking you, except for the [wrapper prefixes](#the-card) desc
 [host changes](/docs/using/approve-agent-requests/#host-changes). Turn it on only for a host whose agents you would let
 do that unsupervised.
 
-If you **adopt** a host that was reinstalled or replaced at the same address, the setting goes back to off, like the
+If you **Adopt** a host that was reinstalled or replaced at the same address, the setting goes back to off, like the
 YOLO setting and both link settings: you have not decided about the new installation yet.
 
 ## Open links from a remote session
 
 When an agent or a command in a remote session tries to open a web link through `BROWSER`, Farhelm asks to open it on
 your machine. The card names the session and host and shows the site it would open and the full URL. Only HTTP and HTTPS
-links are accepted. **allow** opens it in your default browser from the Mac app, or in a new tab from Farhelm's web UI.
-**deny** opens nothing. Commands can also ask directly with `farhelm agent open-url -- https://example.com`, from any
+links are accepted. **Allow** opens it in your default browser from the Mac app, or in a new tab from Farhelm's web UI.
+**Deny** opens nothing. Commands can also ask directly with `farhelm agent open-url -- https://example.com`, from any
 session, including ones on your Mac.
 
 The host settings have two separate permissions, both off initially. **Open links without asking** covers public
 addresses. **Open local-network links without asking** covers addresses on your own machine or private network; those
-cards explain why they ask separately. **always allow from** turns on only the permission that link needs. The commands
+cards explain why they ask separately. **Always allow from** turns on only the permission that link needs. The commands
 permission above covers neither. Farhelm decides which permission a link needs from the address as written, without
 looking up where a name points, so a public-looking name can still lead to your private network.
 
-With the matching permission on, the Mac app opens the link immediately. Farhelm's web UI still shows an **open** button
-because your browser requires a click; **dismiss** refuses the request. Turning on the local-network permission lets
+With the matching permission on, the Mac app opens the link immediately. Farhelm's web UI still shows an **Open** button
+because your browser requires a click; **Dismiss** refuses the request. Turning on the local-network permission lets
 agents on that remote host make your browser load addresses on your machine or network without another approval.
 
 A running agent gets forwarding at its next launch; new terminal tabs get it immediately. Sessions on your Mac open
@@ -149,7 +149,7 @@ most programs do, so its own opener does not forward; use the explicit Farhelm c
 In the Mac app, a localhost link from a remote session also offers **Tunnel and open** first. That opens the service on
 the remote host; **Open** keeps the ordinary behavior of reaching the address on your Mac. The first tunnel needs your
 acceptance of a security warning, and you can close tunnels below the session's title or turn them off under
-**terminal** in settings. [Work in a session](/docs/using/work-in-a-session/#open-a-remote-localhost-link) explains the
+**Terminal** in settings. [Work in a session](/docs/using/work-in-a-session/#open-a-remote-localhost-link) explains the
 access you grant. A host's permission to open links without asking still opens the raw address; it does not create a
 tunnel automatically.
 

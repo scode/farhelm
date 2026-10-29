@@ -17,8 +17,8 @@ your Mac, and they keep running on the host while your Mac sleeps or Farhelm is 
 - Passwordless ssh from your Mac: `ssh <destination> true` has to work in a terminal without asking for a password.
   Farhelm uses your own ssh setup, so keys, the agent, and the Host names in `~/.ssh/config` all apply. A host that asks
   for a second factor or another approval on every ssh login works only on a best-effort basis, and only if you start
-  Farhelm's ssh connections to it by hand. Choose **? → ssh needs 2FA?** for the two commands, or follow the link in
-  **add host** for the destination you are about to add. Run both on your Mac when using the Mac app; in the web UI,
+  Farhelm's ssh connections to it by hand. Choose **? → SSH needs 2FA?** for the two commands, or follow the link in
+  **Add host** for the destination you are about to add. Run both on your Mac when using the Mac app; in the web UI,
   run them on the machine running your [helm](/docs/how-it-works/the-pieces/), as its user. Each asks for approval once
   and stays connected in the background. Run its command again when a connection drops. The dialog also explains when
   a connection cannot be shared from your helm. Adding or updating a host also opens one
@@ -51,7 +51,7 @@ closes. Otherwise Farhelm shows what it would set up there and asks first:
   alt="What setup will create on the host, with its set up and set up, don't ask again buttons explained."
 />
 
-When the host has no new enough tmux, Farhelm brings its own copy, as the list shows. After you choose **set up**, the
+When the host has no new enough tmux, Farhelm brings its own copy, as the list shows. After you choose **Set up**, the
 dialog closes and the host's row in the host list follows the setup until it is done:
 
 <Screenshot
@@ -64,7 +64,7 @@ session](/docs/using/start-a-session/#choose-where-it-runs). On the host, Farhel
 account, so it and its sessions keep running after you disconnect. It starts again when the machine boots where the
 system allows that, and at your next login where it does not.
 
-To have Farhelm ask again before setting up a host, turn off **set up new hosts without asking** under **hosts** in the
+To have Farhelm ask again before setting up a host, turn off **Set up new hosts without asking** under **Hosts** in the
 settings behind the gear at the top of the sidebar; [Manage hosts](/docs/using/manage-hosts/) has the rest of a host's settings.
 
 ## If something goes wrong
@@ -72,9 +72,9 @@ settings behind the gear at the top of the sidebar; [Manage hosts](/docs/using/m
 - When Farhelm cannot reach the host, the dialog shows ssh's own error. Check that `ssh <destination> true` works in
   a terminal without a password.
 - A host without systemd's services for your user account cannot be set up automatically, and the dialog says so.
-- When setup fails partway, open the host's `⋯` menu and choose **re-run** to try again.
+- When setup fails partway, open the host's `⋯` menu and choose **Re-run** to try again.
 - Adding a destination that is already in your host list is refused, and the dialog names that host. To set it up
-  again, use **update** in its `⋯` menu, or **re-run** if its setup failed.
+  again, use **Update** in its `⋯` menu, or **Re-run** if its setup failed.
 
 Next: [Start a session](/docs/using/start-a-session/), or, to remove Farhelm later,
 [Uninstall Farhelm](/docs/get-started/uninstall/).
