@@ -51,6 +51,13 @@
 //! nothing to adopt, the helm refuses an adopt against it, and offering the
 //! control anyway would be a lie about what is on the table. [`adoptable`]
 //! is where that rule is enforced once instead of at each render.
+//!
+//! ## Update offers and update discovery are different questions
+//!
+//! The panel's Update all follows each row's available Update action, which
+//! can include a current or unreachable host. [`updates`] adds the age or
+//! protocol requirement for rail arrows and session-list reminders. Its one
+//! classifier keeps those surfaces in agreement without narrowing Update all.
 
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -90,6 +97,7 @@ use crate::{ApiBase, ConnectionStage, Host, HostId, HostKind, HostPhase, Refresh
 
 pub(crate) mod attention;
 pub(crate) mod settings_dialog;
+pub(crate) mod updates;
 
 use attention::HostAttention;
 
@@ -496,7 +504,7 @@ fn host_update_title(state: &HostPhase) -> Option<String> {
     }
 }
 
-/// Share current update availability between the fleet action and inline button.
+/// Share current Update permission across fleet actions, inline buttons and discovery.
 ///
 /// A missing menu offer is not permission to start. The live provisioning busy
 /// flag closes the render gap before a panel withdraws its published offer.
@@ -1664,6 +1672,10 @@ pub(crate) fn HostsPanel(
     mut ops: OpLock,
     mut mutation_busy_hosts: Signal<std::collections::HashSet<HostId>>,
     mut provisioning_busy_hosts: Signal<std::collections::HashSet<HostId>>,
+    /// Shared with the session-list prompts. Row panels publish their offers
+    /// and consume exact-target requests even while management is concealed.
+    provisioning_menu_states: Signal<HashMap<HostId, ProvisioningMenuState>>,
+    mut provisioning_action_requests: Signal<HashMap<HostId, ActionRequest>>,
     /// The collapsed provisioning traces that currently contribute row height.
     mut provisioning_trace_shapes: Signal<HashMap<HostId, ProvisioningTraceShape>>,
     /// Rows held open by automatic update disclosure. Each provisioning
@@ -1808,11 +1820,6 @@ pub(crate) fn HostsPanel(
     let mut dialog_write = use_signal(HashMap::<HostId, SettingsField>::new);
     let mut destination_draft = use_signal(String::new);
     let mut adding = use_signal(|| false);
-    // Provisioning stays mounted in each row, while its commands render in
-    // the row-owned floating menu. These maps are the narrow bridge between
-    // those two render locations: summaries flow out, one-shot requests in.
-    let provisioning_menu_states = use_signal(HashMap::<HostId, ProvisioningMenuState>::new);
-    let mut provisioning_action_requests = use_signal(HashMap::<HostId, ActionRequest>::new);
     // An add that committed with an unreadable reply, which has no row to
     // sit on — see the form's `on_added`.
     let mut add_warning = use_signal(|| None::<String>);
@@ -2379,6 +2386,11 @@ pub(crate) fn HostsPanel(
         )
         .is_empty()
     });
+    let discovered_updates = updates::classify(
+        read.hosts().unwrap_or_default(),
+        &provisioning_menu_states.read(),
+        &provisioning_busy_hosts.read(),
+    );
     // Cosmetic, not the guard — every handler below claims the token for
     // itself (see the `ops` module).
     let busy = ops.busy();
@@ -2555,10 +2567,7 @@ pub(crate) fn HostsPanel(
                         menu_open: *host_menu_open.read() == Some(host.id)
                             && rail_dialog_hosts.read().contains(&host.id),
                         progress: row_update_progress.read().get(&host.id).cloned(),
-                        update_available: remote_update_available(host,
-                            provisioning_menu_states.read().get(&host.id),
-                            provisioning_busy_hosts.read().contains(&host.id))
-                            && host_update_kind(&host.state).is_some(),
+                        update_available: discovered_updates.contains(host.id),
                         last_read: read.refresh_error().is_some(),
                         attention: row_attention.read().get(&host.id).is_some_and(HostAttention::unseen),
                         on_choose: choose_host,

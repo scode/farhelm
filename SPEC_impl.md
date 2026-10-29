@@ -5257,6 +5257,21 @@ cannot turn the header click into a delayed update after setup finishes. All eli
 waiting for one another; a failed plan or run stays on its own row and cannot suppress another host's result. There is
 no fleet endpoint or page-wide update result to reconcile against those host-scoped authorities.
 
+The session-list update prompts use the rail's narrower available-update classification, not the header's Update all
+list: an offered remote Update, no live provisioning work, and either a compatible older build or a lower peer protocol.
+The Hosts toggle summarizes its count and highest urgency. Required updates replace the optional card with an
+undismissable banner; both send the existing binding-captured requests for their displayed host set. Only the card can
+be dismissed. Its page-local memory keeps the dismissed host ids and helm build, allowing another host's new update or a
+different build to reveal it without any stored dismissal or new backend resource. Hosts management conceals both
+surfaces without ending their owner's lifetime.
+
+ListView owns the provisioning offer and request maps alongside the busy set; the permanently mounted host panels still
+publish and consume them. Reminder identity uses the latest nonempty response build observation, separately from the
+first-mismatch skew verdict. A late old reply can renew a reminder but cannot clear that verdict or restore unattended
+reconnection. Prompt copy and presence join the existing pre-render movement capture for session anchors, so layout
+changes retire only openings measured against the old rows. The optional card bounds its height and scrolls only its
+host names, leaving its heading, dismissal and actions reachable; the names region supports keyboard scrolling.
+
 A supervisor that answers the hello but speaks a DIFFERENT protocol version is a distinct discovery outcome, not a probe
 failure: presence is proven (only a live supervisor sends a hello) and the skew payload names its build, but nothing
 after the refusal — in particular no identity — was exchanged. ADD registers such a host as discovered (identity

@@ -680,6 +680,64 @@ samp {
    acknowledging the failure that prompted it. */
 .host-rail-attention { position: absolute; left: 1px; bottom: 1px; display: flex; padding: 2px; border-radius: 50%; background: var(--bg-1); color: var(--warn); }
 .host-rail-update { position: absolute; top: -2px; right: 0; padding: 0 3px; border-radius: var(--radius-md); background: var(--bg-2); color: var(--warn); font-weight: 600; }
+/* Discovery remains visible when its optional reminder is dismissed. The
+   rail keeps its existing amber arrows; urgency is specific to this toggle. */
+.hosts-toggle-update { position: absolute; top: -2px; right: 0; padding: 0 3px; border-radius: var(--radius-md); background: var(--bg-2); color: var(--warn); font-weight: 600; }
+.hosts-toggle-update[data-update-kind="required"] { color: var(--danger-strong); }
+/* The optional card is a sibling of the scroller, so even a long session
+   list leaves its actions beside the footer's Hosts button. Its arrow points
+   into the rail; the required banner instead leads the session content. */
+.host-update-card, .host-update-banner {
+  position: relative;
+  padding: 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.host-update-card {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  min-height: 116px;
+  max-height: min(280px, 45%);
+  margin: 8px 8px 8px calc(var(--host-rail-width) + 8px);
+  border: 1px solid var(--warn-border);
+  border-radius: var(--radius-sm);
+  background: var(--warn-bg-dim);
+  color: var(--warn-bright);
+}
+.host-update-card::before {
+  content: "";
+  position: absolute;
+  left: -7px;
+  /* The footer's first 40px control is centered 108px above its bottom.
+     Keep the point there even when host names wrap and the card grows. */
+  bottom: 94px;
+  width: 11px;
+  height: 11px;
+  background: var(--warn-bg-dim);
+  border-left: 1px solid var(--warn-border);
+  border-bottom: 1px solid var(--warn-border);
+  transform: rotate(45deg);
+}
+.host-update-banner {
+  background: var(--danger-bg-dim);
+  color: var(--danger-strong);
+  border-bottom: 1px solid var(--danger-soft);
+}
+.host-update-card p, .host-update-banner p { margin: 0 0 8px; }
+.host-update-heading { font-weight: 600; }
+.host-update-card .host-update-heading { flex: 0 0 auto; padding-right: 24px; }
+/* Only names scroll. The dismissal and update/navigation controls remain
+   outside that region, and its tab stop makes hidden names keyboard-readable. */
+.host-update-body { flex: 1 1 auto; min-height: 0; overflow: auto; margin-bottom: 8px; }
+.host-update-body:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.host-update-names { display: flex; flex-wrap: wrap; gap: 2px 8px; list-style: none; padding: 0; margin: 0; }
+.host-update-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.host-update-card .host-update-actions { flex: 0 0 auto; }
+.host-update-actions .btn { font-size: 12px; }
+.host-update-card .host-update-dismiss { position: absolute; top: 4px; right: 4px; padding: 2px 5px; font-size: 12px; }
 /* A dashed operation ring remains distinct from the solid keyboard outline. */
 .host-rail-avatar[data-host-progress="true"]::after { content: ""; position: absolute; inset: 1px; border: 2px dashed var(--accent); border-radius: 50%; pointer-events: none; }
 .host-rail-avatar[aria-pressed="true"][data-host-progress="true"]::after { border-color: var(--on-fill); }

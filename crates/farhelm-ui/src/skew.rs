@@ -23,6 +23,9 @@
 //! does its own comparison against the stamp the attachment policy carries.
 //!
 //! The verdict is LATCHED once seen; [`HELM_BUILD_SKEW`] carries why.
+//! Update-reminder dismissal separately observes later build headers through
+//! [`HELM_BUILD_OBSERVED`]. That presentation-only observation never relaxes
+//! this module's safety verdict, even when replies arrive out of order.
 //!
 //! ## What is deliberately not done here
 //!
@@ -101,6 +104,13 @@ pub(crate) static HELM_BUILD_SKEW: GlobalSignal<Option<Skew>> = Signal::global(|
 /// One-way, like the verdict, and for a simpler reason: a stamp seen once
 /// proves the peer's vocabulary, and no later reply can unprove it.
 pub(crate) static HELM_BUILD_SEEN: GlobalSignal<bool> = Signal::global(|| false);
+
+/// The most recently received nonempty build stamp, solely for update reminders.
+/// Unlike the skew verdict, this observation may change after a mismatch. A
+/// delayed reply can renew a dismissed reminder, but cannot clear the latched
+/// verdict or authorize reconnect/background work. Keep the same bounded stamp
+/// spelling used by the notice; missing headers do not invent a new build.
+pub(crate) static HELM_BUILD_OBSERVED: GlobalSignal<Option<String>> = Signal::global(|| None);
 
 /// Whether the helm answering this page is the build this bundle was made
 /// for — the browser edge's substitute for a version handshake.
@@ -199,16 +209,27 @@ fn skew_of(ours: &str, observed: Option<&str>) -> Option<Skew> {
 /// response threaded a side effect through an identity `map`, which reads
 /// as a transformation and is not one.
 ///
-/// Only a mismatch is ever recorded, and only the first one (see
-/// [`HELM_BUILD_SKEW`]'s latch). Agreement writes nothing at all, which
-/// also means the overwhelmingly common case — every reply, forever, on a
-/// healthy setup — never marks a signal dirty and never re-renders the tree
-/// three times a second.
+/// The safety verdict still records only the first mismatch. The separate
+/// reminder observation records later nonempty build changes too; repeated
+/// replies from the same build write nothing and do not dirty the tree.
 pub(crate) fn note_build(resp: &reqwest::Response) {
     let observed = resp
         .headers()
         .get(BUILD_HEADER)
         .and_then(|value| value.to_str().ok());
+    observe_build_stamp(observed);
+}
+
+/// Publish one decoded header without coupling reminder identity to skew safety.
+/// This boundary also lets the runtime test exercise real signals without an
+/// HTTP fixture or changes to the process environment.
+fn observe_build_stamp(observed: Option<&str>) {
+    if let Some(stamp) = observed.map(str::trim).filter(|stamp| !stamp.is_empty()) {
+        let stamp: String = stamp.chars().take(MAX_STAMP_CHARS).collect();
+        if HELM_BUILD_OBSERVED.peek().as_ref() != Some(&stamp) {
+            *HELM_BUILD_OBSERVED.write() = Some(stamp);
+        }
+    }
     if observed.is_some_and(|stamp| !stamp.trim().is_empty()) && !*HELM_BUILD_SEEN.peek() {
         *HELM_BUILD_SEEN.write() = true;
     }
@@ -275,6 +296,53 @@ pub(crate) fn BuildSkewNotice() -> Element {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Reminder identity follows later reported builds after either kind of
+    /// latched mismatch. Even a late older reply must not relax skew safety.
+    #[farhelm_testtrace::test]
+    fn reminder_observations_continue_after_reported_or_silent_skew() {
+        for initial in [Some("different-build-b"), None] {
+            let mut dom = VirtualDom::new(|| rsx! { span {} });
+            dom.rebuild_in_place();
+            dom.in_scope(dioxus::core::ScopeId::APP, || {
+                observe_build_stamp(initial);
+                let verdict = HELM_BUILD_SKEW.peek().clone();
+                assert!(verdict.is_some(), "the fixture starts with a mismatch");
+                assert_eq!(verdict, skew_of(CLIENT_BUILD, initial));
+                for build in [
+                    "different-build-b",
+                    "different-build-c",
+                    "different-build-b",
+                ] {
+                    observe_build_stamp(Some(build));
+                    assert_eq!(HELM_BUILD_OBSERVED.peek().as_deref(), Some(build));
+                    assert_eq!(*HELM_BUILD_SKEW.peek(), verdict);
+                    assert!(*HELM_BUILD_SEEN.peek());
+                    assert!(build_skew_detected_now());
+                }
+                observe_build_stamp(Some("   "));
+                assert_eq!(
+                    HELM_BUILD_OBSERVED.peek().as_deref(),
+                    Some("different-build-b")
+                );
+                observe_build_stamp(Some("  different-build-c  "));
+                assert_eq!(
+                    HELM_BUILD_OBSERVED.peek().as_deref(),
+                    Some("different-build-c")
+                );
+                observe_build_stamp(Some(&"x".repeat(MAX_STAMP_CHARS + 20)));
+                assert_eq!(
+                    HELM_BUILD_OBSERVED.peek().as_ref().unwrap().len(),
+                    MAX_STAMP_CHARS
+                );
+                assert_eq!(*HELM_BUILD_SKEW.peek(), verdict);
+                observe_build_stamp(Some(CLIENT_BUILD));
+                assert_eq!(HELM_BUILD_OBSERVED.peek().as_deref(), Some(CLIENT_BUILD));
+                assert_eq!(*HELM_BUILD_SKEW.peek(), verdict);
+                assert!(build_skew_detected_now());
+            });
+        }
+    }
 
     /// Agreement — the overwhelmingly common case — must say nothing at
     /// all, including when the stamp arrives with the whitespace an HTTP
