@@ -218,7 +218,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_64` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_65` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -229,7 +229,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 64;
+pub const PROTOCOL_VERSION: u32 = 65;
 
 /// Browser saves buffer the body, so both hosts enforce this decimal 100 MB cap.
 pub const DOWNLOAD_LIMIT_BYTES: u64 = 100_000_000;
@@ -1473,7 +1473,7 @@ crate::enum_with_all! {
     /// command ([`SessionLaunch::agent_kind`]): an agent launch's agent
     /// type, a command launch's declared type, or a legacy session's
     /// stored kind. `Generic` is what a command launch that declares no
-    /// type gets, and what Muse, Cursor and OpenCode run as: a personal
+    /// type gets, and what Cursor and OpenCode run as: a personal
     /// script named `claude` that is not Anthropic's CLI stays generic
     /// unless the user says otherwise, so Claude-Code-specific status
     /// heuristics and identity capture never run against it.
@@ -1498,6 +1498,9 @@ crate::enum_with_all! {
         /// Grok's tracked native launch kind. Capture policy is added separately,
         /// but this identity must survive launch snapshots now.
         Grok,
+        /// Muse's native launch kind, kept distinct even before conversation
+        /// reporting and specialized screen reading are available.
+        Muse,
         /// Explicitly non-integrated: no status heuristics beyond the
         /// generic ones and no conversation-identity capture, whatever the
         /// command's program is called.
@@ -1528,12 +1531,13 @@ impl AgentKind {
             AgentKind::Pi => Some("Pi"),
             AgentKind::Omp => Some("OMP"),
             AgentKind::Grok => Some("Grok"),
+            AgentKind::Muse => Some("Muse"),
             AgentKind::Generic => None,
         }
     }
 
     /// When a session of this kind normally gets a conversation that Restart
-    /// can resume, or `None` for [`AgentKind::Generic`], which reports none.
+    /// can resume, or `None` for kinds with no conversation reporting.
     ///
     /// The single source of these facts for every place that explains a
     /// `not_captured` restart offer while the agent may still report: the
@@ -1562,7 +1566,7 @@ impl AgentKind {
             AgentKind::Pi | AgentKind::Omp => Some(RestartReadiness::FirstReply),
             // Grok's hooks are installed by the user, not injected.
             AgentKind::Grok => Some(RestartReadiness::FirstPromptWithHooks),
-            AgentKind::Generic => None,
+            AgentKind::Muse | AgentKind::Generic => None,
         }
     }
 
@@ -1576,6 +1580,7 @@ impl AgentKind {
             AgentKind::Pi => "pi",
             AgentKind::Omp => "omp",
             AgentKind::Grok => "grok",
+            AgentKind::Muse => "muse",
             AgentKind::Generic => "generic",
         }
     }
@@ -5151,8 +5156,8 @@ mod tests {
 
     /// Spec: every agent kind that reports conversations has a display name
     /// and a restart-readiness moment, each moment words a clause for both
-    /// readers, only the user-facing wording says "you", and the generic
-    /// kind has neither; the `not_captured` refusal names the agent and its
+    /// readers, only the user-facing wording says "you", and kinds without
+    /// reporting have no readiness; the `not_captured` refusal names the agent and its
     /// moment for a reporting kind and makes no per-agent claim otherwise.
     ///
     /// Why: these are the one source of the "when does Restart become
@@ -5165,8 +5170,20 @@ mod tests {
         for &kind in AgentKind::ALL {
             let name = kind.display_name();
             let readiness = kind.restart_readiness();
-            assert_eq!(name.is_some(), readiness.is_some(), "{kind:?}");
-            if kind == AgentKind::Generic {
+            if readiness.is_none() {
+                let expected_name = match kind {
+                    AgentKind::Generic => None,
+                    AgentKind::Muse => Some("Muse"),
+                    AgentKind::Claude
+                    | AgentKind::Codex
+                    | AgentKind::Goose
+                    | AgentKind::Pi
+                    | AgentKind::Omp
+                    | AgentKind::Grok => {
+                        panic!("reporting kind {kind:?} must declare its readiness")
+                    }
+                };
+                assert_eq!(name, expected_name);
                 assert_eq!(readiness, None);
                 let reason = RestartOffer::NotCaptured
                     .unavailable_reason(kind, false)
@@ -5250,8 +5267,8 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_64() {
-        assert_eq!(PROTOCOL_VERSION, 64);
+    fn protocol_version_is_pinned_at_65() {
+        assert_eq!(PROTOCOL_VERSION, 65);
     }
 
     /// A follow-up is an approved mutation even though its success has no
@@ -6990,6 +7007,7 @@ mod tests {
             AgentKind::Pi,
             AgentKind::Omp,
             AgentKind::Grok,
+            AgentKind::Muse,
             AgentKind::Generic,
         ] {
             let expected = match kind {
@@ -6999,6 +7017,7 @@ mod tests {
                 AgentKind::Pi => "pi",
                 AgentKind::Omp => "omp",
                 AgentKind::Grok => "grok",
+                AgentKind::Muse => "muse",
                 AgentKind::Generic => "generic",
             };
             assert_eq!(

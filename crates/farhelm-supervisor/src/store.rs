@@ -1018,6 +1018,7 @@ pub(crate) fn agent_kind_column(kind: farhelm_proto::AgentKind) -> &'static str 
         K::Pi => "pi",
         K::Omp => "omp",
         K::Grok => "grok",
+        K::Muse => "muse",
         K::Generic => "generic",
     }
 }
@@ -1042,6 +1043,7 @@ fn agent_kind_from_column(text: &str) -> anyhow::Result<farhelm_proto::AgentKind
         "pi" => K::Pi,
         "omp" => K::Omp,
         "grok" => K::Grok,
+        "muse" => K::Muse,
         "generic" => K::Generic,
         other => anyhow::bail!("row has unrecognized agent kind {other:?}"),
     })
@@ -9134,7 +9136,8 @@ mod tests {
     }
 
     /// Structured launches retain their integration kind across storage. OMP
-    /// needs its resume template; Cursor must remain Generic without one.
+    /// needs its resume template; Muse has its own kind without a resume
+    /// template, and Cursor must remain Generic without one.
     /// Coercing either half would silently reclassify a durable launch.
     #[farhelm_testtrace::test]
     async fn structured_launches_round_trip_with_their_matching_kind() {
@@ -9151,6 +9154,15 @@ mod tests {
                     "--resume".to_string(),
                     crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
                 ]),
+            ),
+            (
+                farhelm_proto::LaunchHarness::Muse,
+                farhelm_proto::AgentKind::Muse,
+                "muse-spark-1.3-contributor",
+                Some(farhelm_proto::LaunchEffort::High),
+                farhelm_proto::LaunchPermission::Yolo,
+                "muse --model muse-spark-1.3-contributor --reasoning-effort high --yolo",
+                None,
             ),
             (
                 farhelm_proto::LaunchHarness::Cursor,
@@ -9172,12 +9184,19 @@ mod tests {
                 wrapper_prefix: None,
                 workspace_trust: None,
             };
-            let session_launch = farhelm_proto::SessionLaunch::from_pre_launch_kinds(
-                invocation,
-                kind,
-                resume_template.clone(),
-                Some(launch.clone()),
-            );
+            // This round trip exercises today's launch format. The historical
+            // converter validates old kind spellings, which differ for Muse.
+            let mut start = shell_words::split(invocation).expect("fixture invocation");
+            start.push(crate::agent_kind::FARHELM_ARGS_PLACEHOLDER.to_string());
+            let session_launch = farhelm_proto::SessionLaunch::Agent {
+                selection: launch,
+                start,
+                resume: resume_template.map(|mut argv| {
+                    argv.push(crate::agent_kind::FARHELM_ARGS_PLACEHOLDER.to_string());
+                    argv
+                }),
+            };
+            session_launch.validate_new().expect("valid current launch");
             store
                 .insert_session(
                     StoredSession {
@@ -10161,6 +10180,11 @@ mod tests {
     /// resume offers even though the durable row still claims another vendor.
     #[farhelm_testtrace::test]
     async fn new_agent_kinds_round_trip_and_unknown_spellings_fail_decode() {
+        assert_eq!(agent_kind_column(farhelm_proto::AgentKind::Muse), "muse");
+        assert_eq!(
+            agent_kind_from_column("muse").unwrap(),
+            farhelm_proto::AgentKind::Muse
+        );
         let (_dir, store) = fresh_store().await;
         let mut row = launching_row("s-omp");
         // An OMP row must carry the placeholder-bearing template a real

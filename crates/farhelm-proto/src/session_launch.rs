@@ -256,7 +256,7 @@ impl SessionLaunch {
         let Some(selection) = selection else {
             return legacy(resume_template);
         };
-        if selection.harness.agent_kind() != agent_kind {
+        if selection.harness.pre_launch_agent_kind() != agent_kind {
             return legacy(resume_template);
         }
         let Ok(mut start) = shell_words::split(invocation) else {
@@ -784,16 +784,18 @@ mod tests {
             ),
             legacy("claude", AgentKind::Claude, Some(broken))
         );
-        // A structured row of a type with no conversation reporting stored
-        // no resume command, and converts to an agent launch without one.
+        // Muse originally stored Generic. Its historical mapping must still
+        // validate so conversion retains its saved choices without inventing
+        // a resume command; the converted launch derives today's Muse kind.
         let muse = selection_for_muse();
+        let converted = SessionLaunch::from_pre_launch_kinds(
+            "muse --yolo",
+            AgentKind::Generic,
+            None,
+            Some(muse.clone()),
+        );
         assert_eq!(
-            SessionLaunch::from_pre_launch_kinds(
-                "muse --yolo",
-                AgentKind::Generic,
-                None,
-                Some(muse.clone())
-            ),
+            converted,
             SessionLaunch::Agent {
                 selection: muse,
                 start: vec![
@@ -804,6 +806,29 @@ mod tests {
                 resume: None,
             }
         );
+        assert_eq!(converted.agent_kind(), AgentKind::Muse);
+    }
+
+    /// Muse's integration identity comes from the stored harness or declared
+    /// type. Giving the harness a distinct kind must not synthesize a missing
+    /// resume command on an existing structured launch.
+    #[test]
+    fn muse_launches_derive_their_kind_without_backfilling_resume() {
+        let launch = SessionLaunch::Agent {
+            selection: selection_for_muse(),
+            start: vec!["muse".into(), FARHELM_ARGS_PLACEHOLDER.into()],
+            resume: None,
+        };
+        assert_eq!(launch.agent_kind(), AgentKind::Muse);
+        assert!(!launch.has_resume());
+        let command = SessionLaunch::Command(CommandLaunch {
+            command: "wrapper muse {farhelm_args}".into(),
+            yolo: false,
+            agent: Some(LaunchHarness::Muse),
+            resume: None,
+        });
+        assert_eq!(command.agent_kind(), AgentKind::Muse);
+        assert!(!command.has_resume());
     }
 
     /// A Muse selection with every choice at its default.

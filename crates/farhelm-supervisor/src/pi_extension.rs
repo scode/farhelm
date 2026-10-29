@@ -80,6 +80,7 @@ pub(crate) fn reporter_asset(kind: farhelm_proto::AgentKind) -> Option<VendorAss
         | AgentKind::Codex
         | AgentKind::Goose
         | AgentKind::Grok
+        | AgentKind::Muse
         | AgentKind::Generic => None,
     }
 }

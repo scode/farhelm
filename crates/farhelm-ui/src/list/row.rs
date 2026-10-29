@@ -701,6 +701,7 @@ fn kind_glyph(kind: crate::SessionAgentKind) -> HarnessGlyph {
         crate::SessionAgentKind::Pi => HarnessGlyph::Pi,
         crate::SessionAgentKind::Omp => HarnessGlyph::Omp,
         crate::SessionAgentKind::Grok => HarnessGlyph::Grok,
+        crate::SessionAgentKind::Muse => HarnessGlyph::Muse,
         crate::SessionAgentKind::Generic | crate::SessionAgentKind::Unrecognized => {
             HarnessGlyph::Terminal
         }

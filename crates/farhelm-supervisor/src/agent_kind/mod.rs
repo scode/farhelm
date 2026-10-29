@@ -43,8 +43,9 @@
 //!
 //! - **Naming the agents.** `farhelm-proto` declares both enums with a
 //!   generated `ALL`: `LaunchHarness` (what the user picked; `launch.rs`) and
-//!   `AgentKind` (the integration that runs; the crate root). Muse, Cursor,
-//!   and OpenCode are harnesses that run as `AgentKind::Generic`.
+//!   `AgentKind` (the integration that runs; the crate root). Cursor and
+//!   OpenCode run as `AgentKind::Generic`. Muse has its own kind but still
+//!   uses generic activity reading and has no conversation integration.
 //! - **When Restart becomes available.** `AgentKind::display_name` and
 //!   `AgentKind::restart_readiness` in the `farhelm-proto` crate root: the
 //!   agent's name for people and the moment it normally reports a
@@ -198,6 +199,7 @@ pub(crate) fn prompt_delivery(kind: AgentKind) -> Option<PromptDelivery> {
         | AgentKind::Pi
         | AgentKind::Omp
         | AgentKind::Grok
+        | AgentKind::Muse
         | AgentKind::Generic => None,
     }
 }
@@ -222,6 +224,7 @@ mod prompt_delivery_tests {
             AgentKind::Pi,
             AgentKind::Omp,
             AgentKind::Grok,
+            AgentKind::Muse,
             AgentKind::Generic,
         ] {
             assert_eq!(prompt_delivery(kind), None, "{kind:?}");
@@ -815,9 +818,9 @@ fn hook_command(
     command
 }
 
-/// The integration for a kind, or `None` for [`AgentKind::Generic`] —
-/// which is not an omission but the definition of generic: no record
-/// location, no correlators, and therefore no capture, ever.
+/// The integration for a kind, or `None` when it has no conversation reporter.
+/// Generic deliberately never captures; Muse is named separately but does not
+/// yet attach a reporter. Naming a kind alone must not advertise capture.
 #[warn(clippy::wildcard_enum_match_arm)]
 pub fn integration_for(kind: AgentKind) -> Option<&'static dyn AgentIntegration> {
     match kind {
@@ -827,7 +830,7 @@ pub fn integration_for(kind: AgentKind) -> Option<&'static dyn AgentIntegration>
         AgentKind::Pi => Some(&PiIntegration),
         AgentKind::Omp => Some(&OmpIntegration),
         AgentKind::Grok => Some(&GrokIntegration),
-        AgentKind::Generic => None,
+        AgentKind::Muse | AgentKind::Generic => None,
     }
 }
 
@@ -1886,7 +1889,7 @@ impl IntegrationSnapshot {
             }
             AgentKind::Pi => self.typed_locator_offer(LocatorVendor::Pi, captured),
             AgentKind::Omp => self.typed_locator_offer(LocatorVendor::Omp, captured),
-            AgentKind::Claude | AgentKind::Goose | AgentKind::Generic => {
+            AgentKind::Claude | AgentKind::Goose | AgentKind::Muse | AgentKind::Generic => {
                 self.plain_id_offer(captured)
             }
         }
@@ -1905,8 +1908,8 @@ impl IntegrationSnapshot {
     }
 
     /// The offer for an integrated kind whose identity is a plain
-    /// conversation id (Claude, Goose). Generic never reaches here with an
-    /// integration, but stays in the caller's arm so the match names every
+    /// conversation id (Claude, Goose). Unintegrated kinds never reach here,
+    /// but stay in the caller's arm so the match names every
     /// kind rather than hiding one behind a wildcard.
     fn plain_id_offer(&self, captured: Option<&str>) -> RestartOffer {
         // An identity this build would refuse to substitute
@@ -1964,7 +1967,7 @@ impl IntegrationSnapshot {
                 .ok()?
                 .resume_id()?
                 .to_string(),
-            AgentKind::Claude | AgentKind::Goose | AgentKind::Generic => {
+            AgentKind::Claude | AgentKind::Goose | AgentKind::Muse | AgentKind::Generic => {
                 if is_reserved_locator_token(conversation)
                     || !is_plausible_conversation_id(conversation)
                 {
@@ -2033,7 +2036,7 @@ pub fn ownership_proof_implemented(kind: AgentKind) -> bool {
     match kind {
         AgentKind::Codex | AgentKind::Grok | AgentKind::Omp => true,
         AgentKind::Claude | AgentKind::Goose | AgentKind::Pi => false,
-        AgentKind::Generic => false,
+        AgentKind::Muse | AgentKind::Generic => false,
     }
 }
 
@@ -2053,6 +2056,7 @@ fn accepts_unversioned_ownership(kind: AgentKind) -> bool {
         | AgentKind::Pi
         | AgentKind::Omp
         | AgentKind::Grok
+        | AgentKind::Muse
         | AgentKind::Generic => false,
     }
 }
@@ -2069,6 +2073,7 @@ pub fn locator_vendor(kind: AgentKind) -> Option<LocatorVendor> {
         | AgentKind::Codex
         | AgentKind::Goose
         | AgentKind::Grok
+        | AgentKind::Muse
         | AgentKind::Generic => None,
     }
 }
@@ -2079,7 +2084,7 @@ pub fn locator_vendor(kind: AgentKind) -> Option<LocatorVendor> {
 pub fn verifies_resume_target(kind: AgentKind) -> bool {
     match kind {
         AgentKind::Codex | AgentKind::Pi | AgentKind::Omp | AgentKind::Grok => true,
-        AgentKind::Claude | AgentKind::Goose | AgentKind::Generic => false,
+        AgentKind::Claude | AgentKind::Goose | AgentKind::Muse | AgentKind::Generic => false,
     }
 }
 
@@ -2101,6 +2106,7 @@ pub fn unverified_resume_refusal(kind: AgentKind) -> Option<&'static str> {
         | AgentKind::Pi
         | AgentKind::Omp
         | AgentKind::Grok
+        | AgentKind::Muse
         | AgentKind::Generic => None,
     }
 }
@@ -2175,7 +2181,7 @@ pub fn accepts_reported_conversation(kind: AgentKind, value: &str) -> bool {
         AgentKind::Claude | AgentKind::Goose => {
             !is_reserved_locator_token(value) && is_plausible_conversation_id(value)
         }
-        AgentKind::Generic => false,
+        AgentKind::Muse | AgentKind::Generic => false,
     }
 }
 
@@ -2480,7 +2486,7 @@ impl AgentHooks {
             | AgentKind::Goose
             | AgentKind::Pi
             | AgentKind::Omp => !self.allows(kind),
-            AgentKind::Grok | AgentKind::Generic => false,
+            AgentKind::Grok | AgentKind::Muse | AgentKind::Generic => false,
         }
     }
 }
@@ -2648,7 +2654,7 @@ pub fn executable_basename(kind: AgentKind) -> Option<&'static str> {
         AgentKind::Pi => Some("pi"),
         AgentKind::Omp => Some("omp"),
         AgentKind::Grok => Some("grok"),
-        AgentKind::Generic => None,
+        AgentKind::Muse | AgentKind::Generic => None,
     }
 }
 
@@ -3866,6 +3872,27 @@ mod tests {
             integration_for(AgentKind::Generic).is_none(),
             "a generic session has no identity integration; there is no \
              hook_argv to even ask"
+        );
+    }
+
+    /// A distinct Muse kind must not advertise capture before it has a reporter.
+    /// Stored resume templates cannot make this inert integration resumable.
+    #[farhelm_testtrace::test]
+    fn muse_kind_remains_untracked_without_a_reporter() {
+        assert!(integration_for(AgentKind::Muse).is_none());
+        assert!(!accepts_reported_conversation(AgentKind::Muse, "saved-id"));
+        assert!(!AgentHooks::None.silences(AgentKind::Muse));
+        let snapshot = test_snapshot(
+            AgentKind::Muse,
+            Some(vec![
+                "muse".into(),
+                "resume".into(),
+                CONVERSATION_PLACEHOLDER.into(),
+            ]),
+        );
+        assert_eq!(
+            snapshot.restart_offer(Some("saved-id"), 0),
+            RestartOffer::NoConversationReporting
         );
     }
 

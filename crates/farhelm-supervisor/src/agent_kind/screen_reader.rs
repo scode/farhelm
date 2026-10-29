@@ -386,6 +386,7 @@ pub(crate) fn reader_for(kind: AgentKind) -> &'static dyn ScreenReader {
         | AgentKind::Pi
         | AgentKind::Omp
         | AgentKind::Grok
+        | AgentKind::Muse
         | AgentKind::Generic => &GenericReader,
     }
 }
@@ -1067,6 +1068,7 @@ mod tests {
             AgentKind::Pi,
             AgentKind::Omp,
             AgentKind::Grok,
+            AgentKind::Muse,
             AgentKind::Generic,
         ] {
             let reader = reader_for(kind);
