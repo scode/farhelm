@@ -299,6 +299,7 @@ pub enum SessionAgentKind {
     Pi,
     Omp,
     Grok,
+    Muse,
     Generic,
     #[default]
     #[serde(other)]
@@ -324,6 +325,7 @@ impl SessionAgentKind {
             SessionAgentKind::Pi => Some(farhelm_proto::AgentKind::Pi),
             SessionAgentKind::Omp => Some(farhelm_proto::AgentKind::Omp),
             SessionAgentKind::Grok => Some(farhelm_proto::AgentKind::Grok),
+            SessionAgentKind::Muse => Some(farhelm_proto::AgentKind::Muse),
             SessionAgentKind::Generic => Some(farhelm_proto::AgentKind::Generic),
             SessionAgentKind::Unrecognized => None,
         }
@@ -352,6 +354,7 @@ impl SessionAgentKind {
             | SessionAgentKind::Pi
             | SessionAgentKind::Omp
             | SessionAgentKind::Grok
+            | SessionAgentKind::Muse
             | SessionAgentKind::Generic
             | SessionAgentKind::Unrecognized => None,
         }
@@ -3192,6 +3195,9 @@ mod tests {
             serde_json::from_value::<Session>(json).expect("the row must decode")
         };
         assert_eq!(row(Some("codex")).agent_kind, SessionAgentKind::Codex);
+        let muse = row(Some("muse")).agent_kind;
+        assert_eq!(muse, SessionAgentKind::Muse);
+        assert_eq!(muse.proto(), Some(farhelm_proto::AgentKind::Muse));
         assert_eq!(row(Some("generic")).agent_kind, SessionAgentKind::Generic);
         assert_eq!(
             row(Some("a-kind-from-a-newer-helm")).agent_kind,
@@ -3219,6 +3225,7 @@ mod tests {
             SessionAgentKind::Pi,
             SessionAgentKind::Omp,
             SessionAgentKind::Grok,
+            SessionAgentKind::Muse,
             SessionAgentKind::Generic,
             SessionAgentKind::Unrecognized,
         ] {

@@ -625,8 +625,8 @@ fn resume_arguments(harness: LaunchHarness) -> Option<&'static [&'static str]> {
 
 /// Resolve a one-time conversation start while leaving the ordinary launch unchanged.
 ///
-/// Reporting harnesses use their composed resume command directly. The three
-/// generic harnesses have a separate selector only for this start: adding them
+/// Reporting harnesses use their composed resume command directly. Harnesses
+/// without conversation integration have a selector only for this start: adding them
 /// to `resume_arguments` would incorrectly offer ordinary Restart afterwards.
 pub(crate) fn named_start(
     launch: &SessionLaunch,
@@ -1578,7 +1578,7 @@ mod tests {
         input.model = Some("release/candidate'42;$literal".to_string());
         input.effort = Some(LaunchEffort::Xhigh);
         let compiled = compile(input).unwrap();
-        assert_eq!(compiled.agent_kind, AgentKind::Generic);
+        assert_eq!(compiled.agent_kind, AgentKind::Muse);
         assert_eq!(
             shell_words::split(&compiled.invocation).unwrap(),
             [

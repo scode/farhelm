@@ -33,9 +33,8 @@ crate::enum_with_all! {
     ///
     /// This is distinct from [`crate::AgentKind`]. `AgentKind` describes the
     /// supervisor features available after a process starts; this enum preserves
-    /// the harness the user selected. In particular, Muse is a first-class launch
-    /// choice even though it currently maps to the supervisor's generic runtime
-    /// integration.
+    /// the harness the user selected. A named kind does not itself promise
+    /// conversation reporting: Muse still launches without that integration.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
     #[serde(rename_all = "snake_case")]
     pub enum LaunchHarness {
@@ -143,13 +142,33 @@ impl LaunchHarness {
         match self {
             LaunchHarness::Codex => AgentKind::Codex,
             LaunchHarness::Claude => AgentKind::Claude,
-            LaunchHarness::Muse | LaunchHarness::Cursor | LaunchHarness::OpenCode => {
-                AgentKind::Generic
-            }
+            LaunchHarness::Muse => AgentKind::Muse,
+            LaunchHarness::Cursor | LaunchHarness::OpenCode => AgentKind::Generic,
             LaunchHarness::Goose => AgentKind::Goose,
             LaunchHarness::Pi => AgentKind::Pi,
             LaunchHarness::Omp => AgentKind::Omp,
             LaunchHarness::Grok => AgentKind::Grok,
+        }
+    }
+
+    /// The kind a structured row stored before launch kinds existed.
+    ///
+    /// Conversion validates historical data against its original vocabulary:
+    /// Muse was Generic then. Using today's mapping would discard a valid saved
+    /// Muse selection when it gains an integration. This does not backfill a
+    /// resume command or change the kind derived from a current launch.
+    pub(crate) fn pre_launch_agent_kind(self) -> crate::AgentKind {
+        use crate::AgentKind;
+        match self {
+            LaunchHarness::Muse | LaunchHarness::Cursor | LaunchHarness::OpenCode => {
+                AgentKind::Generic
+            }
+            LaunchHarness::Codex
+            | LaunchHarness::Claude
+            | LaunchHarness::Goose
+            | LaunchHarness::Pi
+            | LaunchHarness::Omp
+            | LaunchHarness::Grok => self.agent_kind(),
         }
     }
 

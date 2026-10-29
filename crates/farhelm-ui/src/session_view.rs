@@ -109,9 +109,9 @@ fn restart_with_unavailable(session: &Session) -> Option<String> {
     {
         return None;
     }
-    // A harness that runs under the generic integration never has a
-    // conversation to resume, whatever happened in the session.
-    if launch.harness.agent_kind() == farhelm_proto::AgentKind::Generic {
+    // A named kind alone does not promise reporting. Use its readiness
+    // contract so untracked Muse keeps the same explanation as generic kinds.
+    if launch.harness.agent_kind().restart_readiness().is_none() {
         Some(format!(
             "{} sessions can't be resumed",
             crate::launch_composer::harness_label(launch.harness)

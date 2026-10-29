@@ -6798,6 +6798,7 @@ impl Supervisor {
             | AgentKind::Goose
             | AgentKind::Pi
             | AgentKind::Grok
+            | AgentKind::Muse
             | AgentKind::Generic => {}
         }
     }
@@ -6831,6 +6832,7 @@ impl Supervisor {
             | AgentKind::Omp
             | AgentKind::Claude
             | AgentKind::Goose
+            | AgentKind::Muse
             | AgentKind::Generic => {}
         }
         let Some(vendor) = crate::agent_kind::locator_vendor(snapshot.kind) else {
@@ -15666,7 +15668,7 @@ impl Supervisor {
                 )
                 .await
             }
-            AgentKind::Generic => Err(RequestError::new(
+            AgentKind::Muse | AgentKind::Generic => Err(RequestError::new(
                 ErrorKind::Conflict,
                 "no conversation reporter is implemented for this session's agent kind",
             )),
@@ -31867,6 +31869,7 @@ exit 0
             AgentKind::Pi => "pi",
             AgentKind::Omp => "omp",
             AgentKind::Grok => "grok",
+            AgentKind::Muse => "muse",
             AgentKind::Generic => "agent",
         };
         program_snapshot(argv0)
