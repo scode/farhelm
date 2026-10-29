@@ -1273,7 +1273,8 @@ unchanged Enter, Escape and Cancel all return to the new session's terminal. Ord
 submission and focus-return behavior.
 
 - **Stop** terminates the agent and its entire process tree — MCP servers, dev servers, and other descendants included.
-  Terminal tabs keep running, and the session remains with its terminal still viewable.
+  Ordinary sessions keep their terminal tabs running. A containerized session stops its whole container, tabs included.
+  The session remains with its terminal still viewable.
 - **Restart** relaunches the agent in the same working directory and resumes the session's own conversation (see
   Durability for the exact promise). Confirmed 2026-10-03: Restart always means the conversation is preserved. It is
   offered only when Farhelm knows the session's agent type, has captured its conversation, and can resume it: an agent
@@ -1493,6 +1494,18 @@ shell's last words as the error.
 
 When a session's terminal contents no longer exist on a reachable host after a reboot, opening it shows the session's
 metadata and says why there is no terminal, rather than an empty pane.
+
+A containerized session should feel like the container is its host. Its tabs run Bash login shells inside that same
+container and checkout, without running the host's shell startup first. Each tab reads the optional token file afresh.
+Opening one after Stop starts the existing container again; a missing container is refused, never a request to create a
+new container. Tabs survive the agent exiting on its own. Closing a tab ends its shell by terminal hangup; an
+in-container process it detached may survive until Stop or Delete stops the whole container. After a host reboot,
+Replace and Delete remain the available session operations.
+
+File links in a containerized session's agent terminal and tabs are offered only for readable regular files inside its
+checkout. A path outside it, including one escaping through `..` or a symlink, is not offered. The actual download
+rechecks this boundary independently. Both printed paths and file hyperlinks supplied by terminal programs use this
+boundary, including hyperlinks to filenames containing spaces. Web hyperlinks remain available.
 
 ### Session list
 

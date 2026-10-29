@@ -9,6 +9,7 @@
 use super::connection::{reply_frame, send_reply};
 use super::core::{RequestError, Supervisor, error_kind};
 use farhelm_proto::{ControlMsg, DownloadFileInfo, DownloadFileStatus, ErrorKind, Frame};
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::{
     Arc,
@@ -48,15 +49,38 @@ impl DownloadRoute {
 }
 
 impl Supervisor {
-    /// Session metadata, rather than this daemon's cwd, anchors relative paths.
-    /// Home expansion uses the account home captured at startup, just as Create.
-    pub(crate) async fn download_path(&self, session: &str, path: &str) -> anyhow::Result<PathBuf> {
+    /// Resolve and open against the session's authority, independently for hover
+    /// and transfer. A container names its own filesystem in terminal output;
+    /// only its shared checkout can therefore authorize a host file read.
+    async fn inspect_download(
+        &self,
+        session: &str,
+        path: &str,
+    ) -> anyhow::Result<(DownloadFileInfo, Option<tokio::fs::File>)> {
         let row = self
             .store
             .session(session)
             .await?
             .ok_or_else(|| RequestError::new(ErrorKind::NotFound, "session not found"))?;
-        resolve_path(&row.cwd, self.user_home.as_deref(), path)
+        if matches!(&row.launch, farhelm_proto::SessionLaunch::Agent { selection, .. }
+            if selection.container.is_some())
+        {
+            let canonical_cwd = row.canonical_cwd.as_deref().ok_or_else(|| {
+                RequestError::new(
+                    ErrorKind::InvalidRequest,
+                    "container checkout identity is unavailable; file download refused",
+                )
+            })?;
+            // The workdir can be below the actual bind. Reuse creation's
+            // verified registry boundary, rather than narrowing to a subdir or
+            // widening to an ancestor after the selected checkout disappears.
+            let checkout = self.container_checkout_root(canonical_cwd).await?;
+            let path = resolve_path(canonical_cwd, self.user_home.as_deref(), path)?;
+            inspect_checkout(path, checkout).await
+        } else {
+            let path = resolve_path(&row.cwd, self.user_home.as_deref(), path)?;
+            inspect(path).await
+        }
     }
 }
 
@@ -79,6 +103,25 @@ fn resolve_path(cwd: &str, home: Option<&Path>, path: &str) -> anyhow::Result<Pa
 /// prevents a race replacing a checked path with a FIFO from parking the open;
 /// the opened descriptor, not the earlier metadata, must be a regular file.
 async fn inspect(path: PathBuf) -> anyhow::Result<(DownloadFileInfo, Option<tokio::fs::File>)> {
+    inspect_with_checkout(path, None).await
+}
+
+/// Constrain the descriptor as well as the disclosed path. Checking only a
+/// canonical pathname leaves an agent-controlled ancestor free to become a
+/// symlink before open, turning a checkout link into a host-file download.
+async fn inspect_checkout(
+    path: PathBuf,
+    checkout: PathBuf,
+) -> anyhow::Result<(DownloadFileInfo, Option<tokio::fs::File>)> {
+    inspect_with_checkout(path, Some(checkout)).await
+}
+
+/// Share ordinary kind/size reporting while selecting the opening authority
+/// from the durable launch. A hover holds no reservation for a later click.
+async fn inspect_with_checkout(
+    path: PathBuf,
+    checkout: Option<PathBuf>,
+) -> anyhow::Result<(DownloadFileInfo, Option<tokio::fs::File>)> {
     let mut info = DownloadFileInfo {
         path: path
             .to_str()
@@ -105,6 +148,16 @@ async fn inspect(path: PathBuf) -> anyhow::Result<(DownloadFileInfo, Option<toki
             )
         })?
         .to_string();
+    if checkout
+        .as_ref()
+        .is_some_and(|root| !canonical.starts_with(root))
+    {
+        info.status = DownloadFileStatus::NotReadable;
+        return Ok((info, None));
+    }
+    // Preserve the ordinary nonregular-object preflight before opening a
+    // device or FIFO. This observation does not authorize the later open:
+    // confinement and the descriptor's kind are checked independently below.
     let metadata = match tokio::fs::metadata(&canonical).await {
         Ok(metadata) => metadata,
         Err(error) => {
@@ -121,29 +174,96 @@ async fn inspect(path: PathBuf) -> anyhow::Result<(DownloadFileInfo, Option<toki
         info.status = DownloadFileStatus::NotRegular;
         return Ok((info, None));
     }
-    let file = match tokio::fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NONBLOCK)
-        .open(&canonical)
-        .await
-    {
+    let file = match if let Some(checkout) = checkout {
+        open_checkout_file(checkout, canonical.clone()).await
+    } else {
+        tokio::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(&canonical)
+            .await
+    } {
         Ok(file) => file,
         Err(error) => {
             info.status = io_status(&error);
             return Ok((info, None));
         }
     };
-    let metadata = file.metadata().await?;
+    let metadata = match file.metadata().await {
+        Ok(metadata) => metadata,
+        Err(error) => {
+            info.status = io_status(&error);
+            return Ok((info, None));
+        }
+    };
     info.size = Some(metadata.len());
-    info.status = if !metadata.is_file() {
-        DownloadFileStatus::NotRegular
-    } else if metadata.len() > farhelm_proto::DOWNLOAD_LIMIT_BYTES {
+    if metadata.is_dir() {
+        info.status = DownloadFileStatus::Folder;
+        return Ok((info, None));
+    }
+    if !metadata.is_file() {
+        info.status = DownloadFileStatus::NotRegular;
+        return Ok((info, None));
+    }
+    info.status = if metadata.len() > farhelm_proto::DOWNLOAD_LIMIT_BYTES {
         DownloadFileStatus::TooLarge
     } else {
         DownloadFileStatus::Ready
     };
     let ready = info.status == DownloadFileStatus::Ready;
     Ok((info, ready.then_some(file)))
+}
+
+/// Open a resolved checkout path beneath a held directory, refusing symlink
+/// substitutions atomically. Container sessions are Linux-only; an unavailable
+/// confinement primitive is a refusal, never ordinary account-wide access.
+async fn open_checkout_file(
+    checkout: PathBuf,
+    canonical: PathBuf,
+) -> std::io::Result<tokio::fs::File> {
+    let file = tokio::task::spawn_blocking(move || {
+        let root = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_DIRECTORY | libc::O_CLOEXEC)
+            .open(&checkout)?;
+        let relative = canonical.strip_prefix(&checkout).map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "file is outside the container checkout",
+            )
+        })?;
+        open_beneath_checkout(&root, relative)
+    })
+    .await
+    .map_err(std::io::Error::other)??;
+    Ok(tokio::fs::File::from_std(file))
+}
+
+/// A separate syscall boundary lets tests replace an ancestor after resolving
+/// its name and prove the actual open still refuses an escape. Static symlinks
+/// within the checkout have already resolved to an ordinary relative path.
+fn open_beneath_checkout(root: &std::fs::File, relative: &Path) -> std::io::Result<std::fs::File> {
+    #[cfg(target_os = "linux")]
+    {
+        use rustix::fs::{Mode, OFlags, ResolveFlags, openat2};
+        openat2(
+            root,
+            relative,
+            OFlags::RDONLY | OFlags::NONBLOCK | OFlags::CLOEXEC,
+            Mode::empty(),
+            ResolveFlags::BENEATH | ResolveFlags::NO_MAGICLINKS,
+        )
+        .map(Into::into)
+        .map_err(Into::into)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (root, relative);
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "container checkout file confinement requires Linux",
+        ))
+    }
 }
 
 /// Missing and unreadable paths have distinct hover refusals. Other filesystem
@@ -165,7 +285,7 @@ pub(crate) async fn stat(
     path: String,
 ) {
     let result = async {
-        inspect(sup.download_path(&session, &path).await?)
+        sup.inspect_download(&session, &path)
             .await
             .map(|(info, _)| info)
     }
@@ -192,7 +312,7 @@ pub(crate) fn start(
     let sent = Arc::new(AtomicU64::new(0));
     let task_sent = Arc::clone(&sent);
     let task = tasks.spawn(async move {
-        let opened = async { inspect(sup.download_path(&session, &path).await?).await }.await;
+        let opened = sup.inspect_download(&session, &path).await;
         let (info, file) = match opened {
             Ok((info, Some(file))) => (info, file),
             Ok((info, None)) => {
@@ -458,6 +578,74 @@ mod tests {
             inspect(file).await.unwrap().0.status,
             DownloadFileStatus::NotReadable
         );
+    }
+
+    /// A container's terminal may name any host path, but only the mounted
+    /// checkout authorizes a read. Keep useful internal symlinks while denying
+    /// parent traversal, prefix lookalikes and links into the host filesystem.
+    #[cfg(target_os = "linux")]
+    #[farhelm_testtrace::test]
+    async fn container_downloads_stay_in_the_checkout() {
+        let fixture = farhelm_teststate::tempdir().unwrap();
+        let checkout = fixture.path().join("checkout");
+        std::fs::create_dir(&checkout).unwrap();
+        let checkout = std::fs::canonicalize(checkout).unwrap();
+        let inside = checkout.join("report.txt");
+        std::fs::write(&inside, b"checkout-witness").unwrap();
+        let outside = checkout.parent().unwrap().join("outside.txt");
+        std::fs::write(&outside, b"host-witness").unwrap();
+        let lookalike = checkout.with_file_name("checkout-other");
+        std::fs::create_dir(&lookalike).unwrap();
+        std::fs::write(lookalike.join("report.txt"), b"other-checkout").unwrap();
+        symlink("report.txt", checkout.join("relative-link.txt")).unwrap();
+        symlink(&inside, checkout.join("absolute-link.txt")).unwrap();
+        symlink(&outside, checkout.join("escape.txt")).unwrap();
+
+        for path in [
+            inside.clone(),
+            checkout.join("relative-link.txt"),
+            checkout.join("absolute-link.txt"),
+        ] {
+            let (info, file) = inspect_checkout(path, checkout.clone()).await.unwrap();
+            assert_eq!(info.status, DownloadFileStatus::Ready);
+            assert_eq!(info.path, inside.to_str().unwrap());
+            let mut bytes = Vec::new();
+            file.unwrap().read_to_end(&mut bytes).await.unwrap();
+            assert_eq!(bytes, b"checkout-witness");
+        }
+        for path in [
+            outside,
+            checkout.join("../outside.txt"),
+            checkout.join("escape.txt"),
+            lookalike.join("report.txt"),
+        ] {
+            let (info, file) = inspect_checkout(path, checkout.clone()).await.unwrap();
+            assert_eq!(info.status, DownloadFileStatus::NotReadable);
+            assert!(file.is_none());
+        }
+    }
+
+    /// Resolution is not a reservation: replacing a resolved ancestor with
+    /// an outside symlink must fail at the actual descriptor open. The normal
+    /// open premise shows this fixture distinguishes the vulnerable sequence.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn container_open_refuses_an_ancestor_swapped_after_resolution() {
+        let fixture = farhelm_teststate::tempdir().unwrap();
+        let checkout = fixture.path().join("checkout");
+        let outside = fixture.path().join("outside");
+        std::fs::create_dir_all(checkout.join("sub")).unwrap();
+        std::fs::create_dir(&outside).unwrap();
+        std::fs::write(checkout.join("sub/report.txt"), b"checkout-witness").unwrap();
+        std::fs::write(outside.join("report.txt"), b"host-witness").unwrap();
+        let checkout = std::fs::canonicalize(checkout).unwrap();
+        let canonical = std::fs::canonicalize(checkout.join("sub/report.txt")).unwrap();
+        let relative = canonical.strip_prefix(&checkout).unwrap();
+        let root = std::fs::File::open(&checkout).unwrap();
+        std::fs::rename(checkout.join("sub"), checkout.join("original-sub")).unwrap();
+        symlink(&outside, checkout.join("sub")).unwrap();
+        assert_eq!(std::fs::read(&canonical).unwrap(), b"host-witness");
+        assert!(open_beneath_checkout(&root, relative).is_err());
     }
 
     /// A credit wait is an observable boundary: after exactly one window has

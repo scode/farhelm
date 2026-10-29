@@ -971,9 +971,11 @@ pub struct SupervisorSeams {
     /// harnesses run concurrently, so a per-process override would leak
     /// between unrelated supervisors.
     ///
-    /// Applied to the AGENT launch as well as to tabs, deliberately: the
+    /// Applied to the AGENT launch as well as to ordinary tabs, deliberately: the
     /// two share one shell-resolution contract, and a seam that covered
     /// only one of them would be a second place for that contract to live.
+    /// Container tabs deliberately bypass this host shell: their login shell
+    /// runs inside the container and must not source host startup files first.
     pub launch_shell: Option<String>,
     /// The filesystem an attachment upload stages through
     /// (`crate::files::FaultSeam`). [`crate::files::RealFs`] in
@@ -13565,8 +13567,18 @@ impl Supervisor {
             RequestError::new(
                 ErrorKind::Conflict,
                 format!(
-                    "session {} has no terminals to add a tab to; restart the session first",
-                    truncate_for_error(session_id)
+                    "session {} has no terminals to add a tab to; {}",
+                    truncate_for_error(session_id),
+                    if entry
+                        .info
+                        .launch
+                        .agent_selection()
+                        .is_some_and(|selection| selection.container.is_some())
+                    {
+                        "containerized sessions must be replaced or deleted"
+                    } else {
+                        "restart the session first"
+                    }
                 ),
             )
         };
@@ -13586,7 +13598,25 @@ impl Supervisor {
             Err(e) if self.tmux.is_definitively_empty(&e) => return Err(restart_first()),
             Err(e) => return Err(RequestError::new(error_kind(&e), format!("{e:#}"))),
         }
-        ensure_cwd_usable(&entry.info.cwd)
+        // The container bind uses the accepted canonical checkout. A copied
+        // host symlink spelling need not exist inside that filesystem, and a
+        // later symlink edit must not retarget a tab's working directory.
+        let cwd = if entry
+            .info
+            .launch
+            .agent_selection()
+            .is_some_and(|selection| selection.container.is_some())
+        {
+            entry.canonical_cwd.clone().ok_or_else(|| {
+                RequestError::new(
+                    ErrorKind::Conflict,
+                    "container working-directory identity is unavailable; use Replace or Delete",
+                )
+            })?
+        } else {
+            entry.info.cwd.clone()
+        };
+        ensure_cwd_usable(&cwd)
             .await
             .map_err(|e| RequestError::new(error_kind(&e), format!("{e:#}")))?;
         let session_token = self
@@ -13607,11 +13637,39 @@ impl Supervisor {
         // not.
         let sup = Arc::clone(self);
         let session_id = session_id.to_string();
-        let cwd = entry.info.cwd.clone();
+        let container = crate::container::ContainerRuntime::for_session(
+            &self.state_dir,
+            &session_id,
+            entry.generation,
+            &cwd,
+            &entry.info.launch,
+        )
+        .map_err(|error| RequestError::new(error_kind(&error), format!("{error:#}")))?;
         let task = tokio::spawn(async move {
             let _lifecycle = lifecycle;
+            // The initial creator lives outside the agent scope. Its fence must
+            // also cover an existing-container start, so Stop/Delete cannot
+            // confirm teardown while a late tab helper starts it again.
+            let container_guard = match container.as_ref() {
+                Some(runtime) => Some(runtime.acquire().await.map_err(|error| {
+                    RequestError::new(error_kind(&error), format!("{error:#}"))
+                })?),
+                None => None,
+            };
+            if let Some(guard) = &container_guard {
+                guard
+                    .start_existing(&sup.seams.scopes)
+                    .await
+                    .map_err(|error| RequestError::new(error_kind(&error), format!("{error:#}")))?;
+            }
             let opened = sup
-                .open_tab_window(&session_id, &session_token, &agent, &cwd)
+                .open_tab_window(
+                    &session_id,
+                    &session_token,
+                    &agent,
+                    &cwd,
+                    container.as_ref(),
+                )
                 .await;
             // Hinted here on the owned task rather than by the handler that
             // awaits it: that waiter can be abandoned while this finishes.
@@ -13708,6 +13766,7 @@ impl Supervisor {
         session_token: &str,
         agent: &Terminal,
         cwd: &str,
+        container: Option<&crate::container::ContainerRuntime>,
     ) -> Result<TabInfo, RequestError> {
         let tab_id = uuid::Uuid::new_v4().to_string();
         // The scope, decided per OPEN the way an agent's is decided per
@@ -13745,12 +13804,25 @@ impl Supervisor {
         } else {
             TabScopeMarker::Scoped
         };
-        let shell = self.launch_shell().await;
         let env = self.tab_environment(session_id, session_token, &tab_id);
         // The tab helper runs now and immediately execs the shell. It starts
         // through the forwarder in the app's version layout, so its version is
         // claimed from before it runs (see `Self::session_farhelm_exe`).
-        let window_cmd = self.tab_window_command(&shell, cwd, scope_prefix);
+        let (window_cmd, shell) = match container {
+            Some(runtime) => (
+                crate::launch::container_tab_window_command(
+                    runtime,
+                    &self.session_farhelm_exe,
+                    scope_prefix,
+                )
+                .map_err(|error| RequestError::new(error_kind(&error), format!("{error:#}")))?,
+                "bash in the session container".to_string(),
+            ),
+            None => {
+                let shell = self.launch_shell().await;
+                (self.tab_window_command(&shell, cwd, scope_prefix), shell)
+            }
+        };
         let (window, pane) = self
             .tmux
             .new_window(&agent.tmux_name, cwd, &env, &window_cmd)

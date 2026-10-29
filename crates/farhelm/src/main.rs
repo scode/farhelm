@@ -1325,7 +1325,13 @@ enum InternalCmd {
     },
     /// Enter the session directory before starting a tab's login shell. This runs
     /// inside the tab scope, so shell startup retains the tab's cleanup contract.
-    TabShell { directory: PathBuf, shell: PathBuf },
+    TabShell {
+        directory: PathBuf,
+        shell: PathBuf,
+        /// Credential-free container intent; the helper reads the token itself.
+        #[arg(long)]
+        container: Option<String>,
+    },
     /// An agent hook adapter: read the vendor's JSON payload from stdin and
     /// drop a report of the conversation identity it names for the
     /// supervisor that launched this session to apply.
@@ -1780,9 +1786,14 @@ fn main() -> anyhow::Result<()> {
                 );
                 Ok(())
             }
-            InternalCmd::TabShell { directory, shell } => Err(
-                farhelm_supervisor::launch::exec_tab_shell(&directory, &shell),
-            ),
+            InternalCmd::TabShell {
+                directory,
+                shell,
+                container,
+            } => Err(match container {
+                Some(runtime) => farhelm_supervisor::launch::exec_container_tab_shell(&runtime),
+                None => farhelm_supervisor::launch::exec_tab_shell(&directory, &shell),
+            }),
             InternalCmd::Hold { spec, command } => {
                 let exe =
                     anyhow::Context::context(std::env::current_exe(), "locating this program")?;

@@ -95,6 +95,9 @@ fn NativeTunnelStrip(session: Session) -> Element {
 /// captured-target rules. Availability reads the stored command rather than
 /// maintaining another harness capability list.
 fn restart_with_unavailable(session: &Session) -> Option<String> {
+    if let Some(reason) = container_restart_reason(session) {
+        return Some(reason.into());
+    }
     let launch = session.agent_selection()?;
     if session.restart_offer == RestartOffer::Resume
         || session.launch.as_ref().is_some_and(|launch| {
@@ -128,6 +131,15 @@ fn restart_with_unavailable(session: &Session) -> Option<String> {
     } else {
         Some("No captured conversation to resume".to_string())
     }
+}
+
+/// Hooks are deliberately absent inside containers; a named conversation does
+/// not opt them back into resuming. Keep both restart surfaces explicit even
+/// if an old or stale peer happens to advertise an ordinary restart offer.
+fn container_restart_reason(session: &Session) -> Option<&'static str> {
+    session.agent_selection().filter(|selection| selection.container.is_some()).map(|_| {
+        "Containerized sessions cannot restart or resume through Farhelm; use Replace or Replace with to start over"
+    })
 }
 
 /// Why this dialog cannot change the session's launch, when it cannot: a
@@ -1612,6 +1624,7 @@ pub(crate) fn SessionView(
         let mut specs = vec![serde_json::json!({
             "el": AGENT_TERMINAL_ELEMENT_ID,
             "sessionId": spec_session_id,
+            "containerized": session.agent_selection().is_some_and(|selection| selection.container.is_some()),
             "unavailable": session.stale,
             "banner": AGENT_BANNER_ELEMENT_ID,
             // Where this terminal's connecting placeholder is written
@@ -1652,6 +1665,7 @@ pub(crate) fn SessionView(
             specs.push(serde_json::json!({
                 "el": tab_terminal_element_id(id),
                 "sessionId": spec_session_id,
+                "containerized": session.agent_selection().is_some_and(|selection| selection.container.is_some()),
                 "unavailable": session.stale,
                 "banner": tab_banner_element_id(id),
                 "connecting": tab_connecting_element_id(id),
@@ -1868,10 +1882,13 @@ pub(crate) fn SessionView(
     // The restart offer's explanation, now the restart button's tooltip and
     // accessible description rather than a permanent band (see this
     // component's header docs).
-    let offer_explanation =
-        restart_offer_text(&shown.status, shown.restart_offer, shown.agent_kind);
-    let offer_continuation =
-        restart_offer_continuation(&shown.status, shown.restart_offer, shown.agent_kind);
+    let container_restart = container_restart_reason(&shown);
+    let offer_explanation = container_restart.map(str::to_string).unwrap_or_else(|| {
+        restart_offer_text(&shown.status, shown.restart_offer, shown.agent_kind)
+    });
+    let offer_continuation = container_restart.map(str::to_string).unwrap_or_else(|| {
+        restart_offer_continuation(&shown.status, shown.restart_offer, shown.agent_kind)
+    });
     // The restart control's full accessible name (`Resume conversation` or
     // `Restart unavailable`): the button's own VISIBLE glyph is now
     // the compact "Restart" every header action uses (so the cluster fits
@@ -1879,11 +1896,15 @@ pub(crate) fn SessionView(
     // CSS), so this is what actually carries SPEC.md's "Restart says so"
     // promise to `aria-label` and to the hover tooltip, in front of the
     // further elaboration `offer_explanation` provides.
-    let restart_label = restart_button_label(shown.restart_offer);
+    let restart_label = if container_restart.is_some() {
+        "Restart unavailable"
+    } else {
+        restart_button_label(shown.restart_offer)
+    };
     // Whether Restart can run at all; Restart with additionally needs a launch
     // it can edit, an agent launch or a resumable command launch
     // (`restart_with_reason`).
-    let restart_available = shown.restart_offer.can_restart();
+    let restart_available = container_restart.is_none() && shown.restart_offer.can_restart();
     // The precondition the header delete's prompt, as rendered by THIS pass,
     // covered, captured by its confirm handler. It must come from the same
     // snapshot the consequence text is drawn from, not from a fresh read at
@@ -2564,7 +2585,13 @@ pub(crate) fn SessionView(
             // (SPEC.md, Durability and resume).
             if interrupted_card_shown() {
                 div { class: "interrupted-card",
-                    span { class: "interrupted-card-text", "{interrupted_surface_text(shown.restart_offer, card_offers_replace_with, shown.agent_kind)}" }
+                    span { class: "interrupted-card-text",
+                        if container_restart.is_some() {
+                            "A host reboot ended this session's terminals. Containerized sessions cannot restart; use Replace to start over, or Delete."
+                        } else {
+                            "{interrupted_surface_text(shown.restart_offer, card_offers_replace_with, shown.agent_kind)}"
+                        }
+                    }
                     if restart_available {
                         button {
                             r#type: "button",
@@ -3772,6 +3799,27 @@ mod tests {
             RestartOffer::NotCaptured,
             "ordinary offer is not widened"
         );
+        // A known conversation cannot opt container sessions back into Restart.
+        // Even a stale ordinary offer must retain the explicit Replace advice.
+        if let Some(crate::SessionLaunch::Agent { selection, .. }) = &mut session.launch {
+            selection.container = Some(farhelm_proto::ContainerConfig {
+                engine: farhelm_proto::ContainerEngine::Podman,
+                image_file: "/images/agent.oci".into(),
+                api_proxy_port: 43210,
+                github_token_file: None,
+            });
+        }
+        for offer in [RestartOffer::NotCaptured, RestartOffer::Resume] {
+            session.restart_offer = offer;
+            let reason = restart_with_reason(&session).expect("container restart is unavailable");
+            assert!(reason.contains("Containerized") && reason.contains("Replace"));
+            assert_eq!(container_restart_reason(&session), Some(reason.as_str()));
+        }
+        if let Some(crate::SessionLaunch::Agent { selection, .. }) = &mut session.launch {
+            selection.container = None;
+        }
+        // Restore the ordinary no-capture premise after the stale-offer case.
+        session.restart_offer = RestartOffer::NotCaptured;
         if let Some(crate::SessionLaunch::Agent { resume, .. }) = &mut session.launch {
             *resume = None;
         }
