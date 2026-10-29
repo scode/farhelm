@@ -57,6 +57,34 @@ paragraphs. Classes are `readiness`, `replay-live`, `fixture-premise`, `peer-lif
 Confidence is `established`, `hypothesis`, or `unknown`; `Cause:` is the last line. These fields apply only to new
 entries. Missing historical fields are missing evidence, not an implicit cause classification.
 
+## 2026-10-29 — confirming-state test status premise (e2e/tests/terminal.spec.ts)
+
+`a failed listing read while confirming does not clear the confirming state` failed in WebKit in full browser sweep
+`e0526613-832f-4fba-b023-b38cc064e5c2`, waiting ten seconds for a basic session status while the badge showed
+`Idle — new output`. All three isolated classification reruns passed (`2d9754a3-cc01-4570-ba93-43cfdaf7d866`,
+`653a6901-8a15-4d7d-8f6f-737854594ede`, `f595a1ba-4576-48f8-b391-922163c21513`). Cause unknown; the excerpt does not
+establish a failure in the confirming-state behavior named by the test. Open and excluded from subsequent sweeps; no
+further reproduction or fix attempted.
+
+```text
+Expected pattern: /^(Running|Waiting|Idle)$/
+Received string: "Idle — new output"
+Timeout: 10000ms
+```
+
+Evidence: clean commit `32299b8eb13a37b33e5fec139a76ac269e8ea2d1`, shared x86_64 Linux, full Chromium and WebKit
+selection excluding known flakes, three workers with one stack each and zero retries. The same battery also failed the
+folder-dropdown visibility test recorded below. Battery duration 8996 seconds; individual duration, concurrent load at
+failure and OS/compiler versions were not extracted. Playwright 1.64.0, Node 26.12.1, locale C.UTF-8; recorded tmux 3.7c
+SHA256 `384c071bf93d416a8f1d884ceb13df0cebabfabe885a3f1408f6144f17fda723`. Ambient `FARHELM_*` markers were scrubbed;
+child inputs were `FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR`. Private evidence is addressed by the
+run UUIDs and expires with temporary-file cleanup. The recorder's bounded browser report was incomplete; the driver
+supplied the named failure and classification results independently.
+
+Class: fixture-premise
+
+Cause: unknown
+
 ## 2026-10-29 — folder dropdown keyboard reset visibility (e2e/tests/sidebar.spec.ts)
 
 `composer folder dropdown preserves keyboard launch and grouped history` failed in WebKit during browser sweep
