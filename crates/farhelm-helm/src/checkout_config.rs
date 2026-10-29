@@ -2955,12 +2955,11 @@ mod tests {
             // schema 47's `ntfy_alerts`, schema 52's `session_pins` and
             // schema 54's `registry_namespace`. A new table that is missing
             // here fails the DDL comparison below, not a migration.
-            // Later preference columns also
-            // go, including the session-confirmation choice added in schema 48:
+            // Every later preference column also goes, including nullable
+            // additions: an unset value still changes the historical shape.
+            // This includes the session-confirmation choice added in schema 48:
             // the test compares the result with the frozen v26 DDL, which
             // has none of them.
-            // Nullable additions still change that shape even when unset;
-            // remove tunnel consent and quick-launch naming before rewinding.
             conn.execute_batch(
                 "DROP TABLE checkout_config_host;
                  DROP TABLE checkout_config;
@@ -2991,6 +2990,8 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN feedback_contact;
                  -- Schema 66 added the shared visit history, which v26 did not have.
                  ALTER TABLE preferences DROP COLUMN visit_history;
+                 -- Schema 68 added automatic host updates, also absent from v26.
+                 ALTER TABLE preferences DROP COLUMN auto_update_remote_hosts;
                  ALTER TABLE hosts DROP COLUMN icon;
                  ALTER TABLE hosts DROP COLUMN color;
                  ALTER TABLE hosts DROP COLUMN commands_without_asking;

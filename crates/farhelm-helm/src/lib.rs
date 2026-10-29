@@ -504,6 +504,9 @@ struct AppState {
     event_subscriber_cap: usize,
     /// The one in-flight provisioning authority shared by every browser.
     provisioning: Arc<provisioning::ProvisioningService>,
+    /// Own the event-driven updater independently of any connected interface.
+    /// Dropping application state requests cancellation of its listener.
+    _automatic_updates: provisioning::AutomaticUpdates,
     /// The shared fixed-window accept budget behind `POST /api/client-log`
     /// (see [`client_log::RateWindow`]).
     ///
@@ -606,6 +609,7 @@ impl AppState {
         mode: ServingMode,
     ) -> AppState {
         AppState {
+            _automatic_updates: provisioning::AutomaticUpdates::start(&provisioning),
             mode,
             ntfy: manager.ntfy.clone(),
             manager,
@@ -2350,6 +2354,7 @@ async fn serve_with_ready(
         ) => unreachable!("checkout configuration watcher runs until serving ends"),
         () = embedded_shutdown => Ok(())
     };
+    state._automatic_updates.stop();
     state.tunnels.shutdown().await;
     state.manager.shutdown();
     serving

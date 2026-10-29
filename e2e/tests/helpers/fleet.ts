@@ -307,6 +307,8 @@ export interface SessionPage {
 export interface HostRow {
   id: number;
   kind: string;
+  /** Live update eligibility evidence; only connected rows carry build-age flags. */
+  state: { phase: string; build_version?: string; old_version?: boolean; newer_version?: boolean };
   /** The helm's connection token, which a session create echoes back as
    * `expected_incarnation` — captured by the wire specs so they can assert the
    * request carried THIS value rather than merely some value. The create is
@@ -1030,6 +1032,8 @@ export async function hideSeenState(page: Page): Promise<void> {
 
 /** The helm's shared client preference as `GET /api/preferences` answers it. */
 export interface Preferences {
+  /** Only an explicit true lets the helm update remote hosts without a window. */
+  auto_update_remote_hosts?: boolean;
   /** First-open welcome dismissal, shared across all clients of this helm. */
   welcome_seen?: boolean;
   /** Shared opt-out for the managed-checkout Claude trust hint. */
@@ -1085,6 +1089,7 @@ export async function readPreferences(request: APIRequestContext): Promise<Prefe
 export async function patchPreferences(
   request: APIRequestContext,
   patch: {
+    auto_update_remote_hosts?: boolean | null;
     welcome_seen?: boolean | null;
     claude_trust_hint_dismissed?: boolean | null;
     codex_trust_hint_dismissed?: boolean | null;
@@ -1124,6 +1129,7 @@ export async function patchPreferences(
  */
 export async function resetPreferences(request: APIRequestContext): Promise<void> {
   await patchPreferences(request, {
+    auto_update_remote_hosts: null,
     welcome_seen: true,
     claude_trust_hint_dismissed: null,
     codex_trust_hint_dismissed: null,

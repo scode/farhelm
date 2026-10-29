@@ -213,29 +213,33 @@ permissions, host confirmation choices, and remembered feedback contact are one 
 singleton row of `helm.db` (`preferences`: `list_sort`, `last_selected`, `visit_history`, `compact`,
 `remembered_permissions`, `remembered_workspace_trust`, `skip_host_remove_confirmation`, `skip_host_setup_confirmation`,
 `feedback_contact`, `remembered_wrapper_prefixes`, `terminal_link_click`, `skip_session_confirmations`,
-`name_session_on_quick_launch`, `color_terminal_frames`, `quick_launch_template`, `template_shortcuts`, `welcome_seen`)
-behind `GET`/`PUT /api/preferences`, device-authenticated like every other route. The remembered permission field and
-per-agent wrapper-prefix map are written by the helm after a successful user agent launch; no client PUTs them. A launch
-without a prefix removes that agent type's entry. Agent-origin launches and command launches leave the map alone. The
-`remembered_workspace_trust` column remains for upgrade compatibility but is neither read nor written. Remembered
-permissions describe accepted launches rather than one client's claim. Both clients read the row once after
-authentication — `PreferencesGate` holds the authenticated tree, rendering nothing, until the read lands, so the sort
-control and the auto-select effect see the remembered values on their first run and no frame shows a default that is
-then corrected. On desktop the IPC authentication gate already holds the tree and the read is one loopback hop, so
-nothing is visible; in the browser the first paint deliberately waits on that one round trip to the helm — a page with a
-valid credential used to paint its sidebar synchronously from localStorage — so the list never appears in an order that
-then changes. A write is a sparse patch naming only the field the user changed, merged per-field by the helm (an absent
-field is untouched, an explicit `null` clears one), so two clients changing different fields at nearly the same time
-cannot clobber each other; immediate controls update the signal in the page before the request leaves. Same-field writes
-are serialized latest-wins in the client, so a burst of changes cannot land on the helm in reverse order. A write that
-fails, or whose writer is lost, is forgotten: the choice stays in effect only until the next read from the helm for the
-explicitly silent preferences, and is never resent. A failed write is logged; callers that must report it discard their
-optimistic choice and report locally (SPEC.md, "Errors and diagnostics"). The seed read runs under a seconds-scale
-deadline of its own and expiry reads as "nothing remembered", so a stalled preference endpoint cannot blank the page for
-the funnel's full sixty seconds. Before each automatic session choice the list makes one more GET under that same short
-deadline. Only selection/history inputs refresh; unrelated settings retain their reload contract. A failed GET uses the
-current optimistic preference mirror. Selection writes update both values in that mirror before queueing their existing
-single-field PUT.
+`name_session_on_quick_launch`, `color_terminal_frames`, `quick_launch_template`, `template_shortcuts`, `welcome_seen`,
+`auto_update_remote_hosts`) behind `GET`/`PUT /api/preferences`, device-authenticated like every other route. The
+remembered permission field and per-agent wrapper-prefix map are written by the helm after a successful user agent
+launch; no client PUTs them. A launch without a prefix removes that agent type's entry. Agent-origin launches and
+command launches leave the map alone. The `remembered_workspace_trust` column remains for upgrade compatibility but is
+neither read nor written. Remembered permissions describe accepted launches rather than one client's claim. Both clients
+read the row once after authentication — `PreferencesGate` holds the authenticated tree, rendering nothing, until the
+read lands, so the sort control and the auto-select effect see the remembered values on their first run and no frame
+shows a default that is then corrected. On desktop the IPC authentication gate already holds the tree and the read is
+one loopback hop, so nothing is visible; in the browser the first paint deliberately waits on that one round trip to the
+helm — a page with a valid credential used to paint its sidebar synchronously from localStorage — so the list never
+appears in an order that then changes. A write is a sparse patch naming only the field the user changed, merged
+per-field by the helm (an absent field is untouched, an explicit `null` clears one), so two clients changing different
+fields at nearly the same time cannot clobber each other; immediate controls update the signal in the page before the
+request leaves. Same-field writes are serialized latest-wins in the client, so a burst of changes cannot land on the
+helm in reverse order. A write that fails, or whose writer is lost, is forgotten: the choice stays in effect only until
+the next read from the helm for the explicitly silent preferences, and is never resent. A failed write is logged;
+callers that must report it discard their optimistic choice and report locally (SPEC.md, "Errors and diagnostics"). The
+seed read runs under a seconds-scale deadline of its own and expiry reads as "nothing remembered", so a stalled
+preference endpoint cannot blank the page for the funnel's full sixty seconds. Before each automatic session choice the
+list makes one more GET under that same short deadline. Only selection/history inputs refresh; unrelated settings retain
+their reload contract. A failed GET uses the current optimistic preference mirror. Selection writes update both values
+in that mirror before queueing their existing single-field PUT.
+
+Helm schema 68 adds nullable `preferences.auto_update_remote_hosts`, constrained to booleans. Unset, null and false
+authorize nothing; only true enables automatic remote-host updates. Migration leaves it unset and preserves other
+preferences. The normal newer-schema guard refuses older helms, and the value survives reopening the store.
 
 The GUI's HTTP funnel orders reads and actions after this client's earlier configuration saves: quick-launch and
 number-key bindings, template save/delete, checkout folder, post-clone command, and ntfy settings. A save registers
@@ -760,63 +764,88 @@ lifecycle owns more context than a floating menu can safely hold. Setup and unin
 independently of row details, while a failed retained run leaves one short trace when details are closed. A run whose
 status is showing inline leaves that trace out because it would only repeat the progress.
 
+Automatic remote-host updates have one AppState-owned, abort-on-drop listener. It subscribes to fleet revisions before
+its initial scan; connection transitions, provisioning completion and a committed preference write wake it through that
+same channel. Its idle provisioning reference is weak. Shutdown requests listener cancellation before shutting down the
+manager; pending admission waits belong to that cancellable listener, while accepted runs retain normal provisioning
+ownership. Cancellation is cooperative, rather than a synchronous stop-return barrier. There is no timer or interface
+owner. Each scan checks the stored authorization, remote panel-update capability, busy state, and the host response's
+existing build-order helpers: a compatible older build or a lower protocol without a newer build. Development and
+unparseable builds retain unknown age. It reserves the host incarnation before awaiting the existing Update planner,
+then rechecks authorization and the host binding before consuming or starting that one-use plan. Committed policy writes
+and the final automatic authorization check plus busy/progress claim share a short admission lock, including a patch
+that also changes tunnel consent. It is released before waiting for the host lock or doing remote work; manual Update
+does not take it. An opt-out that commits before admission therefore prevents that start. The start uses the ordinary
+owned Update path and its revalidation; it adds no confirmation or alternate executor.
+
+The listener remembers attempted host incarnations for this helm lifetime, including logged planning refusals. Busy
+hosts are skipped before reservation. Automatic run ownership is bound to its run ID under the same lock that publishes
+busy and progress, before execution can finish. Failure records the then-current incarnation before releasing busy and
+bumping the fleet revision: Update can itself reconnect while learning installation paths, and that earlier reconnect
+must not turn its later failure into another automatic attempt. Manual runs cannot acquire this ownership. Removal
+forgets the host's memory; a later connection incarnation or a helm restart permits a new automatic attempt. Toggling
+the preference does not clear remembered failures. An accepted run retains its normal progress and lifetime after
+opt-out.
+
 The rail footer's gear opens a modal `settings` dialog owned by AppBar outside its top band; that band's context cannot
 cap the backdrop below main-pane surfaces. Its sessions section holds session confirmations, quick-launch naming and
-terminal-frame coloring; hosts holds the two app-wide host-confirmation choices, with state-specific help and an
-explanation that other open clients see changes on reload, and, only in a desktop app whose updater is active, the app
-section holds the automatic-updates switch, which reads and writes the desktop state file instead (see The desktop app's
-updater). The desktop file-opening field lives in the shared preference row but bypasses the best-effort preference
-queue: it sends one acknowledged sparse `PUT /api/preferences`, keeps a refused draft editable, and updates the shared
-client mirror only after success. Its warnings use the same parser and type classifier as the helm's stat and open
-checks. The switches retain native checkbox inputs for label activation and Space handling. Each host-confirmation
-switch reads `Some(true)` as without asking, updates `SharedPreferences` immediately and sends an explicit boolean
-through the existing sparse preference queue. Host-confirmation preference failures retain that queue's silent behavior.
-The session confirmation switch also updates locally immediately, but restoring confirmations observes the queue's
-completion: a failed save shows an adjacent Settings error because a reload could restore the stored opt-out. Each click
-advances a component-local generation and clears the error; only the newest restoring click can show a failure. The
-enqueue happens before spawning its waiter so a later silent opt-out cannot overtake it. Closing Settings cancels the
-waiter, never the process-owned preference writer. Quick-launch naming, frame colors and link-click choices observe the
-same queue with a retained per-field identity, so even an already delivered result loses authority after another click.
-On failure they immediately restore only their field from its last observed or acknowledged value, then refine it with
-one fresh read while that identity is still current. Every successful sent PUT advances this fallback, including a PUT
-whose observer was superseded; capturing the previous click could preserve another unsaved choice. These three bounded
-fallbacks are never pending overlays or replayed writes. The existing authenticated seed refreshes idle fallbacks,
-leaves pending ones intact, and initializes only missing defaults after a failed read. A failed corrective read retains
-the fallback and save error without claiming that the helm's current value is known. Rollback outlives Settings; its
-alert uses the dialog's mounted check, and a destroyed authenticated tree's signal is left alone. Trust reads capture
-the dismissal field's identity and pending bit before awaiting the GET. At completion a current pending dismissal wins
-and carries its identity; otherwise a read that began pending or crossed a new identity carries its start marker for
-immediate invalidation. Only an unchanged idle read is unmarked, so an old raw response cannot escape reconciliation
-just because its crossing save already settled. Every mounted Settings or band resource independently owns a cancellable
-one-shot invalidation waiter for that stamp, separate from the click's completion and any deletion barrier. New records,
-final settlement and writer loss release these waiters; late enrollment checks pending state and identity atomically. An
-invalidated resource clears and rereads only if it still carries that stamp, including after supersession. Local
-optimistic mutations stamp their new record before yielding, so an old invalidation cannot clear a newer choice. This
-uses one replaceable companion resource, not a trust cache, polling loop, mounted-resource registry or global HTTP
-ordering ticket. A copied overlay therefore cannot survive its failed save in a reopened dialog or another band. The
-click waiter owns only its local alert, which disappears on close; a corrective read failure leaves the resource unknown
-rather than treating trust as off. Restart alone would retain the previous successful provisional value while that GET
-is pending, so the matching value is cleared first. Controlled native checks also synchronize their property from the
-currently rendered choice: a refusal that beats the optimistic render can otherwise leave the browser's changed property
-behind an unchanged virtual-DOM value. A band's Don't show again waiter belongs to its mounted session and reports only
-the current dismissal's failure; navigation drops that alert without canceling the write. Normal hint copy and actions
-still require an explicitly disabled trust setting. An unreadable corrective GET can show the local save error alone,
-under the existing question, managed-checkout, agent-pane and occurrence-dismissal gates, without claiming trust is off.
-The dialog uses the host dialogs' framed header and footer, with a gear tile and a separately named × close control.
-Only the body scrolls, containing a section-button sidebar and the selected panel. The order is Sessions, Appearance,
-Hosts, Terminal, Checkouts, Agent trust, Notifications and, when the updater is active, App. Each section button pairs
-an existing decorative icon with its full sentence-case label; icons inherit the selected button's inverse color. The
-solid selection fill marks the open section. Terminal holds web-link choices and desktop tunnel consent and file types;
-checkouts holds the explicit-save folder and command; agent trust holds all four agents' blocks; notifications groups
-device sounds and helm-wide ntfy alerts. Inactive panels stay mounted with hidden, preserving field drafts, outcomes and
-pending saves. The sound asset's document-wide input query initializes even hidden inputs. No section choice is
-persisted. At 620px and below, a presentation-only signal reveals either the selected panel or the section list; the
-back button reads '‹ Settings'. Section selection focuses its heading, while back focuses the selected section button
-after the rendering frame. Neither adds a normal Tab stop or overrides platform button navigation. Both close controls
-stay visible. It uses the shared focus/isolation helper with its own selector; gear opening selects sessions and focuses
-its first switch. Existing trust props instead select agent trust before mount, focus the agent's switch and scroll its
-block into view. Escape or either close control releases isolation and returns focus to the gear. The host setup and
-removal permanent answers each name that gear as the way to turn confirmation back on.
+terminal-frame coloring; hosts holds the two app-wide host-confirmation choices and the default-off automatic
+remote-host update choice, with state-specific help and an explanation that other open clients see changes on reload,
+and, only in a desktop app whose updater is active, the app section holds the automatic-updates switch, which reads and
+writes the desktop state file instead (see The desktop app's updater). The desktop file-opening field lives in the
+shared preference row but bypasses the best-effort preference queue: it sends one acknowledged sparse
+`PUT /api/preferences`, keeps a refused draft editable, and updates the shared client mirror only after success. Its
+warnings use the same parser and type classifier as the helm's stat and open checks. The switches retain native checkbox
+inputs for label activation and Space handling. Each host-confirmation switch reads `Some(true)` as without asking,
+updates `SharedPreferences` immediately and sends an explicit boolean through the existing sparse preference queue.
+Host-confirmation preference failures retain that queue's silent behavior. The session confirmation switch also updates
+locally immediately, but restoring confirmations observes the queue's completion: a failed save shows an adjacent
+Settings error because a reload could restore the stored opt-out. Each click advances a component-local generation and
+clears the error; only the newest restoring click can show a failure. The enqueue happens before spawning its waiter so
+a later silent opt-out cannot overtake it. Closing Settings cancels the waiter, never the process-owned preference
+writer. Quick-launch naming, frame colors and link-click choices observe the same queue with a retained per-field
+identity, as does automatic remote-host updating, so even an already delivered result loses authority after another
+click. On failure they immediately restore only their field from its last observed or acknowledged value, then refine it
+with one fresh read while that identity is still current. Every successful sent PUT advances this fallback, including a
+PUT whose observer was superseded; capturing the previous click could preserve another unsaved choice. These four
+bounded fallbacks are never pending overlays or replayed writes. The existing authenticated seed refreshes idle
+fallbacks, leaves pending ones intact, and initializes only missing defaults after a failed read. A failed corrective
+read retains the fallback and save error without claiming that the helm's current value is known. Rollback outlives
+Settings; its alert uses the dialog's mounted check, and a destroyed authenticated tree's signal is left alone. Trust
+reads capture the dismissal field's identity and pending bit before awaiting the GET. At completion a current pending
+dismissal wins and carries its identity; otherwise a read that began pending or crossed a new identity carries its start
+marker for immediate invalidation. Only an unchanged idle read is unmarked, so an old raw response cannot escape
+reconciliation just because its crossing save already settled. Every mounted Settings or band resource independently
+owns a cancellable one-shot invalidation waiter for that stamp, separate from the click's completion and any deletion
+barrier. New records, final settlement and writer loss release these waiters; late enrollment checks pending state and
+identity atomically. An invalidated resource clears and rereads only if it still carries that stamp, including after
+supersession. Local optimistic mutations stamp their new record before yielding, so an old invalidation cannot clear a
+newer choice. This uses one replaceable companion resource, not a trust cache, polling loop, mounted-resource registry
+or global HTTP ordering ticket. A copied overlay therefore cannot survive its failed save in a reopened dialog or
+another band. The click waiter owns only its local alert, which disappears on close; a corrective read failure leaves
+the resource unknown rather than treating trust as off. Restart alone would retain the previous successful provisional
+value while that GET is pending, so the matching value is cleared first. Controlled native checks also synchronize their
+property from the currently rendered choice: a refusal that beats the optimistic render can otherwise leave the
+browser's changed property behind an unchanged virtual-DOM value. A band's Don't show again waiter belongs to its
+mounted session and reports only the current dismissal's failure; navigation drops that alert without canceling the
+write. Normal hint copy and actions still require an explicitly disabled trust setting. An unreadable corrective GET can
+show the local save error alone, under the existing question, managed-checkout, agent-pane and occurrence-dismissal
+gates, without claiming trust is off. The dialog uses the host dialogs' framed header and footer, with a gear tile and a
+separately named × close control. Only the body scrolls, containing a section-button sidebar and the selected panel. The
+order is Sessions, Appearance, Hosts, Terminal, Checkouts, Agent trust, Notifications and, when the updater is active,
+App. Each section button pairs an existing decorative icon with its full sentence-case label; icons inherit the selected
+button's inverse color. The solid selection fill marks the open section. Terminal holds web-link choices and desktop
+tunnel consent and file types; checkouts holds the explicit-save folder and command; agent trust holds all four agents'
+blocks; notifications groups device sounds and helm-wide ntfy alerts. Inactive panels stay mounted with hidden,
+preserving field drafts, outcomes and pending saves. The sound asset's document-wide input query initializes even hidden
+inputs. No section choice is persisted. At 620px and below, a presentation-only signal reveals either the selected panel
+or the section list; the back button reads '‹ Settings'. Section selection focuses its heading, while back focuses the
+selected section button after the rendering frame. Neither adds a normal Tab stop or overrides platform button
+navigation. Both close controls stay visible. It uses the shared focus/isolation helper with its own selector; gear
+opening selects sessions and focuses its first switch. Existing trust props instead select agent trust before mount,
+focus the agent's switch and scroll its block into view. Escape or either close control releases isolation and returns
+focus to the gear. The host setup and removal permanent answers each name that gear as the way to turn confirmation back
+on.
 
 The all-hosts checkout folder uses a shared explicit-save field rather than the preference queue: invalid path text must
 have a visible refusal, and a draft is not configuration. `GET`/`PUT /api/checkout-root` is an ordinary protected route

@@ -19,6 +19,8 @@
 //! never part of the shared client snapshot or the queued preference writes.
 //! Terminal frame coloring is a helm preference too: an open session sees the
 //! new choice through the shared signal, while other clients reload to get it.
+//! Automatic remote-host updates are a separate shared opt-in: only a committed
+//! helm preference authorizes background work; the optimistic checkbox does not.
 //! Native tunnel consent also requires an acknowledged save; its controller
 //! owns the shared warning and revokes listeners when the switch turns off.
 //! The desktop download-opening list uses an acknowledged save too: the helm
@@ -136,6 +138,9 @@ pub(crate) fn sync_preference_checks() {
 /// unrelated controls may have changed while this request was outstanding.
 fn apply_settings_preference(preferences: &mut api::Preferences, value: PreferenceValue) {
     match value {
+        PreferenceValue::AutoUpdateRemoteHosts(value) => {
+            preferences.auto_update_remote_hosts = Some(value);
+        }
         PreferenceValue::NameSessionOnQuickLaunch(value) => {
             preferences.name_session_on_quick_launch = Some(value);
         }
@@ -145,7 +150,7 @@ fn apply_settings_preference(preferences: &mut api::Preferences, value: Preferen
         PreferenceValue::TerminalLinkClick(value) => {
             preferences.terminal_link_click = Some(value.key().into());
         }
-        _ => unreachable!("only the three shared Settings choices use this rollback"),
+        _ => unreachable!("only shared Settings choices use this rollback"),
     }
 }
 
@@ -197,7 +202,7 @@ fn save_settings_preference(
 ///
 /// Writes use the ordinary preference queue. Restoring session confirmations
 /// reports a failed save because a reload could otherwise silently restore the
-/// opt-out. Naming, frame colors and link clicks report and roll back a failed
+/// opt-out. Naming, frame colors, remote updates and link clicks report and roll back a failed
 /// newest choice; only their alert is dropped when the dialog closes. The host
 /// confirmation choices retain their documented silent failure behavior.
 /// Controls stay enabled, and closing the dialog must not cancel a queued write.
@@ -220,6 +225,7 @@ pub(crate) fn SettingsDialog(
     let session_base = base.clone();
     let naming_base = base.clone();
     let frame_base = base.clone();
+    let auto_update_base = base.clone();
     let link_base = base.clone();
     let mut preferences = use_context::<SharedPreferences>();
     let setup = preferences.0.read().skip_host_setup_confirmation == Some(true);
@@ -229,18 +235,21 @@ pub(crate) fn SettingsDialog(
     // treating an absent value like the confirmation opt-outs would disable it.
     let name_quick_launches = preferences.0.read().name_session_on_quick_launch != Some(false);
     let color_frames = preferences.0.read().color_terminal_frames == Some(true);
+    let auto_update_hosts = preferences.0.read().auto_update_remote_hosts == Some(true);
     // Superseded writes also report false. Only the latest click may explain
     // its failure, including when an intervening click opted out again.
     let mut session_generation = use_signal(|| 0_u64);
     let mut session_error = use_signal(|| false);
     let naming_error = use_signal(|| None::<PreferenceWrite>);
     let frame_error = use_signal(|| None::<PreferenceWrite>);
+    let auto_update_error = use_signal(|| None::<PreferenceWrite>);
     let link_error = use_signal(|| None::<PreferenceWrite>);
     let mounted = use_hook(|| Rc::new(Cell::new(true)));
     let on_drop = mounted.clone();
     use_drop(move || on_drop.set(false));
     let naming_mounted = mounted.clone();
     let frame_mounted = mounted.clone();
+    let auto_update_mounted = mounted.clone();
     // The radio components share a field and one adjacent alert. Registering in
     // their parent also gives every radio the same surviving rollback lifetime.
     let link_change = use_callback(move |value: TerminalLinkClick| {
@@ -498,6 +507,33 @@ pub(crate) fn SettingsDialog(
                                 class: "host-settings-section-title",
                                 tabindex: "-1",
                                 "Hosts"
+                            }
+                            div { class: "setting-group",
+                                label {
+                                    class: "app-settings-choice setting-row",
+                                    "data-tooltip": "Update remote hosts as soon as an update is available, even with no window open; never update the helm's own machine",
+                                    span { "Update remote hosts automatically" }
+                                    input {
+                                        r#type: "checkbox",
+                                        class: "control-switch",
+                                        checked: auto_update_hosts,
+                                        "data-preference-checked": auto_update_hosts.to_string(),
+                                        aria_describedby: "remote-host-auto-update-help",
+                                        onchange: move |event| {
+                                            save_settings_preference(&auto_update_base, preferences,
+                                                PreferenceValue::AutoUpdateRemoteHosts(event.checked()), auto_update_error,
+                                                auto_update_mounted.clone());
+                                        },
+                                    }
+                                }
+                                p { id: "remote-host-auto-update-help", class: "host-settings-help",
+                                    "Update remote hosts as soon as an update is available, even with no window open. This never updates the helm's own machine. Other open clients pick up this choice when they reload."
+                                }
+                                if auto_update_error().is_some_and(|write| write.is_current()) {
+                                    p { class: "host-settings-help app-settings-error", role: "alert",
+                                        "Could not save whether to update remote hosts automatically. Try again."
+                                    }
+                                }
                             }
                             p { class: "host-settings-help",
                                 "The host choices apply to every host on this helm. Other open clients pick them up when they reload."

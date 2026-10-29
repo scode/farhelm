@@ -5,6 +5,8 @@
 //! host confirmation choices, terminal web-link ownership, quick-launch template,
 //! number-key bindings, welcome dismissal, tunnel consent, desktop download-opening
 //! types, and contact reused after successful feedback.
+//! Automatic remote-host updates are a helm-owned authorization too: only an
+//! explicit true enables them, and committing a policy write wakes the listener.
 //!
 //! The helm holds this rather than each client, and that is the whole
 //! design: no client persists its own copy, so a browser tab and the desktop
@@ -107,6 +109,7 @@ pub(crate) async fn put_preferences(
         || patch.muse_trust_hint_dismissed.is_some()
         || patch.pi_trust_hint_dismissed.is_some();
     let tunnel_consent_changed = patch.tunnel_consent.is_some();
+    let auto_update_changed = patch.auto_update_remote_hosts.is_some();
     if let Some(Some(raw)) = &patch.open_extensions {
         let list = match farhelm_proto::open_extensions::OpenExtensions::parse(raw) {
             Ok(list) => list,
@@ -219,7 +222,15 @@ pub(crate) async fn put_preferences(
         tokio::spawn(async move {
             let _mutation = state.tunnels.mutation.lock().await;
             let disabling = patch.tunnel_consent != Some(Some(true));
+            let policy = if auto_update_changed {
+                Some(state.provisioning.automatic_update_admission.lock().await)
+            } else {
+                None
+            };
             state.store.update_preferences(patch).await?;
+            // Release after the durable policy commit. Listener admission must
+            // not hold up tunnel shutdown, or wait behind it while holding this.
+            drop(policy);
             if disabling {
                 state.tunnels.close_all_locked().await;
             }
@@ -235,13 +246,21 @@ pub(crate) async fn put_preferences(
         .await
         .map_err(anyhow::Error::from)
         .and_then(|result| result)
-    } else if trust_hint_changed {
+    } else if trust_hint_changed || auto_update_changed {
         // Keep the write-plus-hint sub-operation owned independently of its
-        // response conversion, like consent above. Direct handler callers use
+        // response conversion, like consent above. Auto-update authorization
+        // uses the same committed-write notification to wake the helm listener.
+        // Direct handler callers use
         // this same contract; this is not a whole-handler routing wrapper.
         let state = Arc::clone(&state);
         crate::run_owned(async move {
+            let policy = if auto_update_changed {
+                Some(state.provisioning.automatic_update_admission.lock().await)
+            } else {
+                None
+            };
             state.store.update_preferences(patch).await?;
+            drop(policy);
             state.manager.events().bump();
             Ok::<(), anyhow::Error>(())
         })
@@ -261,6 +280,51 @@ mod tests {
     use crate::store::Preferences;
     use axum::http::StatusCode;
     use tower::ServiceExt;
+
+    /// Authorization is a shared typed preference, not a best-effort local
+    /// switch: invalid writes are atomic, and committed changes publish a wake.
+    #[farhelm_testtrace::test]
+    async fn automatic_host_update_preference_is_sparse_and_announced() {
+        let harness = rest_harness::idle_helm().await;
+        assert_eq!(read(&harness).await.auto_update_remote_hosts, None);
+        let mut events = harness.manager.events().subscribe();
+        let before = *events.borrow_and_update();
+        for value in [
+            serde_json::json!(true),
+            serde_json::json!(false),
+            serde_json::Value::Null,
+        ] {
+            assert_eq!(
+                harness
+                    .router()
+                    .oneshot(put(serde_json::json!({"auto_update_remote_hosts":value})))
+                    .await
+                    .unwrap()
+                    .status(),
+                StatusCode::NO_CONTENT
+            );
+            assert_eq!(
+                read(&harness).await.auto_update_remote_hosts,
+                value.as_bool()
+            );
+        }
+        assert!(
+            *events.borrow() >= before + 3,
+            "every committed policy change wakes the helm-owned listener"
+        );
+        assert_eq!(
+            harness
+                .router()
+                .oneshot(put(
+                    serde_json::json!({"auto_update_remote_hosts":"true", "compact":true})
+                ))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+        assert_eq!(read(&harness).await.compact, None);
+    }
 
     /// Hint writes and their feed notification are one accepted action. Test
     /// both a hint-only patch and the existing consent-owned path, whose second
@@ -1011,6 +1075,7 @@ mod tests {
                 muse_trust_hint_dismissed: None,
                 pi_trust_hint_dismissed: None,
                 tunnel_consent: None,
+                auto_update_remote_hosts: None,
             },
             "each sparse patch lands its own field and keeps the others"
         );
@@ -1128,6 +1193,7 @@ mod tests {
                 muse_trust_hint_dismissed: None,
                 pi_trust_hint_dismissed: None,
                 tunnel_consent: None,
+                auto_update_remote_hosts: None,
             },
             "an explicit null clears selection and visits without changing settings"
         );
