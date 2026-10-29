@@ -207,6 +207,7 @@ mod tests {
             effort: None,
             permissions: None,
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         });
         assert_eq!(
@@ -243,6 +244,7 @@ mod tests {
             permissions: Some(farhelm_proto::LaunchPermission::Custom),
             permission_flags: Some(vec!["--permission-mode".into(), "auto".into()]),
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         })
         .unwrap();
@@ -331,6 +333,7 @@ mod tests {
             effort: None,
             permissions: None,
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
         let composed = crate::launches::compile(selection.clone()).expect("compiles");
@@ -382,6 +385,7 @@ mod tests {
             permissions: None,
             permission_flags: None,
             wrapper_prefix: Some(vec!["with-endpoint".into(), "--".into()]),
+            container: None,
             workspace_trust: None,
         };
         let launch = crate::launches::compile(selection.clone()).expect("composed wrapper");

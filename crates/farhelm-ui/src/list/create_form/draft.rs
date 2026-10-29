@@ -772,6 +772,7 @@ impl LaunchDraft {
                 &self.permission_flags,
             ),
             wrapper_prefix: super::wrapper_words(&self.wrapper).ok().flatten(),
+            container: None,
             workspace_trust: None,
         }
     }
@@ -2923,6 +2924,7 @@ mod tests {
             permissions: permission,
             permission_flags: None,
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
         let mut draft = LaunchDraft::new(None);
@@ -5713,6 +5715,7 @@ mod tests {
                     permissions: Some(Some(LaunchPermission::Custom)),
                     permission_flags: Some(vec!["--mode".into(), "ask me".into()]),
                     wrapper_prefix: Some(Some(vec!["nice".into(), "two words".into()])),
+                    container: None,
                     ..Default::default()
                 },
             );
@@ -6078,6 +6081,7 @@ mod tests {
             permissions: Some(LaunchPermission::Guarded),
             permission_flags: None,
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
         draft.restore_launch(&selection, Some(LaunchHarness::Codex));
@@ -6524,6 +6528,7 @@ mod tests {
             permissions: None,
             permission_flags: None,
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
         for operation in 0..3 {
@@ -6626,6 +6631,7 @@ mod tests {
                     permissions: Some(LaunchPermission::Custom),
                     permission_flags: Some(vec!["--mode".into(), "ask me".into()]),
                     wrapper_prefix: Some(vec!["prefix".into(), "two words".into()]),
+                    container: None,
                     workspace_trust: None,
                 }),
                 replace_source: Some("replace-source".into()),

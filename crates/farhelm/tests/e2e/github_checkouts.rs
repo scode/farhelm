@@ -1324,6 +1324,7 @@ async fn lost_fresh_checkout_success_replays_after_settings_change_and_helm_rest
                 effort: Some(LaunchEffort::High),
                 permissions: Some(LaunchPermission::Yolo),
                 wrapper_prefix: None,
+                container: None,
                 workspace_trust: None,
             }),
         ),

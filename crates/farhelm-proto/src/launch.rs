@@ -595,6 +595,10 @@ pub struct LaunchSelection {
     /// does not inspect or trust the wrapper's own behavior.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wrapper_prefix: Option<Vec<String>>,
+    /// Optional capability isolation, preserved as launch intent rather than inferred
+    /// from the command. Absence keeps historical launch fingerprints unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub container: Option<ContainerConfig>,
     /// The launch's resolved trust for project-local settings and extensions.
     ///
     /// This is separate from tool approval and from Farhelm's hook-trust
@@ -606,6 +610,46 @@ pub struct LaunchSelection {
     /// JSON because that encoding also serves as a durable launch fingerprint.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace_trust: Option<bool>,
+}
+
+/// The deliberately single supported container engine. Unknown engines refuse the
+/// launch instead of silently executing it with different isolation guarantees.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContainerEngine {
+    Podman,
+}
+
+/// Host paths and one intentionally exposed loopback port for an isolated agent.
+/// The token's contents never belong here: each exec reads the named file afresh.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContainerConfig {
+    pub engine: ContainerEngine,
+    pub image_file: String,
+    pub api_proxy_port: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub github_token_file: Option<String>,
+}
+
+impl ContainerConfig {
+    /// Check portable intent without looking at the helm's filesystem. Existence,
+    /// executable discovery and token readability belong to the session's host.
+    pub fn validate(&self) -> Result<(), String> {
+        for (label, path) in std::iter::once(("image file", self.image_file.as_str())).chain(
+            self.github_token_file
+                .as_deref()
+                .map(|path| ("GitHub token file", path)),
+        ) {
+            if !path.starts_with('/') || path.contains('\0') {
+                return Err(format!("container {label} must be an absolute host path"));
+            }
+        }
+        if self.api_proxy_port == 0 {
+            return Err("container API proxy port must be between 1 and 65535".into());
+        }
+        Ok(())
+    }
 }
 
 /// Parse a wrapper command line into literal argv words, with no shell run.
@@ -947,6 +991,7 @@ mod tests {
             effort: None,
             permissions: None,
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
 
@@ -957,6 +1002,7 @@ mod tests {
         assert!(json["permissions"].is_null());
         assert!(json.get("workspace_trust").is_none());
         assert!(json.get("wrapper_prefix").is_none());
+        assert!(json.get("container").is_none());
         assert_eq!(
             serde_json::from_value::<LaunchSelection>(json).expect("deserialize launch selection"),
             selection
@@ -976,6 +1022,40 @@ mod tests {
         .expect("decode an older stored selection");
         assert_eq!(selection.workspace_trust, None);
         assert_eq!(selection.wrapper_prefix, None);
+    }
+
+    /// Container intent must fail closed before it reaches a host: engine and
+    /// field typos cannot silently remove isolation, and paths/ports must retain
+    /// their host-local meaning without consulting the helm's filesystem.
+    #[test]
+    fn container_configuration_rejects_unknown_authority_and_invalid_inputs() {
+        let valid = serde_json::json!({
+            "engine": "podman", "image_file": "/images/agent.oci", "api_proxy_port": 65535
+        });
+        let config: super::ContainerConfig = serde_json::from_value(valid.clone()).unwrap();
+        config.validate().unwrap();
+        for (field, value) in [
+            ("engine", serde_json::json!("other")),
+            ("mounts", serde_json::json!(["/host"])),
+            ("api_proxy_port", serde_json::json!(65536)),
+            ("api_proxy_port", serde_json::json!(-1)),
+        ] {
+            let mut input = valid.clone();
+            input[field] = value;
+            assert!(serde_json::from_value::<super::ContainerConfig>(input).is_err());
+        }
+        for (field, value) in [
+            ("image_file", serde_json::json!("relative.oci")),
+            ("image_file", serde_json::json!("/images/bad\0.oci")),
+            ("github_token_file", serde_json::json!("relative-token")),
+            ("github_token_file", serde_json::json!("")),
+            ("api_proxy_port", serde_json::json!(0)),
+        ] {
+            let mut input = valid.clone();
+            input[field] = value;
+            let config: super::ContainerConfig = serde_json::from_value(input).unwrap();
+            assert!(config.validate().is_err());
+        }
     }
 
     /// Wrapper input is shell-like only for word boundaries. Persisted words
@@ -1012,6 +1092,7 @@ mod tests {
             effort: None,
             permissions: None,
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
         for choice in [true, false] {

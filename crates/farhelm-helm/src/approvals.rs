@@ -1844,6 +1844,7 @@ mod tests {
             replaces_existing: false,
             fields: farhelm_proto::launcher::TemplateFields {
                 wrapper_prefix: Some(Some(vec!["with-endpoint".into(), "--".into()])),
+                container: None,
                 ..Default::default()
             },
             host_name: None,

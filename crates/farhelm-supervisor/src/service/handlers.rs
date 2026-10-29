@@ -995,6 +995,35 @@ async fn handle_stop_session(
                 .await;
                 return;
             }
+            let container_runtime = match crate::container::ContainerRuntime::for_session(
+                &sup.state_dir,
+                &session_id,
+                entry.generation,
+                &entry.info.cwd,
+                &entry.info.launch,
+            ) {
+                Ok(runtime) => runtime,
+                Err(error) => {
+                    reply_error(&tx, req_id, ErrorKind::Internal, format!("{error:#}")).await;
+                    return;
+                }
+            };
+            let container_guard = match container_runtime.as_ref() {
+                Some(runtime) => match runtime.acquire().await {
+                    Ok(guard) => Some(guard),
+                    Err(error) => {
+                        reply_error(&tx, req_id, ErrorKind::Internal, format!("{error:#}")).await;
+                        return;
+                    }
+                },
+                None => None,
+            };
+            if let Some(container) = &container_guard
+                && let Err(error) = container.revoke()
+            {
+                reply_error(&tx, req_id, ErrorKind::Internal, format!("{error:#}")).await;
+                return;
+            }
             // A durable Error can finish cleanup now, including residue
             // from an earlier failed settlement. Share the ticker's success
             // latch so repeated Stops do not redo evidence preservation
@@ -1041,6 +1070,12 @@ async fn handle_stop_session(
                 // must be able to tell "nothing was running" from
                 // "the sweep could not confirm nothing is running".
                 reply_error(&tx, req_id, ErrorKind::Internal, format!("{e:#}")).await;
+                return;
+            }
+            if let Some(container) = &container_guard
+                && let Err(error) = container.stop().await
+            {
+                reply_error(&tx, req_id, ErrorKind::Internal, format!("{error:#}")).await;
                 return;
             }
             None
@@ -4114,6 +4149,7 @@ mod tests {
                 effort: Some(farhelm_proto::LaunchEffort::High),
                 permissions: Some(farhelm_proto::LaunchPermission::Yolo),
                 wrapper_prefix: None,
+                container: None,
                 workspace_trust: None,
             }),
         )

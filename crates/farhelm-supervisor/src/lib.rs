@@ -45,6 +45,7 @@ pub mod attachments;
 /// process-group kill.
 pub mod bounded_command;
 mod checkout_trash;
+pub mod container;
 /// The SQLite plumbing the supervisor's and the helm's stores share.
 pub mod db;
 pub mod files;

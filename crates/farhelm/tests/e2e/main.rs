@@ -71,6 +71,9 @@ mod structured_launches;
 mod wrapper_launch;
 
 #[cfg(target_os = "linux")]
+mod containerized_sessions;
+
+#[cfg(target_os = "linux")]
 mod marker_model;
 #[cfg(target_os = "linux")]
 mod tab_lifecycle_edges;

@@ -206,6 +206,9 @@ pub struct LaunchSpec {
     /// [`CheckoutPreparation::state_path`].
     #[serde(default)]
     pub preparation: Option<CheckoutPreparation>,
+    /// Optional outside-scope preparation and inside-container exec for this launch.
+    #[serde(default)]
+    pub container: Option<crate::container::ContainerLaunch>,
     /// Settings the agent's own conversation reporter reads, added to the
     /// agent's environment and to nothing else the shim runs (git and the
     /// post-clone hook never see them). SPEC.md keeps the environment out
@@ -1124,6 +1127,27 @@ pub fn exec_launch_spec_with_seam(
         let report = record_launch_failure(&status_path, format!("{error:#}"), seam);
         return error.context(report);
     }
+    if let Some(container) = &spec.container {
+        let result = (|| -> anyhow::Result<()> {
+            container.prepare()?;
+            let mut command = container.runtime.exec_command(&spec.argv)?;
+            command
+                .env(SESSION_ID_ENV_VAR, &spec.session_id)
+                .env(AGENT_ID_ENV_VAR, &spec.session_id)
+                .env_remove(TAB_ID_ENV_VAR);
+            for name in PRIVATE_TMUX_ENV_VARS {
+                command.env_remove(name);
+            }
+            Err(command.exec().into())
+        })();
+        let error = result.expect_err("exec never returns on success");
+        let report = record_launch_failure(
+            &status_path,
+            format!("container launch failed: {error:#}"),
+            seam,
+        );
+        return error.context(report);
+    }
     // Nothing is written to the terminal before `exec`. The shim once
     // painted a "preamble" here — the previous run's captured last screen,
     // handed over by a restart — and SPEC.md now forbids exactly that: a
@@ -1878,7 +1902,7 @@ fn run_checkout_preparation(
     // Setup is already Ready. Trust is deliberately outside its success
     // contract: any vendor/config failure leaves the agent free to ask its
     // ordinary question, and never turns a successful checkout into an error.
-    if preparation.claude_trust {
+    if preparation.claude_trust && spec.container.is_none() {
         let result = (|| -> anyhow::Result<()> {
             use crate::agent_kind::claude::trust;
             let environment = trust::Environment::current()?;
@@ -2674,6 +2698,7 @@ mod tests {
             farhelm_bin_dir: PathBuf::from("/opt/bin"),
             browser_command: Some("/opt/bin/farhelm agent open-url -- %s".into()),
             preparation: None,
+            container: None,
             env: Vec::new(),
         };
         let browser_override = |command: &std::process::Command| {
@@ -2737,6 +2762,7 @@ mod tests {
             farhelm_bin_dir: PathBuf::from("/usr/bin"),
             browser_command: None,
             preparation: None,
+            container: None,
             env: vec![("PWD".into(), "/wrong".into())],
         };
         let output = agent_command(&spec).output().unwrap();
@@ -2769,6 +2795,7 @@ mod tests {
             farhelm_bin_dir: PathBuf::from("/opt/farhelm/bin"),
             browser_command: None,
             preparation: None,
+            container: None,
             env: Vec::new(),
         };
         std::fs::write(&spec_path, serde_json::to_vec(&spec).unwrap()).unwrap();
@@ -2881,6 +2908,7 @@ mod tests {
             farhelm_bin_dir: PathBuf::from("/opt/farhelm/bin"),
             browser_command: None,
             preparation: None,
+            container: None,
             env: Vec::new(),
         };
         std::fs::write(&spec_path, serde_json::to_vec(&spec).unwrap()).unwrap();
@@ -2936,6 +2964,7 @@ mod tests {
             farhelm_bin_dir: tmp.path().into(),
             browser_command: None,
             preparation: None,
+            container: None,
             env: Vec::new(),
         };
         assert!(
@@ -2978,6 +3007,7 @@ mod tests {
             farhelm_bin_dir: PathBuf::from("/opt/farhelm/bin"),
             browser_command: None,
             preparation: None,
+            container: None,
             env: Vec::new(),
         };
         std::fs::write(&spec_path, serde_json::to_vec(&spec).unwrap()).unwrap();
@@ -3058,6 +3088,7 @@ mod tests {
             farhelm_bin_dir: PathBuf::from("/opt/farhelm/bin"),
             browser_command: None,
             preparation: None,
+            container: None,
             env: Vec::new(),
         };
         std::fs::write(&spec_path, serde_json::to_vec(&spec).unwrap()).unwrap();
@@ -3095,6 +3126,7 @@ mod tests {
             farhelm_bin_dir: PathBuf::from("/opt/farhelm/bin"),
             browser_command: None,
             preparation: None,
+            container: None,
             env: Vec::new(),
         };
         std::fs::write(&spec_path, serde_json::to_vec(&spec).unwrap()).unwrap();
@@ -3224,6 +3256,7 @@ mod tests {
             farhelm_bin_dir: PathBuf::from("/opt/farhelm/bin"),
             browser_command: None,
             preparation: None,
+            container: None,
             env: vec![(
                 PI_REPORTER_EXE_ENV_VAR.to_string(),
                 "/opt/farhelm/bin/farhelm".to_string(),
@@ -3262,6 +3295,7 @@ mod tests {
             farhelm_bin_dir: PathBuf::from("/opt/farhelm/bin"),
             browser_command: None,
             preparation: None,
+            container: None,
             env: Vec::new(),
         };
         let command = agent_command(&spec);
@@ -3764,6 +3798,7 @@ exec sleep 60
                 farhelm_bin_dir: self.bin_dir(),
                 browser_command: None,
                 preparation: Some(self.preparation.clone()),
+                container: None,
                 env: Vec::new(),
             };
             std::fs::write(&self.spec_path, serde_json::to_vec(&spec).unwrap()).unwrap();

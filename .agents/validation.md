@@ -58,6 +58,13 @@ four global slots, zero retries and failure on empty selection, and retains each
 Runtime `SKIPPED` messages still require reading the retained output: an early-return test is a JUnit pass, not proof
 that its required systemd or SSH substrate ran.
 
+- The Linux `containerized_sessions` e2e tests require rootless Podman and the offline image
+  `docker.io/library/ubuntu:24.04`. They never pull images and fail if either prerequisite is missing. An intentional
+  run without this coverage sets `FARHELM_TEST_SKIP_PODMAN=1` and passes `--keep-farhelm-env FARHELM_TEST_SKIP_PODMAN`
+  to the recorder. The explicit SKIPPED output is not isolation evidence. A focused selection is
+  `cargo nextest run -p farhelm --test e2e -E 'test(containerized_sessions::)'`; creator-fence, timeout and
+  token-privacy unit tests are selected by
+  `cargo nextest run -p farhelm-supervisor --lib -E 'test(container::tests::)'`.
 - `cargo fmt --all -- --check`
 - `cargo clippy --all-targets -- -D warnings`
 - `cargo clippy -p farhelm --bins -- -D warnings` — lints the shipped binary's configuration, in which the supervisor's

@@ -1048,6 +1048,7 @@ impl LaunchFlags {
             effort: self.effort.map(|choice| choice.0),
             permissions: self.permissions.map(|choice| choice.0),
             wrapper_prefix: self.wrapper.as_ref().map(|prefix| Some(prefix.0.clone())),
+            container: None,
             // The helm derives trust from Settings and the resolved destination.
             // Keep the wire field absent so CLI launches cannot request it.
             workspace_trust: None,
@@ -1307,6 +1308,8 @@ enum InternalCmd {
     /// this exists (zsh terminates on failed exec; a shell-side sentinel
     /// can never fire there).
     Launch { spec: PathBuf },
+    /// Prepare one container while holding its creation fence outside the agent scope.
+    ContainerPrepare { ticket: PathBuf, generation: i64 },
     /// Clone a spare after the user's login shell established its environment.
     BuildSpare { spec: PathBuf },
     /// Bound that shell and ordinary descendants to the supervisor's lifetime.
@@ -1742,6 +1745,9 @@ fn main() -> anyhow::Result<()> {
                     None => farhelm_supervisor::default_state_dir()?,
                 };
                 runtime()?.block_on(stdio_proxy(&dir))
+            }
+            InternalCmd::ContainerPrepare { ticket, generation } => {
+                farhelm_supervisor::container::prepare(&ticket, generation)
             }
             InternalCmd::Launch { spec } => {
                 // Holding its own version now, the shim lets the window's

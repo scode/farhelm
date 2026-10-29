@@ -8573,6 +8573,7 @@ mod tests {
             effort: None,
             permissions: None,
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         });
         entry.github_repo = Some(other.clone());
@@ -8904,6 +8905,7 @@ mod tests {
                 effort: Some(farhelm_proto::LaunchEffort::High),
                 permissions: None,
                 wrapper_prefix: None,
+                container: None,
                 workspace_trust: None,
             }),
             ..session("created", 100)
@@ -8971,6 +8973,7 @@ mod tests {
                 effort: None,
                 permissions: Some(farhelm_proto::LaunchPermission::Yolo),
                 wrapper_prefix: Some(vec!["with-endpoint".into(), "--".into()]),
+                container: None,
                 workspace_trust: None,
             }),
             ..session(id, 100)
@@ -9061,6 +9064,7 @@ mod tests {
             permissions: Some(farhelm_proto::LaunchPermission::Custom),
             permission_flags: Some(vec!["--mode".into(), "ask me".into()]),
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
         store
@@ -9111,6 +9115,7 @@ mod tests {
             effort: None,
             permissions: Some(farhelm_proto::LaunchPermission::Approve),
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
         store
@@ -9167,6 +9172,7 @@ mod tests {
                     effort: None,
                     permissions: Some(permission),
                     wrapper_prefix: None,
+                    container: None,
                     workspace_trust: None,
                 }),
                 ..session(&format!("goose-mode-{index}"), 101 + index as i64)
@@ -9251,6 +9257,7 @@ mod tests {
                     effort: None,
                     permissions: None,
                     wrapper_prefix: None,
+                    container: None,
                     workspace_trust: trust,
                 }),
                 ..session(id, 100)
@@ -9465,6 +9472,7 @@ mod tests {
             effort: None,
             permissions: None,
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
         let first = SessionInfo {
@@ -9806,6 +9814,7 @@ mod tests {
                 effort: None,
                 permissions: None,
                 wrapper_prefix: None,
+                container: None,
                 workspace_trust: None,
             }),
             ..session("proven", 1)
@@ -9883,6 +9892,7 @@ mod tests {
                 effort: None,
                 permissions: None,
                 wrapper_prefix: None,
+                container: None,
                 workspace_trust: None,
             }),
             ..session("proven-older", 1)
@@ -10030,6 +10040,7 @@ mod tests {
                 effort: None,
                 permissions: None,
                 wrapper_prefix: None,
+                container: None,
                 workspace_trust: None,
             }),
             ..session("before-retarget", 100)
@@ -10109,6 +10120,7 @@ mod tests {
             effort: None,
             permissions: None,
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
         for sequence in 1..=MAX_LAUNCH_HISTORY as u64 {
@@ -10180,6 +10192,7 @@ mod tests {
                 effort: None,
                 permissions: None,
                 wrapper_prefix: None,
+                container: None,
                 workspace_trust: None,
             }),
             ..session("structured", 1)
@@ -10239,6 +10252,7 @@ mod tests {
             effort: None,
             permissions: None,
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
         let first = SessionInfo {
@@ -10442,6 +10456,7 @@ mod tests {
             effort: None,
             permissions: None,
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
         let early = SessionInfo {
@@ -10577,6 +10592,7 @@ mod tests {
             effort: None,
             permissions: None,
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
         for sequence in 1..=MAX_LAUNCH_HISTORY as u64 {
@@ -10643,6 +10659,7 @@ mod tests {
             effort: None,
             permissions: None,
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
         for identity in ["retired-one", "retired-two"] {
@@ -14058,6 +14075,7 @@ mod tests {
                 effort: None,
                 permissions: None,
                 wrapper_prefix: None,
+                container: None,
                 workspace_trust: None,
             }),
             ..session("post-migration", 2)

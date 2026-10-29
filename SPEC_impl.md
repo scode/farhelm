@@ -5521,6 +5521,51 @@ status, so a reinstall command still ends the text. An idle installed app also e
 a newer version is installed and offers the restart menu then. The development-build predicate lives in `farhelm-proto`,
 shared by web wording and the helm's native release decisions, so their classification cannot drift.
 
+### Rootless Podman sessions
+
+The optional launch selection `container` carries a strict Podman engine choice, absolute OCI-archive path, selected
+proxy port and optional token-file path. Matching template edits use absent/set/null semantics. Both strict wire
+surfaces land under protocol 66; absent launch settings are omitted so existing fingerprints do not change.
+
+The supervisor resolves Podman by absolute executable path before login-shell startup and checks Linux, managed
+membership, a regular image file and a readable nonempty token file. The container's working directory is canonical; its
+only explicit bind is the whole deepest allocated containing checkout, selected before verifying its identity. Missing
+or replaced inner checkouts refuse rather than falling back to a broader outer checkout. Existing registry membership
+and allocation admission keep that root stable; file admission reuses the same bounded lookup. The private creation
+ticket carries the bind root, while control reconstruction needs no checkout filesystem observation. Host checkout
+preparation remains unchanged except that the container launch suppresses its Claude trust edit. After preparation, the
+terminal shim runs a short-lived creator through the existing scope prefix in `farhelm-<session>-container.scope`,
+disjoint from agent and tab patterns. Every Podman control command scrubs all inherited `FARHELM_*` and private tmux
+variables before it could initialize Podman's shared pause process. With no usable user manager the helper runs
+unscoped. The helpers keep the container alive outside agent containment; the agent's marked `podman exec -it` client
+remains in ordinary agent containment.
+
+A permanent per-session flock inode and a credential-free positive ticket serialize creation with teardown across
+processes. The ticket carries its generation; an older delayed helper cannot spend a retry's newer permit. The creator
+itself holds the CLOEXEC flock across its Podman child, ignoring ordinary terminal SIGHUP while it waits. A lock held
+only by the agent shim would drop when Stop killed that shim while the separately scoped creator kept running. A lock
+without a positive permit would let a queued creator recreate the container after Delete. The checkout-preparation flock
+is per working copy and ends too early to serve either purpose.
+
+Stop/Delete acquire with nonblocking flock attempts and async 50 ms waits, bounded by a 30-second deadline. Timeout
+revokes nothing and sends no signals. Stop revokes only after committing its intent or dead-agent classification; Delete
+revokes after read-only preflights and upload cancellation. The guard spans the Podman operation and actual state
+confirmation. The lock inode is never unlinked, since an already-open waiter could otherwise acquire a different inode
+from a future opener. Ambiguous Create unwind must also revoke and confirm removal before discarding a row; unconfirmed
+cleanup retains its ownership record.
+
+Creation uses an OCI archive directly, keep-id mapped to uid/gid 1000, the checkout as its only explicit read-write
+bind, `pasta:-T,<port>`, Podman's init and an idle Bash/sleep keeper, overriding any image entrypoint. No image manager
+or registry step is added. Exec forwards only TERM, COLORTERM and optional name-only GH_TOKEN; the helper reads the
+latter afresh and never serializes its contents. Podman's own transient exec metadata can contain it. Container launches
+select the existing hooks-off policy, which prevents reporter materialization, command injection, capture notifications
+and BROWSER forwarding for this one launch without changing other sessions.
+
+Podman's command status is not a lifecycle oracle. After an exec scope was killed, Podman 4.9.3 can stop the container
+yet fail waiting for an exec exit file. Stop accepts only inspected exited/stopped state or confirmed absence; Delete
+accepts only confirmed absence. Delete includes the dedicated container helper scope by exact derived name after
+removing the container, preserving the existing fail-closed scope checks.
+
 ### What running sessions hold across versions
 
 A newer `farhelm` must accept everything a running or resumable session was handed and will hand back to whatever

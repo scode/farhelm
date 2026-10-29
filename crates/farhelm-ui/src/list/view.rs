@@ -3828,7 +3828,7 @@ pub(crate) fn ListView(
                     }
                 }
                 Some(super::quick_switcher::SwitcherPick::New(action)) => {
-                    restore = !open_new.call(Some(action));
+                    restore = !open_new.call(Some(*action));
                 }
                 Some(super::quick_switcher::SwitcherPick::QuickLaunch) => {
                     quick_launch.call((
@@ -5524,6 +5524,7 @@ mod tests {
             effort: None,
             permissions: None,
             wrapper_prefix: None,
+            container: None,
             workspace_trust: Some(true),
         };
         mirror_submitted_launch(&mut preferences, Some(&submitted));
@@ -5544,6 +5545,7 @@ mod tests {
             effort: None,
             permissions: Some(farhelm_proto::LaunchPermission::Yolo),
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
         mirror_submitted_launch(&mut preferences, Some(&omitted_yolo_default));

@@ -282,6 +282,7 @@ mod tests {
                 effort: None,
                 permission_flags: None,
                 wrapper_prefix: None,
+                container: None,
                 workspace_trust: None,
             },
             start: vec!["claude".into(), "{farhelm_args}".into()],

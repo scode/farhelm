@@ -415,6 +415,25 @@ impl Supervisor {
                 Err(e) => return Err(TeardownError::TabScopeEnumeration(e)),
             }
         }
+        let container_runtime = crate::container::ContainerRuntime::for_session(
+            &self.state_dir,
+            session_id,
+            entry.generation,
+            &entry.info.cwd,
+            &entry.info.launch,
+        )
+        .map_err(TeardownError::Sweep)?;
+        if container_runtime.is_some() {
+            let unit = crate::container::unit_name(session_id).map_err(TeardownError::Sweep)?;
+            if self.seams.scopes.available().await {
+                self.seams
+                    .scopes
+                    .exists(&unit)
+                    .await
+                    .map_err(TeardownError::TabScopeEnumeration)?;
+            }
+            units.extend_derived([unit]);
+        }
         units.normalize();
 
         // All refusal-prone, read-only preflights have passed: pane
@@ -432,6 +451,14 @@ impl Supervisor {
         // directory teardown below; cancellation itself is not rollback.
         abort_session_uploads(self, session_id, "the session was deleted").await;
 
+        let container_guard = match container_runtime.as_ref() {
+            Some(runtime) => Some(runtime.acquire().await.map_err(TeardownError::Sweep)?),
+            None => None,
+        };
+        if let Some(container) = &container_guard {
+            container.revoke().map_err(TeardownError::Sweep)?;
+            container.remove().await.map_err(TeardownError::Sweep)?;
+        }
         reap_process_tree(
             &self.seams.scopes,
             units,

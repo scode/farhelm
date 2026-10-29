@@ -100,6 +100,7 @@ fn the_helm_session_list_fixture_decodes_with_every_mirrored_field() {
             effort: Some(LaunchEffort::High),
             permissions: Some(LaunchPermission::Yolo),
             wrapper_prefix: None,
+            container: None,
             workspace_trust: Some(true),
         })
     );

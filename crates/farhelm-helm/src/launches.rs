@@ -720,6 +720,9 @@ fn program(harness: LaunchHarness) -> &'static str {
 /// valid for every harness and is resolved by that harness when it starts.
 fn validate_selection(selection: &LaunchSelection) -> Result<(), String> {
     farhelm_proto::check_wrapper_prefix(selection.wrapper_prefix.as_deref())?;
+    if let Some(container) = &selection.container {
+        container.validate()?;
+    }
     farhelm_proto::check_permission_flags(
         selection.permissions,
         selection.permission_flags.as_deref(),
@@ -1152,6 +1155,7 @@ mod tests {
             let bare = super::compile(selection(*harness)).expect("bare agent compiles");
             let wrapped = super::compile(LaunchSelection {
                 wrapper_prefix: Some(prefix.clone()),
+                container: None,
                 ..selection(*harness)
             })
             .expect("wrapped agent compiles");
@@ -1172,6 +1176,33 @@ mod tests {
         }
     }
 
+    /// Isolation is launch intent, not an executable prefix. The supervisor must
+    /// receive the choice intact and run the ordinary harness argv inside it.
+    #[test]
+    fn container_choice_survives_compilation_without_rewriting_harness_argv() {
+        let mut input = selection(LaunchHarness::Claude);
+        let baseline = super::compile(input.clone()).unwrap();
+        let config = farhelm_proto::ContainerConfig {
+            engine: farhelm_proto::ContainerEngine::Podman,
+            image_file: "/images/agent.oci".into(),
+            api_proxy_port: 42000,
+            github_token_file: Some("/credentials/token".into()),
+        };
+        input.container = Some(config.clone());
+        let isolated = super::compile(input.clone()).unwrap();
+        assert_eq!(isolated.agent_selection().unwrap().container, Some(config));
+        assert_eq!(
+            isolated.start_argv().unwrap(),
+            baseline.start_argv().unwrap()
+        );
+        assert_eq!(
+            isolated.resume_argv().unwrap(),
+            baseline.resume_argv().unwrap()
+        );
+        input.container.as_mut().unwrap().api_proxy_port = 0;
+        assert!(super::compile(input).is_err());
+    }
+
     fn selection(harness: LaunchHarness) -> LaunchSelection {
         LaunchSelection {
             permission_flags: None,
@@ -1180,6 +1211,7 @@ mod tests {
             effort: None,
             permissions: None,
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         }
     }
@@ -1202,6 +1234,7 @@ mod tests {
             effort: None,
             permissions: None,
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
         let normalized = normalize_selection(pi.clone());
@@ -1220,6 +1253,7 @@ mod tests {
                     effort: None,
                     permissions,
                     wrapper_prefix: None,
+                    container: None,
                     workspace_trust: None,
                 };
                 let launch = compile(input.clone()).unwrap();
@@ -1349,6 +1383,7 @@ mod tests {
             effort: Some(LaunchEffort::High),
             permissions: Some(LaunchPermission::Yolo),
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
         assert_eq!(
@@ -1370,6 +1405,7 @@ mod tests {
             effort: Some(LaunchEffort::High),
             permissions: Some(LaunchPermission::Yolo),
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
         assert_eq!(
@@ -1391,6 +1427,7 @@ mod tests {
             effort: Some(LaunchEffort::Xhigh),
             permissions: Some(LaunchPermission::Yolo),
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
         assert_eq!(
@@ -1412,6 +1449,7 @@ mod tests {
             effort: None,
             permissions: Some(LaunchPermission::Yolo),
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
         let compiled = compile(opencode).expect("OpenCode's documented flags compile");
@@ -1440,6 +1478,7 @@ mod tests {
             effort: None,
             permissions: None,
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
         let compiled = compile(bare.clone()).expect("bare Zen model");
@@ -1499,6 +1538,7 @@ mod tests {
                     effort: None,
                     permissions: None,
                     wrapper_prefix: None,
+                    container: None,
                     workspace_trust: None,
                 };
                 let compiled = compile(opencode.clone())
@@ -1551,6 +1591,7 @@ mod tests {
             effort: Some(LaunchEffort::High),
             permissions: None,
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
 
@@ -1680,6 +1721,7 @@ mod tests {
                 effort: Some(effort),
                 permissions: None,
                 wrapper_prefix: None,
+                container: None,
                 workspace_trust: None,
             };
             assert!(
@@ -1700,6 +1742,7 @@ mod tests {
             effort: Some(LaunchEffort::Max),
             permissions: Some(LaunchPermission::SmartApprove),
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         })
         .expect("Goose selection compiles");
@@ -1725,6 +1768,7 @@ mod tests {
             effort: Some(LaunchEffort::Minimal),
             permissions: None,
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         })
         .expect("Pi selection compiles");
@@ -1755,6 +1799,7 @@ mod tests {
             effort: None,
             permissions: None,
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
         assert_eq!(
@@ -1780,6 +1825,7 @@ mod tests {
             let compiled = compile(LaunchSelection {
                 permissions: Some(permission),
                 wrapper_prefix: None,
+                container: None,
                 workspace_trust: None,
                 ..base.clone()
             })
@@ -1811,6 +1857,7 @@ mod tests {
             effort: None,
             permissions: None,
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
         let omitted = shell_words::split(&compile(base.clone()).unwrap().invocation).unwrap();
@@ -1818,6 +1865,7 @@ mod tests {
             &compile(LaunchSelection {
                 permissions: Some(LaunchPermission::Yolo),
                 wrapper_prefix: None,
+                container: None,
                 workspace_trust: None,
                 ..base.clone()
             })
@@ -1836,6 +1884,7 @@ mod tests {
                 compile(LaunchSelection {
                     permissions: Some(permission),
                     wrapper_prefix: None,
+                    container: None,
                     workspace_trust: None,
                     ..base.clone()
                 })
@@ -1859,6 +1908,7 @@ mod tests {
             effort: Some(LaunchEffort::Minimal),
             permissions: Some(LaunchPermission::Approve),
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         })
         .expect("OMP selection compiles");
@@ -1886,6 +1936,7 @@ mod tests {
             effort: Some(LaunchEffort::Xhigh),
             permissions: Some(LaunchPermission::Yolo),
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         })
         .expect("OMP yolo compiles");
@@ -1912,6 +1963,7 @@ mod tests {
             effort: None,
             permissions: None,
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         })
         .expect("OMP default compiles");
@@ -1962,6 +2014,7 @@ mod tests {
             effort: None,
             permissions: None,
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         })
         .expect("a custom OMP id is the escape hatch");
@@ -1995,6 +2048,7 @@ mod tests {
                     effort: Some(*effort),
                     permissions: None,
                     wrapper_prefix: None,
+                    container: None,
                     workspace_trust: None,
                 })
                 .is_ok(),
@@ -2009,6 +2063,7 @@ mod tests {
                 effort: Some(LaunchEffort::Ultra),
                 permissions: None,
                 wrapper_prefix: None,
+                container: None,
                 workspace_trust: None,
             })
             .is_err(),
@@ -2025,6 +2080,7 @@ mod tests {
                     effort: None,
                     permissions: Some(permission),
                     wrapper_prefix: None,
+                    container: None,
                     workspace_trust: None,
                 })
                 .is_err(),
@@ -2080,6 +2136,7 @@ mod tests {
             effort: None,
             permissions: Some(LaunchPermission::Yolo),
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         })
         .expect("compile permissive Grok launch");
@@ -2120,6 +2177,7 @@ mod tests {
                     effort: None,
                     permissions: None,
                     wrapper_prefix: None,
+                    container: None,
                     workspace_trust: None,
                 })
                 .is_ok()
@@ -2133,6 +2191,7 @@ mod tests {
                 effort: None,
                 permissions: Some(LaunchPermission::Chat),
                 wrapper_prefix: None,
+                container: None,
                 workspace_trust: None,
             })
             .is_err()
@@ -2343,6 +2402,7 @@ mod tests {
                     permissions,
                     permission_flags: None,
                     wrapper_prefix: None,
+                    container: None,
                     workspace_trust: previous,
                 };
                 let converted = SessionLaunch::from_pre_launch_kinds(

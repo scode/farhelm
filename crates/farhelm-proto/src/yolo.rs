@@ -117,6 +117,7 @@ mod tests {
             effort: None,
             permissions,
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
         assert!(selection_is_yolo(&selection(

@@ -3227,6 +3227,14 @@ const RELAUNCH_ROWS: u16 = 24;
 /// session and is checked once it has been read.
 fn validate_restart_with(launch: &SessionLaunch) -> Result<(), RequestError> {
     let invalid = |message: String| RequestError::new(ErrorKind::InvalidRequest, message);
+    if launch
+        .agent_selection()
+        .is_some_and(|selection| selection.container.is_some())
+    {
+        return Err(invalid(
+            "Restart with cannot add or change container isolation; use Replace with".into(),
+        ));
+    }
     // Create's byte bound, applied to the one field Restart with changes:
     // the launch is stored on success and echoed in every listing, which
     // is the reply growth `CREATE_FIELD_CAP` exists to keep bounded.
@@ -3251,6 +3259,43 @@ fn validate_restart_with(launch: &SessionLaunch) -> Result<(), RequestError> {
         crate::agent_kind::ensure_resume_template(&resume).map_err(invalid)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod container_restart_validation_tests {
+    /// Container settings cannot enter through an ordinary host session's Restart
+    /// with. This check runs before reading a stored session or stopping any agent.
+    #[test]
+    fn incoming_container_is_refused_before_restart_can_mutate_a_host_session() {
+        let launch = farhelm_proto::SessionLaunch::Agent {
+            selection: farhelm_proto::LaunchSelection {
+                harness: farhelm_proto::LaunchHarness::Claude,
+                model: None,
+                effort: None,
+                permissions: None,
+                permission_flags: None,
+                wrapper_prefix: None,
+                workspace_trust: None,
+                container: Some(farhelm_proto::ContainerConfig {
+                    engine: farhelm_proto::ContainerEngine::Podman,
+                    image_file: "/images/agent.oci".into(),
+                    api_proxy_port: 42000,
+                    github_token_file: None,
+                }),
+            },
+            start: vec!["agent".into(), "{farhelm_args}".into()],
+            resume: Some(vec![
+                "agent".into(),
+                "--resume".into(),
+                "{conversation}".into(),
+                "{farhelm_args}".into(),
+            ]),
+        };
+        launch.validate_new().unwrap();
+        let error =
+            super::validate_restart_with(&launch).expect_err("container restart must refuse");
+        assert!(error.to_string().contains("container isolation"));
+    }
 }
 
 /// Why `replacement` cannot be this session's Restart with, or `None` when
@@ -5082,6 +5127,23 @@ impl Supervisor {
             };
             listing.managed_checkout = crate::working_copies::cwd_is_managed(&conn, &listing.cwd)?;
             Ok(listing)
+        })
+        .await
+    }
+
+    /// Find the whole verified checkout shared with a container, independently
+    /// of its working subdirectory. File admission uses this same bounded lookup
+    /// so it cannot mistake cwd for the bind root or fall back past a replaced
+    /// inner checkout. Callers supply the session's canonical working directory.
+    pub(super) async fn container_checkout_root(
+        &self,
+        canonical_cwd: &str,
+    ) -> anyhow::Result<PathBuf> {
+        let cwd = canonical_cwd.to_owned();
+        let conn = self.store.conn.clone();
+        Self::run_directory_worker(Arc::clone(&self.directory_browse_workers), move || {
+            crate::working_copies::managed_checkout_root(&conn, &cwd)?
+                .context("containerized launches require a verified managed checkout")
         })
         .await
     }
@@ -8177,6 +8239,19 @@ impl Supervisor {
         launch
             .validate_new()
             .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
+        if let Some(container) = launch
+            .agent_selection()
+            .and_then(|selection| selection.container.as_ref())
+        {
+            crate::container::preflight(container)?;
+            if !destination.is_fresh() {
+                let listing = self.inspect_directory(&cwd, true).await?;
+                anyhow::ensure!(
+                    listing.managed_checkout,
+                    "containerized launches require a managed checkout"
+                );
+            }
+        }
         launch
             .validate_initial_prompt(prompt.as_deref(), named_start.is_some())
             .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
@@ -10432,6 +10507,9 @@ impl Supervisor {
                         text,
                     )
                 }),
+                info.launch
+                    .agent_selection()
+                    .and_then(|selection| selection.container.as_ref()),
             )
             .await;
         let (pane, artifacts, hooked, launch_excerpt) = match spawned {
@@ -10442,9 +10520,29 @@ impl Supervisor {
                 launch_excerpt,
             }) => (pane, artifacts, hooked, launch_excerpt),
             Err(SpawnFailure::Spec(error)) => {
-                // Nothing external happened yet — the spec is the FIRST
-                // side effect and it did not land — so the launching row
-                // is provably describing nothing and is rolled back. A
+                // A fresh spec failure launched nothing, but a create retry can
+                // inherit a container from its earlier, ambiguous generation.
+                // Confirm that prior ownership is gone before dropping the row.
+                if let Err(cleanup) = self
+                    .cleanup_failed_container(&info, generation, launch_scope.clone())
+                    .await
+                {
+                    self.publish_retained_launch(
+                        &info,
+                        None,
+                        &snapshot,
+                        canonical_cwd.as_deref(),
+                        LastOutcome::Launching,
+                        generation,
+                        launch_scope.clone(),
+                        None,
+                    )
+                    .await;
+                    return Err(error.context(format!(
+                        "container cleanup was unconfirmed ({cleanup:#}); session {id} is retained for retry")));
+                }
+                // For an ordinary launch the spec was the FIRST external side
+                // effect and did not land, so its row can be rolled back. A
                 // crash here would leave it instead, which is the case
                 // reload reconciles; this path can do better because the
                 // process is still alive to know.
@@ -10500,6 +10598,27 @@ impl Supervisor {
                 let mut error = error;
                 match self.tmux.has_session(&tmux_name).await {
                     Ok(false) => {
+                        // A pane can disappear while its separately scoped image
+                        // creator survives. Revoke and confirm removal before the
+                        // row or process cleanup drops this launch's final handle.
+                        let container_cleanup = self
+                            .cleanup_failed_container(&info, generation, launch_scope.clone())
+                            .await;
+                        if let Err(cleanup) = &container_cleanup {
+                            self.publish_retained_launch(
+                                &info,
+                                None,
+                                &snapshot,
+                                canonical_cwd.as_deref(),
+                                LastOutcome::Launching,
+                                generation,
+                                launch_scope.clone(),
+                                None,
+                            )
+                            .await;
+                            return Err(error.context(format!(
+                                "container cleanup was unconfirmed ({cleanup:#}); session {id} is retained for retry")));
+                        }
                         // Reaped BEFORE the row is discarded, and this is
                         // the ordering the whole rollback rests on:
                         // removing the row is removing the last handle
@@ -10512,15 +10631,16 @@ impl Supervisor {
                         // both asked. An unconfirmed reap RETAINS the row
                         // (the same rule the ambiguous arms below follow)
                         // rather than orphaning what it could not reach.
-                        if let Err(sweep) = reap_process_tree(
-                            &self.seams.scopes,
-                            ScopeUnits::recorded(launch_scope.clone()),
-                            None,
-                            &id,
-                            &SweepTarget::AgentOnly,
-                            ScopeKillFailure::Warn,
-                        )
-                        .await
+                        if !container_cleanup.expect("error returned above")
+                            && let Err(sweep) = reap_process_tree(
+                                &self.seams.scopes,
+                                ScopeUnits::recorded(launch_scope.clone()),
+                                None,
+                                &id,
+                                &SweepTarget::AgentOnly,
+                                ScopeKillFailure::Warn,
+                            )
+                            .await
                         {
                             self.publish_retained_launch(
                                 &info,
@@ -11331,6 +11451,14 @@ impl Supervisor {
             )
             .into());
         };
+        anyhow::ensure!(
+            entry
+                .info
+                .launch
+                .agent_selection()
+                .is_none_or(|selection| selection.container.is_none()),
+            "Restart and Restart with are unavailable for containerized sessions; replace the session instead"
+        );
         if let Some(expected) = &expected_launch
             && *expected != entry.info.launch
         {
@@ -12200,6 +12328,7 @@ impl Supervisor {
                 // Ready one never clones again) — this parameter belongs to
                 // the create path only. The refusal wiring arrives with the
                 // restart-against-preparation slice.
+                None,
                 None,
                 None,
             )
@@ -14530,6 +14659,43 @@ impl Supervisor {
         )
     }
 
+    /// A failed create cannot discard the last handle to an earlier container.
+    /// Even a definitive spec-write failure on a retry can follow an older shim
+    /// that already imported its image. Return whether this performed the strict
+    /// container-and-agent cleanup, so ordinary unwind does not repeat its sweep.
+    async fn cleanup_failed_container(
+        &self,
+        info: &SessionInfo,
+        generation: i64,
+        scope: Option<String>,
+    ) -> anyhow::Result<bool> {
+        let Some(runtime) = crate::container::ContainerRuntime::for_session(
+            &self.state_dir,
+            &info.id,
+            generation,
+            &info.cwd,
+            &info.launch,
+        )?
+        else {
+            return Ok(false);
+        };
+        let guard = runtime.acquire().await?;
+        guard.revoke()?;
+        guard.remove().await?;
+        let mut units = ScopeUnits::recorded(scope);
+        units.extend_derived([crate::container::unit_name(&info.id)?]);
+        reap_process_tree(
+            &self.seams.scopes,
+            units,
+            None,
+            &info.id,
+            &SweepTarget::AgentOnly,
+            ScopeKillFailure::Refuse,
+        )
+        .await?;
+        Ok(true)
+    }
+
     /// Publish one launch's spec and start its window command in tmux —
     /// the side-effecting half of a launch, shared by create (PLAN_M3.md
     /// items 2/6) and restart (item 9).
@@ -14567,11 +14733,17 @@ impl Supervisor {
     ///
     /// Failures are classified rather than flattened, because the two
     /// classes cannot be unwound the same way: a spec that never landed
-    /// proves nothing external happened, while a tmux failure is AMBIGUOUS
+    /// proves this attempt started no pane, while a tmux failure is AMBIGUOUS
     /// (the session can exist despite the error) and the caller must probe
     /// before deciding anything. Successful spawns and tmux failures carry the
     /// artifact owner so an unwind can remove the published files; a spec failure
-    /// carries none because publication did not complete.
+    /// carries none because publication did not complete. Container creation
+    /// also needs fenced cleanup of any earlier attempt before its row is lost;
+    /// failure to publish this spec says nothing about a predecessor's helper.
+    ///
+    /// `container_config` changes this launch's hook policy before reporter assets
+    /// or argv are composed. The resulting spec retains only token-file paths;
+    /// the shim reads the credential immediately before its Podman exec.
     #[allow(clippy::too_many_arguments)]
     #[allow(
         clippy::result_large_err,
@@ -14594,7 +14766,22 @@ impl Supervisor {
         scope: Option<&str>,
         preparation: Option<crate::launch::CheckoutPreparation>,
         initial_prompt: Option<(farhelm_proto::LaunchHarness, &str)>,
+        container_config: Option<&farhelm_proto::ContainerConfig>,
     ) -> Result<Spawned, SpawnFailure> {
+        // An alias is not a second bind inside the container. Resolve before
+        // filling argv so its cwd placeholders and actual workdir name the same
+        // canonical directory within the shared checkout.
+        let container_cwd = if container_config.is_some() {
+            Some(
+                self.inspect_directory(cwd, true)
+                    .await
+                    .map_err(SpawnFailure::Spec)?
+                    .cwd,
+            )
+        } else {
+            None
+        };
+        let cwd = container_cwd.as_deref().unwrap_or(cwd);
         // Placeholder substitution is the FIRST transformation and hook
         // injection the second, so the injected tail — literals this crate
         // wrote, never re-validated — is never itself a substitution
@@ -14617,8 +14804,13 @@ impl Supervisor {
         // vendor's artifact published; one vendor's asset can never serve
         // the other because the reporters carry different event surfaces
         // and different `vendor` payloads.
+        let hook_policy = if container_config.is_some() {
+            &crate::agent_kind::AgentHooks::None
+        } else {
+            &self.seams.agent_hooks
+        };
         let vendor_asset = crate::pi_extension::reporter_asset(snapshot.kind)
-            .filter(|_| self.seams.agent_hooks.allows(snapshot.kind));
+            .filter(|_| hook_policy.allows(snapshot.kind));
         let vendor_extension = match vendor_asset {
             Some(asset) => {
                 match crate::pi_extension::materialize_asset(&self.state_dir, &asset).await {
@@ -14636,8 +14828,20 @@ impl Supervisor {
             }
             None => None,
         };
-        let (argv, env, hooked, hook_skip) =
-            self.with_farhelm_args(argv, args_mode, snapshot, vendor_extension.as_deref(), id);
+        let (argv, env, hooked, hook_skip) = if container_config.is_some() {
+            with_farhelm_args_using(
+                argv,
+                args_mode,
+                snapshot,
+                hook_policy,
+                self.seams.agent_instructions,
+                Some(self.session_farhelm_exe_str.as_str()),
+                vendor_extension.as_deref(),
+                id,
+            )
+        } else {
+            self.with_farhelm_args(argv, args_mode, snapshot, vendor_extension.as_deref(), id)
+        };
         // The message is literal user data, including whole arguments that
         // resemble {cwd} or {farhelm_args}. Append it only after both fills;
         // neither hooks nor a later Restart may reinterpret or repeat it.
@@ -14674,7 +14878,35 @@ impl Supervisor {
         // including for the failure
         // classes (missing/malformed spec) where the shim never gets to
         // read this struct's own `status_file` field at all.
+        let container = match container_config {
+            Some(config) => {
+                let checkout_root = self
+                    .container_checkout_root(cwd)
+                    .await
+                    .map_err(SpawnFailure::Spec)?;
+                let runtime = crate::container::ContainerRuntime {
+                    config: config.clone(),
+                    podman: crate::container::executable().map_err(SpawnFailure::Spec)?,
+                    session_id: id.to_owned(),
+                    generation,
+                    cwd: cwd.into(),
+                    state_dir: self.state_dir.clone(),
+                };
+                Some(
+                    crate::container::ContainerLaunch::publish(
+                        runtime,
+                        checkout_root,
+                        &self.session_farhelm_exe,
+                        &self.seams.scopes,
+                    )
+                    .await
+                    .map_err(SpawnFailure::Spec)?,
+                )
+            }
+            None => None,
+        };
         let spec = LaunchSpec {
+            container,
             argv,
             working_directory: Some(PathBuf::from(cwd)),
             status_file: artifacts.status().to_path_buf(),
@@ -16536,6 +16768,7 @@ pub(crate) mod tests {
                     None,
                     None,
                     prompt.map(|text| (LaunchHarness::Claude, text)),
+                    None,
                 )
                 .await;
             let Err(SpawnFailure::Tmux {
@@ -16573,6 +16806,7 @@ pub(crate) mod tests {
                 effort: None,
                 permissions: None,
                 wrapper_prefix: None,
+                container: None,
                 workspace_trust: None,
                 permission_flags: None,
             },
@@ -17436,6 +17670,7 @@ pub(crate) mod tests {
                 effort: None,
                 permissions: None,
                 wrapper_prefix: None,
+                container: None,
                 workspace_trust: None,
             },
             start: vec!["claude".into(), "{farhelm_args}".into()],
@@ -20981,6 +21216,7 @@ pub(crate) mod tests {
                 effort: None,
                 permissions: None,
                 wrapper_prefix: None,
+                container: None,
                 workspace_trust: None,
                 permission_flags: None,
             },
@@ -24778,6 +25014,7 @@ exit 0
                 effort: None,
                 permissions: None,
                 wrapper_prefix: Some(prefix.clone()),
+                container: None,
                 workspace_trust: None,
             },
             start: start.clone(),
@@ -25781,6 +26018,7 @@ exit 0
                 80,
                 24,
                 SpawnTarget::NewSession,
+                None,
                 None,
                 None,
                 None,
@@ -27666,6 +27904,7 @@ exit 0
                 effort: None,
                 permissions: None,
                 wrapper_prefix: None,
+                container: None,
                 workspace_trust: None,
             },
             start: vec!["claude".into(), "{farhelm_args}".into()],
@@ -27895,6 +28134,7 @@ exit 0
                         effort: Some(farhelm_proto::LaunchEffort::High),
                         permissions: Some(farhelm_proto::LaunchPermission::Yolo),
                         wrapper_prefix: None,
+                        container: None,
                         workspace_trust: None,
                     },
                     start: vec!["codex".into(), "--yolo".into(), "{farhelm_args}".into()],
@@ -28163,6 +28403,7 @@ exit 0
                 effort: Some(farhelm_proto::LaunchEffort::High),
                 permissions: Some(farhelm_proto::LaunchPermission::Approve),
                 wrapper_prefix: None,
+                container: None,
                 workspace_trust: None,
             }
         );
@@ -34089,6 +34330,7 @@ exit 0
                 effort: None,
                 permissions: None,
                 wrapper_prefix: None,
+                container: None,
                 workspace_trust: None,
             },
             start: vec!["same-command".into(), "{farhelm_args}".into()],
@@ -34481,6 +34723,7 @@ exit 0
                 permissions: None,
                 permission_flags: None,
                 wrapper_prefix: Some(vec!["sh".into()]),
+                container: None,
                 workspace_trust: None,
             },
             start: vec![

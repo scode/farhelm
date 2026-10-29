@@ -537,6 +537,7 @@ fn launcher_snapshot(
             &draft.permission_flags(),
         ),
         wrapper_prefix: wrapper_words(&draft.wrapper()).ok().flatten(),
+        container: None,
         workspace_trust: None,
         command: submitted_field(
             &draft.invocation(),
@@ -8696,6 +8697,7 @@ mod tests {
                     effort: None,
                     permissions: None,
                     wrapper_prefix: None,
+                    container: None,
                     workspace_trust: None,
                 }),
                 ..base.clone()
@@ -8871,6 +8873,7 @@ mod tests {
                     permissions: None,
                     permission_flags: None,
                     wrapper_prefix: None,
+                    container: None,
                     workspace_trust: None,
                 },
                 created_at: 1,
@@ -9338,6 +9341,7 @@ mod tests {
                     effort: None,
                     permissions: None,
                     wrapper_prefix: None,
+                    container: None,
                     workspace_trust: None,
                 },
             }),
@@ -9358,6 +9362,7 @@ mod tests {
             effort: None,
             permissions: Some(LaunchPermission::Yolo),
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
         let session = Session {

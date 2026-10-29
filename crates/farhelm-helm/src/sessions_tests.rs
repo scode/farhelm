@@ -27,6 +27,7 @@ async fn composer_catalog_and_history_routes_serve_helm_owned_choices() {
             effort: Some(farhelm_proto::LaunchEffort::High),
             permissions: Some(farhelm_proto::LaunchPermission::Yolo),
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         }),
         ..rest_harness::session("composer-history", 100)
@@ -519,6 +520,7 @@ async fn structured_tilde_create_replay_keeps_all_three_path_facts_distinct() {
                                 effort: Some(farhelm_proto::LaunchEffort::High),
                                 permissions: Some(farhelm_proto::LaunchPermission::Yolo),
                                 wrapper_prefix: None,
+                                container: None,
                                 workspace_trust: None,
                             },
                         ),
@@ -631,6 +633,7 @@ async fn a_successful_structured_launch_remembers_its_permissions_choice() {
                     effort: None,
                     permissions: Some(LaunchPermission::Yolo),
                     wrapper_prefix: None,
+                    container: None,
                     workspace_trust: None,
                 }),
             ),
@@ -644,6 +647,7 @@ async fn a_successful_structured_launch_remembers_its_permissions_choice() {
                     effort: None,
                     permissions: None,
                     wrapper_prefix: None,
+                    container: None,
                     workspace_trust: None,
                 }),
             ),
@@ -656,6 +660,7 @@ async fn a_successful_structured_launch_remembers_its_permissions_choice() {
                     effort: None,
                     permissions: Some(LaunchPermission::Yolo),
                     wrapper_prefix: None,
+                    container: None,
                     workspace_trust: None,
                 }),
             ),
@@ -824,6 +829,7 @@ async fn remembered_defaults_follow_the_submitted_launch_not_the_reply() {
                 effort: None,
                 permissions: Some(LaunchPermission::Yolo),
                 wrapper_prefix: None,
+                container: None,
                 workspace_trust: Some(true),
             });
             writer
@@ -2334,6 +2340,7 @@ async fn a_plain_replace_records_no_launch_choices_from_the_listed_row() {
         effort: None,
         permissions: Some(LaunchPermission::Yolo),
         wrapper_prefix: None,
+        container: None,
         workspace_trust: Some(true),
     };
     let mut source = rest_harness::session("yolo-src", 1_700_000_000);
@@ -2966,6 +2973,7 @@ async fn replace_of_an_agent_launch_copies_its_stored_launch() {
         effort: Some(LaunchEffort::High),
         permissions: None,
         wrapper_prefix: None,
+        container: None,
         workspace_trust: None,
     };
     // A launch an older catalog composed: the start command carries a flag
@@ -3004,6 +3012,7 @@ async fn plain_replace_retains_stored_workspace_trust_and_historical_words() {
             permissions: Some(LaunchPermission::Yolo),
             permission_flags: None,
             wrapper_prefix: None,
+            container: None,
             workspace_trust: trust,
         })
         .unwrap();
@@ -4976,6 +4985,7 @@ async fn assert_codex_trust_dispatch(surface: TrustComposeSurface) {
             permissions: Some(LaunchPermission::Guarded),
             permission_flags: None,
             wrapper_prefix: None,
+            container: None,
             workspace_trust: incoming_trust,
         };
         let mut final_selection = selection.clone();
@@ -9784,6 +9794,7 @@ async fn fresh_local_refusal_recovers_a_concurrent_winner_after_settings_change(
                 permissions: Some(farhelm_proto::LaunchPermission::Guarded),
                 permission_flags: None,
                 wrapper_prefix: None,
+                container: None,
                 workspace_trust: Some(true),
             })
             .unwrap();

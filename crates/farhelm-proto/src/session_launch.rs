@@ -382,6 +382,9 @@ impl SessionLaunch {
                     selection.permissions,
                     selection.permission_flags.as_deref(),
                 )?;
+                if let Some(container) = &selection.container {
+                    container.validate()?;
+                }
                 Self::validate_start_argv("the agent launch's start command", start)?;
                 if let Some(resume) = resume {
                     check_argv("the agent launch's resume command", resume)?;
@@ -627,6 +630,7 @@ mod tests {
             effort: None,
             permissions: None,
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
         let agent = |start: &[&str], resume: Option<&[&str]>| SessionLaunch::Agent {
@@ -679,6 +683,7 @@ mod tests {
                 effort: None,
                 permissions: Some(LaunchPermission::Yolo),
                 wrapper_prefix: None,
+                container: None,
                 workspace_trust: None,
             },
             start: vec!["claude".into(), "{farhelm_args}".into()],
@@ -717,6 +722,7 @@ mod tests {
             effort: None,
             permissions: None,
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
         let template = vec![
@@ -840,6 +846,7 @@ mod tests {
             effort: None,
             permissions: None,
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         }
     }

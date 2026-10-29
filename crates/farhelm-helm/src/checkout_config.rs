@@ -3213,6 +3213,7 @@ mod tests {
                 effort: None,
                 permissions: None,
                 wrapper_prefix: None,
+                container: None,
                 workspace_trust: None,
             });
             store
@@ -3230,6 +3231,7 @@ mod tests {
                 effort: Some(farhelm_proto::LaunchEffort::High),
                 permissions: Some(farhelm_proto::LaunchPermission::Approve),
                 wrapper_prefix: None,
+                container: None,
                 workspace_trust: None,
             }),
             ..migration_session("history-retained", 1_700_000_100)

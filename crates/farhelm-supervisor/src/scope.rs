@@ -1159,7 +1159,7 @@ fn unit_matches_pattern(pattern: &str, unit: &str) -> bool {
 
 /// Resolve `name` to an absolute path by walking the supervisor's `$PATH`,
 /// or `None`. See [`resolve_program_in`] for which candidates count.
-fn resolve_program(name: &str) -> Option<PathBuf> {
+pub(crate) fn resolve_program(name: &str) -> Option<PathBuf> {
     resolve_program_in(name, &std::env::var_os("PATH")?)
 }
 
