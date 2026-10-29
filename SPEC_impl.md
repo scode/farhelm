@@ -1051,6 +1051,13 @@ row menu: removing the activated item can leave the row's inside-focus bookkeepi
 item's element identity in the same pass, so its `onfocusout` never runs to clear it — and the dismissal must retire its
 toggle return for the transfer instead of issuing it after the composer's own search focus and stealing it back.
 
+The protocol crate's `host_name::host_short_name` is the single short-display-name rule, over raw local-kind,
+destination and alias values. The UI's `Host::short_name()` delegates to it, falling back to the full registry name when
+the derived form is empty, and returns raw `PeerText`, so consumers choose ordinary escaping and direction isolation at
+presentation. Every surface needing a short form asks the host; it never re-parses the destination itself. The result
+depends on that host alone, may equal another host's short name, and never identifies or resolves one. All inputs
+already arrive in `GET /api/hosts`; there is no new wire field, helm name, stored alias or registry mutation.
+
 The leading `name:` label offers one action carrying its whole value, including later colons. `host:` filters the same
 registry rows as the GUI selector; `host:local` uses the row's local kind rather than its mutable display name.
 Accepting either action does not launch and keeps search as the focus target. A host action also takes over a clone's

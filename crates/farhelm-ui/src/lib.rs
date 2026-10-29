@@ -804,6 +804,31 @@ pub struct Host {
     pub color: farhelm_proto::host_appearance::HostColor,
 }
 
+impl Host {
+    /// Ask for this host's short display form without changing its registry name.
+    ///
+    /// Rail captions and session-row host lines share the protocol crate's
+    /// single rule. Keeping the result as peer text preserves the caller's
+    /// explicit escaping choice; it must never become a lookup or request key.
+    /// A newer host kind may supply neither a destination nor an alias; an
+    /// empty derived form retains its full registry name instead of hiding it.
+    pub fn short_name(&self) -> peer::PeerText {
+        let short = farhelm_proto::host_name::host_short_name(
+            self.kind.is_this_machine(),
+            self.destination.as_ref().map(peer::PeerText::raw),
+            self.alias
+                .as_ref()
+                .and_then(Option::as_ref)
+                .map(peer::PeerText::raw),
+        );
+        if short.is_empty() {
+            self.name.clone()
+        } else {
+            short.into()
+        }
+    }
+}
+
 /// Which kind of registry row a host is (farhelm-helm's `HostKind`, as the
 /// `kind` string on the wire).
 ///
@@ -2652,6 +2677,61 @@ mod tests {
                 .map(|alias| alias.as_ref().map(|value| value.raw())),
             Some(Some("shortname"))
         );
+    }
+
+    /// Short names derive from raw registry fields and retain the peer-text boundary.
+    ///
+    /// An alias containing presentation controls must not be escaped before
+    /// the renderer sees it, and the local default must come from the kind
+    /// rather than recognizing the helm's mutable display-name spelling.
+    #[farhelm_testtrace::test]
+    fn host_short_name_preserves_raw_alias_and_uses_local_kind() {
+        let mut host: Host = serde_json::from_value(serde_json::json!({
+            "id": 1,
+            "kind": "ssh",
+            "destination": "user@build.example.test",
+            "alias": null,
+            "name": "user@build.example.test",
+            "identity": null,
+            "remote_farhelm": null,
+            "remote_state_dir": null,
+            "state": { "phase": "connecting", "attempt": 1, "last_error": null },
+        }))
+        .unwrap();
+        assert_eq!(host.short_name().raw(), "build");
+        host.alias = Some(Some("بناء\u{202e}<x>".into()));
+        assert_eq!(host.short_name().raw(), "بناء\u{202e}<x>");
+        assert!(host.short_name().escaped().contains("<U+202E>"));
+        host.kind = HostKind::Local;
+        assert_eq!(host.short_name().raw(), "بناء\u{202e}<x>");
+        host.alias = Some(None);
+        assert_eq!(host.short_name().raw(), "Local");
+        host.alias = None;
+        assert_eq!(host.short_name().raw(), "Local");
+    }
+
+    /// Newer registry kinds must remain identifiable without an SSH destination.
+    ///
+    /// Decoding an unknown kind is supported across versions. Its full name
+    /// must survive the short-form projection, still raw for the renderer's
+    /// escaping boundary, rather than leaving captions and row prefixes blank.
+    #[farhelm_testtrace::test]
+    fn host_short_name_falls_back_to_full_name_when_derivation_is_empty() {
+        let host: Host = serde_json::from_value(serde_json::json!({
+            "id": 1,
+            "kind": "future-kind",
+            "name": "Future\u{202e}<host>",
+            "destination": null,
+            "alias": null,
+            "identity": null,
+            "remote_farhelm": null,
+            "remote_state_dir": null,
+            "state": { "phase": "connecting", "attempt": 1, "last_error": null },
+        }))
+        .unwrap();
+        assert_eq!(host.kind, HostKind::Unrecognized);
+        assert_eq!(host.short_name().raw(), host.name.raw());
+        assert!(host.short_name().escaped().contains("<U+202E>"));
     }
 
     /// An old-shaped `Session` JSON (no `status` field at all — exactly
