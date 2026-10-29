@@ -234,6 +234,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   behind clicks and hard to discover. Put a clearly visible update control (an "update all hosts" button or similar)
   where users look for it, and add a setting to always auto-update.
 
+- **Show an upgrade arrow on the hosts icon when any host needs an update.** The hosts icon in the bottom-left only
+  surfaces update availability once the host list is open; when at least one host needs an update, show an upgrade arrow
+  on that icon itself, so updates are visible at a glance.
+
 ## Doc todo
 
 - Tell users that a working-copy (checkout) root must be a location only they can write: Farhelm is not designed for
