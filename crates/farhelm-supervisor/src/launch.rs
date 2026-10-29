@@ -759,6 +759,28 @@ pub fn tab_window_command(
     argv
 }
 
+/// Run the tab helper directly, with only credential-free launch intent in argv.
+/// A container tab must never enter the host's login shell first. Token contents
+/// are read by the helper at exec time and never travel through tmux options.
+pub(crate) fn container_tab_window_command(
+    runtime: &crate::container::ContainerRuntime,
+    farhelm_exe: &Path,
+    scope_prefix: Vec<String>,
+) -> anyhow::Result<Vec<String>> {
+    let mut argv = scope_prefix;
+    argv.extend([
+        farhelm_exe.to_string_lossy().into_owned(),
+        "internal".into(),
+        "tab-shell".into(),
+        "--container".into(),
+        serde_json::to_string(runtime)?,
+        "--".into(),
+        runtime.cwd.to_string_lossy().into_owned(),
+        "bash".into(),
+    ]);
+    Ok(argv)
+}
+
 /// The files belonging to one launch, independent of its process or durable row.
 ///
 /// The service removes these paths only after preserving the evidence its
@@ -1244,6 +1266,27 @@ pub fn exec_tab_shell(directory: &Path, shell: &Path) -> anyhow::Error {
         "could not execute terminal shell {}",
         shell.display()
     ))
+}
+
+/// Enter the container's login shell without running any host startup file.
+/// The serialized value contains paths and settings only; exec_command reads the
+/// optional token file afresh and uses a name-only environment argument. As with
+/// exec_tab_shell, callers must exit when this function returns an exec failure.
+pub fn exec_container_tab_shell(runtime: &str) -> anyhow::Error {
+    use std::os::unix::process::CommandExt;
+    let runtime: crate::container::ContainerRuntime = match serde_json::from_str(runtime) {
+        Ok(runtime) => runtime,
+        Err(error) => return anyhow::Error::from(error).context("invalid container tab settings"),
+    };
+    let mut command = match runtime.exec_command(&["bash".into(), "-l".into(), "-i".into()]) {
+        Ok(command) => command,
+        Err(error) => return error,
+    };
+    command.env_remove(AGENT_ID_ENV_VAR);
+    for name in PRIVATE_TMUX_ENV_VARS {
+        command.env_remove(name);
+    }
+    anyhow::Error::from(command.exec()).context("could not execute the container's terminal shell")
 }
 
 /// BROWSER readers split on colon and whitespace, and substitute percent placeholders.

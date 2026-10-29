@@ -336,6 +336,63 @@ impl ContainerGuard<'_> {
             }
         }
     }
+    /// A tab may restart its existing keeper, never create a replacement for
+    /// missing state. The tab's owned lifecycle task holds this fence through
+    /// startup and window publication, so Stop/Delete cannot race that restart.
+    pub(crate) async fn start_existing(
+        &self,
+        scopes: &crate::scope::ScopeManager,
+    ) -> anyhow::Result<()> {
+        use crate::bounded_command::{Ended, GroupChild, OutputCaps};
+        match self.runtime.state().await? {
+            Some(state) if state == "running" => return Ok(()),
+            None => bail!("this session's container does not exist; replace or delete the session"),
+            Some(_) => {}
+        }
+        let name = self.runtime.name()?;
+        let unit = unit_name(&self.runtime.session_id)?;
+        let prefix = scopes.launch_prefix(&unit).await.unwrap_or_default();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+        if !prefix.is_empty() {
+            // Stop confirms the container itself, while systemd can collect
+            // its old conmon scope a moment later. Wait for that exact unit;
+            // killing it to reclaim the name can corrupt Podman's state.
+            while scopes.exists(&unit).await? {
+                anyhow::ensure!(
+                    tokio::time::Instant::now() < deadline,
+                    "the stopped container's helper scope is still closing; retry opening the tab"
+                );
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        }
+        let mut command = match prefix.first() {
+            Some(program) => {
+                let mut command = control_command(Path::new(program));
+                command.args(&prefix[1..]).arg(&self.runtime.podman);
+                command
+            }
+            None => control_command(&self.runtime.podman),
+        };
+        command.args(["start", &name]);
+        let caps = OutputCaps {
+            stdout: 65536,
+            stderr: Some(65536),
+        };
+        let mut command = tokio::process::Command::from(command);
+        let mut child = GroupChild::spawn(&mut command, caps)?;
+        let ended = child.finish(deadline, caps).await;
+        let state = self.runtime.state().await?;
+        if state.as_deref() == Some("running") {
+            return Ok(());
+        }
+        let detail = match ended {
+            Ok(Ended::Exited(output)) => String::from_utf8_lossy(&output.stderr).into_owned(),
+            Ok(Ended::TimedOut) => "start command timed out".into(),
+            Ok(Ended::OutputOverCap) => "start command output exceeded its bound".into(),
+            Err(error) => format!("start command failed: {error:#}"),
+        };
+        bail!("container start could not be confirmed (state {state:?}): {detail}")
+    }
 }
 
 impl ContainerLaunch {

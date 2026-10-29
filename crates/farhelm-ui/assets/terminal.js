@@ -3415,6 +3415,7 @@
           secret: deviceSecret,
           native: typeof window[WEBVIEW_DEVICE_SECRET] === 'string',
           isMac: IS_MAC,
+          containerized: spec.containerized === true,
           isClick: event => linkGesture.isClick(event),
           coveringRects: linkCoveringRects,
         });
@@ -3537,6 +3538,8 @@
           // opener; files go through host lookup, and other schemes do nothing.
           // OSC spans still take precedence over plain web/path providers.
           linkHandler: {
+            // Container terminals adapt the native OSC provider below so file
+            // targets pass checkout admission before xterm offers their spans.
             allowNonHttpProtocols: true,
             activate(event, uri) {
               // The gesture gate also covers mouse-reporting programs, which

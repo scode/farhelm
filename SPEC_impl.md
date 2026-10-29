@@ -2453,6 +2453,24 @@ opening was not offered. It never falls back to Blob. Tooltip and transfer outco
 isolation and visible Unicode format escapes. The addon is disposed with its terminal, cancelling pending work; retained
 reconnect terminals retain it.
 
+Container terminals pass an immutable containerized flag to both agent and tab islands. Their prose-file provider and a
+small adapter around the pinned xterm OSC provider ask the authenticated host stat endpoint before publishing file
+links, admit only Ready replies, and reject replies whose buffer cells changed or lookup was superseded. The native OSC
+objects retain their ranges, arbitrary labels, URI decoding and precedence; its callback interface waits for admission
+without delaying terminal parsing. The adapter depends on the shipped xterm 6.0.0 provider registration seam, pinned by
+a real-bundle test. Each provider owns one abortable batch of at most 32 file candidates; larger batches offer no file
+links. Separate cancellation slots keep independently requested OSC and prose answers from cancelling each other. Web
+hyperlinks remain available. Hover and transfer still recheck independently.
+
+The supervisor derives confinement from the stored launch, never from that browser flag. Both stat and BeginDownload use
+the same verified registry root as container creation, selected from the stored canonical workdir. A subdirectory does
+not shrink the bind, and a missing or replaced selected checkout never falls back to a broader ancestor. Relative paths
+resolve against that canonical workdir, not a host symlink alias. Canonical resolution first rejects paths outside the
+checkout, including dot-dot and symlink escapes. The actual Linux open uses openat2 BENEATH|NO_MAGICLINKS relative to a
+held checkout descriptor, so replacing an ancestor after resolution cannot open an outside host file. Pre-open
+nonregular checks and descriptor metadata checks retain ordinary file-kind and size rules; no hover reserves a future
+read.
+
 ## Supervisor internals
 
 ### Owned checkout admission and lifetime

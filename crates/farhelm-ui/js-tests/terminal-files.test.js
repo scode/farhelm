@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const { spawnSync } = require('node:child_process');
 const { linkRangeText } = require('../assets/terminal-links.js');
-const { pathTokens, oscTarget, bufferLinks, boundedBlob, formatSize, sizeTier, fileIcon, disclosureFits, markedCoverRects, LINK_COVER_SELECTOR, MAX_BYTES } = require('../assets/terminal-files.js');
+const { pathTokens, oscTarget, bufferLinks, boundedBlob, formatSize, sizeTier, fileIcon, disclosureFits, markedCoverRects, LINK_COVER_SELECTOR, MAX_BYTES, FileLinksAddon } = require('../assets/terminal-files.js');
 
 /** A noninteractive clipped or covered disclosure is not inspectable. Both
  * dimensions and live cover rectangles matter, including changes after lookup.
@@ -289,6 +289,245 @@ test('buffer mapping handles wide, combining and wrapped path cells', () => {
   for (const row of [1, 2]) assert.deepEqual(bufferLinks(term, row), [{
     path: 'src/main.rs', range: { start: { x: 5, y: 1 }, end: { x: 4, y: 2 } },
   }]);
+});
+
+/** Model xterm's provider callback with real mutable buffer cells. Admission
+ * responses stay under test control so no delay stands in for a pending lookup.
+ */
+function providerFixture(text, containerized = true) {
+  const rows = [{ cells: Array.from(text, ch => [ch, 1]), wrapped: false }];
+  const requests = [];
+  let provider;
+  const term = { ...terminal(rows), element: { querySelector: () => null, removeEventListener() {} },
+    _core: { _linkProviderService: { linkProviders: [{ provideLinks(_row, callback) { callback([]); } }] } },
+    registerLinkProvider(value) { provider = value; return { dispose() {} }; } };
+  const addon = new FileLinksAddon({ endpoint: '/files', secret: () => 'fixture', containerized });
+  const batches = [];
+  const admit = addon.checkoutLinks.bind(addon);
+  addon.checkoutLinks = (...args) => {
+    const batch = admit(...args);
+    batches.push(batch);
+    return batch;
+  };
+  addon.request = (_operation, path, signal) => new Promise(resolve => {
+    requests.push({ path, signal, reply: info => resolve({ json: async () => info }) });
+  });
+  addon.activate(term);
+  return { addon, requests, term,
+    settled: () => Promise.all(batches),
+    provide: () => new Promise(resolve => provider.provideLinks(1, resolve)),
+    rewrite(text) { rows[0].cells = Array.from(text, ch => [ch, 1]); } };
+}
+
+/** A container path becomes a link only after host-side confinement admits
+ * it. Ordinary sessions retain immediate recognition and their usual hover.
+ */
+test('container providers publish only host-admitted checkout paths', async () => {
+  const fixture = providerFixture('/checkout/report.txt /host.txt /checkout/escape.txt');
+  assert.equal(bufferLinks(fixture.term, 1).length, 3, 'all three paths are recognized candidates');
+  let offered = false;
+  const pending = fixture.provide().then(links => { offered = true; return links; });
+  assert.equal(offered, false);
+  assert.equal(fixture.requests.length, 3);
+  fixture.requests[0].reply({ status: 'ready' });
+  fixture.requests[1].reply({ status: 'not_readable' });
+  fixture.requests[2].reply({ status: 'not_readable' });
+  assert.deepEqual((await pending).map(link => link.text), ['/checkout/report.txt']);
+  fixture.addon.dispose();
+
+  const ordinary = providerFixture('/host.txt', false);
+  assert.deepEqual((await ordinary.provide()).map(link => link.text), ['/host.txt']);
+  assert.equal(ordinary.requests.length, 0);
+  ordinary.addon.dispose();
+});
+
+/** A valid old response cannot attach to replacement text or a newer lookup.
+ * This tests the actual callback publication boundary, not just request abort.
+ */
+test('container link admission discards replaced cells and superseded requests', async () => {
+  const fixture = providerFixture('/checkout/old.txt');
+  const old = fixture.provide();
+  fixture.rewrite('/checkout/new.txt');
+  fixture.requests[0].reply({ status: 'ready' });
+  assert.deepEqual(await old, []);
+  let supersededPublished = false;
+  void fixture.provide().then(() => { supersededPublished = true; });
+  const current = fixture.provide();
+  assert.equal(fixture.requests[1].signal.aborted, true);
+  fixture.requests[2].reply({ status: 'ready' });
+  assert.deepEqual((await current).map(link => link.text), ['/checkout/new.txt']);
+  fixture.requests[1].reply({ status: 'ready' });
+  await fixture.settled();
+  assert.equal(supersededPublished, false, 'even an empty stale callback could overwrite the new reply');
+  fixture.addon.dispose();
+});
+
+/** Retiring a terminal cancels provider work as well as hover/transfers. A
+ * transport which answers despite abort must still publish no retired link.
+ */
+test('disposing a container terminal withdraws pending link admission', async () => {
+  const fixture = providerFixture('/checkout/report.txt');
+  let published = false;
+  void fixture.provide().then(() => { published = true; });
+  fixture.addon.dispose();
+  assert.equal(fixture.requests[0].signal.aborted, true);
+  fixture.requests[0].reply({ status: 'ready' });
+  await fixture.settled();
+  assert.equal(published, false, 'a retired terminal receives no provider callback');
+});
+
+/** A wrapped line controlled by an agent must not fan out thousands of host
+ * filesystem requests just because the pointer entered it.
+ */
+test('container link admission bounds pathological candidate batches', async () => {
+  const fixture = providerFixture(Array.from({ length: 33 }, (_, n) => `/checkout/${n}.txt`).join(' '));
+  assert.equal(bufferLinks(fixture.term, 1).length, 33, 'fixture exceeds the request budget');
+  assert.deepEqual(await fixture.provide(), []);
+  assert.equal(fixture.requests.length, 0);
+  fixture.addon.dispose();
+});
+
+/** Exercise the pinned OSC provider itself, not a copied parser or provider
+ * model. xterm can parse into its real buffer before a DOM element is opened;
+ * controlled Stat replies expose the async publication boundary without sleeps.
+ */
+async function oscProviderFixture(t, output, containerized = true) {
+  const { Terminal } = require('../assets/vendor/xterm.js');
+  const activations = [];
+  const term = new Terminal({ cols: 240, rows: 5, allowProposedApi: true,
+    linkHandler: { allowNonHttpProtocols: true, activate: (_event, uri) => activations.push(uri) } });
+  let disposed = false;
+  const dispose = () => { if (!disposed) { disposed = true; term.dispose(); } };
+  t.after(dispose);
+  const service = term._core._linkProviderService;
+  assert.equal(service.linkProviders.length, 1, 'the constructor registers OSC before addons');
+  const provider = service.linkProviders[0];
+  assert.equal(typeof provider.provideLinks, 'function', 'pin the shipped private registration seam');
+  const original = provider.provideLinks;
+  const nativeReplies = [];
+  const observed = function (row, callback) {
+    original.call(this, row, links => { nativeReplies.push(links || []); callback(links); });
+  };
+  provider.provideLinks = observed;
+  const context = { window: { farhelmTerminalLinks: require('../assets/terminal-links.js') },
+    AbortController, URL, setTimeout, clearTimeout };
+  vm.runInNewContext(fs.readFileSync(require.resolve('../assets/terminal-files.js'), 'utf8'), context);
+  const addon = new context.window.farhelmTerminalFiles.FileLinksAddon({
+    endpoint: '/files', secret: () => 'fixture', containerized,
+  });
+  const requests = [];
+  addon.request = (_operation, path, signal) => new Promise(resolve => {
+    requests.push({ path, signal, reply: info => resolve({ json: async () => info }) });
+  });
+  const batches = [];
+  const admit = addon.checkoutLinks.bind(addon);
+  addon.checkoutLinks = (...args) => {
+    const batch = admit(...args);
+    batches.push(batch);
+    return batch;
+  };
+  term.loadAddon(addon);
+  const write = text => new Promise(resolve => term.write(text, resolve));
+  await write(output);
+  return { addon, term, provider, requests, nativeReplies, activations, dispose, write,
+    unchangedProvider: () => provider.provideLinks === observed,
+    provide: () => new Promise(resolve => provider.provideLinks(1, resolve)),
+    prose: () => new Promise(resolve => service.linkProviders[1].provideLinks(1, resolve)),
+    settled: () => Promise.all(batches) };
+}
+
+/** OSC labels need not look like paths. Preserve native ranges and callbacks,
+ * decode the target once, and admit OSC/prose independently on the same row.
+ * Refusing only at hover would already have offered the outside host links.
+ */
+test('real OSC checkout links retain arbitrary labels and spaces alongside web and prose links', async t => {
+  const osc = (uri, label) => `\x1b]8;;${uri}\x1b\\${label}\x1b]8;;\x1b\\`;
+  const inside = 'file://session-host/checkout/my%20report.txt';
+  const web = 'https://example.test/result';
+  const output = [osc(inside, 'download result'), osc('file:///host-only.txt', 'outside'),
+    osc('file:///checkout/escape.txt', 'symlink'), osc(web, 'web'), '/checkout/printed.txt'].join(' ');
+  const fixture = await oscProviderFixture(t, output);
+  let published = false;
+  const pending = fixture.provide().then(links => { published = true; return links; });
+  const native = fixture.nativeReplies.at(-1);
+  assert.equal(native.length, 4, 'the actual native provider recognized all OSC spans');
+  assert.equal(linkRangeText(fixture.term, native[0].range), 'download result');
+  assert.equal(published, false, 'no unchecked OSC object is offered');
+  const prose = fixture.prose();
+  assert.deepEqual(fixture.requests.map(request => request.path), [
+    '/checkout/my report.txt', '/host-only.txt', '/checkout/escape.txt', '/checkout/printed.txt',
+  ]);
+  assert.equal(fixture.requests.some(request => request.signal.aborted), false,
+    'independently requested providers cannot cancel each other');
+  for (const request of fixture.requests) request.reply({
+    status: ['/checkout/my report.txt', '/checkout/printed.txt'].includes(request.path) ? 'ready' : 'not_readable',
+  });
+  const offered = await pending;
+  assert.deepEqual(Array.from(offered, link => link.text), [inside, web]);
+  assert.equal(offered[0], native[0], 'keep the native object rather than introducing prose recognition');
+  assert.equal(offered[1], native[3], 'HTTP link identity and callbacks stay unchanged');
+  // Linkifier supplies the native callback with both the event and URI.
+  offered[0].activate({}, offered[0].text);
+  assert.deepEqual(fixture.activations, [inside]);
+  assert.deepEqual(Array.from(await prose, link => link.text), ['/checkout/printed.txt']);
+  fixture.dispose();
+  assert.equal(fixture.unchangedProvider(), true, 'disposal restores the provider it wrapped');
+  const ordinary = await oscProviderFixture(t, output, false);
+  assert.equal(ordinary.unchangedProvider(), true);
+  assert.equal((await ordinary.provide()).length, 4, 'ordinary sessions keep their existing host-file policy');
+  assert.equal(ordinary.requests.length, 0);
+});
+
+/** OSC can repaint a label while keeping its target and cell range. The
+ * changed-label case, late superseded answer and terminal retirement each
+ * distinguish stale publication from a merely aborted transport request.
+ */
+test('real OSC admission rejects label redraws and never publishes superseded or disposed replies', async t => {
+  const osc = label => `\x1b]8;;file:///checkout/result.txt\x1b\\${label}\x1b]8;;\x1b\\`;
+  const changed = await oscProviderFixture(t, osc('old label'));
+  const pending = changed.provide();
+  const before = changed.nativeReplies.at(-1)[0];
+  await changed.write('\r\x1b[2K' + osc('new label'));
+  changed.requests[0].reply({ status: 'ready' });
+  assert.equal((await pending).length, 0);
+  const after = changed.nativeReplies.at(-1)[0];
+  assert.equal(after.text, before.text);
+  assert.deepEqual(after.range, before.range, 'the label alone changed at the same target and range');
+  assert.equal(linkRangeText(changed.term, after.range), 'new label');
+
+  const replaced = await oscProviderFixture(t, osc('download'));
+  let oldPublished = false;
+  void replaced.provide().then(() => { oldPublished = true; });
+  const latest = replaced.provide();
+  assert.equal(replaced.requests[0].signal.aborted, true);
+  replaced.requests[1].reply({ status: 'ready' });
+  assert.equal((await latest).length, 1);
+  replaced.requests[0].reply({ status: 'ready' });
+  await replaced.settled();
+  assert.equal(oldPublished, false, 'an old callback cannot overwrite the latest same-row reply');
+
+  const retired = await oscProviderFixture(t, osc('download'));
+  let retiredPublished = false;
+  void retired.provide().then(() => { retiredPublished = true; });
+  retired.dispose();
+  assert.equal(retired.requests[0].signal.aborted, true);
+  retired.requests[0].reply({ status: 'ready' });
+  await retired.settled();
+  assert.equal(retiredPublished, false);
+});
+
+/** The shared per-provider cap must not turn a pathological OSC row into
+ * unbounded host lookups or suppress an unrelated native web hyperlink.
+ */
+test('real OSC admission caps file requests while preserving web links', async t => {
+  const osc = (uri, label) => `\x1b]8;;${uri}\x1b\\${label}\x1b]8;;\x1b\\`;
+  const output = Array.from({ length: 33 }, (_, n) => osc(`file:///checkout/${n}.txt`, 'x'))
+    .concat(osc('https://example.test/', 'web')).join(' ');
+  const fixture = await oscProviderFixture(t, output);
+  const offered = await fixture.provide();
+  assert.equal(fixture.nativeReplies[0].length, 34, 'the native fixture actually exceeds the file budget');
+  assert.deepEqual(Array.from(offered, link => link.text), ['https://example.test/']);
+  assert.equal(fixture.requests.length, 0);
 });
 
 /** Opening headers are not completion: bytes are offered only after EOF. */
