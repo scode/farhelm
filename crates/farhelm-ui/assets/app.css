@@ -2872,7 +2872,7 @@ a:any-link,
 
 /* Both menus start with a borderless, left-aligned command row. The host
    menu keeps these full-width square rows. The session menu overrides the
-   shape below for inset rounded focus and hover fills while preserving the
+   shape below for inset rounded focus fills while preserving the
    button class and keyboard behavior shared by both. */
 .session-row-menu-item,
 .host-row-menu-item {
@@ -2895,8 +2895,9 @@ a:any-link,
 }
 
 /* A session command's fill is inset rather than full bleed. The icon and
-   two-line copy share a stable left edge; a focused item gets the same fill
-   as a hovered one, while the existing focus-visible ring remains intact. */
+   two-line copy share a stable left edge. Pointer movement transfers focus,
+   so one fill identifies both keyboard and pointer intent; the existing
+   focus-visible ring remains intact. */
 .session-row-menu-item {
   display: flex;
   align-items: flex-start;
@@ -2919,13 +2920,11 @@ a:any-link,
   line-height: 1.25;
 }
 
-.host-row-menu-item:hover:not([aria-disabled="true"]),
 .host-row-menu-item:focus:not([aria-disabled="true"]) {
   background: var(--accent-fill);
   color: var(--on-fill);
 }
 
-.session-row-menu-item:hover:not([aria-disabled="true"]),
 .session-row-menu-item:focus:not([aria-disabled="true"]) {
   background: var(--accent-fill);
   color: var(--on-fill);
@@ -8867,17 +8866,12 @@ a:any-link,
 /* A highlighted command uses selection even when it is destructive. Its
    wording, icon shape and separating rule still identify the destructive
    command; red remains its resting color. Disabled items never gain a fill. */
-.session-row-menu-item:hover:not([aria-disabled="true"]) .session-row-menu-icon,
 .session-row-menu-item:focus:not([aria-disabled="true"]) .session-row-menu-icon,
-.host-row-menu-item:hover:not([aria-disabled="true"]) .session-row-menu-icon,
 .host-row-menu-item:focus:not([aria-disabled="true"]) .session-row-menu-icon {
   color: var(--on-fill);
 }
-.session-row-menu-item:hover:not([aria-disabled="true"]) .session-row-menu-description,
 .session-row-menu-item:focus:not([aria-disabled="true"]) .session-row-menu-description,
-.session-row-menu-item:hover:not([aria-disabled="true"]) .templates-number-owner,
 .session-row-menu-item:focus:not([aria-disabled="true"]) .templates-number-owner,
-.host-row-menu-item:hover:not([aria-disabled="true"]) .session-row-menu-description,
 .host-row-menu-item:focus:not([aria-disabled="true"]) .session-row-menu-description {
   color: var(--on-accent-dim);
 }
@@ -8994,12 +8988,21 @@ a:any-link,
 .menu-description { color: var(--fg-1); font-size: 11px; }
 .menu-danger,
 .menu-danger .menu-icon { color: var(--danger); }
-.menu-item:hover:not([aria-disabled="true"]),
+/* The tunnel popover reuses menu-item outside a menu and retains ordinary
+   hover feedback. Inside a menu, only focus may paint the selection: a
+   resting pointer must not leave a second fill after an arrow-key move. */
+.menu-item:hover:not([aria-disabled="true"]):not([role="menu"] .menu-item),
 .menu-item:focus:not([aria-disabled="true"]) { background: var(--accent-fill); color: var(--on-fill); }
-.menu-item:hover:not([aria-disabled="true"]) .menu-icon,
+.menu-item:hover:not([aria-disabled="true"]):not([role="menu"] .menu-item) .menu-icon,
 .menu-item:focus:not([aria-disabled="true"]) .menu-icon { color: var(--on-fill); }
-.menu-item:hover:not([aria-disabled="true"]) .menu-description,
+.menu-item:hover:not([aria-disabled="true"]):not([role="menu"] .menu-item) .menu-description,
 .menu-item:focus:not([aria-disabled="true"]) .menu-description { color: var(--on-accent-dim); }
+/* Menu buttons still inherit the generic ghost-button hover treatment.
+   Cancel that quieter fill too, so an unfocused hovered command stays bare. */
+[role="menu"] [data-menu-focus]:hover:not(:focus) { background: transparent; }
+/* ARIA-disabled commands remain focusable to expose their explanation, but
+   even keyboard focus must not inherit the generic button's quiet fill. */
+[role="menu"] [data-menu-focus][aria-disabled="true"] { background: transparent; }
 .menu-item[aria-disabled="true"] { background: transparent; opacity: .5; cursor: default; }
 .menu-separator { height: 1px; margin: 4px 10px; border: 0; background: var(--border-dim); }
 

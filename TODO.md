@@ -43,10 +43,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   could make Muse ask a real question. Until then a waiting Muse session can look idle. The alternative is to supply an
   authenticated test provider (or a documented fixture protocol) so the executor can capture those screens.
 
-- **Fix menu highlighting.** In the host, session and restart menus, the first item stays highlighted when the pointer
-  moves over another item, leaving two items highlighted. Check the other menus for the same problem and fix the shared
-  cause if there is one. Plan: `plans/queue/menu-single-highlight.md`.
-
 - Initial version of agent2agent comms.
 
 - **Crappy model warning.** Let the user pick a list of models they never want to run. Warn when an agent's TUI

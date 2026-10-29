@@ -1,4 +1,4 @@
-// Unit coverage for tooltip.js's pure decisions, run with node's built-in
+// Unit coverage for tooltip.js's pure decisions and menu focus ownership, run with node's built-in
 // test runner (the same shape as the other files in this directory: `node
 // --test` loads the exact file the page ships).
 //
@@ -14,7 +14,8 @@
 // the terminal scrolls under live output) are behaviors, not crashes.
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { placeTooltip, instantFollowOn, scrollMovesTarget } = require("../assets/tooltip.js");
+const { placeTooltip, instantFollowOn, scrollMovesTarget, install } = require("../assets/tooltip.js");
+const { installMenuFocus } = require("../assets/menu-focus.js");
 
 const VIEWPORT = { width: 1000, height: 800 };
 
@@ -102,4 +103,189 @@ test("a scroll of an unrelated container (the terminal under live output) does n
   const terminalViewport = { contains: () => false };
   const doc = { documentElement: {}, body: {} };
   assert.equal(scrollMovesTarget(terminalViewport, target, doc), false);
+});
+
+// ---------------------------------------------------------------------------
+// Pointer-made menu focus
+// ---------------------------------------------------------------------------
+
+/** Run both shipped listener sets with synchronous focus and an owned clock.
+ * The fixture forces :focus-visible even for pointer-made focus: engines can
+ * retain keyboard modality across script focus, which is the regression here.
+ * Timers advance only at requested boundaries, without wall-clock sleeps.
+ */
+function menuTooltipPage(menuFirst) {
+  const listeners = new Map();
+  const timers = new Map();
+  const tooltips = [];
+  let now = 0;
+  let timerId = 0;
+  const doc = {
+    activeElement: null,
+    addEventListener(type, listener, capture) {
+      if (type !== "visibilitychange") assert.equal(capture, true);
+      if (!listeners.has(type)) listeners.set(type, []);
+      listeners.get(type).push(listener);
+    },
+    querySelector(selector) {
+      assert.equal(selector, "input[data-menu-focus-epoch]");
+      return null;
+    },
+    createElement(tag) {
+      assert.equal(tag, "div");
+      const tip = element();
+      tip.isConnected = false;
+      tooltips.push(tip);
+      return tip;
+    },
+  };
+  /** Dispatch in registration order, including focus nested within pointermove. */
+  function dispatch(type, target, fields = {}) {
+    for (const listener of listeners.get(type) || []) listener({ target, ...fields });
+  }
+  /** Only the DOM contracts these assets use are modeled; unknown selectors fail. */
+  function element(attributes = {}, parentElement = null) {
+    return {
+      nodeType: 1, parentElement, isConnected: true, style: {}, dataset: {}, hidden: true,
+      getAttribute(name) { return attributes[name] ?? null; },
+      setAttribute(name, value) { attributes[name] = value; },
+      matches(selector) {
+        assert.equal(selector, ":focus-visible");
+        return true;
+      },
+      closest(selector) {
+        assert.ok(selector === "[data-menu-focus]" || selector === '[role="menu"]');
+        for (let node = this; node; node = node.parentElement) {
+          if (selector === "[data-menu-focus]" && node.getAttribute("data-menu-focus") !== null) return node;
+          if (selector === '[role="menu"]' && node.getAttribute("role") === "menu") return node;
+        }
+        return null;
+      },
+      contains(node) {
+        for (; node; node = node.parentElement) if (node === this) return true;
+        return false;
+      },
+      focus() {
+        if (doc.activeElement === this) return;
+        const previous = doc.activeElement;
+        doc.activeElement = this;
+        if (previous) dispatch("focusout", previous);
+        dispatch("focusin", this);
+      },
+      getBoundingClientRect() { return rect(100, 100, 80, 20); },
+      appendChild(node) { node.isConnected = true; },
+      replaceChildren() {},
+    };
+  }
+  doc.body = element();
+  const win = {
+    document: doc, farhelmTooltip: {}, innerWidth: 1000, innerHeight: 800,
+    addEventListener() {}, performance: { now: () => now },
+    setTimeout(callback, delay) {
+      const id = ++timerId;
+      timers.set(id, { callback, at: now + delay });
+      return id;
+    },
+    clearTimeout(id) { timers.delete(id); },
+    setInterval(callback, delay) {
+      const id = ++timerId;
+      timers.set(id, { callback, at: now + delay, interval: delay });
+      return id;
+    },
+    clearInterval(id) { timers.delete(id); },
+  };
+  if (menuFirst) installMenuFocus(doc, win);
+  install(win);
+  if (!menuFirst) installMenuFocus(doc, win);
+  const panel = element({ role: "menu" });
+  return {
+    doc, dispatch,
+    item(key) { return element({ "data-menu-focus": key, "data-tooltip": `${key} help` }, panel); },
+    outside: doc.body,
+    visible() { return tooltips.filter(tip => !tip.hidden); },
+    /** Fire every due task in deadline order, including recurring watch ticks. */
+    advance(ms) {
+      const end = now + ms;
+      for (;;) {
+        const next = [...timers].filter(([, timer]) => timer.at <= end).sort((a, b) => a[1].at - b[1].at)[0];
+        if (!next) break;
+        const [id, timer] = next;
+        now = timer.at;
+        if (timer.interval) timer.at += timer.interval;
+        else timers.delete(id);
+        timer.callback();
+      }
+      now = end;
+    },
+  };
+}
+
+// A script focus may match :focus-visible after keyboard use. It must neither
+// bypass the pointer's rest timer nor keep help showing after the pointer leaves.
+test("menu hover after keyboard focus keeps the rest delay and pointer-leave dismissal", () => {
+  for (const menuFirst of [true, false]) {
+    for (const leaveWindow of [true, false]) {
+      const p = menuTooltipPage(menuFirst);
+      const keyboard = p.item("keyboard");
+      const hovered = p.item("hovered");
+      keyboard.focus();
+      assert.equal(p.doc.activeElement, keyboard);
+      assert.equal(hovered.matches(":focus-visible"), true);
+      p.advance(100);
+      p.dispatch("pointerover", hovered, { pointerType: "mouse" });
+      p.advance(200);
+      p.dispatch("pointermove", hovered, { pointerType: "mouse" });
+      assert.equal(p.doc.activeElement, hovered, "the real menu listener must make the focus change");
+      p.advance(299);
+      assert.equal(p.visible().length, 0, "pointer-made focus must preserve the full rest delay");
+      p.advance(1);
+      assert.equal(p.visible().length, 1);
+      assert.equal(p.visible()[0].textContent, "hovered help");
+      if (leaveWindow) p.dispatch("pointerout", hovered, { relatedTarget: null });
+      else p.dispatch("pointerover", p.outside, { pointerType: "mouse" });
+      assert.equal(p.doc.activeElement, hovered, "leaving retains the menu's current item");
+      assert.equal(p.visible().length, 0, "retained focus must not retain pointer help");
+    }
+  }
+});
+
+// An arrow can move focus away while the pointer stays on its old item. A
+// subsequent move within that item has no pointerover to restart hover help.
+test("motion inside a still-hovered menu item restores pointer help after an arrow", () => {
+  for (const menuFirst of [true, false]) {
+    const p = menuTooltipPage(menuFirst);
+    const hovered = p.item("hovered");
+    const keyboard = p.item("keyboard");
+    p.dispatch("pointerover", hovered, { pointerType: "mouse" });
+    p.dispatch("pointermove", hovered, { pointerType: "mouse" });
+    assert.equal(p.doc.activeElement, hovered);
+    keyboard.focus();
+    assert.equal(p.doc.activeElement, keyboard);
+    p.advance(100);
+    // The pointer never left this item: dispatch movement without an over.
+    p.dispatch("pointermove", hovered, { pointerType: "mouse" });
+    assert.equal(p.doc.activeElement, hovered);
+    p.advance(299);
+    assert.equal(p.visible().length, 0, "rest begins again after focus returns by pointer");
+    p.advance(1);
+    assert.equal(p.visible().length, 1, "help must be scheduled without another pointerover");
+    assert.equal(p.visible()[0].textContent, "hovered help");
+    p.dispatch("pointerover", p.outside, { pointerType: "mouse" });
+    assert.equal(p.doc.activeElement, hovered);
+    assert.equal(p.visible().length, 0);
+  }
+});
+
+// The pointer provenance exception must not weaken actual keyboard ownership:
+// focus help still survives an unrelated pointer leaving while focus stays put.
+test("keyboard menu focus retains its help when the pointer leaves", () => {
+  const p = menuTooltipPage(true);
+  const keyboard = p.item("keyboard");
+  keyboard.focus();
+  assert.equal(p.doc.activeElement, keyboard);
+  p.advance(300);
+  assert.equal(p.visible().length, 1);
+  p.dispatch("pointerover", p.outside, { pointerType: "mouse" });
+  p.dispatch("pointerout", p.outside, { relatedTarget: null });
+  assert.equal(p.visible().length, 1);
 });

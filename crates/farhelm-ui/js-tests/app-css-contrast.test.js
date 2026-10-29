@@ -244,8 +244,10 @@ const SELECTED_HOST_MARKS = [
   ".launcher-host-option[aria-selected=\"true\"] .host-kind-icon",
   ".host-icon-choice[aria-pressed=\"true\"] .host-kind-icon",
 ];
-const HIGHLIGHTED_COMMANDS = ["session-row-menu-item", "host-row-menu-item"].flatMap((name) =>
-  ["hover", "focus"].map((state) => `.${name}:${state}:not([aria-disabled="true"])`)
+// Pointer movement transfers focus inside menus. Only that focused command
+// owns the fill; a resting pointer must not keep a second selection painted.
+const HIGHLIGHTED_COMMANDS = ["session-row-menu-item", "host-row-menu-item"].map((name) =>
+  `.${name}:focus:not([aria-disabled="true"])`
 );
 const SHIPPED_ROLE_BINDINGS = [
   [".status-badge.running", "color", "var(--ok)"],
@@ -273,7 +275,7 @@ const SHIPPED_ROLE_BINDINGS = [
     [`${selector} .session-row-menu-icon`, "color", "var(--on-fill)"],
     [`${selector} .session-row-menu-description`, "color", "var(--on-accent-dim)"],
     [
-      selector.replace(":hover:", ":focus-visible:").replace(":focus:", ":focus-visible:"),
+      selector.replace(":focus:", ":focus-visible:"),
       "outline-color",
       "var(--on-fill)",
     ],

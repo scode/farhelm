@@ -1,5 +1,6 @@
-// Rust owns menu navigation. This synchronous page boundary refuses a move
-// already sent across the desktop bridge after focus has independently moved.
+// Rust owns keyboard navigation; pointer movement focuses menu items directly.
+// This synchronous page boundary refuses a move already sent across the desktop
+// bridge after focus has independently moved, including by hover.
 (function (root) {
   /** Install once per page; repeated Rust evaluations must retain the epochs.
    * The exported factory lets unit tests use separate pages without globals.
@@ -26,6 +27,24 @@
       if (["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key) &&
         event.target?.closest?.('[role="menu"], [role="menuitem"], [aria-haspopup="menu"]')) {
         win.__farhelmMenuFocusSync();
+      }
+    }, true);
+    doc.addEventListener("pointermove", event => {
+      if (event.pointerType !== "mouse" && event.pointerType !== "pen") return;
+      const target = event.target?.closest?.("[data-menu-focus]");
+      if (!target?.closest('[role="menu"]') || doc.activeElement === target) return;
+      // Mounted role=menu panels are open menus. Use movement, not pointerover:
+      // content moving under a resting pointer must not undo arrow navigation.
+      // Native focus is independent, so it invalidates in-flight arrow moves.
+      // The tooltip must also know this is hover even if keyboard modality makes
+      // the scripted focus match :focus-visible. Keep that provenance synchronous
+      // and target-specific; a focus handler's redirection is its own move.
+      const previous = win.__farhelmMenuPointerFocus;
+      win.__farhelmMenuPointerFocus = target;
+      try {
+        target.focus({ preventScroll: true });
+      } finally {
+        win.__farhelmMenuPointerFocus = previous;
       }
     }, true);
     /** An opening focus is ungated, but remains app-owned like an arrow move.
