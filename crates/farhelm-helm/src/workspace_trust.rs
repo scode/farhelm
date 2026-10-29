@@ -167,6 +167,7 @@ mod tests {
                 permissions: None,
                 permission_flags: None,
                 wrapper_prefix: None,
+                container: None,
                 workspace_trust: harness.offers_workspace_trust().then_some(false),
             })
             .unwrap();

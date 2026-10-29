@@ -27,10 +27,11 @@ pub(super) const OPENER: SavedFocus = SavedFocus::new("__farhelmQuickSwitcherFoc
 
 /// A choice closes the switcher before using the list's normal entry point.
 /// New carries an accepted search action; it never creates a session itself.
+/// Its boxed draft keeps ordinary session/template picks small as launch choices grow.
 #[derive(Clone)]
 pub(super) enum SwitcherPick {
     Session(Box<Session>),
-    New(ComposerSearchResult),
+    New(Box<ComposerSearchResult>),
     /// Close this modal, then use the chord's fresh quick-launch path.
     QuickLaunch,
     /// Resolve a template name again after this snapshot's dialog closes.
@@ -311,15 +312,15 @@ pub(super) fn QuickSwitcher(
             if let (true, ComposerSearchResult::Template(name)) = (template_only, &action) {
                 SwitcherPick::TemplateLaunch(name.clone())
             } else {
-                SwitcherPick::New(action)
+                SwitcherPick::New(Box::new(action))
             }
         })
     } else if selected_index == matches.len() && show_quick {
         Some(SwitcherPick::QuickLaunch)
     } else if selected_index == matches.len() && show_new {
-        Some(SwitcherPick::New(ComposerSearchResult::Name(
+        Some(SwitcherPick::New(Box::new(ComposerSearchResult::Name(
             text.trim().to_string(),
-        )))
+        ))))
     } else {
         sessions.and_then(|listing| {
             matches
@@ -394,7 +395,7 @@ pub(super) fn QuickSwitcher(
                                   let pick = if template_only {
                                       SwitcherPick::TemplateLaunch(name.clone())
                                   } else {
-                                      SwitcherPick::New(action.clone())
+                                      SwitcherPick::New(Box::new(action.clone()))
                                   };
                                   let badges = if template_only { template_shortcut_badges(name, &preferences.0.read()) } else { Vec::new() };
                                   rsx! {
@@ -458,7 +459,7 @@ pub(super) fn QuickSwitcher(
                             class: "quick-switcher-row quick-switcher-new", r#type: "button", role: "option", tabindex: "-1",
                             id: "quick-switcher-result-{matches.len()}", aria_selected: count > 0 && selected_index == matches.len(),
                             "data-tooltip": "Open New with this name; nothing launches yet",
-                            onclick: { let name = text.trim().to_string(); move |_| on_pick.call(SwitcherPick::New(ComposerSearchResult::Name(name.clone()))) },
+                            onclick: { let name = text.trim().to_string(); move |_| on_pick.call(SwitcherPick::New(Box::new(ComposerSearchResult::Name(name.clone())))) },
                             span { "New session named \"" bdi { "{display_peer(text.trim())}" } "\"" }
                         }
                     }

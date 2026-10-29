@@ -134,8 +134,9 @@ pub mod time;
 /// Build classification shared by browser wording and native release decisions.
 pub mod version;
 pub use launch::{
-    LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection, NamedConversationStart,
-    check_permission_flags, check_wrapper_prefix, split_permission_flags, split_wrapper_prefix,
+    ContainerConfig, ContainerEngine, LaunchEffort, LaunchHarness, LaunchPermission,
+    LaunchSelection, NamedConversationStart, check_permission_flags, check_wrapper_prefix,
+    split_permission_flags, split_wrapper_prefix,
 };
 pub use version::is_development_build;
 /// The launcher's shared rules: the model catalog, agent-type
@@ -218,7 +219,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_65` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_66` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -229,7 +230,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 65;
+pub const PROTOCOL_VERSION: u32 = 66;
 
 /// Browser saves buffer the body, so both hosts enforce this decimal 100 MB cap.
 pub const DOWNLOAD_LIMIT_BYTES: u64 = 100_000_000;
@@ -5268,8 +5269,8 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_65() {
-        assert_eq!(PROTOCOL_VERSION, 65);
+    fn protocol_version_is_pinned_at_66() {
+        assert_eq!(PROTOCOL_VERSION, 66);
     }
 
     /// A follow-up is an approved mutation even though its success has no
@@ -7089,6 +7090,7 @@ mod tests {
                     effort: None,
                     permissions: None,
                     wrapper_prefix: None,
+                    container: None,
                     workspace_trust: None,
                 },
                 start: vec![

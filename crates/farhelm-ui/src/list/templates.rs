@@ -2853,6 +2853,7 @@ mod tests {
             name: Some("review\u{200b}".into()),
             permission_flags: Some(vec!["--mode".into(), "ask me".into()]),
             wrapper_prefix: Some(Some(vec!["wrapper".into(), "--".into()])),
+            container: None,
             ..Default::default()
         };
         let parts = template_summary_parts(&fields);

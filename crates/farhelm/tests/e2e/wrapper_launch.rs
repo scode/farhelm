@@ -601,6 +601,7 @@ async fn a_structured_agent_wrapper_forwards_start_resume_and_environment() {
             STRUCTURED_WRAPPER_SCRIPT.to_string(),
             "wrapper".to_string(),
         ]),
+        container: None,
         workspace_trust: None,
     };
     let launch = farhelm_helm::compile_agent_launch(selection.clone())

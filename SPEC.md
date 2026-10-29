@@ -3426,6 +3426,51 @@ Parent tracking is explicitly optional for now. `farhelm spawn --parent` can rec
 incomplete parent filter is an accepted limitation, not a missing correctness guarantee. Future work should consider
 either removing agent parent/child relationships or making them useful; neither direction is selected or required now.
 
+### Containerized sessions
+
+Containerized agent sessions are experimental, Linux-only, and subject to rapid change. A session has one rootless
+Podman container, created from the user-supplied absolute path to an OCI archive on its host and removed when the
+session is deleted. Farhelm builds and downloads no image. The image supplies a uid-1000 user with its harness and
+configuration already installed, using a local API proxy or load balancer on the host; subscription login is
+unsupported. Managed checkouts only: command launches and plain-folder launches cannot select this isolation.
+
+The container receives the whole managed checkout, read-write at its same canonical absolute path, even when launched
+through an alias or from a subdirectory; one selected host loopback TCP port, reachable as `127.0.0.1:<port>` inside;
+and optionally a GitHub token from a named host file as `GH_TOKEN`. Farhelm checks that file before launch, reads it
+again immediately before agent exec, trims surrounding whitespace, and neither stores its contents nor places them on a
+command line. Changing or removing it after the check can fail the later launch in its terminal. The user's own Podman
+tools can inspect the token while the receiving exec session lives.
+
+The agent runs inside the container with the image's environment, terminal type and colour capability, and that optional
+token. No Farhelm program, state, socket, session credential, reporter or browser fallback is supplied inside. A
+containerized launch has conversation integration turned off for that launch: status still follows the terminal screen,
+but no conversation is captured and no missing-hook notification fires. Farhelm does not edit the host's Claude trust
+configuration for it. Restart and Restart with are unavailable; the latter explicitly overrides its ordinary
+named-conversation offer. Replace and Replace with create a fresh session and container before deleting the source.
+
+Container creation and image-copy progress appear in the session terminal after checkout preparation. The container's
+idle keeper runs under Podman's own init, independently of the agent exec. It stays running when the agent exits on its
+own. Stop first stops the ordinary agent process tree, then the whole container, including any terminal or detached
+process in it. The stopped container and its files remain. Delete removes it only after the ordinary read-only
+preflights and upload cancellation; a refused preflight leaves it intact. Stop and Delete require Podman's actual state
+to confirm completion: a command's successful exit alone proves neither, and a command's failed exit does not override a
+confirmed stopped or absent container. Unconfirmed cleanup fails visibly and keeps the session for retry. Delete's
+existing confirmation follows the agent and terminal-tab state; after they end, Delete can still remove work that
+detached inside the container, just as ordinary Delete reaps leftover descendants after their agent exits.
+
+An image import already holding the creation fence can delay cleanup. After 30 seconds waiting for that fence, the
+operation refuses without cancelling creation or signalling processes and asks the user to retry after preparation
+finishes. Once Stop or Delete revokes creation, an earlier delayed creator cannot recreate the container. After a host
+reboot the session terminal is gone and Restart remains unavailable, so the session can only be replaced or deleted.
+
+This isolates host filesystem capabilities, not memory or CPU use. Internet access, LAN and tailnet addresses, and cloud
+metadata remain reachable. A localhost tunnel reaches the selected host's port, not an in-container port. The host's
+`containers.conf` still applies. Podman's ordinary privileges, including working sudo inside an appropriately prepared
+image, remain available. Files written as the uid-1000 image user belong to the host user through keep-id mapping;
+container-root files belong to a subordinate host uid. The user may need `podman unshare` to edit or remove them. A
+container-root-owned folder can likewise prevent Empty Trash until removed with `podman unshare rm -rf`. Delete removes
+the container but leaves the imported image in the user's Podman storage until they prune it.
+
 ### Local authority and trust between hosts
 
 The local security boundary is the Unix account on a particular host. Processes the user runs on the target host,
@@ -3434,7 +3479,7 @@ does not provide strong same-account isolation against deliberate interference w
 session credentials do not provide same-account containment. Running agents without permission checks in disposable
 remote environments is an intended use. Farhelm still keeps simple local guards against accidental interference where
 their identity is available, such as excluding a session's recorded agent pane from tab discovery and destructive tab
-cleanup. Future container or sandbox support would require a new, explicit isolation contract.
+cleanup. Containerized sessions have their own explicit isolation contract above.
 
 Farhelm defends against what an attached host or an agent's output can do, and against mistakes a user plausibly makes
 in ordinary use of Farhelm or their machine. The test is whether a reasonable user would hit the trigger by accident.

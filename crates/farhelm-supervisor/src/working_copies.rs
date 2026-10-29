@@ -1205,7 +1205,53 @@ pub fn attach_existing_ancestors(
 /// observation. This read takes no lifecycle lease: admission still validates
 /// the destination when it creates, and a later path replacement remains possible.
 pub(crate) fn cwd_is_managed(db: &crate::db::Db, canonical_cwd: &str) -> Result<bool> {
-    let allocated = {
+    let cwd = Path::new(canonical_cwd);
+    for row in allocated_managed_rows(db)? {
+        if row
+            .canonical_path
+            .as_deref()
+            .is_some_and(|path| managed_ancestor(Path::new(path), cwd))
+            && verify_identity(&row)? == IdentityStatus::Matches
+            && !creation_time_unconfirmed_now(&row)
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Resolve the single checkout whose whole tree a container shares. Pick the
+/// deepest allocated ancestor before checking identity: falling back to an outer
+/// checkout when the inner one disappears would broaden later file authority.
+/// Ordinary launch trust deliberately keeps its any-valid-ancestor rule above.
+pub(crate) fn managed_checkout_root(
+    db: &crate::db::Db,
+    canonical_cwd: &str,
+) -> Result<Option<PathBuf>> {
+    let cwd = Path::new(canonical_cwd);
+    let selected = allocated_managed_rows(db)?
+        .into_iter()
+        .filter(|row| {
+            row.canonical_path
+                .as_deref()
+                .is_some_and(|path| managed_ancestor(Path::new(path), cwd))
+        })
+        .max_by_key(|row| {
+            Path::new(row.canonical_path.as_deref().expect("allocated path"))
+                .components()
+                .count()
+        });
+    let Some(row) = selected else { return Ok(None) };
+    if verify_identity(&row)? != IdentityStatus::Matches || creation_time_unconfirmed_now(&row) {
+        return Ok(None);
+    }
+    Ok(row.canonical_path.map(PathBuf::from))
+}
+
+/// Snapshot registry rows without holding the database mutex during filesystem
+/// identity checks. Both ownership queries must use the same allocation filter.
+fn allocated_managed_rows(db: &crate::db::Db) -> Result<Vec<WorkingCopyRow>> {
+    {
         let conn = db.lock();
         let mut stmt = conn.prepare(
             "SELECT id, canonical_root, canonical_path, repo_owner, repo_name, \
@@ -1218,21 +1264,8 @@ pub(crate) fn cwd_is_managed(db: &crate::db::Db, canonical_cwd: &str) -> Result<
             rusqlite::params![AllocationState::Allocated.as_str()],
             decode_row,
         )?;
-        rows.collect::<std::result::Result<Vec<_>, _>>()?
-    };
-    let cwd = Path::new(canonical_cwd);
-    for row in allocated {
-        if row
-            .canonical_path
-            .as_deref()
-            .is_some_and(|path| managed_ancestor(Path::new(path), cwd))
-            && verify_identity(&row)? == IdentityStatus::Matches
-            && !creation_time_unconfirmed_now(&row)
-        {
-            return Ok(true);
-        }
+        Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     }
-    Ok(false)
 }
 
 /// Match accepted paths by components, with the same root exception as create
@@ -3086,6 +3119,41 @@ mod tests {
             .unwrap();
         assert!(!cwd_is_managed(&db, root).unwrap());
         assert!(!managed_ancestor(Path::new("/"), Path::new("/ordinary")));
+    }
+
+    /// Container file authority belongs to the deepest allocated checkout, not
+    /// any valid ancestor. Losing the inner root must refuse rather than silently
+    /// expose an outer tree; ordinary ownership discovery retains its older rule.
+    #[test]
+    fn container_root_does_not_fall_back_past_an_unverified_inner_checkout() {
+        let db = crate::db::Db::new(registry_conn(), "container root test");
+        let dir = tempfile::tempdir().unwrap();
+        let outer = planned_row(&db.lock(), dir.path(), "outer");
+        let outer = allocate(&db.lock(), &outer.id, None).unwrap();
+        let inner = planned_row(&db.lock(), &outer.canonical_path, "inner");
+        let inner = allocate(&db.lock(), &inner.id, None).unwrap();
+        let cwd = inner.canonical_path.join("nested");
+        fs::create_dir(&cwd).unwrap();
+        assert_eq!(
+            managed_checkout_root(&db, cwd.to_str().unwrap()).unwrap(),
+            Some(inner.canonical_path.clone())
+        );
+        let displaced = outer.canonical_path.join("displaced-inner");
+        fs::rename(&inner.canonical_path, &displaced).unwrap();
+        assert_eq!(
+            managed_checkout_root(&db, cwd.to_str().unwrap()).unwrap(),
+            None
+        );
+        fs::create_dir(&inner.canonical_path).unwrap();
+        assert_eq!(
+            verify_identity(&inner.row).unwrap(),
+            IdentityStatus::DifferentObject
+        );
+        assert_eq!(
+            managed_checkout_root(&db, cwd.to_str().unwrap()).unwrap(),
+            None
+        );
+        assert!(cwd_is_managed(&db, cwd.to_str().unwrap()).unwrap());
     }
 
     /// A recorded path must not grant automatic trust to replacement content.

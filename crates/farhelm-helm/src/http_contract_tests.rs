@@ -51,6 +51,7 @@ fn session_list_body() -> SessionListBody {
         effort: Some(LaunchEffort::High),
         permissions: Some(LaunchPermission::Yolo),
         wrapper_prefix: None,
+        container: None,
         workspace_trust: Some(true),
     })
     .expect("a valid Codex selection compiles");

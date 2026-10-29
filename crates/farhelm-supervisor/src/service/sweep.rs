@@ -1883,12 +1883,29 @@ pub(crate) async fn stop_live_agent(
     entry: &SessionEntry,
     root_identity: Option<(u32, u64)>,
 ) -> Result<(), StopFailure> {
+    let runtime = crate::container::ContainerRuntime::for_session(
+        &sup.state_dir,
+        session_id,
+        entry.generation,
+        &entry.info.cwd,
+        &entry.info.launch,
+    )
+    .map_err(StopFailure::Sweep)?;
+    let container = match runtime.as_ref() {
+        Some(runtime) => Some(runtime.acquire().await.map_err(StopFailure::Sweep)?),
+        None => None,
+    };
     sup.record(session_id, entry, Transition::StopRequested)
         .await
         .map_err(StopFailure::Unrecorded)?;
+    if let Some(container) = &container {
+        container.revoke().map_err(StopFailure::Sweep)?;
+    }
     // `AgentOnly`, shared verbatim by `StopSession` and the restart's
     // pre-relaunch reap — the two operations SPEC.md says leave a
-    // session's terminal tabs running (PLAN_M4.md item 2's marker split).
+    // ordinary session's terminal tabs running (PLAN_M4.md item 2's marker split).
+    // A containerized Stop then ends the whole container below, after this exec
+    // client and its helpers are gone; its keeper must survive this first sweep.
     reap_process_tree(
         &sup.seams.scopes,
         ScopeUnits::recorded(entry.scope.clone()),
@@ -1902,6 +1919,9 @@ pub(crate) async fn stop_live_agent(
     )
     .await
     .map_err(StopFailure::Sweep)?;
+    if let Some(container) = &container {
+        container.stop().await.map_err(StopFailure::Sweep)?;
+    }
     let exit_code = dead_pane_exit_code(sup, entry.terminal.as_ref(), session_id).await;
     sup.record(session_id, entry, Transition::StopCompleted { exit_code })
         .await

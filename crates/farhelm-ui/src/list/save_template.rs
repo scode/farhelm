@@ -390,6 +390,7 @@ mod tests {
             kind: Some(LauncherKind::Agent),
             harness: Some(LaunchHarness::Codex),
             wrapper_prefix: Some(vec!["wrapper".into(), "--".into()]),
+            container: None,
             ..Default::default()
         };
         let passive = Candidate::from_state(&state, ExplicitChoices::default());
@@ -403,6 +404,7 @@ mod tests {
         let explicit = Candidate::from_state(
             &LauncherState {
                 wrapper_prefix: None,
+                container: None,
                 ..state
             },
             ExplicitChoices {

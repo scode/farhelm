@@ -6211,6 +6211,7 @@ mod tests {
             effort: None,
             permissions: Some(farhelm_proto::LaunchPermission::Yolo),
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
         let replacement = farhelm_proto::SessionLaunch::from_pre_launch_kinds(
@@ -9075,6 +9076,7 @@ mod tests {
             effort: Some(farhelm_proto::LaunchEffort::High),
             permissions: Some(farhelm_proto::LaunchPermission::Yolo),
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
         let session_launch = farhelm_proto::SessionLaunch::from_pre_launch_kinds(
@@ -9182,6 +9184,7 @@ mod tests {
                 effort,
                 permissions: Some(permissions),
                 wrapper_prefix: None,
+                container: None,
                 workspace_trust: None,
             };
             // This round trip exercises today's launch format. The historical
@@ -9260,6 +9263,7 @@ mod tests {
             effort: Some(farhelm_proto::LaunchEffort::High),
             permissions: Some(farhelm_proto::LaunchPermission::Approve),
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
         let locator = r#"omp:{"version":1,"session_id":"persisted-omp","session_file":"/work/conversation.jsonl"}"#;
@@ -12789,6 +12793,7 @@ mod tests {
             effort: None,
             permissions: None,
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
         plant_v25_launch_rows(
@@ -12879,6 +12884,7 @@ mod tests {
             effort: None,
             permissions: Some(farhelm_proto::LaunchPermission::Yolo),
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
         {

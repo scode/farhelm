@@ -123,6 +123,11 @@ desktop smoke, including the public-to-local session identity boundary), `script
 sweep's workspace nextest runs the same tests on the same pinned tmux), and the macOS-only uninstall acceptance (the
 rehearsal's macOS leg runs it in step 4).
 
+The workspace nextest selection includes Linux `containerized_sessions` coverage. Rootless Podman and the offline
+`docker.io/library/ubuntu:24.04` image are required; tests never pull. An intentional opt-out uses
+`FARHELM_TEST_SKIP_PODMAN=1` retained through the recorder's `--keep-farhelm-env FARHELM_TEST_SKIP_PODMAN` option. Read
+and report its explicit SKIPPED output as missing coverage, not a runtime pass.
+
 The opt-in `DESKTOP_SMOKE_APPEARANCE=1 scripts/desktop-smoke.sh` checks four native fresh/stored dark/light cases:
 startup palette, ordinary Settings choices, private-profile persistence, fonts and same-attachment terminal input. It
 retains JSON and one final client image per case. Normal appshots supply visual review; DOM observations do not prove

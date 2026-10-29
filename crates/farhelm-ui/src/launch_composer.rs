@@ -2202,6 +2202,7 @@ mod tests {
             effort,
             permissions: None,
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         }
     }
@@ -2297,6 +2298,7 @@ mod tests {
             effort: None,
             permissions: None,
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
         assert!(
@@ -2351,6 +2353,7 @@ mod tests {
             effort: Some(LaunchEffort::High),
             permissions: Some(LaunchPermission::Yolo),
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
 
@@ -2387,6 +2390,7 @@ mod tests {
             effort,
             permissions: None,
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
 
@@ -2990,6 +2994,7 @@ mod tests {
             effort: None,
             permissions: Some(LaunchPermission::SmartApprove),
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
         let (pi, _) = reconcile_harness_selection(goose.clone(), None, LaunchHarness::Pi, &[]);
@@ -3004,6 +3009,7 @@ mod tests {
         let omitted = LaunchSelection {
             permissions: None,
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
             ..goose.clone()
         };
@@ -3051,6 +3057,7 @@ mod tests {
                     effort: None,
                     permissions: Some(permission),
                     wrapper_prefix: None,
+                    container: None,
                     workspace_trust: None,
                 },
                 &[],
@@ -3070,6 +3077,7 @@ mod tests {
                         effort: None,
                         permissions: Some(permission),
                         wrapper_prefix: None,
+                        container: None,
                         workspace_trust: None,
                     },
                     &[],
@@ -3085,6 +3093,7 @@ mod tests {
                     effort: None,
                     permissions,
                     wrapper_prefix: None,
+                    container: None,
                     workspace_trust: None,
                 },
                 &[],
@@ -3111,6 +3120,7 @@ mod tests {
                     effort: None,
                     permissions,
                     wrapper_prefix: None,
+                    container: None,
                     workspace_trust: None,
                 },
                 None,
@@ -3135,6 +3145,7 @@ mod tests {
                 effort: None,
                 permissions: Some(cleared),
                 wrapper_prefix: None,
+                container: None,
                 workspace_trust: None,
             };
             let (omp, _) =
@@ -3155,6 +3166,7 @@ mod tests {
                         effort: None,
                         permissions: Some(cleared),
                         wrapper_prefix: None,
+                        container: None,
                         workspace_trust: None,
                     },
                     &[]
@@ -3170,6 +3182,7 @@ mod tests {
                 effort: None,
                 permissions: Some(LaunchPermission::Approve),
                 wrapper_prefix: None,
+                container: None,
                 workspace_trust: None,
             },
             &[],
@@ -3183,6 +3196,7 @@ mod tests {
                 effort: None,
                 permissions: None,
                 wrapper_prefix: None,
+                container: None,
                 workspace_trust: None,
             },
             &[],
@@ -3196,6 +3210,7 @@ mod tests {
             effort: None,
             permissions: None,
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
         assert_eq!(selection_permission_value(&omitted), "Guarded");
@@ -3203,6 +3218,7 @@ mod tests {
         let approve = LaunchSelection {
             permissions: Some(LaunchPermission::Approve),
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
             ..omitted
         };
@@ -3235,6 +3251,7 @@ mod tests {
             effort: None,
             permissions: None,
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
         assert_eq!(selection_permission_value(&pi), "YOLO");
@@ -3245,6 +3262,7 @@ mod tests {
             harness: LaunchHarness::Goose,
             permissions: Some(LaunchPermission::SmartApprove),
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
             ..pi
         };
@@ -3534,6 +3552,7 @@ mod tests {
                 effort: None,
                 permissions: None,
                 wrapper_prefix: None,
+                container: None,
                 workspace_trust: None,
             };
             assert!(selection_is_compatible(&selection, &catalog), "{typed}");
@@ -3559,6 +3578,7 @@ mod tests {
                 effort: None,
                 permissions: None,
                 wrapper_prefix: None,
+                container: None,
                 workspace_trust: None,
             },
             None,
@@ -3578,6 +3598,7 @@ mod tests {
                 effort: None,
                 permissions: None,
                 wrapper_prefix: None,
+                container: None,
                 workspace_trust: None,
             },
             None,
@@ -3592,6 +3613,7 @@ mod tests {
             effort: None,
             permissions: None,
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
         assert_eq!(
@@ -4530,6 +4552,7 @@ mod tests {
                 effort: None,
                 permissions: None,
                 wrapper_prefix: None,
+                container: None,
                 workspace_trust: None,
             },
             &catalog,
@@ -4542,6 +4565,7 @@ mod tests {
                 effort: None,
                 permissions: Some(LaunchPermission::Yolo),
                 wrapper_prefix: None,
+                container: None,
                 workspace_trust: None,
             },
             &catalog,
@@ -4554,6 +4578,7 @@ mod tests {
                 effort: None,
                 permissions: None,
                 wrapper_prefix: None,
+                container: None,
                 workspace_trust: None,
             },
             &catalog,
@@ -4566,6 +4591,7 @@ mod tests {
                 effort: Some(LaunchEffort::High),
                 permissions: None,
                 wrapper_prefix: None,
+                container: None,
                 workspace_trust: None,
             },
             Some(LaunchHarness::Codex),

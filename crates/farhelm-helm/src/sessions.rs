@@ -2361,6 +2361,7 @@ mod workspace_trust_tests {
                     permissions: None,
                     permission_flags: None,
                     wrapper_prefix: None,
+                    container: None,
                     workspace_trust: trust,
                 };
                 let resolved = resolve_launch_request(LaunchRequest::Agent { selection }).unwrap();
@@ -2398,6 +2399,7 @@ mod workspace_trust_tests {
                         permissions: None,
                         permission_flags: None,
                         wrapper_prefix: None,
+                        container: None,
                         workspace_trust: harness.offers_workspace_trust().then_some(true),
                     };
                     let launch = launches::compile(selection).unwrap();

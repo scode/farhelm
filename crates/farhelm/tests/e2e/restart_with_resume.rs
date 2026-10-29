@@ -64,6 +64,7 @@ async fn structured_claude_session(h: &Harness, fixture: &FakeHarness) -> Sessio
         effort: None,
         permissions: None,
         wrapper_prefix: None,
+        container: None,
         workspace_trust: None,
     };
     h.client
@@ -244,6 +245,7 @@ async fn named_create_runs_once_and_reports_identity_without_changing_saved_laun
         effort: None,
         permissions: None,
         wrapper_prefix: None,
+        container: None,
         workspace_trust: None,
         permission_flags: None,
     };
@@ -431,6 +433,7 @@ async fn restart_with_refuses_a_launch_kind_change_without_changing_settings() {
         effort: None,
         permissions: None,
         wrapper_prefix: None,
+        container: None,
         workspace_trust: None,
     };
     let invocation = fixture.hook_invocation(&selection);
@@ -1210,6 +1213,7 @@ async fn interrupted_session_resumes_its_conversation(structured: bool) {
         effort: Some(farhelm_proto::LaunchEffort::High),
         permissions: Some(farhelm_proto::LaunchPermission::Yolo),
         wrapper_prefix: None,
+        container: None,
         workspace_trust: None,
     });
     let structured_options = structured

@@ -405,6 +405,7 @@ mod tests {
 
         let fields = crate::launcher::TemplateFields {
             wrapper_prefix: Some(Some(vec!["with-endpoint".into()])),
+            container: None,
             ..Default::default()
         };
         assert!(
@@ -523,6 +524,7 @@ mod tests {
             replaces_existing: true,
             fields: crate::launcher::TemplateFields {
                 wrapper_prefix: Some(Some(vec!["with-endpoint".into()])),
+                container: None,
                 ..Default::default()
             },
             host_name: None,
@@ -591,6 +593,7 @@ mod tests {
                     permissions: None,
                     permission_flags: None,
                     wrapper_prefix: None,
+                    container: None,
                     workspace_trust: None,
                 },
                 start: vec![

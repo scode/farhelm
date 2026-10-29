@@ -1350,6 +1350,7 @@ async fn an_authenticated_agent_clone_starts_a_structured_successor() {
         effort: Some(LaunchEffort::High),
         permissions: Some(LaunchPermission::Yolo),
         wrapper_prefix: None,
+        container: None,
         workspace_trust: None,
     };
     let (status, body) = post(

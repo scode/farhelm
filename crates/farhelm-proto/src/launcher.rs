@@ -269,6 +269,13 @@ pub struct TemplateFields {
         skip_serializing_if = "Option::is_none"
     )]
     pub wrapper_prefix: Option<Option<Vec<String>>>,
+    /// Absent preserves isolation settings; null returns to an ordinary host launch.
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub container: Option<Option<crate::ContainerConfig>>,
     /// Retained to decode stored templates and older clients. This field
     /// neither applies a choice nor implies an agent launch; new saves drop it.
     #[serde(
@@ -363,6 +370,7 @@ impl TemplateFields {
             || self.permissions.is_some()
             || self.permission_flags.is_some()
             || self.wrapper_prefix.is_some()
+            || self.container.is_some()
             || self.prompt.is_some()
     }
 
@@ -455,6 +463,9 @@ pub fn check_template_shape(template: &LaunchTemplate) -> Result<(), String> {
     if let Some(Some(prefix)) = &template.fields.wrapper_prefix {
         crate::check_wrapper_prefix(Some(prefix))?;
     }
+    if let Some(Some(container)) = &template.fields.container {
+        container.validate()?;
+    }
     let name = &template.name;
     if name.is_empty() {
         return Err("a template needs a name".to_string());
@@ -528,6 +539,8 @@ pub struct LauncherState {
     /// The current agent launch's optional command prefix. Templates edit
     /// this value without changing the command launch's separate draft.
     pub wrapper_prefix: Option<Vec<String>>,
+    /// The active agent draft's isolation choice, independent of the command draft.
+    pub container: Option<crate::ContainerConfig>,
     /// Compatibility state for callers carrying old stored selections. New
     /// GUI/CLI drafts leave this unset, and templates cannot modify it.
     pub workspace_trust: Option<bool>,
@@ -629,6 +642,11 @@ pub fn apply_template(
             .map_err(|reason| refuse("wrapper prefix", reason))?;
     }
 
+    if let Some(Some(container)) = &fields.container {
+        container
+            .validate()
+            .map_err(|reason| refuse("container", reason))?;
+    }
     // 1. The launch kind.
     if let Some(kind) = fields.kind {
         next.kind = Some(kind);
@@ -642,6 +660,7 @@ pub fn apply_template(
                 let selection = LaunchSelection {
                     permission_flags: next.permission_flags.clone(),
                     wrapper_prefix: next.wrapper_prefix.clone(),
+                    container: next.container.clone(),
                     harness: next.harness.unwrap_or(agent),
                     model: next.model.clone(),
                     effort: next.effort,
@@ -661,6 +680,7 @@ pub fn apply_template(
                 next.permissions = selection.permissions;
                 next.permission_flags = selection.permission_flags;
                 next.wrapper_prefix = selection.wrapper_prefix;
+                next.container = selection.container;
                 next.workspace_trust = selection.workspace_trust;
                 if !agent.supports_initial_prompt(false) {
                     next.prompt = None;
@@ -693,12 +713,13 @@ pub fn apply_template(
     }
 
     // 3. The agent launch's choices.
-    let agent_fields: [(&'static str, bool); 5] = [
+    let agent_fields: [(&'static str, bool); 6] = [
         ("model", fields.model.is_some()),
         ("effort", fields.effort.is_some()),
         ("permissions", fields.permissions.is_some()),
         ("permission flags", fields.permission_flags.is_some()),
         ("wrapper prefix", fields.wrapper_prefix.is_some()),
+        ("container", fields.container.is_some()),
     ];
     if let Some((field, _)) = agent_fields.iter().find(|(_, set)| *set) {
         if kind == LauncherKind::Command {
@@ -761,6 +782,7 @@ pub fn apply_template(
                         LaunchSelection {
                             permission_flags: next.permission_flags.clone(),
                             wrapper_prefix: next.wrapper_prefix.clone(),
+                            container: next.container.clone(),
                             harness,
                             model: Some(model.clone()),
                             effort: next.effort,
@@ -814,6 +836,9 @@ pub fn apply_template(
         }
         if let Some(prefix) = &fields.wrapper_prefix {
             next.wrapper_prefix = prefix.clone();
+        }
+        if let Some(container) = &fields.container {
+            next.container = container.clone();
         }
     }
 
@@ -1172,6 +1197,7 @@ mod tests {
             permissions: Some(crate::LaunchPermission::Custom),
             permission_flags: Some(words),
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
         for destination in [
@@ -1209,6 +1235,7 @@ mod tests {
                 permissions: Some(crate::LaunchPermission::Guarded),
                 permission_flags: None,
                 wrapper_prefix: None,
+                container: None,
                 workspace_trust: None,
             };
             let (after, _) =
@@ -1323,6 +1350,48 @@ mod tests {
         }
     }
 
+    /// Isolation edits need all three wire states: an omitted field preserves the
+    /// current agent, an object sets the choice, and null returns it to the host.
+    /// Command templates must refuse the edit atomically, including explicit null.
+    #[test]
+    fn container_template_preserves_sets_clears_and_refuses_command_edits() {
+        let config = crate::ContainerConfig {
+            engine: crate::ContainerEngine::Podman,
+            image_file: "/images/agent.oci".into(),
+            api_proxy_port: 42000,
+            github_token_file: None,
+        };
+        let state = LauncherState {
+            kind: Some(LauncherKind::Agent),
+            harness: Some(LaunchHarness::Codex),
+            container: Some(config.clone()),
+            ..Default::default()
+        };
+        for (edit, expected) in [
+            (None, Some(config.clone())),
+            (Some(None), None),
+            (Some(Some(config.clone())), Some(config)),
+        ] {
+            let fields = TemplateFields {
+                container: edit.clone(),
+                ..Default::default()
+            };
+            let encoded = serde_json::to_value(&fields).unwrap();
+            let decoded: TemplateFields = serde_json::from_value(encoded).unwrap();
+            assert_eq!(decoded.container, edit);
+            let template = template("isolation", fields);
+            let applied = apply_template(&state, &template, &context(&[], &[], false)).unwrap();
+            assert_eq!(applied.container, expected);
+            let command = LauncherState {
+                kind: Some(LauncherKind::Command),
+                ..state.clone()
+            };
+            if edit.is_some() {
+                assert!(apply_template(&command, &template, &context(&[], &[], false)).is_err());
+            }
+        }
+    }
+
     /// A missing wrapper edit must preserve New's remembered prefix, while a
     /// present null must remove it. Quick launch and agent template writes use
     /// this same application rule, so all three wire states matter.
@@ -1332,6 +1401,7 @@ mod tests {
             kind: Some(LauncherKind::Agent),
             harness: Some(LaunchHarness::Codex),
             wrapper_prefix: Some(vec!["old-wrapper".into(), "--".into()]),
+            container: None,
             ..Default::default()
         };
         let context = context(&[], &[], false);
@@ -1345,6 +1415,7 @@ mod tests {
         ] {
             let fields = TemplateFields {
                 wrapper_prefix: edit.clone(),
+                container: None,
                 ..Default::default()
             };
             let encoded = serde_json::to_value(&fields).unwrap();

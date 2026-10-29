@@ -720,6 +720,7 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
             effort: None,
             permissions: None,
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
         let created = launch(&h, &fixture, selection.clone()).await;
@@ -745,6 +746,7 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
             effort: None,
             permissions: Some(LaunchPermission::Yolo),
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         },
         LaunchSelection {
@@ -754,6 +756,7 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
             effort: None,
             permissions: Some(LaunchPermission::Yolo),
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         },
         LaunchSelection {
@@ -763,6 +766,7 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
             effort: Some(LaunchEffort::High),
             permissions: Some(LaunchPermission::Yolo),
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         },
         LaunchSelection {
@@ -772,6 +776,7 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
             effort: Some(LaunchEffort::High),
             permissions: Some(LaunchPermission::Yolo),
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         },
         LaunchSelection {
@@ -781,6 +786,7 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
             effort: Some(LaunchEffort::Xhigh),
             permissions: Some(LaunchPermission::Yolo),
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         },
         LaunchSelection {
@@ -790,6 +796,7 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
             effort: None,
             permissions: Some(LaunchPermission::Yolo),
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         },
     ];
@@ -940,6 +947,7 @@ async fn explicit_spawn_inheritance_relays_the_parents_stored_launch() {
         effort: Some(LaunchEffort::High),
         permissions: Some(LaunchPermission::Yolo),
         wrapper_prefix: None,
+        container: None,
         workspace_trust: None,
     };
     let parent = launch(&h, &fixture, selection.clone()).await;
@@ -1046,6 +1054,7 @@ async fn restricted_raw_data_is_refused() {
         effort: Some(LaunchEffort::High),
         permissions: Some(LaunchPermission::Yolo),
         wrapper_prefix: None,
+        container: None,
         workspace_trust: None,
     };
     let parent = launch(&h, &fixture, selection.clone()).await;
@@ -1344,6 +1353,7 @@ mod decoder_tests {
             effort: None,
             permissions: None,
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
 
@@ -1357,6 +1367,7 @@ mod decoder_tests {
         let approve = LaunchSelection {
             permissions: Some(LaunchPermission::Approve),
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
             ..base.clone()
         };
@@ -1369,6 +1380,7 @@ mod decoder_tests {
         let yolo = LaunchSelection {
             permissions: Some(LaunchPermission::Yolo),
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
             ..base.clone()
         };

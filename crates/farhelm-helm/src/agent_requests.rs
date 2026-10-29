@@ -3265,6 +3265,7 @@ fn merge_template_fields(
         permissions,
         permission_flags,
         wrapper_prefix,
+        container,
         workspace_trust: _,
         command,
         yolo,
@@ -3289,6 +3290,7 @@ fn merge_template_fields(
             permission_flags.or(existing.permission_flags)
         },
         wrapper_prefix: wrapper_prefix.or(existing.wrapper_prefix),
+        container: container.or(existing.container),
         workspace_trust: None,
         command: command.or(existing.command),
         yolo: yolo.or(existing.yolo),
@@ -8267,6 +8269,7 @@ mod tests {
             effort: None,
             permissions: Some(farhelm_proto::LaunchPermission::Guarded),
             wrapper_prefix: Some(vec!["with-endpoint".to_string(), "--".to_string()]),
+            container: None,
             workspace_trust: None,
         })
         .expect("compose a guarded wrapped Claude launch");
@@ -8302,6 +8305,7 @@ mod tests {
                 effort: None,
                 permissions: None,
                 wrapper_prefix: None,
+                container: None,
                 workspace_trust: None,
             },
             start: ["claude", "--from-an-older-catalog", "{farhelm_args}"]
@@ -8517,6 +8521,7 @@ mod tests {
                 permissions: Some(LaunchPermission::Guarded),
                 permission_flags: None,
                 wrapper_prefix: None,
+                container: None,
                 workspace_trust: source_trust,
             };
             let source_launch = crate::launches::compile(selection.clone()).unwrap();
@@ -8606,6 +8611,7 @@ mod tests {
             permissions: Some(LaunchPermission::Guarded),
             permission_flags: None,
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
         let source_launch = crate::launches::compile(selection.clone()).unwrap();
@@ -8717,6 +8723,7 @@ mod tests {
             permissions: Some(LaunchPermission::Guarded),
             permission_flags: None,
             wrapper_prefix: None,
+            container: None,
             workspace_trust: Some(true),
         })
         .unwrap();
@@ -9855,6 +9862,7 @@ mod tests {
                     permissions: Some(LaunchPermission::Guarded),
                     permission_flags: None,
                     wrapper_prefix: None,
+                    container: None,
                     workspace_trust: (enabled && managed).then_some(true),
                 })
                 .unwrap();
@@ -10107,6 +10115,7 @@ mod tests {
                 permissions: Some(LaunchPermission::Guarded),
                 permission_flags: None,
                 wrapper_prefix: None,
+                container: None,
                 workspace_trust: None,
             };
             let source_launch = crate::launches::compile(selection.clone()).unwrap();
@@ -10552,6 +10561,7 @@ mod tests {
                 agent: Some(farhelm_proto::LaunchHarness::Claude),
                 permissions: Some(Some(farhelm_proto::LaunchPermission::Guarded)),
                 wrapper_prefix: Some(Some(vec!["with-endpoint".into(), "--".into()])),
+                container: None,
                 destination: Some(farhelm_proto::launcher::TemplateDestination::Github(
                     "owner/project".into(),
                 )),
@@ -11221,6 +11231,7 @@ mod tests {
                     permissions: harness.request_permission(Some(LaunchPermission::Guarded)),
                     permission_flags: None,
                     wrapper_prefix: None,
+                    container: None,
                     workspace_trust: source_trust,
                 };
                 let inherited = crate::launches::compile(selection.clone()).unwrap();
@@ -11344,6 +11355,7 @@ mod tests {
             permissions: Some(LaunchPermission::Guarded),
             permission_flags: None,
             wrapper_prefix: None,
+            container: None,
             workspace_trust: Some(true),
         })
         .unwrap();
@@ -11440,6 +11452,7 @@ mod tests {
                 effort: None,
                 permissions: None,
                 wrapper_prefix: None,
+                container: None,
                 workspace_trust: None,
             },
             start: vec!["claude".into(), "{farhelm_args}".into()],

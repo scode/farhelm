@@ -5481,6 +5481,7 @@ mod tests {
             effort: None,
             permissions: None,
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
             permission_flags: None,
         };
@@ -5806,6 +5807,7 @@ mod tests {
             effort: None,
             permissions: Some(crate::LaunchPermission::Yolo),
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
         let plain = restart_request_body(false, None);
@@ -6119,6 +6121,7 @@ mod tests {
             effort: None,
             permissions: None,
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
         let structured = create_body(
@@ -6192,6 +6195,7 @@ mod tests {
             effort: None,
             permissions: None,
             wrapper_prefix: None,
+            container: None,
             workspace_trust: None,
         };
         for (agent, selector) in [
