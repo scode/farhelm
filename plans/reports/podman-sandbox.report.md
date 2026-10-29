@@ -154,3 +154,105 @@ backend had no actionable findings. The terminal reviewer identified the absent-
 reviewer identified placeholder text and switch/input layout defects; the docs reviewer requested resource-limit and
 image-startup caveats. All were corrected and reconciled, with no open findings. Commit/PR wording passed independent
 cold reads. The plan report received its separate required cold read before delivery.
+
+### Landing
+
+Landed with two fixes at landing, one of which documents a gap in the isolation you asked for rather than closing it
+(below). Linux hosts can now run a session's agent and its terminal tabs in a rootless Podman container, opted into per
+launch with the launcher's new Containerized switch (marked experimental). The container gets the session's managed
+checkout, one host loopback port for a local API proxy and optionally a GitHub token read from a file; the user supplies
+the image. Stop ends the whole container, Delete removes it, and Restart is unavailable for these sessions. A docs page,
+"Containerized sessions", describes the setup and its limits.
+
+- #2791: the container launch and its plumbing.
+- #2792: terminal tabs inside the container.
+- #2793: the launcher switch and its settings.
+- #2794: the docs page.
+
+#### What landed since the stack was based, and whether it interacted
+
+Nothing but plan bookkeeping landed since the plan was based; nothing interacted.
+
+#### Security review
+
+A fresh-context security review checked that the GitHub token stays off command lines, logs, the database and the
+interface; that file paths and links printed inside the container can only open files inside the checkout, with the
+actual download pinned beneath it; that Delete removes only the container Farhelm named for that session; that the
+protocol version was raised so mismatched helms and supervisors refuse to connect; and that ordinary sessions behave as
+before. No database change.
+
+#### Fixes made at landing
+
+- Your planning requirement was that the container must not reach outside itself, and this falls short of it: the
+  container can write anything in the checkout, including its `.git` folder and an agent's own project settings, and
+  those can run with your full account access when Git or an agent later runs in that checkout outside the container (a
+  terminal, a shell prompt that shows Git status, an editor, a later ordinary session). SPEC.md and the docs page
+  promised isolation without saying this; both now do, the page with a caution box. The landing documented the gap
+  instead of blocking, because the feature is opt-in and experimental and still confines far more than running the agent
+  on the host. Closing it is your call, recorded right after this landing as a near-term TODO entry. The two options the
+  reviews name: give the container `.git` hooks and configuration (and agent settings) read-only, which closes the main
+  path but may break agents that legitimately change them; or warn before an ordinary session or launch uses a checkout
+  a container has used. The monitor recommends the read-only option.
+- The new Containerized switch had no hover text, which the browser sweep of hover text caught; it now has one that also
+  fits the template editor, where the same switch appears.
+
+#### Things you should know
+
+- The terminal connection inside the container keeps Podman's default detach keys: Ctrl-P is held back until the next
+  key, and Ctrl-P Ctrl-Q disconnects the session's terminal while the agent keeps running. Probably fixed by turning
+  detach keys off, which needs trying on the supported Podman version.
+- Services listening on the host's LAN or tailnet address are reachable from inside; only other host loopback ports are
+  blocked, and that is proven only on Podman 4.9.3.
+- Stop and Delete of a containerized session are refused when Podman is missing or not on the supervisor's PATH, and
+  nothing else removes such a session until Podman is back.
+- The GitHub token file is read without a size limit, inside the supervisor's request handling; a pipe or device path
+  there can hang the supervisor or use unbounded memory. Requiring a regular file and capping its size would fix it.
+- Smaller edges: one lock file per containerized session accumulates; a container gets read-write access to managed
+  checkouts nested inside its own; an image path containing a colon is misread; the "Turn off containerization" and
+  "Clear" buttons in the container settings have no hover text.
+- The whole Rust workspace's tests now fail, rather than skip, on a machine without rootless Podman and an Ubuntu 24.04
+  image already in its Podman storage (the tests never pull one), unless their documented opt-out is used; that affects
+  other machines and the deflake sweep.
+- Containerized terminals rely on an internal of the bundled terminal library, so upgrading it will need care; a test
+  catches a break.
+- The docs page has no launcher screenshots, and it introduces an "Experimental" sidebar badge, new to the site.
+
+#### Checks
+
+This round landed only this plan. On the stack as delivered:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, the web-target UI lint
+  `cargo clippy -p farhelm-ui --target wasm32-unknown-unknown --features web -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`,
+  `cargo check -p farhelm-desktop`, the check that every test delay states its reason, `dprint check` across the
+  repository, `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py` (three warnings, all
+  about citations already on main), the docs website build, the workspace debug build, the UI's release web build and
+  `scripts/check-desktop-assets.sh`: all passed.
+- The UI's Rust tests, `cargo nextest run -p farhelm-ui`, run `d2b6ed87-c8e1-417b-a804-bf820519e660`: all 813 passed;
+  its desktop-build tests, `cargo nextest run -p farhelm-ui --features desktop`, run
+  `e2866549-6346-4f9a-800b-4c65447c5be4`: all 996 passed. The UI's JavaScript tests (`node --test` in
+  `crates/farhelm-ui/js-tests`), run `a6096384-e5cf-45af-82ae-cc82fb792ac6`: 365 passed.
+- `npx playwright test` in `e2e/`, the whole browser suite on Chromium and WebKit, three workers each with its own helm
+  and supervisors, no retries, run `9e2208e2-e470-472a-9947-fb14ef3acd6b`: 2769 passed, 14 skipped by design, 3 failed:
+  the hover-text sweep on both engines (the switch fixed at landing), and on WebKit "a wheel over the header or the
+  sidebar edge never scrolls the document", which timed out while deleting its ordinary session at the end. Repeated
+  five times alone on WebKit after the fixes, run `f3da77ab-8cb1-4930-8a02-5bcde9cf529d`, it passed every time; one
+  failure is not recorded as a flake.
+- The whole Rust workspace, `cargo nextest run --workspace --exclude farhelm-desktop`, with the pinned test runner and
+  tmux, on a machine with rootless Podman, run `bcd24fec-5ba9-4601-8c2e-fc23d3246328`: 4533 passed, 41 skipped by
+  design, and 1 failed: the known flake "shallow pause resumes without reset or replay", in terminal code this plan does
+  not touch. The container tests actually ran on this machine rather than returning early.
+
+After the landing fixes:
+
+- `dprint check`, `python3 scripts/check-agents-md.py`, the docs website build (with the new caution box),
+  `cargo fmt --all -- --check`, the web-target UI lint and the UI's release web build: all passed.
+- `npx playwright test` in `e2e/` with `tests/tooltip-coverage.spec.ts`, `tests/github-checkout-composer.spec.ts` and
+  `tests/templates.spec.ts`, on Chromium and WebKit, run `e237d0e7-d3a9-4578-b166-070084c1735c`: all 178 passed.
+- The final rewording of the hover text and of the caution came after that run; it changes only text no test checks, and
+  `dprint check`, `cargo fmt --all -- --check` and the website build passed again after it.
+- Reused: none. Skipped: the desktop smoke tests (no desktop-specific code changed) and the native Mac app (not runnable
+  here; containers are Linux only).
+
+The report's checks were the executor's selected runs; this landing ran the whole browser suite and the whole Rust
+workspace. Nothing else in the executor's report became untrue at landing.
