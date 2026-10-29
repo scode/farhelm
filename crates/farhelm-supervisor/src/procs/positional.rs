@@ -1,13 +1,13 @@
-//! Claude Code's positional attribution of a hook to its emitting process.
+//! Claude Code and Muse's positional attribution of a hook to its emitter.
 //! Admission pins that process; ancestry alone does not establish authority.
 
 use super::*;
 
 /// The emitter and every possible correcting ancestor through the pane anchor.
 /// Ancestors are nearest-first and exclude the emitter and hook trampolines
-/// below it. Claude has no image rule, so every ancestor can correct a pin.
+/// below it. These vendors have no image rule, so every ancestor can correct a pin.
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) struct ClaudeAttribution {
+pub(crate) struct PositionalAttribution {
     pub(crate) emitter: ProcessIdentity,
     pub(crate) ancestors: Vec<ProcessIdentity>,
 }
@@ -30,11 +30,14 @@ pub(crate) struct ClaudeAttribution {
 /// `node`, so an image rule would have to track install layouts, and the
 /// injected `--settings` hook is a vendor detail that may change on its
 /// own. Neither argv nor environment above the emitter identifies Claude.
+/// Muse has the same constraint: its launcher execs a versioned binary and
+/// may remove that binary on update. The hook's immediate nontrampoline parent
+/// is its long-lived Muse process, not a separate per-hook host.
 ///
 /// Trampoline skipping is load-bearing, not tidiness: whether the hook's
 /// `sh -c` survives as a link or `exec`s the hook depends on the shell,
 /// and the position of the emitter must not depend on that.
-pub(crate) fn claude_corridor(chain: &[ChainLink]) -> Result<ClaudeAttribution, String> {
+pub(crate) fn positional_corridor(chain: &[ChainLink]) -> Result<PositionalAttribution, String> {
     let reporter = chain
         .first()
         .ok_or_else(|| "the hook ancestry is empty".to_string())?;
@@ -57,7 +60,7 @@ pub(crate) fn claude_corridor(chain: &[ChainLink]) -> Result<ClaudeAttribution, 
         })
         .ok_or_else(|| "the hook reporter is itself the pane process".to_string())?;
     let link = &chain[emitter];
-    Ok(ClaudeAttribution {
+    Ok(PositionalAttribution {
         emitter: ProcessIdentity {
             pid: link.pid,
             start: link.start,

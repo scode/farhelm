@@ -1,5 +1,5 @@
 //! The supervisor's per-agent behavior that needs the supervisor itself:
-//! one file per agent kind, each an `impl Supervisor` block.
+//! one file per agent kind, with positional admission shared by Claude and Muse.
 //!
 //! This is the stateful half of a kind's integration. The pure half (launch
 //! argv, hook injection decisions, record and locator parsing, screen
@@ -18,7 +18,7 @@
 //! decision until it states its answer. A kind with no entry here (Goose,
 //! Pi, Generic) has no stateful supervisor behavior of its own.
 
-mod claude;
 mod codex;
 mod grok;
 mod omp;
+pub(super) mod positional;

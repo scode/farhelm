@@ -15627,8 +15627,8 @@ impl Supervisor {
     }
 
     /// Dispatch report authority independently of the Restart provenance gate.
-    /// Claude uses a process pin while retaining ownership version 0; routing it
-    /// through the proof predicate would withdraw existing Restart offers.
+    /// Claude and Muse share a process pin while retaining ownership version 0;
+    /// routing them through the proof predicate would withdraw Restart offers.
     /// Every integration chooses its admission explicitly so a new kind cannot
     /// inherit another vendor's process or record rules.
     #[warn(clippy::wildcard_enum_match_arm)]
@@ -15642,8 +15642,24 @@ impl Supervisor {
     ) -> Result<(), RequestError> {
         match kind {
             AgentKind::Claude => {
-                self.report_claude_conversation(id, report, kind, generation, entry)
-                    .await
+                self.report_positional_conversation(
+                    id,
+                    report,
+                    vendor::positional::CLAUDE,
+                    generation,
+                    entry,
+                )
+                .await
+            }
+            AgentKind::Muse => {
+                self.report_positional_conversation(
+                    id,
+                    report,
+                    vendor::positional::MUSE,
+                    generation,
+                    entry,
+                )
+                .await
             }
             AgentKind::Codex => {
                 self.report_codex_conversation(id, report, kind, generation, entry)
@@ -15668,7 +15684,7 @@ impl Supervisor {
                 )
                 .await
             }
-            AgentKind::Muse | AgentKind::Generic => Err(RequestError::new(
+            AgentKind::Generic => Err(RequestError::new(
                 ErrorKind::Conflict,
                 "no conversation reporter is implemented for this session's agent kind",
             )),

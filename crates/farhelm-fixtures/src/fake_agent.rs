@@ -1,5 +1,5 @@
 //! The fake agent: a deterministic scripted TUI standing in for Claude
-//! Code / Codex in tests.
+//! Code, Codex and Muse in tests.
 //!
 //! Why it exists (PLAN_M1.md): end-to-end tests — including replay and
 //! mode restoration — must run without vendor auth, tokens, or
@@ -179,6 +179,12 @@ pub enum Script {
     /// `stop-report <id>` runs this launch's injected Claude `Stop` command
     /// with its current conversation, without a SessionStart announcement.
     HookReport,
+    /// The same controlled conversation/report loop for Muse. It executes
+    /// this launch's actual `-c hooks=<JSON>` callbacks, with Muse's payloads
+    /// and `resume <id>` selector; it does not imitate Muse's record layout.
+    /// Callers disable the instructions announcement through the supervisor
+    /// seam because the shared callback oracle asserts complete silence.
+    MuseHookReport,
     /// The whole agent-facing chain, acted out end to end: read the
     /// injected `SessionStart` hook out of this launch's own `--settings`
     /// argv, RUN it, obey the pointer line it prints by running `farhelm
@@ -386,6 +392,7 @@ pub fn run(
         Script::CodexConversation => codex_conversation::run(record_home),
         Script::GrokConversation => grok_conversation::run(record_home),
         Script::HookReport => record_agent(RecordShape::Claude, record_home, true),
+        Script::MuseHookReport => record_agent(RecordShape::Muse, record_home, true),
         Script::AgentRelay => agent_relay(),
         Script::EnvEcho => env_echo(),
     }
@@ -746,6 +753,34 @@ fn injected_hook_command(event: &str) -> anyhow::Result<String> {
         .with_context(|| format!("the injected settings declare no {event} hook command"))
 }
 
+/// Read Muse's per-launch hook table, rather than Claude's outer settings object.
+/// The fixture consumes the actual argv supplied by the supervisor; a missing
+/// or malformed table fails the fixture instead of falling back to a fake hook.
+fn injected_muse_hooks() -> anyhow::Result<serde_json::Value> {
+    let argv: Vec<String> = std::env::args().collect();
+    let hooks = argv
+        .windows(2)
+        .find_map(|pair| match pair[0].as_str() {
+            "-c" | "--config" => pair[1].strip_prefix("hooks="),
+            _ => None,
+        })
+        .context("this Muse launch carries no -c hooks=<JSON>")?;
+    serde_json::from_str(hooks).context("the injected Muse hooks value is not JSON")
+}
+
+/// Resolve a callback through the vendor's real per-launch configuration shape.
+/// Only Muse and Claude use this shared fixture's injected callback path.
+fn injected_report_command(shape: RecordShape, event: &str) -> anyhow::Result<String> {
+    match shape {
+        RecordShape::Claude => injected_hook_command(event),
+        RecordShape::Muse => injected_muse_hooks()?[event][0]["hooks"][0]["command"]
+            .as_str()
+            .map(str::to_owned)
+            .with_context(|| format!("the injected Muse table declares no {event} hook")),
+        RecordShape::Codex => anyhow::bail!("Codex uses its dedicated conversation fixture"),
+    }
+}
+
 /// Parse one `$farhelm clone this session onto <host>[ in <dir>]` line.
 ///
 /// Returns the host name and the optional directory, or `None` for
@@ -884,18 +919,22 @@ fn env_echo() -> anyhow::Result<()> {
     basic()
 }
 
-/// Which agent's on-disk record layout [`record_agent`] imitates.
+/// Which conversation dialect [`record_agent`] imitates. Muse uses only a
+/// private fixture record; no test treats that file as a real Muse journal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RecordShape {
     Claude,
     Codex,
+    Muse,
 }
 
 /// Run a deterministic vendor-shaped conversation with explicit input markers.
 ///
 /// The first ordinary input creates a record; `append` preserves its identity,
 /// and `fork` writes another without changing the current conversation. Resume
-/// fixtures select their existing record through `RESUME_ENV_VAR`. Markers
+/// Claude/Codex resume fixtures select an existing record through
+/// `RESUME_ENV_VAR`; Muse consumes its native `resume <id>` argv and exposes
+/// that observation without requiring a vendor journal. Record-write markers
 /// follow the completed write, so tests can wait on evidence rather than time.
 ///
 /// `hook_reports` adds foreground and nested-child report commands through the
@@ -935,10 +974,9 @@ fn record_agent(
     // `--record-home` — the per-launch hook flags such as `--settings
     // <json>` — which clap's `FakeAgent::extra` catch-all accepts but never
     // inspects. That is the whole point: a test can assert injection
-    // happened by reading this line without the fixture needing to
-    // understand the injected flags' shape. (A resumed launch's identity
-    // does not travel in this tail: resume templates replace the argv, and
-    // the fixture reads its conversation from `RESUME_ENV_VAR`.)
+    // happened by reading this line. Muse also reads its injected hook
+    // table and native resume selector from argv; the older Claude/Codex
+    // record fixtures take resumed identity through `RESUME_ENV_VAR`.
     writeln!(
         out,
         "FAKE-AGENT ARGV:{}\r",
@@ -951,9 +989,16 @@ fn record_agent(
     // adopted here, exactly as a real agent's `--resume` picks up an
     // existing conversation rather than starting a new one.
     let mut current: Option<(String, std::path::PathBuf)> = None;
-    if let Ok(resumed) = std::env::var(RESUME_ENV_VAR)
-        && !resumed.is_empty()
-    {
+    let resumed = match shape {
+        RecordShape::Muse => option_after(std::env::args(), "resume"),
+        RecordShape::Claude | RecordShape::Codex => std::env::var(RESUME_ENV_VAR).ok(),
+    };
+    if let Some(resumed) = resumed.filter(|id| !id.is_empty()) {
+        if shape == RecordShape::Muse {
+            // Muse capture deliberately has no record requirement. This
+            // marker witnesses the selector the replacement actually read.
+            writeln!(out, "MUSE-RESUMED:{resumed}\r")?;
+        }
         // `record_path` stamps Codex paths with TODAY's date, but a resumed
         // conversation's record was created when the conversation started —
         // resume a session across UTC midnight and the recomputed path names
@@ -1018,10 +1063,15 @@ fn record_agent(
                 hook_report(shape, line[REPORT_COMMAND.len()..].trim(), &mut out)?;
             }
             (line, _) if hook_reports && line.starts_with(STOP_REPORT_COMMAND) => {
-                stop_hook_report(line[STOP_REPORT_COMMAND.len()..].trim(), &mut out)?;
+                stop_hook_report(shape, line[STOP_REPORT_COMMAND.len()..].trim(), &mut out)?;
             }
             (line, _) if hook_reports && line.starts_with(NESTED_REPORT_COMMAND) => {
-                nested_hook_report(&home, line[NESTED_REPORT_COMMAND.len()..].trim(), &mut out)?;
+                nested_hook_report(
+                    shape,
+                    &home,
+                    line[NESTED_REPORT_COMMAND.len()..].trim(),
+                    &mut out,
+                )?;
             }
             _ => {
                 if current.is_none() {
@@ -1090,19 +1140,29 @@ fn option_after(args: impl Iterator<Item = String>, flag: &str) -> Option<String
 /// the hook ran; whether the supervisor accepted or refused it is in the
 /// hook log and the stored identity.
 fn nested_hook_report(
+    shape: RecordShape,
     home: &std::path::Path,
     conversation: &str,
     out: &mut impl Write,
 ) -> anyhow::Result<()> {
     let fixture = std::env::current_exe().context("locating this fixture's own executable")?;
-    let mut child = std::process::Command::new("/bin/sh")
-        .args([
-            "-c",
-            "\"$0\" fake-agent --script hook-report --record-home \"$1\" --report-once \"$2\"; :",
-        ])
+    let script = match shape {
+        RecordShape::Claude | RecordShape::Codex => "hook-report",
+        RecordShape::Muse => "muse-hook-report",
+    };
+    let mut command = std::process::Command::new("/bin/sh");
+    command
+        .args(["-c", "\"$@\"; :", "nested-reporter"])
         .arg(&fixture)
+        .args(["fake-agent", "--script", script, "--record-home"])
         .arg(home)
-        .arg(conversation)
+        .args([REPORT_ONCE_FLAG, conversation]);
+    if shape == RecordShape::Muse {
+        // A child Muse can inherit a reporting hook. Forward precisely the
+        // parent's table so the child also runs the genuine Muse entry point.
+        command.args(["-c", &format!("hooks={}", injected_muse_hooks()?)]);
+    }
+    let mut child = command
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -1267,8 +1327,9 @@ pub fn report_conversation_at_start(conversation: &str) -> anyhow::Result<()> {
 /// Fire the real `farhelm internal hook` for `conversation`, as the vendor
 /// would at `SessionStart`, without the optional instructions announcement.
 ///
-/// The child runs the product binary selected for this fixture, using the
-/// same vendor entry point the supervisor injects into the hook configuration.
+/// Claude/Codex run the product binary selected for this fixture, using the
+/// vendor entry point the supervisor injects into the hook configuration.
+/// Muse runs the actual injected command from its own launch's hooks table.
 /// The environment is inherited untouched because
 /// that is where the session credential lives (`FARHELM_SESSION_ID` and
 /// friends, injected at launch); nothing here has to know those names, and
@@ -1276,13 +1337,31 @@ pub fn report_conversation_at_start(conversation: &str) -> anyhow::Result<()> {
 ///
 /// The payload names the current conversation and callback. `source` belongs
 /// to SessionStart; [`stop_hook_report`] deliberately omits it for Stop.
+/// Muse includes its observed null transcript rather than inventing a file.
 fn hook_report(shape: RecordShape, conversation: &str, out: &mut impl Write) -> anyhow::Result<()> {
+    if shape == RecordShape::Muse {
+        let injected = injected_report_command(shape, "SessionStart")?;
+        let mut command = std::process::Command::new("sh");
+        command.args(["-c", &injected]);
+        return run_report_hook(
+            command,
+            serde_json::json!({
+                "session_id": conversation,
+                "hook_event_name": "SessionStart",
+                "source": "startup",
+                "transcript_path": null,
+            }),
+            conversation,
+            out,
+        );
+    }
     let exe = product_farhelm()?;
     // The discriminator comes from the shape under test — the entry point
     // a real injection would have installed — never from the payload.
     let vendor = match shape {
         RecordShape::Claude => "claude",
         RecordShape::Codex => "codex",
+        RecordShape::Muse => unreachable!("Muse runs its actual injected callback above"),
     };
     let mut command = std::process::Command::new(&exe);
     command.args(["internal", "hook", "--vendor", vendor]);
@@ -1302,8 +1381,12 @@ fn hook_report(shape: RecordShape, conversation: &str, out: &mut impl Write) -> 
 /// The source-free payload carries the current conversation. Parsing and
 /// running the injected command catches broken or announcing Stop injection
 /// that a hand-built `internal hook` invocation would miss.
-fn stop_hook_report(conversation: &str, out: &mut impl Write) -> anyhow::Result<()> {
-    let injected = injected_hook_command("Stop")?;
+fn stop_hook_report(
+    shape: RecordShape,
+    conversation: &str,
+    out: &mut impl Write,
+) -> anyhow::Result<()> {
+    let injected = injected_report_command(shape, "Stop")?;
     let words = shell_words::split(&injected).context("parsing the injected Stop command")?;
     anyhow::ensure!(
         !words.iter().any(|word| word == "--announce"),
@@ -1311,15 +1394,15 @@ fn stop_hook_report(conversation: &str, out: &mut impl Write) -> anyhow::Result<
     );
     let mut command = std::process::Command::new("sh");
     command.args(["-c", &injected]);
-    run_report_hook(
-        command,
-        serde_json::json!({
-            "session_id": conversation,
-            "hook_event_name": "Stop",
-        }),
-        conversation,
-        out,
-    )
+    let mut payload = serde_json::json!({
+        "session_id": conversation,
+        "hook_event_name": "Stop",
+    });
+    if shape == RecordShape::Muse {
+        payload["transcript_path"] = serde_json::Value::Null;
+        payload["stop_hook_active"] = serde_json::Value::Bool(false);
+    }
+    run_report_hook(command, payload, conversation, out)
 }
 
 /// Run one real report callback under a deadline and expose its silence result.
@@ -1480,6 +1563,9 @@ fn record_path(
                 .join(&stamp[8..10])
                 .join(format!("rollout-{id}.jsonl"))
         }
+        RecordShape::Muse => home
+            .join("muse-fixture-records")
+            .join(format!("{id}.jsonl")),
     }
 }
 
@@ -1546,6 +1632,7 @@ fn record_line(shape: RecordShape, id: &str, cwd: &str) -> String {
                 "timestamp": timestamp,
             },
         }),
+        RecordShape::Muse => serde_json::json!({"fixture_conversation":id, "cwd":cwd}),
     };
     // `to_string` is the compact form, which is also the only form that is
     // legal here: JSONL requires the whole record on one line, and
@@ -3288,6 +3375,7 @@ mod tests {
             let recorded = match shape {
                 RecordShape::Claude => &parsed["cwd"],
                 RecordShape::Codex => &parsed["payload"]["cwd"],
+                RecordShape::Muse => &parsed["cwd"],
             };
             assert_eq!(recorded.as_str(), Some(cwd), "{shape:?} lost the cwd");
         }

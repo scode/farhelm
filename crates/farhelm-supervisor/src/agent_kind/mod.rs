@@ -44,8 +44,8 @@
 //! - **Naming the agents.** `farhelm-proto` declares both enums with a
 //!   generated `ALL`: `LaunchHarness` (what the user picked; `launch.rs`) and
 //!   `AgentKind` (the integration that runs; the crate root). Cursor and
-//!   OpenCode run as `AgentKind::Generic`. Muse has its own kind but still
-//!   uses generic activity reading and has no conversation integration.
+//!   OpenCode run as `AgentKind::Generic`. Muse shares Claude's positional
+//!   capture and still uses generic activity reading.
 //! - **When Restart becomes available.** `AgentKind::display_name` and
 //!   `AgentKind::restart_readiness` in the `farhelm-proto` crate root: the
 //!   agent's name for people and the moment it normally reports a
@@ -86,7 +86,7 @@
 //! - **What an agent launch runs and resumes with.** The helm's compiler
 //!   (`farhelm-helm/src/launches.rs`): the start command from the choices,
 //!   and `resume_arguments`, the per-harness resume selector the resume
-//!   command adds (none for Muse, Cursor and OpenCode).
+//!   command adds (none for Cursor and OpenCode).
 //! - **Pure per-kind decisions in the supervisor.** This module: one
 //!   [`prompt_delivery`] strategy for supported running-agent prompts (today
 //!   bracketed paste plus a kind-specific submit key),
@@ -96,7 +96,7 @@
 //!   [`AgentIntegration::inject_hooks`]), the exhaustive
 //!   per-kind functions below (ownership, locators, resume verification,
 //!   report vocabularies, executable names), and one file per kind
-//!   (`claude.rs`, `codex.rs`, `goose.rs`, `grok.rs`, `omp.rs`, `pi.rs`) for
+//!   (`claude.rs`, `codex.rs`, `goose.rs`, `grok.rs`, `muse.rs`, `omp.rs`, `pi.rs`) for
 //!   that kind's own helpers: argv grammar, record and locator parsing, and
 //!   the vendor-file verification some locators need. Screen readers:
 //!   `screen_reader.rs`, including exhaustive launch-harness permission-footer
@@ -105,8 +105,10 @@
 //! - **Stateful per-kind behavior in the supervisor** (report admission,
 //!   resume verification, launch provenance):
 //!   `service/core/vendor/<kind>.rs`, dispatched from `service/core.rs` by
-//!   exhaustive matches.
-//! - **Process-tree attribution:** `procs/<kind>.rs`, each kind's corridor.
+//!   exhaustive matches. Claude and Muse share `vendor/positional.rs` with
+//!   explicit per-kind event and correction-notice policies.
+//! - **Process-tree attribution:** `procs/<kind>.rs`, each kind's corridor;
+//!   Claude and Muse share `procs/positional.rs` without executable recognition.
 //! - **Reporter assets and hook entry points:** `pi_extension.rs` chooses and
 //!   materializes which extension a kind loads; the extensions themselves
 //!   (`assets/pi-conversation-v1.ts`, `assets/omp-conversation-v1.ts`) own
@@ -236,6 +238,7 @@ pub(crate) mod claude;
 pub(crate) mod codex;
 pub(crate) mod goose;
 pub(crate) mod grok;
+mod muse;
 pub(crate) mod omp;
 pub(crate) mod pi;
 mod records;
@@ -481,7 +484,7 @@ pub trait AgentIntegration: Send + Sync {
     /// caller (`service::core`'s `legacy_hook_injection`) owns the one place
     /// that traces it. Each kind keeps its own check order: Goose, Pi, and
     /// OMP check the invocation's shape before the opt-out, and Goose
-    /// rewrites a resume even with hooks off; Claude, Codex, and Grok share
+    /// rewrites a resume even with hooks off; Claude, Codex, Muse, and Grok share
     /// [`inject_hook_argv_tail`]. Required so a new kind states its
     /// decision rather than inheriting another kind's.
     fn inject_hooks(&self, argv: Vec<String>, policy: &HookPolicy<'_>) -> HookInjection;
@@ -549,7 +552,7 @@ impl FarhelmArgs {
 }
 
 /// `{farhelm_args}` for the kinds whose integration is one tail of hook
-/// arguments from [`AgentIntegration::hook_argv`] (Claude, Codex, Grok): the
+/// arguments from [`AgentIntegration::hook_argv`] (Claude, Codex, Muse, Grok): the
 /// opt-out, then the executable path, then the tail. Unlike
 /// [`inject_hook_argv_tail`] nothing here looks at the user's command; a
 /// command launch puts `{farhelm_args}` where its command can take them.
@@ -662,7 +665,7 @@ pub enum HookLog {
     /// silently degrades identity capture, so the log is its only evidence.
     Skipped(&'static str),
     /// "conversation hook flags injected". Only the hook-tail kinds
-    /// (Claude, Codex) have ever logged this.
+    /// (Claude, Codex, Muse) log this.
     Injected,
 }
 
@@ -705,7 +708,7 @@ impl HookInjection {
 }
 
 /// The hook decision shared by the kinds whose hook is a tail of argv
-/// elements from [`AgentIntegration::hook_argv`] (Claude, Codex, Grok),
+/// elements from [`AgentIntegration::hook_argv`] (Claude, Codex, Muse, Grok),
 /// with `vendor_refusal` as the one kind-specific check.
 ///
 /// The order is the contract: the opt-out, then the executable path, then
@@ -777,14 +780,14 @@ pub(crate) fn with_launch_environment(argv: Vec<String>, assignments: &[String])
     }
 }
 
-/// The command string both integrations embed in their vendor's hook
+/// The command string the integrations embed in their vendor's hook
 /// configuration: farhelm's own binary, shell-quoted, running
 /// `internal hook`.
 ///
-/// Shared rather than written twice because the two vendors differ only in
+/// Shared rather than copied because the vendors differ only in
 /// how they QUOTE this string, never in what it says — and a flag that
 /// reached one vendor's launches but not the other's would be a difference
-/// nobody chose. Shell-quoted because both vendors run a hook's `command`
+/// nobody chose. Shell-quoted because these vendors run a hook's `command`
 /// through a shell rather than exec'ing it, so an unquoted path containing
 /// a space would be split into arguments neither can find (verified).
 #[warn(clippy::wildcard_enum_match_arm)]
@@ -800,6 +803,7 @@ fn hook_command(
         farhelm_proto::ReportVendor::Pi => "pi",
         farhelm_proto::ReportVendor::Omp => "omp",
         farhelm_proto::ReportVendor::Grok => "grok",
+        farhelm_proto::ReportVendor::Muse => "muse",
     };
     // The `--vendor` flag is the report envelope's discriminator, sourced
     // from the vendor-specific entry point rather than inferred from the
@@ -819,8 +823,8 @@ fn hook_command(
 }
 
 /// The integration for a kind, or `None` when it has no conversation reporter.
-/// Generic deliberately never captures; Muse is named separately but does not
-/// yet attach a reporter. Naming a kind alone must not advertise capture.
+/// Generic deliberately never captures. Each integrated kind explicitly supplies
+/// its reporter; naming a kind alone must not advertise capture.
 #[warn(clippy::wildcard_enum_match_arm)]
 pub fn integration_for(kind: AgentKind) -> Option<&'static dyn AgentIntegration> {
     match kind {
@@ -830,7 +834,8 @@ pub fn integration_for(kind: AgentKind) -> Option<&'static dyn AgentIntegration>
         AgentKind::Pi => Some(&PiIntegration),
         AgentKind::Omp => Some(&OmpIntegration),
         AgentKind::Grok => Some(&GrokIntegration),
-        AgentKind::Muse | AgentKind::Generic => None,
+        AgentKind::Muse => Some(&MuseIntegration),
+        AgentKind::Generic => None,
     }
 }
 
@@ -857,6 +862,9 @@ pub fn reads_as_waiting(kind: AgentKind, screen: &str) -> bool {
 /// Claude reports through injected SessionStart and Stop hooks; the integration
 /// supplies the settings argument and the conversation-specific Resume template.
 struct ClaudeIntegration;
+/// Muse supplies launch-local callbacks; its plain identity is admitted under
+/// the shared positional pin rather than verified against vendor records.
+struct MuseIntegration;
 
 /// Codex binds an attributed foreground report to its exact root rollout.
 /// Directory proximity cannot establish ownership when nested invocations exist.
@@ -1908,7 +1916,7 @@ impl IntegrationSnapshot {
     }
 
     /// The offer for an integrated kind whose identity is a plain
-    /// conversation id (Claude, Goose). Unintegrated kinds never reach here,
+    /// conversation id (Claude, Goose, Muse). Unintegrated kinds never reach here,
     /// but stay in the caller's arm so the match names every
     /// kind rather than hiding one behind a wildcard.
     fn plain_id_offer(&self, captured: Option<&str>) -> RestartOffer {
@@ -2023,7 +2031,8 @@ pub fn validate_named_conversation(value: &str) -> Result<(), String> {
 ///
 /// Codex, Grok, and OMP have complete proofs. Claude attributes by position
 /// and pins the admitted process, without a vendor record proof or versioned
-/// provenance. It deliberately stays false: flipping it would withdraw every
+/// provenance. Muse shares that positional contract without a record check.
+/// It deliberately stays false: flipping it would withdraw every
 /// existing Claude Restart offer. Goose and Pi retain their legacy behavior.
 ///
 /// This is the provenance/offer policy, not the report-dispatch policy. Each
@@ -2126,9 +2135,11 @@ pub fn conversation_report_slot(
             Some("SessionStart") => Slot::Selection,
             _ => Slot::Enrichment,
         },
-        ReportVendor::Claude | ReportVendor::Goose | ReportVendor::Pi | ReportVendor::Omp => {
-            Slot::Latest
-        }
+        ReportVendor::Claude
+        | ReportVendor::Goose
+        | ReportVendor::Pi
+        | ReportVendor::Omp
+        | ReportVendor::Muse => Slot::Latest,
     }
 }
 
@@ -2151,7 +2162,11 @@ pub fn foreground_source_refusal(
             .then_some("Codex reported an unsupported foreground transition"),
         ReportVendor::Omp => (!omp::is_omp_foreground_source(source))
             .then_some("OMP reported an unsupported foreground transition"),
-        ReportVendor::Claude | ReportVendor::Goose | ReportVendor::Pi | ReportVendor::Grok => None,
+        ReportVendor::Claude
+        | ReportVendor::Goose
+        | ReportVendor::Pi
+        | ReportVendor::Grok
+        | ReportVendor::Muse => None,
     }
 }
 
@@ -2167,6 +2182,7 @@ pub fn agent_kind_of_vendor(vendor: farhelm_proto::ReportVendor) -> AgentKind {
         farhelm_proto::ReportVendor::Pi => AgentKind::Pi,
         farhelm_proto::ReportVendor::Omp => AgentKind::Omp,
         farhelm_proto::ReportVendor::Grok => AgentKind::Grok,
+        farhelm_proto::ReportVendor::Muse => AgentKind::Muse,
     }
 }
 
@@ -2178,10 +2194,10 @@ pub fn accepts_reported_conversation(kind: AgentKind, value: &str) -> bool {
         AgentKind::Omp => parse_locator(LocatorVendor::Omp, value).is_ok(),
         AgentKind::Grok => grok::GrokLocator::parse(value).is_ok(),
         AgentKind::Codex => codex::CodexLocator::parse(value).is_ok(),
-        AgentKind::Claude | AgentKind::Goose => {
+        AgentKind::Claude | AgentKind::Goose | AgentKind::Muse => {
             !is_reserved_locator_token(value) && is_plausible_conversation_id(value)
         }
-        AgentKind::Muse | AgentKind::Generic => false,
+        AgentKind::Generic => false,
     }
 }
 
@@ -2485,8 +2501,9 @@ impl AgentHooks {
             | AgentKind::Codex
             | AgentKind::Goose
             | AgentKind::Pi
-            | AgentKind::Omp => !self.allows(kind),
-            AgentKind::Grok | AgentKind::Muse | AgentKind::Generic => false,
+            | AgentKind::Omp
+            | AgentKind::Muse => !self.allows(kind),
+            AgentKind::Grok | AgentKind::Generic => false,
         }
     }
 }
@@ -2508,7 +2525,7 @@ impl AgentHooks {
 ///   [`AgentHooks::All`].
 /// - `none` maps to [`AgentHooks::None`].
 /// - Anything else is read as a comma-separated list of kind names
-///   (`claude`, `codex`, `goose`, `pi`, `omp` — the automatically configured
+///   (`claude`, `codex`, `goose`, `pi`, `omp`, `muse` — the automatically configured
 ///   kinds, spelled as the protocol spells each [`AgentKind`], rather than a
 ///   spelling invented for this variable). Whitespace around each token is trimmed, and matching is
 ///   case-insensitive throughout this grammar: this is a value a human
@@ -2524,8 +2541,8 @@ impl AgentHooks {
 ///
 /// ## Failure mode: fail open, not partially
 ///
-/// A token outside `all`, `none`, `claude`, `codex`, `goose`, `pi`, and
-/// `omp` invalidates the WHOLE value, not just that token. `grok` is not a
+/// A token outside `all`, `none`, `claude`, `codex`, `goose`, `pi`, `omp`, and
+/// `muse` invalidates the WHOLE value, not just that token. `grok` is not a
 /// token because this switch cannot remove a manually installed callback. A
 /// `tracing::warn!` names the bad
 /// token and the full offending value, and the result is `All`. The
@@ -2551,6 +2568,7 @@ pub fn parse_agent_hooks(value: &str) -> AgentHooks {
             "goose" => kinds.push(AgentKind::Goose),
             "pi" => kinds.push(AgentKind::Pi),
             "omp" => kinds.push(AgentKind::Omp),
+            "muse" => kinds.push(AgentKind::Muse),
             _ => {
                 tracing::warn!(
                     token,
@@ -2683,7 +2701,7 @@ mod tests {
     }
 
     /// Spec: a successful hook injection is logged as "injected" only for
-    /// the hook-tail kinds (Claude, Codex); the reporter-extension kinds
+    /// the hook-tail kinds (Claude, Codex, Muse); the reporter-extension kinds
     /// (Goose, Pi, OMP) succeed silently, a kind with no tail (Grok) returns
     /// silently unhooked, and a skip carries its reason.
     ///
@@ -2711,6 +2729,7 @@ mod tests {
         for (kind, program, hooked, logged_injected) in [
             (AgentKind::Claude, "claude", true, true),
             (AgentKind::Codex, "codex", true, true),
+            (AgentKind::Muse, "muse", true, true),
             (AgentKind::Goose, "goose", true, false),
             (AgentKind::Pi, "pi", true, false),
             (AgentKind::Omp, "omp", true, false),
@@ -3382,7 +3401,12 @@ mod tests {
                 LocatorVendor::Omp => LocatorVendor::Pi,
             };
             assert!(parse_locator(other, &encoded).is_err());
-            for plain_kind in [AgentKind::Claude, AgentKind::Codex, AgentKind::Goose] {
+            for plain_kind in [
+                AgentKind::Claude,
+                AgentKind::Codex,
+                AgentKind::Goose,
+                AgentKind::Muse,
+            ] {
                 assert!(!accepts_reported_conversation(plain_kind, &encoded));
             }
             let own_kind = match vendor {
@@ -3448,7 +3472,12 @@ mod tests {
                 is_reserved_locator_token(malformed),
                 "{malformed:?} claims a reserved prefix"
             );
-            for plain_kind in [AgentKind::Claude, AgentKind::Codex, AgentKind::Goose] {
+            for plain_kind in [
+                AgentKind::Claude,
+                AgentKind::Codex,
+                AgentKind::Goose,
+                AgentKind::Muse,
+            ] {
                 assert!(
                     !accepts_reported_conversation(plain_kind, malformed),
                     "{malformed:?} must not pass as a plain id for {plain_kind:?}"
@@ -3875,13 +3904,19 @@ mod tests {
         );
     }
 
-    /// A distinct Muse kind must not advertise capture before it has a reporter.
-    /// Stored resume templates cannot make this inert integration resumable.
+    /// Muse accepts only plain ids, keeps version-0 Restart provenance, and honors
+    /// automatic hook opt-out. Older stored launches still have no resume command;
+    /// adding an integration must not invent one for them.
     #[farhelm_testtrace::test]
-    fn muse_kind_remains_untracked_without_a_reporter() {
-        assert!(integration_for(AgentKind::Muse).is_none());
-        assert!(!accepts_reported_conversation(AgentKind::Muse, "saved-id"));
-        assert!(!AgentHooks::None.silences(AgentKind::Muse));
+    fn muse_reporting_keeps_plain_ids_and_historical_launch_contracts() {
+        assert!(integration_for(AgentKind::Muse).is_some());
+        assert!(accepts_reported_conversation(AgentKind::Muse, "saved-id"));
+        assert!(AgentHooks::None.silences(AgentKind::Muse));
+        assert!(!ownership_proof_implemented(AgentKind::Muse));
+        assert_eq!(
+            parse_agent_hooks("MuSe"),
+            AgentHooks::Only(vec![AgentKind::Muse])
+        );
         let snapshot = test_snapshot(
             AgentKind::Muse,
             Some(vec![
@@ -3892,7 +3927,11 @@ mod tests {
         );
         assert_eq!(
             snapshot.restart_offer(Some("saved-id"), 0),
-            RestartOffer::NoConversationReporting
+            RestartOffer::Resume
+        );
+        assert_eq!(
+            test_snapshot(AgentKind::Muse, None).restart_offer(Some("saved-id"), 0),
+            RestartOffer::NoResumeCommand
         );
     }
 

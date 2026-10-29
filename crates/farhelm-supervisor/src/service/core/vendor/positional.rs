@@ -1,25 +1,56 @@
-//! Claude report admission: positional attribution and durable launch authority.
+//! Plain-id report admission with positional attribution and durable authority.
 //!
-//! Claude cannot be recognized by executable name. Its corridor attributes the
-//! hook by position; the first admitted emitter is pinned, so accepting resident
-//! wrappers does not let a later shelled-out child replace the conversation.
+//! Claude and Muse cannot be recognized by executable name. Their shared corridor
+//! attributes the hook by position; the first admitted emitter is pinned, so
+//! accepting resident wrappers does not let a later shelled-out child replace
+//! the conversation.
 
 use super::super::*;
 
+/// Facts selected by per-kind dispatch, separate from the shared authority rules.
+/// Both vendors currently emit Stop; keeping the spelling here makes adopting
+/// another vendor's end-of-turn policy an explicit decision.
+pub(in crate::service::core) struct PositionalReportPolicy {
+    kind: AgentKind,
+    name: &'static str,
+    quiet_event: &'static str,
+    correction_kind: crate::service::notifications::NotificationKind,
+    correction_text: &'static str,
+}
+
+pub(in crate::service::core) const CLAUDE: PositionalReportPolicy = PositionalReportPolicy {
+    kind: AgentKind::Claude,
+    name: "Claude",
+    quiet_event: "Stop",
+    correction_kind: crate::service::notifications::NotificationKind::ClaudePinCorrected,
+    correction_text: crate::service::notifications::CLAUDE_PIN_CORRECTED_TEXT,
+};
+
+/// Muse 1.4.14 reports the parent on SessionStart and Stop; native reminder
+/// children use marked SubagentStart/SubagentStop events instead.
+pub(in crate::service::core) const MUSE: PositionalReportPolicy = PositionalReportPolicy {
+    kind: AgentKind::Muse,
+    name: "Muse",
+    quiet_event: "Stop",
+    correction_kind: crate::service::notifications::NotificationKind::MusePinCorrected,
+    correction_text: crate::service::notifications::MUSE_PIN_CORRECTED_TEXT,
+};
+
 impl Supervisor {
-    /// Admit Claude's own conversation without changing its Restart provenance.
+    /// Admit a positional vendor's conversation without versioned record proof.
     /// The capture claim protects both the recorded process pin and the current
     /// binding. Ancestor correction and its once-per-launch notification commit
-    /// together; refusals and failed writes publish nothing. Claude still takes
-    /// no transcript proof and writes ownership version 0.
+    /// together; refusals and failed writes publish nothing. Neither vendor has
+    /// an established unmarked same-process child hazard, so this does not read
+    /// vendor files and deliberately writes ownership version 0.
     /// Stop is an ordinary selecting report of the current conversation. A
     /// rival Stop acknowledges without effect or warning, including when pin
     /// liveness is unavailable; validation and storage failures remain errors.
-    pub(in crate::service::core) async fn report_claude_conversation(
+    pub(in crate::service::core) async fn report_positional_conversation(
         &self,
         id: &str,
         report: ReportedConversation,
-        kind: AgentKind,
+        policy: PositionalReportPolicy,
         generation: i64,
         entry: Option<Arc<SessionEntry>>,
     ) -> Result<(), RequestError> {
@@ -30,7 +61,10 @@ impl Supervisor {
             hook_event_name,
             ..
         } = report;
-        let stop = hook_event_name.as_ref().and_then(serde_json::Value::as_str) == Some("Stop");
+        let kind = policy.kind;
+        let name = policy.name;
+        let stop = hook_event_name.as_ref().and_then(serde_json::Value::as_str)
+            == Some(policy.quiet_event);
         if !crate::agent_kind::accepts_reported_conversation(kind, &conversation) {
             return Err(RequestError::new(
                 ErrorKind::InvalidRequest,
@@ -40,7 +74,9 @@ impl Supervisor {
         let chain = ancestry.ok_or_else(|| {
             RequestError::new(
                 ErrorKind::Conflict,
-                "the Claude report carries no process ancestry reaching this session's pane",
+                format!(
+                    "the {name} report carries no process ancestry reaching this session's pane"
+                ),
             )
         })?;
 
@@ -62,12 +98,12 @@ impl Supervisor {
                 "this session has moved on to another launch",
             ));
         }
-        let attribution = crate::procs::claude_corridor(&chain)
+        let attribution = crate::procs::positional_corridor(&chain)
             .map_err(|reason| RequestError::new(ErrorKind::Conflict, reason))?;
         let stored_pin = self.store.report_pin(id).await.map_err(|_| {
             RequestError::new(
                 ErrorKind::Internal,
-                "could not read the Claude reporting-process pin",
+                format!("could not read the {name} reporting-process pin"),
             )
         })?;
         use crate::agent_kind::report_pin::{PinDecision, ReportPin};
@@ -78,7 +114,7 @@ impl Supervisor {
             .map_err(|_| {
                 RequestError::new(
                     ErrorKind::Internal,
-                    "the Claude reporting-process pin is invalid",
+                    format!("the {name} reporting-process pin is invalid"),
                 )
             })?;
         let decision = match pin.as_ref() {
@@ -88,6 +124,8 @@ impl Supervisor {
                 if initial == PinDecision::Refuse {
                     // Only positive evidence of exit, PID reuse or a non-running
                     // process permits release. An unreadable process is unknown.
+                    // The historical Claude-named test seam exercises this
+                    // shared liveness boundary for both positional vendors.
                     let evidence = match self
                         .seams
                         .faults
@@ -122,7 +160,9 @@ impl Supervisor {
             }
             return Err(RequestError::new(
                 ErrorKind::Conflict,
-                "the Claude report came from a process other than this launch's pinned emitter",
+                format!(
+                    "the {name} report came from a process other than this launch's pinned emitter"
+                ),
             ));
         }
         let correction = decision == PinDecision::Correct;
@@ -161,11 +201,8 @@ impl Supervisor {
                         &conversation,
                         &replacement_pin,
                         0,
-                        correction.then_some((
-                            crate::service::notifications::NotificationKind::ClaudePinCorrected
-                                .as_str(),
-                            crate::service::notifications::CLAUDE_PIN_CORRECTED_TEXT,
-                        )),
+                        correction
+                            .then_some((policy.correction_kind.as_str(), policy.correction_text)),
                     )
                     .await
             }

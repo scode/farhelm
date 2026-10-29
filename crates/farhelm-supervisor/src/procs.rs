@@ -60,14 +60,16 @@ use std::collections::HashMap;
 // sit between a hook and the agent's foreground process, and which one is
 // the emitter) lives in its own file; the walk, the shared trampoline and
 // runtime rules, and the platform reads stay here.
-mod claude;
 mod codex;
 mod grok;
 mod omp;
-pub(crate) use claude::claude_corridor;
+mod positional;
 pub(crate) use codex::codex_corridor;
 pub(crate) use grok::grok_corridor;
 pub(crate) use omp::omp_corridor;
+pub(crate) use positional::positional_corridor;
+#[cfg(test)]
+use positional::positional_corridor as claude_corridor;
 
 /// The only distinction the sweep draws between one live process and
 /// another.
@@ -3856,6 +3858,34 @@ mod tests {
     }
 
     const CLAUDE_IMAGE: &str = "/home/user/.local/share/claude/versions/2.1.284";
+
+    /// Muse's versioned image and resident launch wrappers carry no identity
+    /// rule. Its reporter spelling still enters the same positional corridor,
+    /// retaining every ancestor that could later correct child-first capture.
+    #[farhelm_testtrace::test]
+    fn muse_admits_its_hook_below_resident_wrappers_without_image_identification() {
+        let chain = vec![
+            corridor_link(
+                14,
+                "/opt/test/bin/farhelm",
+                &["farhelm", "internal", "hook", "--vendor", "muse"],
+            ),
+            corridor_link(
+                13,
+                "/bin/dash",
+                &["sh", "-c", "farhelm internal hook --vendor muse"],
+            ),
+            corridor_link(12, "/opt/vendor/muse-bin-1.4.14", &["anything-at-all"]),
+            corridor_link(11, "/opt/test/wrapper", &["resident-wrapper"]),
+            corridor_link(10, "/opt/test/outer", &["outer-wrapper"]),
+        ];
+        let attributed = positional_corridor(&chain).expect("Muse callback reaches its emitter");
+        assert_eq!(attributed.emitter, claude_identity(12));
+        assert_eq!(
+            attributed.ancestors,
+            vec![claude_identity(11), claude_identity(10)]
+        );
+    }
 
     /// Keep expected identities explicit about PID reuse without repeating
     /// the deterministic start-token convention of `corridor_link` in each test.

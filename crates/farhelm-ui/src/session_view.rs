@@ -109,13 +109,20 @@ fn restart_with_unavailable(session: &Session) -> Option<String> {
     {
         return None;
     }
-    // A named kind alone does not promise reporting. Use its readiness
-    // contract so untracked Muse keeps the same explanation as generic kinds.
+    // Reporting support and a stored resume command are separate facts:
+    // older agent launches can gain tracking without gaining a resume command.
+    // A missing command needs recreation advice, not a claim about capture.
     if launch.harness.agent_kind().restart_readiness().is_none() {
         Some(format!(
             "{} sessions can't be resumed",
             crate::launch_composer::harness_label(launch.harness)
         ))
+    } else if session.restart_offer == RestartOffer::NoResumeCommand {
+        Some(
+            "This agent launch has no resume command, so it cannot be restarted; use Clone or \
+             Replace with"
+                .to_string(),
+        )
     } else if session.restart_offer == RestartOffer::NotCaptured {
         Some(not_captured_with_reason(session))
     } else {
@@ -3604,8 +3611,10 @@ mod tests {
     /// This dialog changes an agent or command launch with a captured
     /// conversation; the disabled explanation must identify which fact is
     /// missing without treating a generic integration or a command without a
-    /// resume command as resumable, and a legacy session is pointed at
-    /// Replace with.
+    /// resume command as resumable. An older tracked agent launch without a
+    /// resume command needs recreation advice; missing capture alone would
+    /// incorrectly suggest waiting for another report. Legacy sessions point
+    /// at Replace with.
     #[farhelm_testtrace::test]
     fn restart_with_availability_explains_each_unavailable_case() {
         let mut session = live_session();
@@ -3661,9 +3670,23 @@ mod tests {
             Some("No captured conversation to resume")
         );
         session.launch = agent(LaunchHarness::Muse);
+        session.agent_kind = crate::SessionAgentKind::Muse;
+        session.restart_offer = RestartOffer::NoResumeCommand;
         assert_eq!(
             restart_with_reason(&session).as_deref(),
-            Some("Muse sessions can't be resumed")
+            Some(
+                "This agent launch has no resume command, so it cannot be restarted; use Clone or \
+                 Replace with"
+            )
+        );
+        // An agent launch whose agent has no conversation reporting names
+        // that agent instead; Cursor and OpenCode launches still reach this.
+        session.launch = agent(LaunchHarness::Cursor);
+        session.agent_kind = crate::SessionAgentKind::Generic;
+        session.restart_offer = RestartOffer::NoConversationReporting;
+        assert_eq!(
+            restart_with_reason(&session).as_deref(),
+            Some("Cursor sessions can't be resumed")
         );
 
         // A command launch can be edited exactly when it can resume: it
@@ -3678,6 +3701,7 @@ mod tests {
             }))
         };
         session.launch = command(Some("claude --resume {conversation} {farhelm_args}"));
+        session.agent_kind = crate::SessionAgentKind::Claude;
         session.restart_offer = RestartOffer::Resume;
         assert_eq!(restart_with_reason(&session), None);
         session.restart_offer = RestartOffer::NotCaptured;
@@ -3694,15 +3718,16 @@ mod tests {
             Some("No captured conversation to resume")
         );
         session.launch = Some(crate::SessionLaunch::Command(crate::CommandLaunch {
-            command: "muse {farhelm_args}".to_string(),
+            command: "cursor-agent {farhelm_args}".to_string(),
             yolo: false,
-            agent: Some(LaunchHarness::Muse),
-            resume: Some("muse --resume {conversation} {farhelm_args}".to_string()),
+            agent: Some(LaunchHarness::Cursor),
+            resume: Some("cursor-agent --resume {conversation} {farhelm_args}".to_string()),
         }));
+        session.agent_kind = crate::SessionAgentKind::Generic;
         session.restart_offer = RestartOffer::NoConversationReporting;
         assert_eq!(
             restart_with_reason(&session).as_deref(),
-            Some("Muse sessions can't be resumed"),
+            Some("Cursor sessions can't be resumed"),
             "a declared type without conversation reporting never captures one"
         );
         session.launch = command(None);

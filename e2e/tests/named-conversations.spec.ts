@@ -88,7 +88,7 @@ test("named conversation labels and reporting help follow the selected agent", a
   await expect(form).toBeVisible();
   for (const [agent, label, captures] of [
     ["Claude", "Conversation ID", true], ["Codex", "Conversation ID", true],
-    ["Grok", "Conversation ID", true], ["Muse", "Conversation ID", false],
+    ["Grok", "Conversation ID", true], ["Muse", "Conversation ID", true],
     ["Cursor", "Chat ID", false], ["Goose", "Session ID", false],
     ["OpenCode", "Session ID", false], ["Pi", "Session file", true], ["OMP", "Session file", true],
   ] as const) {
@@ -98,9 +98,10 @@ test("named conversation labels and reporting help follow the selected agent", a
     await expect(choice.locator(".named-conversation")).toHaveValue("");
     await expect(choice.getByText("Farhelm will not capture", { exact: false })).toHaveCount(captures ? 0 : 1);
   }
-  // Include the reporting warning in the width proof, so its wrapping is
-  // checked beside the same labeled field rather than only through copy.
-  await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Muse", exact: true }).click();
+  // Cursor still shows the reporting warning. Keep that premise explicit so
+  // adding tracking for another agent cannot silently remove this width proof.
+  await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Cursor", exact: true }).click();
+  await expect(form.locator(".named-conversation-choice")).toContainText("Farhelm will not capture");
   // Retain both layouts for visual inspection; the narrow input must stay
   // inside the launcher even when its label and reporting help wrap.
   for (const [name, width, height] of [["desktop", 1280, 900], ["phone", 390, 844]] as const) {

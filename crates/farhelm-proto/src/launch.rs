@@ -33,8 +33,9 @@ crate::enum_with_all! {
     ///
     /// This is distinct from [`crate::AgentKind`]. `AgentKind` describes the
     /// supervisor features available after a process starts; this enum preserves
-    /// the harness the user selected. A named kind does not itself promise
-    /// conversation reporting: Muse still launches without that integration.
+    /// the harness the user selected. Cursor and OpenCode are launch choices
+    /// without conversation reporting; selecting a harness alone promises no
+    /// integration beyond that harness's own declared capabilities.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
     #[serde(rename_all = "snake_case")]
     pub enum LaunchHarness {
@@ -412,11 +413,9 @@ impl LaunchHarness {
             | LaunchHarness::Codex
             | LaunchHarness::Grok
             | LaunchHarness::Pi
-            | LaunchHarness::Omp => true,
-            LaunchHarness::Goose
-            | LaunchHarness::Muse
-            | LaunchHarness::Cursor
-            | LaunchHarness::OpenCode => false,
+            | LaunchHarness::Omp
+            | LaunchHarness::Muse => true,
+            LaunchHarness::Goose | LaunchHarness::Cursor | LaunchHarness::OpenCode => false,
         }
     }
 

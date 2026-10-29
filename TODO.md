@@ -279,6 +279,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Deflake
 
+- **Restart-with dialog loses focus in WebKit.**
+  `restart with keeps gap focus and container Enter uses its enabled action` in `e2e/tests/restart-with.spec.ts` failed
+  after the YOLO choice when `dialog.focus()` did not leave the dialog focused. The two-spec browser run
+  `ca41e45d-2ea0-486b-a8b1-7f1defad7146` passed the other 111 cases; the exact WebKit retry
+  `143efecd-81a2-4e44-8ba1-8275f8fdb7ed` passed unchanged. The Muse landing Decision records earlier occurrences too.
+  Cause unknown; preserve the focus assertion (FLAKES.md, 2026-10-29).
+
 - **Hung-save waiter times out just before its deadline.** The unit test
   `api::save_order::tests::a_hung_save_releases_waiters_at_their_deadline` in `crates/farhelm-ui/src/api/save_order.rs`
   failed its assertion that at least 30 ms had passed, fast and through the timeout path, in full `farhelm-ui` library

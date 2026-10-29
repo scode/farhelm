@@ -276,7 +276,7 @@ fn fixture_invocation(fixtures: &CaptureFixtures, kind: &str, script: &str) -> S
 /// A command launch running `script` through the `kind` symlink and
 /// declaring that agent type, with `{farhelm_args}` last and the resume
 /// command the agent type's own resume selector would give (Claude's
-/// `--resume`, Codex's `resume` subcommand): the declared-type launch a
+/// `--resume`, Codex's and Muse's `resume` subcommand): the declared-type launch a
 /// user would write for this program.
 fn hook_launch(
     fixtures: &CaptureFixtures,
@@ -286,7 +286,8 @@ fn hook_launch(
     let (name, selector) = match kind {
         farhelm_proto::LaunchHarness::Codex => ("codex", "resume"),
         farhelm_proto::LaunchHarness::Claude => ("claude", "--resume"),
-        other => panic!("the hook fixtures stand in for Claude and Codex, not {other:?}"),
+        farhelm_proto::LaunchHarness::Muse => ("muse", "resume"),
+        other => panic!("the hook fixtures stand in for Claude, Codex and Muse, not {other:?}"),
     };
     let invocation = fixture_invocation(fixtures, name, script);
     declared_command(
@@ -702,23 +703,103 @@ fn assert_declares_session_start_hook(settings: &serde_json::Value) {
     );
 }
 
-/// A Stop must run the Claude reporter without the instructions announcement.
-/// Inspecting its own entry keeps a valid SessionStart command from disguising
-/// missing Stop injection before the fixture tries to run that callback.
-fn assert_declares_stop_hook(settings: &serde_json::Value) {
-    let command = settings["hooks"]["Stop"][0]["hooks"][0]["command"]
+/// The vendor facts that differ between the two positional capture fixtures.
+/// Scenario bodies share the same ancestry and durable-state assertions;
+/// only callback configuration, payload dialect and resume vocabulary differ.
+#[derive(Clone, Copy)]
+struct PositionalFixture {
+    harness: farhelm_proto::LaunchHarness,
+    name: &'static str,
+    display_name: &'static str,
+    script: &'static str,
+    resume_selector: &'static str,
+    resume_marker: Option<&'static str>,
+    read_hooks: fn(&str) -> serde_json::Value,
+}
+
+const CLAUDE_FIXTURE: PositionalFixture = PositionalFixture {
+    harness: farhelm_proto::LaunchHarness::Claude,
+    name: "claude",
+    display_name: "Claude",
+    script: "hook-report",
+    resume_selector: "--resume",
+    resume_marker: None,
+    read_hooks: |argv| injected_settings(argv)["hooks"].clone(),
+};
+
+const MUSE_FIXTURE: PositionalFixture = PositionalFixture {
+    harness: farhelm_proto::LaunchHarness::Muse,
+    name: "muse",
+    display_name: "Muse",
+    script: "muse-hook-report",
+    resume_selector: "resume",
+    resume_marker: Some("MUSE-RESUMED:"),
+    read_hooks: |argv| {
+        let words = shell_words::split(argv).expect("Muse argv boundaries");
+        let hooks = words
+            .windows(2)
+            .find_map(|pair| match pair[0].as_str() {
+                "-c" => pair[1].strip_prefix("hooks="),
+                _ => None,
+            })
+            .expect("actual -c hooks table");
+        serde_json::from_str(hooks).expect("Muse hook table is JSON")
+    },
+};
+
+/// Keep these identity scenarios on the existing silence oracle. The
+/// announcement has separate hook/injection coverage; disabling it through
+/// the constructor seam leaves both vendors' actual callbacks unchanged.
+async fn positional_hook_harness() -> (Harness, CaptureFixtures, ServeTask) {
+    let (h, fixtures) = fixture_harness_with_seams(|seams| {
+        seams.agent_instructions = farhelm_supervisor::agent_kind::AgentInstructions::Off;
+    })
+    .await;
+    let serving = ServeTask::spawn(&h.sup, h.state.path()).await;
+    (h, fixtures, serving)
+}
+
+/// Create the declared launch with the vendor's own callback and resume grammar.
+/// A declared command keeps the reporting process beneath real resident
+/// wrappers without depending on any vendor executable-name heuristic.
+async fn positional_hook_session(
+    h: &Harness,
+    fixtures: &CaptureFixtures,
+    cwd: &std::path::Path,
+    vendor: PositionalFixture,
+) -> SessionInfo {
+    h.client
+        .create_session_with_extras(
+            &cwd.to_string_lossy(),
+            hook_launch(fixtures, vendor.harness, vendor.script),
+            None,
+            WIDE_COLS,
+            ROWS,
+            farhelm_helm::CreateExtras::default(),
+        )
+        .await
+        .expect("create a positional hook fixture")
+}
+
+/// Inspect the actual injected table before asking the fixture to run it.
+/// Vendor spelling and silent Stop are independent of whether a callback
+/// merely exists, so both are asserted instead of relying on launch success.
+fn assert_positional_hook(vendor: PositionalFixture, argv: &str, event: &str) {
+    let hooks = (vendor.read_hooks)(argv);
+    let command = hooks[event][0]["hooks"][0]["command"]
         .as_str()
-        .unwrap_or_else(|| panic!("the injected settings must declare a Stop command: {settings}"));
-    let words = shell_words::split(command).expect("shell-safe injected Stop command");
+        .expect("injected callback command");
+    let words = shell_words::split(command).expect("shell-safe hook command");
     assert!(
         words
             .windows(4)
-            .any(|words| words == ["internal", "hook", "--vendor", "claude"]),
-        "Stop must run the Claude reporter: {command}"
+            .any(|words| words == ["internal", "hook", "--vendor", vendor.name]),
+        "{event} must use {}: {command}",
+        vendor.name
     );
     assert!(
         !words.iter().any(|word| word == "--announce"),
-        "Stop must never announce instructions: {command}"
+        "these scenarios disable announcements: {command}"
     );
 }
 
@@ -871,7 +952,11 @@ async fn a_second_report_replaces_the_first() {
 /// Commands after the resident shells' child calls prevent shell tail-exec
 /// optimizations. Phase-specific markers keep restart assertions from matching
 /// the original launch's terminal replay.
-fn two_level_hook_wrapper(fixtures: &CaptureFixtures, phase: &str) -> Vec<String> {
+fn two_level_hook_wrapper(
+    fixtures: &CaptureFixtures,
+    phase: &str,
+    vendor: PositionalFixture,
+) -> Vec<String> {
     let mut argv = Vec::new();
     for role in ["OUTER", "INNER", "EMITTER"] {
         argv.extend([
@@ -882,14 +967,21 @@ fn two_level_hook_wrapper(fixtures: &CaptureFixtures, phase: &str) -> Vec<String
             } else {
                 r#"printf '%s:%s\n' "$0" "$$"; "$@"; exit $?"#.to_string()
             },
-            format!("CLAUDE-WRAPPER-{phase}-{role}"),
+            format!(
+                "{}-WRAPPER-{phase}-{role}",
+                vendor.name.to_ascii_uppercase()
+            ),
         ]);
     }
     argv.extend([
-        fixtures.bin().join("claude").to_string_lossy().into_owned(),
+        fixtures
+            .bin()
+            .join(vendor.name)
+            .to_string_lossy()
+            .into_owned(),
         "fake-agent".to_string(),
         "--script".to_string(),
-        "hook-report".to_string(),
+        vendor.script.to_string(),
         "--record-home".to_string(),
         fixtures.home().to_string_lossy().into_owned(),
     ]);
@@ -906,11 +998,18 @@ async fn assert_two_resident_wrappers(
     id: &str,
     transcript: &[u8],
     phase: &str,
+    vendor: PositionalFixture,
 ) -> [u32; 3] {
     let pids = ["OUTER", "INNER", "EMITTER"].map(|role| {
-        marker_value(transcript, &format!("CLAUDE-WRAPPER-{phase}-{role}:"))
-            .parse::<u32>()
-            .expect("wrapper witness PID")
+        marker_value(
+            transcript,
+            &format!(
+                "{}-WRAPPER-{phase}-{role}:",
+                vendor.name.to_ascii_uppercase()
+            ),
+        )
+        .parse::<u32>()
+        .expect("wrapper witness PID")
     });
     let [outer, inner, emitter] = pids;
     assert!(outer != inner && inner != emitter && outer != emitter);
@@ -974,13 +1073,26 @@ async fn assert_two_resident_wrappers(
 /// new launch acquired its own emitter pin and retained its injected hook.
 #[farhelm_testtrace::test]
 async fn a_two_level_resident_wrapper_captures_and_resumes_claude() {
-    let (h, fixtures, serving) = hook_harness().await;
+    two_level_resident_wrapper_captures_and_resumes(CLAUDE_FIXTURE).await;
+}
+
+/// Muse's versioned executable identity must not prevent capture below two
+/// resident wrappers, nor lose its exact resume selector on replacement.
+#[farhelm_testtrace::test]
+async fn a_two_level_resident_wrapper_captures_and_resumes_muse() {
+    two_level_resident_wrapper_captures_and_resumes(MUSE_FIXTURE).await;
+}
+
+/// Run the same live ancestry and replacement contract through each positional
+/// vendor's own callback configuration and payload adapter.
+async fn two_level_resident_wrapper_captures_and_resumes(vendor: PositionalFixture) {
+    let (h, fixtures, serving) = positional_hook_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
-    let mut start = two_level_hook_wrapper(&fixtures, "start");
+    let mut start = two_level_hook_wrapper(&fixtures, "start", vendor);
     start.push(farhelm_proto::session_launch::FARHELM_ARGS_PLACEHOLDER.into());
-    let mut resume = two_level_hook_wrapper(&fixtures, "resume");
+    let mut resume = two_level_hook_wrapper(&fixtures, "resume", vendor);
     resume.extend([
-        "--resume".into(),
+        vendor.resume_selector.into(),
         farhelm_supervisor::agent_kind::CONVERSATION_PLACEHOLDER.into(),
         farhelm_proto::session_launch::FARHELM_ARGS_PLACEHOLDER.into(),
     ]);
@@ -990,7 +1102,7 @@ async fn a_two_level_resident_wrapper_captures_and_resumes_claude() {
             &work.path().to_string_lossy(),
             declared_command(
                 &shell_words::join(&start),
-                farhelm_proto::LaunchHarness::Claude,
+                vendor.harness,
                 Some(&shell_words::join(&resume)),
             ),
             None,
@@ -1001,7 +1113,7 @@ async fn a_two_level_resident_wrapper_captures_and_resumes_claude() {
         .await
         .expect("create two-level wrapper launch");
     let (chan, mut rx, mut seen) = attach_ready(&h, &session).await;
-    let before_pids = assert_two_resident_wrappers(&h, &session.id, &seen, "start").await;
+    let before_pids = assert_two_resident_wrappers(&h, &session.id, &seen, "start", vendor).await;
     report(&h, chan, &mut rx, &mut seen, "conv-deep-wrapper").await;
     let before = snapshot_of(&h, &session.id).await;
     assert_eq!(
@@ -1011,6 +1123,7 @@ async fn a_two_level_resident_wrapper_captures_and_resumes_claude() {
         hook_log(&h, &session.id)
     );
     assert_eq!(before.restart_offer, farhelm_proto::RestartOffer::Resume);
+    assert_eq!(before.capture_ownership_version, 0);
     assert_eq!(
         resumed_conversation(&before.resume_argv),
         "conv-deep-wrapper"
@@ -1026,7 +1139,10 @@ async fn a_two_level_resident_wrapper_captures_and_resumes_claude() {
     wait_for_after(
         &mut rx,
         &mut seen,
-        "CLAUDE-WRAPPER-resume-EMITTER:",
+        &format!(
+            "{}-WRAPPER-resume-EMITTER:",
+            vendor.name.to_ascii_uppercase()
+        ),
         "FAKE-AGENT READY",
         30,
     )
@@ -1035,15 +1151,21 @@ async fn a_two_level_resident_wrapper_captures_and_resumes_claude() {
     assert!(
         resumed
             .windows(2)
-            .any(|words| words == ["--resume", "conv-deep-wrapper"]),
+            .any(|words| words == [vendor.resume_selector, "conv-deep-wrapper"]),
         "the real replacement must receive the captured identity: {resumed:?}"
     );
-    let after_pids = assert_two_resident_wrappers(&h, &session.id, &seen, "resume").await;
+    if let Some(marker) = vendor.resume_marker {
+        assert!(
+            String::from_utf8_lossy(&seen).contains(&format!("{marker}conv-deep-wrapper")),
+            "the replacement must consume its native resume selector"
+        );
+    }
+    let after_pids = assert_two_resident_wrappers(&h, &session.id, &seen, "resume", vendor).await;
     assert_ne!(
         before_pids[2], after_pids[2],
         "Restart must replace the emitter"
     );
-    assert_declares_session_start_hook(&injected_settings(&argv_marker(&seen)));
+    assert_positional_hook(vendor, &argv_marker(&seen), "SessionStart");
     report(&h, chan, &mut rx, &mut seen, "conv-after-deep-resume").await;
     let after = snapshot_of(&h, &session.id).await;
     assert!(after.generation > before.generation);
@@ -1078,9 +1200,22 @@ async fn a_two_level_resident_wrapper_captures_and_resumes_claude() {
 /// supervisor at all.
 #[farhelm_testtrace::test]
 async fn a_shelled_out_child_cannot_replace_the_foreground_report() {
-    let (h, fixtures, serving) = hook_harness().await;
+    shelled_out_child_cannot_replace_foreground(CLAUDE_FIXTURE).await;
+}
+
+/// A separate Muse process that inherits credentials and hooks must be
+/// refused by the foreground pin, with positive refusal evidence in its log.
+#[farhelm_testtrace::test]
+async fn a_shelled_out_muse_child_cannot_replace_the_foreground_report() {
+    shelled_out_child_cannot_replace_foreground(MUSE_FIXTURE).await;
+}
+
+/// Prove the child ran through a live resident shell, reached admission and
+/// was refused, while the selected parent identity and offer stay unchanged.
+async fn shelled_out_child_cannot_replace_foreground(vendor: PositionalFixture) {
+    let (h, fixtures, serving) = positional_hook_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
-    let session = hook_session(&h, &fixtures, work.path()).await;
+    let session = positional_hook_session(&h, &fixtures, work.path(), vendor).await;
     let (chan, mut rx, mut seen) = attach_ready(&h, &session).await;
 
     report(&h, chan, &mut rx, &mut seen, "conv-parent").await;
@@ -1102,9 +1237,10 @@ async fn a_shelled_out_child_cannot_replace_the_foreground_report() {
         .unwrap_or_else(|| panic!("the supervisor must have judged the child's report: {log:?}"));
     assert!(
         child.contains(" refused conflict ")
-            && child.contains(
-                "the Claude report came from a process other than this launch's pinned emitter"
-            ),
+            && child.contains(&format!(
+                "the {} report came from a process other than this launch's pinned emitter",
+                vendor.display_name
+            )),
         "the supervisor must have refused the child for its emitter pin: {child}"
     );
     assert!(
@@ -1121,6 +1257,7 @@ async fn a_shelled_out_child_cannot_replace_the_foreground_report() {
         hook_log(&h, &session.id)
     );
     assert_eq!(snapshot.restart_offer, farhelm_proto::RestartOffer::Resume);
+    assert_eq!(snapshot.capture_ownership_version, 0);
     serving.stop().await;
 }
 
@@ -1135,11 +1272,25 @@ async fn a_shelled_out_child_cannot_replace_the_foreground_report() {
 /// rather than testing only a command retained by the original process.
 #[farhelm_testtrace::test]
 async fn child_first_claude_capture_is_corrected_by_stop_and_resumes_parent() {
-    let (h, fixtures, serving) = hook_harness().await;
+    child_first_capture_is_corrected_by_stop_and_resumes_parent(CLAUDE_FIXTURE).await;
+}
+
+/// Muse's parent's source-less Stop corrects an already-applied child pin
+/// once, and the actual replacement receives the parent's resume selector.
+#[farhelm_testtrace::test]
+async fn child_first_muse_capture_is_corrected_by_stop_and_resumes_parent() {
+    child_first_capture_is_corrected_by_stop_and_resumes_parent(MUSE_FIXTURE).await;
+}
+
+/// Observe the child-first intermediate selection before sending the
+/// ancestor's Stop, then check one correction notice and the replacement's
+/// fresh callback. Otherwise a Latest-slot overwrite could disguise a bug.
+async fn child_first_capture_is_corrected_by_stop_and_resumes_parent(vendor: PositionalFixture) {
+    let (h, fixtures, serving) = positional_hook_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
-    let session = hook_session(&h, &fixtures, work.path()).await;
+    let session = positional_hook_session(&h, &fixtures, work.path(), vendor).await;
     let (chan, mut rx, mut seen) = attach_ready(&h, &session).await;
-    assert_declares_stop_hook(&injected_settings(&argv_marker(&seen)));
+    assert_positional_hook(vendor, &argv_marker(&seen), "Stop");
     let initial = snapshot_of(&h, &session.id).await;
     assert_eq!(
         initial.captured_conversation, None,
@@ -1178,6 +1329,7 @@ async fn child_first_claude_capture_is_corrected_by_stop_and_resumes_parent() {
         hook_log(&h, &session.id)
     );
     assert_eq!(parent.restart_offer, farhelm_proto::RestartOffer::Resume);
+    assert_eq!(parent.capture_ownership_version, 0);
     assert_eq!(
         resumed_conversation(&parent.resume_argv),
         "conv-parent-stop"
@@ -1185,6 +1337,7 @@ async fn child_first_claude_capture_is_corrected_by_stop_and_resumes_parent() {
     let notifications = listed(&h.client, &session.id).await.notifications;
     assert_eq!(notifications.len(), 1, "{notifications:?}");
     assert!(notifications[0].text.contains("A Restart before now"));
+    assert!(notifications[0].text.contains(vendor.display_name));
     assert!(!notifications[0].resolved);
 
     // A repeated end of turn is accepted from the corrected emitter, with
@@ -1213,7 +1366,7 @@ async fn child_first_claude_capture_is_corrected_by_stop_and_resumes_parent() {
     wait_for_after(
         &mut rx,
         &mut seen,
-        "--resume conv-parent-stop",
+        &format!("{} conv-parent-stop", vendor.resume_selector),
         "FAKE-AGENT READY",
         30,
     )
@@ -1223,10 +1376,10 @@ async fn child_first_claude_capture_is_corrected_by_stop_and_resumes_parent() {
     assert!(
         words
             .windows(2)
-            .any(|words| words == ["--resume", "conv-parent-stop"]),
+            .any(|words| words == [vendor.resume_selector, "conv-parent-stop"]),
         "Restart must run the corrected parent's identity: {words:?}"
     );
-    assert_declares_stop_hook(&injected_settings(&argv));
+    assert_positional_hook(vendor, &argv, "Stop");
     assert!(snapshot_of(&h, &session.id).await.generation > parent.generation);
     stop_report(&h, chan, &mut rx, &mut seen, "conv-resumed-turn").await;
     let resumed = snapshot_of(&h, &session.id).await;

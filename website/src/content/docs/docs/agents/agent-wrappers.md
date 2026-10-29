@@ -107,6 +107,13 @@ notifications what a **Restart** before the switch would have resumed. If the fo
 fresh one in the same terminal, Farhelm can follow the new one. Sessions already running before end-of-turn reporting
 was added gain it on relaunch; until then, correction waits for another start, resume, `/clear`, or compact.
 
+Muse also works through multiple wrappers that stay running. Farhelm follows the first Muse process whose conversation
+it accepts; a nested Muse cannot replace a conversation already reported by its parent. If the nested process reports
+first, the parent's next report switches Farhelm back and a session notification explains what **Restart** would have
+resumed before that switch. If the followed Muse exits, a fresh Muse in the same terminal can report its own
+conversation. See [Muse](/docs/agents/muse/#restarting-a-conversation) for when it reports after a new conversation or
+resume.
+
 Codex also works through a wrapper that stays running, including one named `codex` itself. Farhelm follows the first
 Codex process whose conversation it accepts; wrappers above that process do not need to replace themselves. If another
 Codex process started inside the session reports first, Farhelm may briefly follow its conversation. When the Codex

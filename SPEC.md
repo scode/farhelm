@@ -276,10 +276,13 @@ integration has verified an exact conversation. See [Grok](website/src/content/d
 
 Muse support uses `muse --permission-profile :auto-review` for guarded launches and `muse --yolo` for YOLO, with generic
 activity status. Guarded selects Muse's AI reviewer and workspace sandbox; the yolo variant skips approval prompts and
-sandboxing and trusts the workspace for the run. Muse-specific hooks, conversation capture/resume, and waiting-state
-recognition are not implemented. Muse's managed-checkout trust setting adds `--trust-workspace` when Farhelm composes an
-agent launch into a managed checkout. With it off, Farhelm adds no trust flag; YOLO or vendor configuration may still
-grant trust. Muse follows the agent-version support rule under "Supported user environments".
+sandboxing and trusts the workspace for the run. Muse 1.4.14 or later receives per-launch `SessionStart` and `Stop`
+hooks, without a plugin installation or edits to Muse's own configuration. The conversation becomes known at the first
+prompt, and Restart resumes its reported UUID with `muse resume <conversation-id>`, keeping the launch's permission
+flags. A supported Muse that cannot report still launches; without a captured conversation Restart explains why it is
+unavailable. Muse's managed-checkout trust setting adds `--trust-workspace` when Farhelm composes an agent launch into a
+managed checkout. With it off, Farhelm adds no trust flag; YOLO or vendor configuration may still grant trust. Muse
+follows the agent-version support rule under "Supported user environments".
 
 OpenCode is an agent type. Its model is optional and uses OpenCode's configured default when omitted. For an explicit
 choice, Farhelm suggests `opencode/glm-5.3-flash`, `opencode/grok-4.5`, `opencode/grok-4.6`, `opencode/glm-5.3`,
@@ -696,8 +699,8 @@ agent choice is independent of that destination:
   that the conversation exists. Leading dashes, reserved locator tokens and Farhelm placeholders, spaces, quotes,
   backslashes, control characters and oversized values are refused by the existing conversation-id checks. Session-file
   paths may be absolute or relative to the session directory; a leading tilde is refused because it does not expand. New
-  managed-checkout destinations and command launches refuse a selector. Goose, Muse, Cursor and OpenCode show that
-  Farhelm will not capture the named conversation and later Restart will be unavailable.
+  managed-checkout destinations and command launches refuse a selector. Goose, Cursor and OpenCode show that Farhelm
+  will not capture the named conversation and later Restart will be unavailable.
 - Initial prompt: the agent tab offers a resizable multiline **Initial prompt** box directly after the conversation
   selector for supported agents. Its help says "Sent once, as &lt;agent&gt;'s first message when it starts. Restart,
   Clone and Replace do not send it again." The summary adds `Prompt: N lines` for a nonempty message. Enter edits the
@@ -1306,17 +1309,18 @@ submission and focus-return behavior.
   agent type, host and folder remain visible. Replace with can change the harness or folder, and Clone can change the
   host. The launcher shows the current settings and marks edited fields, and its primary action is inactive until a
   setting changes or a conversation selector is entered. For an agent launch with a stored resume command, it is
-  available even without a captured conversation; then its conversation field is required and explains why. Muse, Cursor
-  and OpenCode still have no stored resume command, so they do not gain Restart with. The launcher's ordinary controls,
-  templates, validation and Enter rules apply. Its primary action reads "Restart", or "Stop and restart" while the shown
-  agent is working, with the agent type, host and folder beside it. A working agent is stopped first with the user's
-  confirmation on that action; a live agent in any other status is stopped first without it, as for Restart. The edited
-  launch is validated exactly as a create validates it before anything is stopped, so an invalid edit leaves the agent
-  running and the dialog open with the reason. A refusal leaves the dialog and its edits visible with the reason. The
-  held folder never uses or updates the per-host folder default; its advisory check still applies. Restart with runs the
-  resume command, so an edited start command of a command launch takes effect the next time it is cloned or replaced.
-  Command launches offer this action exactly when Restart is. Its entry in the header's Restart menu remains visible but
-  greyed out otherwise, with a hover tooltip and accessible description explaining why.
+  available even without a captured conversation; then its conversation field is required and explains why. Cursor and
+  OpenCode have no stored resume command, so they do not gain Restart with. Muse launches created before conversation
+  tracking also retain their missing resume command until recreated. The launcher's ordinary controls, templates,
+  validation and Enter rules apply. Its primary action reads "Restart", or "Stop and restart" while the shown agent is
+  working, with the agent type, host and folder beside it. A working agent is stopped first with the user's confirmation
+  on that action; a live agent in any other status is stopped first without it, as for Restart. The edited launch is
+  validated exactly as a create validates it before anything is stopped, so an invalid edit leaves the agent running and
+  the dialog open with the reason. A refusal leaves the dialog and its edits visible with the reason. The held folder
+  never uses or updates the per-host folder default; its advisory check still applies. Restart with runs the resume
+  command, so an edited start command of a command launch takes effect the next time it is cloned or replaced. Command
+  launches offer this action exactly when Restart is. Its entry in the header's Restart menu remains visible but greyed
+  out otherwise, with a hover tooltip and accessible description explaining why.
 - **Clone** opens an ordinary, editable create form pre-filled from an existing session's host, title, and launch — the
   fresh-conversation counterpart to restart's resumed one unless the user names a conversation for this start. A session
   in a managed checkout starts on a managed checkout of the same repository, named `<title>-clone` with the first free
@@ -1880,8 +1884,8 @@ ordinary Enter rule applies), for an agent that reports by its first prompt (Pi 
 reply, which can take as long as the first turn, so their silence proves nothing and is not reported); a launch Farhelm
 could not add its conversation hook to, unless the user turned hooks off for that agent themselves; a Codex or Grok
 conversation record that Restart finds missing, which withdraws the resume offer; and an OMP launch whose conversation
-reporter does not match the running Farhelm, the one refused conversation report that notifies; and a Claude or Codex
-launch whose first conversation report came from a nested process of that agent, corrected when a recorded ancestor
+reporter does not match the running Farhelm, the one refused conversation report that notifies; and a Claude, Codex or
+Muse launch whose first conversation report came from a nested process of that agent, corrected when a recorded ancestor
 reports. That correction says which conversation a Restart before now would have resumed and that Farhelm now follows
 the conversation of the agent process that started it, without claiming no further ancestor can correct it. Every other
 refused report (from a subagent, from an agent process the session's agent started itself, overtaken by a relaunch or
@@ -2334,37 +2338,38 @@ The system must not presume the original OS process survived the reboot.
 The resume promise is per-session: for agents with conversation-identity integration, the supervisor captures which
 agent conversation belongs to each session, and restart resumes exactly that conversation (e.g.
 `claude --resume <conversation-id>`) — even when several sessions share a working directory. Claude Code, Codex, Goose,
-Pi, and Grok integrations at this level are required. Confirmed 2026-10-01: Farhelm identifies an agent's conversation
-only from the harness's own explicit report, through a hook, plugin, extension, or whatever reporting mechanism that
-harness needs. A selector entered in New, Clone, Replace with or Restart with is a one-time start argument, never a
-captured identity. Claude, Codex, Grok, Pi and OMP can report the resulting conversation through the ordinary path. A
-named Restart with keeps the old capture until that report replaces it; Codex reports at the first prompt, so plain
-Restart before then still enters the old conversation. Goose cannot report on this resume, so a named Restart with
-clears its old capture in the relaunch transaction; a definitive pre-spawn abort restores it, an ambiguous failure does
-not. The same clearing applies when Farhelm's conversation hooks are turned off for the agent (`FARHELM_AGENT_HOOKS`) or
-when the conversation reporter's extension cannot be prepared, since no report can then replace the old capture; Grok's
-own callbacks are not affected by that switch. Muse, Cursor, OpenCode and named Goose starts do not gain later plain
-Restart from this choice. Heuristics that cannot be relied upon, such as correlating the vendor's files on disk with a
-launch, are not supported, because a wrong match resumes, and appends to, a conversation that is not the session's own.
-Checking the exact file a report names is verification of that report, not identification. A launch whose harness cannot
-report, or whose report never arrived, has no captured identity and cannot be restarted: Restart says why, and Replace
-starts the session over. What capture never does is write to the agent's own configuration or record directories. The
-opt-in managed-checkout Claude trust edit is a separate, narrowly scoped exception to the no-agent-configuration rule;
-it does not participate in capture. A hook passed on the command line for one launch is allowed because it writes
-nothing the vendor owns — no configuration file, no conversation record, no trust state — and cannot outlive the launch
-that carried it. It is not invisible in the absolute: the report it delivers is written to a file in farhelm's own state
-directory and from there lands in farhelm's own database, and every run leaves a line in farhelm's own hook log.
-Vendor-owned state is the boundary the no-agent-configuration rule from Status is protecting, and that rule's own
-example — hooks written into the agent's configuration — still stands. Grok is the documented opt-in exception: the user
-installs its hook entries, and Farhelm itself never writes, edits, or removes them. Every integrated agent type
-identifies conversations only through accepted reports; Farhelm never selects a conversation by scanning vendor state.
-Historical stored identities remain usable under the same per-type Resume rules, regardless of their source. A reporting
-credential alone does not establish which Codex conversation is in the foreground. Goose persists a credential-free
-named MCP reporter with the conversation and reuses it on resume; Pi loads a private static extension from Farhelm's
-state directory on every launch. A Pi report without a session file withdraws the old resume target. Before a Pi resume,
-Farhelm reads the bounded first record of that exact file without following symlinks and requires its session ID to
-match. A failed check withdraws the durable resume offer, which makes Restart unavailable, and rejects the stale Resume
-request so the user can refresh; it never silently launches fresh under that request.
+Pi, Muse, and Grok integrations at this level are required. Confirmed 2026-10-01: Farhelm identifies an agent's
+conversation only from the harness's own explicit report, through a hook, plugin, extension, or whatever reporting
+mechanism that harness needs. A selector entered in New, Clone, Replace with or Restart with is a one-time start
+argument, never a captured identity. Claude, Codex, Grok, Pi, Muse and OMP can report the resulting conversation through
+the ordinary path. A named Restart with keeps the old capture until that report replaces it; Codex and Muse report at
+the first prompt, so plain Restart before then still enters the old conversation. Goose cannot report on this resume, so
+a named Restart with clears its old capture in the relaunch transaction; a definitive pre-spawn abort restores it, an
+ambiguous failure does not. The same clearing applies when Farhelm's conversation hooks are turned off for the agent
+(`FARHELM_AGENT_HOOKS`) or when the conversation reporter's extension cannot be prepared, since no report can then
+replace the old capture; Grok's own callbacks are not affected by that switch. Cursor, OpenCode and named Goose starts
+do not gain later plain Restart from this choice. Heuristics that cannot be relied upon, such as correlating the
+vendor's files on disk with a launch, are not supported, because a wrong match resumes, and appends to, a conversation
+that is not the session's own. Checking the exact file a report names is verification of that report, not
+identification. A launch whose harness cannot report, or whose report never arrived, has no captured identity and cannot
+be restarted: Restart says why, and Replace starts the session over. What capture never does is write to the agent's own
+configuration or record directories. The opt-in managed-checkout Claude trust edit is a separate, narrowly scoped
+exception to the no-agent-configuration rule; it does not participate in capture. A hook passed on the command line for
+one launch is allowed because it writes nothing the vendor owns — no configuration file, no conversation record, no
+trust state — and cannot outlive the launch that carried it. It is not invisible in the absolute: the report it delivers
+is written to a file in farhelm's own state directory and from there lands in farhelm's own database, and every run
+leaves a line in farhelm's own hook log. Vendor-owned state is the boundary the no-agent-configuration rule from Status
+is protecting, and that rule's own example — hooks written into the agent's configuration — still stands. Grok is the
+documented opt-in exception: the user installs its hook entries, and Farhelm itself never writes, edits, or removes
+them. Every integrated agent type identifies conversations only through accepted reports; Farhelm never selects a
+conversation by scanning vendor state. Historical stored identities remain usable under the same per-type Resume rules,
+regardless of their source. A reporting credential alone does not establish which Codex conversation is in the
+foreground. Goose persists a credential-free named MCP reporter with the conversation and reuses it on resume; Pi loads
+a private static extension from Farhelm's state directory on every launch. A Pi report without a session file withdraws
+the old resume target. Before a Pi resume, Farhelm reads the bounded first record of that exact file without following
+symlinks and requires its session ID to match. A failed check withdraws the durable resume offer, which makes Restart
+unavailable, and rejects the stale Resume request so the user can refresh; it never silently launches fresh under that
+request.
 
 Codex's first admitted selecting report pins the native Codex process that emitted it, under the session's owned pane.
 Later reports must come from that process, not a Codex process below it that inherited its credential. Resident
@@ -2396,26 +2401,37 @@ record pairs. Arbitrary later file changes are noticed at Restart rather than th
 withdraws Resume and records its notification then; a different conversation withdraws silently. An I/O read failure
 refuses that Restart with a retry message and preserves Resume. None of these refusals launches an agent.
 
-Claude attribution is positional: the first process above the hook's narrow shell trampolines is its emitter, at any
-depth below the session's owned pane. Farhelm does not recognize Claude by executable, command line, or environment;
-those are vendor details that change independently of Farhelm. Resident wrapper chains therefore keep reporting. The
-first admitted selecting report pins its emitter by pid and start token and records every ancestor through the pane.
-Later reports from that process may change the conversation; a nested Claude that inherited the credential cannot
-replace or withdraw it. Reports from the same emitter preserve the original recorded ancestry. A recorded ancestor's
-report corrects both the pin and conversation and posts a notification once per launch explaining what Restart before
-the correction would have resumed. If a nested Claude reports first, it may be followed until the parent next reports at
-start, resume, `/clear`, compact, or the end of a turn. Claude's injected `Stop` hook reports the current conversation
-and is an ordinary selecting report under the same pin: it can establish the first pin, update the pinned process's
-conversation, or correct a child-first selection when a recorded ancestor reports. A `Stop` refused by the pin is
-acknowledged silently, with no warning or mutation. A proven gone, reused, or non-running pin releases only for an
-emitter whose report chain does not contain it; unavailable process evidence never releases it. The pin survives a
-supervisor restart but clears on relaunch and is not restored by an aborted relaunch. Sessions running across the
+Claude and Muse attribution is positional: the first process above the hook's narrow shell trampolines is its emitter,
+at any depth below the session's owned pane. Farhelm does not recognize either agent by executable, command line, or
+environment; those are vendor details that change independently of Farhelm. Resident wrapper chains therefore keep
+reporting. The first admitted selecting report pins its emitter by pid and start token and records every ancestor
+through the pane. Later reports from that process may change the conversation; a nested Claude that inherited the
+credential cannot replace or withdraw it. Reports from the same emitter preserve the original recorded ancestry. A
+recorded ancestor's report corrects both the pin and conversation and posts a notification once per launch explaining
+what Restart before the correction would have resumed. If a nested Claude reports first, it may be followed until the
+parent next reports at start, resume, `/clear`, compact, or the end of a turn. Claude's injected `Stop` hook reports the
+current conversation and is an ordinary selecting report under the same pin: it can establish the first pin, update the
+pinned process's conversation, or correct a child-first selection when a recorded ancestor reports. A `Stop` refused by
+the pin is acknowledged silently, with no warning or mutation. A proven gone, reused, or non-running pin releases only
+for an emitter whose report chain does not contain it; unavailable process evidence never releases it. The pin survives
+a supervisor restart but clears on relaunch and is not restored by an aborted relaunch. Sessions running across the
 upgrade start unpinned, so their first selecting report may come from a nested child until an ancestor reports. Running
 launches retain their old command line without `Stop` until relaunch; no upgrade machinery compensates for that gap.
 Farhelm subscribes to Claude's `SessionStart` and `Stop`, not `SubagentStop`. In the observed Claude Code 2.1.310, a
 native sub-agent completed through `SubagentStop`, while `Stop` carried the parent's conversation. Any report naming a
 sub-agent is refused for every agent type. Claude requires no transcript check and takes no versioned ownership proof,
 so its existing captures stay resumable across the change.
+
+Muse uses the same process pin, ancestor correction, dead-pin release and relaunch rules, with a Muse notification once
+per launch when a recorded ancestor corrects the followed conversation. Its `SessionStart` and `Stop` both select the
+current UUID; a rival `Stop` is acknowledged silently without changing capture. Muse 1.4.14 fires `SessionStart` at the
+first prompt, with source `startup` or `resume`, and a source-less `Stop` at turn end. `/clear` and `/new` change the
+UUID but defer `SessionStart` until the next prompt; until a report arrives, the previous captured conversation can
+remain the Restart target. In the observed same-process reminder runs, native children emitted marked `SubagentStart`
+and `SubagentStop` events, while the subscribed `SessionStart` and `Stop` named the parent. That observation does not
+cover every possible Muse child. Muse reports carrying `agent_id`, `subagent_id` or `child_session_id` child markers are
+refused. Muse requires no transcript check or versioned ownership proof; its pinned captures use ownership version 0.
+Farhelm never discovers a Muse conversation from its session files or index.
 
 Grok reports must come from one native `grok` process under the owned pane, launched with `--no-leader` before any real
 end-of-options boundary. The only admitted descendants are the documented reporter command and its narrow shell
@@ -2449,11 +2465,11 @@ discriminator naming the adapter that produced it — the injected hook command,
 and a report addressed to a session of another agent type is refused before any vendor state is consulted. The
 discriminator routes; it does not prove. Codex and Grok admission require foreground and record proofs, and their exact
 resume additionally requires versioned proof that the binding was admitted under those proofs, with the historical Codex
-exception described in SPEC_impl.md. Claude admission requires the positional attribution and pin checks above but no
-versioned proof, so its resume rules are unchanged. Goose and Pi retain their existing admission and resume rules; for
-them the discriminator alone adds no foreground protection. Old senders that predate the discriminator fail closed
-rather than reporting untagged. A refused report changes nothing: no stored identity, no offer, no pending state. Resume
-is never silently turned into fresh, and historical captures are never rewritten to look proven.
+exception described in SPEC_impl.md. Claude and Muse admission require the positional attribution and pin checks above
+but no versioned proof; Claude's resume rules are unchanged. Goose and Pi retain their existing admission and resume
+rules; for them the discriminator alone adds no foreground protection. Old senders that predate the discriminator fail
+closed rather than reporting untagged. A refused report changes nothing: no stored identity, no offer, no pending state.
+Resume is never silently turned into fresh, and historical captures are never rewritten to look proven.
 
 Confirmed 2026-10-22, an accepted exception to restart resuming exactly the session's own conversation (above): Goose's
 reporter does not tell a native Goose sub-agent, or a nested Goose run that inherits the reporter, from the session's
@@ -2481,13 +2497,14 @@ difference works in the user's favor: OMP 18.2.4 persists a new conversation eag
 conversation can be resumable at once instead of waiting for a first assistant message.
 
 Farhelm composes an agent launch's resume command from the same choices as its start command: Claude adds
-`--resume <conversation-id>`, Codex `resume <conversation-id>`, Goose `session --resume --session-id <conversation-id>`,
-Pi `--session <verified-absolute-file>`, OMP `--resume <verified-absolute-file>`, and Grok
-`--no-leader --resume <verified-conversation-id>`. A command launch that opts into Resume supplies its own resume
-command, and Farhelm never derives one from its start command: it fills in `{conversation}`, `{cwd}`, and
-`{farhelm_args}` and runs the rest as written. For Pi and OMP, `{conversation}` means the verified file path, not
-Farhelm's internal durable locator; for Codex it means the verified persistent thread ID, not the runtime session ID or
-encoded locator; for Grok it means the verified UUID, not the `grok:` locator or either evidence path.
+`--resume <conversation-id>`, Codex and Muse `resume <conversation-id>`, Goose
+`session --resume --session-id <conversation-id>`, Pi `--session <verified-absolute-file>`, OMP
+`--resume <verified-absolute-file>`, and Grok `--no-leader --resume <verified-conversation-id>`. A command launch that
+opts into Resume supplies its own resume command, and Farhelm never derives one from its start command: it fills in
+`{conversation}`, `{cwd}`, and `{farhelm_args}` and runs the rest as written. For Pi and OMP, `{conversation}` means the
+verified file path, not Farhelm's internal durable locator; for Codex it means the verified persistent thread ID, not
+the runtime session ID or encoded locator; for Grok it means the verified UUID, not the `grok:` locator or either
+evidence path.
 
 Anything farhelm attaches to a launch — an agent launch, or a command launch that declares an agent type — must be
 invisible from inside the session when it works AND when it fails: no output on the agent's terminal, no non-zero exit,
@@ -2508,9 +2525,19 @@ The instructions themselves are printed only when that command is run, so a sess
 farhelm pays one line and nothing more. Grok's manually configured hooks omit `--announce`: Grok ignores the relevant
 stdout, so its integration delivers no instructions pointer.
 
+Muse's `SessionStart` hook receives that pointer as developer context; its `Stop` hook omits the announcement. The
+observed Muse 1.4.14 hooks printed nothing on the terminal on success or failure, so no vendor-output exception is
+needed for Muse.
+
 A resume command is never run with `{conversation}` unfilled: no captured conversation means no Restart, with the reason
 shown, not a garbled command line. `{cwd}` is always filled where it stands as a whole argument, on every launch and
 restart; there is no launch without a working directory.
+
+Existing Muse agent launches derive the Muse integration from their stored harness and gain its hooks through their
+stored `{farhelm_args}` at the next start. They retain their original missing resume command: Restart explains that
+there is no resume command until the session is recreated. No backfill or migration synthesizes one. This is a
+feature-level compatibility choice under "Upgrade compatibility and client scale", not a change to the supported
+installation update path.
 
 Sessions created before launch kinds existed keep working after the upgrade. One that was created from structured
 choices becomes an agent launch: its stored commands are Farhelm-composed and never contain a bare `--`, so the upgrade
