@@ -57,7 +57,7 @@ test("the remembered structured-launch permissions mode survives an open, a rese
       (await readPreferences(request)).remembered_permissions,
       "the fixture premise: nothing remembered before this test's first launch",
     ).toBeUndefined();
-    await expect(permissions().getByRole("button", { name: "guarded", exact: true })).toHaveAttribute(
+    await expect(permissions().getByRole("button", { name: "Guarded", exact: true })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
@@ -65,7 +65,7 @@ test("the remembered structured-launch permissions mode survives an open, a rese
     // A successful structured launch with yolo.
     await fillLauncherFolder(form, cwd);
     await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
-    await permissions().getByRole("button", { name: "yolo", exact: true }).click();
+    await permissions().getByRole("button", { name: "YOLO", exact: true }).click();
     const [yoloResponse] = await Promise.all([
       page.waitForResponse(
         (candidate) => candidate.request().method() === "POST" && candidate.url().endsWith("/api/sessions"),
@@ -89,7 +89,7 @@ test("the remembered structured-launch permissions mode survives an open, a rese
     // the remembered mode instead of always starting on "default".
     await page.locator(".new-session-button").click();
     await expect(form).toBeVisible();
-    await expect(permissions().getByRole("button", { name: "yolo", exact: true })).toHaveAttribute(
+    await expect(permissions().getByRole("button", { name: "YOLO", exact: true })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
@@ -100,9 +100,9 @@ test("the remembered structured-launch permissions mode survives an open, a rese
     // unpreselected (SPEC.md's harness/model rule, unchanged by this
     // feature), so choosing Codex AFTER reset is what proves the segment's
     // own remembered value survived that same reset independently.
-    await form.getByRole("button", { name: "reset choices", exact: true }).click();
+    await form.getByRole("button", { name: "Reset choices", exact: true }).click();
     await expect(form.locator(".launch-composer-trust-choice")).toHaveCount(0);
-    await expect(permissions().getByRole("button", { name: "yolo", exact: true })).toHaveAttribute(
+    await expect(permissions().getByRole("button", { name: "YOLO", exact: true })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
@@ -114,8 +114,8 @@ test("the remembered structured-launch permissions mode survives an open, a rese
     // A following structured launch with explicit default permissions
     // clears the memory again.
     await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
-    await form.getByLabel("folder", { exact: true }).fill(cwd);
-    await permissions().getByRole("button", { name: "guarded", exact: true }).click();
+    await form.getByLabel("Folder", { exact: true }).fill(cwd);
+    await permissions().getByRole("button", { name: "Guarded", exact: true }).click();
     const [defaultResponse] = await Promise.all([
       page.waitForResponse(
         (candidate) => candidate.request().method() === "POST" && candidate.url().endsWith("/api/sessions"),
@@ -138,7 +138,7 @@ test("the remembered structured-launch permissions mode survives an open, a rese
     // Reopening New once more preselects guarded, the new-request default.
     await page.locator(".new-session-button").click();
     await expect(form).toBeVisible();
-    await expect(permissions().getByRole("button", { name: "guarded", exact: true })).toHaveAttribute(
+    await expect(permissions().getByRole("button", { name: "Guarded", exact: true })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
@@ -202,7 +202,7 @@ test("a create reply claiming yolo does not change what the next New dialog pres
     await page.locator(".new-session-button").click();
     await fillLauncherFolder(form, cwd);
     await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
-    await permissions().getByRole("button", { name: "guarded", exact: true }).click();
+    await permissions().getByRole("button", { name: "Guarded", exact: true }).click();
     const submitted = (await submit()).launch;
     expect(submitted).toMatchObject({ harness: "codex", permissions: "guarded" });
     expect(submitted).not.toHaveProperty("workspace_trust");
@@ -211,22 +211,22 @@ test("a create reply claiming yolo does not change what the next New dialog pres
     await expect(form).toBeVisible();
     await expect(form.locator(".launch-composer-trust-choice")).toHaveCount(0);
     await expect(
-      permissions().getByRole("button", { name: "guarded", exact: true }),
+      permissions().getByRole("button", { name: "Guarded", exact: true }),
       "the reply's yolo must not become this page's preselection",
     ).toHaveAttribute("aria-pressed", "true");
 
     // A command create, which submits no launch at all.
-    await form.getByRole("tab", { name: "command", exact: true }).click();
-    await form.getByLabel("agent command").fill(FAKE_AGENT);
+    await form.getByRole("tab", { name: "Command", exact: true }).click();
+    await form.getByLabel("Agent command").fill(FAKE_AGENT);
     await answerYolo(form);
-    await form.getByLabel("folder", { exact: true }).fill(cwd);
+    await form.getByLabel("Folder", { exact: true }).fill(cwd);
     expect(await submit()).not.toHaveProperty("launch");
 
     await page.locator(".new-session-button").click();
     await expect(form).toBeVisible();
     await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
     await expect(
-      permissions().getByRole("button", { name: "guarded", exact: true }),
+      permissions().getByRole("button", { name: "Guarded", exact: true }),
       "a command create's reply must not change the preselection either",
     ).toHaveAttribute("aria-pressed", "true");
     expect(
@@ -255,12 +255,12 @@ for (const [label, harness] of [["Pi", "pi"], ["OpenCode", "open_code"], ["Goose
       const harnesses = form.locator(".launch-composer-harness-choice");
       const permissions = form.locator(".launch-composer-permissions-choice");
       await harnesses.getByRole("button", { name: label, exact: true }).click();
-      await expect(permissions.getByRole("button", { name: "yolo", exact: true })).toHaveAttribute("aria-pressed", "true");
+      await expect(permissions.getByRole("button", { name: "YOLO", exact: true })).toHaveAttribute("aria-pressed", "true");
       await harnesses.getByRole("button", { name: "Codex", exact: true }).click();
-      await expect(permissions.getByRole("button", { name: "guarded", exact: true })).toHaveAttribute("aria-pressed", "true");
+      await expect(permissions.getByRole("button", { name: "Guarded", exact: true })).toHaveAttribute("aria-pressed", "true");
       await harnesses.getByRole("button", { name: label, exact: true }).click();
-      await expect(permissions.getByRole("button", { name: "yolo", exact: true })).toHaveAttribute("aria-pressed", "true");
-      await form.getByLabel("folder", { exact: true }).fill(stackScratchDir("default-yolo-memory-"));
+      await expect(permissions.getByRole("button", { name: "YOLO", exact: true })).toHaveAttribute("aria-pressed", "true");
+      await form.getByLabel("Folder", { exact: true }).fill(stackScratchDir("default-yolo-memory-"));
       const [response] = await Promise.all([
         page.waitForResponse((entry) => entry.request().method() === "POST" && new URL(entry.url()).pathname === "/api/sessions"),
         form.locator(".create-session-submit").click(),
@@ -274,7 +274,7 @@ for (const [label, harness] of [["Pi", "pi"], ["OpenCode", "open_code"], ["Goose
       await page.locator(".new-session-button").click();
       await expect(form).toBeVisible();
       await harnesses.getByRole("button", { name: "Codex", exact: true }).click();
-      await expect(permissions.getByRole("button", { name: "guarded", exact: true })).toHaveAttribute("aria-pressed", "true");
+      await expect(permissions.getByRole("button", { name: "Guarded", exact: true })).toHaveAttribute("aria-pressed", "true");
     } finally {
       await setLocalYoloWithoutAsking(request, false);
       for (const id of created) await cleanupSession(request, id);

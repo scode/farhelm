@@ -372,15 +372,15 @@ pub(crate) fn ManagedCheckoutMark(
         description.push_str(&format!(" Session folder: {}.", cwd.escaped()));
     }
     description.push_str(" Farhelm made the checkout folder for its first session. When the last session using it is deleted, the checkout moves to the trash.");
-    let tooltip = format!("managed checkout of {repo}{description}");
+    let tooltip = format!("Managed checkout of {repo}{description}");
     rsx! {
         span { class: "managed-checkout-mark", "data-tooltip": tooltip,
             BranchIcon {}
             if show_repository {
-                span { class: "visually-hidden", "managed checkout" }
+                span { class: "visually-hidden", "Managed checkout" }
                 span { class: "session-repository peer-value", dir: "ltr", "{repo}" }
             } else {
-                span { class: "visually-hidden", "managed checkout of {repo}" }
+                span { class: "visually-hidden", "Managed checkout of {repo}" }
             }
             span { class: "visually-hidden managed-checkout-description", "{description}" }
         }

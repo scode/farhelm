@@ -28,20 +28,20 @@ test("OpenCode keeps composer controls while offering default and explicit Zen m
   await fillLauncherFolder(form, "/tmp");
   const harness = form.locator(".launch-composer-harness-choice");
   await harness.getByRole("button", { name: "Codex", exact: true }).click();
-  await form.locator(".launch-composer-effort-choice").getByRole("button", { name: "high", exact: true }).click();
+  await form.locator(".launch-composer-effort-choice").getByRole("button", { name: "High", exact: true }).click();
   await harness.getByRole("button", { name: "OpenCode", exact: true }).click();
   const modelRow = form.locator(".launch-composer-model-choice");
   await expect(harness.locator(".launch-composer-model-choice")).toHaveCount(0);
   await expect(form.locator(".launch-composer-effort-choice")).toHaveCount(0);
-  await expect(form.getByRole("tab", { name: "command", exact: true })).toBeVisible();
+  await expect(form.getByRole("tab", { name: "Command", exact: true })).toBeVisible();
   await expect(form.locator(".create-session-submit")).toBeEnabled();
-  const model = modelRow.getByRole("combobox", { name: "model", exact: true });
-  await expect(model).toHaveValue("harness default");
+  const model = modelRow.getByRole("combobox", { name: "Model", exact: true });
+  await expect(model).toHaveValue("Harness default");
   await model.focus();
   // Focusing opens the list; the default row shares the same model field and
   // explicit Zen suggestions without displacing the command escape.
-  await expect(modelRow.locator("#launch-composer-model-results").getByRole("option", { name: "show every harness's models", exact: true })).toBeVisible();
-  await expect(modelRow.getByRole("option", { name: "harness default", exact: true })).toBeVisible();
+  await expect(modelRow.locator("#launch-composer-model-results").getByRole("option", { name: "Show every harness's models", exact: true })).toBeVisible();
+  await expect(modelRow.getByRole("option", { name: "Harness default", exact: true })).toBeVisible();
   for (const id of ids) {
     await model.fill(id);
     await modelRow.getByRole("option", { name: id, exact: true }).click();
@@ -57,8 +57,8 @@ test("OpenCode keeps composer controls while offering default and explicit Zen m
   // selections. Its configured model does not imply a permission default.
   // The help button is not a mode; only choices expose pressed state.
   const permissions = form.locator(".launch-composer-permissions-choice");
-  await expect(permissions.locator("button[aria-pressed]")).toHaveText(["yolo"]);
-  await expect(permissions.getByRole("button", { name: "yolo", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(permissions.locator("button[aria-pressed]")).toHaveText(["YOLO"]);
+  await expect(permissions.getByRole("button", { name: "YOLO", exact: true })).toHaveAttribute("aria-pressed", "true");
   await page.route("**/api/sessions", async (route) => {
     if (route.request().method() !== "POST") return route.continue();
     await route.fulfill({ status: 400, headers: { "x-farhelm-build": build }, body: "fixture captured launch" });
@@ -71,13 +71,13 @@ test("OpenCode keeps composer controls while offering default and explicit Zen m
     harness: "open_code", model: "custom'42;$literal", effort: null, permissions: "yolo",
   });
   await expect(form).toContainText("fixture captured launch");
-  await form.getByRole("tab", { name: "command", exact: true }).click();
-  await expect(form.getByLabel("agent command")).toBeEnabled();
+  await form.getByRole("tab", { name: "Command", exact: true }).click();
+  await expect(form.getByLabel("Agent command")).toBeEnabled();
   // The agent tab's settings are its draft, kept while the command tab is
   // shown rather than a second active launch: its fields are not shown.
-  await expect(form.getByRole("tab", { name: "command", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(form.getByRole("tab", { name: "Command", exact: true })).toHaveAttribute("aria-selected", "true");
   await expect(harness).toHaveCount(0);
-  await form.getByRole("tab", { name: "agent", exact: true }).click();
+  await form.getByRole("tab", { name: "Agent", exact: true }).click();
   await expect(harness.locator('[aria-pressed="true"]')).toHaveCount(1);
   await expect(harness.getByRole("button", { name: "OpenCode", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(model).toHaveValue("custom'42;$literal");
@@ -114,7 +114,7 @@ test("typing a model never switches the selected harness, and bare OpenCode name
   await expect(form).toBeVisible();
   await fillLauncherFolder(form, "/tmp");
   const harness = form.locator(".launch-composer-harness-choice");
-  const model = form.locator(".launch-composer-model-choice").getByRole("combobox", { name: "model", exact: true });
+  const model = form.locator(".launch-composer-model-choice").getByRole("combobox", { name: "Model", exact: true });
 
   await harness.getByRole("button", { name: "Codex", exact: true }).click();
   await model.fill("opencode/gpt-6-luna");
@@ -131,7 +131,7 @@ test("typing a model never switches the selected harness, and bare OpenCode name
   await expect(model).toHaveValue("gpt-6-luna");
   await expect(harness.getByRole("button", { name: "OpenCode", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(form.locator(".launch-composer-choice-error")).toHaveCount(0);
-  await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "YOLO", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(form.locator(".create-session-submit")).toBeEnabled();
   await page.route("**/api/sessions", async (route) => {
     if (route.request().method() !== "POST") return route.continue();

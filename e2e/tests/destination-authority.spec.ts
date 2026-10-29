@@ -89,7 +89,7 @@ for (const replace of [false, true]) {
       await page.locator(".new-session-button").click();
       const form = page.locator(".create-session-form");
       await expect(form.locator(".create-session-host")).toHaveAttribute("data-host-id", String(replace ? fixture.local : fixture.remote.id));
-      await expect(form.getByLabel("folder", { exact: true })).toHaveValue(replace ? "~" : active.cwd);
+      await expect(form.getByLabel("Folder", { exact: true })).toHaveValue(replace ? "~" : active.cwd);
       await expect(form.locator(".launch-composer-harness-choice button[aria-pressed=true]")).toHaveCount(0);
       await expect(form.locator(".create-session-submit")).toBeDisabled();
     } finally {
@@ -153,7 +153,7 @@ async function historyFixture(page: Page, request: APIRequestContext, ordinaryRe
   // Retry cases next use controls outside the floating suggestions. The
   // authority cases deliberately retain those options for saved callbacks.
   if (ordinaryRetry) await fillLauncherFolder(form, "/tmp");
-  else await form.getByLabel("folder", { exact: true }).fill("/tmp");
+  else await form.getByLabel("Folder", { exact: true }).fill("/tmp");
   return { ...fixture, state, posts, feed, form };
 }
 
@@ -165,7 +165,7 @@ for (const source of ["ordinary recent", "search recent", "saved folder"] as con
   test(`applied ${source} retains installation authority through Launch`, async ({ page, request }) => {
     const fixture = await historyFixture(page, request);
     const { form, state, feed, remote, local, posts } = fixture;
-    const folder = form.getByLabel("folder", { exact: true });
+    const folder = form.getByLabel("Folder", { exact: true });
     const launch = form.locator(".create-session-submit");
     if (source === "ordinary recent") {
       await form.locator(".launch-composer-recent-slots button").first().click();
@@ -174,7 +174,7 @@ for (const source of ["ordinary recent", "search recent", "saved folder"] as con
       await form.getByRole("option", { name: /^Recent setup:.*\/tmp/ }).click();
     } else {
       await folder.focus();
-      await form.getByRole("listbox", { name: "folders" }).getByRole("option", { name: "/tmp", exact: true }).click();
+      await form.getByRole("listbox", { name: "Folders" }).getByRole("option", { name: "/tmp", exact: true }).click();
       await form.locator(".launch-composer-harness-choice").getByRole("button", { name: /Codex$/ }).click();
     }
     await expect(form).toHaveAttribute("data-history-activation-attempts", "1");
@@ -219,9 +219,9 @@ for (const source of ["ordinary recent", "search recent", "saved folder"] as con
  * dispatching at a node already withdrawn from the document. */
 test("queued saved-folder activation cannot follow an explicit host change", async ({ page, request }) => {
   const { form, local } = await historyFixture(page, request);
-  const folder = form.getByLabel("folder", { exact: true });
+  const folder = form.getByLabel("Folder", { exact: true });
   await folder.focus();
-  const saved = form.getByRole("listbox", { name: "folders" }).getByRole("option", { name: "/var/tmp", exact: true });
+  const saved = form.getByRole("listbox", { name: "Folders" }).getByRole("option", { name: "/var/tmp", exact: true });
   await expect(saved).toBeVisible();
   // A native pointer press blurs the folder and withdraws its options. Open
   // the host picker with an unfocused key event instead: both callbacks stay
@@ -239,7 +239,7 @@ test("queued saved-folder activation cannot follow an explicit host change", asy
   }, local);
   await expect(form).toHaveAttribute("data-history-activation-attempts", String(attempts + 1));
   await expect(form.locator(".create-session-host")).toHaveAttribute("data-host-id", String(local));
-  await expect(form.getByLabel("folder", { exact: true })).toHaveValue("/tmp");
+  await expect(form.getByLabel("Folder", { exact: true })).toHaveValue("/tmp");
 });
 
 /** The UUID eval is awaited by the production web renderer. Hold that return
@@ -304,10 +304,10 @@ async function placementFolderOptions(form: Locator) {
   const anchor = form.locator(".create-session-submit");
   await anchor.focus();
   await expect(anchor).toBeFocused();
-  const folder = form.getByRole("combobox", { name: "folder", exact: true });
+  const folder = form.getByRole("combobox", { name: "Folder", exact: true });
   await folder.focus();
   await expect(folder).toBeFocused();
-  const list = form.getByRole("listbox", { name: "folders", exact: true });
+  const list = form.getByRole("listbox", { name: "Folders", exact: true });
   await expect(list).toBeVisible();
   return list;
 }
@@ -351,7 +351,7 @@ async function expectPlacementAuthority(form: Locator, remote: { id: number; inc
   await expect(form.locator(".create-session-host")).toHaveAttribute("data-host-id", String(remote.id));
   await expect(form).toHaveAttribute("data-browse-live-connection", String(remote.incarnation));
   await expect(form).toHaveAttribute("data-remembered-destination-valid", "true");
-  await expect(form.getByLabel("folder", { exact: true })).toHaveValue(cwd);
+  await expect(form.getByLabel("Folder", { exact: true })).toHaveValue(cwd);
 }
 
 /** Selecting Home, saved history or the same literal path must not replace
@@ -360,9 +360,9 @@ async function expectPlacementAuthority(form: Locator, remote: { id: number; inc
 test("unchanged Home and folder selections preserve the unresolved create", async ({ page, request }) => {
   const { form, posts, remote } = await historyFixture(page, request, true);
   await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
-  await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true }).click();
+  await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "Guarded", exact: true }).click();
   let list = await placementFolderOptions(form);
-  await list.getByRole("option", { name: "reset folder to home", exact: true }).click();
+  await list.getByRole("option", { name: "Reset folder to home", exact: true }).click();
   await expect(list).toHaveCount(0);
   await expectPlacementAuthority(form, remote, "~");
   expect(posts).toEqual([]);
@@ -373,7 +373,7 @@ test("unchanged Home and folder selections preserve the unresolved create", asyn
 
   let before = posts.length;
   list = await placementFolderOptions(form);
-  await list.getByRole("option", { name: "reset folder to home", exact: true }).click();
+  await list.getByRole("option", { name: "Reset folder to home", exact: true }).click();
   await expect(list).toHaveCount(0);
   await expectPlacementAuthority(form, remote, "~");
   expect(posts, "Home only reapplies the folder").toHaveLength(before);
@@ -459,14 +459,14 @@ test("unchanged Home and folder selections preserve the unresolved create", asyn
 test("unchanged existing-folder recents retain retry identity across their controls", async ({ page, request }) => {
   const { form, posts, remote } = await historyFixture(page, request, true);
   const rows = form.locator(".launch-composer-recent-slots");
-  const original = rows.getByRole("button", { name: /model: default · effort: default · permissions: guarded$/ });
+  const original = rows.getByRole("button", { name: /Model: Default · Effort: Default · Permissions: Guarded$/ });
   await expect(original).toHaveCount(1);
   let attempts = Number(await form.getAttribute("data-history-activation-attempts"));
   await original.click();
   await expect(form).toHaveAttribute("data-history-activation-attempts", String(attempts + 1));
   await expectPlacementAuthority(form, remote, "/tmp");
-  await expect(form.getByRole("combobox", { name: "model", exact: true })).toHaveValue("harness default");
-  await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(form.getByRole("combobox", { name: "Model", exact: true })).toHaveValue("Harness default");
+  await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "Guarded", exact: true })).toHaveAttribute("aria-pressed", "true");
   expect(posts).toEqual([]);
   let previous = await submitPlacementRetry(form, posts);
   expect(previous.intent_key).toEqual(expect.any(String));
@@ -495,7 +495,7 @@ test("unchanged existing-folder recents retain retry identity across their contr
           await search.focus();
           await expect(search).toBeFocused();
           await search.fill("recent:codex");
-          const saved = form.getByRole("option", { name: /^Recent setup:.*model: default · effort: default · permissions: guarded$/ });
+          const saved = form.getByRole("option", { name: /^Recent setup:.*Model: Default · Effort: Default · Permissions: Guarded$/ });
           await expect(saved).toHaveCount(1);
           await saved.click();
           await expect(search).toHaveValue("");
@@ -512,13 +512,13 @@ test("unchanged existing-folder recents retain retry identity across their contr
     });
   }
 
-  const changed = rows.getByRole("button", { name: /model: placement-model · effort: default · permissions: guarded$/ });
+  const changed = rows.getByRole("button", { name: /Model: placement-model · Effort: Default · Permissions: Guarded$/ });
   await expect(changed, "the unfiltered model dimension must still offer the changed recent").toBeVisible();
   const before = posts.length;
   attempts = Number(await form.getAttribute("data-history-activation-attempts"));
   await changed.click();
   await expect(form).toHaveAttribute("data-history-activation-attempts", String(attempts + 1));
-  await expect(form.getByRole("combobox", { name: "model", exact: true })).toHaveValue("placement-model");
+  await expect(form.getByRole("combobox", { name: "Model", exact: true })).toHaveValue("placement-model");
   await expectPlacementAuthority(form, remote, "/tmp");
   expect(posts).toHaveLength(before);
   const next = await submitPlacementRetry(form, posts);
@@ -556,7 +556,7 @@ test("equal browse and current-directory choices preserve the unresolved create"
   await page.route(endpoint, browseRoute);
   try {
     await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
-    await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true }).click();
+    await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "Guarded", exact: true }).click();
     // historyFixture typed this path directly, without accepting history.
     // An equal browse therefore clears no previously invalid saved claim.
     await expect(form).toHaveAttribute("data-history-activation-attempts", "0");
@@ -581,7 +581,7 @@ test("equal browse and current-directory choices preserve the unresolved create"
       expect(browseBodies[before]).toEqual({ host: remote.id, cwd, expected_incarnation: remote.incarnation });
       await expect(form).toHaveAttribute("data-browse-reply-completions", String(completions + 1));
       const browser = form.locator(".launch-composer-browser");
-      await expect(browser.getByRole("button", { name: `use ${cwd}`, exact: true })).toBeVisible();
+      await expect(browser.getByRole("button", { name: `Use ${cwd}`, exact: true })).toBeVisible();
       await expectPlacementAuthority(form, remote, cwd);
       expect(posts, "directory observation must not create a session").toHaveLength(creates);
       return browser;
@@ -604,11 +604,11 @@ test("equal browse and current-directory choices preserve the unresolved create"
     expectPlacementRetry(previous, next);
     previous = next;
 
-    const browseButton = form.getByRole("button", { name: "browse this path", exact: true });
+    const browseButton = form.getByRole("button", { name: "Browse this path", exact: true });
     let browser = await readDirectory(root, () => browseButton.click());
     let attempts = Number(await form.getAttribute("data-browse-activation-attempts"));
     let creates = posts.length;
-    await browser.getByRole("button", { name: `use ${root}`, exact: true }).click();
+    await browser.getByRole("button", { name: `Use ${root}`, exact: true }).click();
     await expect(form).toHaveAttribute("data-browse-activation-attempts", String(attempts + 1));
     await expect(browser, "an accepted current-folder pick invalidates its observation").toHaveCount(0);
     await expectPlacementAuthority(form, remote, root);
@@ -633,7 +633,7 @@ test("equal browse and current-directory choices preserve the unresolved create"
     previous = next;
 
     browser = await readDirectory(child, () => browseButton.click());
-    const parentChoice = browser.getByRole("button", { name: `parent: ${root}`, exact: true });
+    const parentChoice = browser.getByRole("button", { name: `Parent: ${root}`, exact: true });
     await expect(parentChoice).toBeVisible();
     attempts = Number(await form.getAttribute("data-browse-activation-attempts"));
     creates = posts.length;
@@ -686,7 +686,7 @@ test("the launcher's folder follows each host's last launch until the user types
   await page.locator(".new-session-button").click();
   const form = page.locator(".create-session-form");
   const host = form.locator(".create-session-host");
-  const folder = form.getByLabel("folder", { exact: true });
+  const folder = form.getByLabel("Folder", { exact: true });
   await chooseLauncherHost(host, String(fixture.remote.id));
   await expect(folder).toHaveValue("/srv/remote-work");
   await chooseLauncherHost(host, String(fixture.local));

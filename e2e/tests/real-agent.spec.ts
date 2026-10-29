@@ -95,13 +95,13 @@ async function createSession(
   const form = page.locator(".create-session-form");
   await expect(form).toBeVisible();
   // An arbitrary command belongs to the command path.
-  await form.getByRole("tab", { name: "command", exact: true }).click();
-  await form.getByLabel("folder", { exact: true }).fill(cwd);
-  await form.getByLabel("agent command").fill(invocation);
+  await form.getByRole("tab", { name: "Command", exact: true }).click();
+  await form.getByLabel("Folder", { exact: true }).fill(cwd);
+  await form.getByLabel("Agent command").fill(invocation);
   await answerYolo(form);
   // Name is visible on the top action row now; find it by label rather
   // than by DOM position, which a future reorder could otherwise retarget.
-  await form.getByLabel("name (optional)").fill(title);
+  await form.getByLabel("Name (optional)").fill(title);
   const [response] = await Promise.all([
     page.waitForResponse(
       (r) => r.request().method() === "POST" && r.url().endsWith("/api/sessions"),

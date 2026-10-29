@@ -81,7 +81,7 @@ test("settings focus stays on its painted fill and descriptions stay with their 
         const close = dialog.getByRole("button", { name: "Close", exact: true });
         for (const field of [".checkout-root-field", ".checkout-post-clone-field"]) {
           await expect(dialog.locator(field).locator("input, textarea")).toBeEditable();
-          const save = dialog.locator(field).getByRole("button", { name: "save", exact: true });
+          const save = dialog.locator(field).getByRole("button", { name: "Save", exact: true });
           await expect(save).toHaveAttribute("aria-disabled", "true");
           await expect(save).toHaveCSS("font-size", await close.evaluate((element) => getComputedStyle(element).fontSize));
           await expect(save).toHaveCSS("color", await resolveToken(page, "--fg-2"));
@@ -1127,8 +1127,8 @@ test("settings saves and clears the all-hosts post-clone command", async ({ page
   await page.goto("/");
   const dialog = page.getByRole("dialog", { name: "settings", exact: true });
   const field = dialog.locator(".checkout-post-clone-field");
-  const command = field.getByRole("textbox", { name: "post-clone command", exact: true });
-  const save = field.getByRole("button", { name: "save", exact: true });
+  const command = field.getByRole("textbox", { name: "Post-clone command", exact: true });
+  const save = field.getByRole("button", { name: "Save", exact: true });
   const chosen = "  printf 'first'\nprintf 'second'  ";
   try {
     for (const value of [null, "", "  existing command\nnext line  "]) {
@@ -1174,7 +1174,7 @@ test("settings saves and clears the all-hosts post-clone command", async ({ page
       response.url().endsWith("/api/checkout-post-clone") && response.request().method() === "GET"
     );
     await save.click();
-    await expect(field.getByRole("status")).toHaveText("post-clone command saved");
+    await expect(field.getByRole("status")).toHaveText("Post-clone command saved");
     const refreshed = await refetched;
     expect(refreshed.ok(), await refreshed.text()).toBe(true);
     expect(await refreshed.json()).toEqual({ command: chosen });
@@ -1196,7 +1196,7 @@ test("settings saves and clears the all-hosts post-clone command", async ({ page
     await expect(command).toHaveValue(chosen);
     await command.fill(" \n\t ");
     await save.click();
-    await expect(field.getByRole("status")).toHaveText("post-clone command saved");
+    await expect(field.getByRole("status")).toHaveText("Post-clone command saved");
     expect(await read()).toEqual({ command: null });
     await dialog.getByRole("button", { name: "Close", exact: true }).click();
     await openSettings(page, "checkouts");
@@ -1229,8 +1229,8 @@ test("post-clone commands with carriage returns refuse edits but can be cleared"
     await page.goto("/");
     const dialog = page.getByRole("dialog", { name: "settings", exact: true });
     const field = dialog.locator(".checkout-post-clone-field");
-    const command = field.getByRole("textbox", { name: "post-clone command", exact: true });
-    const save = field.getByRole("button", { name: "save", exact: true });
+    const command = field.getByRole("textbox", { name: "Post-clone command", exact: true });
+    const save = field.getByRole("button", { name: "Save", exact: true });
     for (const stored of ["printf 'one\rtwo'", "printf 'one\r\ntwo'"]) {
       const seeded = await request.put("/api/checkout-post-clone", { data: { command: stored } });
       expect(seeded.ok(), await seeded.text()).toBe(true);
@@ -1257,13 +1257,13 @@ test("post-clone commands with carriage returns refuse edits but can be cleared"
         response.url().endsWith("/api/checkout-post-clone") && response.request().method() === "GET"
       );
       await save.click();
-      await expect(field.getByRole("status")).toHaveText("post-clone command saved");
+      await expect(field.getByRole("status")).toHaveText("Post-clone command saved");
       expect(await (await refetched).json()).toEqual({ command: null });
       expect(await readPostClone(request)).toEqual({ command: null });
       await expect(field.getByRole("alert")).toHaveCount(0);
       await command.fill("printf 'ordinary'");
       await save.click();
-      await expect(field.getByRole("status")).toHaveText("post-clone command saved");
+      await expect(field.getByRole("status")).toHaveText("Post-clone command saved");
       expect(await readPostClone(request)).toEqual({ command: "printf 'ordinary'" });
       await dialog.getByRole("button", { name: "Close", exact: true }).click();
     }
@@ -1305,8 +1305,8 @@ test("post-clone command stays locked until its initial read completes", async (
     await openSettings(page, "checkouts");
     await reading;
     const field = page.locator(".checkout-post-clone-field");
-    const command = field.getByRole("textbox", { name: "post-clone command", exact: true });
-    const save = field.getByRole("button", { name: "save", exact: true });
+    const command = field.getByRole("textbox", { name: "Post-clone command", exact: true });
+    const save = field.getByRole("button", { name: "Save", exact: true });
     await expect(command).not.toBeEditable();
     await expect(command).toHaveValue("");
     await expect(save).toHaveAttribute("aria-disabled", "true");
@@ -1324,7 +1324,7 @@ test("post-clone command stays locked until its initial read completes", async (
     await save.dispatchEvent("click");
     await command.fill("printf 'edited after load'");
     await save.click();
-    await expect(field.getByRole("status")).toHaveText("post-clone command saved");
+    await expect(field.getByRole("status")).toHaveText("Post-clone command saved");
     expect(writes, "saves go out in click order, so only the edited one was sent").toBe(1);
   } finally {
     release();
@@ -1358,13 +1358,13 @@ test("a pending post-clone save orders reopened settings before the next save", 
     await openSettings(page, "checkouts");
     const dialog = page.getByRole("dialog", { name: "settings", exact: true });
     const field = dialog.locator(".checkout-post-clone-field");
-    const command = field.getByRole("textbox", { name: "post-clone command", exact: true });
+    const command = field.getByRole("textbox", { name: "Post-clone command", exact: true });
     await expect(command).toBeEditable();
     await expect(command).toHaveValue(previous.command ?? "");
     await command.fill(chosen);
-    await field.getByRole("button", { name: "save", exact: true }).click();
+    await field.getByRole("button", { name: "Save", exact: true }).click();
     await submitted;
-    const pendingSave = field.getByRole("button", { name: "saving…", exact: true });
+    const pendingSave = field.getByRole("button", { name: "Saving…", exact: true });
     await expect(pendingSave).toBeFocused();
     await expect(pendingSave).toHaveAttribute("aria-disabled", "true");
     await expect(command).not.toBeEditable();
@@ -1393,13 +1393,13 @@ test("a pending post-clone save orders reopened settings before the next save", 
     await expect(command).toHaveValue(chosen);
     const newer = "printf 'newer save wins'";
     await command.fill(newer);
-    await field.getByRole("button", { name: "save", exact: true }).click();
-    await expect(field.getByRole("status")).toHaveText("post-clone command saved");
+    await field.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(field.getByRole("status")).toHaveText("Post-clone command saved");
     expect(await readPostClone(request)).toEqual({ command: newer });
     await selectSettingsSection(page, "hosts");
     await selectSettingsSection(page, "checkouts");
     await expect(command).toHaveValue(newer);
-    await expect(field.getByRole("status")).toHaveText("post-clone command saved");
+    await expect(field.getByRole("status")).toHaveText("Post-clone command saved");
     expect(await readPostClone(request)).toEqual({ command: newer });
   } finally {
     release();
@@ -1427,8 +1427,8 @@ test("settings saves and clears the all-hosts checkout folder", async ({ page, r
   const read = () => readCheckoutRoot(request);
   const previous = await read();
   const field = dialog.locator(".checkout-root-field");
-  const folder = field.getByRole("textbox", { name: "checkout folder", exact: true });
-  const save = field.getByRole("button", { name: "save", exact: true });
+  const folder = field.getByRole("textbox", { name: "Checkout folder", exact: true });
+  const save = field.getByRole("button", { name: "Save", exact: true });
   const chosen = "~/managed-checkouts";
   const submitted: Request[] = [];
   let bodyFailed = false;
@@ -1459,7 +1459,7 @@ test("settings saves and clears the all-hosts checkout folder", async ({ page, r
       response.url().endsWith("/api/checkout-root") && response.request().method() === "GET"
     );
     await save.click();
-    await expect(field.getByRole("status")).toHaveText("checkout folder saved");
+    await expect(field.getByRole("status")).toHaveText("Checkout folder saved");
     const refreshed = await refetched;
     expect(refreshed.ok(), await refreshed.text()).toBe(true);
     expect(await refreshed.json()).toEqual({ root: chosen });
@@ -1468,7 +1468,7 @@ test("settings saves and clears the all-hosts checkout folder", async ({ page, r
     await selectSettingsSection(page, "hosts");
     await selectSettingsSection(page, "checkouts");
     await expect(folder).toHaveValue(chosen);
-    await expect(field.getByRole("status")).toHaveText("checkout folder saved");
+    await expect(field.getByRole("status")).toHaveText("Checkout folder saved");
     expect(await read()).toEqual({ root: chosen });
     for (const width of [1280, 390]) {
       await page.setViewportSize({ width, height: 900 });
@@ -1485,7 +1485,7 @@ test("settings saves and clears the all-hosts checkout folder", async ({ page, r
     await expect(folder).toBeEditable();
     await folder.fill("");
     await save.click();
-    await expect(field.getByRole("status")).toHaveText("checkout folder saved");
+    await expect(field.getByRole("status")).toHaveText("Checkout folder saved");
     expect(await read()).toEqual({ root: null });
     await dialog.getByRole("button", { name: "Close", exact: true }).click();
     await openSettings(page, "checkouts");
@@ -1526,8 +1526,8 @@ test("checkout drafts survive switching sections and are discarded on close", as
   });
   await page.goto("/");
   const dialog = await openSettings(page, "checkouts");
-  const folder = dialog.getByRole("textbox", { name: "checkout folder", exact: true });
-  const command = dialog.getByRole("textbox", { name: "post-clone command", exact: true });
+  const folder = dialog.getByRole("textbox", { name: "Checkout folder", exact: true });
+  const command = dialog.getByRole("textbox", { name: "Post-clone command", exact: true });
   await expect(folder).toBeEditable();
   await expect(command).toBeEditable();
   await expect(folder).toHaveValue(previousRoot.root ?? "");
@@ -1579,7 +1579,7 @@ test("an untouched checkout folder save writes nothing and edited paths are trim
     await page.goto("/");
     await openSettings(page, "checkouts");
     const field = page.getByRole("dialog", { name: "settings", exact: true }).locator(".checkout-root-field");
-    const folder = field.getByRole("textbox", { name: "checkout folder", exact: true });
+    const folder = field.getByRole("textbox", { name: "Checkout folder", exact: true });
     await expect(folder).toBeEditable();
     await expect(folder).toHaveValue(literal);
     /** Each Save needs its own terminal reply; an old success notice cannot
@@ -1589,14 +1589,14 @@ test("an untouched checkout folder save writes nothing and edited paths are trim
       const finished = page.waitForResponse(response =>
         response.url().endsWith("/api/checkout-root") && response.request().method() === "PUT"
       );
-      await field.getByRole("button", { name: "save", exact: true }).click();
+      await field.getByRole("button", { name: "Save", exact: true }).click();
       expect((await finished).ok()).toBe(true);
-      await expect(field.getByRole("status")).toHaveText("checkout folder saved");
+      await expect(field.getByRole("status")).toHaveText("Checkout folder saved");
     };
     const outside = await request.put("/api/checkout-root", { data: { root: "~/changed-outside" } });
     expect(outside.ok(), "premise: the folder changes while Settings shows the old one").toBe(true);
     await expect(folder).toHaveValue(literal);
-    const save = field.getByRole("button", { name: "save", exact: true });
+    const save = field.getByRole("button", { name: "Save", exact: true });
     await expect(save).toHaveAttribute("aria-disabled", "true");
     // Playwright waits on aria-disabled buttons; force the click a user can still make.
     await save.click({ force: true });
@@ -1649,13 +1649,13 @@ test("a pending checkout folder save survives closing settings", async ({ page, 
     await page.goto("/");
     await openSettings(page, "checkouts");
     const dialog = page.getByRole("dialog", { name: "settings", exact: true });
-    const folder = dialog.getByRole("textbox", { name: "checkout folder", exact: true });
+    const folder = dialog.getByRole("textbox", { name: "Checkout folder", exact: true });
     await expect(folder).toBeEditable();
     await expect(folder).toHaveValue(previous.root ?? "");
     await folder.fill("~/save-survives-close");
-    await dialog.locator(".checkout-root-field").getByRole("button", { name: "save", exact: true }).click();
+    await dialog.locator(".checkout-root-field").getByRole("button", { name: "Save", exact: true }).click();
     await submitted;
-    const pendingSave = dialog.getByRole("button", { name: "saving…", exact: true });
+    const pendingSave = dialog.getByRole("button", { name: "Saving…", exact: true });
     await expect(pendingSave).toBeFocused();
     await expect(pendingSave).toHaveAttribute("aria-disabled", "true");
     expect(await readCheckoutRoot(request)).toEqual(previous);

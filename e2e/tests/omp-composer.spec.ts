@@ -31,7 +31,7 @@ test("the OMP composer offers OMP's own vocabulary and the row shows the effecti
   await expect(form).toBeVisible();
   const harnesses = form.locator(".launch-composer-harness-choice");
   const permissions = form.locator(".launch-composer-permissions-choice");
-  const effort = form.getByRole("combobox", { name: "effort", exact: true });
+  const effort = form.getByRole("combobox", { name: "Effort", exact: true });
   const status = form.getByRole("status");
 
   // Harness selection: the OMP chip exists, is searchable by its word, and
@@ -47,13 +47,13 @@ test("the OMP composer offers OMP's own vocabulary and the row shows the effecti
 
   // OMP can defer to its configured model without changing its effort or
   // permission vocabulary.
-  const model = form.getByRole("combobox", { name: "model", exact: true });
-  await expect(model).toHaveValue("harness default");
+  const model = form.getByRole("combobox", { name: "Model", exact: true });
+  await expect(model).toHaveValue("Harness default");
   await model.focus();
   await expect(
     form
       .locator("#launch-composer-model-results")
-      .getByRole("option", { name: "harness default", exact: true }),
+      .getByRole("option", { name: "Harness default", exact: true }),
   ).toBeVisible();
 
   // Eight choices belong in a native dropdown. Its vocabulary remains OMP's
@@ -61,7 +61,7 @@ test("the OMP composer offers OMP's own vocabulary and the row shows the effecti
   await expect(effort).toBeVisible();
   await expect(effort).toHaveValue("default");
   const levels = ["default", "off", "minimal", "low", "medium", "high", "xhigh", "max"];
-  await expect(effort.locator("option")).toHaveText(levels);
+  await expect(effort.locator("option")).toHaveText(levels.map(level => level[0].toUpperCase() + level.slice(1)));
   expect(await effort.locator("option").evaluateAll((options) => options.map((option) => (option as HTMLOptionElement).value)))
     .toEqual(levels);
 
@@ -69,11 +69,11 @@ test("the OMP composer offers OMP's own vocabulary and the row shows the effecti
   // a new launch defaults to guarded. Goose-only approval modes are not offered. The
   // choices are named rather than counted, because the section also holds
   // the permission help button.
-  for (const choice of ["guarded", "yolo", "custom", "approve"]) {
+  for (const choice of ["Guarded", "YOLO", "Custom", "Approve"]) {
     await expect(permissions.getByRole("button", { name: choice, exact: true })).toBeVisible();
   }
-  await expect(permissions.getByRole("button", { name: "guarded", exact: true })).toHaveAttribute("aria-pressed", "true");
-  for (const absent of ["smart approve", "chat"]) {
+  await expect(permissions.getByRole("button", { name: "Guarded", exact: true })).toHaveAttribute("aria-pressed", "true");
+  for (const absent of ["Smart approve", "Chat"]) {
     await expect(permissions.getByRole("button", { name: absent, exact: true })).toHaveCount(0);
   }
 
@@ -87,9 +87,9 @@ test("the OMP composer offers OMP's own vocabulary and the row shows the effecti
   await form.getByRole("option", { name: "x-ai/grok-4.6", exact: true }).click();
   await expect(model).toHaveValue("x-ai/grok-4.6");
   await effort.selectOption("max");
-  await permissions.getByRole("button", { name: "approve", exact: true }).click();
+  await permissions.getByRole("button", { name: "Approve", exact: true }).click();
   await expect(status).toHaveCount(0);
-  await form.getByLabel("folder", { exact: true }).fill("/tmp");
+  await form.getByLabel("Folder", { exact: true }).fill("/tmp");
   await expect(form.locator(".create-session-submit")).toBeEnabled();
   await page.route("**/api/sessions", async (route) => {
     if (route.request().method() !== "POST") return route.continue();
@@ -158,7 +158,7 @@ test("an OMP session row shows the OMP glyph and its actual permission", async (
     approveRow.locator(".session-agent svg.permission-glyph[data-glyph='shielded']"),
   ).toBeVisible();
 
-  const approveDescription = /^OMP — approve: the agent asks before every tool action\n\n[\s\S]*\n\nLaunched with: omp$/;
+  const approveDescription = /^OMP — Approve: the agent asks before every tool action\n\n[\s\S]*\n\nLaunched with: omp$/;
   await expect(approveRow.locator(".session-agent")).toHaveAttribute("data-tooltip", approveDescription);
   await expect(approveRow.locator(".permission-glyph").locator("..")).toHaveAttribute("data-tooltip", approveDescription);
   await expect(approveRow.locator(".session-agent .visually-hidden")).toHaveText(approveDescription);

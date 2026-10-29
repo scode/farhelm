@@ -74,7 +74,7 @@ const MINT_ATTEMPTS: usize = 3;
 
 /// Shared by visible invalidation and both submission checks so an explicit
 /// destination correction can retire only this refusal, not an unrelated error.
-const REMEMBERED_DESTINATION_CHANGED: &str = "the remembered folder belongs to a different installation; choose the host or folder again before launching";
+const REMEMBERED_DESTINATION_CHANGED: &str = "The remembered folder belongs to a different installation; choose the host or folder again before launching";
 
 /// An empty field means no prefix; every nonempty draft must parse before a
 /// launch or template save so an unfinished quote cannot silently disappear.
@@ -82,7 +82,9 @@ fn wrapper_words(text: &str) -> Result<Option<Vec<String>>, String> {
     if text.is_empty() {
         Ok(None)
     } else {
-        farhelm_proto::split_wrapper_prefix(text).map(Some)
+        farhelm_proto::split_wrapper_prefix(text)
+            .map(Some)
+            .map_err(crate::local_validation_notice)
     }
 }
 
@@ -101,7 +103,7 @@ fn remembered_wrapper(preferences: &api::Preferences, harness: Option<LaunchHarn
 /// A malformed custom editor needs its own reason, even when catalog
 /// compatibility also rejects the resulting incomplete selection.
 const CUSTOM_PERMISSION_FLAGS_REFUSAL: &str =
-    "enter valid custom permission flags before launching";
+    "Enter valid custom permission flags before launching";
 
 /// The first unmet launch prerequisite, shared by the button and its refusal.
 ///
@@ -128,29 +130,29 @@ impl LaunchPrerequisites {
     /// Ordering keeps transient operation locks ahead of draft corrections.
     fn refusal(&self) -> Option<&'static str> {
         if self.busy {
-            Some("wait for the current operation to finish before launching")
+            Some("Wait for the current operation to finish before launching")
         } else if self.saving_template {
-            Some("finish or cancel saving the template before launching")
+            Some("Finish or cancel saving the template before launching")
         } else if !self.host_available {
-            Some("choose a connected host before launching")
+            Some("Choose a connected host before launching")
         } else if self.github_search {
-            Some("select a GitHub repository before launching")
+            Some("Select a GitHub repository before launching")
         } else if !self.destination_ready {
-            Some("wait for a current checkout preview before launching")
+            Some("Wait for a current checkout preview before launching")
         } else if !self.remembered_destination_valid {
             Some(REMEMBERED_DESTINATION_CHANGED)
         } else if self.folder_default_waiting {
-            Some("wait for this host's last folder before launching")
+            Some("Wait for this host's last folder before launching")
         } else if self.needs_harness {
-            Some("choose a structured harness before launching")
+            Some("Choose a structured harness before launching")
         } else if self.invalid_permission_flags {
             Some(CUSTOM_PERMISSION_FLAGS_REFUSAL)
         } else if self.incompatible_choice {
             Some(
-                "this saved choice is no longer supported by the current catalog; choose a compatible model or effort",
+                "This saved choice is no longer supported by the current catalog; choose a compatible model or effort",
             )
         } else if self.invalid_wrapper {
-            Some("correct the wrapper prefix before launching")
+            Some("Correct the wrapper prefix before launching")
         } else {
             None
         }
@@ -439,7 +441,7 @@ fn permission_mode_name(permission: Option<LaunchPermission>) -> &'static str {
         Some(LaunchPermission::Approve) => "Approve",
         Some(LaunchPermission::SmartApprove) => "Smart approve",
         Some(LaunchPermission::Chat) => "Chat",
-        None => "agent's own setting",
+        None => "Agent's own setting",
     }
 }
 
@@ -697,7 +699,7 @@ fn validated_template_batch(
             Some(TemplateDestination::Github(repo)) => Some(
                 crate::github_checkout::GithubRepo::parse(repo).map_err(|error| {
                     format!(
-                        "template {:?} was not applied: its destination {repo:?} is not a GitHub repository ({error})",
+                        "Template {:?} was not applied: its destination {repo:?} is not a GitHub repository ({error})",
                         template.name
                     )
                 })?,
@@ -2237,26 +2239,26 @@ fn search_result_tooltip(
             display_peer(&crate::launch_composer::selection_summary(&entry.selection)),
         ),
         ComposerSearchResult::Name(name) => {
-            format!("use \"{}\" as the session's name", display_peer(name))
+            format!("Use \"{}\" as the session's name", display_peer(name))
         }
-        ComposerSearchResult::Host(_) => "run the session on this host".to_string(),
+        ComposerSearchResult::Host(_) => "Run the session on this host".to_string(),
         ComposerSearchResult::UsePath(_) | ComposerSearchResult::Folder(_) => {
-            "use this folder: the session will start here".to_string()
+            "Use this folder: the session will start here".to_string()
         }
-        ComposerSearchResult::BrowsePath(_) => "list the folders under this path".to_string(),
-        ComposerSearchResult::Harness(_) => "use this agent for the session".to_string(),
+        ComposerSearchResult::BrowsePath(_) => "List the folders under this path".to_string(),
+        ComposerSearchResult::Harness(_) => "Use this agent for the session".to_string(),
         ComposerSearchResult::Template(_) => {
-            "apply this template's settings to the draft".to_string()
+            "Apply this template's settings to the draft".to_string()
         }
         ComposerSearchResult::Github(_) => {
-            "start in a managed checkout of this repository".to_string()
+            "Start in a managed checkout of this repository".to_string()
         }
-        ComposerSearchResult::Model { .. } => "use this model for the session".to_string(),
+        ComposerSearchResult::Model { .. } => "Use this model for the session".to_string(),
         ComposerSearchResult::Effort(Some(_)) => {
-            "use this reasoning effort for the session".to_string()
+            "Use this reasoning effort for the session".to_string()
         }
         ComposerSearchResult::Effort(None) => {
-            "use the agent's default reasoning effort".to_string()
+            "Use the agent's default reasoning effort".to_string()
         }
         ComposerSearchResult::Permissions(ComposerPermission::Guarded) => {
             crate::launch_composer::permission_help(
@@ -2265,7 +2267,7 @@ fn search_result_tooltip(
             )
         }
         ComposerSearchResult::Permissions(ComposerPermission::OwnSetting) => {
-            "use the agent's own setting, which Farhelm cannot force or classify".to_string()
+            "Use the agent's own setting, which Farhelm cannot force or classify".to_string()
         }
         ComposerSearchResult::Permissions(ComposerPermission::Custom) => {
             crate::launch_composer::permission_tooltip(LaunchPermission::Custom).into()
@@ -2851,14 +2853,14 @@ pub(super) fn CreateSessionForm(
         .as_ref()
         .and_then(|prefill| match *clone_host_state.read() {
             CloneHostState::Unconfirmable if prefill.host.is_none() => Some(
-                "the session you cloned predates host tracking, so its host could not be \
+                "The session you cloned predates host tracking, so its host could not be \
                  confirmed and the ordinary host default is used — check the host below",
             ),
             // Worded for the SOURCE session rather than "the session you
             // cloned": a replace-with prefill takes this same path, and its
             // user did not clone anything.
             CloneHostState::Unconfirmable => Some(
-                "the source session reports a different installation now, so its host was \
+                "The source session reports a different installation now, so its host was \
                  not carried over here — check the host below",
             ),
             CloneHostState::Waiting | CloneHostState::Bound | CloneHostState::UserTookOver => None,
@@ -2918,7 +2920,7 @@ pub(super) fn CreateSessionForm(
                 .or_else(|| prefill.command.as_ref().and_then(|command| command.agent))
         })
         .map(crate::launch_composer::harness_label)
-        .unwrap_or("unknown agent");
+        .unwrap_or("Unknown agent");
     let selected = if restart_mode {
         prefill.as_ref().and_then(|prefill| prefill.host)
     } else {
@@ -3408,7 +3410,8 @@ pub(super) fn CreateSessionForm(
     };
     let restart_command_problem = restart_command
         .as_ref()
-        .and_then(|command| command.validate().err());
+        .and_then(|command| command.validate().err())
+        .map(crate::local_validation_notice);
     let (command_changed, resume_changed, yolo_changed) =
         match (&restart_command, &restart_baseline) {
             (Some(command), Some(api::RestartEdit::Command(stored))) => (
@@ -3613,7 +3616,7 @@ pub(super) fn CreateSessionForm(
     let selected_host_label = selected
         .and_then(|id| hosts.iter().find(|host| host.id == id))
         .map(HostOption::label)
-        .unwrap_or_else(|| "unavailable host".to_string());
+        .unwrap_or_else(|| "Unavailable host".to_string());
     // Confirmation owns raw peer text and escapes it at its own rendering
     // boundary. Keep that snapshot separate from this form's display label.
     let host_label_for_restart = if restart_mode {
@@ -3656,7 +3659,7 @@ pub(super) fn CreateSessionForm(
         }
         let selection = draft.snapshot().editing_selection(harness);
         (!crate::launch_composer::selection_fits_catalog(&selection, catalog_answer.as_deref())).then_some(
-            "this saved choice is no longer supported by the current catalog; choose a compatible model or effort",
+            "This saved choice is no longer supported by the current catalog; choose a compatible model or effort",
         )
     });
     // Peer-owned values remain separate directional runs. The launch context
@@ -3681,18 +3684,18 @@ pub(super) fn CreateSessionForm(
     // summary, so replacement and a stop-first restart remain explicit.
     let submit_verb = if restart_mode {
         if restart_stop_first {
-            "stop and restart"
+            "Stop and restart"
         } else {
-            "restart"
+            "Restart"
         }
     } else if is_replace_with {
-        "replace"
+        "Replace"
     } else {
-        "launch"
+        "Launch"
     };
     // A recent setup's accessible name replaces its visible content, hint
     // included, so in Replace with the name carries the verb itself.
-    let recent_name_prefix = if is_replace_with { "replace: " } else { "" };
+    let recent_name_prefix = if is_replace_with { "Replace: " } else { "" };
     // What pressing "replace" stops, drawn from one render: the warning under
     // the button, and the precondition a press or answer drawn by this render
     // passes to the submit (see `replace_with_warning`).
@@ -3757,7 +3760,7 @@ pub(super) fn CreateSessionForm(
         }
         let next_preview = match result {
             Ok(preview) if authority.accepts(&live, &preview) => PreviewState::Ready { authority: authority.clone(), preview },
-            Ok(_) => PreviewState::Failed { authority: authority.clone(), message: "the preview is stale or belongs to a different host installation; select the repository again".into() },
+            Ok(_) => PreviewState::Failed { authority: authority.clone(), message: "The preview is stale or belongs to a different host installation; select the repository again".into() },
             Err(failure) => {
                 // This is the existing system edit: authoritative occupancy may
                 // advance a default while busy, but never retire a retry key.
@@ -3814,22 +3817,22 @@ pub(super) fn CreateSessionForm(
             && wrapper_words(&structured_wrapper()).is_err(),
     };
     let launch_refusal = if restart_mode && !restart_host_confirmed {
-        Some("the source host installation cannot be confirmed; close and reopen restart with")
+        Some("The source host installation cannot be confirmed; close and reopen restart with")
     } else if restart_mode && !selected_host_available {
-        Some("the source host is unavailable; wait for it to reconnect before restarting")
+        Some("The source host is unavailable; wait for it to reconnect before restarting")
     } else {
         launch_prerequisites.refusal()
     }.or_else(|| {
         if !restart_mode { return None; }
         let current = draft.snapshot();
         if model_open() && !model_draft().is_empty() || model_draft_error().is_some() {
-            Some("choose a model before restarting")
+            Some("Choose a model before restarting")
         } else if conversation_required && current.conversation().is_empty() {
-            Some("enter a conversation to restart")
+            Some("Enter a conversation to restart")
         } else if current.restart_edit().as_ref() == restart_baseline.as_ref() {
-            Some("change a setting before restarting")
+            Some("Change a setting before restarting")
         } else if matches!(current.restart_edit(), Some(api::RestartEdit::Command(ref command)) if command.validate().is_err()) {
-            Some("correct the command before restarting")
+            Some("Correct the command before restarting")
         } else { None }
     });
     let displayed_preview = retry_binding
@@ -3844,10 +3847,10 @@ pub(super) fn CreateSessionForm(
     let summary_folder = match destination_draft() {
         DestinationDraft::Existing { cwd } => display_peer(&cwd),
         DestinationDraft::GithubInput { query } if query.trim().is_empty() => {
-            "managed checkout (select a repository)".to_string()
+            "Managed checkout (select a repository)".to_string()
         }
         DestinationDraft::GithubInput { query } => format!(
-            "managed checkout: {} (select a repository)",
+            "Managed checkout: {} (select a repository)",
             display_peer(&query)
         ),
         DestinationDraft::Github { repo, .. } => displayed_preview.as_ref().map_or_else(
@@ -3860,7 +3863,7 @@ pub(super) fn CreateSessionForm(
     // retry binding), so the destination field must not echo that old seed.
     let (folder_field_value, folder_placeholder, checkout_mode) = match destination_draft() {
         DestinationDraft::Existing { .. } => (cwd(), "", false),
-        DestinationDraft::GithubInput { .. } => (String::new(), "select a repository", true),
+        DestinationDraft::GithubInput { .. } => (String::new(), "Select a repository", true),
         DestinationDraft::Github { .. } => (
             displayed_preview
                 .as_ref()
@@ -3869,9 +3872,9 @@ pub(super) fn CreateSessionForm(
             if displayed_preview.is_some() {
                 ""
             } else if matches!(preview_state(), PreviewState::Failed { .. }) {
-                "checkout preview unavailable"
+                "Checkout preview unavailable"
             } else {
-                "waiting for checkout preview"
+                "Waiting for checkout preview"
             },
             true,
         ),
@@ -3925,7 +3928,7 @@ pub(super) fn CreateSessionForm(
         .flatten();
     let summary_model = structured_model()
         .map(|model| display_peer(&model))
-        .unwrap_or_else(|| "default".to_string());
+        .unwrap_or_else(|| "Default".to_string());
     let summary_prompt_lines = active_prompt(
         farhelm_proto::launcher::LauncherKind::Agent,
         structured_harness(),
@@ -3933,17 +3936,18 @@ pub(super) fn CreateSessionForm(
     )
     .filter(|text| !text.is_empty())
     .map(|text| text.split('\n').count());
-    let summary_effort = structured_effort()
-        .map(crate::launch_composer::effort_value)
-        .unwrap_or("default");
-    let summary_permission = match structured_harness() {
+    let summary_effort = crate::launch_composer::effort_label(structured_effort());
+    // Display names are independent from permission semantics: changing case
+    // must not decide whether the footer paints the YOLO warning.
+    let summary_permission_choice = match structured_harness() {
         Some(harness) => {
             crate::launch_composer::normalized_permissions(harness, structured_permissions())
         }
         None => structured_permissions(),
-    }
-    .map(crate::launch_composer::permission_value)
-    .unwrap_or("default");
+    };
+    let summary_permission = summary_permission_choice
+        .map(crate::launch_composer::permission_display_value)
+        .unwrap_or("Default");
     let catalog_for_submit = catalog_answer.clone();
     let catalog_for_harness = catalog_answer.clone();
     // Pointer activation and Enter both apply exactly the same saved draft.
@@ -4154,7 +4158,7 @@ pub(super) fn CreateSessionForm(
                 match response {
                     Ok(reply) if authority.accepts(&live, &reply) => Some(Ok(reply)),
                     Ok(_) => Some(Err(
-                        "repository suggestions belong to a different host installation"
+                        "Repository suggestions belong to a different host installation"
                             .to_string(),
                     )),
                     Err(error) => Some(Err(error)),
@@ -4182,7 +4186,7 @@ pub(super) fn CreateSessionForm(
             .map(|text| text.raw().to_owned())
             .or_else(|| {
                 reply.truncated.then(|| {
-                    "repository search is incomplete; a valid owner/repo can still be selected"
+                    "Repository search is incomplete; a valid owner/repo can still be selected"
                         .into()
                 })
             }),
@@ -4444,7 +4448,7 @@ pub(super) fn CreateSessionForm(
             && let Some(Err(message)) = launch_templates.read().as_ref()
         {
             template_error.set(Some(format!(
-                "couldn't load templates: {message}; search tl: and retry"
+                "Couldn't load templates: {message}; search tl: and retry"
             )));
             pending_initial_action.set(None);
             return;
@@ -4615,7 +4619,7 @@ pub(super) fn CreateSessionForm(
                 auto_launch_pending.set(false);
                 quick_launch_hidden.set(false);
                 preparation_error.set(Some(format!(
-                    "couldn't prepare quick launch: the host list failed: {message}"
+                    "Couldn't prepare quick launch: the host list failed: {message}"
                 )));
                 return;
             }
@@ -4656,7 +4660,7 @@ pub(super) fn CreateSessionForm(
                     auto_launch_pending.set(false);
                     quick_launch_hidden.set(false);
                     preparation_error.set(Some(
-                        "couldn't prepare quick launch: this host's recent setups could not be read, so its last folder is unknown; check the folder and launch".to_string(),
+                        "Couldn't prepare quick launch: this host's recent setups could not be read, so its last folder is unknown; check the folder and launch".to_string(),
                     ));
                 }
                 return;
@@ -4718,13 +4722,13 @@ pub(super) fn CreateSessionForm(
     let host_notes = rsx! {
         if choice_vanished {
             div { class: "create-session-host-note",
-                "the host you picked is no longer registered, so this create would go to the \
+                "The host you picked is no longer registered, so this create would go to the \
                  one selected now"
             }
         }
         if selected.is_some() && !selected_host_available {
             div { class: "create-session-host-note",
-                "the selected host is unavailable; choose a connected host before launching"
+                "The selected host is unavailable; choose a connected host before launching"
             }
         }
         if !remembered_destination_valid {
@@ -4932,12 +4936,12 @@ pub(super) fn CreateSessionForm(
                 // empty-command refusal visible at Launch. Accepted fresh
                 // retries keep their existing exemption from this check.
                 if command_requires_text && current.invocation().is_empty() {
-                    error.set(Some("enter an agent command before launching".to_string()));
+                    error.set(Some("Enter an agent command before launching".to_string()));
                     return;
                 }
                 let Some(launch) = current.launch_intent() else {
                     error.set(Some(
-                        "say whether this command runs in YOLO mode (YOLO) before \
+                        "Say whether this command runs in YOLO mode (YOLO) before \
                          launching"
                             .to_string(),
                     ));
@@ -4959,7 +4963,7 @@ pub(super) fn CreateSessionForm(
                 effective_create_host(&hosts, chosen_host.peek().to_owned(), open_host.as_ref())
             };
             if !restart_host_confirmed {
-                error.set(Some("restart keeps the source session's host, but its installation cannot be confirmed; close and reopen restart with once that host is back".into()));
+                error.set(Some("Restart keeps the source session's host, but its installation cannot be confirmed; close and reopen restart with once that host is back".into()));
                 return;
             }
             if !remembered_destination_matches(
@@ -4982,7 +4986,7 @@ pub(super) fn CreateSessionForm(
             // the request can bind its idempotency and connection claims.
             if !target_matches_selection(selected_now, &hosts, target_now.as_ref()) {
                 error.set(Some(
-                    "the target host changed while preparing this request, so nothing was sent — check the target and try again"
+                    "The target host changed while preparing this request, so nothing was sent — check the target and try again"
                         .to_string(),
                 ));
                 drop(op_guard);
@@ -5027,13 +5031,13 @@ pub(super) fn CreateSessionForm(
                     matches!(*clone_host_state.peek(), CloneHostState::Unconfirmable);
                 error.set(Some(
                     if unconfirmable {
-                        "replace with keeps the source session's own host, but that host \
+                        "Replace with keeps the source session's own host, but that host \
                          could not be confirmed (the source reports a different installation \
                          now), so this create was not sent — replace with cannot proceed \
                          until the source's host is back; clone is the way to start a session \
                          elsewhere"
                     } else {
-                        "replace with keeps the source session's own host, so this create was \
+                        "Replace with keeps the source session's own host, so this create was \
                          not sent — clone is the way to start a session on a different host"
                     }
                     .to_string(),
@@ -5059,9 +5063,9 @@ pub(super) fn CreateSessionForm(
                 checkout: None,
             }) else {
                 error.set(Some(if hosts_loaded {
-                    "this helm reported no hosts at all, so this request cannot be sent".to_string()
+                    "This helm reported no hosts at all, so this request cannot be sent".to_string()
                 } else {
-                    "the host list has not loaded yet, so this request was not sent — it \
+                    "The host list has not loaded yet, so this request was not sent — it \
                          would have gone to whichever host the helm picked rather than one \
                          you chose"
                         .to_string()
@@ -5081,8 +5085,9 @@ pub(super) fn CreateSessionForm(
             }
             if let Some(message) = &binding.prompt {
                 let refusal = farhelm_proto::launcher::check_initial_prompt(message).err()
+                    .map(crate::local_validation_notice)
                     .or_else(|| match &binding.agent {
-                        LaunchIntent::Structured(selection) if !selection.harness.supports_initial_prompt(binding.conversation.is_some()) => Some("this agent cannot combine an initial prompt with a named conversation".into()),
+                        LaunchIntent::Structured(selection) if !selection.harness.supports_initial_prompt(binding.conversation.is_some()) => Some("This agent cannot combine an initial prompt with a named conversation".into()),
                         _ => None,
                     });
                 if let Some(refusal) = refusal {
@@ -5094,7 +5099,7 @@ pub(super) fn CreateSessionForm(
                 let _ = destination_draft();
                 draft.snapshot().destination().repo().is_some()
             } {
-                error.set(Some("named conversations cannot start in a new managed checkout; choose an existing folder".into()));
+                error.set(Some("Named conversations cannot start in a new managed checkout; choose an existing folder".into()));
                 drop(op_guard);
                 return;
             }
@@ -5121,11 +5126,11 @@ pub(super) fn CreateSessionForm(
                     return;
                 }
                 if *conversation_required && current.conversation().is_empty() {
-                    error.set(Some("enter a conversation to restart".into()));
+                    error.set(Some("Enter a conversation to restart".into()));
                     return;
                 }
                 if model_open() && !model_draft().is_empty() || model_draft_error().is_some() {
-                    error.set(Some("choose a model before restarting".into()));
+                    error.set(Some("Choose a model before restarting".into()));
                     return;
                 }
                 match &edit {
@@ -5140,7 +5145,7 @@ pub(super) fn CreateSessionForm(
                     }
                     api::RestartEdit::Command(command) => {
                         if let Err(reason) = command.validate() {
-                            error.set(Some(reason));
+                            error.set(Some(crate::local_validation_notice(reason)));
                             return;
                         }
                     }
@@ -5196,7 +5201,7 @@ pub(super) fn CreateSessionForm(
                     }
                     if create_target.peek().as_ref() != target_now.as_ref() {
                         launch_attempted.set(true);
-                        error.set(Some("the source host changed while preparing restart; close and reopen restart with".into()));
+                        error.set(Some("The source host changed while preparing restart; close and reopen restart with".into()));
                         return;
                     }
                     let same_launch = bridge
@@ -5206,7 +5211,7 @@ pub(super) fn CreateSessionForm(
                     if !same_launch {
                         launch_attempted.set(true);
                         error.set(Some(
-                            "this session's launch settings changed; close and reopen restart with"
+                            "This session's launch settings changed; close and reopen restart with"
                                 .into(),
                         ));
                         return;
@@ -5288,7 +5293,7 @@ pub(super) fn CreateSessionForm(
             match draft.snapshot().destination() {
                 DestinationDraft::Existing { .. } => {}
                 DestinationDraft::GithubInput { .. } => {
-                    error.set(Some("select a GitHub repository before launching".into()));
+                    error.set(Some("Select a GitHub repository before launching".into()));
                     return;
                 }
                 DestinationDraft::Github { repo } => {
@@ -5298,7 +5303,7 @@ pub(super) fn CreateSessionForm(
                         .and_then(|host| host.identity.as_deref());
                     let Some(installation) = installation else {
                         error.set(Some(
-                            "the host installation is not verified; a checkout cannot be created"
+                            "The host installation is not verified; a checkout cannot be created"
                                 .into(),
                         ));
                         return;
@@ -5339,7 +5344,7 @@ pub(super) fn CreateSessionForm(
                             .expect("the preliminary binding already resolved its host");
                     } else {
                         error.set(Some(
-                            "wait for a current checkout preview before launching".into(),
+                            "Wait for a current checkout preview before launching".into(),
                         ));
                         return;
                     }
@@ -5384,7 +5389,7 @@ pub(super) fn CreateSessionForm(
                 .iter()
                 .find(|host| host.id == binding.host)
                 .map(HostOption::label)
-                .unwrap_or_else(|| "this host".to_string());
+                .unwrap_or_else(|| "This host".to_string());
             // An admitted attempt is progress, not a refusal. Do not show
             // the busy prerequisite merely because its request is running.
             launch_attempted.set(false);
@@ -5425,7 +5430,7 @@ pub(super) fn CreateSessionForm(
                     if attempts >= MINT_ATTEMPTS {
                         launch_attempted.set(true);
                         error.set(Some(
-                            "the form kept changing while an idempotency key was being \
+                            "The form kept changing while an idempotency key was being \
                              generated, so this create was not sent; try again"
                                 .to_string(),
                         ));
@@ -5444,7 +5449,7 @@ pub(super) fn CreateSessionForm(
                             // caused it.
                             launch_attempted.set(true);
                             error.set(Some(format!(
-                                "could not generate an idempotency key for this create, so \
+                                "Could not generate an idempotency key for this create, so \
                                  it was not sent (a retry could otherwise create a second \
                                  session): {reason}"
                             )));
@@ -5469,7 +5474,7 @@ pub(super) fn CreateSessionForm(
                         if current.harness().is_none() {
                             launch_attempted.set(true);
                             error.set(Some(
-                                "the structured launch choice changed while its idempotency key was being generated; choose a harness and press launch again".to_string(),
+                                "The structured launch choice changed while its idempotency key was being generated; choose a harness and press Launch again".to_string(),
                             ));
                             drop(op_guard);
                             return;
@@ -5495,7 +5500,7 @@ pub(super) fn CreateSessionForm(
                         {
                             launch_attempted.set(true);
                             error.set(Some(
-                                "the structured launch choice changed while its idempotency key was being generated; review it and press launch again".to_string(),
+                                "The structured launch choice changed while its idempotency key was being generated; review it and press Launch again".to_string(),
                             ));
                             drop(op_guard);
                             return;
@@ -5549,7 +5554,7 @@ pub(super) fn CreateSessionForm(
                         || (!replaying_fresh && *live_preview_authority.peek() != fresh_authority))
                 {
                     launch_attempted.set(true);
-                    error.set(Some("the checkout draft changed while preparing the request; review the preview and press launch again".into()));
+                    error.set(Some("The checkout draft changed while preparing the request; review the preview and press Launch again".into()));
                     return;
                 }
                 // Only a confirmation given for THIS key counts; see
@@ -5658,7 +5663,7 @@ pub(super) fn CreateSessionForm(
                                 "{}; {}",
                                 failure.message(),
                                 if retired {
-                                    "nothing was accepted; review the refreshed preview and press launch again"
+                                    "nothing was accepted; review the refreshed preview and press Launch again"
                                 } else {
                                     "the original request is retained; retry reconciles that request without allocating a different checkout"
                                 }
@@ -5809,7 +5814,7 @@ pub(super) fn CreateSessionForm(
                             // Say so without leaking its host-specific prose
                             // or retiring the new target's retry identity.
                             launch_attempted.set(true);
-                            error.set(Some("a launch for an earlier setup was refused".into()));
+                            error.set(Some("A launch for an earlier setup was refused".into()));
                         }
                         drop(op_guard);
                     }
@@ -5883,7 +5888,7 @@ pub(super) fn CreateSessionForm(
                 guarded_submit_pending.set(None);
                 launch_attempted.set(true);
                 error.set(Some(
-                    "wait for a current checkout preview before launching".into(),
+                    "Wait for a current checkout preview before launching".into(),
                 ));
             }
         }
@@ -6000,7 +6005,7 @@ pub(super) fn CreateSessionForm(
             // Submit and the helm keep their ordinary validation authority.
             novalidate: true,
             aria_modal: "true",
-            aria_label: if restart_mode { "restart a session" } else { "launch a session" },
+            aria_label: if restart_mode { "Restart a session" } else { "Launch a session" },
             onclick: move |evt: MouseEvent| {
                 // A click that leaves the search surface must make its
                 // hidden results ineligible before another control handles
@@ -6098,7 +6103,7 @@ pub(super) fn CreateSessionForm(
                     span { "{notice.message}" }
                     button {
                         r#type: "button", class: "btn btn-neutral permission-escalation-undo",
-                        "data-tooltip": "undo: restore the draft from before this agent switch",
+                        "data-tooltip": "Undo: restore the draft from before this agent switch",
                         disabled: busy,
                         onclick: move |_| {
                             if draft.undo_permission_switch(notice.generation, recovery_targets,
@@ -6113,18 +6118,18 @@ pub(super) fn CreateSessionForm(
                                 focus_composer_surface(false);
                             }
                         },
-                        "undo"
+                        "Undo"
                     }
                     button {
                         r#type: "button", class: "btn btn-neutral permission-escalation-dismiss",
-                        "data-tooltip": "dismiss this permission warning",
+                        "data-tooltip": "Dismiss this permission warning",
                         onclick: move |_| {
                             if permission_escalation.peek().as_ref().is_some_and(|current| current.generation == notice.generation) {
                                 permission_escalation.set(None);
                                 focus_composer_surface(false);
                             }
                         },
-                        "dismiss"
+                        "Dismiss"
                     }
                 }
             }
@@ -6132,11 +6137,11 @@ pub(super) fn CreateSessionForm(
                 p { class: "create-session-error", role: "alert", "{display_peer(&message)}" }
             }
             if loading_setup {
-                p { role: "status", "loading session setup…" }
+                p { role: "status", "Loading session setup…" }
                 button {
                     r#type: "button", class: "btn btn-neutral launch-composer-loading-cancel",
-                    "data-tooltip": "cancel: discard this session setup",
-                    onclick: move |_| on_cancel.call(()), "cancel"
+                    "data-tooltip": "Cancel: discard this session setup",
+                    onclick: move |_| on_cancel.call(()), "Cancel"
                 }
             } else {
             // Why the last template accepted from search was not applied;
@@ -6157,12 +6162,12 @@ pub(super) fn CreateSessionForm(
                     input {
                         r#type: "search",
                         role: "combobox",
-                        aria_label: "search folders, harnesses, models, and efforts",
+                        aria_label: "Search folders, harnesses, models, and efforts",
                         aria_expanded: composer_search_open(),
                         aria_controls: "launch-composer-search-results",
                         aria_activedescendant: (composer_search_open() && !search_results_for_keys.is_empty())
                             .then(|| format!("launch-composer-search-option-{}", composer_active_index)),
-                        placeholder: "search names, hosts, folders, harnesses, models…",
+                        placeholder: "Search names, hosts, folders, harnesses, models…",
                         autocomplete: "off",
                         // Search includes literal host paths and model IDs;
                         // browser text correction would change the query's meaning.
@@ -6325,7 +6330,7 @@ pub(super) fn CreateSessionForm(
                                     }
                                     evt.prevent_default();
                                     if !draft_transition_allowed(ops) {
-                                        template_error.set(Some("wait for the current operation to finish before choosing a result".into()));
+                                        template_error.set(Some("Wait for the current operation to finish before choosing a result".into()));
                                         return;
                                     }
                                     // A queued key can observe a newer input signal
@@ -6425,18 +6430,18 @@ pub(super) fn CreateSessionForm(
                                                         crate::launch_composer::ComposerSearchResult::Github(repo) => rsx! { "Managed checkout: {display_peer(&repo.identifier())}" },
                                                         crate::launch_composer::ComposerSearchResult::Model { id, harness } => rsx! { "Model: {display_peer(id)} ({crate::launch_composer::harness_label(*harness)})" },
                                                         crate::launch_composer::ComposerSearchResult::Effort(effort) => rsx! {
-                                                            "Effort: {crate::launch_composer::effort_search_word(*effort)}"
+                                                            "Effort: {crate::launch_composer::effort_label(*effort)}"
                                                         },
                                                         crate::launch_composer::ComposerSearchResult::Permissions(permission) => rsx! {
                                                             "Permissions: "
                                                             {match permission {
-                                                                crate::launch_composer::ComposerPermission::Guarded => "guarded",
-                                                                crate::launch_composer::ComposerPermission::OwnSetting => "agent's own setting",
-                                                                crate::launch_composer::ComposerPermission::Yolo => "yolo",
-                                                                crate::launch_composer::ComposerPermission::Custom => "custom",
-                                                                crate::launch_composer::ComposerPermission::Approve => crate::launch_composer::permission_value(LaunchPermission::Approve),
-                                                                crate::launch_composer::ComposerPermission::SmartApprove => crate::launch_composer::permission_value(LaunchPermission::SmartApprove),
-                                                                crate::launch_composer::ComposerPermission::Chat => crate::launch_composer::permission_value(LaunchPermission::Chat),
+                                                                crate::launch_composer::ComposerPermission::Guarded => "Guarded",
+                                                                crate::launch_composer::ComposerPermission::OwnSetting => "Agent's own setting",
+                                                                crate::launch_composer::ComposerPermission::Yolo => "YOLO",
+                                                                crate::launch_composer::ComposerPermission::Custom => "Custom",
+                                                                crate::launch_composer::ComposerPermission::Approve => crate::launch_composer::permission_display_value(LaunchPermission::Approve),
+                                                                crate::launch_composer::ComposerPermission::SmartApprove => crate::launch_composer::permission_display_value(LaunchPermission::SmartApprove),
+                                                                crate::launch_composer::ComposerPermission::Chat => crate::launch_composer::permission_display_value(LaunchPermission::Chat),
                                                             }}
                                                         },
                                                         crate::launch_composer::ComposerSearchResult::Recent(entry) => rsx! {
@@ -6452,9 +6457,9 @@ pub(super) fn CreateSessionForm(
                                                             // string, so search recents carry the same warning as
                                                             // the visible recent-setup rows.
                                                             span { class: "launch-composer-search-recent-selection",
-                                                                "{display_peer(&crate::launch_composer::selection_summary_before_permissions(&entry.selection))} · permissions: "
-                                                                if crate::launch_composer::selection_permission_value(&entry.selection) == "yolo" {
-                                                                    span { class: "launch-composer-danger", "yolo" }
+                                                                "{display_peer(&crate::launch_composer::selection_summary_before_permissions(&entry.selection))} · Permissions: "
+                                                                if crate::launch_composer::normalized_permissions(entry.selection.harness, entry.selection.permissions) == Some(LaunchPermission::Yolo) {
+                                                                    span { class: "launch-composer-danger", "YOLO" }
                                                                 } else {
                                                                     "{crate::launch_composer::selection_permission_value(&entry.selection)}"
                                                                 }
@@ -6481,7 +6486,7 @@ pub(super) fn CreateSessionForm(
                 // holds those controls; search still explains a rejected recent.
                 if !restart_mode && !recent_launches.is_empty() {
                     div { class: "launch-composer-recents",
-                            span { class: "launch-composer-section-label", "recent setups" }
+                            span { class: "launch-composer-section-label", "Recent setups" }
                             div { class: "launch-composer-recent-slots",
                             for (entry, summary, explicit, permission, uses_guarded_default) in recent_launches.iter().take(3).map(|entry| (
                                 entry,
@@ -6589,9 +6594,9 @@ pub(super) fn CreateSessionForm(
                                         }
                                         if !uses_guarded_default {
                                             if !explicit.is_empty() { " · " }
-                                            "permissions: "
-                                            if permission == "yolo" {
-                                                span { class: "launch-composer-danger", "yolo" }
+                                            "Permissions: "
+                                            if crate::launch_composer::normalized_permissions(entry.selection.harness, entry.selection.permissions) == Some(LaunchPermission::Yolo) {
+                                                span { class: "launch-composer-danger", "YOLO" }
                                             } else {
                                                 "{permission}"
                                             }
@@ -6629,7 +6634,7 @@ pub(super) fn CreateSessionForm(
             if search_scope == crate::launch_composer::SearchScope::Template {
                 if let Some(message) = &templates_read_error {
                     p { class: "create-catalog-error launch-composer-templates-error",
-                        span { role: "status", "couldn't load templates: {display_peer(message)} " }
+                        span { role: "status", "Couldn't load templates: {display_peer(message)} " }
                         button {
                             r#type: "button",
                             class: "btn btn-neutral",
@@ -6637,7 +6642,7 @@ pub(super) fn CreateSessionForm(
                                 launch_templates.clear();
                                 launch_templates.restart();
                             },
-                            "retry"
+                            "Retry"
                         }
                     }
                 }
@@ -6645,9 +6650,9 @@ pub(super) fn CreateSessionForm(
             div { class: "launch-composer-columns",
                     if restart_mode {
                         div { class: "launch-composer-held-context",
-                            p { "agent type (held): " span { class: "peer-value", dir: "ltr", "{held_agent_label}" } }
-                            p { "host (held): " span { class: "peer-value", dir: "ltr", "{selected_host_label}" } }
-                            p { "folder (held): " span { class: "peer-value font-mono", dir: "ltr", "{summary_folder}" } }
+                            p { "Agent type (held): " span { class: "peer-value", dir: "ltr", "{held_agent_label}" } }
+                            p { "Host (held): " span { class: "peer-value", dir: "ltr", "{selected_host_label}" } }
+                            p { "Folder (held): " span { class: "peer-value font-mono", dir: "ltr", "{summary_folder}" } }
                             if let Some(notice) = folder_notice() { PeerLine { class: "launch-composer-folder-warning".to_string(), parts: notice } }
                         }
                     } else {
@@ -6677,9 +6682,9 @@ pub(super) fn CreateSessionForm(
                                     button {
                                         r#type: "button",
                                         disabled: busy || selected.is_none(),
-                                        aria_label: "browse this path",
+                                        aria_label: "Browse this path",
                                         class: "btn btn-neutral",
-                                        "data-tooltip": "browse: list the folders under this path on the host",
+                                        "data-tooltip": "Browse: list the folders under this path on the host",
                                         onclick: move |_| {
                                             if !draft_transition_allowed(ops) { return; }
                                             request_directory_browse(
@@ -6714,7 +6719,7 @@ pub(super) fn CreateSessionForm(
                                         evt.stop_propagation();
                                     },
                                     span { class: "launch-composer-row-label", "Repository" }
-                                    input { r#type: "text", role: "combobox", aria_label: "repository", aria_autocomplete: "list",
+                                    input { r#type: "text", role: "combobox", aria_label: "Repository", aria_autocomplete: "list",
                                         aria_expanded: !repository_read_only && repository_open(),
                                         aria_controls: (!repository_read_only && repository_open()).then_some("checkout-repository-options"),
                                         aria_activedescendant: (!repository_read_only && repository_open() && !repository_suggestions.is_empty()).then(|| format!("checkout-repository-{repository_active}")),
@@ -6740,7 +6745,7 @@ pub(super) fn CreateSessionForm(
                                                     evt.prevent_default(); evt.stop_propagation();
                                                     if evt.is_auto_repeating() || evt.is_composing() || repository_read_only { return; }
                                                     if !draft_transition_allowed(ops) {
-                                                        template_error.set(Some("wait for the current operation to finish before choosing a repository".into()));
+                                                        template_error.set(Some("Wait for the current operation to finish before choosing a repository".into()));
                                                         return;
                                                     }
                                                     // A queued key must not select a row from
@@ -6774,16 +6779,16 @@ pub(super) fn CreateSessionForm(
                                     // Drop selection and preview together, as an ordinary
                                     // repository edit does, without copying display markers.
                                     button { r#type: "button", class: "btn btn-neutral launch-composer-repository-clear", disabled: busy,
-                                        "data-tooltip": "clear repository: remove this selection before editing",
+                                        "data-tooltip": "Clear repository: remove this selection before editing",
                                         onclick: move |_| {
                                             draft.clear_repository(placement_targets, repository_targets);
                                         },
-                                        "clear repository"
+                                        "Clear repository"
                                     }
                                 }
                                 if !repository_read_only && repository_open() {
                                     div { class: "launch-composer-repository-options", id: "checkout-repository-options",
-                                        role: if repository_suggestions.is_empty() { "status" } else { "listbox" }, aria_label: "repositories",
+                        role: if repository_suggestions.is_empty() { "status" } else { "listbox" }, aria_label: "Repositories",
                                         onclick: move |evt| {
                                             composer_search_open.set(false);
                                             evt.stop_propagation();
@@ -6794,7 +6799,7 @@ pub(super) fn CreateSessionForm(
                                         for (index, repo) in repository_suggestions.iter().enumerate() {
                                             button { r#type: "button", role: "option", id: "checkout-repository-{index}",
                                                 aria_selected: index == repository_active, disabled: busy, tabindex: "-1",
-                                                "data-tooltip": "managed checkout of {display_peer(&repo.identifier())}",
+                                                "data-tooltip": "Managed checkout of {display_peer(&repo.identifier())}",
                                                 onmousedown: move |evt| evt.prevent_default(),
                                                 onclick: { let repo = repo.clone(); move |_| {
                                                     select_repository.call(repo.clone());
@@ -6817,15 +6822,15 @@ pub(super) fn CreateSessionForm(
                                             PreviewState::Ready { .. } => "ready",
                                             PreviewState::Failed { .. } => "failed",
                                         },
-                                        "managed checkout of {display_peer(&repo.identifier())} on {selected_host_label}"
+                                        "Managed checkout of {display_peer(&repo.identifier())} on {selected_host_label}"
                                         if let Some(preview) = &displayed_preview {
                                             div { class: "font-mono", dir: "ltr", "{preview.cwd.escaped()}" }
                                         }
                                         if retry_binding.is_some() {
-                                            div { "retry reconciles the original request at this path" }
+                                            div { "Retry reconciles the original request at this path" }
                                         } else {
                                             match preview_state() {
-                                                PreviewState::Pending => rsx! { div { "waiting for a current checkout preview" } },
+                                                PreviewState::Pending => rsx! { div { "Waiting for a current checkout preview" } },
                                                 PreviewState::Failed { message, .. } => rsx! { div { class: "create-session-error", "{display_peer(&message)}" } },
                                                 PreviewState::Ready { .. } => rsx! {},
                                             }
@@ -6857,7 +6862,7 @@ pub(super) fn CreateSessionForm(
                                 value: "{folder_field_value}",
                                 placeholder: "{folder_placeholder}",
                                 disabled: busy,
-                                aria_label: "folder",
+                                aria_label: "Folder",
                                 aria_invalid: folder_notice().is_some().then_some("true"),
                                 aria_describedby: folder_notice().is_some().then_some("launcher-folder-problem"),
                                 onfocus: move |_| {
@@ -6910,15 +6915,15 @@ pub(super) fn CreateSessionForm(
                             // would resize and recenter this dialog when pointer blur
                             // closes it, moving the pressed action before mouseup.
                             if !checkout_mode && folder_open() {
-                                div { class: "launch-composer-folder-options", id: "launcher-folder-options", role: "listbox", aria_label: "folders",
+                                div { class: "launch-composer-folder-options", id: "launcher-folder-options", role: "listbox", aria_label: "Folders",
                                     // A press anywhere in the list (a heading, the empty
                                     // row, a gap, its scrollbar) must not take focus
                                     // from the field, whose blur would close the list.
                                     onmousedown: move |evt| evt.prevent_default(),
                                     div { role: "group", aria_labelledby: "launcher-folder-recent",
-                                        div { class: "launch-composer-folder-heading", id: "launcher-folder-recent", "recent" }
+                                        div { class: "launch-composer-folder-heading", id: "launcher-folder-recent", "Recent" }
                                         if folder_recents.is_empty() {
-                                            div { class: "launch-composer-folder-empty", "no recent folders" }
+                                            div { class: "launch-composer-folder-empty", "No recent folders" }
                                         }
                                         for (index, folder) in folder_recents.iter().enumerate() {
                                             button { r#type: "button", role: "option", id: "launcher-folder-{index}", tabindex: "-1",
@@ -6932,18 +6937,18 @@ pub(super) fn CreateSessionForm(
                                         }
                                     }
                                     div { role: "group", aria_labelledby: "launcher-folder-reset",
-                                        div { class: "launch-composer-folder-heading", id: "launcher-folder-reset", "reset" }
+                                        div { class: "launch-composer-folder-heading", id: "launcher-folder-reset", "Reset" }
                                         button { r#type: "button", role: "option", id: "launcher-folder-{folder_recents.len()}", tabindex: "-1",
                                             aria_selected: folder_highlight == Some(folder_recents.len()), disabled: busy,
-                                            aria_label: "reset folder to home", "data-tooltip": "home: start in your home folder on this host",
+                                            aria_label: "Reset folder to home", "data-tooltip": "Home: start in your home folder on this host",
                                             onmousedown: move |evt| evt.prevent_default(), onclick: move |_| choose_folder.call(FolderChoice::Home),
-                                            span { "home" } span { class: "launch-composer-folder-meaning", "~ on this host" }
+                                            span { "Home" } span { class: "launch-composer-folder-meaning", "~ on this host" }
                                         }
                                         button { r#type: "button", role: "option", id: "launcher-folder-{folder_recents.len() + 1}", tabindex: "-1",
                                             aria_selected: folder_highlight == Some(folder_recents.len() + 1), disabled: busy,
-                                            aria_label: "reset destination to local home", "data-tooltip": "local home: start in your home folder on this machine",
+                                            aria_label: "Reset destination to local home", "data-tooltip": "Local home: start in your home folder on this machine",
                                             onmousedown: move |evt| evt.prevent_default(), onclick: move |_| choose_folder.call(FolderChoice::LocalHome),
-                                            span { "local home" } span { class: "launch-composer-folder-meaning", "~ on this machine" }
+                                            span { "Local home" } span { class: "launch-composer-folder-meaning", "~ on this machine" }
                                         }
                                     }
                                 }
@@ -6965,7 +6970,7 @@ pub(super) fn CreateSessionForm(
                                 span { class: "launch-composer-name-caption",
                                     span { class: "launch-composer-row-label", "Name (optional)" }
                                     if template_base.is_some() {
-                                        span { class: "launch-composer-name-policy", "data-tooltip": "this template supplies a base name; Farhelm adds a number when its managed-checkout folder is already taken", "from template · numbered if taken" }
+                                        span { class: "launch-composer-name-policy", "data-tooltip": "This template supplies a base name; Farhelm adds a number when its managed-checkout folder is already taken", "From template · numbered if taken" }
                                     }
                                 }
                                 input {
@@ -6980,7 +6985,7 @@ pub(super) fn CreateSessionForm(
                                     // checkout can hide that seed; see
                                     // `title_field_value`.
                                     dir: "ltr",
-                                    aria_label: "name (optional)",
+                                    aria_label: "Name (optional)",
                                     value: "{title_field_value}",
                                     placeholder: "{title_placeholder}",
                                     disabled: busy,
@@ -6991,7 +6996,7 @@ pub(super) fn CreateSessionForm(
                                     },
                                 }
                                 if let Some((base, true)) = &template_base {
-                                    span { class: "launch-composer-name-taken", "data-tooltip": "the template's base checkout name is already taken; this launch uses the first available numbered name", "(" bdi { dir: "ltr", "{display_peer(base)}" } " is taken)" }
+                                    span { class: "launch-composer-name-taken", "data-tooltip": "The template's base checkout name is already taken; this launch uses the first available numbered name", "(" bdi { dir: "ltr", "{display_peer(base)}" } " is taken)" }
                                 }
                             }
                         }
@@ -7006,14 +7011,14 @@ pub(super) fn CreateSessionForm(
                         // select and focus the other tab, as screen readers
                         // announcing "tab, 1 of 2" lead people to expect.
                         if !restart_mode {
-                        div { class: "launch-kind-tabs", role: "tablist", "aria-label": "launch kind",
+                        div { class: "launch-kind-tabs", role: "tablist", "aria-label": "Launch kind",
                             for (tab, label) in [(LaunchTab::Agent, "Agent"), (LaunchTab::Command, "Command")] {
                                 button {
                                     r#type: "button",
                                     role: "tab",
-                                    aria_label: if tab == LaunchTab::Agent { "agent" } else { "command" },
+                                    aria_label: if tab == LaunchTab::Agent { "Agent" } else { "Command" },
                                     class: if launch_tab() == tab { "launch-kind-tab selected" } else { "launch-kind-tab" },
-                                    "data-tooltip": if tab == LaunchTab::Agent { "agent: start a supported agent with its model, effort and permissions" } else { "command: run a command line you type, as written" },
+                                    "data-tooltip": if tab == LaunchTab::Agent { "Agent: start a supported agent with its model, effort and permissions" } else { "Command: run a command line you type, as written" },
                                     "aria-selected": "{launch_tab() == tab}",
                                     tabindex: if launch_tab() == tab { "0" } else { "-1" },
                                     disabled: busy,
@@ -7057,7 +7062,7 @@ pub(super) fn CreateSessionForm(
                                         r#type: "button",
                                         class: if launch_tab() == LaunchTab::Agent && *structured_harness.read() == Some(harness) { "selected" } else { "" },
                                         aria_pressed: launch_tab() == LaunchTab::Agent && *structured_harness.read() == Some(harness),
-                                        "data-tooltip": "use {crate::launch_composer::harness_label(harness)} for the session",
+                                        "data-tooltip": "Use {crate::launch_composer::harness_label(harness)} for the session",
                                         disabled: busy,
                                         onkeydown: move |event| enter_choice(event, ops.busy_now(), || choose_harness.call(harness), Some(launch_from_choice)),
                                         onclick: move |_| choose_harness.call(harness),
@@ -7077,11 +7082,11 @@ pub(super) fn CreateSessionForm(
                                 // it, so a screen reader announces the failure, not the
                                 // control.
                                 p { class: "create-catalog-error",
-                                    span { role: "status", "model catalog unavailable: {message} " }
+                                    span { role: "status", "Model catalog unavailable: {message} " }
                                     button {
                                         r#type: "button",
                                         class: "btn btn-neutral",
-                                        "data-tooltip": "retry: ask the host for its model list again",
+                                        "data-tooltip": "Retry: ask the host for its model list again",
                                         // Cleared first so the line goes away while the
                                         // read is out and comes back only if it fails
                                         // again; left in place, a retry would look like a
@@ -7090,7 +7095,7 @@ pub(super) fn CreateSessionForm(
                                             launch_catalog.clear();
                                             launch_catalog.restart();
                                         },
-                                        "retry"
+                                        "Retry"
                                     }
                                 }
                             }
@@ -7222,7 +7227,7 @@ pub(super) fn CreateSessionForm(
                     spellcheck: "false",
                     dir: "ltr",
                     value: "{displayed_invocation}", readonly: restart_command_readonly,
-                    aria_label: "agent command",
+                    aria_label: "Agent command",
                     disabled: busy,
                     oninput: move |evt| {
                         draft.edit_invocation(evt.value());
@@ -7231,17 +7236,17 @@ pub(super) fn CreateSessionForm(
             }
             if restart_command_readonly {
                 button { r#type: "button", class: "btn btn-neutral", disabled: busy,
-                    onclick: move |_| { draft.edit_invocation(String::new()); }, "clear agent command" }
+                    onclick: move |_| { draft.edit_invocation(String::new()); }, "Clear agent command" }
             }
-            if command_changed { p { class: "launch-composer-changed-marker", "● changed" } }
+            if command_changed { p { class: "launch-composer-changed-marker", "● Changed" } }
             if let Some(problem) = &restart_command_problem { p { class: "launch-command-error", role: "alert", "{problem}" } }
             // The YOLO assertion: a required choice with no default
             // (SPEC.md, Creation). Farhelm believes it and never reads the
             // command to check it.
             fieldset { class: "launch-command-yolo",
-                legend { "runs in YOLO mode" }
+                legend { "Runs in YOLO mode" }
                 label {
-                    "data-tooltip": "yes: you assert this command bypasses human, classifier and sandbox safety checks; Farhelm marks it YOLO and does not check",
+                    "data-tooltip": "Yes: you assert this command bypasses human, classifier and sandbox safety checks; Farhelm marks it YOLO and does not check",
                     input {
                         r#type: "radio",
                         name: "launch-command-yolo",
@@ -7252,10 +7257,10 @@ pub(super) fn CreateSessionForm(
                             draft.choose_command_yolo(true);
                         },
                     }
-                    "yes (YOLO)"
+                    "Yes (YOLO)"
                 }
                 label {
-                    "data-tooltip": "no: you assert this command retains a safety check that may refuse or ask you; Farhelm does not check",
+                    "data-tooltip": "No: you assert this command retains a safety check that may refuse or ask you; Farhelm does not check",
                     input {
                         r#type: "radio",
                         name: "launch-command-yolo",
@@ -7266,18 +7271,18 @@ pub(super) fn CreateSessionForm(
                             draft.choose_command_yolo(false);
                         },
                     }
-                    "no"
+                    "No"
                 }
             }
-            if yolo_changed { p { class: "launch-composer-changed-marker", "● changed" } }
+            if yolo_changed { p { class: "launch-composer-changed-marker", "● Changed" } }
             if !restart_mode {
             label { class: "launch-composer-row",
                 span { class: "launch-composer-row-label", "Agent type" }
                 select {
                     class: "launch-command-agent",
-                    aria_label: "agent type",
+                    aria_label: "Agent type",
                         onkeydown: move |event| enter_choice(event, ops.busy_now(), || {}, Some(launch_from_choice)),
-                    "data-tooltip": "the agent this command runs, if any, so Farhelm can track and resume it",
+                    "data-tooltip": "The agent this command runs, if any, so Farhelm can track and resume it",
                     disabled: busy,
                     onchange: move |evt| {
                         draft.choose_command_agent(
@@ -7287,7 +7292,7 @@ pub(super) fn CreateSessionForm(
                                 .find(|harness| harness_value(*harness) == evt.value()),
                         );
                     },
-                    option { value: "", selected: command_agent().is_none(), "none" }
+                    option { value: "", selected: command_agent().is_none(), "None" }
                     for harness in LaunchHarness::ALL.iter().copied() {
                         option {
                             value: harness_value(harness),
@@ -7305,7 +7310,7 @@ pub(super) fn CreateSessionForm(
                 if !restart_mode {
                 label {
                     class: "launch-command-resume-choice",
-                    "data-tooltip": "resume: give the command a way to pick its conversation back up after a restart",
+                    "data-tooltip": "Resume: give the command a way to pick its conversation back up after a restart",
                     input {
                         r#type: "checkbox",
                         class: "launch-command-resume-toggle",
@@ -7316,7 +7321,7 @@ pub(super) fn CreateSessionForm(
                             draft.choose_command_resume(evt.checked());
                         },
                     }
-                    "resume"
+                    "Resume"
                 }
                 }
                 if command_resume_on() {
@@ -7325,7 +7330,7 @@ pub(super) fn CreateSessionForm(
                         input {
                             r#type: "text",
                             class: "launch-command-resume",
-                            aria_label: "resume command",
+                            aria_label: "Resume command",
                             autocomplete: "off",
                             autocorrect: "off",
                             autocapitalize: "none",
@@ -7340,9 +7345,9 @@ pub(super) fn CreateSessionForm(
                     }
                     if restart_resume_readonly {
                         button { r#type: "button", class: "btn btn-neutral", disabled: busy,
-                            onclick: move |_| { draft.edit_command_resume(String::new()); }, "clear resume command" }
+                            onclick: move |_| { draft.edit_command_resume(String::new()); }, "Clear resume command" }
                     }
-                    if resume_changed { p { class: "launch-composer-changed-marker", "● changed" } }
+                    if resume_changed { p { class: "launch-composer-changed-marker", "● Changed" } }
                 }
             }
                         }
@@ -7374,7 +7379,7 @@ pub(super) fn CreateSessionForm(
                     button {
                         r#type: "button",
                         dir: "ltr",
-                        "data-tooltip": "use this folder: the session will start here",
+                        "data-tooltip": "Use this folder: the session will start here",
                         onclick: {
                             let selected_cwd = result.cwd.clone();
                             let authority = result_authority.clone();
@@ -7383,13 +7388,13 @@ pub(super) fn CreateSessionForm(
                                     live_browse_connection, browse_activation_attempts);
                             }
                         },
-                        "use " span { class: "font-mono", "{result.cwd.escaped()}" }
+                        "Use " span { class: "font-mono", "{result.cwd.escaped()}" }
                     }
                     if let Some(parent) = result.parent.clone() {
                         button {
                             r#type: "button",
                             dir: "ltr",
-                            "data-tooltip": "use the parent folder instead",
+                            "data-tooltip": "Use the parent folder instead",
                             onclick: {
                                 let authority = result_authority.clone();
                                 move |_| {
@@ -7397,18 +7402,18 @@ pub(super) fn CreateSessionForm(
                                     live_browse_connection, browse_activation_attempts);
                             }
                             },
-                            "parent: " span { class: "font-mono", "{parent.escaped()}" }
+                            "Parent: " span { class: "font-mono", "{parent.escaped()}" }
                         }
                     }
                     if result.truncated {
-                        div { class: "launch-composer-browser-truncated", "more directories exist; refine the path and browse again" }
+                        div { class: "launch-composer-browser-truncated", "More directories exist; refine the path and browse again" }
                     }
                     for child in result.children {
                         button {
                             class: "font-mono",
                             r#type: "button",
                             dir: "ltr",
-                            "data-tooltip": "use this folder: the session will start here",
+                            "data-tooltip": "Use this folder: the session will start here",
                             onclick: {
                                 let authority = result_authority.clone();
                                 move |_| {
@@ -7453,20 +7458,18 @@ pub(super) fn CreateSessionForm(
                             }
             if *launch_tab.read() == LaunchTab::Agent {
                 div { class: "launch-composer-summary", aria_live: "polite",
-                    "model: "
+                    "Model: "
                     span { class: "peer-value", dir: "ltr", "{summary_model}" }
-                    " · effort: {summary_effort} · permissions: "
-                    // Matched on the signal, not on display text, and spelled
-                    // out per variant so every permission reads in the same
-                    // lowercase register as "default": a Debug fallback would
-                    // capitalize a future variant next to these.
-                    if summary_permission == "yolo" {
-                        span { class: "launch-composer-danger", "yolo" }
+                    " · Effort: {summary_effort} · Permissions: "
+                    // Shared display names determine the wording; the enum
+                    // determines warning styling independently of that wording.
+                    if summary_permission_choice == Some(LaunchPermission::Yolo) {
+                        span { class: "launch-composer-danger", "YOLO" }
                     } else {
                         "{summary_permission}"
                     }
                     if let Some(lines) = summary_prompt_lines {
-                        " · prompt: {lines} lines"
+                        " · Prompt: {lines} lines"
                     }
                 }
             }
@@ -7476,11 +7479,11 @@ pub(super) fn CreateSessionForm(
                 button {
                     r#type: "button",
                     class: "btn btn-neutral launch-composer-cancel",
-                    aria_label: "cancel",
+                    aria_label: "Cancel",
                     // Keep explicit launcher cancellation separate from the
                     // isolation safety net's innermost-panel Escape target.
                     "data-template-panel-open": template_panel().is_some().then_some("true"),
-                    "data-tooltip": "cancel: close without starting anything",
+                    "data-tooltip": "Cancel: close without starting anything",
                     disabled: busy || template_saving(),
                     onclick: move |_| {
                         // The disabled attribute updates after this event's
@@ -7497,8 +7500,8 @@ pub(super) fn CreateSessionForm(
                     button {
                         r#type: "button",
                         class: "btn btn-neutral launch-composer-reset",
-                        aria_label: "reset choices",
-                        "data-tooltip": if restart_mode { "reset choices: restore the session's stored settings and clear the conversation selector" } else { "reset choices: clear the agent, model and effort; remember permissions and the next agent's wrapper prefix" },
+                        aria_label: "Reset choices",
+                        "data-tooltip": if restart_mode { "Reset choices: restore the session's stored settings and clear the conversation selector" } else { "Reset choices: clear the agent, model and effort; remember permissions and the next agent's wrapper prefix" },
                         disabled: busy,
                         onclick: move |_| {
                             draft.reset_choices(preferences, choice_targets, composer_reset_reason,
@@ -7509,8 +7512,8 @@ pub(super) fn CreateSessionForm(
                 }
                 if !is_replace_with {
                     button { r#type: "button", class: "btn launch-composer-save-template",
-                        aria_label: "save as template",
-                        "data-tooltip": "save as template: keep choices from this setup for another launch",
+                        aria_label: "Save as template",
+                        "data-tooltip": "Save as template: keep choices from this setup for another launch",
                         disabled: busy || template_saving() || template_panel().is_some(),
                         onclick: move |_| {
                             // Reopening an already mounted panel would replace
@@ -7543,9 +7546,9 @@ pub(super) fn CreateSessionForm(
                     r#type: "submit",
                     class: "btn btn-primary create-session-submit",
                     "data-tooltip": launch_refusal.unwrap_or(if restart_mode {
-                        if restart_stop_first { "stop and restart: stop the working agent, then relaunch this session with these settings" }
-                        else { "restart: relaunch this session with these settings" }
-                    } else if is_replace_with { "replace: start this session, then delete the old one and its state" } else { "launch: start the session" }),
+                        if restart_stop_first { "Stop and restart: stop the working agent, then relaunch this session with these settings" }
+                        else { "Restart: relaunch this session with these settings" }
+                    } else if is_replace_with { "Replace: start this session, then delete the old one and its state" } else { "Launch: start the session" }),
                     aria_describedby: if restart_mode && restart_stop_first { Some(RESTART_WARNING_ID) } else { replace_warning.as_ref().map(|_| REPLACE_WARNING_ID) },
                     // Keep refused attempts reachable: native disabled would
                     // swallow both a click and implicit Enter before submit can

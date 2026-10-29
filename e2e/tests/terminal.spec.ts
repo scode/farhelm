@@ -342,7 +342,7 @@ test("the create form prefills the working directory with ~ when no session is s
   await page.locator(".new-session-button").click();
   const form = page.locator(".create-session-form");
   await expect(form).toBeVisible();
-  await expect(form.getByLabel("folder", { exact: true })).toHaveValue("~");
+  await expect(form.getByLabel("Folder", { exact: true })).toHaveValue("~");
 });
 
 // Keyboard activation (PLAN_M2.md step 7: rows must be
@@ -1912,11 +1912,11 @@ test("create dialog surfaces a precondition failure, preserves the form, and cre
       "does not exist",
     );
     // Preserved, not cleared or reset: the same values the user typed.
-    await expect(form.getByLabel("folder", { exact: true })).toHaveValue(
+    await expect(form.getByLabel("Folder", { exact: true })).toHaveValue(
       "/nonexistent/definitely/not/here",
     );
-    await expect(form.getByLabel("agent command")).toHaveValue("true");
-    await expect(form.getByLabel("name (optional)")).toHaveValue(title);
+    await expect(form.getByLabel("Agent command")).toHaveValue("true");
+    await expect(form.getByLabel("Name (optional)")).toHaveValue(title);
     // The form itself stayed open (a failed create must not silently
     // close it and strand the user with no visible cause).
     await expect(form).toBeVisible();
@@ -1930,7 +1930,7 @@ test("create dialog surfaces a precondition failure, preserves the form, and cre
     // double-submission guard in `CreateSessionForm`'s `onsubmit` would
     // otherwise leave the control permanently disabled after its first,
     // failed attempt).
-    await form.getByLabel("folder", { exact: true }).fill("/tmp");
+    await form.getByLabel("Folder", { exact: true }).fill("/tmp");
     await form.locator('button[type="submit"]').click();
     await waitForSessionRevealed(page, await sessionIdFor(rowByTitle(page, title)));
     await expect(page.locator(".session-details .title")).toHaveText(title);
@@ -3995,8 +3995,8 @@ test("compact rows retain distinct ended and harness glyphs within two character
     { id: "exited", invocation: "muse --yolo", harness: "muse", permission: "yolo", description: "Muse Code — YOLO, as asserted when the command was launched, by the user or by an agent — not checked by Farhelm — muse --yolo", launch: commandLaunchRow("muse --yolo {farhelm_args}", { yolo: true, agent: "muse" }), status: { state: "exited", exit_code: 7 }, annotation: null },
     { id: "interrupted", invocation: "claude --dangerously-skip-permissions", harness: "claude", permission: "yolo", description: "Claude Code — YOLO, as asserted when the command was launched, by the user or by an agent — not checked by Farhelm — claude --dangerously-skip-permissions", launch: commandLaunchRow("claude --dangerously-skip-permissions {farhelm_args}", { yolo: true, agent: "claude" }), status: { state: "interrupted" }, annotation: null },
     { id: "error", invocation: "opencode --auto", harness: "opencode", permission: "yolo", description: "OpenCode — YOLO, as asserted when the command was launched, by the user or by an agent — not checked by Farhelm — opencode --auto", launch: commandLaunchRow("opencode --auto {farhelm_args}", { yolo: true, agent: "open_code" }), status: { state: "error", detail: "cannot launch" }, annotation: null },
-    { id: "default", invocation: "codex", harness: "codex", permission: "own-setting", description: /^Codex — Not classified · agent's own setting\n[\s\S]*\n\nLaunched with: codex$/, launch: agentLaunchRow({ harness: "codex", model: null, effort: null, permissions: null }), status: { state: "idle" }, annotation: null },
-    { id: "approve", invocation: "omp --approval-mode always-ask", harness: "omp", permission: "shielded", description: /^OMP — approve: the agent asks before every tool action\n\n[\s\S]*\n\nLaunched with: omp$/, launch: agentLaunchRow({ harness: "omp", model: null, effort: null, permissions: "approve" }), status: { state: "idle" }, annotation: null },
+    { id: "default", invocation: "codex", harness: "codex", permission: "own-setting", description: /^Codex — Not classified · Agent's own setting\n[\s\S]*\n\nLaunched with: codex$/, launch: agentLaunchRow({ harness: "codex", model: null, effort: null, permissions: null }), status: { state: "idle" }, annotation: null },
+    { id: "approve", invocation: "omp --approval-mode always-ask", harness: "omp", permission: "shielded", description: /^OMP — Approve: the agent asks before every tool action\n\n[\s\S]*\n\nLaunched with: omp$/, launch: agentLaunchRow({ harness: "omp", model: null, effort: null, permissions: "approve" }), status: { state: "idle" }, annotation: null },
     { id: "full-auto", invocation: "codex --yolo", harness: "codex", permission: "shielded", description: "Codex — not YOLO, as asserted when the command was launched, by the user or by an agent — not checked by Farhelm — codex --yolo", launch: commandLaunchRow("codex --yolo {farhelm_args}", { agent: "codex" }), status: { state: "idle" }, annotation: null },
     { id: "unknown", invocation: "codex --yolo", harness: "terminal", permission: "unknown", description: "command — unclassified — a command from before launch kinds, which Farhelm never classified — codex --yolo", launch: { kind: "legacy", invocation: "codex --yolo", agent_kind: "generic", resume_template: null }, status: { state: "idle" }, annotation: null },
   ];

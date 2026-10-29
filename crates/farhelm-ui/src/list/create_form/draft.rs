@@ -877,7 +877,7 @@ impl LaunchDraft {
                 .unwrap_or_default();
             let reset_reason = self.effort.filter(|effort| !offered.contains(effort)).map(|_| {
                 self.effort = None;
-                "the selected effort is not in Farhelm's offering for that model, so it was cleared".to_string()
+                "The selected effort is not in Farhelm's offering for that model, so it was cleared".to_string()
             });
             self.model = Some(id);
             self.model_raw_seed = None;
@@ -1826,7 +1826,7 @@ impl LaunchDraftState {
     ) -> bool {
         if self.snapshot().is_restart() {
             reset_reason.set(Some(
-                "destination cannot change here: this dialog keeps destination fixed for restart"
+                "Destination cannot change here: this dialog keeps destination fixed for restart"
                     .into(),
             ));
             return false;
@@ -1974,7 +1974,7 @@ impl LaunchDraftState {
                 || self.snapshot().harness() != Some(harness))
         {
             recovery.composer_reset_reason.set(Some(
-                "agent type cannot change here: this dialog keeps the session's agent type".into(),
+                "Agent type cannot change here: this dialog keeps the session's agent type".into(),
             ));
             return None;
         }
@@ -2017,7 +2017,7 @@ impl LaunchDraftState {
                 || self.snapshot().harness() != Some(harness))
         {
             recovery.composer_reset_reason.set(Some(
-                "agent type cannot change here: this dialog keeps the session's agent type".into(),
+                "Agent type cannot change here: this dialog keeps the session's agent type".into(),
             ));
             return None;
         }
@@ -2081,7 +2081,7 @@ impl LaunchDraftState {
     /// No unchanged-valid request is asserted and no semantic field is published.
     pub(super) fn report_model_harness_required(self, mut error: Signal<Option<String>>) -> bool {
         self.apply_edit(EditRule::Ordinary, |_| {
-            error.set(Some("choose a harness before a custom model id".into()));
+            error.set(Some("Choose a harness before a custom model id".into()));
             (
                 (),
                 EditFacts {
@@ -2225,7 +2225,7 @@ impl LaunchDraftState {
                     let applied = match templates.iter().find(|t| t.name == name) {
                         Some(template) => self.apply_template(draft, template, &inputs, targets),
                         None => Err(format!(
-                            "no template is named {name:?}; it may have been deleted"
+                            "No template is named {name:?}; it may have been deleted"
                         )),
                     };
                     match applied {
@@ -2494,7 +2494,7 @@ impl LaunchDraftState {
             // admission fence, but explain the rejected activation where other
             // search/template failures already appear.
             action_error.set(Some(
-                "that result belongs to an earlier host; choose a current result".into(),
+                "That result belongs to an earlier host; choose a current result".into(),
             ));
             return (None, false, false);
         }

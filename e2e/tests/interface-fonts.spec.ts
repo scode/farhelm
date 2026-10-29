@@ -64,8 +64,8 @@ test("interface and technical values load their own bundled font roles", async (
     await page.locator(".new-session-button").click();
     const launcher = page.locator("form.create-session-form");
     await expect(launcher).toBeVisible();
-    await launcher.getByRole("group", { name: "destination type", exact: true }).getByRole("button", { name: "folder", exact: true }).click();
-    await expectLoadedFont(launcher.getByRole("combobox", { name: "folder", exact: true }), "JetBrains Mono");
+    await launcher.getByRole("group", { name: "Destination type", exact: true }).getByRole("button", { name: "Folder", exact: true }).click();
+    await expectLoadedFont(launcher.getByRole("combobox", { name: "Folder", exact: true }), "JetBrains Mono");
     const search = launcher.locator(".launch-composer-search input");
     await expectLoadedFont(search, "Inter");
     await search.fill("/tmp");
@@ -78,8 +78,8 @@ test("interface and technical values load their own bundled font roles", async (
       await expectLoadedFont(path, "JetBrains Mono");
     }
     await search.fill("");
-    await launcher.getByRole("tab", { name: "command", exact: true }).click();
-    const input = launcher.getByLabel("agent command", { exact: true });
+    await launcher.getByRole("tab", { name: "Command", exact: true }).click();
+    const input = launcher.getByLabel("Agent command", { exact: true });
     await input.fill("printf hello");
     await expect(input).toHaveValue("printf hello");
     await expectLoadedFont(input, "JetBrains Mono");
@@ -166,17 +166,17 @@ test("template summaries split command fonts and shortcut digits keep equal widt
     await patchPreferences(request, { welcome_seen: true, template_shortcuts: { "1": names[0], "8": names[1] } });
     await page.goto("/");
     await page.locator(".templates-button").click();
-    const dialog = page.getByRole("dialog", { name: "templates", exact: true });
+    const dialog = page.getByRole("dialog", { name: "Templates", exact: true });
     await expect(dialog.locator(".templates-sidebar")).toHaveAttribute("aria-busy", "false");
     const row = dialog.locator(".templates-row").filter({ has: page.getByText(names[0], { exact: true }) });
     const summary = row.locator(".templates-row-summary");
-    await expectLoadedFont(summary.getByText("wrapper prefix", { exact: true }), "Inter");
+    await expectLoadedFont(summary.getByText("Wrapper prefix", { exact: true }), "Inter");
     await expectLoadedFont(summary.locator(".font-mono").filter({ hasText: /^wrapper --$/ }), "JetBrains Mono");
     await expectLoadedFont(summary.locator(".font-mono").filter({ hasText: /^--mode ask$/ }), "JetBrains Mono");
 
     const widths = [];
     for (const [index, name] of names.entries()) {
-      const toggle = dialog.getByRole("button", { name: `number shortcut ${name}`, exact: true });
+      const toggle = dialog.getByRole("button", { name: `Number shortcut ${name}`, exact: true });
       await expect(toggle).toHaveText(`Ctrl+Shift+${index === 0 ? "1" : "8"}`);
       await expectLoadedFont(toggle, "JetBrains Mono");
       await expect(toggle).toHaveCSS("font-variant-numeric", "tabular-nums");
@@ -205,7 +205,7 @@ test("template summaries split command fonts and shortcut digits keep equal widt
     await expect(result).toHaveCount(1);
     await expect(result).toContainText(names[0]);
     const switchSummary = result.locator(".quick-switcher-template-summary");
-    await expectLoadedFont(switchSummary.getByText("wrapper prefix", { exact: true }), "Inter");
+    await expectLoadedFont(switchSummary.getByText("Wrapper prefix", { exact: true }), "Inter");
     await expectLoadedFont(switchSummary.locator(".font-mono").filter({ hasText: /^wrapper --$/ }), "JetBrains Mono");
     await expectLoadedFont(switchSummary.locator(".font-mono").filter({ hasText: /^--mode ask$/ }), "JetBrains Mono");
   } catch (error) {

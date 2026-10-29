@@ -93,7 +93,7 @@ test("header Clone from Hosts reveals Sessions and restores launcher focus", asy
     const launcher = page.locator(".create-session-form");
     await expect(launcher).toBeVisible();
     await expect(page.locator(".hosts-panel-toggle")).toHaveAttribute("aria-pressed", "false");
-    await launcher.getByRole("button", { name: "cancel", exact: true }).click();
+    await launcher.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(launcher).toHaveCount(0);
     await expect(page.locator(".new-session-button")).toBeVisible();
     await expect(page.locator(".new-session-button")).toBeFocused();

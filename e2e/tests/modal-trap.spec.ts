@@ -136,7 +136,7 @@ test("ordinary New isolates the page and wraps its concrete command controls", a
     await page.locator(".app-main").evaluate((node) => node.setAttribute("inert", ""));
     await expect(page.locator("[inert]")).toHaveCount(1);
     await opener.click();
-    const form = page.getByRole("dialog", { name: "launch a session" });
+    const form = page.getByRole("dialog", { name: "Launch a session" });
     await expect(form).toBeVisible();
     await expect(form.locator('.launch-composer-search input[role="combobox"]')).toBeFocused();
     expect(await form.evaluate((node) => document.querySelector(".app-main")!.contains(node)),
@@ -144,18 +144,18 @@ test("ordinary New isolates the page and wraps its concrete command controls", a
     await expect.poll(() => opener.evaluate((node) => node.closest("[inert]") !== null)).toBe(true);
     expect(await form.evaluate((node) => node.closest("[inert]") !== null)).toBe(false);
 
-    await form.getByRole("tab", { name: "command", exact: true }).click();
+    await form.getByRole("tab", { name: "Command", exact: true }).click();
     await expect(form).toHaveAttribute("data-composer-mode", "command");
     // The shared frame follows reading order: Close, fields, then the footer
     // with its primary last. Keep native wrapping rather than old top actions.
     const first = form.locator(".launch-composer-close");
     const last = form.locator(".create-session-submit");
-    const agentType = form.getByRole("combobox", { name: "agent type", exact: true });
+    const agentType = form.getByRole("combobox", { name: "Agent type", exact: true });
     await expect(agentType).toBeVisible();
     await expect(agentType).toBeEnabled();
     await agentType.selectOption("");
-    await form.getByLabel("agent command", { exact: true }).fill(FAKE_AGENT);
-    await form.getByRole("radio", { name: "no", exact: true }).check();
+    await form.getByLabel("Agent command", { exact: true }).fill(FAKE_AGENT);
+    await form.getByRole("radio", { name: "No", exact: true }).check();
     await expect(agentType).toHaveValue("");
     await expect(form.locator(".launch-command-resume-toggle, .launch-composer-browser")).toHaveCount(0);
     await expectBoundaries(page, form, first, last);
@@ -307,12 +307,12 @@ test("busy Templates contains Tab on its root with no enabled descendant", async
     await page.goto("/");
     // The sidebar icon and the dialog keep distinct accessible names.
     await page.getByRole("button", { name: "Templates", exact: true }).click();
-    const dialog = page.getByRole("dialog", { name: "templates", exact: true });
+    const dialog = page.getByRole("dialog", { name: "Templates", exact: true });
     await expect(dialog).toBeVisible();
     await expect(dialog.locator(".templates-sidebar")).toHaveAttribute("aria-busy", "false");
     await expect(dialog.locator(".templates-retry")).toHaveCount(0);
     await dialog.locator(".templates-row").filter({ has: page.getByText(name, { exact: true }) }).click();
-    await dialog.getByLabel("session name", { exact: true }).fill("after");
+    await dialog.getByLabel("Session name", { exact: true }).fill("after");
     const save = dialog.getByRole("button", { name: "Save", exact: true });
     await expect(save).toBeEnabled();
     await save.click();

@@ -63,12 +63,12 @@ test("OMP defaults to Guarded and escalation Undo restores the pre-switch draft"
     const permissions = form.locator(".launch-composer-permissions-choice");
     const banner = form.locator(".permission-escalation-banner");
     await chooseAgent(form, "OMP");
-    await expect(permissions.getByRole("button", { name: "guarded", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(permissions.getByRole("button", { name: "Guarded", exact: true })).toHaveAttribute("aria-pressed", "true");
     await expect(banner).toHaveCount(0);
     await chooseAgent(form, "Claude");
-    await permissions.getByRole("button", { name: "guarded", exact: true }).click();
+    await permissions.getByRole("button", { name: "Guarded", exact: true }).click();
     await chooseAgent(form, "OMP");
-    await expect(permissions.getByRole("button", { name: "guarded", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(permissions.getByRole("button", { name: "Guarded", exact: true })).toHaveAttribute("aria-pressed", "true");
     await expect(banner).toHaveCount(0);
     const name = form.locator(".launch-composer-name input");
     await name.fill("before switch");
@@ -80,21 +80,21 @@ test("OMP defaults to Guarded and escalation Undo restores the pre-switch draft"
     const screenshot = testInfo.outputPath("permission-escalation-banner.png");
     await form.screenshot({ path: screenshot });
     await testInfo.attach("permission-escalation-banner", { path: screenshot, contentType: "image/png" });
-    await expect(permissions.getByRole("button", { name: "yolo", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(permissions.getByRole("button", { name: "YOLO", exact: true })).toHaveAttribute("aria-pressed", "true");
     // The plan promises the whole pre-switch draft, including later edits.
     await name.fill("after switch");
     await form.locator(".named-conversation").fill("after-conversation");
-    await banner.getByRole("button", { name: "undo", exact: true }).click();
+    await banner.getByRole("button", { name: "Undo", exact: true }).click();
     await expect(banner).toHaveCount(0);
     await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: "OMP", exact: true })).toHaveAttribute("aria-pressed", "true");
-    await expect(permissions.getByRole("button", { name: "guarded", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(permissions.getByRole("button", { name: "Guarded", exact: true })).toHaveAttribute("aria-pressed", "true");
     await expect(name).toHaveValue("before switch");
     await expect(form.locator(".named-conversation")).toHaveValue("before-conversation");
     await chooseAgent(form, "Pi");
     await expect(banner).toBeVisible();
-    await banner.getByRole("button", { name: "dismiss", exact: true }).click();
+    await banner.getByRole("button", { name: "Dismiss", exact: true }).click();
     await expect(banner).toHaveCount(0);
-    await expect(permissions.getByRole("button", { name: "yolo", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(permissions.getByRole("button", { name: "YOLO", exact: true })).toHaveAttribute("aria-pressed", "true");
   } finally {
     await patchPreferences(request, { remembered_permissions: preferences.remembered_permissions });
   }
@@ -120,13 +120,13 @@ test("template permissions are compared after the complete template transaction"
     await page.goto("/");
     await page.locator(".new-session-button").click();
     const form = page.locator(".create-session-form");
-    const search = form.getByRole("combobox", { name: "search folders, harnesses, models, and efforts" });
+    const search = form.getByRole("combobox", { name: "Search folders, harnesses, models, and efforts" });
     await expect(form).toHaveAttribute("data-initial-templates-ready", "true");
     await chooseAgent(form, "Claude");
-    await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true }).click();
+    await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "Guarded", exact: true }).click();
     const name = form.locator(".launch-composer-name input");
     await name.fill("original name");
-    const folder = form.getByRole("combobox", { name: "folder", exact: true });
+    const folder = form.getByRole("combobox", { name: "Folder", exact: true });
     const oldFolder = await folder.inputValue();
     await search.fill(`tl:${names[0]}`);
     await search.focus();
@@ -136,7 +136,7 @@ test("template permissions are compared after the complete template transaction"
     await expect(banner).toContainText("Pi does not support Guarded");
     await expect(name).toHaveValue("template name");
     await expect(folder).toHaveValue("/template-choice");
-    await banner.getByRole("button", { name: "undo", exact: true }).click();
+    await banner.getByRole("button", { name: "Undo", exact: true }).click();
     await expect(name).toHaveValue("original name");
     await expect(folder).toHaveValue(oldFolder);
     await search.fill(`tl:${names[1]}`);
@@ -167,25 +167,25 @@ for (const path of ["search", "model picker"]) {
     const form = page.locator(".create-session-form");
     await chooseAgent(form, "Claude");
     const permissions = form.locator(".launch-composer-permissions-choice");
-    await permissions.getByRole("button", { name: "guarded", exact: true }).click();
+    await permissions.getByRole("button", { name: "Guarded", exact: true }).click();
     const banner = form.locator(".permission-escalation-banner");
     await expect(banner).toHaveCount(0);
     if (path === "search") {
-      const search = form.getByRole("combobox", { name: "search folders, harnesses, models, and efforts" });
+      const search = form.getByRole("combobox", { name: "Search folders, harnesses, models, and efforts" });
       await search.fill("harness:pi");
       await search.focus();
       await expect(search).toBeFocused();
       await search.press("Enter");
     } else {
-      const model = form.getByRole("combobox", { name: "model", exact: true });
+      const model = form.getByRole("combobox", { name: "Model", exact: true });
       await model.focus();
-      await form.getByRole("option", { name: "show every harness's models", exact: true }).click();
+      await form.getByRole("option", { name: "Show every harness's models", exact: true }).click();
       await form.getByRole("option", { name: "pi-warning-model (Pi)", exact: true }).click();
     }
     await expect(banner).toContainText("Pi does not support Guarded");
-    await banner.getByRole("button", { name: "undo", exact: true }).click();
+    await banner.getByRole("button", { name: "Undo", exact: true }).click();
     await expect(banner).toHaveCount(0);
-    await permissions.getByRole("button", { name: "yolo", exact: true }).click();
+    await permissions.getByRole("button", { name: "YOLO", exact: true }).click();
     await expect(banner).toHaveCount(0);
   });
 }
@@ -198,9 +198,9 @@ test("permission banner lifetime pauses for hover and focus and survives reduced
   await page.goto("/");
   await page.locator(".new-session-button").click();
   const form = page.locator(".create-session-form");
-  const search = form.getByRole("combobox", { name: "search folders, harnesses, models, and efforts" });
+  const search = form.getByRole("combobox", { name: "Search folders, harnesses, models, and efforts" });
   await chooseAgent(form, "Claude");
-  await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true }).click();
+  await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "Guarded", exact: true }).click();
   await chooseAgent(form, "Pi");
   const banner = form.locator(".permission-escalation-banner");
   await banner.hover();
@@ -215,8 +215,8 @@ test("permission banner lifetime pauses for hover and focus and survives reduced
   await expect(banner).toHaveCount(0);
   await chooseAgent(form, "Claude");
   await chooseAgent(form, "Pi");
-  await banner.getByRole("button", { name: "undo", exact: true }).focus();
-  await expect(banner.getByRole("button", { name: "undo", exact: true })).toBeFocused();
+  await banner.getByRole("button", { name: "Undo", exact: true }).focus();
+  await expect(banner.getByRole("button", { name: "Undo", exact: true })).toBeFocused();
   await expect.poll(() => lifetimeState(banner)).toEqual({ state: "paused", duration: 8000 });
   await nearExpiry(banner);
   await search.focus();

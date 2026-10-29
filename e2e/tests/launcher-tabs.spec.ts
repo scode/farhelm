@@ -33,13 +33,13 @@ async function openNew(page: Page) {
  */
 test("New opens on the agent tab, and each tab keeps its own fields and draft", async ({ page }) => {
   const form = await openNew(page);
-  const agentTab = form.getByRole("tab", { name: "agent", exact: true });
-  const commandTab = form.getByRole("tab", { name: "command", exact: true });
+  const agentTab = form.getByRole("tab", { name: "Agent", exact: true });
+  const commandTab = form.getByRole("tab", { name: "Command", exact: true });
   const harness = form.locator(".launch-composer-harness-choice");
   await expect(agentTab).toHaveAttribute("aria-selected", "true");
   await expect(commandTab).toHaveAttribute("aria-selected", "false");
   await expect(harness.locator('[aria-pressed="true"]')).toHaveCount(0);
-  await expect(form.getByLabel("agent command")).toHaveCount(0);
+  await expect(form.getByLabel("Agent command")).toHaveCount(0);
 
   await commandTab.click();
   await expect(commandTab).toHaveAttribute("aria-selected", "true");
@@ -47,21 +47,21 @@ test("New opens on the agent tab, and each tab keeps its own fields and draft", 
   await expect(harness).toHaveCount(0);
   await expect(form.locator(".launch-composer-model-choice")).toHaveCount(0);
   await expect(form.locator(".launch-composer-summary")).toHaveCount(0);
-  await form.getByLabel("agent command").fill("sleep 300");
+  await form.getByLabel("Agent command").fill("sleep 300");
   await answerYolo(form, true);
 
   await agentTab.click();
-  await expect(form.getByLabel("agent command")).toHaveCount(0);
+  await expect(form.getByLabel("Agent command")).toHaveCount(0);
   await harness.getByRole("button", { name: "Claude", exact: true }).click();
   await expect(harness.getByRole("button", { name: "Claude", exact: true })).toHaveAttribute("aria-pressed", "true");
 
   await commandTab.click();
-  await expect(form.getByLabel("agent command")).toHaveValue("sleep 300");
+  await expect(form.getByLabel("Agent command")).toHaveValue("sleep 300");
   await expect(form.locator(".launch-composer-launch-context")).toContainText("Command · ");
   await expect(form.locator(".launch-composer-launch-context")).not.toContainText("Claude");
-  await expect(form.locator(".create-session-submit")).toHaveAccessibleName(/^launch Command · /);
+  await expect(form.locator(".create-session-submit")).toHaveAccessibleName(/^Launch Command · /);
   await expect(
-    form.getByRole("group", { name: "runs in YOLO mode" }).getByLabel("yes (YOLO)", { exact: true }),
+    form.getByRole("group", { name: "Runs in YOLO mode" }).getByLabel("Yes (YOLO)", { exact: true }),
   ).toBeChecked();
   await agentTab.click();
   await expect(harness.getByRole("button", { name: "Claude", exact: true })).toHaveAttribute("aria-pressed", "true");
@@ -90,14 +90,14 @@ test("agent wrapper input refuses unfinished text and submits parsed words", asy
 
   const form = await openNew(page);
   await form.getByRole("button", { name: "Codex", exact: true }).click();
-  await form.getByLabel("folder", { exact: true }).fill("/tmp");
+  await form.getByLabel("Folder", { exact: true }).fill("/tmp");
   const wrapper = form.locator(".launch-composer-wrapper");
   await expect(wrapper).toBeVisible();
   await wrapper.fill("with-endpoint 'unfinished");
   await expect(wrapper).toHaveAttribute("aria-invalid", "true");
   await expect(form.locator(".create-session-submit")).toHaveAttribute("aria-disabled", "true");
   await form.locator(".create-session-submit").click({ force: true });
-  await expect(form.locator(".launch-composer-refusal")).toContainText("invalid wrapper prefix: missing closing quote");
+  await expect(form.locator(".launch-composer-refusal")).toContainText("Invalid wrapper prefix: missing closing quote");
   expect(bodies, "invalid wrapper text must not become a create").toHaveLength(0);
 
   await wrapper.fill("with-endpoint --profile 'work profile' --");
@@ -122,8 +122,8 @@ test("a dormant invalid wrapper does not block saving a command template", async
   const form = await openNew(page);
   await form.getByRole("button", { name: "Codex", exact: true }).click();
   await form.locator(".launch-composer-wrapper").fill("with-endpoint 'unfinished");
-  await form.getByRole("tab", { name: "command", exact: true }).click();
-  await form.getByLabel("agent command").fill("printf hello");
+  await form.getByRole("tab", { name: "Command", exact: true }).click();
+  await form.getByLabel("Agent command").fill("printf hello");
   await form.locator(".launch-composer-save-template").click();
   const panel = form.locator(".save-template-panel");
   await expect(panel).toBeVisible();
@@ -166,7 +166,7 @@ test("agent switch loads that agent's remembered wrapper prefix", async ({ page 
   await harness.getByRole("button", { name: "Claude", exact: true }).click();
   await expect(wrapper).toHaveValue("env 'CLAUDE_PROFILE=work<U+202E>'");
   await expect(wrapper).toHaveJSProperty("readOnly", true);
-  await form.getByRole("button", { name: "clear wrapper prefix" }).click();
+  await form.getByRole("button", { name: "Clear wrapper prefix" }).click();
   await expect(wrapper).toHaveValue("");
   await expect(wrapper).toHaveJSProperty("readOnly", false);
   await harness.getByRole("button", { name: "Codex", exact: true }).click();
@@ -185,24 +185,24 @@ test("agent switch loads that agent's remembered wrapper prefix", async ({ page 
  */
 test("search on the command tab switches to the agent tab only for an agent choice", async ({ page }) => {
   const form = await openNew(page);
-  const agentTab = form.getByRole("tab", { name: "agent", exact: true });
-  const commandTab = form.getByRole("tab", { name: "command", exact: true });
+  const agentTab = form.getByRole("tab", { name: "Agent", exact: true });
+  const commandTab = form.getByRole("tab", { name: "Command", exact: true });
   const search = form.locator('.launch-composer-search input[role="combobox"]');
   await commandTab.click();
-  await form.getByLabel("agent command").fill("sleep 300");
+  await form.getByLabel("Agent command").fill("sleep 300");
 
   // The folder history can offer /tmp a second time under the same words.
   await search.fill("/tmp");
   await form.getByRole("option", { name: "Use this path: /tmp", exact: true }).first().click();
   await expect(commandTab).toHaveAttribute("aria-selected", "true");
-  await expect(form.getByLabel("folder", { exact: true })).toHaveValue("/tmp");
-  await expect(form.getByLabel("agent command")).toHaveValue("sleep 300");
+  await expect(form.getByLabel("Folder", { exact: true })).toHaveValue("/tmp");
+  await expect(form.getByLabel("Agent command")).toHaveValue("sleep 300");
 
   await search.fill("name:tabs-named");
   await form.getByRole("option").first().click();
   await expect(commandTab, "a name keeps the command tab").toHaveAttribute("aria-selected", "true");
-  await expect(form.getByLabel("name (optional)")).toHaveValue("tabs-named");
-  await expect(form.getByLabel("agent command")).toHaveValue("sleep 300");
+  await expect(form.getByLabel("Name (optional)")).toHaveValue("tabs-named");
+  await expect(form.getByLabel("Agent command")).toHaveValue("sleep 300");
 
   await search.fill("claude");
   await form.getByRole("option", { name: "Harness: Claude", exact: true }).click();
@@ -211,7 +211,7 @@ test("search on the command tab switches to the agent tab only for an agent choi
     form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Claude", exact: true }),
   ).toHaveAttribute("aria-pressed", "true");
   await commandTab.click();
-  await expect(form.getByLabel("agent command"), "the command draft survives the switch").toHaveValue("sleep 300");
+  await expect(form.getByLabel("Agent command"), "the command draft survives the switch").toHaveValue("sleep 300");
 });
 
 /**
@@ -224,15 +224,15 @@ test("search on the command tab switches to the agent tab only for an agent choi
  */
 test("the arrow keys move between the launch-kind tabs", async ({ page }) => {
   const form = await openNew(page);
-  const agentTab = form.getByRole("tab", { name: "agent", exact: true });
-  const commandTab = form.getByRole("tab", { name: "command", exact: true });
+  const agentTab = form.getByRole("tab", { name: "Agent", exact: true });
+  const commandTab = form.getByRole("tab", { name: "Command", exact: true });
   await expect(agentTab).toHaveAttribute("tabindex", "0");
   await expect(commandTab).toHaveAttribute("tabindex", "-1");
   await agentTab.focus();
   await page.keyboard.press("ArrowRight");
   await expect(commandTab).toHaveAttribute("aria-selected", "true");
   await expect(commandTab).toBeFocused();
-  await expect(form.getByLabel("agent command")).toBeVisible();
+  await expect(form.getByLabel("Agent command")).toBeVisible();
   await page.keyboard.press("ArrowLeft");
   await expect(agentTab).toHaveAttribute("aria-selected", "true");
   await expect(agentTab).toBeFocused();

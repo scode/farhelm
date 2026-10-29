@@ -151,13 +151,13 @@ test("unsafe template model and folder stay raw until explicitly replaced", asyn
     await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
     expect((await storedTemplate(request, name)).fields).toEqual({ ...fields, name: "after" });
     for (const field of ["model", "destination"]) {
-      await dialog.getByRole("button", { name: `remove ${field}`, exact: true }).click();
+      await dialog.getByRole("button", { name: `Remove ${field}`, exact: true }).click();
     }
     await dialog.locator(".templates-save").click();
     await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
     expect((await storedTemplate(request, name)).fields).toEqual({ kind: "agent", agent: "claude", name: "after" });
-    for (const [field, value] of [["model", "replacement model"], ["destination", "/tmp/replacement"]]) {
-      await addField(dialog, field);
+    for (const [field, label, value] of [["model", "Model", "replacement model"], ["destination", "Destination", "/tmp/replacement"]]) {
+      await addField(dialog, label);
       const input = dialog.locator(`.templates-${field}`);
       await expect(input).toBeEditable();
       await input.fill(value);
@@ -167,7 +167,7 @@ test("unsafe template model and folder stay raw until explicitly replaced", asyn
     expect((await storedTemplate(request, name)).fields).toEqual({ kind: "agent", agent: "claude", name: "after", model: "replacement model", destination: { folder: "/tmp/replacement" } });
     const suggestion = dialog.getByRole("button", { name: "suggested<U+200B>", exact: true });
     await expect(suggestion).toBeVisible();
-    await expect(suggestion).toHaveAttribute("data-tooltip", "set model to suggested<U+200B>");
+    await expect(suggestion).toHaveAttribute("data-tooltip", "Set model to suggested<U+200B>");
     await suggestion.click();
     await expect(dialog.locator(".templates-model")).toHaveValue("suggested<U+200B>");
     await expect(dialog.locator(".templates-model")).toHaveJSProperty("readOnly", true);
@@ -220,15 +220,15 @@ for (const [field, value] of [
     // Repairing the draft cannot make the stored snapshot restorable.
     if (field === "name") {
       await expect(dialog.locator(".templates-session-name")).toHaveJSProperty("readOnly", true);
-      await dialog.getByRole("button", { name: "remove session name", exact: true }).click();
-      await addField(dialog, "session name");
+      await dialog.getByRole("button", { name: "Remove session name", exact: true }).click();
+      await addField(dialog, "Session name");
       const input = dialog.locator(".templates-session-name");
       await expect(input).toBeEditable();
       await input.fill("repaired draft");
       await expect(input).toHaveValue("repaired draft");
     }
     const remove = dialog.locator(".templates-delete:visible");
-    await expect(remove).toHaveText("delete permanently");
+    await expect(remove).toHaveText("Delete permanently");
     await expect(remove).toHaveAttribute("data-tooltip", /current save rules.*undo is not available/);
     expect(deletes, "the permanent warning must be visible before any delete").toBe(0);
     await remove.click();
@@ -259,18 +259,18 @@ test("number keys move, follow rename, and stay freed after undo", async ({ page
     await putTemplate(request, partial, { effort: "high" });
     await page.goto("/");
     await page.locator(".templates-button").click();
-    const dialog = page.getByRole("dialog", { name: "templates", exact: true });
+    const dialog = page.getByRole("dialog", { name: "Templates", exact: true });
     await expect(dialog.locator(".templates-sidebar")).toHaveAttribute("aria-busy", "false");
-    const keyButton = (name: string) => dialog.getByRole("button", { name: `number shortcut ${name}`, exact: true });
+    const keyButton = (name: string) => dialog.getByRole("button", { name: `Number shortcut ${name}`, exact: true });
     await expect(keyButton(partial)).toBeEnabled();
     await expect(keyButton(a)).toHaveText("Ctrl+Shift+ –");
     await expect(keyButton(a)).toHaveAttribute("data-tooltip", /right away.*Only one template/);
-    await expect(dialog.getByRole("button", { name: `quick launch ${a}`, exact: true }))
+    await expect(dialog.getByRole("button", { name: `Quick launch ${a}`, exact: true }))
       .toHaveAttribute("data-tooltip", /without opening New.*Only one template/);
     await keyButton(a).focus();
     await expect(keyButton(a)).toBeFocused();
     await page.keyboard.press("ArrowDown");
-    const menu = dialog.getByRole("menu", { name: `number key for ${a}`, exact: true });
+    const menu = dialog.getByRole("menu", { name: `Number key for ${a}`, exact: true });
     const none = menu.getByRole("menuitem", { name: "No shortcut", exact: true });
     await expect(none).toBeFocused();
     await expect(none).toHaveAccessibleDescription("Remove this template's number shortcut");
@@ -302,7 +302,7 @@ test("number keys move, follow rename, and stay freed after undo", async ({ page
     await page.keyboard.press("Escape");
     await expect(keyButton(a)).toBeFocused();
     await keyButton(b).click();
-    const other = dialog.getByRole("menu", { name: `number key for ${b}`, exact: true });
+    const other = dialog.getByRole("menu", { name: `Number key for ${b}`, exact: true });
     const moving = other.getByRole("menuitem", { name: "Ctrl+Shift+1", exact: true });
     await expect(moving).toBeVisible();
     await expect(moving).toHaveAccessibleDescription(`${a} (moves here)`);
@@ -311,28 +311,28 @@ test("number keys move, follow rename, and stay freed after undo", async ({ page
     await keyButton(b).click();
     await other.getByRole("menuitem", { name: "Ctrl+Shift+0", exact: true }).click();
     await expect.poll(async () => (await readPreferences(request)).template_shortcuts).toEqual({ "0": b });
-    await dialog.getByRole("button", { name: `quick launch ${b}`, exact: true }).click();
+    await dialog.getByRole("button", { name: `Quick launch ${b}`, exact: true }).click();
     await expect.poll(async () => (await readPreferences(request)).quick_launch_template).toBe(b);
     await dialog.locator(".templates-row-name").getByText(b, { exact: true }).click();
     await dialog.locator(".templates-name").fill(renamed);
     await dialog.getByRole("button", { name: "Save", exact: true }).click();
     await expect.poll(async () => (await readPreferences(request)).template_shortcuts).toEqual({ "0": renamed });
     await expect.poll(async () => (await readPreferences(request)).quick_launch_template).toBe(renamed);
-    await dialog.getByRole("button", { name: "delete", exact: true }).click();
+    await dialog.getByRole("button", { name: "Delete", exact: true }).click();
     await expect.poll(async () => (await readPreferences(request)).template_shortcuts ?? {}).toEqual({});
-    await dialog.getByRole("button", { name: "undo", exact: true }).click();
+    await dialog.getByRole("button", { name: "Undo", exact: true }).click();
     await expect(keyButton(renamed)).toBeVisible();
     await expect(keyButton(renamed)).toHaveText("Ctrl+Shift+ –");
     await patchPreferences(request, { template_shortcuts: { "1": a }, quick_launch_template: a });
     expect((await readPreferences(request)).template_shortcuts).toEqual({ "1": a });
     await expect(keyButton(a)).toHaveText("Ctrl+Shift+ –");
     await keyButton(renamed).click();
-    await dialog.getByRole("menu", { name: `number key for ${renamed}`, exact: true })
+    await dialog.getByRole("menu", { name: `Number key for ${renamed}`, exact: true })
       .getByRole("menuitem", { name: "Ctrl+Shift+2", exact: true }).click();
     await expect.poll(async () => (await readPreferences(request)).template_shortcuts).toEqual({ "1": a, "2": renamed });
     await patchPreferences(request, { quick_launch_template: renamed });
     expect((await readPreferences(request)).quick_launch_template).toBe(renamed);
-    const bolt = dialog.getByRole("button", { name: `quick launch ${renamed}`, exact: true });
+    const bolt = dialog.getByRole("button", { name: `Quick launch ${renamed}`, exact: true });
     await expect(bolt).toHaveAttribute("aria-pressed", "false");
     // The stale unlit bolt asks to mark a template an agent has already marked: the mark must survive.
     await bolt.click();
@@ -344,7 +344,7 @@ test("number keys move, follow rename, and stay freed after undo", async ({ page
     await page.locator(".templates-button").click();
     await expect(keyButton(partial)).toBeEnabled();
     await keyButton(partial).click();
-    const remove = dialog.getByRole("menu", { name: `number key for ${partial}`, exact: true });
+    const remove = dialog.getByRole("menu", { name: `Number key for ${partial}`, exact: true });
     await expect(remove.getByRole("menuitem")).toHaveCount(11);
     await remove.getByRole("menuitem", { name: "No shortcut", exact: true }).click();
     await expect.poll(async () => (await readPreferences(request)).template_shortcuts ?? {}).toEqual({});
@@ -389,15 +389,15 @@ test(`a failed number-key save is reported and never saved later: ${failure}`, a
     });
     await page.goto("/");
     await page.locator(".templates-button").click();
-    const dialog = page.getByRole("dialog", { name: "templates", exact: true });
+    const dialog = page.getByRole("dialog", { name: "Templates", exact: true });
     await expect(dialog.locator(".templates-sidebar")).toHaveAttribute("aria-busy", "false");
-    const keyButton = dialog.getByRole("button", { name: `number shortcut ${a}`, exact: true });
-    const menu = dialog.getByRole("menu", { name: `number key for ${a}`, exact: true });
+    const keyButton = dialog.getByRole("button", { name: `Number shortcut ${a}`, exact: true });
+    const menu = dialog.getByRole("menu", { name: `Number key for ${a}`, exact: true });
     await expect(keyButton).toHaveText("Ctrl+Shift+ –");
     await keyButton.click();
     await menu.getByRole("menuitem", { name: "Ctrl+Shift+1", exact: true }).click();
     const detail = failure === "unreadable keys" ? "current keys could not be read" : "showing the keys read from Farhelm";
-    await expect(dialog.locator(".templates-error")).toHaveText(`the number key may not have been saved; ${detail}`);
+    await expect(dialog.locator(".templates-error")).toHaveText(`The number key may not have been saved; ${detail}`);
     expect(writes).toBe(1);
     expect(rereads, "a preferences read followed the failed write").toBeGreaterThan(0);
     await expect(keyButton).toHaveText(failure === "lost reply" ? "Ctrl+Shift+1" : "Ctrl+Shift+ –");
@@ -432,8 +432,8 @@ test("a refused quick-launch mark restores the stored mark and reports the failu
     await patchPreferences(request, { quick_launch_template: a });
     expect((await readPreferences(request)).quick_launch_template).toBe(a);
     const dialog = await openTemplates(page);
-    const oldMark = dialog.getByRole("button", { name: `quick launch ${a}`, exact: true });
-    const newMark = dialog.getByRole("button", { name: `quick launch ${b}`, exact: true });
+    const oldMark = dialog.getByRole("button", { name: `Quick launch ${a}`, exact: true });
+    const newMark = dialog.getByRole("button", { name: `Quick launch ${b}`, exact: true });
     await expect(oldMark).toHaveAttribute("aria-pressed", "true");
     await expect(newMark).toHaveAttribute("aria-pressed", "false");
     await page.route("**/api/preferences", async route => {
@@ -445,7 +445,7 @@ test("a refused quick-launch mark restores the stored mark and reports the failu
     });
     await newMark.click();
     await expect(dialog.locator(".templates-error")).toHaveText(
-      "the quick-launch mark may not have been saved; showing the mark read from Farhelm",
+      "The quick-launch mark may not have been saved; showing the mark read from Farhelm",
     );
     await expect(oldMark).toHaveAttribute("aria-pressed", "true");
     await expect(newMark).toHaveAttribute("aria-pressed", "false");
@@ -506,12 +506,12 @@ test("model-only number key opens New with a temporary composition explanation",
     await patchPreferences(request, { template_shortcuts: null, quick_launch_template: null });
     await putTemplate(request, name, { model: model.id });
     const dialog = await openTemplates(page);
-    const key = dialog.getByRole("button", { name: `number shortcut ${name}`, exact: true });
+    const key = dialog.getByRole("button", { name: `Number shortcut ${name}`, exact: true });
     await expect(key).toBeEnabled();
     await expect(key).toHaveAttribute("data-tooltip", /cannot launch on its own.*Ctrl\+Shift\+X/);
-    await expect(dialog.getByRole("button", { name: `quick launch ${name}`, exact: true })).toBeDisabled();
+    await expect(dialog.getByRole("button", { name: `Quick launch ${name}`, exact: true })).toBeDisabled();
     await key.click();
-    await dialog.getByRole("menu", { name: `number key for ${name}`, exact: true })
+    await dialog.getByRole("menu", { name: `Number key for ${name}`, exact: true })
       .getByRole("menuitem", { name: "Ctrl+Shift+4", exact: true }).click();
     await expect.poll(async () => (await readPreferences(request)).template_shortcuts).toEqual({ "4": name });
     await dialog.locator(".templates-close").click();
@@ -521,21 +521,21 @@ test("model-only number key opens New with a temporary composition explanation",
     const form = page.locator(".create-session-form");
     const banner = form.getByRole("alert").filter({ hasText: "cannot launch on its own" });
     await expect.poll(() => held).toBe(true);
-    await expect(form.getByRole("status")).toHaveText("loading session setup…");
+    await expect(form.getByRole("status")).toHaveText("Loading session setup…");
     await expect(banner).toHaveCount(0);
     // sleep-ok: hold catalog loading beyond the six-second notice lifetime to distinguish mount expiry from form-open expiry.
     await page.waitForTimeout(6500);
     expect(held && hold, "the catalog gate must still own the loading boundary").toBe(true);
-    await expect(form.getByRole("status")).toHaveText("loading session setup…");
+    await expect(form.getByRole("status")).toHaveText("Loading session setup…");
     hold = false;
     gate.release();
     await expect(banner).toContainText(`${name} cannot launch on its own.`);
     await expect(banner).toContainText("Ctrl+Shift+X");
     await banner.click();
     await expect(banner, "reading the explanation is not an edit").toBeVisible();
-    await expect(form.getByRole("combobox", { name: "model", exact: true })).toHaveValue(model.id);
+    await expect(form.getByRole("combobox", { name: "Model", exact: true })).toHaveValue(model.id);
     await test.info().attach("partial-template-notice", { body: await page.screenshot(), contentType: "image/png" });
-    const modelInput = form.getByRole("combobox", { name: "model", exact: true });
+    const modelInput = form.getByRole("combobox", { name: "Model", exact: true });
     await modelInput.focus();
     await expect(modelInput).toBeFocused();
     await expect(banner).toBeVisible();
@@ -545,7 +545,7 @@ test("model-only number key opens New with a temporary composition explanation",
     await expect(form).toHaveCount(0);
     await page.keyboard.press("Control+Shift+Digit4");
     await expect(banner).toBeVisible();
-    await form.getByRole("tab", { name: "command", exact: true }).click();
+    await form.getByRole("tab", { name: "Command", exact: true }).click();
     await expect(banner, "button-based draft choices also dismiss the notice").toHaveCount(0);
     await form.locator(".launch-composer-cancel").click();
     await expect(form).toHaveCount(0);
@@ -571,10 +571,10 @@ test("number popup toggle stays open during pointerdown and closes on click", as
     await putTemplate(request, name, { kind: "agent", agent: "claude" });
     await page.goto("/");
     await page.locator(".templates-button").click();
-    const dialog = page.getByRole("dialog", { name: "templates", exact: true });
-    const toggle = dialog.getByRole("button", { name: `number shortcut ${name}`, exact: true });
+    const dialog = page.getByRole("dialog", { name: "Templates", exact: true });
+    const toggle = dialog.getByRole("button", { name: `Number shortcut ${name}`, exact: true });
     await toggle.click();
-    const menu = dialog.getByRole("menu", { name: `number key for ${name}`, exact: true });
+    const menu = dialog.getByRole("menu", { name: `Number key for ${name}`, exact: true });
     await expect(menu).toBeVisible();
     await test.info().attach("number-menu", { body: await page.screenshot(), contentType: "image/png" });
     await toggle.hover();
@@ -604,11 +604,11 @@ for (const movement of ["scroll", "resize", "width-only resize"]) {
       await page.setViewportSize({ width: 1100, height: 500 });
       await page.goto("/");
       await page.locator(".templates-button").click();
-      const dialog = page.getByRole("dialog", { name: "templates", exact: true });
+      const dialog = page.getByRole("dialog", { name: "Templates", exact: true });
       await expect(dialog.locator(".templates-sidebar")).toHaveAttribute("aria-busy", "false");
       expect(await dialog.evaluate(node => node.scrollHeight > node.clientHeight), "premise: dialog overflows").toBe(true);
-      await dialog.getByRole("button", { name: `number shortcut ${names[0]}`, exact: true }).click();
-      const menu = dialog.getByRole("menu", { name: `number key for ${names[0]}`, exact: true });
+      await dialog.getByRole("button", { name: `Number shortcut ${names[0]}`, exact: true }).click();
+      const menu = dialog.getByRole("menu", { name: `Number key for ${names[0]}`, exact: true });
       await expect(menu).toBeVisible();
       await expect(menu.getByRole("menuitem", { name: "No shortcut", exact: true })).toBeFocused();
       if (movement === "scroll") {
@@ -650,10 +650,10 @@ test("number popup delayed close keeps another popup's focus", async ({ page, re
     expect((await readPreferences(request)).template_shortcuts).toEqual({ "1": names[0] });
     await page.goto("/");
     await page.locator(".templates-button").click();
-    const dialog = page.getByRole("dialog", { name: "templates", exact: true });
-    const menu = (name: string) => dialog.getByRole("menu", { name: `number key for ${name}`, exact: true });
+    const dialog = page.getByRole("dialog", { name: "Templates", exact: true });
+    const menu = (name: string) => dialog.getByRole("menu", { name: `Number key for ${name}`, exact: true });
     for (const name of names) {
-      const toggle = dialog.getByRole("button", { name: `number shortcut ${name}`, exact: true });
+      const toggle = dialog.getByRole("button", { name: `Number shortcut ${name}`, exact: true });
       await toggle.focus();
       await expect(toggle).toBeFocused();
       await page.keyboard.press("ArrowDown");
@@ -797,23 +797,23 @@ test("tl: search reports a failed template read and retries it", async ({ page, 
       } else await route.continue();
     });
     const form = await openNew(page);
-    await form.getByLabel("name (optional)").fill("preserved draft");
+    await form.getByLabel("Name (optional)").fill("preserved draft");
     const search = form.locator('.launch-composer-search input[role="combobox"]');
     await search.fill("tl:");
     const error = form.locator(".launch-composer-templates-error");
-    await expect(error).toContainText("couldn't load templates");
+    await expect(error).toContainText("Couldn't load templates");
     await expect(error).toContainText("temporary template list failure");
     expect(failedReads).toBeGreaterThan(0);
     await form.getByRole("button", { name: "Codex", exact: true }).click();
     await expect(form.getByRole("button", { name: "Codex", exact: true })).toHaveAttribute("aria-pressed", "true");
     failReads = false;
-    await error.getByRole("button", { name: "retry", exact: true }).click();
+    await error.getByRole("button", { name: "Retry", exact: true }).click();
     await expect(error).toHaveCount(0);
     // Choice and Retry clicks dismiss the search list. Typing again opens
     // it within the same draft, so this checks the refreshed catalog.
     await search.fill(`tl:${name}`);
     await expect(form.getByRole("option", { name: `Template: ${name}`, exact: true })).toBeVisible();
-    await expect(form.getByLabel("name (optional)")).toHaveValue("preserved draft");
+    await expect(form.getByLabel("Name (optional)")).toHaveValue("preserved draft");
   } catch (error) {
     bodyFailed = true;
     throw error;
@@ -902,7 +902,7 @@ for (const width of [1100, 390]) {
       for (const control of await visibleControls.all()) await expect(control).toBeDisabled();
       await expect(dialog).toHaveAttribute("tabindex", "0");
       await expect(dialog).toHaveAttribute("role", "dialog");
-      await expect(dialog).toHaveAccessibleName("templates");
+      await expect(dialog).toHaveAccessibleName("Templates");
       await expect(dialog).toHaveAttribute("aria-modal", "true");
       await expect(dialog.locator('[role="region"], form')).toHaveCount(0);
       await page.keyboard.press("Tab");
@@ -978,7 +978,7 @@ for (const [trust, write] of [[true, "edit"], [false, "duplicate"], [null, "undo
       });
       const form = await openNew(page);
       await applyTemplate(form, source);
-      await expect(form.getByLabel("name (optional)")).toHaveValue("legacy-template");
+      await expect(form.getByLabel("Name (optional)")).toHaveValue("legacy-template");
       await expect.poll(() => legacyReads, { message: "the launcher received the old-rules template" }).toBeGreaterThan(0);
       await expect(form.locator(".launch-composer-trust-choice")).toHaveCount(0);
       await expect(form.locator(".launch-composer-summary")).not.toContainText("trust:");
@@ -1007,8 +1007,8 @@ for (const [trust, write] of [[true, "edit"], [false, "duplicate"], [null, "undo
       await expect(row.locator(".templates-row-summary")).not.toContainText("trust");
       await expect(dialog.locator('[data-field="trust"]')).toHaveCount(0);
       await dialog.locator(".templates-add").click();
-      await expect(dialog.getByRole("group", { name: "add field", exact: true })).toBeVisible();
-      await expect(dialog.locator(".templates-add-menu").getByRole("button", { name: "workspace trust", exact: true })).toHaveCount(0);
+      await expect(dialog.getByRole("group", { name: "Add field", exact: true })).toBeVisible();
+      await expect(dialog.locator(".templates-add-menu").getByRole("button", { name: "Workspace trust", exact: true })).toHaveCount(0);
       await dialog.locator(".templates-add").click();
       let writtenName = source;
       if (write === "duplicate") {
@@ -1062,7 +1062,7 @@ for (const keepPrompt of [true, false]) {
       await putTemplate(request, nameOnly, { name: "unrelated edit" });
       const form = await openNew(page);
       await applyTemplate(form, initial);
-      const prompt = form.getByLabel("initial prompt", { exact: true });
+      const prompt = form.getByLabel("Initial prompt", { exact: true });
       await expect(prompt).toHaveCount(0);
       await applyTemplate(form, unchanged);
       await expect(prompt).toHaveValue("first<U+202E><U+000A>second");
@@ -1075,9 +1075,9 @@ for (const keepPrompt of [true, false]) {
       await applyTemplate(form, initial);
       // A projected-out message must not be written back as absence by an
       // unrelated template. Both dormant launch kinds retain the raw draft.
-      await form.getByRole("tab", { name: "command", exact: true }).click();
+      await form.getByRole("tab", { name: "Command", exact: true }).click();
       await applyTemplate(form, nameOnly);
-      await form.getByRole("tab", { name: "agent", exact: true }).click();
+      await form.getByRole("tab", { name: "Agent", exact: true }).click();
       await expect(prompt).toHaveValue("first<U+202E><U+000A>second");
       await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Goose", exact: true }).click();
       await expect(prompt).toHaveCount(0);
@@ -1087,7 +1087,7 @@ for (const keepPrompt of [true, false]) {
       await form.locator(".launch-composer-save-template").click();
       const panel = form.locator(".save-template-panel");
       const choice = panel.locator(".save-template-choice").filter({ has: page.locator('[data-field="prompt"]') });
-      await expect(choice).toContainText("initial prompt: first<U+202E>…");
+      await expect(choice).toContainText("Initial prompt: first<U+202E>…");
       const checkbox = choice.locator('input[type="checkbox"]');
       await expect(checkbox).toBeChecked();
       if (!keepPrompt) await checkbox.uncheck();
@@ -1121,12 +1121,12 @@ test("initial prompt survives a recent but clears on Clone and Replace prefills"
     await pinAutoSelect(page, source.id);
     const form = await openNew(page);
     await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
-    await form.getByLabel("initial prompt", { exact: true }).fill("keep through recent");
+    await form.getByLabel("Initial prompt", { exact: true }).fill("keep through recent");
     await expect(form.getByLabel("host", { exact: true })).toHaveAttribute("data-host-id", String(host!.id));
     const recent = form.locator(".launch-composer-recents button");
     await expect(recent).toHaveCount(1);
     await recent.click();
-    await expect(form.getByLabel("initial prompt", { exact: true })).toHaveValue("keep through recent");
+    await expect(form.getByLabel("Initial prompt", { exact: true })).toHaveValue("keep through recent");
     await form.locator(".launch-composer-cancel").click();
     for (const selector of [".session-row-clone", ".session-row-replace-with"]) {
       const row = page.locator(`.session-row[data-session-id="${source.id}"]`);
@@ -1134,10 +1134,10 @@ test("initial prompt survives a recent but clears on Clone and Replace prefills"
       await openRowMenu(row);
       await row.locator(selector).click();
       await expect(form).toBeVisible();
-      await form.getByRole("tab", { name: "agent", exact: true }).click();
+      await form.getByRole("tab", { name: "Agent", exact: true }).click();
       await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
-      await expect(form.getByLabel("initial prompt", { exact: true })).toHaveValue("");
-      await form.getByLabel("initial prompt", { exact: true }).fill("discard for next prefill");
+      await expect(form.getByLabel("Initial prompt", { exact: true })).toHaveValue("");
+      await form.getByLabel("Initial prompt", { exact: true }).fill("discard for next prefill");
       await form.locator(".launch-composer-cancel").click();
     }
   } finally {
@@ -1156,8 +1156,8 @@ test("initial prompt template field preserves multiline text and agent compatibi
     const dialog = await openTemplates(page);
     await dialog.locator(".templates-new").click();
     await dialog.locator(".templates-name").fill(name);
-    await addField(dialog, "initial prompt");
-    const prompt = dialog.getByLabel("initial prompt", { exact: true });
+    await addField(dialog, "Initial prompt");
+    const prompt = dialog.getByLabel("Initial prompt", { exact: true });
     await expect(prompt).toBeEditable();
     await prompt.fill(message);
     await expect(prompt).toHaveValue(message);
@@ -1165,14 +1165,14 @@ test("initial prompt template field preserves multiline text and agent compatibi
     await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
     expect((await storedTemplate(request, name)).fields.prompt).toBe(message);
     await expect(dialog.locator(".templates-row").filter({ has: page.getByText(name, { exact: true }) })
-      .locator(".templates-row-summary")).toContainText("initial prompt");
-    await addField(dialog, "agent type");
-    await dialog.getByLabel("agent type", { exact: true }).selectOption("pi");
-    await expect(dialog.locator('.templates-set-field[data-field="prompt"] .templates-error')).toContainText("does not fit");
+      .locator(".templates-row-summary")).toContainText("Initial prompt");
+    await addField(dialog, "Agent type");
+    await dialog.getByLabel("Agent type", { exact: true }).selectOption("pi");
+    await expect(dialog.locator('.templates-set-field[data-field="prompt"] .templates-error')).toContainText("Does not fit");
     await expect(prompt).toHaveValue(message);
-    await dialog.getByRole("button", { name: "remove initial prompt", exact: true }).click();
+    await dialog.getByRole("button", { name: "Remove initial prompt", exact: true }).click();
     await dialog.locator(".templates-add").click();
-    await expect(dialog.locator(".templates-add-menu").getByRole("button", { name: "initial prompt", exact: true })).toHaveCount(0);
+    await expect(dialog.locator(".templates-add-menu").getByRole("button", { name: "Initial prompt", exact: true })).toHaveCount(0);
     await dialog.locator(".templates-add").click();
     await dialog.locator(".templates-save").click();
     await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
@@ -1195,16 +1195,16 @@ test("initial prompt template escapes formatting while preserving raw saved text
     await putTemplate(request, name, { kind: "agent", prompt: message });
     const dialog = await openTemplates(page);
     await dialog.locator(".templates-row-name").getByText(name, { exact: true }).click();
-    const prompt = dialog.getByLabel("initial prompt", { exact: true });
+    const prompt = dialog.getByLabel("Initial prompt", { exact: true });
     await expect(prompt).toHaveJSProperty("readOnly", true);
     await expect(prompt).toHaveValue("first<U+202E><U+000A>second");
-    await addField(dialog, "session name");
+    await addField(dialog, "Session name");
     await dialog.locator(".templates-session-name").fill("other edit");
     await dialog.locator(".templates-save").click();
     await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
     expect((await storedTemplate(request, name)).fields.prompt).toBe(message);
-    await dialog.getByRole("button", { name: "remove initial prompt", exact: true }).click();
-    await addField(dialog, "initial prompt");
+    await dialog.getByRole("button", { name: "Remove initial prompt", exact: true }).click();
+    await addField(dialog, "Initial prompt");
     await expect(prompt).toBeEditable();
     await expect(prompt).toHaveValue("");
     await prompt.fill("replacement\nmessage");
@@ -1225,8 +1225,8 @@ test("an approvals-only template saves every offered approval choice", async ({ 
     const dialog = await openTemplates(page);
     await dialog.locator(".templates-new").click();
     await dialog.locator(".templates-name").fill(name);
-    await addField(dialog, "approvals");
-    const choices = dialog.getByLabel("approvals", { exact: true });
+    await addField(dialog, "Approvals");
+    const choices = dialog.getByLabel("Approvals", { exact: true });
     for (const choice of ["guarded", "approve", "smart_approve", "chat", "yolo"]) {
       await choices.selectOption(choice);
       await expect(dialog.locator(".templates-save")).toBeEnabled();
@@ -1249,12 +1249,12 @@ test("templates save explicit guarded and default-YOLO permissions", async ({ pa
     const dialog = await openTemplates(page);
     await dialog.locator(".templates-new").click();
     await dialog.locator(".templates-name").fill(name);
-    await addField(dialog, "agent type");
-    await dialog.getByLabel("agent type", { exact: true }).selectOption("codex");
-    await addField(dialog, "approvals");
+    await addField(dialog, "Agent type");
+    await dialog.getByLabel("Agent type", { exact: true }).selectOption("codex");
+    await addField(dialog, "Approvals");
     for (const [agent, permission] of [["codex", "guarded"], ["omp", "yolo"], ["goose", "yolo"]]) {
-      await dialog.getByLabel("agent type", { exact: true }).selectOption(agent);
-      const choices = dialog.getByRole("group", { name: "approvals", exact: true });
+      await dialog.getByLabel("Agent type", { exact: true }).selectOption(agent);
+      const choices = dialog.getByRole("group", { name: "Approvals", exact: true });
       const offered = choices.locator(`button[value="${permission}"]`);
       await expect(offered).not.toHaveText(/not offered/);
       await offered.click();
@@ -1291,7 +1291,7 @@ test("delete waits for the saved template list before offering undo", async ({ p
   try {
     const dialog = await openTemplates(page);
     await dialog.locator(".templates-row").filter({ has: page.getByText(name, { exact: true }) }).click();
-    await dialog.getByLabel("session name", { exact: true }).fill("new title");
+    await dialog.getByLabel("Session name", { exact: true }).fill("new title");
     hold = true;
     await dialog.locator(".templates-save").click();
     await expect.poll(() => held).toBe(true);
@@ -1350,11 +1350,11 @@ test("a lost template Delete reply reports uncertainty and refreshes the list", 
     await row.click();
     await expect(row).toHaveAttribute("aria-pressed", "true");
     await expect(dialog.locator(".templates-name")).toHaveValue(name);
-    await expect(dialog.locator(".templates-delete:visible")).toHaveText("delete");
+    await expect(dialog.locator(".templates-delete:visible")).toHaveText("Delete");
     await expect(dialog.locator(".templates-undo")).toHaveCount(0);
     await dialog.locator(".templates-delete:visible").click();
     await expect(dialog.locator('p.templates-error[role="status"]')).toHaveText(
-      "the template may have been deleted; reloading the template list",
+      "The template may have been deleted; reloading the template list",
     );
     await expect.poll(() => rereads, { message: "the page rereads templates after the lost reply" }).toBeGreaterThan(0);
     await expect(row).toHaveCount(0);
@@ -1397,7 +1397,7 @@ test("a refused template Delete keeps the helm error and stored template", async
     await expect(row).toBeVisible();
     await row.click();
     await expect(dialog.locator(".templates-name")).toHaveValue(name);
-    await expect(dialog.locator(".templates-delete:visible")).toHaveText("delete");
+    await expect(dialog.locator(".templates-delete:visible")).toHaveText("Delete");
     await dialog.locator(".templates-delete:visible").click();
     await expect(dialog.locator('p.templates-error[role="status"]')).toHaveText(refusal);
     await expect(row).toBeVisible();
@@ -1425,19 +1425,19 @@ test("template destination uses the shared folder and managed checkout control",
     const dialog = await openTemplates(page);
     await dialog.locator(".templates-new").click();
     await dialog.locator(".templates-name").fill(name);
-    await addField(dialog, "destination");
-    const types = dialog.getByRole("group", { name: "destination type", exact: true });
+    await addField(dialog, "Destination");
+    const types = dialog.getByRole("group", { name: "Destination type", exact: true });
     await expect(types.locator('[data-glyph="branch"]')).toHaveCount(1);
     await expect(types.locator('[data-glyph="folder"]')).toHaveCount(1);
-    await expect(types.getByRole("button", { name: "folder", exact: true })).toHaveAttribute("aria-pressed", "true");
-    await types.getByRole("button", { name: "managed checkout", exact: true }).click();
-    await dialog.getByLabel("repository", { exact: true }).fill("acme/bar");
+    await expect(types.getByRole("button", { name: "Folder", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await types.getByRole("button", { name: "Managed checkout", exact: true }).click();
+    await dialog.getByLabel("Repository", { exact: true }).fill("acme/bar");
     await expect(dialog.locator(".templates-hint", { hasText: "Each session from this template" })).toContainText("moves to the trash");
     await dialog.locator(".templates-save").click();
     await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
     expect((await storedTemplate(request, name)).fields.destination).toEqual({ github: "acme/bar" });
-    await types.getByRole("button", { name: "folder", exact: true }).click();
-    await dialog.getByLabel("folder path", { exact: true }).fill("/tmp/project");
+    await types.getByRole("button", { name: "Folder", exact: true }).click();
+    await dialog.getByLabel("Folder path", { exact: true }).fill("/tmp/project");
     await dialog.locator(".templates-save").click();
     await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
     expect((await storedTemplate(request, name)).fields.destination).toEqual({ folder: "/tmp/project" });
@@ -1455,8 +1455,8 @@ for (const query of ["", "invalid!", "acme/bar"]) {
     try {
       const form = await openNew(page);
       await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
-      await form.getByRole("group", { name: "destination type", exact: true }).getByRole("button", { name: "managed checkout", exact: true }).click();
-      await form.getByRole("combobox", { name: "repository", exact: true }).fill(query);
+      await form.getByRole("group", { name: "Destination type", exact: true }).getByRole("button", { name: "Managed checkout", exact: true }).click();
+      await form.getByRole("combobox", { name: "Repository", exact: true }).fill(query);
       await expect(form.locator(".launch-composer-checkout-preview")).toHaveCount(0);
       await expect(form.locator(".create-session-submit")).toBeDisabled();
       await form.locator(".launch-composer-save-template").click();
@@ -1487,11 +1487,11 @@ test("the Templates dialog creates, edits, renames, deletes and undoes", async (
     const dialog = await openTemplates(page);
     await dialog.locator(".templates-new").click();
     await dialog.locator(".templates-name").fill(name);
-    await addField(dialog, "agent type");
-    await dialog.getByLabel("agent type", { exact: true }).selectOption("codex");
-    await addField(dialog, "effort");
-    const effort = dialog.getByRole("group", { name: "effort", exact: true });
-    await effort.getByRole("button", { name: "high", exact: true }).click();
+    await addField(dialog, "Agent type");
+    await dialog.getByLabel("Agent type", { exact: true }).selectOption("codex");
+    await addField(dialog, "Effort");
+    const effort = dialog.getByRole("group", { name: "Effort", exact: true });
+    await effort.getByRole("button", { name: "High", exact: true }).click();
     await dialog.locator(".templates-save").click();
     const row = dialog.locator(".templates-row", { hasText: name });
     await expect(row).toBeVisible();
@@ -1501,9 +1501,9 @@ test("the Templates dialog creates, edits, renames, deletes and undoes", async (
     await dialog.locator(".templates-new").click();
     await expect(row).toHaveAttribute("aria-pressed", "false");
     await row.click();
-    await expect(dialog.getByLabel("agent type", { exact: true })).toHaveValue("codex");
-    await expect(effort.getByRole("button", { name: "high", exact: true })).toHaveAttribute("aria-pressed", "true");
-    await effort.getByRole("button", { name: "low", exact: true }).click();
+    await expect(dialog.getByLabel("Agent type", { exact: true })).toHaveValue("codex");
+    await expect(effort.getByRole("button", { name: "High", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await effort.getByRole("button", { name: "Low", exact: true }).click();
     await dialog.locator(".templates-name").fill(renamed);
     await dialog.locator(".templates-save").click();
     await expect(dialog.locator(".templates-row-name", { hasText: renamed })).toBeVisible();
@@ -1580,8 +1580,8 @@ test("session name kind survives duplicate and undo and base saves stay clean", 
     await putTemplate(request, name, { kind: "agent", name: "review", name_kind: "fixed" });
     const dialog = await openTemplates(page);
     await dialog.locator(".templates-row-name").getByText(name, { exact: true }).click();
-    const kinds = dialog.getByRole("group", { name: "session name kind", exact: true });
-    await expect(kinds.getByRole("button", { name: "fixed name", exact: true })).toHaveAttribute("aria-pressed", "true");
+    const kinds = dialog.getByRole("group", { name: "Session name kind", exact: true });
+    await expect(kinds.getByRole("button", { name: "Fixed name", exact: true })).toHaveAttribute("aria-pressed", "true");
     await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
     await page.setViewportSize({ width: 390, height: 800 });
     await expect(kinds).toBeVisible();
@@ -1591,7 +1591,7 @@ test("session name kind survives duplicate and undo and base saves stay clean", 
     await page.setViewportSize({ width: 1280, height: 800 });
     await dialog.locator(".templates-duplicate").click();
     await expect(dialog.locator(".templates-name")).toHaveValue(copy);
-    await expect(kinds.getByRole("button", { name: "fixed name", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(kinds.getByRole("button", { name: "Fixed name", exact: true })).toHaveAttribute("aria-pressed", "true");
     await dialog.locator(".templates-save").click();
     await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
     expect((await storedTemplate(request, copy)).fields.name_kind).toBe("fixed");
@@ -1602,16 +1602,16 @@ test("session name kind survives duplicate and undo and base saves stay clean", 
     await expect(dialog.locator(".templates-row-name").getByText(copy, { exact: true })).toBeVisible();
     expect((await storedTemplate(request, copy)).fields.name_kind).toBe("fixed");
     await dialog.locator(".templates-row-name").getByText(copy, { exact: true }).click();
-    await kinds.getByRole("button", { name: "base name", exact: true }).click();
+    await kinds.getByRole("button", { name: "Base name", exact: true }).click();
     await dialog.locator(".templates-save").click();
     await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
     expect((await storedTemplate(request, copy)).fields).toEqual({ kind: "agent", name: "review" });
-    await dialog.getByRole("button", { name: "remove session name", exact: true }).click();
+    await dialog.getByRole("button", { name: "Remove session name", exact: true }).click();
     await dialog.locator(".templates-save").click();
     await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
     expect((await storedTemplate(request, copy)).fields).toEqual({ kind: "agent" });
-    await addField(dialog, "session name");
-    await expect(kinds.getByRole("button", { name: "base name", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await addField(dialog, "Session name");
+    await expect(kinds.getByRole("button", { name: "Base name", exact: true })).toHaveAttribute("aria-pressed", "true");
     await dialog.locator(".templates-session-name").fill("review again");
     await dialog.locator(".templates-save").click();
     await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
@@ -1659,7 +1659,7 @@ test("unsaved departures support keep editing, discard and save before leaving",
     expect((await storedTemplate(request, copy)).fields.name).toBe("saved-before-leaving");
     // This is the command template's statement, not the launcher's YOLO
     // question. Native button Enter edits only the unsaved template draft.
-    const yolo = dialog.getByRole("group", { name: "approvals", exact: true }).getByRole("button", { name: "YOLO", exact: true });
+    const yolo = dialog.getByRole("group", { name: "Approvals", exact: true }).getByRole("button", { name: "YOLO", exact: true });
     await yolo.focus();
     await expect(yolo).toBeFocused();
     await yolo.press("Enter");
@@ -1703,12 +1703,12 @@ test("legacy switches and agent choices remain explicit at phone width", async (
     expect((await storedTemplate(request, name)).fields.kind).toBeUndefined();
     // Both presentations must initialize from the saved value, even when it
     // is not the first offered option. Goose has reset plus four approvals.
-    await expect(dialog.getByLabel("agent type", { exact: true })).toHaveValue("goose");
-    const approvals = dialog.getByRole("group", { name: "approvals", exact: true });
+    await expect(dialog.getByLabel("Agent type", { exact: true })).toHaveValue("goose");
+    const approvals = dialog.getByRole("group", { name: "Approvals", exact: true });
     await expect(approvals.getByRole("button")).toHaveCount(5);
     await expect(approvals.locator('button[value="smart_approve"]')).toHaveAttribute("aria-pressed", "true");
-    await dialog.getByLabel("agent type", { exact: true }).selectOption("omp");
-    const longer = dialog.getByRole("combobox", { name: "approvals", exact: true });
+    await dialog.getByLabel("Agent type", { exact: true }).selectOption("omp");
+    const longer = dialog.getByRole("combobox", { name: "Approvals", exact: true });
     await expect(longer.locator("option")).toHaveCount(6);
     await expect(longer).toHaveValue("smart_approve");
     await expect(longer.locator('option[value="smart_approve"]')).toHaveText(/not offered/);
@@ -1725,16 +1725,16 @@ test("legacy switches and agent choices remain explicit at phone width", async (
     await expect.poll(() => dialog.evaluate((element) => element.contains(document.activeElement) && document.activeElement !== element)).toBe(true);
     expect((await storedTemplate(request, name)).fields.permissions).toBe("smart_approve");
     // Restore the same unsupported draft for the existing refusal path.
-    await dialog.getByLabel("agent type", { exact: true }).selectOption("goose");
+    await dialog.getByLabel("Agent type", { exact: true }).selectOption("goose");
     await approvals.locator('button[value="smart_approve"]').click();
-    await dialog.getByLabel("agent type", { exact: true }).selectOption("claude");
+    await dialog.getByLabel("Agent type", { exact: true }).selectOption("claude");
     await expect(approvals.getByRole("button")).toHaveCount(5);
     await expect(approvals.locator('button[value="smart_approve"]')).toHaveAttribute("aria-pressed", "true");
     await expect(approvals.locator('button[value="smart_approve"]')).toHaveText(/not offered/);
     await expect(dialog.locator('.templates-set-field[data-field="permissions"] .templates-error')).toContainText("does not offer");
     await dialog.locator(".templates-save").click();
     const refusal = dialog.locator('p.templates-error[role="status"]');
-    await expect(refusal).toContainText("approvals");
+    await expect(refusal).toContainText("Approvals");
     // A refusal belongs below the complete editor. A height-limited flex
     // dialog must scroll its content, not shrink the editor and overlay it.
     await expect.poll(async () => refusal.evaluate((element) => {
@@ -1818,7 +1818,7 @@ test("a phone draft can retry a failed template list without discarding", async 
     await dialog.locator(".templates-new").click();
     await expect(dialog.locator(".templates-sidebar")).toBeHidden();
     await dialog.locator(".templates-name").fill(name);
-    await addField(dialog, "session name");
+    await addField(dialog, "Session name");
     await dialog.locator(".templates-session-name").fill("kept draft");
     await dialog.locator(".templates-save").click();
     await expect(dialog.locator(".templates-error").last()).toContainText("template list could not be loaded");
@@ -1971,19 +1971,19 @@ test("tl: applies templates, stacks them, and refuses one that does not apply", 
 
     await applyTemplate(form, codex);
     await expect(harness.getByRole("button", { name: "Codex", exact: true })).toHaveAttribute("aria-pressed", "true");
-    await expect(effort.getByRole("button", { name: "high", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(effort.getByRole("button", { name: "High", exact: true })).toHaveAttribute("aria-pressed", "true");
 
     await applyTemplate(form, low);
-    await expect(effort.getByRole("button", { name: "low", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(effort.getByRole("button", { name: "Low", exact: true })).toHaveAttribute("aria-pressed", "true");
     await expect(harness.getByRole("button", { name: "Codex", exact: true }), "left out, kept").toHaveAttribute("aria-pressed", "true");
-    await expect(form.getByLabel("name (optional)")).toHaveValue("from-template");
+    await expect(form.getByLabel("Name (optional)")).toHaveValue("from-template");
 
     // A command field on the agent launch kind applies to nothing here.
     await applyTemplate(form, command);
     await expect(form.locator(".launch-composer-template-error")).toContainText("its command applies to a command launch");
-    await expect(form.getByRole("tab", { name: "agent", exact: true })).toHaveAttribute("aria-selected", "true");
+    await expect(form.getByRole("tab", { name: "Agent", exact: true })).toHaveAttribute("aria-selected", "true");
     await expect(harness.getByRole("button", { name: "Codex", exact: true }), "nothing from it applied").toHaveAttribute("aria-pressed", "true");
-    await expect(effort.getByRole("button", { name: "low", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(effort.getByRole("button", { name: "Low", exact: true })).toHaveAttribute("aria-pressed", "true");
   } finally {
     for (const name of [codex, low, command]) await deleteTemplate(request, name);
   }
@@ -2019,22 +2019,22 @@ test("a template fills the command tab and the folder, and a reset clears a choi
     const form = await openNew(page);
 
     await applyTemplate(form, command);
-    await expect(form.getByRole("tab", { name: "command", exact: true })).toHaveAttribute("aria-selected", "true");
-    await expect(form.getByLabel("agent command")).toHaveValue("claude {farhelm_args}");
+    await expect(form.getByRole("tab", { name: "Command", exact: true })).toHaveAttribute("aria-selected", "true");
+    await expect(form.getByLabel("Agent command")).toHaveValue("claude {farhelm_args}");
     await expect(
-      form.getByRole("group", { name: "runs in YOLO mode" }).getByLabel("no", { exact: true }),
+      form.getByRole("group", { name: "Runs in YOLO mode" }).getByLabel("No", { exact: true }),
     ).toBeChecked();
     await expect(form.locator(".launch-command-agent")).toHaveValue("claude");
     await expect(form.locator(".launch-command-resume-toggle")).toBeChecked();
     await expect(form.locator(".launch-command-resume")).toHaveValue("claude --resume {conversation} {farhelm_args}");
-    await expect(form.getByLabel("folder", { exact: true })).toHaveValue("/tmp");
+    await expect(form.getByLabel("Folder", { exact: true })).toHaveValue("/tmp");
 
-    await form.getByRole("tab", { name: "agent", exact: true }).click();
+    await form.getByRole("tab", { name: "Agent", exact: true }).click();
     await applyTemplate(form, effort);
     const efforts = form.locator(".launch-composer-effort-choice");
-    await expect(efforts.getByRole("button", { name: "high", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(efforts.getByRole("button", { name: "High", exact: true })).toHaveAttribute("aria-pressed", "true");
     await applyTemplate(form, reset);
-    await expect(efforts.getByRole("button", { name: "default", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(efforts.getByRole("button", { name: "Default", exact: true })).toHaveAttribute("aria-pressed", "true");
   } finally {
     for (const name of [command, effort, reset]) await deleteTemplate(request, name);
   }
@@ -2068,7 +2068,7 @@ test("Replace with accepts its own template host and refuses another host atomic
     const form = page.locator('.create-session-form[role="dialog"]');
     await expect(form).toBeVisible();
     await expect(form.locator(".launch-composer-save-template")).toHaveCount(0);
-    const nameField = form.getByLabel("name (optional)");
+    const nameField = form.getByLabel("Name (optional)");
     const before = await nameField.inputValue();
     await applyTemplate(form, name);
     await expect(form.locator(".launch-composer-template-error")).toContainText("this dialog keeps the session's host");
@@ -2105,20 +2105,20 @@ for (const kind of ["agent", "command"] as const) {
       if (kind === "agent") {
         await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
       } else {
-        await form.getByRole("tab", { name: "command", exact: true }).click();
-        await form.getByLabel("agent command").fill("printf hello");
-        await form.getByRole("group", { name: "runs in YOLO mode" }).getByLabel("no", { exact: true }).check();
+        await form.getByRole("tab", { name: "Command", exact: true }).click();
+        await form.getByLabel("Agent command").fill("printf hello");
+        await form.getByRole("group", { name: "Runs in YOLO mode" }).getByLabel("No", { exact: true }).check();
       }
-      await form.getByLabel("folder", { exact: true }).fill("/tmp");
-      await form.getByLabel("name (optional)", { exact: true }).fill("typed review");
+      await form.getByLabel("Folder", { exact: true }).fill("/tmp");
+      await form.getByLabel("Name (optional)", { exact: true }).fill("typed review");
       await form.locator(".launch-composer-save-template").click();
       const panel = form.locator(".save-template-panel");
       await expect(panel).toBeVisible();
       await expect(panel.locator('[data-field="destination"]')).toBeChecked();
       await expect(panel.locator('[data-field="name"]')).toBeChecked();
-      const nameKinds = panel.getByRole("group", { name: "session name kind", exact: true });
-      await expect(nameKinds.getByRole("button", { name: "base name", exact: true })).toHaveAttribute("aria-pressed", "true");
-      if (kind === "command") await nameKinds.getByRole("button", { name: "fixed name", exact: true }).click();
+      const nameKinds = panel.getByRole("group", { name: "Session name kind", exact: true });
+      await expect(nameKinds.getByRole("button", { name: "Base name", exact: true })).toHaveAttribute("aria-pressed", "true");
+      if (kind === "command") await nameKinds.getByRole("button", { name: "Fixed name", exact: true }).click();
       if (kind === "agent") await expect(panel.locator('[data-field="agent"]')).toBeChecked();
       else await expect(panel.locator('[data-field="command"]')).toBeChecked();
       const choices = panel.locator(".save-template-choice");

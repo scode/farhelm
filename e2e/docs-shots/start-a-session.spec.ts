@@ -59,13 +59,13 @@ test("destination", async ({ page, request }) => {
   const { director } = await open(page, request);
   const form = await openLauncher(page);
   const destination = form.locator(".launch-composer-destination");
-  await destination.getByRole("combobox", { name: "folder", exact: true }).focus();
-  const folders = destination.getByRole("listbox", { name: "folders", exact: true });
+  await destination.getByRole("combobox", { name: "Folder", exact: true }).focus();
+  const folders = destination.getByRole("listbox", { name: "Folders", exact: true });
   await expect(folders).toBeVisible();
   // The dropdown floats past the end of the launcher's scrolling body, which
   // clips it; scrolling its last entry into view is what a person does to
   // reach it, and keeps local home, which the last callout names, in the shot.
-  await folders.getByRole("option", { name: "reset destination to local home" }).scrollIntoViewIfNeeded();
+  await folders.getByRole("option", { name: "Reset destination to local home" }).scrollIntoViewIfNeeded();
   // Four callouts stacked down the left margin, each nudged (dy) so the
   // boxes clear one another while the arrows stay level with their controls.
   await director.callout(
@@ -79,7 +79,7 @@ test("destination", async ({ page, request }) => {
     { side: "left", dy: 20 },
   );
   await director.callout(
-    destination.getByLabel("folder", { exact: true }),
+    destination.getByLabel("Folder", { exact: true }),
     "The directory the agent starts in. ~ is your home on that host, not on the machine in front of you.",
     { side: "left", dy: 40 },
   );
@@ -102,7 +102,7 @@ test("checkout setup", async ({ page, request }) => {
   const { director } = await open(page, request);
   const form = await openLauncher(page);
   const destination = form.locator(".launch-composer-destination");
-  await destination.locator(".destination-type-control button", { hasText: "managed checkout" }).click();
+  await destination.locator(".destination-type-control button", { hasText: "Managed checkout" }).click();
   const field = destination.locator(".checkout-root-field");
   await expect(field).toBeVisible();
   await field.locator("input").fill("~/work");
@@ -112,7 +112,7 @@ test("checkout setup", async ({ page, request }) => {
     { side: "left" },
   );
   await director.callout(
-    field.getByRole("button", { name: "save" }),
+    field.getByRole("button", { name: "Save" }),
     "Saves it for every host. Change it later in settings.",
     { side: "left", dy: 40 },
   );

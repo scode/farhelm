@@ -59,7 +59,7 @@ pub(crate) fn CheckoutPostCloneField() -> Element {
     rsx! {
         div { class: "checkout-post-clone-field",
             label { class: "checkout-root-label",
-                span { "post-clone command" }
+                span { "Post-clone command" }
                 textarea {
                     rows: "4", value: "{draft}", readonly: locked,
                     aria_disabled: locked,
@@ -83,20 +83,20 @@ pub(crate) fn CheckoutPostCloneField() -> Element {
                 p { class: "checkout-root-error", role: "alert", "{error}" }
                 button {
                     r#type: "button", class: "btn btn-neutral",
-                    "data-tooltip": "retry loading the all-hosts post-clone command",
-                    onclick: move |_| command.restart(), "retry"
+                    "data-tooltip": "Retry loading the all-hosts post-clone command",
+                    onclick: move |_| command.restart(), "Retry"
                 }
             } else {
                 button {
                     r#type: "button", class: "btn btn-primary", aria_disabled: locked || !edited(),
-                    "data-tooltip": "save the post-clone command for future managed checkouts",
+                    "data-tooltip": "Save the post-clone command for future managed checkouts",
                     onclick: move |_| {
                         if !initialized() || saving() || !edited() { return; }
                         let value = draft();
                         // Judge the loaded command, not the browser's normalized
                         // draft; after a successful clear, the refetch lifts this refusal.
                         if stored_carriage_return && !value.trim().is_empty() {
-                            outcome.set(Some(Err("the saved command contains a carriage return this field would turn into a newline; change it with `farhelm helm checkout-config set-post-clone` on the helm's machine, or save an empty field to clear it".into())));
+                            outcome.set(Some(Err("The saved command contains a carriage return this field would turn into a newline; change it with `farhelm helm checkout-config set-post-clone` on the helm's machine, or save an empty field to clear it".into())));
                             return;
                         }
                         saving.set(true);
@@ -128,12 +128,12 @@ pub(crate) fn CheckoutPostCloneField() -> Element {
                             }
                         });
                     },
-                    if saving() { "saving…" } else { "save" }
+                    if saving() { "Saving…" } else { "Save" }
                 }
             }
             if let Some(result) = outcome() {
                 match result {
-                    Ok(()) => rsx! { p { class: "checkout-root-success", role: "status", "post-clone command saved" } },
+                    Ok(()) => rsx! { p { class: "checkout-root-success", role: "status", "Post-clone command saved" } },
                     Err(error) => rsx! { p { class: "checkout-root-error", role: "alert", "{error}" } },
                 }
             }

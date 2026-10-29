@@ -217,6 +217,20 @@ use session_view::SessionView;
 #[derive(Clone, PartialEq)]
 pub struct ApiBase(pub String);
 
+/// Present an in-process validator's authored clause as a standalone UI notice.
+///
+/// Shared validators also supply clauses inside longer protocol explanations,
+/// so their source text keeps its grammatical case. Call this only on errors
+/// returned directly by those local validators, before mixing them with any
+/// API, host or agent response. Peer messages and values retain their
+/// own bytes; this changes only the leading ASCII letter of our own sentence.
+pub(crate) fn local_validation_notice(mut reason: String) -> String {
+    if let Some(first) = reason.get_mut(..1) {
+        first.make_ascii_uppercase();
+    }
+    reason
+}
+
 /// Keep a held Enter from answering a confirmation opened by the same key.
 ///
 /// Confirm buttons retain native Enter and Space activation. Only repeated or

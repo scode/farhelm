@@ -163,7 +163,7 @@ pub(crate) async fn stop_asking(base: &str, host: HostId, host_name: &str) -> Re
         // that committed, so the host's state is not known here. Retrying is
         // harmless, the write is idempotent.
         Err(reason) => Err(format!(
-            "could not stop asking for {host_name}: {}. This answer started nothing; {host_name} may still ask before YOLO launches.",
+            "Could not stop asking for {host_name}: {}. This answer started nothing; {host_name} may still ask before YOLO launches.",
             reason.trim_end_matches('.')
         )),
     }
@@ -275,7 +275,7 @@ pub(crate) fn YoloConfirmation(
         div {
             class: "yolo-confirmation",
             role: "alertdialog",
-            aria_label: "confirm a YOLO launch",
+            aria_label: "Confirm a YOLO launch",
             "data-yolo-confirm-id": "{instance}",
             // Instant rather than smooth: the point is that it is on screen
             // by the time the user looks. See `scroll_into_view`.
@@ -305,7 +305,7 @@ pub(crate) fn YoloConfirmation(
                 button {
                     r#type: "button",
                     class: "btn btn-neutral yolo-cancel",
-                    "data-tooltip": "cancel: go back without starting anything",
+                    "data-tooltip": "Cancel: go back without starting anything",
                     disabled: busy,
                     onclick: move |_| on_cancel.call(()),
                     "Cancel"
@@ -314,7 +314,7 @@ pub(crate) fn YoloConfirmation(
                     button {
                         r#type: "button",
                         class: "btn btn-primary yolo-launch-guarded",
-                        "data-tooltip": "start this session in guarded mode instead, where the agent's own safety checks stay on",
+                        "data-tooltip": "Start this session in guarded mode instead, where the agent's own safety checks stay on",
                         disabled: busy,
                         onclick: move |_| on_launch_guarded.call(()),
                         "Start guarded session instead"
@@ -324,7 +324,7 @@ pub(crate) fn YoloConfirmation(
                     button {
                         r#type: start_type,
                         class: "btn btn-danger btn-outline yolo-confirm-stop-asking",
-                        "data-tooltip": "start it, and start YOLO sessions on this host without asking from now on",
+                        "data-tooltip": "Start it, and start YOLO sessions on this host without asking from now on",
                         disabled: busy,
                         onclick: move |_| on_confirm_and_stop_asking.call(()),
                         "Start, and don't ask again on this host"
@@ -333,7 +333,7 @@ pub(crate) fn YoloConfirmation(
                 button {
                     r#type: start_type,
                     class: "btn btn-danger yolo-confirm",
-                    "data-tooltip": "start the session in YOLO mode, where the agent acts without asking",
+                    "data-tooltip": "Start the session in YOLO mode, where the agent acts without asking",
                     disabled: busy,
                     onclick: move |_| on_confirm.call(()),
                     "Start YOLO session anyway"

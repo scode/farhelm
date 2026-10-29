@@ -92,15 +92,15 @@ test("composer word search drives a structured launch", async ({ page, request }
   await search.fill(model.id);
   await expect(form.getByRole("option", { name: `Model: ${model.id} (Codex)`, exact: true })).toHaveAttribute("aria-selected", "true");
   await search.press("Enter");
-  await expect(form.getByRole("combobox", { name: "model", exact: true })).toHaveValue(model.id);
+  await expect(form.getByRole("combobox", { name: "Model", exact: true })).toHaveValue(model.id);
   await expect(search).toHaveValue("");
   await expect(search).toBeFocused();
 
   const effort = model.efforts[0];
   await search.fill(effort);
-  await expect(form.getByRole("option", { name: `Effort: ${effort}`, exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(form.getByRole("option", { name: `Effort: ${effort[0].toUpperCase()}${effort.slice(1)}`, exact: true })).toHaveAttribute("aria-selected", "true");
   await search.press("Enter");
-  await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: effort, exact: true }))
+  await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: effort[0].toUpperCase() + effort.slice(1), exact: true }))
     .toHaveAttribute("aria-pressed", "true");
   await expect(search).toHaveValue("");
   await expect(search).toBeFocused();
@@ -109,27 +109,27 @@ test("composer word search drives a structured launch", async ({ page, request }
   // level. Restore that level afterward so the launch assertion below still
   // checks the complete structured draft.
   await search.fill("effort:default");
-  await expect(form.getByRole("option", { name: "Effort: default", exact: true, selected: true })).toBeVisible();
+  await expect(form.getByRole("option", { name: "Effort: Default", exact: true, selected: true })).toBeVisible();
   await search.press("Enter");
-  await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: "default", exact: true }))
+  await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: "Default", exact: true }))
     .toHaveAttribute("aria-pressed", "true");
   await search.fill(effort);
-  await expect(form.getByRole("option", { name: `Effort: ${effort}`, exact: true, selected: true })).toBeVisible();
+  await expect(form.getByRole("option", { name: `Effort: ${effort[0].toUpperCase()}${effort.slice(1)}`, exact: true, selected: true })).toBeVisible();
   await search.press("Enter");
-  await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: effort, exact: true }))
+  await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: effort[0].toUpperCase() + effort.slice(1), exact: true }))
     .toHaveAttribute("aria-pressed", "true");
 
   await search.fill("perms:yolo");
   // The search section and the persistent mode choices need distinct names
   // even while both are visible to assistive technology.
   await expect(form.getByRole("group", { name: "Permissions", exact: true })).toBeVisible();
-  const permissionModes = form.getByRole("group", { name: "permission mode", exact: true });
+  const permissionModes = form.getByRole("group", { name: "Permission mode", exact: true });
   await expect(permissionModes).toBeVisible();
-  await expect(form.locator(".launch-composer-permissions-choice .launch-composer-section-label")).toHaveText("permissions");
-  await expect(form.getByRole("option", { name: "Permissions: yolo", exact: true, selected: true }))
+  await expect(form.locator(".launch-composer-permissions-choice .launch-composer-section-label")).toHaveText("Permissions");
+  await expect(form.getByRole("option", { name: "Permissions: YOLO", exact: true, selected: true }))
     .toBeVisible();
   await search.press("Enter");
-  await expect(permissionModes.getByRole("button", { name: "yolo", exact: true }))
+  await expect(permissionModes.getByRole("button", { name: "YOLO", exact: true }))
     .toHaveAttribute("aria-pressed", "true");
   await expect(search).toHaveValue("");
   await expect(search).toBeFocused();
@@ -138,15 +138,15 @@ test("composer word search drives a structured launch", async ({ page, request }
   // longer offers the old implicit-default permission; the stored launch
   // below must retain this explicit choice as well as the model and effort.
   await search.fill("guarded");
-  await expect(form.getByRole("option", { name: "Permissions: guarded", exact: true, selected: true }))
+  await expect(form.getByRole("option", { name: "Permissions: Guarded", exact: true, selected: true }))
     .toBeVisible();
   await search.press("Enter");
-  await expect(permissionModes.getByRole("button", { name: "guarded", exact: true }))
+  await expect(permissionModes.getByRole("button", { name: "Guarded", exact: true }))
     .toHaveAttribute("aria-pressed", "true");
   await expect(search).toHaveValue("");
   await expect(search).toBeFocused();
 
-  await form.getByLabel("folder", { exact: true }).fill("/tmp");
+  await form.getByLabel("Folder", { exact: true }).fill("/tmp");
   const launchButton = form.locator(".create-session-submit");
   // Premise for the empty-box launch shortcut: the button it activates is
   // enabled, and the box really is empty and focused. Filling the folder
@@ -206,7 +206,7 @@ test("name and host labels apply one draft choice without launching", async ({ p
   await expect(form.getByRole("option", { name: "Set session name: fix: parser", exact: true, selected: true }))
     .toBeVisible();
   await search.press("Enter");
-  await expect(form.getByLabel("name (optional)")).toHaveValue("fix: parser");
+  await expect(form.getByLabel("Name (optional)")).toHaveValue("fix: parser");
   await expect(search).toHaveValue("");
   await expect(search).toBeFocused();
 
@@ -258,7 +258,7 @@ test("empty composer search does not launch an incomplete selection", async ({ p
   await expect(
     form.locator(".launch-composer-refusal"),
     "the refused Enter must say why beside Launch",
-  ).toContainText("choose a structured harness before launching");
+  ).toContainText("Choose a structured harness before launching");
   await expect(form).toBeVisible();
   expect(creates, "a refused empty-search Enter must post no create").toBe(0);
   const after = await listedSessions(request);
@@ -284,7 +284,7 @@ test("New's command tab keeps the agent draft dormant and preserves the raw invo
   // Seed structured-only choices before leaving the mode. Command search and
   // summary must then ignore them without destroying the draft.
   await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Claude", exact: true }).click();
-  await form.getByRole("button", { name: "yolo", exact: true }).click();
+  await form.getByRole("button", { name: "YOLO", exact: true }).click();
 
   // Search does not switch tabs by interpreting arbitrary words. Unmatched
   // text instead offers an explicit name action, which this test leaves alone.
@@ -293,14 +293,14 @@ test("New's command tab keeps the agent draft dormant and preserves the raw invo
   // also options.
   await expect(form.locator(".launch-composer-search").getByRole("option", { name: "Set session name: command", exact: true })).toBeVisible();
   await search.fill("");
-  await form.getByRole("tab", { name: "command", exact: true }).click();
+  await form.getByRole("tab", { name: "Command", exact: true }).click();
   await expect(form).toHaveAttribute("data-composer-mode", "command");
   await expect(search, "the tab hands focus to the shared search box").toBeFocused();
   await expect(form.locator(".launch-composer-summary"), "structured settings are dormant in command mode").toHaveCount(0);
   await expect(form.locator(".create-session-host"), "destination controls stay mounted in command mode").toBeVisible();
-  await expect(form.getByLabel("folder", { exact: true })).toBeVisible();
-  await expect(form.getByLabel("name (optional)")).toBeVisible();
-  const command = form.getByLabel("agent command");
+  await expect(form.getByLabel("Folder", { exact: true })).toBeVisible();
+  await expect(form.getByLabel("Name (optional)")).toBeVisible();
+  const command = form.getByLabel("Agent command");
   await command.fill(FAKE_AGENT);
 
   await search.fill(model.id);
@@ -308,9 +308,9 @@ test("New's command tab keeps the agent draft dormant and preserves the raw invo
     "command search exposes globally owned models instead of filtering by a dormant harness").toBeVisible();
   await search.press("Enter");
   await expect(form, "accepting an owned model explicitly activates its structured harness").toHaveAttribute("data-composer-mode", "structured");
-  await expect(form.getByRole("combobox", { name: "model", exact: true })).toHaveValue(model.id);
+  await expect(form.getByRole("combobox", { name: "Model", exact: true })).toHaveValue(model.id);
   await expect(search).toBeFocused();
-  await form.getByRole("tab", { name: "command", exact: true }).click();
+  await form.getByRole("tab", { name: "Command", exact: true }).click();
   await expect(command, "the command draft survives a structured search round trip").toHaveValue(FAKE_AGENT);
 
   await search.fill(model.efforts[0]);
@@ -323,7 +323,7 @@ test("New's command tab keeps the agent draft dormant and preserves the raw invo
   await expect(form.getByRole("option", { name: "Use this path: /tmp", exact: true, selected: true })).toBeVisible();
   await search.press("Enter");
   await expect(form).toHaveAttribute("data-composer-mode", "command");
-  await expect(form.getByLabel("folder", { exact: true })).toHaveValue("/tmp");
+  await expect(form.getByLabel("Folder", { exact: true })).toHaveValue("/tmp");
   await expect(search, "folder acceptance keeps focus in shared search").toBeFocused();
 
   // A command launch needs its YOLO answer before it can be submitted.
@@ -364,10 +364,10 @@ test("Tab from the open model list reaches the next launcher control", async ({ 
   await codex.click();
   await expect(codex).toHaveAttribute("aria-pressed", "true");
 
-  const model = form.getByRole("combobox", { name: "model", exact: true });
+  const model = form.getByRole("combobox", { name: "Model", exact: true });
   const listbox = form.locator(".launch-composer-model-choice").getByRole("listbox");
   const effortDefault = form.locator(".launch-composer-effort-choice").getByRole("button", {
-    name: "default",
+    name: "Default",
     exact: true,
   });
   // Premise: the model list is open with at least one transient row, so the

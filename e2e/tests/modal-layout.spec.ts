@@ -91,11 +91,11 @@ async function openTallDialog(page: Page, family: string): Promise<Locator> {
     await dialog.locator(".templates-new").click();
     // Command fields are only offered for addition in command mode; establish it before
     // using their height to exercise the card's scrolling ceiling.
-    await dialog.getByRole("group", { name: "switches launcher to", exact: true })
-      .getByRole("button", { name: "command", exact: true }).click();
-    await expect(dialog.getByRole("group", { name: "switches launcher to", exact: true })
-      .getByRole("button", { name: "command", exact: true })).toHaveAttribute("aria-pressed", "true");
-    for (const name of ["command", "resume command", "session name", "destination"]) {
+    await dialog.getByRole("group", { name: "Switches launcher to", exact: true })
+      .getByRole("button", { name: "Command", exact: true }).click();
+    await expect(dialog.getByRole("group", { name: "Switches launcher to", exact: true })
+      .getByRole("button", { name: "Command", exact: true })).toHaveAttribute("aria-pressed", "true");
+    for (const name of ["Command", "Resume command", "Session name", "Destination"]) {
       await dialog.locator(".templates-add").click();
       await dialog.locator(".templates-add-menu").getByRole("button", { name, exact: true }).click();
     }
@@ -104,7 +104,7 @@ async function openTallDialog(page: Page, family: string): Promise<Locator> {
   if (family === "launcher") {
     await page.locator(".new-session-button").click();
     const dialog = page.locator(".create-session-form");
-    await dialog.getByRole("tab", { name: "command", exact: true }).click();
+    await dialog.getByRole("tab", { name: "Command", exact: true }).click();
     await dialog.locator(".launch-composer-save-template").click();
     await expect(dialog.locator(".save-template-panel")).toBeVisible();
     return dialog;
@@ -130,7 +130,7 @@ async function openTallDialog(page: Page, family: string): Promise<Locator> {
   // Cancel is the restart opening boundary; wait for it before replacing
   // focus with the permission edit that makes this long refusal possible.
   await expect(dialog.locator(".launch-composer-cancel")).toBeFocused();
-  await dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true }).click();
+  await dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "YOLO", exact: true }).click();
   await dialog.locator(".create-session-submit").click();
   await expect(dialog.locator(".launch-composer-refusal-alert")).toContainText("cannot be saved");
   return dialog;

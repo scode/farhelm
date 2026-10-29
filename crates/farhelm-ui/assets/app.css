@@ -1153,12 +1153,12 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   padding: 0;
 }
 
-/* Composer labels stay subordinate to the list titles. */
+/* Sentence-case labels use ordinary tracking; spaced capitals made mixed-case words harder to read. */
 .launch-composer-section-label {
   color: var(--fg-1);
   font-size: 11px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  letter-spacing: normal;
+  text-transform: none;
 }
 
 /* The host count reads as a heading, label first: "Hosts 3".
@@ -6074,7 +6074,6 @@ a:any-link,
   text-transform: none;
 }
 .create-session-form .launch-composer-section-label { display: block; }
-.create-session-form .launch-composer-section-label::first-letter { text-transform: uppercase; }
 .create-session-form .launch-composer-choice .launch-composer-section-label,
 .launch-composer-row-label {
   padding-top: 8px;
@@ -6194,7 +6193,7 @@ a:any-link,
 }
 .launch-composer-folder-heading,
 .launch-composer-folder-empty { padding: 6px 10px; color: var(--fg-1); }
-.launch-composer-folder-heading { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
+.launch-composer-folder-heading { font-size: 11px; text-transform: none; letter-spacing: normal; }
 .launch-composer-folder-options > [role="group"] + [role="group"] { border-top: 1px solid var(--border-dim); }
 .launch-composer-folder-options button {
   display: flex;
@@ -8094,7 +8093,7 @@ a:any-link,
   color: var(--danger);
   font-weight: 700;
   margin: 0;
-  text-transform: uppercase;
+  text-transform: none;
 }
 .yolo-confirmation-consequence {
   font-weight: 600;

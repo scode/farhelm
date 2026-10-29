@@ -318,7 +318,7 @@ test("an interrupted legacy session offers Replace with, prefilled with its comm
   await notice.locator(".replace-with-from-notice").click();
   const form = page.locator(".create-session-form");
   await expect(form).toBeVisible();
-  await expect(form.getByLabel("agent command")).toHaveValue("claude");
+  await expect(form.getByLabel("Agent command")).toHaveValue("claude");
 });
 
 /**

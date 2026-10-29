@@ -48,7 +48,7 @@ function row(page: Page, id: string) {
  * values into the request.
  */
 async function submitClonedCwd(page: Page, form: Locator, cwd: string) {
-  await form.getByLabel("folder", { exact: true }).fill(cwd);
+  await form.getByLabel("Folder", { exact: true }).fill(cwd);
   const [response] = await Promise.all([
     page.waitForResponse(
       (r) => r.request().method() === "POST" && r.url().endsWith("/api/sessions"),
@@ -67,12 +67,12 @@ async function submitClonedCwd(page: Page, form: Locator, cwd: string) {
  * one name for "however the clone's name field is reached."
  */
 async function fillCloneTitle(form: Locator, title: string) {
-  await form.getByLabel("name (optional)").fill(title);
+  await form.getByLabel("Name (optional)").fill(title);
 }
 
 /** Switch the launcher to its command tab. */
 async function chooseCommandMode(form: Locator) {
-  await form.getByRole("tab", { name: "command", exact: true }).click();
+  await form.getByRole("tab", { name: "Command", exact: true }).click();
   await expect(form).toHaveAttribute("data-composer-mode", "command");
   await expect(form.locator('.launch-composer-search input[role="combobox"]')).toBeFocused();
 }
@@ -134,11 +134,11 @@ test("a structured GUI clone pre-fills without launching, then starts its ready 
       // The search field and recent-folder group also mention “folder”; the
       // composer input is the one control whose literal value becomes the
       // successor destination.
-      await expect(form.locator('input[aria-label="folder"]')).toHaveValue(cwd);
+      await expect(form.locator('input[aria-label="Folder"]')).toHaveValue(cwd);
       // The chip strip that used to echo every choice is gone; the harness
       // shows on its pressed chip and the rest on the summary line.
       await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true })).toHaveAttribute("aria-pressed", "true");
-      await expect(form.locator(".launch-composer-summary")).toHaveText("model: gpt-6-astra · effort: high · permissions: yolo");
+      await expect(form.locator(".launch-composer-summary")).toHaveText("Model: gpt-6-astra · Effort: High · Permissions: YOLO");
       expect(createPosts, "opening and inspecting a clone must not launch it").toBe(0);
 
       const [response] = await Promise.all([
@@ -434,7 +434,7 @@ test("a deliberately entered name field keeps focus through the late catalog ren
       // The deliberate move, before any catalog bytes exist: click into
       // the name field (a trusted pointer move, not a programmatic
       // focus) and type through page-level keystrokes.
-      const name = form.getByLabel("name (optional)");
+      const name = form.getByLabel("Name (optional)");
       await name.click();
       await expect(name).toBeFocused();
       // The click caret lands wherever it lands; End puts it after the
@@ -450,7 +450,7 @@ test("a deliberately entered name field keeps focus through the late catalog ren
       // `high`, which the row shows before any catalog), so its button is
       // absent now and appears exactly when that reply renders.
       const fixtureOnlyEffort = form.locator(".launch-composer-effort-choice").getByRole("button", {
-        name: "low",
+        name: "Low",
         exact: true,
       });
       await expect(fixtureOnlyEffort).toHaveCount(0);
@@ -591,7 +591,7 @@ test("a closed opening's held focus work stays stale when released after reopen"
       // A's search never focuses (its deliveries are held), so close
       // through the visible Cancel: Escape cannot reach a dialog no
       // focused control sits inside.
-      await form.getByRole("button", { name: "cancel", exact: true }).click();
+      await form.getByRole("button", { name: "Cancel", exact: true }).click();
       await expect(form).toHaveCount(0);
       // Opening B, same source: its own mount work passes the frozen
       // gate (a different dialog node) and must complete its handoff.
@@ -601,7 +601,7 @@ test("a closed opening's held focus work stays stale when released after reopen"
       const search = form.locator('.launch-composer-search input[role="combobox"]');
       await expect(search).toBeFocused();
       // Deliberate newer intent before A's release.
-      const name = form.getByLabel("name (optional)");
+      const name = form.getByLabel("Name (optional)");
       await name.click();
       await expect(name).toBeFocused();
       await page.keyboard.press("End");
@@ -764,29 +764,29 @@ test("clone pre-fills the create form from a typed-command row, and the edited c
 
     const form = page.locator(".create-session-form");
     await expect(form).toBeVisible();
-    await expect(form.getByLabel("folder", { exact: true })).toHaveValue(originalCwd);
-    await expect(form.getByLabel("name (optional)")).toHaveValue(title);
+    await expect(form.getByLabel("Folder", { exact: true })).toHaveValue(originalCwd);
+    await expect(form.getByLabel("Name (optional)")).toHaveValue(title);
     // A row with no structured launch clones onto the command path, with its
     // exact command editable.
     await expect(form).toHaveAttribute("data-composer-mode", "command");
-    const command = form.getByLabel("agent command");
+    const command = form.getByLabel("Agent command");
     await expect(command).toBeEnabled();
     await expect(command).toHaveValue(invocationA);
 
     // The destination belongs to the shared shell, while the two launch
     // drafts retain their own values across a round trip through a harness.
-    await form.getByRole("tab", { name: "agent", exact: true }).click();
+    await form.getByRole("tab", { name: "Agent", exact: true }).click();
     await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
     await expect(form).toHaveAttribute("data-composer-mode", "structured");
-    await expect(form.getByLabel("folder", { exact: true })).toHaveValue(originalCwd);
-    await expect(form.getByLabel("name (optional)")).toHaveValue(title);
+    await expect(form.getByLabel("Folder", { exact: true })).toHaveValue(originalCwd);
+    await expect(form.getByLabel("Name (optional)")).toHaveValue(title);
     await chooseCommandMode(form);
     await expect(command).toHaveValue(invocationA);
 
     // The copy is edited before it is submitted.
     await command.fill(invocationB);
     const newCwd = stackScratchDir("clone-e2e-");
-    await form.getByLabel("folder", { exact: true }).fill(newCwd);
+    await form.getByLabel("Folder", { exact: true }).fill(newCwd);
     const [response] = await Promise.all([
       page.waitForResponse(
         (r) => r.request().method() === "POST" && r.url().endsWith("/api/sessions"),
@@ -865,41 +865,41 @@ test("each clone restores every field after an intervening draft edit", async ({
     const form = page.locator(".create-session-form");
     await expect(form).toBeVisible();
     await expect(form.locator(".create-session-host")).toHaveAttribute("data-host-id", String(local));
-    await expect(form.getByLabel("folder", { exact: true })).toHaveValue(cwdA);
-    await expect(form.getByLabel("name (optional)")).toHaveValue(titleA);
-    await expect(form.getByLabel("agent command")).toHaveValue(FAKE_AGENT);
+    await expect(form.getByLabel("Folder", { exact: true })).toHaveValue(cwdA);
+    await expect(form.getByLabel("Name (optional)")).toHaveValue(titleA);
+    await expect(form.getByLabel("Agent command")).toHaveValue(FAKE_AGENT);
 
     // Edit every field before cloning again — a partial reseed (one field
     // replaced, another left at this edit) would otherwise be invisible
     // to an assertion that only checked the fields B's clone changes.
-    await form.getByLabel("folder", { exact: true }).fill("/tmp/edited-in-between");
-    await form.getByLabel("agent command").fill("sleep 999");
+    await form.getByLabel("Folder", { exact: true }).fill("/tmp/edited-in-between");
+    await form.getByLabel("Agent command").fill("sleep 999");
     await answerYolo(form);
     await fillCloneTitle(form, "edited in between");
 
     // A modal keeps its obscured sidebar inert. Cancel this edited draft
     // before selecting row B; reopening must still replace every field with
     // B's prefill rather than retaining A's edits in component state.
-    await form.getByRole("button", { name: "cancel", exact: true }).click();
+    await form.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(form).toHaveCount(0);
     await openRowMenu(rowB);
     await rowB.locator(".session-row-clone").click();
     await expect(form.locator(".create-session-host")).toHaveAttribute("data-host-id", String(local));
-    await expect(form.getByLabel("folder", { exact: true })).toHaveValue(cwdB);
-    await expect(form.getByLabel("name (optional)")).toHaveValue(titleB);
-    await expect(form.getByLabel("agent command")).toHaveValue(FAKE_AGENT);
+    await expect(form.getByLabel("Folder", { exact: true })).toHaveValue(cwdB);
+    await expect(form.getByLabel("Name (optional)")).toHaveValue(titleB);
+    await expect(form.getByLabel("Agent command")).toHaveValue(FAKE_AGENT);
 
     // Edit again, close, then clone B a second time. A later mount of the
     // same source must not restore the abandoned draft merely because its
     // prefill resembles the previous clone.
-    await form.getByLabel("folder", { exact: true }).fill("/tmp/edited-again");
+    await form.getByLabel("Folder", { exact: true }).fill("/tmp/edited-again");
     await fillCloneTitle(form, "edited again");
-    await form.getByRole("button", { name: "cancel", exact: true }).click();
+    await form.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(form).toHaveCount(0);
     await openRowMenu(rowB);
     await rowB.locator(".session-row-clone").click();
-    await expect(form.getByLabel("folder", { exact: true })).toHaveValue(cwdB);
-    await expect(form.getByLabel("name (optional)")).toHaveValue(titleB);
+    await expect(form.getByLabel("Folder", { exact: true })).toHaveValue(cwdB);
+    await expect(form.getByLabel("Name (optional)")).toHaveValue(titleB);
 
     const newCwd = stackScratchDir("clone-reseed-e2e-");
     cloneId = await submitClonedCwd(page, form, newCwd);
@@ -950,7 +950,7 @@ test("closing a clone without submitting, or submitting it, both leave the next 
     const assertFreshDefaults = async (expectedCwd: string) => {
       await expect(form).toBeVisible();
       await expect(form.locator(".create-session-host")).toHaveAttribute("data-host-id", String(local));
-      await expect(form.getByLabel("folder", { exact: true })).toHaveValue(expectedCwd);
+      await expect(form.getByLabel("Folder", { exact: true })).toHaveValue(expectedCwd);
       await expect(form.getByRole("button", { name: "Codex", exact: true })).toHaveAttribute(
         "aria-pressed",
         "false",
@@ -966,12 +966,12 @@ test("closing a clone without submitting, or submitting it, both leave the next 
     await openRowMenu(source);
     await source.locator(".session-row-clone").click();
     await expect(form).toBeVisible();
-    await expect(form.getByLabel("folder", { exact: true })).toHaveValue(sourceCwd);
-    await form.getByRole("button", { name: "cancel", exact: true }).click();
+    await expect(form.getByLabel("Folder", { exact: true })).toHaveValue(sourceCwd);
+    await form.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(form).toHaveCount(0);
     await newSessionButton.click();
     await assertFreshDefaults(sourceCwd);
-    await form.getByRole("button", { name: "cancel", exact: true }).click();
+    await form.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(form).toHaveCount(0);
 
     // (b) Clone, submit it successfully, then reopen: the same fresh
@@ -1060,7 +1060,7 @@ async function openEffortClone(
     // Premise: the draft carries the effort. The summary shows it even while
     // the catalog is unknown, and without it neither test exercises the fix.
     await expect(form.locator(".launch-composer-summary"), "premise: the clone's draft names an effort")
-      .toContainText("effort: high");
+      .toContainText("Effort: High");
     return { form, gets: () => gets, done: cleanup };
   } catch (error) {
     // Setup failed before the caller's `finally` could own the cleanup.
@@ -1104,8 +1104,8 @@ test("a clone with an effort can launch while the catalog is still loading", asy
  */
 async function expectEffortShownSelected(form: Locator, effort: string) {
   const row = form.locator(".launch-composer-effort-choice");
-  await expect(row.getByRole("button", { name: effort, exact: true })).toHaveAttribute("aria-pressed", "true");
-  await expect(row.getByRole("button", { name: "default", exact: true })).toHaveAttribute("aria-pressed", "false");
+  await expect(row.getByRole("button", { name: effort[0].toUpperCase() + effort.slice(1), exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(row.getByRole("button", { name: "Default", exact: true })).toHaveAttribute("aria-pressed", "false");
 }
 
 /**
@@ -1128,12 +1128,12 @@ test("a failed catalog read shows a retry and leaves the clone launchable", asyn
   });
   try {
     const failure = clone.form.locator(".create-catalog-error");
-    await expect(failure).toContainText("model catalog unavailable");
+    await expect(failure).toContainText("Model catalog unavailable");
     await expect(clone.form.locator(".launch-composer-choice-error")).toHaveCount(0);
     await expect(clone.form.locator(".create-session-submit")).toBeEnabled();
     await expectEffortShownSelected(clone.form, "high");
 
-    await failure.getByRole("button", { name: "retry" }).click();
+    await failure.getByRole("button", { name: "Retry" }).click();
     await expect.poll(clone.gets, { message: "retry reads the catalog again" }).toBeGreaterThan(1);
     await expect(failure).toHaveCount(0);
     await expect(clone.form.locator(".launch-composer-choice-error")).toHaveCount(0);
@@ -1173,14 +1173,14 @@ test("Clone of a command launch fills in its YOLO answer, agent type and resume 
     await sourceRow.locator(".session-row-clone").click();
     const form = page.locator('.create-session-form[role="dialog"]');
     await expect(form).toBeVisible();
-    await expect(form.getByLabel("agent command")).toHaveValue(`${FAKE_AGENT} {farhelm_args}`);
+    await expect(form.getByLabel("Agent command")).toHaveValue(`${FAKE_AGENT} {farhelm_args}`);
     await expect(
-      form.getByRole("group", { name: "runs in YOLO mode" }).getByLabel("no", { exact: true }),
+      form.getByRole("group", { name: "Runs in YOLO mode" }).getByLabel("No", { exact: true }),
     ).toBeChecked();
     await expect(form.locator(".launch-command-agent")).toHaveValue("claude");
     await expect(form.locator(".launch-command-resume-toggle")).toBeChecked();
     await expect(form.locator(".launch-command-resume")).toHaveValue(resume);
-    await form.getByRole("button", { name: "cancel", exact: true }).click();
+    await form.getByRole("button", { name: "Cancel", exact: true }).click();
   } finally {
     await cleanupSession(request, source.id);
   }

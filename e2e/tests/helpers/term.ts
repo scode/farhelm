@@ -133,8 +133,8 @@ export async function attachSession(page: Page, id: string): Promise<void> {
  */
 export async function answerYolo(form: Locator, yolo = false) {
   await form
-    .getByRole("group", { name: "runs in YOLO mode" })
-    .getByLabel(yolo ? "yes (YOLO)" : "no", { exact: true })
+    .getByRole("group", { name: "Runs in YOLO mode" })
+    .getByLabel(yolo ? "Yes (YOLO)" : "No", { exact: true })
     .check();
 }
 
@@ -156,14 +156,14 @@ export async function fillCreateForm(
   await page.locator(".new-session-button").click();
   const form = page.locator(".create-session-form");
   await expect(form).toBeVisible();
-  await form.getByRole("tab", { name: "command", exact: true }).click();
-  await form.getByLabel("folder", { exact: true }).fill(cwd);
-  await form.getByLabel("agent command").fill(invocation);
+  await form.getByRole("tab", { name: "Command", exact: true }).click();
+  await form.getByLabel("Folder", { exact: true }).fill(cwd);
+  await form.getByLabel("Agent command").fill(invocation);
   // A command launch has no default YOLO answer: the form asks every time.
   await answerYolo(form, yolo);
   // The name field sits on the top action row now, visible without opening
   // anything — fill it by its label directly rather than by DOM position.
-  await form.getByLabel("name (optional)").fill(title);
+  await form.getByLabel("Name (optional)").fill(title);
   return form;
 }
 

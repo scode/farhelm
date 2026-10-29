@@ -91,8 +91,8 @@ test("host picker supports mouse, navigation, typeahead, cancellation, and focus
   await host.press("Space");
   await host.press("Tab");
   await expect(host).toHaveAttribute("aria-expanded", "false");
-  await expect(form.getByRole("button", { name: "browse this path", exact: true })).toBeFocused();
-  await form.getByRole("button", { name: "cancel", exact: true }).click();
+  await expect(form.getByRole("button", { name: "Browse this path", exact: true })).toBeFocused();
+  await form.getByRole("button", { name: "Cancel", exact: true }).click();
   await expect(page.locator("#launcher-host-options")).toHaveCount(0);
 });
 
@@ -128,7 +128,7 @@ test("host picker opened without click focus still owns the keyboard and closes 
   await page.mouse.click(outside.x, outside.y);
   await expect(host, "a click elsewhere closes the menu").toHaveAttribute("aria-expanded", "false");
   await expect(host).toHaveAttribute("data-host-id", String(local.id));
-  await form.getByRole("button", { name: "cancel", exact: true }).click();
+  await form.getByRole("button", { name: "Cancel", exact: true }).click();
 });
 
 /** New seeds its destination from the selected session before the picker has

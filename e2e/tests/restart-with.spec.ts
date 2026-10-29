@@ -65,9 +65,9 @@ async function expectHeldContext(dialog: Locator, agent: string) {
   await expect(dialog.getByRole("tab")).toHaveCount(0);
   await expect(dialog.locator(".launch-composer-harness-choice")).toHaveCount(0);
   await expect(dialog.locator(".launch-command-agent, .launch-command-resume-toggle")).toHaveCount(0);
-  await expect(dialog.getByLabel("folder", { exact: true })).toHaveCount(0);
-  await expect(dialog.getByLabel("name (optional)", { exact: true })).toHaveCount(0);
-  await expect(dialog.getByLabel("initial prompt", { exact: true })).toHaveCount(0);
+  await expect(dialog.getByLabel("Folder", { exact: true })).toHaveCount(0);
+  await expect(dialog.getByLabel("Name (optional)", { exact: true })).toHaveCount(0);
+  await expect(dialog.getByLabel("Initial prompt", { exact: true })).toHaveCount(0);
   await expect(dialog.locator(".create-session-host, .launch-composer-host-picker, .launch-composer-browser")).toHaveCount(0);
 }
 
@@ -116,7 +116,7 @@ test("restart with keeps gap focus and container Enter uses its enabled action",
   await dialog.press("Enter");
   expect(bodies, "an unchanged draft has no action to perform").toHaveLength(0);
 
-  await dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true }).click();
+  await dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "YOLO", exact: true }).click();
   await expect(dialog.locator(".create-session-submit")).toBeEnabled();
   await dialog.focus();
   await expect(dialog).toBeFocused();
@@ -135,7 +135,7 @@ test("Restart with escapes and isolates peer refusal text", async ({ page }) => 
     await fulfillAsHelm(route, { status: 400, contentType: "text/plain", body: "refused \u202Ehost\u200B" });
   });
   const dialog = await openInjectedDialog(page);
-  await dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true }).click();
+  await dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "YOLO", exact: true }).click();
   const submit = dialog.locator(".create-session-submit");
   await expect(submit).toBeEnabled();
   await submit.click();
@@ -157,7 +157,7 @@ test("restart with shows an unsafe stored wrapper prefix without editing its esc
   const wrapper = dialog.locator(".launch-composer-wrapper");
   await expect(wrapper).toHaveValue(/wrapper<U\+202E>/);
   await expect(wrapper).toHaveJSProperty("readOnly", true);
-  await dialog.getByRole("button", { name: "clear wrapper prefix" }).click();
+  await dialog.getByRole("button", { name: "Clear wrapper prefix" }).click();
   await expect(wrapper).toHaveValue("");
   await expect(wrapper).toHaveJSProperty("readOnly", false);
 });
@@ -315,9 +315,9 @@ test("restart with shows fixed context and submits one edited resume", async ({ 
 
     await selectSessionActionWith(page, "Restart");
     await expect(dialog).toBeVisible();
-    await dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true }).click();
+    await dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "YOLO", exact: true }).click();
     await expect(dialog.locator(".launch-composer-permissions-choice .launch-composer-changed-marker"))
-      .toHaveText("● changed · was agent's own setting");
+      .toHaveText("● Changed · was agent's own setting");
     await expect(submit).toBeEnabled();
     await expect(submit).toHaveText(/^restart$/i);
     await expect(submit).toHaveAccessibleName(/^restart codex · .+ · \/tmp$/i);
@@ -348,9 +348,9 @@ test("restart with upgrades an older own-setting launch to guarded", async ({ pa
   const dialog = await openInjectedDialog(page);
   const submit = dialog.locator(".create-session-submit");
   await expect(submit, "the stored launch is initially unchanged").toBeDisabled();
-  await dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true }).click();
+  await dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "Guarded", exact: true }).click();
   await expect(dialog.locator(".launch-composer-permissions-choice .launch-composer-changed-marker"))
-    .toHaveText("● changed · was agent's own setting");
+    .toHaveText("● Changed · was agent's own setting");
   await expect(submit).toBeEnabled();
   await submit.click();
   await expect(dialog).toHaveCount(0);
@@ -405,7 +405,7 @@ test("a YOLO restart-with requires confirmation inside the dialog", async ({ pag
   });
 
   const dialog = await openInjectedDialog(page);
-  await dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true }).click();
+  await dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "YOLO", exact: true }).click();
   await dialog.locator(".create-session-submit").click();
   const confirmation = dialog.locator(".yolo-confirmation");
   await expect(confirmation, "the question must appear inside the modal dialog").toBeVisible();
@@ -488,7 +488,7 @@ test("restart with can answer the YOLO question by restarting guarded", async ({
   try {
     const dialog = await openInjectedDialog(page);
     const permissions = dialog.locator(".launch-composer-permissions-choice");
-    await permissions.getByRole("button", { name: "yolo", exact: true }).click();
+    await permissions.getByRole("button", { name: "YOLO", exact: true }).click();
     const submit = dialog.locator(".create-session-submit");
     await submit.click();
     const confirmation = dialog.locator(".yolo-confirmation");
@@ -507,10 +507,10 @@ test("restart with can answer the YOLO question by restarting guarded", async ({
     await expect.poll(() => restarts.length).toBe(2);
     await expect(submit).toHaveAttribute("aria-disabled", "true");
     await expect(confirmation).toHaveCount(0);
-    await expect(permissions.getByRole("button", { name: "guarded", exact: true }))
+    await expect(permissions.getByRole("button", { name: "Guarded", exact: true }))
       .toHaveAttribute("aria-pressed", "true");
     await expect(permissions.locator(".launch-composer-changed-marker"))
-      .toHaveText("● changed · was agent's own setting");
+      .toHaveText("● Changed · was agent's own setting");
     await expect(submit).toBeFocused();
     expect(restarts[1]).toEqual({
       stop_if_running: false,
@@ -546,7 +546,7 @@ test("restart with hides guarded when it would restore the unchanged launch", as
   const dialog = await openInjectedDialog(page);
   const submit = dialog.locator(".create-session-submit");
   await expect(submit, "the stored guarded launch starts unchanged").toBeDisabled();
-  await dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true }).click();
+  await dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "YOLO", exact: true }).click();
   await submit.click();
   const confirmation = dialog.locator(".yolo-confirmation");
   await expect(confirmation).toBeVisible();
@@ -559,8 +559,8 @@ test("restart with hides guarded when it would restore the unchanged launch", as
   await confirmation.locator(".yolo-cancel").click();
   await expect(confirmation).toHaveCount(0);
   const model = dialog.locator(".launch-composer-model-choice");
-  await model.getByRole("combobox", { name: "model" }).click();
-  await model.getByRole("option", { name: "harness default" }).click();
+  await model.getByRole("combobox", { name: "Model" }).click();
+  await model.getByRole("option", { name: "Harness default" }).click();
   await expect(model.locator(".launch-composer-changed-marker")).toBeVisible();
   await submit.click();
   await expect(confirmation).toBeVisible();
@@ -634,7 +634,7 @@ test("don't ask again from restart with keeps focus in the dialog and marks befo
   });
 
   const dialog = await openInjectedDialog(page);
-  await dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true }).click();
+  await dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "YOLO", exact: true }).click();
   await dialog.locator(".create-session-submit").click();
   const confirmation = dialog.locator(".yolo-confirmation");
   await expect(confirmation).toBeVisible();
@@ -720,7 +720,7 @@ test("cancel and an answer to restart with's YOLO question in one burst restart 
   });
 
   const dialog = await openInjectedDialog(page);
-  await dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true }).click();
+  await dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "YOLO", exact: true }).click();
   const confirmation = dialog.locator(".yolo-confirmation");
   const isRestart = (candidate: { request(): { method(): string }; url(): string }) =>
     candidate.request().method() === "POST" && candidate.url().endsWith(`/api/sessions/${encodeURIComponent(SESSION_ID)}/restart`);
@@ -744,7 +744,7 @@ test("cancel and an answer to restart with's YOLO question in one burst restart 
     expect(answerWasLive, `premise: ${answer} was still live when clicked`).toBe(true);
     await expect(confirmation).toHaveCount(0);
     await expect(dialog, "cancelling the question keeps the dialog open").toBeVisible();
-    await expect(dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true }))
+    await expect(dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "YOLO", exact: true }))
       .toHaveAttribute("aria-pressed", "true");
 
     // A plain restart afterwards: a restart the stale answer had approved
@@ -968,7 +968,7 @@ test("restart with keeps focus inside the dialog over a live terminal while pend
     await expect(dialog.locator(".launch-composer-cancel")).toBeFocused();
     await armTerminalFocusSpy(page);
 
-    await dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true })
+    await dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "YOLO", exact: true })
       .click();
     const submit = dialog.locator(".create-session-submit");
     await expect(submit).toBeEnabled();
@@ -1106,10 +1106,10 @@ test("restart with escapes the old model in its changed marker", async ({ page }
 
   const modelChoice = dialog.locator(".launch-composer-model-choice");
   await expect(modelChoice.locator(".launch-composer-changed-marker")).toHaveCount(0);
-  await modelChoice.getByRole("combobox", { name: "model" }).click();
-  await modelChoice.getByRole("option", { name: "harness default" }).click();
+  await modelChoice.getByRole("combobox", { name: "Model" }).click();
+  await modelChoice.getByRole("option", { name: "Harness default" }).click();
   const marker = modelChoice.locator(".launch-composer-changed-marker");
-  await expect(marker).toHaveText("● changed · was gpt-6-<U+200B>astra");
+  await expect(marker).toHaveText("● Changed · was gpt-6-<U+200B>astra");
   await expect(marker.locator('.peer-value[dir="ltr"]')).toHaveText("gpt-6-<U+200B>astra");
 });
 
@@ -1137,10 +1137,10 @@ test("restart with keeps Tab from the open model list inside the dialog", async 
   await expect(dialog).toBeVisible();
   await expect(dialog.locator(".launch-composer-cancel")).toBeFocused();
 
-  const model = dialog.getByRole("combobox", { name: "model", exact: true });
+  const model = dialog.getByRole("combobox", { name: "Model", exact: true });
   const listbox = dialog.getByRole("listbox");
   const effortDefault = dialog.locator(".launch-composer-effort-choice").getByRole("button", {
-    name: "default",
+    name: "Default",
     exact: true,
   });
   // Premise: the list is open with at least one transient row, so the row
@@ -1351,7 +1351,7 @@ test("restart with makes the page inert while open and restores it exactly", asy
   await selectSessionActionWith(page, "Restart");
   await expect(cancel).toBeFocused();
   expect(await underInert()).toEqual({ dialog: false, trigger: true, row: true, new: true });
-  await dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true })
+  await dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "YOLO", exact: true })
     .click();
   await dialog.locator(".create-session-submit").click();
   await expect(dialog).toHaveCount(0);
@@ -1395,13 +1395,13 @@ test("restart with compares an older omitted permission by its effective mode", 
   const dialog = page.locator(".create-session-form[data-launcher-mode=restart]");
   await expect(dialog).toBeVisible();
   const permissions = dialog.locator(".launch-composer-permissions-choice");
-  const yolo = permissions.getByRole("button", { name: "yolo", exact: true });
+  const yolo = permissions.getByRole("button", { name: "YOLO", exact: true });
   await expect(yolo).toHaveAttribute("aria-pressed", "true");
   await expect(dialog.locator(".create-session-submit")).toBeDisabled();
   // A real edit establishes that compatibility permits submission. Returning
   // to YOLO must then disable it, giving the negative marker check a completed
   // state transition to observe rather than racing the click's render.
-  await permissions.getByRole("button", { name: "approve", exact: true }).click();
+  await permissions.getByRole("button", { name: "Approve", exact: true }).click();
   await expect(dialog.locator(".create-session-submit")).toBeEnabled();
   await yolo.click();
   await expect(dialog.locator(".create-session-submit")).toBeDisabled();
@@ -1482,12 +1482,12 @@ test("restart with edits a command launch's command, resume command and YOLO ans
   const dialog = await openInjectedDialog(page);
   await expectHeldContext(dialog, "claude");
 
-  const command = dialog.getByLabel("agent command", { exact: true });
+  const command = dialog.getByLabel("Agent command", { exact: true });
   const submit = dialog.locator(".create-session-submit");
   await expect(command).toHaveValue("claude {farhelm_args}");
-  await expect(dialog.getByLabel("resume command", { exact: true })).toHaveValue(resume);
+  await expect(dialog.getByLabel("Resume command", { exact: true })).toHaveValue(resume);
   await expect(
-    dialog.getByRole("group", { name: "runs in YOLO mode" }).getByLabel("no", { exact: true }),
+    dialog.getByRole("group", { name: "Runs in YOLO mode" }).getByLabel("No", { exact: true }),
   ).toBeChecked();
   await expect(submit).toBeDisabled();
   await expect(dialog.locator(".launch-composer-changed-marker")).toHaveCount(0);
@@ -1502,11 +1502,11 @@ test("restart with edits a command launch's command, resume command and YOLO ans
   await expect(submit).toBeEnabled();
   // The other two fields reach the request too, each marked once edited.
   const editedResume = "claude --model sonnet --resume {conversation} {farhelm_args}";
-  await dialog.getByLabel("resume command", { exact: true }).fill(editedResume);
+  await dialog.getByLabel("Resume command", { exact: true }).fill(editedResume);
   await expect(dialog.locator(".launch-composer-changed-marker")).toHaveCount(2);
   await dialog
-    .getByRole("group", { name: "runs in YOLO mode" })
-    .getByLabel("yes (YOLO)", { exact: true })
+    .getByRole("group", { name: "Runs in YOLO mode" })
+    .getByLabel("Yes (YOLO)", { exact: true })
     .check();
   await expect(dialog.locator(".launch-composer-changed-marker")).toHaveCount(3);
   await submit.click();
@@ -1588,8 +1588,8 @@ test("a YOLO command restart-with asks inside the dialog, worded for an assertio
   });
   const dialog = await openInjectedDialog(page);
   await dialog
-    .getByRole("group", { name: "runs in YOLO mode" })
-    .getByLabel("yes (YOLO)", { exact: true })
+    .getByRole("group", { name: "Runs in YOLO mode" })
+    .getByLabel("Yes (YOLO)", { exact: true })
     .check();
   await dialog.locator(".create-session-submit").click();
   const confirmation = dialog.locator(".yolo-confirmation");
@@ -1666,9 +1666,9 @@ test("restart with choice Enter applies effort and permissions without old trust
   const dialog = await openInjectedDialog(page);
   await expect(dialog.locator(".launch-composer-trust-choice")).toHaveCount(0);
   const choice = (group: string, name: string) => dialog.locator(group).getByRole("button", { name, exact: true });
-  expect(await enterRestartChoice(dialog, choice(".launch-composer-effort-choice", "low"), bodies))
+  expect(await enterRestartChoice(dialog, choice(".launch-composer-effort-choice", "Low"), bodies))
     .toMatchObject({ stop_if_running: false, with: { harness: "codex", model: BASELINE.model, effort: "low" } });
-  expect(await enterRestartChoice(dialog, choice(".launch-composer-permissions-choice", "yolo"), bodies))
+  expect(await enterRestartChoice(dialog, choice(".launch-composer-permissions-choice", "YOLO"), bodies))
     .toMatchObject({ with: { effort: "low", permissions: "yolo" } });
   for (const body of bodies) {
     expect((body as { with: object }).with).not.toHaveProperty("workspace_trust");
@@ -1686,7 +1686,7 @@ test("restart with choice Enter carries the displayed working-agent confirmation
   await expect(dialog.locator(".launch-composer-launch-context")).toHaveText(/^codex · .+ · \/tmp$/i);
   await expect(dialog.locator(".launch-composer-restart-warning"))
     .toHaveText("The agent is working. This action stops it before restarting.");
-  const low = dialog.locator(".launch-composer-effort-choice").getByRole("button", { name: "low", exact: true });
+  const low = dialog.locator(".launch-composer-effort-choice").getByRole("button", { name: "Low", exact: true });
   expect(await enterRestartChoice(dialog, low, bodies)).toMatchObject({ stop_if_running: true, with: { effort: "low" } });
 });
 
@@ -1697,13 +1697,13 @@ test("restart with unchanged repeated and composing choice Enter sends nothing",
   const bodies = await refuseEnterRestarts(page);
   const dialog = await openInjectedDialog(page);
   const efforts = dialog.locator(".launch-composer-effort-choice");
-  const high = efforts.getByRole("button", { name: "high", exact: true });
+  const high = efforts.getByRole("button", { name: "High", exact: true });
   await expect(high).toHaveAttribute("aria-pressed", "true");
   await high.focus();
   await expect(high).toBeFocused();
   await high.press("Enter");
   await expect(dialog.locator(".create-session-submit")).toBeDisabled();
-  const low = efforts.getByRole("button", { name: "low", exact: true });
+  const low = efforts.getByRole("button", { name: "Low", exact: true });
   await expect(low, "the catalog fixture must offer Low before repeat input").toBeVisible();
   for (const flags of [{ repeat: true }, { isComposing: true }]) {
     await low.focus();
@@ -1730,7 +1730,7 @@ test("restart with model Enter chooses before a separate restart action", async 
   ] }));
   const bodies = await refuseEnterRestarts(page);
   const dialog = await openInjectedDialog(page);
-  const model = dialog.getByRole("combobox", { name: "model", exact: true });
+  const model = dialog.getByRole("combobox", { name: "Model", exact: true });
   await model.fill("enter-model");
   await expect(dialog.getByRole("option", { name: "enter-model", exact: true })).toBeVisible();
   await expect(model).toBeFocused();
@@ -1742,12 +1742,12 @@ test("restart with model Enter chooses before a separate restart action", async 
   // Pointer selection closes the list without restarting and retains field
   // focus. Closed-field Enter keeps the choice without submitting.
   await model.click();
-  await dialog.getByRole("option", { name: "harness default", exact: true }).click();
+  await dialog.getByRole("option", { name: "Harness default", exact: true }).click();
   await expect(model).toBeFocused();
-  await expect(model).toHaveValue("harness default");
+  await expect(model).toHaveValue("Harness default");
   await expect(dialog.locator("#launch-composer-model-results")).toHaveCount(0);
   await model.press("Enter");
-  await expect(model).toHaveValue("harness default");
+  await expect(model).toHaveValue("Harness default");
   expect(bodies).toHaveLength(1);
   expect(await enterRestartChoice(dialog, dialog.locator(".create-session-submit"), bodies))
     .toMatchObject({ with: { harness: "codex" } });
@@ -1763,8 +1763,8 @@ test("restart with model Enter refuses an unselected draft and held keys", async
   ] }));
   const bodies = await refuseEnterRestarts(page);
   const dialog = await openInjectedDialog(page);
-  await dialog.locator(".launch-composer-effort-choice").getByRole("button", { name: "low", exact: true }).click();
-  const model = dialog.getByRole("combobox", { name: "model", exact: true });
+  await dialog.locator(".launch-composer-effort-choice").getByRole("button", { name: "Low", exact: true }).click();
+  const model = dialog.getByRole("combobox", { name: "Model", exact: true });
   await model.fill("other-harness-model");
   await expect(model).toBeFocused();
   for (const flags of [{ repeat: true }, { isComposing: true }]) {
@@ -1791,7 +1791,7 @@ test("restart with command Enter validates and keeps the shown YOLO value", asyn
   await injectCommandSession(page, "claude --resume {conversation} {farhelm_args}", "resume");
   const bodies = await refuseEnterRestarts(page);
   const dialog = await openInjectedDialog(page);
-  const command = dialog.getByLabel("agent command", { exact: true });
+  const command = dialog.getByLabel("Agent command", { exact: true });
   await command.fill("claude --model sonnet");
   await expect(command).toBeFocused();
   await command.press("Enter");
@@ -1802,11 +1802,11 @@ test("restart with command Enter validates and keeps the shown YOLO value", asyn
   expect(await enterRestartChoice(dialog, command, bodies)).toMatchObject({
     with_command: { command: "claude --model sonnet {farhelm_args}", yolo: false },
   });
-  const yes = dialog.getByRole("radio", { name: "yes (YOLO)", exact: true });
+  const yes = dialog.getByRole("radio", { name: "Yes (YOLO)", exact: true });
   await expect(yes).not.toBeChecked();
   expect(await enterRestartChoice(dialog, yes, bodies)).toMatchObject({ with_command: { yolo: false } });
   await expect(yes).not.toBeChecked();
-  const resume = dialog.getByLabel("resume command", { exact: true });
+  const resume = dialog.getByLabel("Resume command", { exact: true });
   await resume.fill("claude --model sonnet --resume {conversation} {farhelm_args}");
   expect(await enterRestartChoice(dialog, resume, bodies)).toMatchObject({
     with_command: { resume: "claude --model sonnet --resume {conversation} {farhelm_args}" },
@@ -1833,8 +1833,8 @@ for (const controlKind of ["effort", "model"] as const) {
       const dialog = await openInjectedDialog(page);
       const submit = dialog.locator(".create-session-submit");
       const control = controlKind === "effort"
-        ? dialog.locator(".launch-composer-effort-choice").getByRole("button", { name: "low", exact: true })
-        : dialog.getByRole("combobox", { name: "model", exact: true });
+        ? dialog.locator(".launch-composer-effort-choice").getByRole("button", { name: "Low", exact: true })
+        : dialog.getByRole("combobox", { name: "Model", exact: true });
       if (controlKind === "model") {
         await control.fill("enter-model");
         await expect(dialog.getByRole("option", { name: "enter-model", exact: true })).toBeVisible();
@@ -1902,8 +1902,8 @@ test("restart with applies an allowed partial agent template", async ({ page }) 
   const dialog = await openInjectedDialog(page);
   await applyRestartTemplate(dialog, "resume-settings");
   await expectHeldContext(dialog, "codex");
-  await expect(dialog.getByRole("combobox", { name: "model", exact: true })).toHaveValue("enter-model");
-  await expect(dialog.locator(".launch-composer-effort-choice").getByRole("button", { name: "low", exact: true }))
+  await expect(dialog.getByRole("combobox", { name: "Model", exact: true })).toHaveValue("enter-model");
+  await expect(dialog.locator(".launch-composer-effort-choice").getByRole("button", { name: "Low", exact: true }))
     .toHaveAttribute("aria-pressed", "true");
   await expect(dialog.locator(".launch-composer-wrapper")).toHaveValue("env 'RESUME_MODE=1'");
   await dialog.locator(".create-session-submit").click();
@@ -1927,8 +1927,8 @@ test("restart with applies an allowed partial command template", async ({ page }
   const dialog = await openInjectedDialog(page);
   await applyRestartTemplate(dialog, "resume-command");
   await expectHeldContext(dialog, "claude");
-  await expect(dialog.getByLabel("agent command", { exact: true })).toHaveValue(command);
-  await expect(dialog.getByLabel("resume command", { exact: true })).toHaveValue(resume);
+  await expect(dialog.getByLabel("Agent command", { exact: true })).toHaveValue(command);
+  await expect(dialog.getByLabel("Resume command", { exact: true })).toHaveValue(resume);
   await dialog.locator(".create-session-submit").click();
   await expect(dialog.locator(".launch-composer-refusal-alert")).toContainText("Enter fixture refused restart 1");
   expect(bodies).toEqual([{ stop_if_running: false, with_command: { command, resume, yolo: true, agent: "claude" } }]);
@@ -1958,7 +1958,7 @@ for (const field of ["kind", "agent", "host", "destination", "name"] as const) {
     await expect(dialog.locator(".create-session-submit")).toBeDisabled();
     await applyRestartTemplate(dialog, `matching-${field}`);
     await expect(dialog.locator(".launch-composer-template-error")).toHaveCount(0);
-    await expect(dialog.locator(".launch-composer-effort-choice").getByRole("button", { name: "low", exact: true }))
+    await expect(dialog.locator(".launch-composer-effort-choice").getByRole("button", { name: "Low", exact: true }))
       .toHaveAttribute("aria-pressed", "true");
     await expect(dialog.locator(".create-session-submit")).toBeEnabled();
     await expectHeldContext(dialog, "codex");
@@ -1994,7 +1994,7 @@ for (const field of ["kind", "agent", "host", "destination", "name", "prompt"] a
     await expect(error).toContainText("cannot change here");
     await expect(error).toContainText({ kind: "launch kind", agent: "agent type", host: "host",
       destination: "destination", name: "session name", prompt: "initial prompt" }[field]);
-    await expect(dialog.locator(".launch-composer-effort-choice").getByRole("button", { name: "high", exact: true }))
+    await expect(dialog.locator(".launch-composer-effort-choice").getByRole("button", { name: "High", exact: true }))
       .toHaveAttribute("aria-pressed", "true");
     await expect(dialog.locator(".create-session-submit")).toBeDisabled();
     await expectHeldContext(dialog, "codex");
@@ -2034,7 +2034,7 @@ test("restart with refuses held composer actions and scopes model search", async
     // An allowed equal-value action clears the previous refusal. Each next
     // held result must therefore produce its own reason, not inherit one.
     await search.fill("effort:high");
-    const high = dialog.getByRole("option", { name: "Effort: high", exact: true });
+    const high = dialog.getByRole("option", { name: "Effort: High", exact: true });
     await expect(high).toBeVisible();
     await high.click();
     await expect(dialog.locator(".launch-composer-template-error")).toHaveCount(0);
@@ -2045,7 +2045,7 @@ test("restart with refuses held composer actions and scopes model search", async
   expect(bodies).toHaveLength(0);
   // Positive control: a permitted search choice still edits this restart.
   await search.fill("effort:low");
-  const low = dialog.getByRole("option", { name: "Effort: low", exact: true });
+  const low = dialog.getByRole("option", { name: "Effort: Low", exact: true });
   await expect(low).toBeVisible();
   await low.click();
   await expect(dialog.locator(".create-session-submit")).toBeEnabled();
@@ -2088,7 +2088,7 @@ test("restart with refuses held shortcut batches and bolt templates", async ({ p
   await page.keyboard.press("Enter");
   await expect(page.locator(".launch-sequence-indicator")).toHaveCount(0);
   await expect(dialog.locator(".launch-composer-template-error")).toContainText("session name cannot change here");
-  await expect(dialog.locator(".launch-composer-effort-choice").getByRole("button", { name: "high", exact: true }))
+  await expect(dialog.locator(".launch-composer-effort-choice").getByRole("button", { name: "High", exact: true }))
     .toHaveAttribute("aria-pressed", "true");
   await expect(dialog.locator(".create-session-submit")).toBeDisabled();
   await cancel.focus();
@@ -2131,18 +2131,18 @@ test("restart with applies matching bolt and shortcut templates without restarti
   await expect(dialog.locator(".create-session-submit")).toBeDisabled();
   await applyRestartTemplate(dialog, "matching-context");
   await expect(dialog.locator(".launch-composer-template-error")).toHaveCount(0);
-  await expect(efforts.getByRole("button", { name: "high", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(efforts.getByRole("button", { name: "High", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(dialog.locator(".create-session-submit")).toBeDisabled();
   await cancel.focus();
   await expect(cancel).toBeFocused();
   await page.keyboard.press("Control+Shift+KeyP");
-  await expect(efforts.getByRole("button", { name: "low", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(efforts.getByRole("button", { name: "Low", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(dialog.locator(".launch-composer-template-error")).toHaveCount(0);
   await expect(dialog.locator(".create-session-submit")).toBeEnabled();
   await expect(dialog).toBeVisible();
   expect(bodies, "the bolt edits the draft without restarting").toHaveLength(0);
 
-  await efforts.getByRole("button", { name: "high", exact: true }).click();
+  await efforts.getByRole("button", { name: "High", exact: true }).click();
   await expect(dialog.locator(".create-session-submit")).toBeDisabled();
   await cancel.focus();
   await expect(cancel).toBeFocused();
@@ -2152,7 +2152,7 @@ test("restart with applies matching bolt and shortcut templates without restarti
   await page.keyboard.press("Digit2");
   await page.keyboard.press("Enter");
   await expect(page.locator(".launch-sequence-indicator")).toHaveCount(0);
-  await expect(efforts.getByRole("button", { name: "low", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(efforts.getByRole("button", { name: "Low", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(dialog.locator(".launch-composer-template-error")).toHaveCount(0);
   await expect(dialog.locator(".create-session-submit")).toBeEnabled();
   await expectHeldContext(dialog, "codex");
@@ -2169,20 +2169,20 @@ for (const editCommand of [false, true]) {
     await injectCommandSession(page, resume, "resume", command);
     const bodies = await refuseEnterRestarts(page);
     const dialog = await openInjectedDialog(page);
-    const commandField = dialog.getByLabel("agent command", { exact: true });
+    const commandField = dialog.getByLabel("Agent command", { exact: true });
     await expect(commandField).toHaveValue("claude  --tag 'literal value'<U+200B> {farhelm_args}  ");
-    await expect(dialog.getByLabel("resume command", { exact: true }))
+    await expect(dialog.getByLabel("Resume command", { exact: true }))
       .toHaveValue("claude   --resume {conversation} --tag '<U+202E>old' {farhelm_args} ");
     const edited = "claude --model sonnet {farhelm_args}";
     await expect(commandField).toHaveJSProperty("readOnly", true);
-    await expect(dialog.getByLabel("resume command", { exact: true })).toHaveJSProperty("readOnly", true);
+    await expect(dialog.getByLabel("Resume command", { exact: true })).toHaveJSProperty("readOnly", true);
     if (editCommand) {
-      await dialog.getByRole("button", { name: "clear agent command", exact: true }).click();
+      await dialog.getByRole("button", { name: "Clear agent command", exact: true }).click();
       await expect(commandField).toHaveValue("");
       await expect(commandField).toHaveJSProperty("readOnly", false);
       await commandField.fill(edited);
     }
-    await dialog.getByRole("radio", { name: "yes (YOLO)", exact: true }).check();
+    await dialog.getByRole("radio", { name: "Yes (YOLO)", exact: true }).check();
     await dialog.locator(".create-session-submit").click();
     await expect(dialog.locator(".launch-composer-refusal-alert")).toContainText("Enter fixture refused restart 1");
     expect(bodies).toEqual([{ stop_if_running: false, with_command: {
@@ -2219,10 +2219,10 @@ test("restart with refuses a matching recent and ignores folder memory", async (
   await expect(offered, "the matching recent must really be offered").toHaveCount(1);
   await offered.click();
   await expect(dialog.locator(".launch-composer-template-error")).toContainText("cannot change here");
-  await expect(dialog.locator(".launch-composer-effort-choice").getByRole("button", { name: "default", exact: true }))
+  await expect(dialog.locator(".launch-composer-effort-choice").getByRole("button", { name: "Default", exact: true }))
     .toHaveAttribute("aria-pressed", "true");
   await expect(dialog.locator(".create-session-submit")).toBeDisabled();
-  await dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true }).click();
+  await dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "Guarded", exact: true }).click();
   await dialog.locator(".create-session-submit").click();
   await expect(dialog).toHaveCount(0);
   expect(bodies).toHaveLength(1);
@@ -2248,14 +2248,14 @@ test("restart with retries the catalog without reseeding its draft", async ({ pa
   const bodies = await refuseEnterRestarts(page);
   const dialog = await openInjectedDialog(page);
   const failure = dialog.locator(".create-catalog-error");
-  await expect(failure).toContainText("model catalog unavailable");
-  await dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true }).click();
+  await expect(failure).toContainText("Model catalog unavailable");
+  await dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "Guarded", exact: true }).click();
   await expect(dialog.locator(".create-session-submit")).toBeEnabled();
-  await failure.getByRole("button", { name: "retry", exact: true }).click();
+  await failure.getByRole("button", { name: "Retry", exact: true }).click();
   await expect.poll(() => reads, { message: "catalog retry reached the controlled reader" }).toBe(2);
   await expect(failure).toHaveCount(0);
   await expectHeldContext(dialog, "codex");
-  await expect(dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true }))
+  await expect(dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "Guarded", exact: true }))
     .toHaveAttribute("aria-pressed", "true");
   await expect(dialog.locator(".create-session-submit")).toBeEnabled();
   await dialog.locator(".create-session-submit").click();
@@ -2295,14 +2295,14 @@ test("restart with withdraws working-agent consent when its source exits", async
     await stopSession(request, id);
     await expect(submit).toHaveText(/^restart$/i, { timeout: 20_000 });
     expect(bodies, "the editor has not consented while source state changed").toHaveLength(0);
-    await dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true }).click();
+    await dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "Guarded", exact: true }).click();
     await expect(submit).toBeEnabled();
     await submit.click();
     await expect(dialog.locator(".launch-composer-refusal-alert")).toContainText("the agent is working now; confirm stopping it");
     expect(bodies).toHaveLength(1);
     expect(bodies[0].stop_if_running, "an exited-render action cannot authorize an unseen working agent").toBe(false);
     await expect(dialog).toBeVisible();
-    await expect(dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true }))
+    await expect(dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "Guarded", exact: true }))
       .toHaveAttribute("aria-pressed", "true");
   } finally {
     if (id) await cleanupSession(request, id);
