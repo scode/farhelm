@@ -275,10 +275,10 @@ pub(crate) fn ClaudeTrustBand(session: ReadSignal<Session>, agent_visible: bool)
                     }
                     div { class: "claude-trust-band-actions",
                         button { r#type: "button", class: "btn btn-primary",
-                            "data-tooltip": "open Settings at the option to answer this question for new checkouts, with its caveats",
+                            "data-tooltip": "Open Settings at the option to answer this question for new checkouts, with its caveats",
                             onclick: move |_| settings_open.set(true), "Settings and caveats" }
                         button { r#type: "button", class: "btn btn-neutral",
-                            "data-tooltip": "stop showing this note for every session; Settings can turn it back on",
+                            "data-tooltip": "Stop showing this note for every session; Settings can turn it back on",
                             onclick: move |_| {
                                 let (write, completion) = api::observe_preference(&base, PreferenceValue::ClaudeTrustHintDismissed(true));
                                 if let Some(Ok(value)) = state.write().as_mut() {
@@ -298,8 +298,8 @@ pub(crate) fn ClaudeTrustBand(session: ReadSignal<Session>, agent_visible: bool)
                                     hint_error.set((!saved).then_some(write));
                                 });
                             }, "Don't show again" }
-                        button { r#type: "button", class: "btn btn-neutral", aria_label: "hide this trust hint for this occurrence",
-                            "data-tooltip": "hide this note for this question only",
+                        button { r#type: "button", class: "btn btn-neutral", aria_label: "Hide this trust hint for this occurrence",
+                            "data-tooltip": "Hide this note for this question only",
                             onclick: move |_| { occurrences.0.write().insert(id.clone()); }, "×" }
                     }
                 }

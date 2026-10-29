@@ -1189,11 +1189,11 @@ test("an OSC 8 span wins over its https display text, beside a working bare URL"
     await expect(targetDisplay.locator("strong")).toHaveText("target.example");
     await expect(targetDisplay).toHaveClass(/\bterminal-link-target-mismatch\b/);
     await expect(targetDisplay.locator(".terminal-link-target-warning")).toHaveText(
-      "link text does not match where it goes",
+      "Link text does not match where it goes",
     );
     // The parentheses printed right against the link make an over-read of
     // even one cell on either side show up here.
-    await expect(targetDisplay.locator(".terminal-link-target-text")).toHaveText(`text says: ${display}`);
+    await expect(targetDisplay.locator(".terminal-link-target-text")).toHaveText(`Text says: ${display}`);
     const box = await targetDisplay.boundingBox();
     const viewport = page.viewportSize();
     expect(box && viewport && box.x >= 0 && box.x + box.width <= viewport.width).toBe(true);

@@ -128,7 +128,7 @@ test("Claude trust hint preserves the terminal and opens the opt-in caveats", as
     await dialog.getByRole("button", { name: "Close", exact: true }).click();
     await expect(band).toBeVisible();
 
-    await band.getByRole("button", { name: "hide this trust hint for this occurrence", exact: true }).click();
+    await band.getByRole("button", { name: "Hide this trust hint for this occurrence", exact: true }).click();
     await expect(band).toHaveCount(0);
     await attachSession(page, neighbor.id);
     await attachSession(page, session.id);

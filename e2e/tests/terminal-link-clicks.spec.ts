@@ -1072,7 +1072,7 @@ test.describe("covered terminal disclosures", () => {
       const label = "https://claimed.test/safe";
       const point = await paintDisclosureLink(page, label, target, 1, 1);
       const disclosure = page.locator("#terminal .terminal-link-target:not(.terminal-file-target)");
-      await expect(disclosure).toContainText("link text does not match where it goes");
+      await expect(disclosure).toContainText("Link text does not match where it goes");
       await expect.poll(() => disclosure.evaluate(el => el.getBoundingClientRect().bottom > innerHeight), {
         message: "the real host disclosure must extend below the small window",
       }).toBe(true);

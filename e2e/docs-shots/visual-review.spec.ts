@@ -13,8 +13,10 @@
  * Trash review reuses the approved archive listing and cancels its question.
  * Browser sign-in review uses fresh credential-free contexts and submits only
  * an empty token, photographing local validation without an exchange request.
+ * Terminal review hovers real replay bytes and temporarily attaches a second
+ * owned view, restoring the first through its ordinary reclaim control.
  */
-import { expect, test, type APIRequestContext, type Browser, type Locator, type Page, type Request as NetworkRequest } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Browser, type BrowserContext, type Locator, type Page, type Request as NetworkRequest } from "@playwright/test";
 import { cleanupSession, hostRowByName, listHosts, listSessions, openHostMenu, openRowMenu, patchPreferences, readPreferences, setLocalYoloWithoutAsking, showHostsPanel, showSessionsPanel } from "../tests/helpers/fleet";
 import { setLocalCommandsWithoutAsking } from "../tests/helpers/approvals";
 import { cleanupOwnedSteps } from "../tests/helpers/cleanup";
@@ -57,6 +59,7 @@ const sentenceSessionHintsOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "se
 const sentenceHelpOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sentence-help";
 const sentenceTrashOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sentence-trash";
 const sentenceAuthOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sentence-auth";
+const sentenceTerminalOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sentence-terminal";
 
 /** Photograph native-only chrome with the goal's explicit CSS-only fallback.
  * The ordinary staged web app supplies the surrounding frame and terminals.
@@ -304,6 +307,321 @@ async function showSession(page: Page, session: ScenarioSession) {
   if (session.transcript) await waitForTermText(page, lastTranscriptLine(DOCS_SHOTS_DIR, session.transcript), 30_000);
   await expect(row).toHaveAttribute("data-session-selected", "true");
   return row;
+}
+
+/** Hover actual visible terminal cells after this session's replay is revealed.
+ * Canvas text has no DOM target. The bounded observation keeps attachment and
+ * visibility facts in a timeout instead of treating an absent path as readiness.
+ * Nothing is printed, clicked or opened to manufacture the target.
+ */
+async function hoverTerminalReviewText(page: Page, id: string, needle: string) {
+  await waitForSessionRevealed(page, id);
+  await page.evaluate(() => document.fonts.ready.then(() => undefined));
+  expect(await page.evaluate(() => document.fonts.check('13px "Inter"') && document.fonts.check('13px "JetBrains Mono"')),
+    "both vendored faces must be ready before measuring terminal cells").toBe(true);
+  await expect(page.locator("#terminal")).toBeVisible();
+  await expect(page.locator("#term-banner")).toBeHidden();
+  await page.mouse.move(0, 0);
+  await expect(page.locator(".farhelm-tooltip")).toBeHidden();
+  await expect(page.locator("#terminal .terminal-link-target:visible")).toHaveCount(0);
+  let cell: { x: number; y: number } | null = null;
+  await expect.poll(async () => {
+    const observed = await page.evaluate(({ id, needle }) => {
+      const island = (window as any).__farhelmIslands?.terminal;
+      const term = island?.term;
+      const screen = term?.element.querySelector(".xterm-screen");
+      const box = screen?.getBoundingClientRect();
+      let cell = null;
+      if (box && box.width > 0 && box.height > 0) {
+        for (let row = 0; row < term.rows; row++) {
+          const line = term.buffer.active.getLine(term.buffer.active.viewportY + row)?.translateToString(true) || "";
+          const column = line.indexOf(needle);
+          if (column < 0) continue;
+          const x = box.x + (column + needle.length / 2) * box.width / term.cols;
+          const y = box.y + (row + 0.5) * box.height / term.rows;
+          if (x >= 0 && x < innerWidth && y >= 0 && y < innerHeight) cell = { x, y };
+          break;
+        }
+      }
+      return {
+        selected: document.querySelector('.session-row[data-session-selected="true"]')?.getAttribute("data-session-id") === id,
+        socketOpen: island?.ws?.readyState === WebSocket.OPEN,
+        replayRevealed: !!island?.test?.replay?.revealed,
+        cell,
+      };
+    }, { id, needle });
+    cell = observed.cell;
+    return { ...observed, found: cell !== null };
+  }, { timeout: 10_000, message: `the revealed live session must show a visible cell for ${needle}` })
+    .toMatchObject({ selected: true, socketOpen: true, replayRevealed: true, found: true });
+  expect(await page.evaluate(({ x, y }) => !!document.elementFromPoint(x, y)?.closest("#terminal"), cell!),
+    "the actual terminal owns the hover hit target").toBe(true);
+  await page.mouse.move(cell!.x, cell!.y);
+}
+
+/** Photograph a genuine second attachment displacing the first view.
+ * Only this capture's in-memory browser state is copied. Ordinary open installs
+ * the same approved privacy rewrites before attaching the default staged session.
+ * Cleanup closes every owned page/context independently, then uses the real
+ * reclaim control; no synthetic socket or product state is introduced.
+ */
+async function terminalDisplacementShot(page: Page, request: APIRequestContext, session: ScenarioSession, name: string, colorScheme: "dark" | "light") {
+  const id = readFleet().ids.get(session.title);
+  if (!id) throw new Error("terminal displacement needs its owned staged session");
+  await waitForSessionRevealed(page, id);
+  const browser = page.context().browser();
+  const viewport = page.viewportSize();
+  if (!browser || !viewport) throw new Error("terminal displacement needs the existing browser and explicit viewport");
+  const socket = await page.evaluateHandle(() => (window as any).__farhelmIslands.terminal.ws);
+  let second: BrowserContext | undefined;
+  let bodyFailed = true;
+  try {
+    second = await browser.newContext({
+      baseURL: new URL(page.url()).origin,
+      viewport,
+      colorScheme,
+      reducedMotion: "reduce",
+      deviceScaleFactor: await page.evaluate(() => devicePixelRatio),
+      storageState: await page.context().storageState(),
+    });
+    const other = await second.newPage();
+    // Browser device storage and the fixture API bearer are separate auth
+    // channels. Reuse the already authenticated API fixture for ordinary open.
+    await open(other, request, { terminalFiles: true });
+    await waitForSessionRevealed(other, id);
+    await expect(other.locator("html")).toHaveAttribute("data-appearance", colorScheme);
+    expect(other.viewportSize()).toEqual(viewport);
+    const banner = page.locator("#term-banner");
+    const reclaim = banner.locator(".banner-reclaim");
+    await expect(banner).toContainText(/^Detached:/);
+    await expect(reclaim).toHaveText("Take control");
+    await expect(reclaim).toBeEnabled();
+    await expect.poll(() => socket.evaluate((socket) => socket.readyState), {
+      timeout: 10_000, message: "the original attachment's socket closes after the second view takes control",
+    }).toBe(3);
+    await expect(page.locator("#term-connecting")).toBeHidden();
+    await expect(page.locator(".terminal-reconnect-now")).toHaveCount(0);
+    await expect(page.locator(`.session-row[data-session-id="${id}"]`)).toHaveAttribute("data-session-selected", "true");
+    await expect(page.locator("#terminal")).toBeVisible();
+    expect(await page.evaluate(() => !!(window as any).__farhelmIslands?.terminal?.test?.replay?.revealed),
+      "the displaced view retains its genuinely revealed terminal").toBe(true);
+    await page.evaluate(() => document.fonts.ready.then(() => undefined));
+    await expect(reclaim).toHaveCSS("font-family", /^Inter/);
+    await insideViewport(page, banner);
+    await insideViewport(page, reclaim);
+    // Bounds and enabled state do not rule out another surface covering the
+    // action. The real button must also own its center before this picture.
+    expect(await reclaim.evaluate(button => {
+      const box = button.getBoundingClientRect();
+      return document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)?.closest("button") === button;
+    }), "the real Take control button owns its center hit target").toBe(true);
+    await waitForSessionRevealed(other, id);
+    await shot(page, `${name}-terminal-take-control`, [page.locator("body")], { pad: 0 });
+    bodyFailed = false;
+  } finally {
+    await cleanupOwnedSteps(bodyFailed, [
+      ...(second?.pages() ?? []).map((other): [string, () => Promise<void>] => ["close an owned takeover page", () => other.close()]),
+      ["close the owned takeover context", async () => { await second?.close(); }],
+      ["restore the original terminal attachment", async () => {
+        const reclaim = page.locator("#term-banner .banner-reclaim");
+        if (await reclaim.isVisible()) {
+          await expect(reclaim).toHaveText("Take control");
+          await expect(reclaim).toBeEnabled();
+          await insideViewport(page, reclaim);
+          await reclaim.click();
+        }
+        await showSession(page, session);
+        await expect(page.locator("#term-banner")).toBeHidden();
+      }],
+      ["release the original socket observation", () => socket.dispose()],
+    ]);
+  }
+}
+
+/** Keep terminal review to three genuine hovers and one ordinary takeover.
+ * The added OSC transcript is docs-owned replay data; file checks use only the
+ * existing adapter. Exact seen stamps and ordinary-open preferences restore
+ * after selection, including failures, without taking ownership from the outer
+ * capture. No download, external link, upload or session action is performed.
+ */
+async function sentenceTerminalShots(page: Page, request: APIRequestContext, scenario: Scenario, name: string, colorScheme: "dark" | "light") {
+  const initial = scenario.sessions.find(session => session.open);
+  const review = scenario.sessions.find(session => session.transcript === "terminal-review.txt");
+  if (!initial || !review) throw new Error("terminal review needs the original open session and declared OSC replay");
+  const initialId = readFleet().ids.get(initial.title);
+  const reviewId = readFleet().ids.get(review.title);
+  if (!initialId || !reviewId) throw new Error("both terminal review sessions must belong to this staged fleet");
+  const ready = scenario.terminal_files?.find(file => file.path === "e2e/attach.spec.ts");
+  expect(ready?.host, "the declared ready path belongs to the original transcript's host").toBe(initial.host);
+  expect(ready?.size).toBe(6412);
+  expect(scenario.terminal_files?.some(file => file.path === "e2e/helpers/stack.ts"),
+    "the existing file adapter must supply its genuine missing-path case").toBe(false);
+  const savedPreferences = await readPreferences(request);
+  const restorePreferences = {
+    compact: savedPreferences.compact ?? null,
+    list_sort: savedPreferences.list_sort ?? null,
+    last_selected: savedPreferences.last_selected ?? null,
+  };
+  const listing = await request.get("/api/sessions");
+  expect(listing.ok(), "read actual seen stamps before selecting the review row").toBe(true);
+  const rows = (await listing.json()).sessions as { id: string; seen_activity_at: number | null }[];
+  const seen = [initialId, reviewId].map(id => {
+    const row = rows.find(row => row.id === id);
+    expect(row, "both review sources remain in the real listing").toBeDefined();
+    expect(Object.hasOwn(row!, "seen_activity_at")).toBe(true);
+    return { id, stamp: row!.seen_activity_at };
+  });
+  let bodyFailed = true;
+  try {
+    await chooseHost(page);
+    await chooseStatus(page, "All");
+    await expect(hostChoice(page)).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("radio", { name: "All", exact: true })).toBeChecked();
+    await showSession(page, initial);
+    // Both file states already occur in the original transcript. Only the
+    // approved check adapter answers them; the download action is never used.
+    const fileTarget = page.locator("#terminal .terminal-file-target");
+    await hoverTerminalReviewText(page, initialId, "e2e/attach.spec.ts");
+    await expect(fileTarget.locator(".terminal-file-name > span:not(.terminal-file-icon)")).toHaveText("attach.spec.ts");
+    await expect(fileTarget.locator(".terminal-file-directory")).toHaveText(`this machine:${ready!.shown_path.slice(0, -"attach.spec.ts".length)}`);
+    await expect(fileTarget.locator(".terminal-file-size")).toHaveText("6.4 KB · click to download");
+    await expect(fileTarget.locator(".terminal-file-refusal")).toHaveCount(0);
+    await expect(fileTarget.locator(".terminal-file-name")).toHaveCSS("font-family", /JetBrains Mono/);
+    await insideViewport(page, fileTarget);
+    await waitForSessionRevealed(page, initialId);
+    await captureShot(page, `${name}-terminal-file-ready`, [page.locator("body")], { pad: 0, keepPointer: true });
+
+    await hoverTerminalReviewText(page, initialId, "e2e/helpers/stack.ts");
+    await expect(fileTarget.locator(".terminal-file-name > span:not(.terminal-file-icon)")).toHaveText("stack.ts");
+    await expect(fileTarget.locator(".terminal-file-directory")).toHaveText(":e2e/helpers/");
+    await expect(fileTarget.locator(".terminal-file-refusal")).toHaveText("Not found");
+    await expect(fileTarget.locator(".terminal-file-size")).toHaveCount(0);
+    await insideViewport(page, fileTarget);
+    await waitForSessionRevealed(page, initialId);
+    await captureShot(page, `${name}-terminal-file-not-found`, [page.locator("body")], { pad: 0, keepPointer: true });
+    await page.mouse.move(0, 0);
+    await expect(fileTarget).toBeHidden();
+
+    // This is a real OSC span from declared replay bytes, rather than a bare
+    // URL whose label and destination could not disagree.
+    await showSession(page, review);
+    await hoverTerminalReviewText(page, reviewId, "https://display.example/review");
+    const linkTarget = page.locator("#terminal .terminal-link-target:not(.terminal-file-target)");
+    await expect(linkTarget).toHaveClass(/\bterminal-link-target-mismatch\b/);
+    const warning = linkTarget.locator(".terminal-link-target-warning");
+    await expect(warning).toHaveText("Link text does not match where it goes");
+    await expect(warning).toHaveCSS("text-transform", "none");
+    await expect(linkTarget.locator(".terminal-link-target-text")).toHaveText("Text says: https://display.example/review");
+    await expect(linkTarget).toContainText("Actually goes to:");
+    await expect(linkTarget.locator(".terminal-link-target-url")).toHaveText("https://target.example/review");
+    await expect(linkTarget.locator("strong")).toHaveText("target.example");
+    await insideViewport(page, linkTarget);
+    await waitForSessionRevealed(page, reviewId);
+    await captureShot(page, `${name}-terminal-link-mismatch`, [page.locator("body")], { pad: 0, keepPointer: true });
+    await page.mouse.move(0, 0);
+    await expect(linkTarget).toBeHidden();
+
+    await showSession(page, initial);
+    await terminalDisplacementShot(page, request, initial, name, colorScheme);
+    bodyFailed = false;
+  } finally {
+    await cleanupOwnedSteps(bodyFailed, [
+      ["park the terminal review pointer", () => page.mouse.move(0, 0)],
+      ["restore all hosts", () => chooseHost(page)],
+      ["restore All status", () => chooseStatus(page, "All")],
+      ["restore the original selected terminal", () => showSession(page, initial)],
+      // Selection may mark output seen. Restore the saved stamps only after
+      // our final attachment, including an originally null unread value.
+      ...seen.map(({ id, stamp }): [string, () => Promise<void>] => ["restore an exact terminal review seen stamp", async () => {
+        const response = await request.put(`/api/sessions/${encodeURIComponent(id)}/seen`, { data: { seen_activity_at: stamp } });
+        expect(response.ok()).toBe(true);
+        await expect.poll(async () => {
+          const response = await request.get("/api/sessions");
+          expect(response.ok()).toBe(true);
+          return (await response.json()).sessions.find((row: { id: string }) => row.id === id)?.seen_activity_at;
+        }, { message: "restore the exact pre-review seen stamp, including null" }).toBe(stamp);
+      }]),
+      ["restore the exact pre-helper ordinary-open preferences", async () => {
+        await patchPreferences(request, restorePreferences);
+        await expect.poll(async () => {
+          const current = await readPreferences(request);
+          return Object.fromEntries(Object.keys(restorePreferences).map(key => [key, current[key as keyof typeof current] ?? null]));
+        }, { message: "restore only the preferences ordinary terminal review writes" }).toEqual(restorePreferences);
+      }],
+    ]);
+  }
+}
+
+/** Show missing shortcut names by queuing references, never launching them.
+ * Real preferences make both references unbound. The physical prefix owns
+ * subsequent keys, and Escape retires each queue without submitting Enter.
+ * Exact bindings restore independently of keyboard cleanup; no template or
+ * session is created, and the request observer remains through restoration.
+ */
+async function unboundShortcutShots(page: Page, request: APIRequestContext, name: string) {
+  const saved = await readPreferences(request);
+  const bindings = {
+    quick_launch_template: saved.quick_launch_template ?? null,
+    template_shortcuts: saved.template_shortcuts ?? null,
+  };
+  let creates = 0;
+  const observe = (request: NetworkRequest) => {
+    if (request.method() === "POST" && new URL(request.url()).pathname === "/api/sessions") creates++;
+  };
+  page.on("request", observe);
+  let bodyFailed = true;
+  try {
+    await patchPreferences(request, { quick_launch_template: null, template_shortcuts: {} });
+    const cleared = await readPreferences(request);
+    expect(cleared.quick_launch_template ?? null).toBeNull();
+    expect(cleared.template_shortcuts ?? {}).toEqual({});
+    await expect.poll(async () => JSON.parse(await page.locator(".launch-sequence-bindings").getAttribute("data-bindings") ?? "null"), {
+      message: "the actual shortcut indicator observes both unbound preferences",
+    }).toMatchObject({ quick_launch_template: null, template_shortcuts: {} });
+    const begin = page.locator('.launch-sequence-trigger[data-sequence-action="begin"]');
+    await expect(begin).toBeEnabled();
+    const terminalInput = page.locator("#terminal .xterm-helper-textarea");
+    await terminalInput.focus();
+    await expect(terminalInput).toBeFocused();
+    const indicator = page.locator(".launch-sequence-indicator");
+    const mac = await page.evaluate(() => /Mac/.test(navigator.platform));
+    for (const [key, label, suffix] of [
+      ["Digit0", "Unbound key 0", "unbound-number"],
+      [mac ? "Meta+KeyP" : "Control+Shift+KeyP", "Unbound ⚡", "unbound-quick-launch"],
+    ]) {
+      await page.keyboard.press("Control+Shift+KeyX");
+      await expect(indicator).toBeVisible();
+      await expect(indicator).toHaveAttribute("data-in-launcher", "false");
+      await page.keyboard.press(key);
+      await expect(indicator.locator(".launch-sequence-names")).toHaveText(label);
+      await expect(indicator.locator(".launch-sequence-hint")).toHaveText("Enter launch · Esc cancel");
+      await insideViewport(page, indicator);
+      expect(await indicator.evaluate(element => element.scrollWidth <= element.clientWidth + 1),
+        "the actual unbound sequence fits the measured main pane").toBe(true);
+      await shot(page, `${name}-${suffix}`, [page.locator("body")], { pad: 0 });
+      await page.keyboard.press("Escape");
+      await expect(indicator).toHaveCount(0);
+    }
+    expect(creates, "queuing and cancelling unbound references creates no session").toBe(0);
+    bodyFailed = false;
+  } finally {
+    await cleanupOwnedSteps(bodyFailed, [
+      ["cancel any remaining owned shortcut sequence", async () => {
+        await page.keyboard.press("Escape");
+        await expect(page.locator(".launch-sequence-indicator")).toHaveCount(0);
+      }],
+      ["restore exact shortcut bindings", async () => {
+        await patchPreferences(request, bindings);
+        const restored = await readPreferences(request);
+        expect(restored.quick_launch_template ?? null).toEqual(bindings.quick_launch_template);
+        expect(restored.template_shortcuts ?? null).toEqual(bindings.template_shortcuts);
+      }],
+      ["detach shortcut observer and verify no session creation", () => {
+        page.off("request", observe);
+        expect(creates, "no session create occurred, including during cleanup").toBe(0);
+      }],
+    ]);
+  }
 }
 
 /** The real host fields needed to preserve this capture's remote identity. */
@@ -2326,7 +2644,7 @@ for (const colorScheme of ["dark", "light"] as const) {
         expect(seeded.skip_host_remove_confirmation).toBe(false);
         expect(seeded.skip_session_confirmations).toBe(false);
         expect(seeded.name_session_on_quick_launch).toBe(true);
-        const { scenario } = await open(page, request, { checkoutTrash: true });
+        const { scenario } = await open(page, request, { checkoutTrash: true, terminalFiles: sentenceTerminalOnly });
         const main = page.locator(".app-main");
         await expect(main).toBeVisible();
         await expect(page.locator("html")).toHaveAttribute("data-appearance", colorScheme);
@@ -2343,6 +2661,11 @@ for (const colorScheme of ["dark", "light"] as const) {
         await expect(page.locator(".build-skew")).toHaveCount(0);
         const name = `visual-review/${colorScheme}-${width}`;
         const window = [page.locator("body")];
+        if (sentenceTerminalOnly) {
+          await sentenceTerminalShots(page, request, scenario, name, colorScheme);
+          await unboundShortcutShots(page, request, name);
+          return;
+        }
         if (sentenceTrashOnly) {
           await trashShots(page, name);
           return;

@@ -1576,7 +1576,7 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 .terminal-link-target-warning {
   margin-bottom: 4px;
   font-weight: 700;
-  text-transform: uppercase;
+  text-transform: none;
 }
 
 /* Farhelm's own hover tooltip (tooltip.js), the one element every

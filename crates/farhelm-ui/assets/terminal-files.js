@@ -327,7 +327,7 @@
         controller: new AbortController(), info: null, leaving: false, leaveTimer: null,
       };
       this.hovered = state;
-      this.show(event, ['checking…', path], true);
+      this.show(event, ['Checking…', path], true);
       try {
         const response = await this.request('stat', path, state.controller.signal);
         const info = await response.json();
@@ -338,12 +338,12 @@
         if (state.link) state.link.decorations.pointerCursor = info.status === 'ready';
         const status = {
           ready: formatSize(info.size),
-          not_found: 'not found',
-          folder: 'folder: not downloadable',
-          too_large: `too large to download: ${formatSize(info.size)} (100 MB limit)`,
-          not_readable: 'not readable',
-          not_regular: 'not a regular file: not downloadable',
-        }[info.status] || 'not downloadable';
+          not_found: 'Not found',
+          folder: 'Folder: not downloadable',
+          too_large: `Too large to download: ${formatSize(info.size)} (100 MB limit)`,
+          not_readable: 'Not readable',
+          not_regular: 'Not a regular file: not downloadable',
+        }[info.status] || 'Not downloadable';
         // Split only for presentation. Both pieces retain the full disclosed
         // path, and each remote fragment still passes through visible escapes.
         const split = info.path.lastIndexOf('/') + 1;

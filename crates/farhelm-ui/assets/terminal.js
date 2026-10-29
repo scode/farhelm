@@ -52,7 +52,7 @@
 // the whole view: existing islands keep their frozen last-known screens and
 // their banners, newly discovered tabs render but never attach, and every
 // pending mount is cancelled. Reclaiming is an explicit user act — the
-// "take control" button this file paints into the detach banner — which
+// "Take control" button this file paints into the detach banner — which
 // unlatches, tears the stale islands down, and re-syncs the full desired
 // set under the same lease, displacing whoever holds it now. That is the
 // same visible, deliberate takeover the other client performed, not an
@@ -2526,7 +2526,7 @@
   }
 
   /**
-   * Paint one terminal's banner, optionally with the "take control" button
+   * Paint one terminal's banner, optionally with the "Take control" button
    * that reclaims a session this view lost.
    *
    * The button is built here rather than in the Dioxus tree deliberately:
@@ -2554,8 +2554,8 @@
       const button = document.createElement("button");
       button.type = "button";
       button.className = "btn banner-reclaim";
-      button.textContent = "take control";
-      button.dataset.tooltip = "take control: attach this view, detaching any other client attached to this session";
+      button.textContent = "Take control";
+      button.dataset.tooltip = "Take control: attach this view, detaching any other client attached to this session";
       button.addEventListener("click", () => farhelmTerm.reclaim());
       banner.appendChild(button);
     }
@@ -3052,7 +3052,7 @@
      * islands, and re-attach the full desired set under this view's own
      * (unchanged) lease — which displaces whoever holds the session now.
      *
-     * Deliberately an explicit user action, wired to the "take control"
+     * Deliberately an explicit user action, wired to the "Take control"
      * button in the detach banner, not something that happens on its own.
      * Automatic reclaim is precisely the eviction loop this whole mechanism
      * exists to stop; a takeover is supposed to be a decision someone
