@@ -12,7 +12,8 @@ use crate::anchored_popovers::{AnchorRegion, MovementOwner, use_rendered_movemen
 use crate::hosts::HostsRead;
 use crate::icons::{BranchIcon, TrashIcon};
 use crate::modal_dialog::{
-    DialogFocus, DialogHandle, ModalDialog, RecoveryDelay, RecoveryFocus, ScrollRegion,
+    DialogActions, DialogFocus, DialogFooter, DialogHandle, DialogHeader, ModalDialog,
+    RecoveryDelay, RecoveryFocus, ScrollRegion,
 };
 use crate::ops::{ConfirmSlot, ConfirmToken, OpGuard, PaneGate, use_confirm_slot};
 use crate::peer::display_peer;
@@ -94,8 +95,8 @@ struct Target {
 }
 
 /// What one in-place confirmation band shows and what confirming it deletes:
-/// the band it is drawn in (a host's, or `None` for "Delete all" at the top
-/// of the host list) and the targets frozen when it opened.
+/// the band it is drawn in (a host's, or `None` for "Delete all" above the
+/// pinned footer) and the targets frozen when it opened.
 ///
 /// It is the key of the dialog's [`ConfirmSlot`], so every opening's
 /// [`ConfirmToken`] carries exactly the targets its band displayed. The band
@@ -397,8 +398,8 @@ fn archived_when(seconds: Option<i64>) -> Element {
 /// focus included.
 ///
 /// Cancelling a global choice returns to its pinned trigger, including Escape.
-/// The band lives in the scrolling body, so clearing it alone would discard the
-/// focused Cancel button and leave keyboard users without a useful next action.
+/// Removing the focused band alone would discard its Cancel button and leave
+/// keyboard users without a useful next action.
 fn cancel_confirmation(
     mut confirmation: ConfirmSlot<Confirmation>,
     shown: &ConfirmToken<Confirmation>,
@@ -503,9 +504,10 @@ fn ConfirmBand(
         .fold(0, u64::saturating_add);
     let partial = confirm.targets.iter().any(|target| target.partial) || unchecked > 0;
     rsx! { div { class: "checkout-trash-confirm", role: "group", aria_label: "Confirm permanent checkout deletion",
-        // A confirmation can name more hosts than fit in the body. Reveal the
-        // confirming answer and its Cancel fallback without moving the
-        // pinned header; the warning remains available by scrolling upwards.
+        // A confirmation can name more hosts than fit in its scroll region:
+        // the archive body for a host, or the bounded band above the footer.
+        // Reveal the answers there; the warning remains reachable by scrolling
+        // upwards, without moving the pinned header or footer.
         onmounted: move |_| { document::eval("requestAnimationFrame(() => { const target = document.querySelector('.checkout-trash-confirm .trash-confirm-submit:enabled') ?? document.querySelector('.checkout-trash-confirm .trash-confirm-cancel:enabled'); target?.focus({preventScroll:true}); target?.closest('.checkout-trash-actions')?.scrollIntoView({block:'nearest'}); })"); },
         if count > 0 { p { "Delete {count} archived {checkouts(count)} ({space(bytes, partial)}) on " span { class: "peer-value", dir: "ltr", "{names}" } "? Work in them that was never committed or pushed is lost permanently." } }
         if unchecked > 0 { p { "Attempt cleanup of {unchecked} unchecked {unchecked_noun} on {unchecked_names}. Farhelm deletes any of these it can verify when cleanup runs; work in them that was never committed or pushed is lost permanently. The rest stay in place and may be forgotten from the trash." } }
@@ -954,37 +956,27 @@ pub(super) fn TrashControl(
                     handle: DialogHandle::new(DIALOG),
                     focus: DialogFocus::remembered(".trash-close", Some(".trash-confirm-cancel, .trash-close"), false, Some(".trash-confirm-submit")),
                     on_escape: { let mut close = close.clone(); move |event: KeyboardEvent| { if !event.is_composing() { event.prevent_default(); event.stop_propagation(); close(); } } },
-                    // Trash deliberately keeps its global controls with its
-                    // totals. Shared heading styling must not cost archive
-                    // height or move those controls into a new footer.
-                    div { class: "dialog-header checkout-trash-header",
-                        h2 { id: "checkout-trash-title", class: "dialog-title", span { class: if busy { "trash-delete-icon deleting" } else { "trash-delete-icon" }, TrashIcon { full } } "Trash" }
-                        span { class: "checkout-trash-total", "{count} {checkouts(count)} · {space(total_bytes, total_partial)} on reachable hosts" }
-                        div { class: "checkout-trash-header-actions",
-                            button { class: "btn btn-danger trash-delete-all", disabled: busy || !all_ready || targets.is_empty(), onclick: move |_| { if deletion.peek().is_none() { confirmation.open(Confirmation { host: None, targets: targets.clone() }, ()); } }, "Delete all" }
-                            // Native disabled controls suppress hover in some
-                            // engines. The wrapper receives the explanation's
-                            // pointer events while Close stays truly disabled.
-                            span { class: "trash-close-help", "data-tooltip": busy.then_some("Available when deletion finishes."),
-                                button { class: "btn btn-neutral trash-close", disabled: busy, onclick: { let mut close = close.clone(); move |_| close() }, "Close" }
+                    DialogHeader {
+                        class: "checkout-trash-header",
+                        title: rsx! { span { id: "checkout-trash-title", class: "checkout-trash-title",
+                            span { class: if busy { "trash-delete-icon deleting" } else { "trash-delete-icon" }, TrashIcon { full } } "Trash"
+                        } },
+                        summary_class: "checkout-trash-total",
+                        summary: rsx! { "{count} {checkouts(count)} · {space(total_bytes, total_partial)} on reachable hosts" },
+                        close: rsx! {
+                            // Keep this distinct from .trash-close: initial and
+                            // recovery focus must still resolve footer Close.
+                            // Native disabled buttons suppress hover in some
+                            // engines, so their wrapper owns the explanation.
+                            span { class: "trash-header-close-help", "data-tooltip": busy.then_some("Available when deletion finishes."),
+                                button { class: "dialog-close trash-header-close", r#type: "button", aria_label: "Close trash", disabled: busy,
+                                    onclick: { let mut close = close.clone(); move |_| close() }, "×" }
                             }
-                        }
-                        // The status region stays mounted while idle so that a
-                        // starting delete is a text change screen readers
-                        // announce; a region inserted with its text already in
-                        // place is announced unreliably, notably under WebKit.
-                        div { class: if progress.is_some() { "checkout-trash-progress" } else { "checkout-trash-progress idle" }, role: "status",
-                            if let Some(run) = &progress {
-                                "{run.status()}"
-                            }
-                        }
+                        },
                     }
                     ScrollRegion { class: "checkout-trash-body",
                     handle: DialogHandle::new(DIALOG), selector: ".checkout-trash-body", name: "Archived checkouts",
                     recovery: RecoveryFocus::new(".trash-close", None, true, RecoveryDelay::OneFrame),
-                    if let Some(shown) = shown.as_ref().filter(|shown| shown.key().host.is_none()).cloned() {
-                        ConfirmBand { shown, busy, submit_disabled: busy || gate.busy(), oncancel: band_cancel, onsubmit: band_submit }
-                    }
                     p { "Folders of managed checkouts whose last session was deleted. They stay here, untouched, until you delete them. To get something back, copy it out of the folder shown under its host." }
                     if let Some(error) = &host_error { p { class: "checkout-trash-issue", "Host reachability could not be refreshed. Cleanup is disabled until it can be checked: " span { class: "peer-value", dir: "ltr", "{display_peer(error)}" } } }
                     if hosts_known && count == 0 && current_hosts.iter().filter(|host| connected(host)).all(|host| state.read().get(&host.id).is_some_and(|entry| !entry.loading && matches!(&entry.reply, Some(Ok(reply)) if reply.issues.is_empty()))) {
@@ -1089,6 +1081,30 @@ pub(super) fn TrashControl(
                             }
                         }
                     }
+                    }
+                    if let Some(shown) = shown.as_ref().filter(|shown| shown.key().host.is_none()).cloned() {
+                        // Global answers stay beside their pinned trigger. Long
+                        // host names scroll locally, leaving the archive body
+                        // reachable and retaining the band's existing focus owner.
+                        ScrollRegion { class: "checkout-trash-global-confirmation",
+                            handle: DialogHandle::new(DIALOG), selector: ".checkout-trash-global-confirmation", name: "Global checkout deletion confirmation",
+                            recovery: RecoveryFocus::new(".trash-delete-all", Some(".trash-close"), true, RecoveryDelay::OneFrame),
+                            ConfirmBand { shown, busy, submit_disabled: busy || gate.busy(), oncancel: band_cancel, onsubmit: band_submit }
+                        }
+                    }
+                    DialogFooter { class: "checkout-trash-footer",
+                        // Keep this node mounted while idle: starting deletion
+                        // changes its text, which screen readers announce more
+                        // reliably than a newly inserted status under WebKit.
+                        div { class: if progress.is_some() { "dialog-footer-hint checkout-trash-progress" } else { "dialog-footer-hint checkout-trash-progress idle" }, role: "status",
+                            if let Some(run) = &progress { "{run.status()}" }
+                        }
+                        DialogActions {
+                            span { class: "trash-close-help", "data-tooltip": busy.then_some("Available when deletion finishes."),
+                                button { class: "btn btn-neutral trash-close", disabled: busy, onclick: { let mut close = close.clone(); move |_| close() }, "Close" }
+                            }
+                            button { class: "btn btn-danger trash-delete-all", disabled: busy || !all_ready || targets.is_empty(), onclick: move |_| { if deletion.peek().is_none() { confirmation.open(Confirmation { host: None, targets: targets.clone() }, ()); } }, "Delete all" }
+                        }
                     }
                 }
             }

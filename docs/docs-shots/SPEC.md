@@ -130,6 +130,13 @@ verify that the same host and install reconnect. Statuses remain real; no SSH co
 `visual-review/` shots are referenced by no docs page and are never published; the publisher selects only shots the docs
 pages reference. It shares the real fleet and machine-detail check with ordinary docs shots.
 
+For Trash footer review, the focused `trash-footer` selection may confirm the staged archive question and hold each
+host's first delete request in the browser. It photographs the renderer's pending progress, then releases those requests
+into the existing staged refusal. No request reaches real deletion, no success is invented, and the staged listing
+remains unchanged. Cleanup releases and drains the held callbacks before removing their route or closing the page. This
+selection takes idle, global confirmation and pending views in both themes at 1600×1000 and 390×520, plus an ordinary
+Rename comparison at each theme and size. Ordinary docs shots still cancel the question.
+
 For approval-card review, development staging may add one owned source using the existing fake-agent Spawn script. Its
 public launch command is portable; its private wrapper lives with the staged fleet. With the genuine GUI connected, the
 capture temporarily sets that local host's command and YOLO permissions to ask for the request while permitting its

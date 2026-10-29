@@ -82,6 +82,9 @@ async function openTallDialog(page: Page, family: string): Promise<Locator> {
     const dialog = page.locator(".checkout-trash-dialog");
     await expect(dialog).toBeVisible();
     await expect(dialog.locator(".checkout-trash-entry")).toHaveCount(24);
+    await expect(dialog.locator(".dialog-footer .dialog-actions button")).toHaveText(["Close", "Delete all"]);
+    await expect(dialog.locator(".trash-close")).toBeFocused();
+    await expect(dialog.locator(".dialog-header .trash-header-close")).toBeEnabled();
     return dialog;
   }
   if (family === "templates") {
@@ -233,6 +236,16 @@ for (const width of [1000, 360]) {
       const margin = width <= 620 ? 12 : 24;
       expect(box.y, "space above the card").toBeGreaterThanOrEqual(margin - 1);
       expect(box.y + box.height, "space below the card").toBeLessThanOrEqual(300 - margin + 1);
+      if (family === "trash") {
+        // The new phone action stack must fit inside the card without using
+        // up the archive list's own keyboard-scrollable viewport.
+        expect(await dialog.locator(".checkout-trash-body").evaluate(node => node.clientHeight)).toBeGreaterThanOrEqual(32);
+        for (const selector of [".dialog-header", ".dialog-footer"]) {
+          const pinned = (await dialog.locator(selector).boundingBox())!;
+          expect(pinned.y).toBeGreaterThanOrEqual(box.y);
+          expect(pinned.y + pinned.height).toBeLessThanOrEqual(box.y + box.height);
+        }
+      }
     });
   }
 }
