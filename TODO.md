@@ -230,6 +230,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   strip label the text-size step as "A−" and "A+", which does not read as an action. Use recognizable zoom-out and
   zoom-in icons (a magnifier with − / +) instead, keeping the tooltips and keyboard-shortcut help.
 
+- **Add an "update all hosts" button and an auto-update setting.** In the current interface, updating hosts is hidden
+  behind clicks and hard to discover. Put a clearly visible update control (an "update all hosts" button or similar)
+  where users look for it, and add a setting to always auto-update.
+
 ## Doc todo
 
 - Tell users that a working-copy (checkout) root must be a location only they can write: Farhelm is not designed for
