@@ -24,6 +24,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Fix menu highlighting.** In the host, session and restart menus, the first item stays highlighted when the pointer
+  moves over another item, leaving two items highlighted. Check the other menus for the same problem and fix the shared
+  cause if there is one.
+
 - **Revisit Trash's pinned header actions.** Decided on the maintainer's behalf on 2026-10-28 for the Steel dialogs
   plan: Trash keeps its totals, progress, Delete all and Close in its pinned header instead of moving them to the shared
   dialog footer. Revisit whether Trash should get the footer like the other dialogs. Plan:
