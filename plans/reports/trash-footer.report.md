@@ -88,3 +88,57 @@ omitted.
 Two pre-existing visual suggestions were deliberately declined: unifying filled and neutral disabled buttons would
 change the shared design, and painting a ring after pointer-opened confirmation would change the shared focus-visible
 policy. Native keyboard traversal still produces the visible ring and passes on both engines.
+
+### Landing
+
+Landed as built. The checkout Trash dialog now uses the shared dialog layout you chose: its heading carries the can, the
+total and a close control, and Close, Delete all and deletion progress sit in a pinned footer, with the global deletion
+question directly above it. This reverses the pinned-header exception decided on your behalf for the Steel dialogs plan,
+and removes that "Revisit" TODO entry. On phones the archive list is shorter.
+
+- #2787: put Trash's actions below the archive list.
+
+#### What landed since the stack was based, and whether it interacted
+
+Only a TODO entry landed since the plan was based; nothing interacted. A fresh-context reviewer checked that no test or
+screenshot spec outside the diff relies on the removed header, and that deletion behaves as before: one checkout at a
+time per host, the same confirmations, Close, the new header close and Escape all blocked while deleting, and focus
+starting on footer Close.
+
+#### Fixes made at landing
+
+None.
+
+#### Things you should know
+
+- The published Trash screenshot in the docs still shows the old header layout; refreshing it is a separate request, as
+  the plan said. The screenshot spec for it has a comment that still puts the delete buttons at the top, and its callout
+  may overlap the new footer; check both at the next screenshot refresh.
+- SPEC.md's description of Trash's Tab order leaves out the global deletion question between the archives and the
+  footer, which SPEC_impl.md includes; it is right while no question is open, just less precise. A one-phrase follow-up
+  at most.
+- The changelog draft does not mention the new close control in the heading.
+
+#### Checks
+
+This round landed only this plan. On the stack as delivered:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, the web-target UI lint
+  `cargo clippy -p farhelm-ui --target wasm32-unknown-unknown --features web -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`,
+  `cargo check -p farhelm-desktop`, the check that every test delay states its reason, `dprint check` across the
+  repository, `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py`, the docs website
+  build, the workspace debug build, the UI's release web build and `scripts/check-desktop-assets.sh`: all passed.
+- The UI's Rust tests, `cargo nextest run -p farhelm-ui`, run `e30ffa1a-b7c6-4e25-bab6-c70846ad9fd1`: all 805 passed;
+  its desktop-build tests, run `45ef18e9-b8d0-4955-ba8c-d0eb690a3f73`: all 988 passed. The UI's JavaScript and
+  stylesheet tests (`node --test` in `crates/farhelm-ui/js-tests`), run `a2e096b8-215b-4585-b860-a7d6a8e36d23`: 358
+  passed.
+- `npx playwright test` in `e2e/` with `tests/trash-dialog.spec.ts`, `tests/modal-layout.spec.ts`,
+  `tests/github-checkouts.spec.ts` and `tests/popover-width-movement.spec.ts`, on Chromium and WebKit, three workers
+  each with its own helm and supervisors, no retries, run `26524abb-8128-48fd-a1cf-a4d7b39d01f2`: all 134 passed.
+- Reused: none. Skipped: the rest of the browser suite (only the Trash dialog changed, and these specs cover it and its
+  callers), the rest of the Rust workspace (only the UI crate changed), the desktop smoke tests (no desktop-specific
+  code changed) and the native Mac app (not runnable here).
+
+The report's checks were the Trash cases of these specs; this landing ran the four spec files whole. Nothing in the
+executor's report became untrue at landing.
