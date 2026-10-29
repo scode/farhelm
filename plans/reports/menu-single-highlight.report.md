@@ -103,3 +103,67 @@ and the narrow correction, including preservation of all focused-command color a
 recorded checks above supply runtime evidence. The original implementation passed that required review after its one
 tooltip finding was reproduced and corrected. Original commit/PR wording is reused unchanged from its successful cold
 read.
+
+### Landing
+
+Landed as redelivered, with no fixes at landing. Menus now show one highlighted item: moving the pointer over an item
+moves keyboard focus to it, so the pointer and the keyboard share one highlight instead of showing two items at once.
+
+- #2803: the single highlight, its tests, the specification text and a changelog entry.
+
+Round 154 sent this plan back because a stylesheet test still expected the old hover highlight on session-row and
+host-row menu items. The redelivery changes only that test: it now requires the selected colors on the focused item and
+no longer on a hovered one, which is exactly what the answer asked.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since round 154 checked this plan, terminal-zoom-icons and new-terminal-button landed (they were in that round's checked
+stack too), plus documentation and TODO entries. Nothing interacted. host-update-discoverability, stacked on top of this
+plan, changes how the Update entry in a host's menu gets its state, and this plan's own menu spec drives that entry; the
+spec passed with both plans present in round 154's whole browser suite and again in this round's checks (below).
+
+#### Things you should know
+
+Nothing beyond the change itself.
+
+#### Checks
+
+This round landed menu-single-highlight and host-update-discoverability, stacked in that order on main `ea62ecf3`. Round
+154 ran the whole battery on both plans as first delivered, stacked with terminal-zoom-icons and new-terminal-button
+(which have since landed). There the whole Rust workspace, run `43959a88-f565-461e-b3dd-760d8725cf4a`, failed only on
+these plans' faults (fixed in the redelivery) and on known flakes. The whole browser suite on Chromium and WebKit, run
+`10af6125-cdc5-4afc-bc9a-369377c00195`, failed on these plans' faults, on the known WebKit Restart with focus flake, and
+on three cases that were neither: "plain Replace keeps a newer row's retry key after an older YOLO cancellation" and
+"terminal link ownership opens once and preserves program clicks in all mounted terminals" on Chromium, and "launcher
+gap keeps focus and container Enter explains an incomplete draft" on WebKit. Those three are rerun on this round's stack
+below. On this round's stack:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, the web-target UI lint, `dprint check`,
+  `python3 releasing/check-changelog.py format`, the docs website build (`bun run build` in `website/`), the workspace
+  debug build and the UI's release web build: all passed.
+- The UI's Rust tests, `cargo nextest run -p farhelm-ui`, run `0d0ba293-25a8-40fb-884e-1c0997efbe07`: all 819 passed.
+  The helm's tests, `cargo nextest run -p farhelm-helm`, run `671c9a89-dce7-4d07-8c6d-e67b38a4b91a`: all 1327 passed,
+  including the two old-settings-database tests that failed in round 154. The UI's JavaScript tests (`node --test` in
+  `crates/farhelm-ui/js-tests`), run `a508caa2-0dc3-45d3-bfda-02f1e52763b0`: all 372 passed, including the stylesheet
+  test that failed in round 154.
+- `npx playwright test` in `e2e/` with the hover-text sweep, settings, host updates, menu highlight and sidebar specs,
+  on Chromium and WebKit, three workers, no retries, run `e0dec166-d73f-4d6f-a4cc-728ee3d9afab`: 343 passed, 1 failed:
+  on WebKit, "the sidebar hides its scrollbar without giving up scrolling" timed out while deleting its 18 test sessions
+  at the end. Repeated five times alone on WebKit, run `1f34fdef-94fa-48ee-a3ee-36b5fe3d5b6b`, it passed every time; one
+  failure is not recorded as a flake.
+
+- The three round-154 cases above, on this stack, Chromium and WebKit, five times each, no retries: the Replace case,
+  run `a9df09fd-a447-495f-a4ae-ad2e845bd396`, 10 of 10 passed; the terminal link case, run
+  `5c33ed32-2a83-4f09-a30c-491f80bab070`, 10 of 10 passed; the launcher case, run
+  `723fd723-c996-48e2-bd61-cc119ddded35`, 10 of 10 passed. None is recorded as a flake on one failure.
+
+- After the docs fix at landing (one paragraph on the Manage hosts page), `bun run build` in `website/` passed again.
+- Reused from round 154 on these plans: the whole browser suite and the whole Rust workspace outside the reruns above,
+  the desktop-build checks and tests, the binaries' lint, the desktop-asset check and the check that every test delay
+  states its reason. The redeliveries change only a stylesheet test, a helm test's rebuilt old database, one hover text
+  and two docs pages, none of them desktop code or test delays, and main has gained only the two plans round 154 checked
+  these with, plus documentation and TODO entries. Skipped: the desktop smoke tests (no desktop-specific code changed)
+  and the native Mac app (not runnable here).
+
+The report's checks were the executor's selected runs; this landing reran the UI's tests and the menu, sidebar and
+hover-text specs with both plans stacked. Nothing in the executor's report became untrue at landing.
