@@ -354,3 +354,62 @@ passed its code review gate, and the last PR removes both TODO.md entries. Open,
 exists, its latest entry must also be satisfied. Then close the plan per `plans/.agents/executing.md`, "Executing one
 plan" (steps 11 and 12): deliver its report through the queue script, write a closing entry in its log, and stop the
 watchdog. Never edit `plans/` yourself.
+
+## Blocked
+
+Blocked while landing on 2026-10-29 (claim f63417).
+
+### Landing stopped: the widened host rail covers the session list's sort control
+
+The landing monitor did not merge this plan; its PRs (#2810, #2811) have not merged and main holds nothing of it. The
+plan gives every host a short name, shows it as a caption under each host on the sidebar's host rail and in session
+rows, and widens the rail to show full names.
+
+The checks ran on this plan alone on current main. The rail widens (up to 280px, over the session list) while the
+pointer is over it and whenever anything inside it has focus, and a mouse click on a host gives that button focus. So
+after a host is picked with a click, the rail stays widened, and its widened part takes the next click meant for the
+session list's sort control. That broke three browser tests, each timing out because "the host rail intercepts pointer
+events" (run `0a494db0-73b5-462c-8e8d-33510baf9df6`, `npx playwright test` in `e2e/`, both engines, no retries; for the
+WebKit Hosts case the intercepted sort click shows in the retained trace):
+
+- "host selector and sort stay usable during held and failed listings" (`e2e/tests/filters.spec.ts`), both engines;
+- "an order and a host choice survive each other, and ALL keeps the order" (`e2e/tests/sort.spec.ts`), both engines;
+- "Hosts swaps ordinary content and preserves filters, sort, selection and details" (`e2e/tests/hosts-panel.spec.ts`),
+  WebKit.
+
+The plan's outline proposed widening on any focus inside the rail, so the executor built what it proposed; but the plan
+also says clicking is unchanged, and a sidebar where a click leaves the session list's controls covered breaks that.
+Limiting the widening to hover and keyboard focus would not be enough on its own: after a click the pointer is still on
+the rail, so hover keeps it widened over the sort control.
+
+Two stylesheet tests fail too, also the plan's: the UI's stylesheet checks require every size and color in the
+stylesheet to be a named theme value declared with the others, and the plan's new rail-width value is declared on the
+rail's own rule instead ("the shipped app.css holds no bare literals and every var() resolves" and "both shipped
+palettes explicitly cover their color, opacity and elevation roles", `node --test` in `crates/farhelm-ui/js-tests`, run
+`8360cb1d-c05b-4518-8579-f80814e7a61c`).
+
+Three WebKit failures in the same run are very unlikely to be the plan's: none touches the host rail, no click in them
+was intercepted, and each passed on Chromium in the same run. They are "the dialog refuses blank and over-long messages
+without sending" (`feedback.spec.ts`, the disabled Send button's color), "closes a number popup below a new bolt chord"
+(`popover-template-movement.spec.ts`) and "number popup delayed close keeps another popup's focus"
+(`templates.spec.ts`); none has a flake record yet. The whole Rust workspace (run
+`ba875ace-da1b-49b4-acda-e1f32d8ba42e`) failed only the known flake "shallow pause resumes without reset or replay", and
+the UI's Rust tests (run `43c68a16-6a18-4d98-8e4c-e04a6057030c`) only the known flake "a hung save releases waiters at
+their deadline".
+
+A fresh-context review also found two SPEC.md sentences that no longer match: the rail paragraph says the rail widens
+"while focus is inside it", and the bottom bar's host is said to follow the session list's naming rules, though the
+bottom bar keeps the full name. And a host of a type this version does not know (one added by a newer helm, say) and
+with no destination gets an empty short name, so its caption is blank and its session rows read ": /dir".
+
+### What should happen to this plan?
+
+- **Send it back to its executor (recommended), with a decision on the rail.** The widened part of the rail only shows
+  names: it takes no clicks and does not keep the rail widened, so the rail widens while the pointer is over the narrow
+  rail itself or keyboard focus is inside it, and a mouse click leaves no focus-driven widening behind. Also: declare
+  the width value with the other theme values; fix the two SPEC.md sentences, the matching implementation note and the
+  changelog fragment; fall back to the full name when the short name is empty; rerun the failing specs, the plan's own
+  spec and the docs-screenshot visual review on both engines, plus the UI's JavaScript tests, and rerun the three WebKit
+  cases on main without the plan if they fail again.
+- **Land it now and fix afterwards.** Main would carry a sidebar where picking a host with a click covers the session
+  list's sort control, three failing browser tests (five runs across the two engines) and two failing stylesheet tests.
