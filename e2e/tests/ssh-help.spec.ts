@@ -17,13 +17,13 @@ test.beforeEach(async ({ request }) => {
 
 /** Open through the ordinary help menu and await the dialog's focus handoff. */
 async function openHelp(page: Page) {
-  await page.getByRole("button", { name: "help", exact: true }).click();
-  const menu = page.getByRole("menu", { name: "help", exact: true });
+  await page.getByRole("button", { name: "Help", exact: true }).click();
+  const menu = page.getByRole("menu", { name: "Help", exact: true });
   await expect(menu).toBeVisible();
-  await menu.locator('[data-bar-menu-item="ssh needs 2FA?"]').click();
-  const dialog = page.getByRole("dialog", { name: "ssh needs 2FA?", exact: true });
+  await menu.locator('[data-bar-menu-item="SSH needs 2FA?"]').click();
+  const dialog = page.getByRole("dialog", { name: "SSH needs 2FA?", exact: true });
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByRole("button", { name: "close", exact: true })).toBeFocused();
+  await expect(dialog.getByRole("button", { name: "Close", exact: true })).toBeFocused();
   return dialog;
 }
 
@@ -56,12 +56,12 @@ test("ssh help displays and copies both registered-host commands", async ({ page
     const section = dialog.locator(".ssh-help-host").filter({ hasText: destination });
     await expect(section).toHaveCount(1);
     await expect(section.locator("pre")).toHaveText([host.sessions, host.setup]);
-    await section.getByRole("button", { name: "copy sessions connection", exact: true }).click();
-    await section.getByRole("button", { name: "copy setup and updates connection", exact: true }).click();
+    await section.getByRole("button", { name: "Copy sessions connection", exact: true }).click();
+    await section.getByRole("button", { name: "Copy setup and updates connection", exact: true }).click();
     await expect.poll(() => page.evaluate(() => (window as any).__sshHelpCopies)).toEqual([host.sessions, host.setup]);
     await page.keyboard.press("Escape");
     await expect(dialog).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "help", exact: true })).toBeFocused();
+    await expect(page.getByRole("button", { name: "Help", exact: true })).toBeFocused();
   } finally {
     const removed = await request.delete(`/api/hosts/${id}`);
     expect(removed.ok()).toBe(true);
@@ -77,10 +77,10 @@ test("ssh help names the empty state and remains dismissible during a failed rea
   }));
   await page.goto("/");
   let dialog = await openHelp(page);
-  await expect(dialog).toContainText("No ssh hosts are registered. Use add host");
-  await dialog.getByRole("button", { name: "close", exact: true }).click();
+  await expect(dialog).toContainText("No SSH hosts are registered. Use Add host");
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
   await expect(dialog).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "help", exact: true })).toBeFocused();
+  await expect(page.getByRole("button", { name: "Help", exact: true })).toBeFocused();
   await page.route("**/api/ssh-connections", (route) => route.fulfill({ status: 500, body: "help unavailable" }));
   dialog = await openHelp(page);
   await expect(dialog.locator(".create-session-error")).toBeVisible();
@@ -102,10 +102,10 @@ test("add host opens ssh help for its draft without losing the form", async ({ p
   await expect(link).toHaveCSS("color", await resolveToken(page, "--link"));
   await expect(link).toHaveCSS("text-decoration-line", "underline");
   await link.click();
-  let dialog = page.getByRole("dialog", { name: "ssh needs 2FA?", exact: true });
+  let dialog = page.getByRole("dialog", { name: "SSH needs 2FA?", exact: true });
   await expect(form).toBeHidden();
-  await expect(dialog).toContainText("Enter an ssh destination in Add host first.");
-  await expect(dialog.getByRole("button", { name: "close", exact: true })).toBeFocused();
+  await expect(dialog).toContainText("Enter an SSH destination in Add host first.");
+  await expect(dialog.getByRole("button", { name: "Close", exact: true })).toBeFocused();
   // Park the pointer before the keyboard handoff so focus, rather than hover,
   // is the premise for the ring checked on the restored inline action.
   await page.mouse.move(0, 0);
@@ -122,11 +122,11 @@ test("add host opens ssh help for its draft without losing the form", async ({ p
   await input.fill(destination);
   await link.click();
   await expect(form).toBeHidden();
-  dialog = page.getByRole("dialog", { name: "ssh needs 2FA?", exact: true });
-  await expect(dialog.locator(".ssh-help-host").first()).toContainText("the host you're adding");
+  dialog = page.getByRole("dialog", { name: "SSH needs 2FA?", exact: true });
+  await expect(dialog.locator(".ssh-help-host").first()).toContainText("The host you're adding");
   await expect(dialog.locator(".ssh-help-host").first().locator("pre")).toHaveCount(2);
   await expect(dialog.locator(".ssh-help-host").first()).toContainText(destination);
-  await dialog.getByRole("button", { name: "close", exact: true }).click();
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
   await expect(dialog).toHaveCount(0);
   await expect(input).toHaveValue(destination);
   await expect(link).toBeFocused();

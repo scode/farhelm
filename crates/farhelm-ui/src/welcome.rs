@@ -37,7 +37,7 @@ pub(crate) fn WelcomeDialog(on_close: EventHandler<()>, on_feedback: EventHandle
                     ".welcome-got-it", Some(".welcome-got-it"), true, Some(".welcome-got-it"),
                 ),
                 class: "app-settings-dialog welcome-dialog host-dialog-framed",
-                role: "dialog", aria_modal: "true", aria_label: "welcome to farhelm", tabindex: "-1",
+                role: "dialog", aria_modal: "true", aria_label: "Welcome to Farhelm", tabindex: "-1",
                 on_escape: move |event: KeyboardEvent| {
                     if !event.is_composing() {
                         on_close.call(());
@@ -45,23 +45,23 @@ pub(crate) fn WelcomeDialog(on_close: EventHandler<()>, on_feedback: EventHandle
                 },
                 crate::modal_dialog::DialogHeader {
                     class: "welcome-header",
-                    title: rsx! { "welcome to farhelm" },
+                    title: rsx! { "Welcome to Farhelm" },
                     close: rsx! { button {
                         r#type: "button", class: "dialog-close host-settings-dismiss welcome-dismiss",
-                        aria_label: "close welcome", "data-tooltip": "close: done with the welcome card",
+                        aria_label: "Close welcome", "data-tooltip": "Close: done with the welcome card",
                         onclick: move |_| on_close.call(()), "×"
                     } },
                 }
                 div { class: "dialog-body host-settings-body welcome-body",
                     p { class: "welcome-introduction",
-                        "One window for every coding agent you run, on your Mac and on any Linux box you can ssh to. Each agent keeps running on its machine when you close the window, and you pick it up where it was."
+                        "One window for every coding agent you run, on your Mac and on any Linux box you can SSH to. Each agent keeps running on its machine when you close the window, and you pick it up where it was."
                     }
                     div { class: "welcome-item",
                         strong { "New to it? " }
                         "The Get started guide walks through your first session and adding a remote host. "
                         a {
                             href: GET_STARTED_URL, target: "_blank", rel: "noopener",
-                            "data-tooltip": "get started: open the first-session guide in your browser",
+                            "data-tooltip": "Get started: open the first-session guide in your browser",
                             onclick: move |event| { event.prevent_default(); open_external_page(GET_STARTED_URL); },
                             "Read Get started ↗"
                         }
@@ -72,17 +72,17 @@ pub(crate) fn WelcomeDialog(on_close: EventHandler<()>, on_feedback: EventHandle
                         " menu at the top of the sidebar, sends a private message straight to Farhelm's maintainer: bugs, rough edges, ideas. "
                         button {
                             r#type: "button", class: "welcome-feedback inline-link",
-                            "data-tooltip": "send feedback now: close the welcome card and write a private message",
+                            "data-tooltip": "Send feedback now: close the welcome card and write a private message",
                             onclick: move |_| on_feedback.call(()), "Send feedback now"
                         }
                     }
                 }
                 crate::modal_dialog::DialogFooter { class: "welcome-footer",
-                    span { class: "dialog-footer-hint", "This card is in the ? menu as welcome if you want it again." }
+                    span { class: "dialog-footer-hint", "This card is in the ? menu as Welcome if you want it again." }
                     crate::modal_dialog::DialogActions {
                         button {
                             r#type: "button", class: "btn btn-primary welcome-got-it",
-                            "data-tooltip": "got it: close the welcome card", onclick: move |_| on_close.call(()), "got it"
+                            "data-tooltip": "Got it: close the welcome card", onclick: move |_| on_close.call(()), "Got it"
                         }
                     }
                 }

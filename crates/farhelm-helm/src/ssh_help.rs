@@ -102,7 +102,8 @@ pub(crate) async fn commands(
     let extra = request
         .destination
         .filter(|dest| !dest.is_empty())
-        .map(|dest| for_host("the host you're adding".into(), dest, path));
+        // This is an authored heading; registered aliases above stay verbatim.
+        .map(|dest| for_host("The host you're adding".into(), dest, path));
     axum::Json(Help {
         unavailable,
         hosts,
@@ -162,6 +163,7 @@ mod tests {
         assert_eq!(body["hosts"].as_array().unwrap().len(), 1);
         assert_eq!(body["hosts"][0]["destination"], "example");
         assert_eq!(body["extra"]["destination"], "new'destination");
+        assert_eq!(body["extra"]["name"], "The host you're adding");
         for kind in ["sessions", "setup"] {
             let argv = shell_words::split(body["extra"][kind].as_str().unwrap()).unwrap();
             assert_eq!(argv.last().unwrap(), "new'destination");

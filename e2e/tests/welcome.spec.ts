@@ -35,7 +35,7 @@ test.afterEach(async ({ request }) => {
 /** Wait for the real mounted modal and its initial focus before sending input. */
 async function firstWelcome(page: Page) {
   await page.goto("/");
-  const dialog = page.getByRole("dialog", { name: "welcome to farhelm", exact: true });
+  const dialog = page.getByRole("dialog", { name: "Welcome to Farhelm", exact: true });
   await expect(dialog).toBeVisible();
   await expect(dialog.locator(".welcome-got-it")).toBeFocused();
   return dialog;
@@ -50,8 +50,8 @@ for (const dismissal of ["got it", "close", "Escape"] as const) {
     await waitForReplayReveal(page, "terminal");
     await expect(dialog.locator(".welcome-got-it")).toBeFocused();
     if (dismissal === "Escape") await page.keyboard.press("Escape");
-    else if (dismissal === "close") await dialog.getByRole("button", { name: "close welcome", exact: true }).click();
-    else await dialog.getByRole("button", { name: "got it", exact: true }).click();
+    else if (dismissal === "close") await dialog.getByRole("button", { name: "Close welcome", exact: true }).click();
+    else await dialog.getByRole("button", { name: "Got it", exact: true }).click();
     await expect(dialog).toHaveCount(0);
     await expect(page.locator("#terminal .xterm-helper-textarea")).toBeFocused();
     await expect.poll(async () => (await readPreferences(request)).welcome_seen).toBe(true);
@@ -66,7 +66,7 @@ for (const dismissal of ["got it", "close", "Escape"] as const) {
       const second = await other.newPage();
       await second.goto(new URL("/", page.url()).href);
       await expect(second.locator(".new-session-button")).toBeVisible();
-      await expect(second.getByRole("dialog", { name: "welcome to farhelm", exact: true })).toHaveCount(0);
+      await expect(second.getByRole("dialog", { name: "Welcome to Farhelm", exact: true })).toHaveCount(0);
     } finally {
       await other.close();
     }
@@ -94,7 +94,7 @@ for (const failure of ["refused", "timed out"] as const) {
       await page.goto("/");
       await expect.poll(() => readStarted).toBe(true);
       await expect(page.locator(".new-session-button")).toBeVisible({ timeout: 15_000 });
-      await expect(page.getByRole("dialog", { name: "welcome to farhelm", exact: true })).toHaveCount(0);
+      await expect(page.getByRole("dialog", { name: "Welcome to Farhelm", exact: true })).toHaveCount(0);
       await expect(page.locator(".build-skew")).toHaveCount(0);
     } finally {
       gate.release();
@@ -123,7 +123,7 @@ test("welcome waits for initial sign-in before deciding", async ({ page }) => {
   await expect(page.locator(".auth-page")).toBeVisible();
   await page.locator(".auth-token-input").fill("AAAAAAAAAAAAAAAAAAAAAA");
   await page.locator(".auth-submit").click();
-  await expect(page.getByRole("dialog", { name: "welcome to farhelm", exact: true })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Welcome to Farhelm", exact: true })).toBeVisible();
   // The refused read, the reloaded page's read after sign-in, and automatic selection's
   // own reread before it picks a session.
   await expect.poll(() => reads).toBe(3);
@@ -208,7 +208,7 @@ test("send feedback now records seen and hands focus to feedback", async ({ page
   const dialog = await firstWelcome(page);
   await dialog.getByRole("button", { name: "Send feedback now", exact: true }).click();
   await expect(dialog).toHaveCount(0);
-  const feedback = page.getByRole("dialog", { name: "send feedback", exact: true });
+  const feedback = page.getByRole("dialog", { name: "Send feedback", exact: true });
   await expect(feedback).toBeVisible();
   await expect(feedback.locator(".feedback-message")).toBeFocused();
   await expect.poll(async () => (await readPreferences(request)).welcome_seen).toBe(true);
@@ -225,12 +225,12 @@ test("help reopens welcome without rewriting seen", async ({ page, request }) =>
     if (request.url().endsWith("/api/preferences") && request.method() === "PUT" && request.postDataJSON().welcome_seen !== undefined) seenWrites++;
   });
   await page.goto("/");
-  const toggle = page.getByRole("button", { name: "help", exact: true });
+  const toggle = page.getByRole("button", { name: "Help", exact: true });
   await toggle.click();
-  const menu = page.getByRole("menu", { name: "help", exact: true });
+  const menu = page.getByRole("menu", { name: "Help", exact: true });
   await expect(menu).toBeVisible();
-  await menu.getByRole("menuitem", { name: /welcome/ }).click();
-  const dialog = page.getByRole("dialog", { name: "welcome to farhelm", exact: true });
+  await menu.getByRole("menuitem", { name: /Welcome/ }).click();
+  const dialog = page.getByRole("dialog", { name: "Welcome to Farhelm", exact: true });
   await expect(dialog.locator(".welcome-got-it")).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);

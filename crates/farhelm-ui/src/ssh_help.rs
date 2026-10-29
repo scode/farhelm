@@ -38,22 +38,22 @@ pub(crate) fn SshHelpDialog(destination: Option<String>, on_close: EventHandler<
                 handle: DIALOG,
                 focus: DialogFocus::remembered(".ssh-help-close", Some(".ssh-help-close"), false, None),
                 class: "app-settings-dialog ssh-help-dialog host-dialog-framed", role: "dialog",
-                aria_modal: "true", aria_label: "ssh needs 2FA?", tabindex: "-1",
+                aria_modal: "true", aria_label: "SSH needs 2FA?", tabindex: "-1",
                 on_escape: move |event: KeyboardEvent| {
                     if !event.is_composing() { on_close.call(()); }
                 },
                 HostDialogHeader {
-                    title: rsx! { "ssh needs 2FA?" }, summary: "start a host's ssh connections yourself",
-                    dismiss_label: "close ssh help", dismiss_tooltip: "close: return without adding a host or starting ssh",
+                    title: rsx! { "SSH needs 2FA?" }, summary: "Start a host's SSH connections yourself",
+                    dismiss_label: "Close SSH help", dismiss_tooltip: "Close: return without adding a host or starting SSH",
                     on_dismiss: move |_| on_close.call(()),
                 }
                 ScrollRegion { class: "dialog-body host-settings-body ssh-help-body",
-                    handle: DIALOG, selector: ".ssh-help-body", name: "ssh connection help",
+                    handle: DIALOG, selector: ".ssh-help-body", name: "SSH connection help",
                     // Command arrival withdraws text-only entry. Close wins
                     // only after lost focus, never over an approval's answer.
                     recovery: RecoveryFocus::new(".ssh-help-close", None, false, RecoveryDelay::OneFrame),
                     p {
-                        "Farhelm connects without prompting, so it cannot answer a second factor or other approval on every ssh login. Run both commands in a terminal "
+                        "Farhelm connects without prompting, so it cannot answer a second factor or other approval on every SSH login. Run both commands in a terminal "
                         if cfg!(all(native_desktop, target_os = "macos")) { strong { "on this Mac" } }
                         else { strong { "on the machine the helm runs on, as the user it runs as" } }
                         ". Each asks for approval once, then keeps a connection open in the background for Farhelm. When a connection drops, run its command again."
@@ -61,23 +61,23 @@ pub(crate) fn SshHelpDialog(destination: Option<String>, on_close: EventHandler<
                     p { "These commands disable agent, X11 and port forwarding, as Farhelm does. Port forwards belong to the master connection and cannot be cancelled by clients that reuse it." }
                     p { "We recommend taking a screenshot of this dialog and asking an agent to set up a script that automates these commands for you." }
                     match result.read().as_ref() {
-                        None => rsx! { p { role: "status", "loading connection commands…" } },
+                        None => rsx! { p { role: "status", "Loading connection commands…" } },
                         Some(Err(error)) => rsx! { PeerLine { class: "create-session-error", parts: vec![crate::peer::DetailPart::peer(error.clone())] } },
                         Some(Ok(help)) => rsx! {
                             for reason in &help.unavailable { PeerLine { class: "create-session-error", parts: vec![crate::peer::DetailPart::peer(reason.clone())] } }
                             if extra_requested {
                                 if let Some(extra) = &help.extra { HostCommands { host: extra.clone() } }
-                                else { section { h3 { "the host you're adding" } p { "Enter an ssh destination in Add host first." } } }
+                                else { section { h3 { "The host you're adding" } p { "Enter an SSH destination in Add host first." } } }
                             }
                             for host in &help.hosts { HostCommands { host: host.clone() } }
-                            if help.hosts.is_empty() { p { "No ssh hosts are registered. Use add host in the hosts panel to register one." } }
+                            if help.hosts.is_empty() { p { "No SSH hosts are registered. Use Add host in the hosts panel to register one." } }
                         },
                     }
                 }
                 crate::modal_dialog::DialogFooter {
                     crate::modal_dialog::DialogActions {
-                        button { r#type: "button", class: "btn btn-neutral ssh-help-close", "data-tooltip": "close: return without starting ssh",
-                            onclick: move |_| on_close.call(()), "close" }
+                        button { r#type: "button", class: "btn btn-neutral ssh-help-close", "data-tooltip": "Close: return without starting SSH",
+                            onclick: move |_| on_close.call(()), "Close" }
                     }
                 }
             }
@@ -94,14 +94,19 @@ fn HostCommands(host: SshHostCommands) -> Element {
         section { class: "ssh-help-host host-settings-section",
             h3 { dir: "ltr", "{host.name.escaped()}" }
             p { class: "peer-value font-mono", dir: "ltr", "{host.destination.escaped()}" }
-            for (label, command) in [("sessions connection", host.sessions), ("setup and updates connection", host.setup)] {
+            // A heading starts a sentence; its copy action continues after
+            // "Copy". Keep those authored phrases separate from raw commands.
+            for (label, copy_label, command) in [
+                ("Sessions connection", "sessions connection", host.sessions),
+                ("Setup and updates connection", "setup and updates connection", host.setup),
+            ] {
                 if let Some(command) = command {
                     div { class: "ssh-help-command",
                         strong { "{label}" }
                         pre { dir: "ltr", "{command.escaped()}" }
-                        button { r#type: "button", class: "btn btn-neutral", aria_label: "copy {label}",
-                            "data-tooltip": "copy: the exact ssh command to run on the helm's machine",
-                            onclick: move |_| crate::session_view::copy_to_clipboard(command.raw()), "copy" }
+                        button { r#type: "button", class: "btn btn-neutral", aria_label: "Copy {copy_label}",
+                            "data-tooltip": "Copy: the exact SSH command to run on the helm's machine",
+                            onclick: move |_| crate::session_view::copy_to_clipboard(command.raw()), "Copy" }
                     }
                 }
             }

@@ -101,14 +101,14 @@ impl BarMenuItem {
     /// The item's label, which is also its `data-bar-menu-item` marker.
     fn label(self) -> &'static str {
         match self {
-            BarMenuItem::SendFeedback => "send feedback",
-            BarMenuItem::Documentation => "documentation",
-            BarMenuItem::ReleaseNotes => "release notes",
-            BarMenuItem::SshHelp => "ssh needs 2FA?",
-            BarMenuItem::Welcome => "welcome",
-            BarMenuItem::CheckForUpdates => "check for updates",
-            BarMenuItem::RestartToUpdate => "restart to update",
-            BarMenuItem::WhatsNew => "what's new",
+            BarMenuItem::SendFeedback => "Send feedback",
+            BarMenuItem::Documentation => "Documentation",
+            BarMenuItem::ReleaseNotes => "Release notes",
+            BarMenuItem::SshHelp => "SSH needs 2FA?",
+            BarMenuItem::Welcome => "Welcome",
+            BarMenuItem::CheckForUpdates => "Check for updates",
+            BarMenuItem::RestartToUpdate => "Restart to update",
+            BarMenuItem::WhatsNew => "What's new",
         }
     }
 
@@ -119,28 +119,28 @@ impl BarMenuItem {
     fn tooltip(self) -> &'static str {
         match self {
             BarMenuItem::SendFeedback => {
-                "send feedback: a private message to Farhelm's maintainer, not a public issue"
+                "Send feedback: a private message to Farhelm's maintainer, not a public issue"
             }
             BarMenuItem::Documentation => {
-                "documentation: open the Farhelm documentation at farhelm.io/docs in your browser"
+                "Documentation: open the Farhelm documentation at farhelm.io/docs in your browser"
             }
             BarMenuItem::ReleaseNotes => {
-                "release notes: open Farhelm's release notes at farhelm.io/docs in your browser, each release with what changed"
+                "Release notes: open Farhelm's release notes at farhelm.io/docs in your browser, each release with what changed"
             }
             BarMenuItem::Welcome => {
-                "welcome: show the welcome card with Get started and how to send feedback"
+                "Welcome: show the welcome card with Get started and how to send feedback"
             }
             BarMenuItem::SshHelp => {
-                "ssh needs 2FA?: commands to start Farhelm's connections by hand when a host asks for approval on every ssh login"
+                "SSH needs 2FA?: commands to start Farhelm's connections by hand when a host asks for approval on every SSH login"
             }
             BarMenuItem::CheckForUpdates => {
-                "check for updates: look for a newer Farhelm release now and install it in the background; the version readout shows how it went"
+                "Check for updates: look for a newer Farhelm release now and install it in the background; the version readout shows how it went"
             }
             BarMenuItem::RestartToUpdate => {
-                "restart to update: quit Farhelm and open it again on the version that is installed; your sessions keep running"
+                "Restart to update: quit Farhelm and open it again on the version that is installed; your sessions keep running"
             }
             BarMenuItem::WhatsNew => {
-                "what's new: open Farhelm's release notes at farhelm.io/docs in your browser, each release with what changed"
+                "What's new: open Farhelm's release notes at farhelm.io/docs in your browser, each release with what changed"
             }
         }
     }
@@ -148,14 +148,14 @@ impl BarMenuItem {
     /// The description line under the label.
     fn description(self) -> &'static str {
         match self {
-            BarMenuItem::SendFeedback => "privately, to Farhelm's maintainer",
-            BarMenuItem::Documentation => "opens farhelm.io/docs in your browser",
-            BarMenuItem::ReleaseNotes => "opens the release notes in your browser",
-            BarMenuItem::SshHelp => "start a host's ssh connections yourself",
-            BarMenuItem::Welcome => "shows the welcome card again",
-            BarMenuItem::CheckForUpdates => "installs a newer Farhelm if there is one",
-            BarMenuItem::RestartToUpdate => "sessions keep running",
-            BarMenuItem::WhatsNew => "opens the release notes in your browser",
+            BarMenuItem::SendFeedback => "Privately, to Farhelm's maintainer",
+            BarMenuItem::Documentation => "Opens farhelm.io/docs in your browser",
+            BarMenuItem::ReleaseNotes => "Opens the release notes in your browser",
+            BarMenuItem::SshHelp => "Start a host's SSH connections yourself",
+            BarMenuItem::Welcome => "Shows the welcome card again",
+            BarMenuItem::CheckForUpdates => "Installs a newer Farhelm if there is one",
+            BarMenuItem::RestartToUpdate => "Sessions keep running",
+            BarMenuItem::WhatsNew => "Opens the release notes in your browser",
         }
     }
 }
@@ -605,7 +605,7 @@ fn BarMenuFlyout(
                     div {
                         class: "host-row-menu-items session-row-menu-items",
                         role: "menu",
-                        aria_label: menu.name,
+                        aria_label: if menu.name == "help" { "Help" } else { "Update" },
                         // Rendered from the same list keyboard order is
                         // built from, so the two cannot drift apart.
                         for item in order.actions() {
@@ -777,9 +777,9 @@ pub(crate) fn AppBar(
     let has_updater = updater.is_some();
     let help_items = help_menu_items(has_updater);
     let help_tooltip = if has_updater {
-        "help: send feedback, open the documentation or release notes, get ssh 2FA help, show welcome, or check for updates"
+        "Help: send feedback, open the documentation or release notes, get SSH 2FA help, show Welcome, or check for updates"
     } else {
-        "help: send feedback, open the documentation or release notes, get ssh 2FA help, or show welcome"
+        "Help: send feedback, open the documentation or release notes, get SSH 2FA help, or show Welcome"
     };
     let help_updater = updater.clone();
     let update_updater = updater.clone();
@@ -869,7 +869,7 @@ pub(crate) fn AppBar(
                 menu: help_menu,
                 items: help_items.clone(),
                 toggle_class: "btn btn-neutral app-help-toggle",
-                toggle_label: "help",
+                toggle_label: "Help",
                 toggle_tooltip: help_tooltip,
                 crate::icons::HelpIcon {}
             }

@@ -204,8 +204,8 @@ async function stubDialogPreferences(page: Page) {
 
 /** Open the real help-menu entry after its menu is mounted. */
 async function openHelpDialog(page: Page, name: string) {
-  await page.getByRole("button", { name: "help", exact: true }).click();
-  const menu = page.getByRole("menu", { name: "help", exact: true });
+  await page.getByRole("button", { name: "Help", exact: true }).click();
+  const menu = page.getByRole("menu", { name: "Help", exact: true });
   await expect(menu).toBeVisible();
   await menu.locator(`[data-bar-menu-item="${name}"]`).click();
   const dialog = page.getByRole("dialog", { name, exact: true });
@@ -255,8 +255,8 @@ test("text-only SSH help scrollports have keyboard entry points", async ({ page 
   }));
   await page.setViewportSize({ width: 360, height: 720 });
   await page.goto("/");
-  const dialog = await openHelpDialog(page, "ssh needs 2FA?");
-  await expect(dialog).toContainText("No ssh hosts are registered.");
+  const dialog = await openHelpDialog(page, "SSH needs 2FA?");
+  await expect(dialog).toContainText("No SSH hosts are registered.");
   await expect(dialog.locator(".ssh-help-body button")).toHaveCount(0);
   await page.setViewportSize({ width: 360, height: 220 });
   await expectKeyboardReachableScrollers(dialog);
@@ -291,7 +291,7 @@ test("sent-feedback scrollports have keyboard entry points", async ({ page }) =>
   });
   await page.setViewportSize({ width: 360, height: 720 });
   await page.goto("/");
-  const dialog = await openHelpDialog(page, "send feedback");
+  const dialog = await openHelpDialog(page, "Send feedback");
   await dialog.locator(".feedback-message").fill("Keep the sent message reachable.");
   await page.clock.install();
   await page.clock.pauseAt(new Date(Date.now() + 5_000));
