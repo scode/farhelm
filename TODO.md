@@ -253,6 +253,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   clickable to check for updates (the app bar's `check_readout` renders it as a button in the old layout). Confirm
   whether this is just a dev-build artifact, and restore the affordance if the steel layout dropped it.
 
+- **Show all keybindings with command-/.** Add a keybinding that shows every keyboard shortcut at a glance, so users can
+  discover them instead of having to remember them.
+
 ## Doc todo
 
 - Tell users that a working-copy (checkout) root must be a location only they can write: Farhelm is not designed for
