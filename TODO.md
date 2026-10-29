@@ -156,7 +156,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Session tracking for Muse Code.** Add what Muse Code still lacks beyond being a launchable terminal agent:
   per-launch hooks/instructions, capture of the correct conversation identity for resume, and recognition of its
   waiting/status signals. The built-in `muse` and `muse-yolo` profiles currently run with generic activity status and no
-  hooks or conversation resume; these are Farhelm integration gaps, not established limitations of Muse.
+  hooks or conversation resume; these are Farhelm integration gaps, not established limitations of Muse. Plan:
+  `plans/queue/muse-session-tracking.md`.
 
 - **Support Kimi Code.** Add Moonshot's Kimi Code CLI as an agent type: terminal launches with guarded and YOLO
   permission flags, model, effort and prompt choices once their command-line contracts are verified, a harness mark and
