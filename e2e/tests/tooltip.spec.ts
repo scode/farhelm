@@ -124,14 +124,14 @@ test("a session's title and open area share its summary card", async ({ page, re
       const card = tooltip(page).locator(".session-summary");
       await expect(card).toBeVisible();
       await expect(card.locator(".session-summary-title")).toHaveText("A <peer> title");
-      await expect(card.locator(".session-summary-state-word")).toHaveText("running");
-      await expect(card.locator(".session-summary-agent")).toContainText("codex");
+      await expect(card.locator(".session-summary-state-word")).toHaveText("Running");
+      await expect(card.locator(".session-summary-agent")).toContainText("Codex");
       await expect(card.locator(".session-summary-host")).toContainText("this machine");
       await expect(card.locator(".session-summary-value")).toContainText([
         /this machine/, /owner\/project · project-2/, "/srv/checkouts/project-2/src",
         "2023-11-14 22:13:20 UTC", /\d+m · .* UTC/,
       ]);
-      await expect(card.locator(".session-summary-footer")).toHaveText("click to open⋯ for actions");
+      await expect(card.locator(".session-summary-footer")).toHaveText("Click to open⋯ For actions");
       const rowIcon = row.locator(".host-kind-icon");
       const cardIcon = card.locator(".host-kind-icon");
       await expect(cardIcon).toHaveAttribute("data-glyph", await rowIcon.getAttribute("data-glyph") ?? "");
@@ -187,7 +187,7 @@ test("a stale card is dim while row marks keep their own hover", async ({ page }
   await row.locator(".session-title").hover();
   const card = tooltip(page).locator(".session-summary");
   await expect(card).toHaveClass(/stale/);
-  await expect(card.locator(".session-summary-label")).toHaveText(["directory", "last active"]);
+  await expect(card.locator(".session-summary-label")).toHaveText(["Directory", "Last active"]);
   await expect(card.locator(".status-dot")).toHaveCSS("animation-name", "none");
   const dimColor = await resolveToken(page, "--fg-2");
   await expect(card.locator(".session-summary-status")).toHaveCSS("color", dimColor);
@@ -206,7 +206,7 @@ test("a legacy session card omits unavailable facts", async ({ page }) => {
   const row = await loadRow(page, { created_at: 0, last_activity_at: 0 }, false);
   const source = page.locator(`#session-summary-${SESSION_ID}`);
   await expect(row.locator(".host-kind-icon")).toHaveCount(0);
-  await expect(source.locator(".session-summary-label")).toHaveText(["directory"]);
+  await expect(source.locator(".session-summary-label")).toHaveText(["Directory"]);
   await expect(source.locator(".session-summary-path")).toHaveText("/tmp");
   await expect(source.locator(".host-kind-icon")).toHaveCount(0);
 });
@@ -218,7 +218,7 @@ test("a legacy session card omits unavailable facts", async ({ page }) => {
 test("an unplaced host keeps its name without a locality mark", async ({ page }) => {
   await loadRow(page, { host_name: "unplaced-host" });
   const source = page.locator(`#session-summary-${SESSION_ID}`);
-  await expect(source.locator(".session-summary-label")).toHaveText(["host", "directory", "last active"]);
+  await expect(source.locator(".session-summary-label")).toHaveText(["Host", "Directory", "Last active"]);
   await expect(source.locator(".session-summary-host")).toHaveText("unplaced-host");
   await expect(source.locator(".session-summary-host .host-kind-icon")).toHaveCount(0);
 });
@@ -272,7 +272,7 @@ test("hovering a row mark shows its text above it after the delay", async ({ pag
   await parkPointer(page);
   const age = row.locator(".status-time");
   const expected = await age.getAttribute("data-tooltip");
-  expect(expected, "premise: the age carries hover text").toMatch(/^last activity /);
+  expect(expected, "premise: the age carries hover text").toMatch(/^Last activity /);
 
   // Record, in the page's own clock, when the pointer arrived and when the
   // tooltip first became visible.
@@ -348,7 +348,7 @@ test("moving to the next mark while a tooltip shows replaces it at once", async 
   const age = row.locator(".status-time");
 
   await dot.hover();
-  await expect(tooltip(page)).toHaveText(/^running/);
+  await expect(tooltip(page)).toHaveText(/^Running/);
 
   // A capture listener added after tooltip.js's own runs after it for the
   // same event, so it sees the tooltip exactly as the dispatch left it.
@@ -374,7 +374,7 @@ test("moving to the next mark while a tooltip shows replaces it at once", async 
     (window as unknown as { __followOn: { text: string | null; expected: string | null; hidden: boolean | null } })
       .__followOn
   );
-  expect(seen.expected, "premise: the age carries hover text").toMatch(/^last activity /);
+  expect(seen.expected, "premise: the age carries hover text").toMatch(/^Last activity /);
   expect(seen.hidden, "the tooltip must stay up while moving between marks").toBe(false);
   expect(seen.text, "the next mark's text must show in the same dispatch").toBe(seen.expected);
 });

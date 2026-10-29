@@ -76,9 +76,9 @@ for (const mode of ["sessions", "templates"] as const) {
       await page.keyboard.press(mode === "sessions"
         ? (mac ? "Meta+k" : "Control+Shift+k")
         : (mac ? "Meta+j" : "Control+Shift+j"));
-      const dialog = page.getByRole("dialog", { name: mode === "sessions" ? "quick switcher" : "template launcher" });
+      const dialog = page.getByRole("dialog", { name: mode === "sessions" ? "Quick switcher" : "Template launcher" });
       const search = dialog.getByRole("combobox");
-      const close = dialog.getByRole("button", { name: "close", exact: true });
+      const close = dialog.getByRole("button", { name: "Close", exact: true });
       await expect(dialog).toBeVisible();
       await expect(search).toBeFocused();
       await search.fill(mode === "sessions" ? session.title : name);
@@ -231,8 +231,8 @@ test("Rename wraps Close through Save while a real approval remains usable", asy
     await expect(row).toBeVisible();
     await openRowMenu(row);
     await row.locator(".session-row-rename").click();
-    const dialog = page.getByRole("dialog", { name: "rename session" });
-    const field = dialog.getByRole("textbox", { name: "new session title" });
+    const dialog = page.getByRole("dialog", { name: "Rename session" });
+    const field = dialog.getByRole("textbox", { name: "New session title" });
     const close = dialog.getByRole("button", { name: "Close rename", exact: true });
     const cancel = dialog.getByRole("button", { name: "Cancel", exact: true });
     const save = dialog.getByRole("button", { name: "Save", exact: true });

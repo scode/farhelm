@@ -40,11 +40,11 @@ test("pin from the menu groups the sidebar and unpin restores title order", asyn
     await expect(shared).toHaveAttribute("data-session-pinned", "false", { timeout: 20_000 });
     await openRowMenu(z);
     await z.getByRole("menuitem", { name: "Pin to top", exact: true }).click();
-    await expect(z.getByRole("img", { name: "pinned", exact: true })).toBeVisible();
+    await expect(z.getByRole("img", { name: "Pinned", exact: true })).toBeVisible();
     // A pin stays secondary metadata on either ordinary or selected rows.
     const pinRole = await z.getAttribute("data-session-selected") === "true" ? "--on-accent-dim" : "--fg-1";
     await expect(z.locator(".session-pin")).toHaveCSS("color", await resolveToken(page, pinRole));
-    await expect(z.locator(".session-row-open")).toHaveAccessibleName(/pinned/);
+    await expect(z.locator(".session-row-open")).toHaveAccessibleName(/Pinned/);
     await page.mouse.move(0, 0);
     await expect.poll(async () => (await order()).indexOf(last.id) < (await order()).indexOf(first.id)).toBe(true);
     await expect(page.locator(".session-pin-separator")).toHaveCount(1);

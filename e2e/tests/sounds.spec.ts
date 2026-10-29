@@ -280,13 +280,13 @@ test.describe("device sounds", () => {
           await expect(page.locator(`[data-session-id="${f.session.id}"]`)).toHaveCount(0);
           await expect(page.locator(`[data-session-id="${f.other.id}"]`)).toBeVisible();
         } else {
-          await expect(page.locator(`[data-session-id="${f.session.id}"] .status-badge.running`)).toHaveText("running");
+          await expect(page.locator(`[data-session-id="${f.session.id}"] .status-badge.running`)).toHaveText("Running");
           await expect(page.locator(`[data-session-id="${f.other.id}"]`)).toHaveCount(0);
         }
         f.data.status = "waiting";
         if (returning) await chooseHost(page, "");
         else f.feed.notify(5);
-        await expect(page.locator(`[data-session-id="${f.session.id}"] .status-badge.waiting`)).toHaveText("waiting");
+        await expect(page.locator(`[data-session-id="${f.session.id}"] .status-badge.waiting`)).toHaveText("Waiting");
         release();
         await applied(page, f.session.id, "waiting");
         await waitForFeedReadersSettled(page);
@@ -316,14 +316,14 @@ test.describe("device sounds", () => {
     try {
       await page.goto("/");
       await f.feed.waitForConnection(1);
-      await expect(page.locator(`[data-session-id="${f.session.id}"] .status-badge.running`)).toHaveText("running");
+      await expect(page.locator(`[data-session-id="${f.session.id}"] .status-badge.running`)).toHaveText("Running");
       await expect.poll(() => heldReads).toBeGreaterThan(0);
       await expect.poll(async () => {
         const sounds = (await readFeedReaders(page)).find((reader) => reader.role === "sounds");
         return sounds?.readers[0].running === true && sounds.baseline === false;
       }, { message: "first approval reply must still be held after initial rows are accepted" }).toBe(true);
       f.data.status = "waiting"; f.feed.notify(2);
-      await expect(page.locator(`[data-session-id="${f.session.id}"] .status-badge.waiting`)).toHaveText("waiting");
+      await expect(page.locator(`[data-session-id="${f.session.id}"] .status-badge.waiting`)).toHaveText("Waiting");
       expect(await starts(page)).toEqual([]);
       release();
       await applied(page, f.session.id, "waiting", "initial-held-request");

@@ -611,7 +611,7 @@ async function headerReplaceKeepsAnswer(page: Page, request: APIRequestContext, 
     // Premise: the prompt the user confirms says nothing is alive (an exited
     // agent and no open tabs, which would add a clause of their own).
     await expect(header.locator(".confirm-consequence")).toHaveText(
-      "replacing discards the conversation; a fresh session with the same settings takes its place:",
+      "Replacing discards the conversation; a fresh session with the same settings takes its place:",
     );
 
     const [refused] = await Promise.all([
@@ -713,7 +713,7 @@ async function sidebarReplaceKeepsAnswer(page: Page, request: APIRequestContext,
     await sourceRow.locator(".session-row-replace").click();
     // Premise: the prompt the user confirms says nothing is alive.
     await expect(sourceRow.locator(".confirm-consequence")).toHaveText(
-      "replacing discards the conversation; a fresh session with the same settings takes its place:",
+      "Replacing discards the conversation; a fresh session with the same settings takes its place:",
     );
 
     const [refused] = await Promise.all([

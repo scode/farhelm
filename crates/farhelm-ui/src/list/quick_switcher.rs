@@ -124,19 +124,19 @@ fn host_name(session: &Session) -> &str {
         .host_name
         .as_ref()
         .map(crate::peer::PeerText::raw)
-        .unwrap_or("unknown host")
+        .unwrap_or("Unknown host")
 }
 
 /// Name the stored launch's agent without guessing from command text.
 fn agent_label(session: &Session) -> &'static str {
     match &session.launch {
         Some(SessionLaunch::Agent { selection, .. }) => harness_label(selection.harness),
-        Some(SessionLaunch::Command(command)) => command.agent.map_or("command", harness_label),
+        Some(SessionLaunch::Command(command)) => command.agent.map_or("Command", harness_label),
         _ => session
             .agent_kind
             .proto()
             .and_then(|kind| kind.display_name())
-            .unwrap_or("command"),
+            .unwrap_or("Command"),
     }
 }
 
@@ -337,7 +337,7 @@ pub(super) fn QuickSwitcher(
             ModalDialog {
                 handle: DIALOG,
                 focus: DialogFocus::remembered(".quick-switcher-search", Some(".quick-switcher-close"), false, None),
-                class: "quick-switcher-dialog", role: "dialog", aria_modal: "true", aria_label: if template_only { "template launcher" } else { "quick switcher" }, tabindex: "-1",
+                class: "quick-switcher-dialog", role: "dialog", aria_modal: "true", aria_label: if template_only { "Template launcher" } else { "Quick switcher" }, tabindex: "-1",
                 onclick: move |event: MouseEvent| event.stop_propagation(),
                 on_escape: move |event: KeyboardEvent| {
                     if !event.is_composing() { event.prevent_default(); on_close.call(()); }
@@ -359,33 +359,33 @@ pub(super) fn QuickSwitcher(
                             _ => {}
                         }
                     },
-                    class: "quick-switcher-search", aria_label: if template_only { "search templates" } else { "search sessions or templates" },
-                    "data-tooltip": if template_only { "search templates by name; Enter starts the highlighted one" } else { "search sessions across every host; tl: searches templates" },
+                    class: "quick-switcher-search", aria_label: if template_only { "Search templates" } else { "Search sessions or templates" },
+                    "data-tooltip": if template_only { "Search templates by name; Enter starts the highlighted one" } else { "Search sessions across every host; tl: searches templates" },
                     role: "combobox", aria_autocomplete: "list", aria_expanded: "true", aria_controls: "quick-switcher-results",
                     aria_activedescendant: (count > 0).then(|| format!("quick-switcher-result-{selected_index}")),
-                    placeholder: if template_only { "start a template" } else { "jump to a session · tl: for templates" }, value: text.clone(),
+                    placeholder: if template_only { "Start a template" } else { "Jump to a session · tl: for templates" }, value: text.clone(),
                     oninput: move |event| { query.set(event.value()); selected.set(0); arrowed.set(false); },
                 }
                 div { class: "quick-switcher-heading",
-                    if template_mode { "templates" } else if text.trim().is_empty() { "recent sessions" } else { "sessions" }
+                    if template_mode { "Templates" } else if text.trim().is_empty() { "Recent sessions" } else { "Sessions" }
                 }
                 if template_mode {
                     match template_read.as_ref() {
-                        None => rsx! { p { role: "status", "loading templates…" } },
+                        None => rsx! { p { role: "status", "Loading templates…" } },
                         Some(Err(reason)) => rsx! { p { role: "alert", "Couldn't load templates: " bdi { "{display_peer(reason)}" } } },
-                        Some(Ok(_)) if template_rows.is_empty() => rsx! { p { role: "status", "no templates match" } },
+                        Some(Ok(_)) if template_rows.is_empty() => rsx! { p { role: "status", "No templates match" } },
                         _ => rsx! {},
                     }
                 } else {
                     match session_read {
-                        None => rsx! { p { role: "status", "loading sessions…" } },
+                        None => rsx! { p { role: "status", "Loading sessions…" } },
                         Some(Err(reason)) => rsx! { p { role: "alert", "Couldn't load sessions: " bdi { "{display_peer(reason)}" } } },
-                        Some(Ok(_)) if matches.is_empty() => rsx! { p { role: "status", "no sessions match" } },
+                        Some(Ok(_)) if matches.is_empty() => rsx! { p { role: "status", "No sessions match" } },
                         _ => rsx! {},
                     }
                 }
                 div { class: "quick-switcher-options", id: "quick-switcher-results", role: "listbox",
-                    aria_label: if template_mode { "templates" } else { "sessions and new session" },
+                    aria_label: if template_mode { "Templates" } else { "Sessions and new session" },
                     div { class: "quick-switcher-results", role: "presentation",
                         if template_mode {
                             for (position, action) in template_rows.iter().enumerate() {
@@ -401,7 +401,7 @@ pub(super) fn QuickSwitcher(
                                     button {
                                         key: "{name}", class: "quick-switcher-row quick-switcher-template", r#type: "button", role: "option", tabindex: "-1",
                                         id: "quick-switcher-result-{position}", aria_selected: position == selected_index,
-                                        "data-tooltip": if template_only { "start a session from this template" } else { "open New with this template applied; nothing launches yet" },
+                                        "data-tooltip": if template_only { "Start a session from this template" } else { "Open New with this template applied; nothing launches yet" },
                                         onclick: move |_| on_pick.call(pick.clone()),
                                         span { class: "quick-switcher-template-name", bdi { "{display_peer(name)}" } }
                                         if let Some(template) = template {
@@ -429,7 +429,7 @@ pub(super) fn QuickSwitcher(
                                         // independently of the escaped labels below.
                                         key: "{session.id.raw()}", class: "quick-switcher-row", r#type: "button", role: "option", tabindex: "-1",
                                         id: "quick-switcher-result-{position}", aria_selected: position == selected_index,
-                                        "data-tooltip": "open this session",
+                                        "data-tooltip": "Open this session",
                                         onclick: move |_| on_pick.call(SwitcherPick::Session(Box::new(session.clone()))),
                                         if let Some(badge) = badge {
                                             span { class: if ended { "quick-switcher-status quick-switcher-ended" } else { "quick-switcher-status" },
@@ -457,19 +457,19 @@ pub(super) fn QuickSwitcher(
                         button {
                             class: "quick-switcher-row quick-switcher-new", r#type: "button", role: "option", tabindex: "-1",
                             id: "quick-switcher-result-{matches.len()}", aria_selected: count > 0 && selected_index == matches.len(),
-                            "data-tooltip": "open New with this name; nothing launches yet",
+                            "data-tooltip": "Open New with this name; nothing launches yet",
                             onclick: { let name = text.trim().to_string(); move |_| on_pick.call(SwitcherPick::New(ComposerSearchResult::Name(name.clone()))) },
-                            span { "new session named \"" bdi { "{display_peer(text.trim())}" } "\"" }
+                            span { "New session named \"" bdi { "{display_peer(text.trim())}" } "\"" }
                         }
                     }
                     if show_quick {
                         button {
                             class: "quick-switcher-row quick-switcher-quick-launch", r#type: "button", role: "option", tabindex: "-1",
                             id: "quick-switcher-result-{matches.len()}", aria_selected: count > 0 && selected_index == matches.len(),
-                            "data-tooltip": "quick launch: start the marked template directly, or open Templates to mark one",
+                            "data-tooltip": "Quick launch: start the marked template directly, or open Templates to mark one",
                             onclick: move |_| on_pick.call(SwitcherPick::QuickLaunch),
                             span { "⚡" }
-                            span { "Quick launch: " bdi { {preferences.0.read().quick_launch_template.as_ref().map_or_else(|| display_peer("mark a template"), crate::peer::PeerText::escaped)} } }
+                            span { "Quick launch: " bdi { {preferences.0.read().quick_launch_template.as_ref().map_or_else(|| display_peer("Mark a template"), crate::peer::PeerText::escaped)} } }
                             span { class: "templates-quick-chord", "{crate::launch_sequence::TEMPLATE_SHORTCUTS.bolt.label(crate::launch_sequence::TEMPLATE_SHORTCUTS.mac_desktop)}" }
                         }
                     }
@@ -480,10 +480,10 @@ pub(super) fn QuickSwitcher(
                 div { class: "quick-switcher-templates-hint",
                     if template_only { "Enter starts the highlighted template. A partial template opens New to complete it." }
                     else if template_mode { "Picking a template opens New with it applied; nothing launches yet." }
-                    else { span { "templates" } p { "Type tl: to search templates. Picking one opens New with it applied." } }
+                    else { span { "Templates" } p { "Type tl: to search templates. Picking one opens New with it applied." } }
                 }
                 footer { class: "quick-switcher-footer", span { "↑↓ choose · Enter pick · Escape close" }
-                    button { class: "quick-switcher-close", r#type: "button", "data-tooltip": "close the quick switcher", onclick: move |_| on_close.call(()), "close" }
+                    button { class: "quick-switcher-close", r#type: "button", "data-tooltip": "Close the quick switcher", onclick: move |_| on_close.call(()), "Close" }
                 }
             }
         }

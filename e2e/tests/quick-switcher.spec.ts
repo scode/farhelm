@@ -24,7 +24,7 @@ async function platform(page: Page, mac: boolean): Promise<void> {
 async function openSwitcher(page: Page, mac = false) {
   await expect(page.locator(".quick-switcher-trigger")).toHaveCount(1);
   await page.keyboard.press(mac ? "Meta+k" : "Control+Shift+k");
-  const dialog = page.getByRole("dialog", { name: "quick switcher" });
+  const dialog = page.getByRole("dialog", { name: "Quick switcher" });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole("combobox")).toBeFocused();
   return dialog;
@@ -139,7 +139,7 @@ for (const mac of [false, true]) {
       dialog = await openSwitcher(page, mac);
       await dialog.getByRole("combobox").fill(second.title);
       await page.keyboard.press("Tab");
-      await expect(dialog.getByRole("button", { name: "close", exact: true })).toBeFocused();
+      await expect(dialog.getByRole("button", { name: "Close", exact: true })).toBeFocused();
       await page.keyboard.press("Enter");
       await expect(dialog).toHaveCount(0);
       await expect(page.locator(`[data-session-id="${first.id}"]`)).toHaveAttribute("data-session-selected", "true");
@@ -298,20 +298,20 @@ test("loading has no selection and a failed listing says so", async ({ page }) =
   try {
     const dialog = await openSwitcher(page);
     await expect.poll(() => requested).toBe(true);
-    await expect(dialog.getByRole("status")).toHaveText("loading sessions…");
+    await expect(dialog.getByRole("status")).toHaveText("Loading sessions…");
     await expect(dialog.locator(".quick-switcher-results").getByRole("option")).toHaveCount(0);
     await page.keyboard.press("Enter");
     await expect(dialog).toBeVisible();
-    await expect(dialog.getByRole("status")).toHaveText("loading sessions…");
+    await expect(dialog.getByRole("status")).toHaveText("Loading sessions…");
     await page.keyboard.press("Tab");
-    await expect(dialog.getByRole("button", { name: "close", exact: true })).toBeFocused();
+    await expect(dialog.getByRole("button", { name: "Close", exact: true })).toBeFocused();
     await page.keyboard.press("Enter");
     await expect(dialog).toHaveCount(0);
     const reopened = await openSwitcher(page);
-    await expect(reopened.getByRole("status")).toHaveText("loading sessions…");
+    await expect(reopened.getByRole("status")).toHaveText("Loading sessions…");
     gate.release();
     await expect(reopened.getByRole("alert")).toContainText("Couldn't load sessions");
-    await expect(reopened).not.toContainText("no sessions match");
+    await expect(reopened).not.toContainText("No sessions match");
     await reopened.getByRole("combobox").fill("name-after-failed-read");
     await expect(reopened.locator(".quick-switcher-new")).toHaveAttribute("aria-selected", "true");
     await page.keyboard.press("Enter");
@@ -354,8 +354,8 @@ test("ranking, highlighting and the listing-cap notice use one snapshot", async 
   await expect(dialog.locator(".quick-switcher-cap")).toContainText("most recently active");
   // Word badges must show their status and exit code, not inherit the dot track.
   const ended = options.first().locator(".status-badge");
-  await expect(ended).toHaveText("exited (code 17)");
-  await expect(options.nth(1).locator(".status-badge")).toContainText("error");
+  await expect(ended).toHaveText("Exited (code 17)");
+  await expect(options.nth(1).locator(".status-badge")).toContainText("Error");
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 844 });
     await expect.poll(() => ended.evaluate((node) => node.clientWidth >= node.scrollWidth)).toBe(true);
@@ -404,7 +404,7 @@ test("the pinned name action opens ordinary New with remembered defaults", async
     const dialog = await openSwitcher(page);
     await dialog.getByRole("combobox").fill(name);
     const choice = dialog.locator(".quick-switcher-new");
-    await expect(choice).toHaveText(`new session named "${name}"`);
+    await expect(choice).toHaveText(`New session named "${name}"`);
     await expect(choice).toHaveAttribute("aria-selected", "true");
     await expect(dialog.locator(".quick-switcher-template")).toHaveCount(0);
     await page.keyboard.press("Enter");

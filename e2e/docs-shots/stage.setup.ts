@@ -21,10 +21,10 @@ test("stage the docs fleet", async ({ page, request }) => {
   const scenario = loadScenario(DOCS_SHOTS_DIR);
   const fleet = await stageFleet(page, request, scenario, DOCS_SHOTS_DIR, readStackInfo(DOCS_STACK_INFO_PATH));
   await stageTemplates(request, scenario);
-  // The launcher also needs this real resumable session for Restart/Replace
-  // drafts. Reuse its reporting fixture rather than inventing those replies.
+  // Launcher drafts and ordinary session review need this real resumable
+  // header state. Reuse its reporting fixture rather than inventing replies.
   const scope = process.env.FARHELM_VISUAL_REVIEW_SCOPE;
-  const toolbarReview = scope === "session-toolbar" || scope === "launcher" || scope === "sentence-launcher"
+  const toolbarReview = scope === "session-toolbar" || scope === "launcher" || scope === "sentence-launcher" || scope === "sentence-sessions" || scope === "sentence-session-hints"
     ? await stageToolbarReviewSession(request, scenario, fleet)
     : undefined;
   // This source creates no child: its one real request is photographed and

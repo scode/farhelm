@@ -197,7 +197,7 @@ test("template summaries split command fonts and shortcut digits keep equal widt
     await expect(page.locator(".quick-switcher-trigger")).toHaveCount(1);
     const mac = await page.evaluate(() => /Mac/.test(navigator.platform));
     await page.keyboard.press(mac ? "Meta+k" : "Control+Shift+k");
-    const switcher = page.getByRole("dialog", { name: "quick switcher", exact: true });
+    const switcher = page.getByRole("dialog", { name: "Quick switcher", exact: true });
     const search = switcher.getByRole("combobox");
     await expect(search).toBeFocused();
     await search.fill(`tl:${names[0]}`);

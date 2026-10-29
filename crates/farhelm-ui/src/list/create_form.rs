@@ -9669,7 +9669,7 @@ mod tests {
         assert!(
             warning
                 .as_deref()
-                .is_some_and(|text| text.starts_with("still running")),
+                .is_some_and(|text| text.starts_with("Still running")),
             "{warning:?}"
         );
         assert_eq!(guard, crate::DeleteGuard::Unconditional);

@@ -17,8 +17,8 @@
 //! design. A color-only status is unreadable to a screen reader and
 //! unassertable by anything that reads text, so [`StatusBadge::visible`]
 //! chooses between showing the text and hiding it visually — never between
-//! having it and not. The badge element's text content is therefore exactly
-//! the same string it was before the dot existed, on every status.
+//! having it and not. Visible and hidden badges carry the same sentence-case
+//! display wording; their lowercase CSS classes remain independent of it.
 //!
 //! Both are pure `SessionStatus` -> text mappings with no renderer and no
 //! I/O, which is what lets them be pinned by unit tests here rather than only
@@ -69,6 +69,24 @@ pub(crate) struct StatusBadge {
     pub(crate) visible: bool,
 }
 
+impl StatusBadge {
+    /// Name the status without its diagnostic, exit code or unseen qualifier.
+    /// Menus and ended summary cards need this short display label, while the
+    /// badge itself keeps its complete explanation. CSS handles stay lowercase.
+    pub(crate) fn label(&self) -> &str {
+        match self.class.split_whitespace().next() {
+            Some("running") => "Running",
+            Some("waiting") => "Waiting",
+            Some("idle") => "Idle",
+            Some("exited") => "Exited",
+            Some("interrupted") => "Interrupted",
+            Some("error") => "Error",
+            Some("unknown") => "Unknown",
+            _ => self.class,
+        }
+    }
+}
+
 /// Map a status — and, for an ended session, its annotation — to the badge to
 /// render, or `None` for a status that must not be badged at all. Kept as one
 /// function so every case stays next to its siblings instead of drifting
@@ -97,7 +115,7 @@ pub(crate) struct StatusBadge {
 ///
 /// The annotation is a QUALIFIER on the exited status, never a
 /// replacement for it: SPEC.md is explicit that "stopped" is not a
-/// distinct status, so a user-stopped session reads "exited (code 0) —
+/// distinct status, so a user-stopped session reads "Exited (code 0) —
 /// stopped by user". The code leads rather than trails the annotation
 /// because the badge is capped at 32 monospace characters (`app.css`'s
 /// `.status-badge`) and the older code-last ordering let a long annotation
@@ -124,7 +142,7 @@ pub(crate) struct StatusBadge {
 /// `Running`'s pulse and `Waiting`'s colour already say "look here" on their
 /// own, so the entry that asked for this split asked for it on idle alone.
 /// An `Idle` row with unseen output gets class `idle unseen` and the text
-/// `idle — new output`; the text change matters as much as the class,
+/// `Idle — new output`; the text change matters as much as the class,
 /// because the hidden word is what a screen reader and the browser suite
 /// read, and "new output" is a fact the colour alone would not otherwise
 /// carry to either.
@@ -139,12 +157,12 @@ pub(crate) fn status_badge(
         // apart at a glance across a list. The class names match the status
         // names deliberately: one vocabulary from the wire to the
         // stylesheet, so a new status is a rename nobody has to translate.
-        SessionStatus::Running => ("running", "running".to_string()),
-        SessionStatus::Waiting => ("waiting", "waiting".to_string()),
+        SessionStatus::Running => ("running", "Running".to_string()),
+        SessionStatus::Waiting => ("waiting", "Waiting".to_string()),
         SessionStatus::Idle if unseen == Some(true) => {
-            ("idle unseen", "idle — new output".to_string())
+            ("idle unseen", "Idle — new output".to_string())
         }
-        SessionStatus::Idle => ("idle", "idle".to_string()),
+        SessionStatus::Idle => ("idle", "Idle".to_string()),
         SessionStatus::Exited { exit_code } => {
             // The exit code leads the annotation, not the other way
             // around: the badge is capped at 32 monospace characters
@@ -153,7 +171,7 @@ pub(crate) fn status_badge(
             // — the code — this whole match arm exists to report. Putting
             // it first means it survives truncation regardless of how long
             // the supervisor's own annotation prose runs.
-            let mut text = "exited".to_string();
+            let mut text = "Exited".to_string();
             if let Some(code) = exit_code {
                 text.push_str(&format!(" (code {code})"));
             }
@@ -163,7 +181,7 @@ pub(crate) fn status_badge(
             }
             ("exited", text)
         }
-        SessionStatus::Interrupted => ("interrupted", "interrupted".to_string()),
+        SessionStatus::Interrupted => ("interrupted", "Interrupted".to_string()),
         // The shim's exec-failure sentinel (PLAN_M3.md item 3): the agent
         // never ran at all, which is a different claim from `Exited`'s
         // "it ran and finished" — so it gets its own word and its own
@@ -175,7 +193,7 @@ pub(crate) fn status_badge(
         // information that actually explains why the row needs attention.
         SessionStatus::Error { detail } => (
             "error",
-            format!("error — {}", crate::peer::display_peer(detail)),
+            format!("Error — {}", crate::peer::display_peer(detail)),
         ),
         // Deliberately the one early return: see this function's own docs.
         SessionStatus::Unknown => return None,
@@ -483,8 +501,11 @@ const REPLACE_SUCCESSOR: &str = "a fresh session with the same settings takes it
 /// lead-in to confirm and cancel buttons, so it ends in a full stop.
 const REPLACE_WITH_SUCCESSOR: &str = "the session launched here takes its place.";
 
-/// Prefix an agent consequence with the tab clause, or return it unchanged
-/// when the listing shows no tabs.
+/// Start one sentence with the tab count, or capitalize its authored agent clause.
+///
+/// Agent clauses are nonempty ASCII-leading UI text. They stay lowercase after
+/// the tab clause's semicolon; only a standalone clause starts with a capital.
+/// Peer text is never passed here as the start of a clause.
 ///
 /// The agent consequences are worded about the AGENT only (no "nothing to
 /// kill" for the whole session), because a session whose agent never
@@ -492,7 +513,7 @@ const REPLACE_WITH_SUCCESSOR: &str = "the session launched here takes its place.
 /// and the combined sentence must not both warn and reassure.
 fn with_tabs(verb: &str, tabs: usize, agent: &str) -> String {
     match tabs {
-        0 => agent.to_string(),
+        0 => format!("{}{}", agent[..1].to_ascii_uppercase(), &agent[1..]),
         1 => format!(
             "1 terminal tab is still open, and {verb} closes it with everything running in it; {agent}"
         ),
@@ -571,19 +592,19 @@ fn replace_consequence_for_agent(status: &SessionStatus) -> &'static str {
 pub(crate) fn restart_consequence(status: &SessionStatus) -> &'static str {
     match status {
         SessionStatus::Running | SessionStatus::Waiting | SessionStatus::Idle => {
-            "still running — restarting stops the agent and its whole process tree first:"
+            "Still running — restarting stops the agent and its whole process tree first:"
         }
         SessionStatus::Unknown => {
-            "status unknown — the agent may still be running; restarting stops it and its whole \
+            "Status unknown — the agent may still be running; restarting stops it and its whole \
              process tree first if so:"
         }
         SessionStatus::Exited { .. } => {
-            "the agent has exited — restarting first stops anything it left running:"
+            "The agent has exited — restarting first stops anything it left running:"
         }
         SessionStatus::Interrupted => {
-            "interrupted by a host reboot — nothing left to stop; restart it:"
+            "Interrupted by a host reboot — nothing left to stop; restart it:"
         }
-        SessionStatus::Error { .. } => "the agent never started — nothing to stop; restart it:",
+        SessionStatus::Error { .. } => "The agent never started — nothing to stop; restart it:",
     }
 }
 
@@ -665,31 +686,57 @@ mod tests {
         assert_eq!(delete_progress_label(&exited, 0), "Deleting…");
     }
 
+    /// Display words use sentence case while CSS keeps the wire vocabulary.
+    /// Keeping both explicit prevents a wording sweep from breaking styling
+    /// or turning a live badge into an ended badge's visible word.
     #[farhelm_testtrace::test]
     fn status_badge_matches_text_and_class_for_each_status() {
+        // Concise menu/card labels must not borrow the CSS spelling or carry
+        // the longer badge's peer diagnostic and unseen-output annotation.
+        for (status, unseen, expected) in [
+            (SessionStatus::Running, None, "Running"),
+            (SessionStatus::Waiting, None, "Waiting"),
+            (SessionStatus::Idle, Some(true), "Idle"),
+            (SessionStatus::Exited { exit_code: Some(7) }, None, "Exited"),
+            (SessionStatus::Interrupted, None, "Interrupted"),
+            (
+                SessionStatus::Error {
+                    detail: "peer detail".into(),
+                },
+                None,
+                "Error",
+            ),
+        ] {
+            assert_eq!(
+                status_badge(&status, Some("peer annotation"), unseen)
+                    .unwrap()
+                    .label(),
+                expected
+            );
+        }
         assert_eq!(
             status_badge(&SessionStatus::Running, None, None),
-            badge("running", "running", false)
+            badge("running", "Running", false)
         );
         assert_eq!(
             status_badge(&SessionStatus::Waiting, None, None),
-            badge("waiting", "waiting", false)
+            badge("waiting", "Waiting", false)
         );
         assert_eq!(
             status_badge(&SessionStatus::Idle, None, None),
-            badge("idle", "idle", false)
+            badge("idle", "Idle", false)
         );
         assert_eq!(
             status_badge(&SessionStatus::Exited { exit_code: Some(7) }, None, None),
-            badge("exited", "exited (code 7)", true)
+            badge("exited", "Exited (code 7)", true)
         );
         assert_eq!(
             status_badge(&SessionStatus::Exited { exit_code: None }, None, None),
-            badge("exited", "exited", true)
+            badge("exited", "Exited", true)
         );
         assert_eq!(
             status_badge(&SessionStatus::Interrupted, None, None),
-            badge("interrupted", "interrupted", true)
+            badge("interrupted", "Interrupted", true)
         );
         assert_eq!(
             status_badge(
@@ -699,7 +746,7 @@ mod tests {
                 None,
                 None
             ),
-            badge("error", "error — exec_failed argv0=/nope errno=2", true),
+            badge("error", "Error — exec_failed argv0=/nope errno=2", true),
             "the shim's own recorded detail must reach the badge text, not just its class"
         );
     }
@@ -717,7 +764,7 @@ mod tests {
                 None,
                 None,
             ),
-            badge("error", "error — exec<U+200B> <U+202E>failed", true),
+            badge("error", "Error — exec<U+200B> <U+202E>failed", true),
         );
         assert_eq!(
             status_badge(
@@ -727,13 +774,13 @@ mod tests {
             ),
             badge(
                 "exited",
-                "exited (code 7) — stopped<U+200B> <U+202E>by user",
+                "Exited (code 7) — stopped<U+200B> <U+202E>by user",
                 true
             ),
         );
         for (detail, shown) in [
-            ("", "error — (empty)"),
-            ("  ", "error — (whitespace only: 2 characters)"),
+            ("", "Error — (empty)"),
+            ("  ", "Error — (whitespace only: 2 characters)"),
         ] {
             assert_eq!(
                 status_badge(
@@ -759,30 +806,30 @@ mod tests {
     fn idle_alone_reads_the_unseen_flag() {
         assert_eq!(
             status_badge(&SessionStatus::Idle, None, Some(true)),
-            badge("idle unseen", "idle — new output", false),
+            badge("idle unseen", "Idle — new output", false),
             "unseen idle output gets its own class and its own hidden word"
         );
         assert_eq!(
             status_badge(&SessionStatus::Idle, None, Some(false)),
-            badge("idle", "idle", false),
+            badge("idle", "Idle", false),
             "explicitly seen is the ordinary idle badge"
         );
         assert_eq!(
             status_badge(&SessionStatus::Idle, None, None),
-            badge("idle", "idle", false),
+            badge("idle", "Idle", false),
             "an old helm that never answers the question draws the SAME ordinary idle \
              badge every other idle row gets — there is no separate legacy colour"
         );
         for unseen in [None, Some(true), Some(false)] {
             assert_eq!(
                 status_badge(&SessionStatus::Running, None, unseen),
-                badge("running", "running", false),
+                badge("running", "Running", false),
                 "a pulsing dot already says \"look here\"; running ignores unseen \
                  entirely: {unseen:?}"
             );
             assert_eq!(
                 status_badge(&SessionStatus::Waiting, None, unseen),
-                badge("waiting", "waiting", false),
+                badge("waiting", "Waiting", false),
                 "waiting is already an attention colour and ignores unseen too: {unseen:?}"
             );
         }
@@ -847,7 +894,7 @@ mod tests {
                 Some("stopped by user"),
                 None
             ),
-            badge("exited", "exited — stopped by user", true)
+            badge("exited", "Exited — stopped by user", true)
         );
         assert_eq!(
             status_badge(
@@ -855,12 +902,12 @@ mod tests {
                 Some("stopped by user"),
                 None
             ),
-            badge("exited", "exited (code 0) — stopped by user", true),
+            badge("exited", "Exited (code 0) — stopped by user", true),
             "the code leads so it survives the badge's character cap ahead of a long annotation"
         );
         assert_eq!(
             status_badge(&SessionStatus::Running, Some("stopped by user"), None),
-            badge("running", "running", false),
+            badge("running", "Running", false),
             "an annotation must never describe a session that is running"
         );
     }
@@ -883,10 +930,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn delete_and_replace_wording_names_open_tabs() {
         let exited = SessionStatus::Exited { exit_code: Some(0) };
-        assert_eq!(
-            confirm_consequence(&exited, 0),
-            confirm_consequence_for_agent(&exited)
-        );
+        assert_eq!(confirm_consequence(&exited, 0), "Delete anyway:");
         assert_eq!(
             confirm_consequence(&exited, 1),
             "1 terminal tab is still open, and deleting closes it with everything running in \
@@ -898,10 +942,7 @@ mod tests {
         );
         assert_eq!(
             replace_consequence(&exited, 0),
-            format!(
-                "{}; {REPLACE_SUCCESSOR}",
-                replace_consequence_for_agent(&exited)
-            )
+            "Replacing discards the conversation; a fresh session with the same settings takes its place:"
         );
         // An Error session can have tabs (opening one needs a terminal, not
         // a live agent), so its prompt must not promise there is nothing
@@ -1008,18 +1049,18 @@ mod tests {
         ] {
             let wording = restart_consequence(&live);
             assert!(
-                wording.contains("still running") && wording.contains("stops the agent"),
+                wording.contains("Still running") && wording.contains("stops the agent"),
                 "{live:?} -> {wording}"
             );
         }
         let unknown = restart_consequence(&SessionStatus::Unknown);
         assert!(
-            unknown.contains("may still be running") && !unknown.contains("still running —"),
+            unknown.contains("may still be running") && !unknown.contains("Still running —"),
             "an unresolved status may not round up to a live status's certainty: {unknown}"
         );
         let exited = restart_consequence(&SessionStatus::Exited { exit_code: Some(0) });
         assert!(
-            !exited.contains("still running") && !exited.contains("nothing"),
+            !exited.contains("Still running") && !exited.contains("nothing"),
             "an exited agent may have left descendants that restart stops: {exited}"
         );
         for gone in [
@@ -1030,7 +1071,7 @@ mod tests {
         ] {
             let wording = restart_consequence(&gone);
             assert!(
-                wording.contains("nothing") && !wording.contains("still running"),
+                wording.contains("nothing") && !wording.contains("Still running"),
                 "{gone:?} -> {wording}"
             );
         }
@@ -1071,7 +1112,7 @@ mod tests {
         // The three levels line up with the three kinds of wording.
         assert!(confirm_consequence(&exited, 2).contains("terminal tabs are still open"));
         assert!(!confirm_consequence(&exited, 2).contains("still running"));
-        assert!(confirm_consequence(&SessionStatus::Running, 0).contains("still running"));
+        assert!(confirm_consequence(&SessionStatus::Running, 0).contains("Still running"));
     }
 
     /// Spec: the restart confirm consents to stopping a running agent exactly
@@ -1105,7 +1146,7 @@ mod tests {
         ] {
             assert!(!restart_prompt_stops_agent(&status), "{status:?}");
             assert!(
-                !restart_consequence(&status).contains("still running"),
+                !restart_consequence(&status).contains("Still running"),
                 "the prompt for {status:?} must not claim a running agent"
             );
         }
@@ -1279,7 +1320,7 @@ mod tests {
             }
         }
         assert!(
-            replace_with_consequence(&SessionStatus::Running, 0).starts_with("still running"),
+            replace_with_consequence(&SessionStatus::Running, 0).starts_with("Still running"),
             "a running source's launcher must lead with the kill warning"
         );
     }

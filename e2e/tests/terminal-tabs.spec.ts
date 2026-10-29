@@ -201,7 +201,7 @@ test("the strip labels tabs positionally and gives the agent terminal no close c
     await page.goto("/");
     await attachSession(page, id);
 
-    await expect(page.locator(".tab-strip .tab-agent")).toHaveText("agent");
+    await expect(page.locator(".tab-strip .tab-agent")).toHaveText("Agent");
     await expect(page.locator(".tab-slot")).toHaveCount(0);
     await expect(page.locator(".tab-close")).toHaveCount(0);
 

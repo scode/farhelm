@@ -84,7 +84,7 @@ for (const hiddenBy of ["status alone", "host and status", "neither"] as const) 
     if (hidden) await expect(page.locator(`[data-session-id="${target.id}"]`)).toHaveCount(0);
     else await expect(page.locator(`[data-session-id="${target.id}"]`)).toBeVisible();
     await page.keyboard.press("Control+Shift+k");
-    const dialog = page.getByRole("dialog", { name: "quick switcher" });
+    const dialog = page.getByRole("dialog", { name: "Quick switcher" });
     await expect(dialog.getByRole("combobox")).toBeFocused();
     await dialog.getByRole("combobox").fill(target.title);
     await expect(dialog.locator(".quick-switcher-results").getByRole("option")).toHaveCount(1);
@@ -130,7 +130,7 @@ for (const [before, after] of [["idle", "running"], ["running", "idle"]] as cons
     if (before === "idle") await expect(row).toBeVisible();
     else await expect(row).toHaveCount(0);
     await page.keyboard.press("Control+Shift+k");
-    const dialog = page.getByRole("dialog", { name: "quick switcher" });
+    const dialog = page.getByRole("dialog", { name: "Quick switcher" });
     await expect(dialog.getByRole("combobox")).toBeFocused();
     await dialog.getByRole("combobox").fill(target.title);
     const option = dialog.locator(".quick-switcher-results").getByRole("option");

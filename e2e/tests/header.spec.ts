@@ -357,7 +357,7 @@ test(
         restartPanelBox.y,
         "the restart confirmation must hang BENEATH the button that opened it",
       ).toBeGreaterThanOrEqual(restartBox.y + restartBox.height - 1);
-      const restartCancel = restartPanel.getByRole("button", { name: "cancel", exact: true });
+      const restartCancel = restartPanel.getByRole("button", { name: "Cancel", exact: true });
       await restartCancel.focus();
       await expect(restartCancel).toBeFocused();
       await page.keyboard.press("Escape");
@@ -372,7 +372,7 @@ test(
       await expect(restartMenu).toHaveCount(0);
       await expect(restartPanel).toHaveText(restartConsent, { useInnerText: true });
       await expect(restartPanel.locator(".restart-confirm")).toBeFocused();
-      await restartPanel.getByRole("button", { name: "cancel", exact: true }).click();
+      await restartPanel.getByRole("button", { name: "Cancel", exact: true }).click();
       await expect(restartPanel).toHaveCount(0);
 
       // A stopped session has a much longer badge than the live dot. It
@@ -382,7 +382,7 @@ test(
       const badge = page.locator(".session-details .status-badge");
       await expect(badge).toHaveClass(/\bexited\b/, { timeout: 20_000 });
       await expect(badge).toContainText("stopped by user");
-      await expect(badge).toHaveAttribute("data-tooltip", /exited.*stopped by user/);
+      await expect(badge).toHaveAttribute("data-tooltip", /Exited.*stopped by user/);
       for (const selector of PERSISTENT_ACTION_SELECTORS) {
         const control = page.locator(selector);
         await expect(control).toBeVisible();
@@ -654,7 +654,7 @@ test("header actions stay ordered, copy full values, and open the right flows", 
         message: "the directory copy must reach the native bridge untruncated",
       })
       .toEqual([cwd]);
-    await expect(copyButtons.nth(0)).toContainText("copied");
+    await expect(copyButtons.nth(0)).toContainText("Copied");
 
     await copyButtons.nth(1).click();
     await expect
@@ -662,21 +662,21 @@ test("header actions stay ordered, copy full values, and open the right flows", 
         message: "the command copy must reach the native bridge untruncated",
       })
       .toEqual([cwd, invocation]);
-    await expect(copyButtons.nth(1)).toContainText("copied");
+    await expect(copyButtons.nth(1)).toContainText("Copied");
 
     const replace = page.locator(".header-replace");
     await replace.click();
     const confirmation = page.locator(".header-replace-confirm");
     await expect(confirmation).toBeVisible();
     const replaceConsent = await confirmation.innerText();
-    await expect(confirmation.getByRole("button", { name: "replace", exact: true })).toHaveClass(
+    await expect(confirmation.getByRole("button", { name: "Replace", exact: true })).toHaveClass(
       /btn-danger/,
     );
-    const confirmReplace = confirmation.getByRole("button", { name: "replace", exact: true });
+    const confirmReplace = confirmation.getByRole("button", { name: "Replace", exact: true });
     await expect(confirmReplace, "a destructive prompt must own focus before the gap click").toBeFocused();
     await clickDialogGap(page, confirmation);
     await expect(confirmReplace, "empty strip space must leave Replace as the keyboard target").toBeFocused();
-    await confirmation.getByRole("button", { name: "cancel", exact: true }).click();
+    await confirmation.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(confirmation).toHaveCount(0);
 
     // Repeating Replace inside the split menu must not bypass the existing
@@ -686,7 +686,7 @@ test("header actions stay ordered, copy full values, and open the right flows", 
     await expect(replaceMenu).toHaveCount(0);
     await expect(confirmation).toHaveText(replaceConsent, { useInnerText: true });
     await expect(confirmReplace).toBeFocused();
-    await confirmation.getByRole("button", { name: "cancel", exact: true }).click();
+    await confirmation.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(confirmation).toHaveCount(0);
 
     const form = page.locator(".create-session-form");
@@ -782,7 +782,7 @@ test("details copy shows escaped peer text, copies raw bytes, and warns upward",
     // An ordinary value gets the ordinary feedback and no warning.
     await page.locator(".session-details .header-copy").nth(0).click();
     await expect(page.locator(".session-details .header-copy").nth(0).locator(".copy-feedback")).toHaveText(
-      "✓ copied",
+      "✓ Copied",
     );
     await expect(warning).toHaveCount(0);
   } finally {
@@ -851,7 +851,7 @@ for (const field of ["folder", "command"] as const) {
       await expect.poll(() => page.evaluate(() => (window as any).__headerCopies)).toEqual([unsafeValue]);
       const warning = page.locator(".session-details .copy-warning");
       const warningText = `⚠ the copied ${field} contains hidden characters, displayed as <U+…>`;
-      await expect(copy.locator(".copy-feedback")).toHaveText("✓ copied");
+      await expect(copy.locator(".copy-feedback")).toHaveText("✓ Copied");
       await expect(warning).toHaveText(warningText);
 
       refreshed = true;
@@ -861,7 +861,7 @@ for (const field of ["folder", "command"] as const) {
       // accessible description still expose the refreshed metadata.
       await expect(copy, "the safe metadata must actually reach the rendered field").toHaveAttribute("data-tooltip", `${safeValue} — click to copy`);
       await expect(copy).toHaveAccessibleDescription(`${safeValue} — click to copy`);
-      await expect(copy.locator(".copy-feedback")).toHaveText("✓ copied");
+      await expect(copy.locator(".copy-feedback")).toHaveText("✓ Copied");
       await expect(warning).toHaveText(warningText);
       expect(await page.evaluate(() => (window as any).__headerCopies), "refreshing must not replace the copied bytes").toEqual([unsafeValue]);
 
@@ -934,18 +934,18 @@ test("the header delete confirms in place and deletes through the list", async (
     // Cancelling is free: nothing is sent and the session stays.
     await deleteButton.click();
     await expect(confirmation).toBeVisible();
-    await expect(confirmation.locator(".confirm-consequence").first()).toContainText("still running");
+    await expect(confirmation.locator(".confirm-consequence").first()).toContainText("Still running");
     const buttonBox = (await deleteButton.boundingBox())!;
     const panelBox = (await confirmation.boundingBox())!;
     expect(panelBox.y, "the confirmation hangs beneath the delete button").toBeGreaterThanOrEqual(
       buttonBox.y + buttonBox.height - 1,
     );
-    await confirmation.getByRole("button", { name: "cancel", exact: true }).click();
+    await confirmation.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(confirmation).toHaveCount(0);
     expect(deleteUrls).toHaveLength(0);
 
     await deleteButton.click();
-    await expect(confirmation.getByRole("button", { name: "delete", exact: true })).toBeFocused();
+    await expect(confirmation.getByRole("button", { name: "Delete", exact: true })).toBeFocused();
     await page.keyboard.press("Enter");
     await expect(row(page, live.id)).toHaveCount(0, { timeout: 20_000 });
     // The main pane lets go of the deleted session. Auto-select may open
@@ -964,7 +964,7 @@ test("the header delete confirms in place and deletes through the list", async (
         { timeout: 20_000 },
       )
       .toBe("exited");
-    await expect(row(page, ended.id).locator(".status-badge")).toHaveText(/exited/, { timeout: 20_000 });
+    await expect(row(page, ended.id).locator(".status-badge")).toHaveText(/Exited/, { timeout: 20_000 });
     await row(page, ended.id).locator(".session-row-open").click();
     await expect(page.locator(".session-topbar")).toBeVisible();
     await deleteButton.click();
@@ -972,11 +972,11 @@ test("the header delete confirms in place and deletes through the list", async (
     // The premise is the prompt the user reads, not the sidebar: the header
     // refreshes its own detail independently, and until it has the ended
     // status its prompt still warns of a live agent (and rightly sends no
-    // precondition). "delete anyway:" is the ended, tab-less wording.
-    await expect(confirmation.locator(".confirm-consequence").first()).toHaveText("delete anyway:", {
+    // precondition). "Delete anyway:" is the ended, tab-less wording.
+    await expect(confirmation.locator(".confirm-consequence").first()).toHaveText("Delete anyway:", {
       timeout: 20_000,
     });
-    await confirmation.getByRole("button", { name: "delete", exact: true }).click();
+    await confirmation.getByRole("button", { name: "Delete", exact: true }).click();
     await expect(row(page, ended.id)).toHaveCount(0, { timeout: 20_000 });
     expect(deleteUrls).toHaveLength(2);
     expect(deleteUrls[1].searchParams.get("only_if_nothing_alive")).toBe("true");
@@ -1078,7 +1078,7 @@ test("a committed delete shows its progress until the reply lands", async ({ pag
 
     // Accepted, from the header this time: the same progress, then the row goes.
     await page.locator(".header-delete").click();
-    await page.locator(".header-delete-confirm").getByRole("button", { name: "delete", exact: true }).click();
+    await page.locator(".header-delete-confirm").getByRole("button", { name: "Delete", exact: true }).click();
     await expect.poll(() => release !== undefined, { message: "the DELETE reached the route" }).toBe(true);
     await expect(rowProgress).toHaveText("Stopping agent…");
     await expect(headerProgress).toHaveText("Stopping agent…");

@@ -153,7 +153,7 @@ test("a clipped file disclosure refuses a click until the window fits", async ({
     })).toBe(true);
     expect(transfers).toBe(0);
     await page.keyboard.press("Control+Shift+k");
-    const switcher = page.getByRole("dialog", { name: "quick switcher" });
+    const switcher = page.getByRole("dialog", { name: "Quick switcher" });
     await expect(switcher).toBeVisible();
     await expect.poll(() => notice.evaluate(el => !!el.closest('[inert]'))).toBe(true);
     await expect.poll(() => notice.evaluate(el => Number(getComputedStyle(el).zIndex))).toBe(12);

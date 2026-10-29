@@ -1301,10 +1301,10 @@ test("the quick switcher row launches through the fresh direct path", async ({ p
     await page.goto("/");
     await expect(page.locator(".quick-switcher-trigger")).toHaveCount(1);
     await page.keyboard.press("Control+Shift+k");
-    const dialog = page.getByRole("dialog", { name: "quick switcher" });
+    const dialog = page.getByRole("dialog", { name: "Quick switcher" });
     await expect(dialog.getByRole("combobox")).toBeFocused();
     const quick = dialog.locator(".quick-switcher-quick-launch");
-    await expect(quick).toContainText("mark a template");
+    await expect(quick).toContainText("Mark a template");
     await expect(dialog.getByRole("option").first()).toHaveAttribute("aria-selected", "true");
     await expect(quick).toHaveAttribute("aria-selected", "false");
     await patchPreferences(request, { quick_launch_template: name });

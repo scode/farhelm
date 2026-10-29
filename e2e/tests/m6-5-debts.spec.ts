@@ -126,7 +126,7 @@ test.describe("the M6.5 test debts", () => {
     await expect(row(page, session.id)).toBeVisible({ timeout: 20_000 });
     // The row must be showing a LIVE status before the stop, or there is
     // nothing for a stale reply to resurrect.
-    await expect(row(page, session.id).locator(".status-badge")).toHaveText(/running|idle|waiting/, {
+    await expect(row(page, session.id).locator(".status-badge")).toHaveText(/Running|Idle|Waiting/, {
       timeout: 30_000,
     });
 
@@ -160,7 +160,7 @@ test.describe("the M6.5 test debts", () => {
     // the outcome the stale walk must not undo.
     await reads.waitForCaptures(2);
     reads.release(2);
-    await expect(row(page, session.id).locator(".status-badge")).toHaveText(/exited/, {
+    await expect(row(page, session.id).locator(".status-badge")).toHaveText(/Exited/, {
       timeout: 20_000,
     });
 
@@ -179,11 +179,11 @@ test.describe("the M6.5 test debts", () => {
       row(page, session.id).locator(".status-badge"),
       "a reply asked for before the stop must not speak for the screen after it — and with the " +
         "repair still held there is nothing else here to correct it",
-    ).toHaveText(/exited/);
+    ).toHaveText(/Exited/);
 
     // And the repair, when it is finally allowed to run, agrees.
     reads.releaseAll();
-    await expect(row(page, session.id).locator(".status-badge")).toHaveText(/exited/, {
+    await expect(row(page, session.id).locator(".status-badge")).toHaveText(/Exited/, {
       timeout: 20_000,
     });
   });
@@ -250,7 +250,7 @@ test.describe("the M6.5 test debts", () => {
     await feed.waitForConnection(1);
     feed.notify(1);
     await expect(row(page, session.id)).toBeVisible({ timeout: 20_000 });
-    await expect(row(page, session.id).locator(".status-badge")).toHaveText(/exited/, {
+    await expect(row(page, session.id).locator(".status-badge")).toHaveText(/Exited/, {
       timeout: 20_000,
     });
     await row(page, session.id).locator(".session-row-open").click();

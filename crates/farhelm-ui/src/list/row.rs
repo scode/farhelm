@@ -296,7 +296,7 @@ fn row_class(stale: bool, selected: bool, menu_open: bool) -> &'static str {
 /// was cut. Escape before clamping so hidden characters are visible and
 /// the shared clamp can preserve whole escape tokens at its boundary.
 fn menu_label(title: &crate::peer::PeerText) -> String {
-    format!("session actions for {}", clamp_title(title))
+    format!("Session actions for {}", clamp_title(title))
 }
 
 /// Split the header's saved launch facts into peer and app-authored runs.
@@ -624,11 +624,11 @@ fn launch_badge(session: &Session) -> AgentBadge {
             command
                 .agent
                 .map(harness_name)
-                .map_or_else(|| "command".to_string(), str::to_string),
+                .map_or_else(|| "Command".to_string(), str::to_string),
         ),
         Some(crate::SessionLaunch::Legacy { .. })
         | Some(crate::SessionLaunch::Agent { .. })
-        | None => (kind_glyph(session.agent_kind), "command".to_string()),
+        | None => (kind_glyph(session.agent_kind), "Command".to_string()),
     };
     description.push_str(" — ");
     description.push_str(permission_description(permission));
@@ -1114,9 +1114,7 @@ pub(super) fn SessionRow(
     // must match SessionSummarySource even for a presentation-unsafe suffix.
     let card_id = format!("session-summary-{}", session.id.raw());
     let card_session = session.clone();
-    let menu_state = badge
-        .as_ref()
-        .map(|badge| badge.class.split_whitespace().next().unwrap_or(badge.class));
+    let menu_state = badge.as_ref().map(crate::status::StatusBadge::label);
     let menu_summary_parts = menu_header_summary_parts(&session, menu_state);
     // Live statuses occupy the fixed leading slot as dots. In compact mode an
     // ended status uses that same slot for an icon; noncompact rows put its
@@ -1199,9 +1197,9 @@ pub(super) fn SessionRow(
     // otherwise — the label follows the CURRENT predicate every render,
     // never a value captured once.
     let mark_seen_label = if unseen == Some(true) {
-        "mark read"
+        "Mark read"
     } else {
-        "mark unread"
+        "Mark unread"
     };
     // The value this row's toggle click sends: clearing the seen stamp
     // (`None`) when marking unread, or the row's current effective activity
@@ -1228,11 +1226,11 @@ pub(super) fn SessionRow(
     // instead. Escape before shortening, as the toggle does, so its spoken
     // title has the same spelling as the visible confirmation quote.
     let prompt_label = if confirming {
-        format!("delete confirmation for {}", clamp_title(&session.title))
+        format!("Delete confirmation for {}", clamp_title(&session.title))
     } else if confirming_replace {
-        format!("replace confirmation for {}", clamp_title(&session.title))
+        format!("Replace confirmation for {}", clamp_title(&session.title))
     } else {
-        format!("rename {}", clamp_title(&session.title))
+        format!("Rename {}", clamp_title(&session.title))
     };
     // The separator earns its place only when something actually
     // precedes delete. Rename is unconditional today, so this is always
@@ -1769,7 +1767,7 @@ pub(super) fn SessionRow(
                                 }
                             }
                             if identity.pinned {
-                                span { class: "session-pin", role: "img", aria_label: "pinned", "data-tooltip": "pinned", "\u{f08d}" }
+                                span { class: "session-pin", role: "img", aria_label: "Pinned", "data-tooltip": "Pinned", "\u{f08d}" }
                             }
                             PeerTitle {
                                 class: title_class,
@@ -1954,7 +1952,7 @@ pub(super) fn SessionRow(
                     // legally run to tens of KB and an accessible name is
                     // read aloud in full.
                     aria_label: menu_label(&session.title),
-                    "data-tooltip": "session actions: rename, clone, replace, stop, delete and more",
+                    "data-tooltip": "Session actions: rename, clone, replace, stop, delete and more",
                     aria_expanded: menu_open,
                     // What this button opens, in the vocabulary the ARIA
                     // menu-button pattern uses — the counterpart of the
@@ -2157,7 +2155,7 @@ pub(super) fn SessionRow(
                                 button {
                                     r#type: "button",
                                     class: "btn btn-neutral confirm-cancel",
-                                    "data-tooltip": "cancel: keep this session",
+                                    "data-tooltip": "Cancel: keep this session",
                                     // A disabled confirming answer cannot receive
                                     // focus; keep a usable escape hatch instead.
                                     autofocus: busy,
@@ -2166,12 +2164,12 @@ pub(super) fn SessionRow(
                                             on_cancel_delete.call((cancel_id.clone(), token));
                                         }
                                     },
-                                    "cancel"
+                                    "Cancel"
                                 }
                                 button {
                                     r#type: "button",
                                     class: "btn btn-danger confirm-delete",
-                                    "data-tooltip": "delete this session and its state now",
+                                    "data-tooltip": "Delete this session and its state now",
                                     // Disabled while the shared token is held:
                                     // the handler refuses then anyway (keeping
                                     // the prompt), and the attribute is that
@@ -2194,7 +2192,7 @@ pub(super) fn SessionRow(
                                             ));
                                         }
                                     },
-                                    "confirm delete"
+                                    "Confirm delete"
                                 }
                             }
                         } else if confirming_replace {
@@ -2228,19 +2226,19 @@ pub(super) fn SessionRow(
                                 button {
                                     r#type: "button",
                                     class: "btn btn-neutral replace-cancel",
-                                    "data-tooltip": "cancel: keep this session as it is",
+                                    "data-tooltip": "Cancel: keep this session as it is",
                                     autofocus: busy,
                                     onclick: move |_| {
                                         if let Some(token) = cancel_replace_question.clone() {
                                             on_cancel_replace.call((cancel_replace_id.clone(), token));
                                         }
                                     },
-                                    "cancel"
+                                    "Cancel"
                                 }
                                 button {
                                     r#type: "button",
                                     class: "btn btn-danger confirm-replace",
-                                    "data-tooltip": "replace this session now, as described",
+                                    "data-tooltip": "Replace this session now, as described",
                                     // See confirm-delete: refusal made visible.
                                     disabled: busy,
                                     autofocus: !busy,
@@ -2251,7 +2249,7 @@ pub(super) fn SessionRow(
                                             on_confirm_replace.call((confirm_replace_source.clone(), token));
                                         }
                                     },
-                                    "confirm replace"
+                                    "Confirm replace"
                                 }
                             }
                         } else {
@@ -2328,13 +2326,13 @@ pub(super) fn SessionRow(
                                         r#type: "button",
                                         class: "btn menu-item session-row-menu-item session-row-rename",
                                         role: "menuitem",
-                                        aria_label: "rename",
+                                        aria_label: "Rename",
                                         aria_describedby: "session-menu-rename-description",
                                         "data-tooltip-anchor": "panel",
                                         "data-tooltip": if selected {
-                                            format!("rename: give this session a new title ({})", crate::SESSION_RENAME_SHORTCUT)
+                                            format!("Rename: give this session a new title ({})", crate::SESSION_RENAME_SHORTCUT)
                                         } else {
-                                            "rename: give this session a new title".to_string()
+                                            "Rename: give this session a new title".to_string()
                                         },
                                         aria_disabled: if busy { "true" },
                                         tabindex: if menu_tab_stop == Some(MenuAction::Rename) { "0" } else { "-1" },
@@ -2366,7 +2364,7 @@ pub(super) fn SessionRow(
                                         },
                                         MenuActionIcon { action: MenuAction::Rename }
                                         menu_panel::MenuItemCopy {
-                                            label: rsx! { "rename" },
+                                            label: rsx! { "Rename" },
                                             description_id: "session-menu-rename-description",
                                             description: rsx! { "Give this session a new title" },
                                         }
@@ -2469,7 +2467,7 @@ pub(super) fn SessionRow(
                                     r#type: "button",
                                     class: "btn menu-item session-row-menu-item session-row-clone",
                                     role: "menuitem",
-                                    aria_label: "clone",
+                                    aria_label: "Clone",
                                     aria_describedby: "session-menu-clone-description",
                                     aria_disabled: if busy { "true" },
                                     tabindex: if menu_tab_stop == Some(MenuAction::Clone) { "0" } else { "-1" },
@@ -2497,9 +2495,9 @@ pub(super) fn SessionRow(
                                     },
                                     MenuActionIcon { action: MenuAction::Clone }
                                     menu_panel::MenuItemCopy {
-                                        label: rsx! { "clone" },
+                                        label: rsx! { "Clone" },
                                         description_id: "session-menu-clone-description",
-                                        description: rsx! { "new session, keep this one" },
+                                        description: rsx! { "New session, keep this one" },
                                     }
                                 }
                                 // Between clone and replace: clone's exact
@@ -2519,7 +2517,7 @@ pub(super) fn SessionRow(
                                     r#type: "button",
                                     class: "btn menu-item session-row-menu-item session-row-replace-with",
                                     role: "menuitem",
-                                    aria_label: "replace with",
+                                    aria_label: "Replace with",
                                     aria_describedby: "session-menu-replace-with-description",
                                     aria_disabled: if busy { "true" },
                                     tabindex: if menu_tab_stop == Some(MenuAction::ReplaceWith) { "0" } else { "-1" },
@@ -2547,9 +2545,9 @@ pub(super) fn SessionRow(
                                     },
                                     MenuActionIcon { action: MenuAction::ReplaceWith }
                                     menu_panel::MenuItemCopy {
-                                        label: rsx! { "replace with…" },
+                                        label: rsx! { "Replace with…" },
                                         description_id: "session-menu-replace-with-description",
-                                        description: rsx! { "edit settings, then swap" },
+                                        description: rsx! { "Edit settings, then swap" },
                                     }
                                 }
                                 // Replace with only opens an editable launcher;
@@ -2571,7 +2569,7 @@ pub(super) fn SessionRow(
                                     r#type: "button",
                                     class: "btn menu-item menu-danger session-row-menu-item session-row-replace",
                                     role: "menuitem",
-                                    aria_label: "replace",
+                                    aria_label: "Replace",
                                     aria_describedby: "session-menu-replace-description",
                                     aria_disabled: if busy { "true" },
                                     tabindex: if menu_tab_stop == Some(MenuAction::Replace) { "0" } else { "-1" },
@@ -2599,9 +2597,9 @@ pub(super) fn SessionRow(
                                     },
                                     MenuActionIcon { action: MenuAction::Replace }
                                     menu_panel::MenuItemCopy {
-                                        label: rsx! { "replace" },
+                                        label: rsx! { "Replace" },
                                         description_id: "session-menu-replace-description",
-                                        description: rsx! { "fresh conversation, same settings" },
+                                        description: rsx! { "Fresh conversation, same settings" },
                                     }
                                 }
                                 if controls.stop {
@@ -2610,7 +2608,7 @@ pub(super) fn SessionRow(
                                         r#type: "button",
                                         class: "btn menu-item menu-danger session-row-menu-item session-row-stop",
                                         role: "menuitem",
-                                        aria_label: "stop",
+                                        aria_label: "Stop",
                                         aria_describedby: "session-menu-stop-description",
                                         aria_disabled: if busy { "true" },
                                         tabindex: if menu_tab_stop == Some(MenuAction::Stop) { "0" } else { "-1" },
@@ -2642,9 +2640,9 @@ pub(super) fn SessionRow(
                                         },
                                         MenuActionIcon { action: MenuAction::Stop }
                                         menu_panel::MenuItemCopy {
-                                            label: rsx! { "stop" },
+                                            label: rsx! { "Stop" },
                                             description_id: "session-menu-stop-description",
-                                            description: rsx! { "ends the agent and its processes" },
+                                            description: rsx! { "Ends the agent and its processes" },
                                         }
                                     }
                                 }
@@ -2660,7 +2658,7 @@ pub(super) fn SessionRow(
                                         r#type: "button",
                                         class: "btn menu-item menu-danger session-row-menu-item session-row-delete",
                                         role: "menuitem",
-                                        aria_label: "delete",
+                                        aria_label: "Delete",
                                         aria_describedby: "session-menu-delete-description",
                                         aria_disabled: if busy { "true" },
                                         tabindex: if menu_tab_stop == Some(MenuAction::Delete) { "0" } else { "-1" },
@@ -2692,9 +2690,9 @@ pub(super) fn SessionRow(
                                         },
                                         MenuActionIcon { action: MenuAction::Delete }
                                         menu_panel::MenuItemCopy {
-                                            label: rsx! { "delete" },
+                                            label: rsx! { "Delete" },
                                             description_id: "session-menu-delete-description",
-                                            description: rsx! { "removes the session and its state" },
+                                            description: rsx! { "Removes the session and its state" },
                                         }
                                     }
                                 }
@@ -2738,7 +2736,7 @@ pub(super) fn SessionRow(
             }
         }
         if pin_separator {
-            div { class: "session-pin-separator", role: "separator", aria_label: "pinned sessions" }
+            div { class: "session-pin-separator", role: "separator", aria_label: "Pinned sessions" }
         }
         SessionSummarySource {
             session: card_session,
@@ -3014,8 +3012,8 @@ mod tests {
             ..row_specimen("structured")
         };
         assert_eq!(
-            detail_text(&menu_header_summary_parts(&structured, Some("running"))),
-            "Claude · YOLO · running"
+            detail_text(&menu_header_summary_parts(&structured, Some("Running"))),
+            "Claude · YOLO · Running"
         );
 
         let legacy = Session {
@@ -3058,7 +3056,7 @@ mod tests {
     /// the typed shared clamp escapes peer text before shortening it.
     #[farhelm_testtrace::test]
     fn menu_label_wraps_the_clamped_title_in_session_wording() {
-        assert_eq!(menu_label(&"short".into()), "session actions for short");
+        assert_eq!(menu_label(&"short".into()), "Session actions for short");
     }
 
     /// Every row title surface escapes peer formatting, including accessible names.
@@ -3246,15 +3244,15 @@ mod tests {
                     })
                     .count()
             };
-            let actions_name = format!("session actions for {accessible_title}");
+            let actions_name = format!("Session actions for {accessible_title}");
             assert_eq!(
                 attribute("aria-label", &|value: &str| value == actions_name),
                 if prompt.0 || prompt.1 { 1 } else { 2 },
                 "{prompt:?}: the toggle and ordinary menu use the escaped, shortened title"
             );
             for (prefix, active) in [
-                ("delete confirmation for", prompt.0),
-                ("replace confirmation for", prompt.1),
+                ("Delete confirmation for", prompt.0),
+                ("Replace confirmation for", prompt.1),
             ] {
                 let name = format!("{prefix} {accessible_title}");
                 assert_eq!(

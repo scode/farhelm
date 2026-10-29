@@ -124,12 +124,12 @@ pub(crate) fn RenameForm(
                 class: "dialog-body rename-body",
                 handle: dialog_handle(generation),
                 selector: ".rename-body",
-                name: "session title",
+                name: "Session title",
                 recovery: RecoveryFocus::new(".rename-input", None, true, RecoveryDelay::OneFrame),
                 {children}
                 textarea {
                     class: "rename-input",
-                    aria_label: "new session title",
+                    aria_label: "New session title",
                     rows: "1",
                     // A textarea does not submit its form on Enter, so the
                     // single-line behavior is implemented here: Enter submits
@@ -185,7 +185,7 @@ pub(crate) fn RenameForm(
                     button {
                         r#type: "button",
                         class: "btn btn-neutral rename-cancel",
-                        "data-tooltip": "cancel: keep the current title",
+                        "data-tooltip": "Cancel: keep the current title",
                         disabled: busy,
                         onclick: move |_| {
                             if busy_now.call(()) {
@@ -198,7 +198,7 @@ pub(crate) fn RenameForm(
                     button {
                         r#type: "submit",
                         class: "btn btn-primary rename-submit",
-                        "data-tooltip": "save the new title",
+                        "data-tooltip": "Save the new title",
                         disabled: submit_disabled,
                         aria_disabled: if busy { "true" },
                         onclick: move |evt| {
@@ -277,7 +277,7 @@ pub(crate) fn RenameDialog(
                 "data-rename-generation": "{generation}",
                 role: "dialog",
                 aria_modal: "true",
-                aria_label: "rename session",
+                aria_label: "Rename session",
                 // The shared boundary can park focus here after an empty-space
                 // click or lost control, without adding a sequential Tab stop.
                 tabindex: "-1",

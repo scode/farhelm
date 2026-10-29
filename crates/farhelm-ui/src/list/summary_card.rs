@@ -78,12 +78,7 @@ pub(super) fn SessionSummarySource(
     });
     let status = badge.map(|badge| {
         let word = if badge.visible {
-            badge
-                .class
-                .split_whitespace()
-                .next()
-                .unwrap_or(badge.class)
-                .to_string()
+            badge.label().to_string()
         } else {
             badge.text
         };
@@ -121,7 +116,7 @@ pub(super) fn SessionSummarySource(
                 div { class: "session-summary-body",
                     if host_known {
                         div { class: "session-summary-row",
-                            span { class: "session-summary-label", "host" }
+                            span { class: "session-summary-label", "Host" }
                             div { class: "session-summary-value session-summary-host",
                                 SessionHostIcon { locality, icon: host_icon, color: host_color }
                                 if let Some(name) = &session.host_name {
@@ -132,13 +127,13 @@ pub(super) fn SessionSummarySource(
                     }
                     if let Some(checkout) = checkout {
                         div { class: "session-summary-row",
-                            span { class: "session-summary-label", "checkout" }
+                            span { class: "session-summary-label", "Checkout" }
                             PeerLine { class: "session-summary-value".to_string(), parts: checkout }
                         }
                     }
                     if !session.cwd.raw().is_empty() {
                         div { class: "session-summary-row",
-                            span { class: "session-summary-label", "directory" }
+                            span { class: "session-summary-label", "Directory" }
                             PeerLine {
                                 class: "session-summary-value session-summary-path".to_string(),
                                 parts: vec![DetailPart::peer(session.cwd.clone())],
@@ -147,20 +142,20 @@ pub(super) fn SessionSummarySource(
                     }
                     if let Some(started) = started {
                         div { class: "session-summary-row",
-                            span { class: "session-summary-label", "started" }
+                            span { class: "session-summary-label", "Started" }
                             span { class: "session-summary-value font-mono", "{started}" }
                         }
                     }
                     if let Some(last_active) = last_active {
                         div { class: "session-summary-row",
-                            span { class: "session-summary-label", "last active" }
+                            span { class: "session-summary-label", "Last active" }
                             span { class: "session-summary-value font-mono", "{last_active}" }
                         }
                     }
                 }
                 div { class: "session-summary-footer",
-                    span { "click to open" }
-                    span { "⋯ for actions" }
+                    span { "Click to open" }
+                    span { "⋯ For actions" }
                 }
             }
         }
@@ -332,7 +327,7 @@ mod tests {
         live.stale = true;
         let live_edits = render(live.clone(), HostLocality::Unknown, None);
         let live_text = text_values(&live_edits);
-        assert!(live_text.contains(&"idle — new output".to_string()));
+        assert!(live_text.contains(&"Idle — new output".to_string()));
         assert!(live_text.contains(&live.title.escaped()));
         assert!(
             !live_text
@@ -350,8 +345,8 @@ mod tests {
             exit_code: Some(42),
         };
         let ended_text = text_values(&render(ended, HostLocality::Unknown, None));
-        assert!(ended_text.contains(&"exited".to_string()));
-        assert!(!ended_text.contains(&"exited (code 42)".to_string()));
+        assert!(ended_text.contains(&"Exited".to_string()));
+        assert!(!ended_text.contains(&"Exited (code 42)".to_string()));
     }
 
     /// Text nodes, rather than serialized HTML, are what the tooltip copies.
