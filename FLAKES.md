@@ -57,6 +57,35 @@ paragraphs. Classes are `readiness`, `replay-live`, `fixture-premise`, `peer-lif
 Confidence is `established`, `hypothesis`, or `unknown`; `Cause:` is the last line. These fields apply only to new
 entries. Missing historical fields are missing evidence, not an implicit cause classification.
 
+## 2026-10-29 — folder dropdown keyboard reset visibility (e2e/tests/sidebar.spec.ts)
+
+`composer folder dropdown preserves keyboard launch and grouped history` failed in WebKit during browser sweep
+`e0526613-832f-4fba-b023-b38cc064e5c2`: the reset option was selected but remained outside the viewport for five
+seconds. Three isolated classification reruns passed (`e3ebe846-ebc4-44da-9a7c-cf6981037ca2`,
+`eaf03d42-4533-48b6-9fc6-21ffa08944f1`, `7a80d996-edd8-46aa-8d82-f1ca43c6d5c8`). Cause unknown; open and excluded from
+subsequent sweeps. No further reproduction or fix was attempted.
+
+```text
+Error: keyboard navigation must reveal a reset below the scroll cap
+Expected: in viewport
+Received: viewport ratio 0
+Timeout: 5000ms
+```
+
+Evidence: clean commit `32299b8eb13a37b33e5fec139a76ac269e8ea2d1` on shared x86_64 Linux; full browser selection on
+Chromium and WebKit excluding recorded flakes, three workers with one stack each, zero retries. The battery took 8996
+seconds; the individual test's total duration and concurrent load at failure were not extracted. Earlier initial checks
+observed unrelated browser/build load; that does not establish load at this failure. Playwright 1.64.0, Node 26.12.1,
+locale C.UTF-8. Recorded tmux 3.7c executable SHA256:
+`384c071bf93d416a8f1d884ceb13df0cebabfabe885a3f1408f6144f17fda723`. The recorder removed ambient `FARHELM_*` markers;
+child inputs were `FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR`. Retained private run directories are
+addressed by the UUIDs above and expire with temporary-file cleanup. The recorder marked its bounded browser report
+incomplete; the driver supplied the named failure and classification results independently.
+
+Class: unknown
+
+Cause: unknown
+
 ## 2026-10-18 — stop and delete through the HTTP API (e2e/tests/terminal.spec.ts)
 
 `stop and delete a session through the HTTP API` saw `error` rather than `exited` for ten seconds after its stop request
