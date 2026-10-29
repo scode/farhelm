@@ -2219,7 +2219,7 @@ pub(crate) async fn exchange_token(base: &str, token: &str) -> Result<String, St
         return Err("the helm build changed; reload before authenticating".to_string());
     }
     if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
-        return Err("that token was not accepted".to_string());
+        return Err("That token was not accepted".to_string());
     }
     if !resp.status().is_success() {
         return Err(refusal_text("POST", &url, resp).await);
@@ -2231,7 +2231,7 @@ pub(crate) async fn exchange_token(base: &str, token: &str) -> Result<String, St
     resp.json::<DeviceExchange>()
         .await
         .map(|exchange| exchange.device_secret)
-        .map_err(|error| format!("the helm returned an unreadable device session: {error}"))
+        .map_err(|error| format!("The helm returned an unreadable device session: {error}"))
 }
 
 // ---------------------------------------------------------------------

@@ -407,18 +407,18 @@ pub(crate) fn install_native_device_secret(secret: String) {
 #[cfg(target_arch = "wasm32")]
 fn store_device_secret(secret: &str) -> Result<(), String> {
     let storage = web_sys::window()
-        .ok_or_else(|| "browser storage is unavailable".to_string())?
+        .ok_or_else(|| "Browser storage is unavailable".to_string())?
         .local_storage()
-        .map_err(|_| "browser storage is unavailable".to_string())?
-        .ok_or_else(|| "browser storage is unavailable".to_string())?;
+        .map_err(|_| "Browser storage is unavailable".to_string())?
+        .ok_or_else(|| "Browser storage is unavailable".to_string())?;
     storage
         .set_item(DEVICE_SECRET_KEY, secret)
-        .map_err(|_| "the browser refused to persist this device session".to_string())
+        .map_err(|_| "The browser refused to persist this device session".to_string())
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 fn store_device_secret(_secret: &str) -> Result<(), String> {
-    Err("device authentication is not available in this renderer yet".to_string())
+    Err("Device authentication is not available in this renderer yet".to_string())
 }
 
 /// Whether the next render must replace the application with the token form.
@@ -451,7 +451,7 @@ pub(crate) fn TokenPrompt() -> Element {
                     }
                     let submitted = token.peek().trim().to_string();
                     if submitted.is_empty() {
-                        error.set(Some("enter the token printed by `farhelm helm token show`".to_string()));
+                        error.set(Some("Enter the token printed by `farhelm helm token show`".to_string()));
                         return;
                     }
                     busy.set(true);
@@ -477,7 +477,7 @@ pub(crate) fn TokenPrompt() -> Element {
                                 #[cfg(not(target_arch = "wasm32"))]
                                 let reloading = false;
                                 if !reloading {
-                                    error.set(Some("signed in; reload the page to continue".to_string()));
+                                    error.set(Some("Signed in; reload the page to continue".to_string()));
                                     busy.set(false);
                                 }
                             }
@@ -511,7 +511,7 @@ pub(crate) fn TokenPrompt() -> Element {
                 button {
                     class: "btn btn-primary auth-submit",
                     r#type: "submit",
-                    "data-tooltip": "continue: sign in with this token",
+                    "data-tooltip": "Continue: sign in with this token",
                     disabled: *busy.read(),
                     if *busy.read() { "Checking…" } else { "Continue" }
                 }
