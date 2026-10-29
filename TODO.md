@@ -155,6 +155,80 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   found on 2026-10-28; the DeepSeek CLIs that turn up are third-party. Confirm the product and its binary first, then
   add it the way Kimi Code is to be added.
 
+- **Containerized sessions: Farhelm integration inside the container.** The first, experimental containerized sessions
+  (rootless podman) run like a launch with conversation hooks turned off: no hooks, no conversation capture for Restart,
+  no `farhelm agent` commands or spawning, no attachments from inside. Add the full integration, restricted so a
+  containerized agent cannot ask for a session outside its container.
+
+- **Containerized sessions: match the host account inside the container.** Consider running the agent with the same uid,
+  user name and paths as the user's host account, so files, paths and tools look the same inside and out, instead of the
+  image's uid-1000 user.
+
+- **Containerized sessions: Restart.** Containerized sessions cannot be restarted, because Farhelm captures no
+  conversation inside the container; Replace starts over in a new container instead. Support Restart (and Restart with)
+  by resuming the conversation the agent recorded in the session's container. Needs the conversation capture from the
+  integration entry above.
+
+- **Containerized sessions: `farhelm spawn` and CLI flags.** Let `farhelm spawn` and the other CLI entry points request
+  a containerized launch directly; today only the launcher, templates and launches copied from another session carry the
+  settings.
+
+- **Consider closing tabs on stop for ordinary sessions too.** Stopping a containerized session stops its whole
+  container, terminal tabs included, while stopping an ordinary session ends only the agent and leaves its tabs running.
+  Consider making ordinary sessions match.
+
+- **Stop containers an agent started through podman before killing processes.** Today Stop, tab close and Delete end a
+  podman container that an agent or tab started (`podman run -d`, say) only by killing its processes, because the
+  container's host-side helpers (podman's conmon and its network helper, pasta) stay in the scope of whatever started
+  them and inherit its `FARHELM_*` markers. Killing conmon that way leaves podman's record of the container stuck
+  ("stopping", or "running" with nothing behind it), and only `podman rm -f` clears it; a `--rm` container is never
+  cleaned up. Stop such containers through podman first, then run the existing sweep as the backstop. Findings from
+  2026-10-28, checked against rootless podman 4.9.3:
+  - Find them without scanning every process: read the operation's own scope (`cgroup.procs` of the agent's scope, a
+    tab's scope, or for Delete every scope of the session, which Delete already lists by name) and keep the processes
+    that are conmon. The scope is the attribution; no environment read is needed, so it also works for a process that
+    rewrote its environment.
+  - A container's main conmon names the container on its command line (`-c <id>`, `-n <name>`) and carries podman's
+    exact storage settings in its `--exit-command-arg` list (`--root`, `--runroot`, `--cgroup-manager`, `--tmpdir`, and
+    so on). Run `podman stop` with those settings so a container in non-default storage is still found.
+  - A conmon with `--exec` belongs to a `podman exec` session, not to a container the session started: the container may
+    be the user's own long-lived one. Never stop that container; ending the exec's conmon (as the sweep already does) is
+    the right cleanup there. An exec with a terminal ends by hangup when its conmon dies; one without a terminal does
+    not, which is a residual to state.
+  - Run podman with the `FARHELM_*` markers removed from its environment. Podman's shared per-user pause process
+    inherits the environment of whichever podman command recreates it, and it is shared with every rootless podman use
+    on the account. Killing it is safe (verified: podman recreates it on the next command, joining a running container's
+    namespaces, or making fresh ones when nothing runs), but a marked pause process gets swept for no reason.
+  - Stop in parallel, under a time bound, and treat podman's reported state rather than its exit status as the result:
+    `podman stop` can exit non-zero after a killed exec session even though the container stopped. A stop that fails or
+    hangs falls through to today's sweep, so the worst case stays today's messy state, never a stuck operation.
+  - Which operation stops which containers follows the scope: Stop stops what the agent started, tab close what that tab
+    started, Delete everything the session started. Containers started outside Farhelm, by systemd units or the user's
+    own shell, are never in a session's scope.
+  - Out of reach, unchanged: Docker containers (started by the root daemon, not by the agent's processes) and podman run
+    under `sudo` (root's conmon). On a host without a usable systemd user manager there are no scopes; the cheap
+    fallback is `podman ps` and checking each listed container's conmon for the session's markers, which costs one read
+    per container and covers only podman's default storage.
+  - The experimental containerized sessions stop their own container by name; this entry is about containers an agent
+    starts itself, in any session.
+
+- **Make the process sweep cheaper where scopes exist.** The stop, tab-close and Delete sweep finds escaped processes by
+  reading the environment of every process on the machine (`/proc/<pid>/environ`), which costs one read per process on
+  the host (about 900 on a dev box on 2026-10-28, against 5 in one session's scope). Where a launch or tab has its own
+  scope, selecting by the scope's `cgroup.procs` covers the same processes for a fraction of the cost. SPEC_impl.md
+  calls the marker sweep the backstop that always runs, including where a scope exists, because a scope can be left by a
+  process that runs `systemd-run --user --scope` itself; changing that is a SPEC decision, so weigh what the backstop
+  still catches against its cost before changing it. Hosts without a usable user manager keep the full sweep.
+
+- **Containerized sessions: localhost tunnels and file links.** Make localhost tunnels reach services listening inside a
+  session's container, and make file links in terminal output work for container paths outside the checkout. Until then,
+  a tunnel offered for a localhost URL a containerized agent prints reaches that port on the host, not in the container,
+  and file links are offered only inside the checkout.
+
+- **Containerized sessions: plain folders.** Consider allowing the Containerized option for "Where: folder" launches,
+  which only managed checkouts get today. Git breaks inside the container for a folder that is a git worktree or a
+  subfolder of a repository, since only the folder itself is mounted.
+
 ## Doc todo
 
 - Tell users that a working-copy (checkout) root must be a location only they can write: Farhelm is not designed for
@@ -533,6 +607,7 @@ are not.
 
 - Containerize agents on remote hosts or locally on the desktop, with Docker, cgroup-based isolation, or something
   similar. The cgroup scopes Farhelm already launches into track and reap an agent's processes; they do not isolate it.
+  Plan: `plans/queue/podman-sandbox.md`.
 
 - Replace xterm.js with libghostty via WebAssembly, assessed 2026-09-12 in `lore/2026-09-12-libghostty-assessment.md`.
   Native libghostty on macOS is ruled out there: it owns its own PTY and renders into an NSView, neither of which fits a
