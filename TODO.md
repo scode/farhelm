@@ -24,6 +24,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Revisit deferring Muse question recognition.** Decided on the maintainer's behalf on 2026-10-29 for the Muse
+  session-tracking plan: it ships conversation resume and working, idle and trust status for Muse, but not recognizing
+  questions or approval dialogs during a conversation, because no provider usable without the maintainer's credentials
+  could make Muse ask a real question. Until then a waiting Muse session can look idle. The alternative is to supply an
+  authenticated test provider (or a documented fixture protocol) so the executor can capture those screens.
+
 - **Fix menu highlighting.** In the host, session and restart menus, the first item stays highlighted when the pointer
   moves over another item, leaving two items highlighted. Check the other menus for the same problem and fix the shared
   cause if there is one.
