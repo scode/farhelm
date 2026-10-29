@@ -238,6 +238,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   surfaces update availability once the host list is open; when at least one host needs an update, show an upgrade arrow
   on that icon itself, so updates are visible at a glance.
 
+- **Make the "+ Terminal" control look distinct from a terminal tab.** The button that creates a new terminal is styled
+  so close to a real tab that it reads as another tab. Visually separate it from tabs, or otherwise make it clear that
+  it creates a terminal.
+
 ## Doc todo
 
 - Tell users that a working-copy (checkout) root must be a location only they can write: Farhelm is not designed for
