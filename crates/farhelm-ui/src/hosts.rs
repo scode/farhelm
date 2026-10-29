@@ -664,6 +664,9 @@ type RailMenuOpener = Callback<(Rc<MountedData>, MenuOpenIntent)>;
 /// actions never changes which sessions the list is showing.
 /// Unseen provisioning outcomes add an independent mark and explanation;
 /// they never replace the connection phase or the current operation's ring.
+/// Captions and expanded names are visual alternatives to the button's one
+/// accessible label. The fixed-size trigger also keeps its menu anchor and
+/// corner badges in place when the surrounding rail expands.
 #[component]
 fn HostRailAvatar(
     host: Host,
@@ -679,11 +682,12 @@ fn HostRailAvatar(
     let id = host.id;
     let mut handle = use_signal(|| None::<Rc<MountedData>>);
     let presentation = rail_presentation(&host.state, progress.as_ref(), update_available);
-    let name = if host.kind.is_this_machine() {
-        "This machine".to_owned()
-    } else {
-        gui_host_name(host.name.raw(), false)
-    };
+    let name = gui_host_name(host.name.raw(), host.kind.is_this_machine());
+    let short_name = host.short_name().escaped();
+    let destination = host
+        .destination
+        .as_ref()
+        .filter(|destination| destination.raw() != host.name.raw());
     let explanation = too_new_title(&host.state).unwrap_or_default();
     let tooltip = format!(
         "{name}: {}{}{}{}",
@@ -743,7 +747,14 @@ fn HostRailAvatar(
                         span { class: "status-dot" }
                     }
                 }
+                span { class: "host-rail-expanded", "aria-hidden": "true",
+                    span { class: "host-rail-expanded-name peer-value", dir: "ltr", "{name}" }
+                    if let Some(destination) = destination {
+                        span { class: "host-rail-destination peer-value", dir: "ltr", "{destination.escaped()}" }
+                    }
+                }
             }
+            span { class: "host-rail-caption peer-value", dir: "ltr", "aria-hidden": "true", "{short_name}" }
         }
     }
 }
@@ -2554,11 +2565,17 @@ pub(crate) fn HostsPanel(
     rsx! {
         nav { class: "host-rail", aria_label: "Hosts",
             onscroll: move |_| on_resize.call(()),
+        // Every narrow hit target, including padding and gaps, lives inside
+        // the scroller so wheel and touch gestures keep their native owner.
+        div { class: "host-rail-hover",
             button { r#type: "button", class: "btn host-rail-all",
                 aria_label: "All hosts", aria_pressed: selected_host.is_none(),
                 "data-tooltip": "All hosts: show sessions from every host",
                 onclick: move |_| choose_host.call(None),
-                "All"
+                span { "aria-hidden": "true", "All" }
+                span { class: "host-rail-expanded", "aria-hidden": "true",
+                    span { class: "host-rail-expanded-name", "All hosts" }
+                }
             }
             if let Some(list) = read.hosts() {
                 for host in list {
@@ -2599,7 +2616,11 @@ pub(crate) fn HostsPanel(
                 aria_label: "Add host", "data-tooltip": "Add host: connect a machine over SSH",
                 disabled: busy, onclick: move |_| open_add.call(true),
                 crate::icons::ActionIcon { glyph: crate::icons::ActionGlyph::Add }
+                span { class: "host-rail-expanded", "aria-hidden": "true",
+                    span { class: "host-rail-expanded-name", "Add host" }
+                }
             }
+        }
         }
         section { class: "hosts-panel",
             id: "host-management-panel", aria_label: "Host management",

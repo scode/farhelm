@@ -235,13 +235,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   which only managed checkouts get today. Git breaks inside the container for a folder that is a git worktree or a
   subfolder of a repository, since only the folder itself is mounted.
 
-- **Auto-assign a host alias from the left-most hostname label.** When a host is added, derive its alias automatically
-  from the left-most part of the hostname (for example, `my-server.example.com` becomes `my-server`) instead of leaving
-  it unset or requiring a manual pick. Plan: `plans/queue/host-short-names.md`.
-
-- **Make host aliases/names visible in the new layout.** Consider how the new host list can show each host's alias or
-  name at a glance; today they are easy to miss. Plan: `plans/queue/host-short-names.md`.
-
 - **Show all keybindings with command-/.** Add a keybinding that shows every keyboard shortcut at a glance, so users can
   discover them instead of having to remember them.
 

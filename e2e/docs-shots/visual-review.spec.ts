@@ -776,6 +776,18 @@ async function menuShots(page: Page, request: APIRequestContext, scenario: Scena
   const pinUrl = `/api/sessions/${encodeURIComponent(id)}/pin`;
   const panel = row.locator(".session-row-menu-panel");
   const window = [page.locator("body")];
+  /** Settle opening focus before preparing an ordinary pointer-menu picture.
+   * Rename can retain keyboard-visible focus after the preceding focus shot.
+   * Hovering the read-state command moves focus through the real menu policy
+   * and clears Rename's help without activating a command or hiding the DOM.
+   */
+  const openPointerMenu = async () => {
+    await openRowMenu(row);
+    await expect(panel.getByRole("menuitem").first()).toBeFocused();
+    const readState = panel.getByRole("menuitem", { name: /^Mark (read|unread)$/ });
+    await readState.hover();
+    await expect(readState).toBeFocused();
+  };
   // Cleanup can run after pointer activation. Re-establish menu-owned focus
   // before Escape so dismissal follows the same supported handoff as a user.
   const closeMenu = async () => {
@@ -791,7 +803,7 @@ async function menuShots(page: Page, request: APIRequestContext, scenario: Scena
     await expect(row).toHaveAttribute("data-session-pinned", "false");
     // Selecting establishes read state through the ordinary reveal path.
     await showSession(page, session);
-    await openRowMenu(row);
+    await openPointerMenu();
     await expect(panel.getByRole("menuitem")).toHaveCount(8);
     await expect(panel.locator(".menu-description")).toHaveCount(8);
     await expect(panel.getByRole("separator")).toHaveCount(4);
@@ -816,14 +828,14 @@ async function menuShots(page: Page, request: APIRequestContext, scenario: Scena
     await panel.getByRole("menuitem", { name: "Mark unread", exact: true }).click();
     await expect(panel).toBeHidden();
     await expect(row.locator(".status-badge.idle.unseen")).toHaveCount(1);
-    await openRowMenu(row);
+    await openPointerMenu();
     await expect(panel.getByRole("menuitem", { name: "Mark read", exact: true }))
       .toHaveAccessibleDescription("Treat the latest output as seen");
     await shot(page, `${name}-session-menu-mark-read`, window, { pad: 0 });
     await closeMenu();
     expect((await request.put(pinUrl, { data: { pinned: true } })).ok()).toBe(true);
     await expect(row).toHaveAttribute("data-session-pinned", "true");
-    await openRowMenu(row);
+    await openPointerMenu();
     await expect(panel.getByRole("menuitem", { name: "Unpin", exact: true }))
       .toHaveAccessibleDescription("Sort this session with the others again");
     await inspectMenu(page, panel);
@@ -832,7 +844,7 @@ async function menuShots(page: Page, request: APIRequestContext, scenario: Scena
 
     await page.setViewportSize({ ...viewport, height: 400 });
     await row.scrollIntoViewIfNeeded();
-    await openRowMenu(row);
+    await openPointerMenu();
     await expect(panel.getByRole("menuitem")).toHaveCount(8);
     expect(await panel.evaluate((element) => element.scrollHeight > element.clientHeight + 1),
       "the short-menu picture must exercise actual panel overflow").toBe(true);
@@ -1768,13 +1780,15 @@ async function settingsShots(page: Page, name: string, includePhone: boolean) {
   await expect(terminalChoices.locator(".terminal-link-description")).toHaveCount(3);
   await terminalChoices.scrollIntoViewIfNeeded();
   await shot(page, `${name}-settings-terminal`, window, { pad: 0 });
-  // API readback alone does not establish this mounted client's off state.
+  // Photograph both confirmation opt-outs and the background-update opt-in
+  // without enabling them; API readback alone does not prove the mounted state.
   const hostChoices = await selectSettingsSection(page, "hosts");
-  for (const choice of await hostChoices.getByRole("checkbox").all()) {
+  await expect(hostChoices.getByRole("checkbox")).toHaveCount(3);
+  for (const name of ["Set up new hosts without asking", "Remove hosts without asking", "Update remote hosts automatically"]) {
+    const choice = hostChoices.getByRole("checkbox", { name, exact: true });
     await expect(choice).toBeEnabled();
     await expect(choice).not.toBeChecked();
   }
-  await expect(hostChoices.getByRole("checkbox")).toHaveCount(2);
   await shot(page, `${name}-settings-hosts`, window, { pad: 0 });
   const trust = await selectSettingsSection(page, "agent trust");
   // Enabling these real resources would affect future launches, not just pixels.
@@ -3109,6 +3123,9 @@ for (const colorScheme of ["dark", "light"] as const) {
         await expect(refusal).toBeHidden();
         await sameConnectedHost(request, originalHost);
 
+        // The refusal opens Hosts through its menu helper. Return through the
+        // real panel control before using Templates in the concealed session UI.
+        await showSessionsPanel(page);
         await page.locator(".templates-button").click();
         const templates = page.locator(".templates-dialog");
         await expect(templates.locator(".templates-sidebar")).toHaveAttribute("aria-busy", "false");
@@ -3116,6 +3133,11 @@ for (const colorScheme of ["dark", "light"] as const) {
         await expect(templates.locator(".templates-editor-heading h3")).toHaveText("Edit template");
         await expect(templates.getByRole("button", { name: "Number shortcut codex-deep", exact: true }))
           .toHaveCSS("font-family", /JetBrains Mono/);
+        await expect(templates.locator(".templates-name")).toHaveValue("codex-deep");
+        await expect(templates.locator(".templates-name")).toBeFocused();
+        // Selection hands focus to Name on the next frame. Dismiss its help
+        // through a real dialog gap before taking this neutral editor picture.
+        await clickDialogGap(page, templates);
         await shot(page, `${name}-template-editor`, window, { pad: 0 });
         const selectedTemplate = templates.locator('.templates-row[aria-pressed="true"]');
         await keyboardFocusControl(page, templates, selectedTemplate);

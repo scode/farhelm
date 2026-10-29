@@ -1181,6 +1181,9 @@ test("a row with unbroken oversized fields stays contained and stacked in the si
     const target = row(page, session.id);
     await expect(target).toBeVisible({ timeout: 20_000 });
 
+    // Measure the confirmed local host's short label, rather than the
+    // provisional helm spelling shown before the registry arrives.
+    await expect(target).toHaveAttribute("data-host-locality", "local");
     const sideBox = (await page.locator(".app-sidebar").boundingBox())!;
     const rowBox = (await target.boundingBox())!;
     expect(rowBox.width).toBeLessThanOrEqual(sideBox.width + 1);
@@ -1216,7 +1219,7 @@ test("a row with unbroken oversized fields stays contained and stacked in the si
     // The second line names the rendered host even when locality is local;
     // the icon and text answer different questions and remain independently
     // truthful.
-    await expect(target.locator(".session-host")).toHaveText("Local (this machine)");
+    await expect(target.locator(".session-host")).toHaveText("Local");
     await expect(target.locator(".session-host-separator")).toHaveText(":");
     await expect(target).toHaveAttribute("data-host-locality", "local");
     await expect(target.locator(".host-kind-icon")).toHaveCount(1);
@@ -1265,7 +1268,8 @@ test("the host/directory line aligns under the title as one continuous string", 
     await page.goto("/");
     const target = row(page, session.id);
     await expect(target).toBeVisible({ timeout: 20_000 });
-    await expect(target.locator(".session-host")).toHaveText("Local (this machine)");
+    await expect(target).toHaveAttribute("data-host-locality", "local");
+    await expect(target.locator(".session-host")).toHaveText("Local");
 
     const dot = (await target.locator(".session-status-slot").boundingBox())!;
     const title = (await target.locator(".session-title").boundingBox())!;
@@ -3499,7 +3503,8 @@ test("host count keeps its heading while session count accompanies the sort titl
  * `shared::session_locality` answers `Unknown` for every case with no
  * evidence either way (including "the hosts read has not landed yet"), and
  * `Unknown` never suppresses an available host label (SPEC_impl.md), and the
- * settled two-line layout keeps that label after classification too. The
+ * settled two-line layout keeps a host label after classification too,
+ * switching to its derived short name when the registry arrives. The
  * route hold makes the unknown window deterministic
  * instead of racing a fast helm: without it, `/api/hosts` ordinarily
  * answers before the first paint and the provisional state is never
@@ -3543,10 +3548,10 @@ test("a local session's host line is provisional until the registry confirms it"
     await expect(target.locator(".host-kind-icon")).toHaveCount(0);
 
     releaseHosts();
-    await expect(target.locator(".session-host")).toHaveText("Local (this machine)");
-    // Confirmed: the name stays on the second line and the locality slot
-    // gains the local glyph.
+    // Confirmed: the short name stays on the second line and the locality
+    // slot gains the local glyph.
     await expect(target).toHaveAttribute("data-host-locality", "local");
+    await expect(target.locator(".session-host")).toHaveText("Local");
     await expect(target.locator(".host-kind-icon")).toHaveCount(1);
     await expect(target.locator(".host-kind-icon")).toHaveAttribute("data-glyph", "laptop");
     await expect(target.locator(".host-kind-icon + .visually-hidden")).toHaveText("Local");
@@ -8067,8 +8072,9 @@ test("resizing the viewport closes an open row menu", async ({ page, request }) 
  * Setting a host's alias from the row menu propagates to every CLIENT
  * surface that reads it — the panel row, the create form's host selector,
  * and the session row's host slot — with the EXACT text, never leaving the
- * raw destination visible beside the alias; clearing restores the
- * destination in the same three places. Both directions are checked with
+ * raw destination visible beside the alias. Clearing restores the full
+ * destination in management and the launcher, and its derived short name
+ * in the session row. Both directions are checked with
  * exact-text matches throughout, not merely `toContain`-shaped ones.
  *
  * Deliberately NARROWED to client rendering and refetch wiring, not
@@ -8246,9 +8252,9 @@ test("aliasing a remote host renames it everywhere but the details view", async 
     `Destination: ${destination}`,
   );
 
-  // Clearing restores the destination everywhere the alias had replaced it
-  // — re-checking all three surfaces again, not only the panel row: a fix
-  // that repopulated the panel correctly but left the session list or the
+  // Clearing restores the full destination in management and the launcher,
+  // and its derived short name in session rows. Re-check all three surfaces:
+  // a fix that repopulated the panel correctly but left the session list or the
   // create form's selector on the stale alias would otherwise pass.
   await openHostMenu(hostRow);
   await hostRow.locator(".host-settings").click();
@@ -8272,7 +8278,8 @@ test("aliasing a remote host renames it everywhere but the details view", async 
 
   await page.reload();
   await expect(sessionRow).toBeVisible({ timeout: 20_000 });
-  await expect(sessionRow.locator(".session-host")).toHaveText(destination);
+  await expect(page.locator(`.host-rail-entry[data-rail-host-id="${hostId}"] .host-rail-caption`)).toHaveText("aliasable-mock");
+  await expect(sessionRow.locator(".session-host")).toHaveText("aliasable-mock");
 });
 
 /**

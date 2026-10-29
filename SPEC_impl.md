@@ -323,14 +323,16 @@ disappearance gate.
 The sidebar uses an identity line and, outside compact mode, a host/directory line plus a detail line when there is
 ended status or a stale qualifier to explain. Its identity line is status, locality, title, a one- or two-glyph agent
 badge, and a right-aligned activity-time column before the narrow menu gutter. The host line is the host name and
-directory, joined by `:` when the helm supplied a name. This restores host visibility for confirmed local sessions too:
-a host name is an identity fact, while the locality icon answers a separate question. The status and locality tracks
-keep fixed icon-sized widths: live status uses the first slot's dot, compact ended status replaces that dot with a
-distinct stopped, exit, interrupted, or error glyph, and an absent status or unknown locality leaves its slot blank. A
-session with notifications adds a bell between the agent glyph (and its permission mark) and the activity-time column,
-in both densities; it is absent, taking no width, when the list is empty, and its hover help and accessible name carry
-the unread count. Compact rows therefore remain one visual line; host unavailability survives there as a neutral glyph
-with the same cause phrase the regular row and session card show, in its accessible text and tooltip. The full status,
+directory, joined by `:` when a name is available. `ListView` projects `Host::short_name()` from its existing hosts read
+into the compared `RowState`, so alias or destination changes redraw the memoized row. A missing registry match keeps
+the session's full helm-supplied name. This restores host visibility for confirmed local sessions too: a host name is an
+identity fact, while the locality icon answers a separate question. The status and locality tracks keep fixed icon-sized
+widths: live status uses the first slot's dot, compact ended status replaces that dot with a distinct stopped, exit,
+interrupted, or error glyph, and an absent status or unknown locality leaves its slot blank. A session with
+notifications adds a bell between the agent glyph (and its permission mark) and the activity-time column, in both
+densities; it is absent, taking no width, when the list is empty, and its hover help and accessible name carry the
+unread count. Compact rows therefore remain one visual line; host unavailability survives there as a neutral glyph with
+the same cause phrase the regular row and session card show, in its accessible text and tooltip. The full status,
 annotation, exit code, and qualifier meaning remain in accessible text and tooltips, and ended glyphs never acquire the
 live dot's mark-read action. Noncompact ended details and qualifier words occupy their own full-width line under the
 title through activity and above host/directory. Detail wraps unbroken peer text at any boundary without ellipsis,
@@ -349,23 +351,24 @@ alike. The row draws the LOCAL glyph only for a confirmed `Local` verdict — an
 never the local one, because a glyph is a positive claim `session_locality` has no evidence to back. The 2026-08-23
 rule's weaker promise survives underneath: unknown locality still never SUPPRESSES an available host label, it only ever
 leaves the row free to show one it already has, and the glyph rule adds a second promise on top rather than replacing
-the first. Legacy rows without a host name at all necessarily show none regardless — locality answers whether a name
-would be shown, not whether one exists to show. The agent track is rendered as glyphs: structured launch metadata
-decides the harness: an agent launch's agent type, a command launch's declared one, or a legacy session's stored kind,
-and the terminal glyph otherwise. The sidebar's YOLO mark and the helm's YOLO confirmation must agree on every launch by
-reading the same verdict, `SessionLaunch::yolo`: `farhelm_proto::yolo::selection_is_yolo` for an agent launch and the
-user's (or agent's) assertion for a command launch. Nothing reads a command line for it. A legacy session has no verdict
-and carries the unclassified mark; nothing that can create a launch holds one, so the guard never asks about it. An
-omitted Pi, OpenCode, OMP or Goose permission is rendered as YOLO for compatibility with older snapshots. The full
-invocation remains in its accessible text and tooltip. The working directory is tilde-folded against the `/home/<user>`
-and `/Users/<user>` shapes, since no home directory is on the wire to fold against properly. The full invocation stays
-on the agent mark; the untouched directory and other row facts ride in a hidden summary card source beside the row. The
-open button names that source with `data-tooltip-card`; the shared tooltip clones its DOM children on hover or keyboard
-focus. The source is a sibling, not a row descendant, so row-scoped controls and locators cannot match a second, hidden
-copy. Rust renders the host's own mark, status classes and isolated peer text. The card gives the full title, host,
-managed checkout, directory and timestamps without changing the open button's accessible name; marks keep their nearer
-hover targets and the complete ended-status detail stays on the row. The source and cloned tooltip remain outside the
-accessibility tree.
+the first. Legacy rows with neither a registry match nor a supplied host name show none — locality does not invent one.
+Only sidebar rows opt into `SessionHostName`'s short-form rendering, which escapes the intended raw short name without
+reinterpreting a literal alias as the local sentinel. Other callers keep full-name presentation. The agent track is
+rendered as glyphs: structured launch metadata decides the harness: an agent launch's agent type, a command launch's
+declared one, or a legacy session's stored kind, and the terminal glyph otherwise. The sidebar's YOLO mark and the
+helm's YOLO confirmation must agree on every launch by reading the same verdict, `SessionLaunch::yolo`:
+`farhelm_proto::yolo::selection_is_yolo` for an agent launch and the user's (or agent's) assertion for a command launch.
+Nothing reads a command line for it. A legacy session has no verdict and carries the unclassified mark; nothing that can
+create a launch holds one, so the guard never asks about it. An omitted Pi, OpenCode, OMP or Goose permission is
+rendered as YOLO for compatibility with older snapshots. The full invocation remains in its accessible text and tooltip.
+The working directory is tilde-folded against the `/home/<user>` and `/Users/<user>` shapes, since no home directory is
+on the wire to fold against properly. The full invocation stays on the agent mark; the untouched directory and other row
+facts ride in a hidden summary card source beside the row. The open button names that source with `data-tooltip-card`;
+the shared tooltip clones its DOM children on hover or keyboard focus. The source is a sibling, not a row descendant, so
+row-scoped controls and locators cannot match a second, hidden copy. Rust renders the host's own mark, status classes
+and isolated peer text. The card gives the full title, host, managed checkout, directory and timestamps without changing
+the open button's accessible name; marks keep their nearer hover targets and the complete ended-status detail stays on
+the row. The source and cloned tooltip remain outside the accessibility tree.
 
 Each live dot carries its status word on the dot itself, with the optional mark read / mark unread action following it.
 Permission marks use hand-drawn stroke silhouettes in the 12-unit viewBox: a slashed shield (`data-glyph="yolo"`) and a
@@ -597,18 +600,18 @@ excludes xterm.js's own helper textarea, which belongs to the vendored widget.
 The open session's chrome has one top row with terminal tabs on the left and fixed text-size controls, split Restart and
 Replace buttons, Clone and Delete on the right, and a slim details bar below the terminal. The bottom bar is ordered
 status, title, host, age, managed-checkout branch mark when present, copyable `{cwd}`, and copyable invocation. The host
-uses the same label component as the session list, reading the shared `Signal<HostsRead>` context rather than starting
-another host request; its name remains visible when locality is unknown, and only a missing name omits it. Identity
-moved below the terminal to make the active session and host easier to see while keeping the bottom bar small and
-leaving room for the tabs and actions together at the top. The terminal keeps at least its previous steady-state height.
-Earlier, four stacked bands cost roughly 170px before the terminal started, on a surface whose entire point is the
-terminal; they were consolidated into one roughly 40px header above the tabs before this split. Two of those bands had
-to go somewhere rather than merely shrink. The restart offer's explanation became the restart button's tooltip and its
-`aria-describedby` target: SPEC.md's rule that Restart always resumes and, when it cannot, is greyed out with the
-specific reason is carried by the button's accessible name (`aria-label` and, alongside the further elaboration, its
-tooltip) — naming the offer (`Resume conversation` or `Restart unavailable`) rather than the action. An unavailable
-Restart, like an unavailable Restart with, is `aria-disabled` rather than natively disabled, so its tooltip stays
-hoverable in webviews and its click handler is what refuses. The directory and invocation buttons carry their full
+uses the same label component as the session list in its full-name mode, reading the shared `Signal<HostsRead>` context
+rather than starting another host request; its name remains visible when locality is unknown, and only a missing name
+omits it. Identity moved below the terminal to make the active session and host easier to see while keeping the bottom
+bar small and leaving room for the tabs and actions together at the top. The terminal keeps at least its previous
+steady-state height. Earlier, four stacked bands cost roughly 170px before the terminal started, on a surface whose
+entire point is the terminal; they were consolidated into one roughly 40px header above the tabs before this split. Two
+of those bands had to go somewhere rather than merely shrink. The restart offer's explanation became the restart
+button's tooltip and its `aria-describedby` target: SPEC.md's rule that Restart always resumes and, when it cannot, is
+greyed out with the specific reason is carried by the button's accessible name (`aria-label` and, alongside the further
+elaboration, its tooltip) — naming the offer (`Resume conversation` or `Restart unavailable`) rather than the action. An
+unavailable Restart, like an unavailable Restart with, is `aria-disabled` rather than natively disabled, so its tooltip
+stays hoverable in webviews and its click handler is what refuses. The directory and invocation buttons carry their full
 values in their tooltips, shrink before the session title and host, and reveal a clipboard affordance on hover or
 keyboard focus. Their hidden-characters copy warning opens upward from the bottom bar so the window edge cannot clip it.
 
@@ -1062,9 +1065,21 @@ The leading `name:` label offers one action carrying its whole value, including 
 registry rows as the GUI selector; `host:local` uses the row's local kind rather than its mutable display name.
 Accepting either action does not launch and keeps search as the focus target. A host action also takes over a clone's
 inferred host and retires the old history destination and idempotency key, just as changing the host selector does. The
-GUI labels an unaliased local row `Local (this machine)` in the selector, Hosts page, and confirmed-local session rows,
-while preserving aliases and the registry's own `this machine` name. A session row without confirmed locality retains
-the name supplied by the helm; the GUI does not infer locality from its text.
+GUI labels an unaliased local host `Local (this machine)` in the selector, Hosts page, full-name details and rail's
+expanded label, while preserving aliases and the registry's own `this machine` name. Its rail caption and known-host
+session row use `Local` through the short-name rule. A session row without a registry match retains the name supplied by
+the helm; the GUI does not infer locality from its text.
+
+The rail keeps 40px avatar triggers at fixed coordinates and clips short-name captions to their width. Its absolute
+navigation body expands over session content through CSS dwell on a 56px content child (only under `(hover: hover)`,
+because touch browsers keep a tapped element hovered) or descendant `:focus-visible`, leaving the content margin and
+footer unchanged. The widened scroller and expanded names take no pointer events; the narrow child restores hit testing
+across its controls, padding and gaps. Names and background beyond that child therefore neither intercept list clicks
+nor retain hover, and mouse focus cannot latch expansion. The child lives inside the scroller so wheel and touch
+gestures retain native scrolling; the nav still owns scroll-driven menu-anchor updates. Captions keep their height while
+hidden during expansion, preserving vertical icon positions. Caption and expanded text copies are aria-hidden; the
+trigger's full display name and state remain its one accessible name. Raw peer values still use ordinary escaping and
+direction isolation in both forms.
 
 The `perms:` scope offers guarded, YOLO, custom, own-setting and approval-mode choices only where the active harness
 supports them. Bare `yolo` and `guarded` join the ordinary combined search and get exact-word preselection; own setting,

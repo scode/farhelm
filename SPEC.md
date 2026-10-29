@@ -1554,69 +1554,78 @@ A narrowed list keeps its visible "N of M" count, including when every session m
 changes neither that selection nor its open terminal; a filter with no matches says so in the list.
 
 One flat list across all registered hosts, with an always-visible host rail. **All** starts selected, followed by each
-registered host in registry order and **Add host**. Each avatar uses that host's chosen icon and color; **This machine**
-names the registered local host. Choosing a host sends a server-side query immediately and is not persisted, while All
-widens it again. Status, sort and the selected session remain unchanged. Unavailable hosts retain their last-known
-sessions; a removed selected host remains explicitly selected and unavailable until another host or All is chosen. The
-**Hosts** control above Settings and Help swaps session content for host management. Sessions is shown initially;
-opening or closing Hosts keeps the current query, sort, selected session and details choice. The control keeps focus and
-exposes its pressed and expanded state. All or a host avatar returns to Sessions, as does an accepted quick-switcher
-pick or New handoff; a refused handoff leaves the panel as it was. Host reading, session reading, sounds and in-flight
-host work continue while their ordinary content is concealed. Rail menus and host dialogs remain available over
-Sessions. The list can be ordered independently by most recent activity, by creation time, or by title; the order
-someone picks is remembered by the helm as one preference shared by every client, together with the last-selected
-session, visit history and compact-row choice, and most recent activity is what a client shows until someone picks
-otherwise. The same shared preference row carries terminal web-link click ownership, the quick-launch template name and
-number-key bindings, the session-confirmation opt-out, the quick-launch naming choice, terminal-frame coloring, the
-desktop download-opening types, automatic remote-host updates, and whether host setup or host removal confirmation
-should be skipped after an explicit permanent answer; a client that has already loaded its preferences keeps its
-previous behavior until it reloads, except that automatic session selection rereads the shared visits immediately before
-choosing, template shortcuts read their bindings on each invocation and the desktop helm reads the current file-opening
-list for each hover and open request. The gear at the foot of the host rail opens a settings dialog. Its left sidebar
-lists **Sessions**, **Appearance**, **Hosts**, **Terminal**, **Checkouts**, **Agent trust** and **Notifications**,
-followed by **App** only in a desktop app whose updater is active. Each section has an icon; the selected one uses the
-solid selection fill. One selected section appears beside the list, with a matching heading; notifications keeps
-**Sounds** and **ntfy alerts** sub-headings. The header and footer stay pinned while the body scrolls. At 620px wide and
-below, the dialog shows either the selected section or the list; **‹ Settings** returns to the list. The gear always
-opens sessions and focuses its first switch, including at phone width. Trust hints instead open agent trust at the
-relevant switch and scroll its block into view. Section buttons follow the platform's normal Tab rules. Switching
-sections preserves unsaved fields, outcome lines and pending saves; closing discards unsaved fields. Escape and either
-close control return focus to the gear. **Appearance** chooses **System**, **Dark** or **Light** for this device, with
-System as the default. System follows the device's current appearance, including changes while Farhelm stays open; an
-explicit choice overrides it. The browser or desktop webview remembers the choice locally, independently of the helm.
-The resolved palette applies before application content appears, and changes immediately without reloading. The terminal
-keeps its dark colors in both palettes. Sessions has an off-by-default **Skip session confirmations** switch. Its help
-names Delete, Replace, Restart and tab Close and excludes YOLO, host and trash questions (see Lifecycle operations).
-Beside it, **Name sessions on quick launch** is on by default, including when the helm has never stored a choice.
-Turning it off disables the naming prompt for quick launches. Beside it, **Color terminal frames by host** starts off
-and colors every session's thin terminal frame to match its host icon when turned on. The **Hosts** section has the
-switches `Set up new hosts without asking` and `Remove hosts without asking`, on when the respective confirmation is
-skipped. Turning one off restores that confirmation; turning one on makes the same choice as the host dialog's permanent
-answer. Changes take effect immediately in the current client. Each switch explains the current behavior, and each host
-dialog's permanent answer points to the gear as the place to undo it. Hosts also has **Update remote hosts
-automatically**, off unless explicitly enabled, with help explaining that the helm updates remote hosts as soon as
-updates are available, with no window open, and never updates its own machine this way. This shared choice survives helm
-restarts; other clients read it on reload, while the helm acts on a committed change immediately. A failed save restores
-the last known value and shows an adjacent error, then reconciles only this field with the helm if the request's outcome
-is uncertain. The **Terminal** section chooses whether web links open in Farhelm without passing the click on (the
-default), open in Farhelm and also pass the click on, or only pass the click on. The latter two choices explain the risk
-of a second browser tab and that a program without mouse reporting cannot act on a click. This choice covers every
-client of the helm and takes effect in every mounted terminal of the current client immediately; other open clients pick
-it up when they reload, like the host choices. In the desktop app, the **Terminal** section also has tunnel consent and
-a free-form, comma-separated **File types to open with Cmd-click** field (Ctrl-click outside macOS). It defaults to
-`md, txt, json`; saving an empty list disables opening while downloads still save. This field requires an explicit,
-acknowledged save, but its value lives in the shared preference row. The dialog shows one prominent warning beside the
-field for each listed type outside `md`, `txt`, `json` and `log`; HTML-like types have a browser-specific warning, and
-all other unrecognized types have a generic warning. The warnings follow the draft as typed, including when another
-entry is malformed. A refused save leaves the draft and current helm policy unchanged and shows the reason inline. Under
-**Notifications**, sounds has three device switches (see Status), and **ntfy alerts** has an off-by-default switch,
-server URL (default `https://ntfy.sh`), topic, optional access token, and priority (Min, Low, Default, High, Urgent;
-default Default). These are explicitly saved helm configuration, shared by every client, outside the preference row.
-Save refusals appear inline. The stored token is never returned: the form shows whether one exists and allows replacing
-or clearing it. Changing to another server clears a saved token unless a new one is entered, and the form says so before
-saving. **Send test** uses the saved configuration, even while disabled, and reports success or failure inline. The
-**Checkouts** section holds the explicitly saved all-hosts checkout folder and, below it, a monospace multi-line
-post-clone command field and the default-on **Keep a checkout ready for faster launches** switch (see
+registered host in registry order and **Add host**. Each avatar uses that host's chosen icon and color, with its short
+name in a small caption underneath, truncated to the 56px rail. The local caption is `Local` unless it has an alias.
+After the pointer rests on the narrow rail for a moment (on devices that can hover; a tap on a touch screen does not
+widen it), or while keyboard focus is inside it, the rail widens over the session list without moving the list or its
+icons. The widened part is display only: it takes no pointer events and does not keep the rail open. A mouse click
+leaves no focus-driven expansion; moving from the narrow rail to the list collapses it. Names appear to the right: each
+host's display name, with its full destination underneath when different. The local display name is
+`Local (this machine)` unless aliased. All and Add host also show their labels. The Hosts, Settings and Help controls at
+the foot of the rail stay 56px wide; badges, menus and actions keep their existing behavior.
+
+Choosing a host sends a server-side query immediately and is not persisted, while All widens it again. Status, sort and
+the selected session remain unchanged. Unavailable hosts retain their last-known sessions; a removed selected host
+remains explicitly selected and unavailable until another host or All is chosen. The **Hosts** control above Settings
+and Help swaps session content for host management. Sessions is shown initially; opening or closing Hosts keeps the
+current query, sort, selected session and details choice. The control keeps focus and exposes its pressed and expanded
+state. All or a host avatar returns to Sessions, as does an accepted quick-switcher pick or New handoff; a refused
+handoff leaves the panel as it was. Host reading, session reading, sounds and in-flight host work continue while their
+ordinary content is concealed. Rail menus and host dialogs remain available over Sessions. The list can be ordered
+independently by most recent activity, by creation time, or by title; the order someone picks is remembered by the helm
+as one preference shared by every client, together with the last-selected session, visit history and compact-row choice,
+and most recent activity is what a client shows until someone picks otherwise. The same shared preference row carries
+terminal web-link click ownership, the quick-launch template name and number-key bindings, the session-confirmation
+opt-out, the quick-launch naming choice, terminal-frame coloring, the desktop download-opening types, automatic
+remote-host updates, and whether host setup or host removal confirmation should be skipped after an explicit permanent
+answer; a client that has already loaded its preferences keeps its previous behavior until it reloads, except that
+automatic session selection rereads the shared visits immediately before choosing, template shortcuts read their
+bindings on each invocation and the desktop helm reads the current file-opening list for each hover and open request.
+The gear at the foot of the host rail opens a settings dialog. Its left sidebar lists **Sessions**, **Appearance**,
+**Hosts**, **Terminal**, **Checkouts**, **Agent trust** and **Notifications**, followed by **App** only in a desktop app
+whose updater is active. Each section has an icon; the selected one uses the solid selection fill. One selected section
+appears beside the list, with a matching heading; notifications keeps **Sounds** and **ntfy alerts** sub-headings. The
+header and footer stay pinned while the body scrolls. At 620px wide and below, the dialog shows either the selected
+section or the list; **‹ Settings** returns to the list. The gear always opens sessions and focuses its first switch,
+including at phone width. Trust hints instead open agent trust at the relevant switch and scroll its block into view.
+Section buttons follow the platform's normal Tab rules. Switching sections preserves unsaved fields, outcome lines and
+pending saves; closing discards unsaved fields. Escape and either close control return focus to the gear. **Appearance**
+chooses **System**, **Dark** or **Light** for this device, with System as the default. System follows the device's
+current appearance, including changes while Farhelm stays open; an explicit choice overrides it. The browser or desktop
+webview remembers the choice locally, independently of the helm. The resolved palette applies before application content
+appears, and changes immediately without reloading. The terminal keeps its dark colors in both palettes. Sessions has an
+off-by-default **Skip session confirmations** switch. Its help names Delete, Replace, Restart and tab Close and excludes
+YOLO, host and trash questions (see Lifecycle operations). Beside it, **Name sessions on quick launch** is on by
+default, including when the helm has never stored a choice. Turning it off disables the naming prompt for quick
+launches. Beside it, **Color terminal frames by host** starts off and colors every session's thin terminal frame to
+match its host icon when turned on. The **Hosts** section has the switches `Set up new hosts without asking` and
+`Remove hosts without asking`, on when the respective confirmation is skipped. Turning one off restores that
+confirmation; turning one on makes the same choice as the host dialog's permanent answer. Changes take effect
+immediately in the current client. Each switch explains the current behavior, and each host dialog's permanent answer
+points to the gear as the place to undo it. Hosts also has **Update remote hosts automatically**, off unless explicitly
+enabled, with help explaining that the helm updates remote hosts as soon as updates are available, with no window open,
+and never updates its own machine this way. This shared choice survives helm restarts; other clients read it on reload,
+while the helm acts on a committed change immediately. A failed save restores the last known value and shows an adjacent
+error, then reconciles only this field with the helm if the request's outcome is uncertain. The **Terminal** section
+chooses whether web links open in Farhelm without passing the click on (the default), open in Farhelm and also pass the
+click on, or only pass the click on. The latter two choices explain the risk of a second browser tab and that a program
+without mouse reporting cannot act on a click. This choice covers every client of the helm and takes effect in every
+mounted terminal of the current client immediately; other open clients pick it up when they reload, like the host
+choices. In the desktop app, the **Terminal** section also has tunnel consent and a free-form, comma-separated **File
+types to open with Cmd-click** field (Ctrl-click outside macOS). It defaults to `md, txt, json`; saving an empty list
+disables opening while downloads still save. This field requires an explicit, acknowledged save, but its value lives in
+the shared preference row. The dialog shows one prominent warning beside the field for each listed type outside `md`,
+`txt`, `json` and `log`; HTML-like types have a browser-specific warning, and all other unrecognized types have a
+generic warning. The warnings follow the draft as typed, including when another entry is malformed. A refused save
+leaves the draft and current helm policy unchanged and shows the reason inline. Under **Notifications**, sounds has
+three device switches (see Status), and **ntfy alerts** has an off-by-default switch, server URL (default
+`https://ntfy.sh`), topic, optional access token, and priority (Min, Low, Default, High, Urgent; default Default). These
+are explicitly saved helm configuration, shared by every client, outside the preference row. Save refusals appear
+inline. The stored token is never returned: the form shows whether one exists and allows replacing or clearing it.
+Changing to another server clears a saved token unless a new one is entered, and the form says so before saving. **Send
+test** uses the saved configuration, even while disabled, and reports success or failure inline. The **Checkouts**
+section holds the explicitly saved all-hosts checkout folder and, below it, a monospace multi-line post-clone command
+field and the default-on **Keep a checkout ready for faster launches** switch (see
 [Managed checkouts](#managed-checkouts)). The switch's help explains one extra checkout's disk space per repository and
 host, promptless login-shell preparation, earlier file times and Git hooks/filters, and discard on the next create or
 after 30 days unused; it links the full earlier-clone caveats. The folder's help explains expansion on each host,
@@ -1715,44 +1724,45 @@ host's chosen icon and color, defaulting to the cloud in the ordinary foreground
 dot with a distinct ended-state icon, preserving complete status details in accessible text and a tooltip. Noncompact
 rows show the complete ended status on a separate full-width line that wraps instead of truncating. Times share a
 right-aligned column before the row menu. A session whose host cannot yet be placed either way marks neither, rather
-than guessing. Its second line shows the helm-supplied host name (an alias when set), then `:`, then its working
-directory; a legacy row with no host name shows only the directory, rather than inventing a local identity or a dangling
-separator. The second line is hidden when the helm-wide compact preference is on, which defaults off and is shared at
-the next preference seed across clients. The working directory and launch command remain abbreviated only where shown,
-with the directory in the row's hover summary card and the full invocation on its agent mark on web and desktop; an
-abbreviation is never the only place a value is recorded. The same card appears from the title or any unmarked part of
-the open button, in either density and on keyboard focus. It names the title, status, agent, host, checkout when
-managed, directory, start and last-activity times, and what a click does; meaningful marks keep their own hover text.
-The summary may clip very long values or whole rows in a short window; the session view provides those details in full.
-Its agent line retains the stored launch facts and adds "YOLO observed" when the shield has status-line evidence,
-including when the launch was already YOLO. The actions-menu header describes only the stored launch. A row's own
-actions menu, beyond the lifecycle operations above, also offers a mark read / mark unread toggle — reachable there or
-by clicking the dot itself — that sets the session's seen state directly (see Status). Directly after it in the menu's
-first metadata group, **Pin to top** / **Unpin** toggles the shared pin. Every session row carries one permission mark.
-An amber slashed shield means the session's launch is YOLO by the rule under Creation: its effective agent-launch
-permission is custom or YOLO, or its command was asserted to be YOLO. A green plain shield means an agent launch in
-guarded or an approval mode, or a command asserted not to be YOLO. A session created before launch kinds existed that
-was not an agent launch has no assertion and carries an amber question mark. Hover and screen-reader text name the
-specific agent-launch mode (guarded, custom, approve, smart approve, chat, or YOLO), or say that the mark is the
-assertion made when the command was launched, by the user or by an agent, and not something Farhelm checked, or that a
-pre-existing session's command was never classified. A grey dashed shield means the agent's own setting, including older
-sessions started without guarded flags. Its hover says Not classified and that the host guard treats it as YOLO. For
-Claude, Grok, Muse and Cursor, Farhelm also tries to read the agent's permission mode from its status line. A definite
-no-checks reading changes any shield other than YOLO or asserted-YOLO to the YOLO shield. Hover and screen-reader text
-name the observed mode and say it was seen on screen, while retaining the launch mode and command. Once observed, YOLO
-stays for the rest of the agent run: a recognized non-YOLO mode, an unreadable or obscured line, or an unrecognized mode
-cannot clear it. This errs toward safety: restoring a safer shield would risk leaving it there if a later switch back to
-YOLO went unnoticed. This never makes the shield safer than its launch choice. Restart, Replace and resume start a new
-run with no observed evidence; a supervisor restart also clears it until new definite samples arrive. Command launches
-with a declared agent type are included; legacy sessions and the other agents are not read. This is advisory and best
-effort, not a promise of detection: a missed or late reading is outside the guarantee. It cannot see allow rules, hooks
-or managed policy. It is display only; host YOLO guards, spawned-session permission inheritance and approval decisions
-still use the stored launch alone. Every guarded hover names the agent's mode and meaning, shows the actual stored
-command under Launched with, and explains that allow rules, hooks, plugins, always-allow answers, sandbox settings and
-in-session switches can loosen it; agents may change behavior between versions. A custom hover says the flags were the
-user's, that Farhelm does not check them and counts the session as YOLO, and shows both the flags and the full stored
-command under Launched with. The launcher's permission choice has a separate ? button with that help, opening the docs
-section on permission modes.
+than guessing. Its second line shows the host's short name when that host is in the current registry read, otherwise the
+full host name supplied by the helm, then `:`, then its working directory. Without either a registry match or a supplied
+host name it shows only the directory, rather than inventing a local identity or a dangling separator. Other surfaces,
+including host management, details, dialogs, tooltips and agent output, keep the display name. The second line is hidden
+when the helm-wide compact preference is on, which defaults off and is shared at the next preference seed across
+clients. The working directory and launch command remain abbreviated only where shown, with the directory in the row's
+hover summary card and the full invocation on its agent mark on web and desktop; an abbreviation is never the only place
+a value is recorded. The same card appears from the title or any unmarked part of the open button, in either density and
+on keyboard focus. It names the title, status, agent, host, checkout when managed, directory, start and last-activity
+times, and what a click does; meaningful marks keep their own hover text. The summary may clip very long values or whole
+rows in a short window; the session view provides those details in full. Its agent line retains the stored launch facts
+and adds "YOLO observed" when the shield has status-line evidence, including when the launch was already YOLO. The
+actions-menu header describes only the stored launch. A row's own actions menu, beyond the lifecycle operations above,
+also offers a mark read / mark unread toggle — reachable there or by clicking the dot itself — that sets the session's
+seen state directly (see Status). Directly after it in the menu's first metadata group, **Pin to top** / **Unpin**
+toggles the shared pin. Every session row carries one permission mark. An amber slashed shield means the session's
+launch is YOLO by the rule under Creation: its effective agent-launch permission is custom or YOLO, or its command was
+asserted to be YOLO. A green plain shield means an agent launch in guarded or an approval mode, or a command asserted
+not to be YOLO. A session created before launch kinds existed that was not an agent launch has no assertion and carries
+an amber question mark. Hover and screen-reader text name the specific agent-launch mode (guarded, custom, approve,
+smart approve, chat, or YOLO), or say that the mark is the assertion made when the command was launched, by the user or
+by an agent, and not something Farhelm checked, or that a pre-existing session's command was never classified. A grey
+dashed shield means the agent's own setting, including older sessions started without guarded flags. Its hover says Not
+classified and that the host guard treats it as YOLO. For Claude, Grok, Muse and Cursor, Farhelm also tries to read the
+agent's permission mode from its status line. A definite no-checks reading changes any shield other than YOLO or
+asserted-YOLO to the YOLO shield. Hover and screen-reader text name the observed mode and say it was seen on screen,
+while retaining the launch mode and command. Once observed, YOLO stays for the rest of the agent run: a recognized
+non-YOLO mode, an unreadable or obscured line, or an unrecognized mode cannot clear it. This errs toward safety:
+restoring a safer shield would risk leaving it there if a later switch back to YOLO went unnoticed. This never makes the
+shield safer than its launch choice. Restart, Replace and resume start a new run with no observed evidence; a supervisor
+restart also clears it until new definite samples arrive. Command launches with a declared agent type are included;
+legacy sessions and the other agents are not read. This is advisory and best effort, not a promise of detection: a
+missed or late reading is outside the guarantee. It cannot see allow rules, hooks or managed policy. It is display only;
+host YOLO guards, spawned-session permission inheritance and approval decisions still use the stored launch alone. Every
+guarded hover names the agent's mode and meaning, shows the actual stored command under Launched with, and explains that
+allow rules, hooks, plugins, always-allow answers, sandbox settings and in-session switches can loosen it; agents may
+change behavior between versions. A custom hover says the flags were the user's, that Farhelm does not check them and
+counts the session as YOLO, and shows both the flags and the full stored command under Launched with. The launcher's
+permission choice has a separate ? button with that help, opening the docs section on permission modes.
 
 On a solid selected row, host and permission marks use the inverse foreground while retaining their shapes, hover
 explanations and accessible meanings.
@@ -2065,32 +2075,32 @@ whatever the agent renders is what you see. There is no composer, no message abs
   the tunnel pill remain fully visible and keyboard reachable from a 650px main pane; only the tab strip takes the
   remaining width and scrolls horizontally when needed. Narrower panes may clip the row, which never wraps. The bottom
   bar is about one tab-strip row high and shows, in order, status, session name, host, age, the managed-checkout branch
-  mark when present, directory, and command line. The host's icon and name follow the session list's rules, with the
-  host prominent beside the session name; a missing host name omits the host rather than inventing one. Directory
-  display still abbreviates the home directory to `~`. Keyboard order follows the top row, terminal, then bottom bar.
-  The terminal loses no height in the steady state. Conditional notices stay between the top row and terminal; a stale
-  session's status appears only in its stale notice, not again in the bottom bar. Restart and its menu's matching
-  entries are greyed out when the session cannot resume its conversation (see Lifecycle operations); their tooltips and
-  accessible descriptions explain the specific reason, such as an agent type without conversation reporting, a command
-  launch that declared no agent type or did not opt into Resume, or a conversation not captured yet. For an agent that
-  reports conversations, a running session's explanation says, naming the agent, when Restart normally becomes available
-  for it (Codex, for instance, once the first prompt is submitted), and an ended session's says its conversation was
-  never captured; both invite the user to send feedback if that is not what happened, since Farhelm cannot tell a report
-  still to come from one that never will. The supervisor's refusal of such a restart and the agent instructions state
-  the same timing, without the invitation. Directory and command line are muted click-to-copy buttons that take the
-  width their values need and ellipsize before the session name or host when the bar runs out of room; a click confirms
-  locally for about 1.5 seconds. A hidden-characters copy warning opens upward from the bar and stays within the window.
-  Clipboard writes use the native bridge first and `navigator.clipboard` second, with JSON serialization and silent
-  failures. Replace has its own anchored danger confirmation and neutral cancellation. Delete is styled as the danger
-  action and asks first in the same anchored way, even for a session that has ended, with the same consequence text the
-  row's delete prompt shows. Restart's confirmation is likewise anchored under its top-row button; Escape cancels these
-  questions and returns focus to the terminal. The session-confirmation setting skips the top row's Delete, Replace and
-  Restart questions, the interrupted-card Replace question, and tab Close, using the screen's consent and existing
-  guards. Split menus follow the app's shared keyboard rules: mouse or pen movement focuses the hovered choice without
-  scrolling, arrows and Home/End move between choices, and only the focused enabled choice has the highlight fill.
-  Leaving the menu keeps that focus; Escape or Tab closes the menu and returns focus to its caret. Cancelling Restart
-  with returns to that persistent caret. An unavailable plain Restart does not hide an independently available Restart
-  with; the menu remains available to inspect reasons.
+  mark when present, directory, and command line. The host's icon follows the session list's rules; its name is the full
+  display name, prominent beside the session name. A missing host name omits the host rather than inventing one.
+  Directory display still abbreviates the home directory to `~`. Keyboard order follows the top row, terminal, then
+  bottom bar. The terminal loses no height in the steady state. Conditional notices stay between the top row and
+  terminal; a stale session's status appears only in its stale notice, not again in the bottom bar. Restart and its
+  menu's matching entries are greyed out when the session cannot resume its conversation (see Lifecycle operations);
+  their tooltips and accessible descriptions explain the specific reason, such as an agent type without conversation
+  reporting, a command launch that declared no agent type or did not opt into Resume, or a conversation not captured
+  yet. For an agent that reports conversations, a running session's explanation says, naming the agent, when Restart
+  normally becomes available for it (Codex, for instance, once the first prompt is submitted), and an ended session's
+  says its conversation was never captured; both invite the user to send feedback if that is not what happened, since
+  Farhelm cannot tell a report still to come from one that never will. The supervisor's refusal of such a restart and
+  the agent instructions state the same timing, without the invitation. Directory and command line are muted
+  click-to-copy buttons that take the width their values need and ellipsize before the session name or host when the bar
+  runs out of room; a click confirms locally for about 1.5 seconds. A hidden-characters copy warning opens upward from
+  the bar and stays within the window. Clipboard writes use the native bridge first and `navigator.clipboard` second,
+  with JSON serialization and silent failures. Replace has its own anchored danger confirmation and neutral
+  cancellation. Delete is styled as the danger action and asks first in the same anchored way, even for a session that
+  has ended, with the same consequence text the row's delete prompt shows. Restart's confirmation is likewise anchored
+  under its top-row button; Escape cancels these questions and returns focus to the terminal. The session-confirmation
+  setting skips the top row's Delete, Replace and Restart questions, the interrupted-card Replace question, and tab
+  Close, using the screen's consent and existing guards. Split menus follow the app's shared keyboard rules: mouse or
+  pen movement focuses the hovered choice without scrolling, arrows and Home/End move between choices, and only the
+  focused enabled choice has the highlight fill. Leaving the menu keeps that focus; Escape or Tab closes the menu and
+  returns focus to its caret. Cancelling Restart with returns to that persistent caret. An unavailable plain Restart
+  does not hide an independently available Restart with; the menu remains available to inspect reasons.
 - One attached client per session, enforced by the supervisor: attaching from a second client visibly detaches the
   first, which keeps a non-live snapshot and an explicit take-control action. No shared-input mirroring in v1.
 - A viewer that is slow is served slowly, for as long as it takes. Honoring that can briefly slow the agent's OUTPUT — a

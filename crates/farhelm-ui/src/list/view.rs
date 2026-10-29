@@ -31,7 +31,7 @@ use crate::rows::{
     self, absence_is_evidence, apply_optimistic_renames, count_banner,
     remove_row_reporting_menu_move, retire_vanished_renames, settle_optimistic_renames,
 };
-use crate::{ApiBase, HostId, Session, SessionStatus};
+use crate::{ApiBase, Host, HostId, Session, SessionStatus};
 
 use super::create_form::{
     COMPOSER_DIALOG, CreatePrefill, CreateSessionForm, CreateTarget, CreatedSession,
@@ -4717,6 +4717,8 @@ pub(crate) fn ListView(
                                         .find(|host| Some(host.id) == session.host).map(|host| host.icon).unwrap_or_default(),
                                     host_color: hosts.read().hosts().unwrap_or_default().iter()
                                         .find(|host| Some(host.id) == session.host).map(|host| host.color).unwrap_or_default(),
+                                    host_short_name: hosts.read().hosts().unwrap_or_default().iter()
+                                        .find(|host| Some(host.id) == session.host).map(Host::short_name),
                                     unavailable_cause: crate::hosts::session_unavailable_cause(hosts.read().lookup(session.host)),
                                     // Formatted HERE, not in the row: see
                                     // `RowState::activity` for why the

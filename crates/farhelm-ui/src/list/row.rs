@@ -1060,6 +1060,7 @@ pub(super) fn SessionRow(
         locality,
         host_icon,
         host_color,
+        host_short_name,
         unavailable_cause,
         activity,
         deleting,
@@ -1858,12 +1859,12 @@ pub(super) fn SessionRow(
                     }
                     if !compact {
                     // The optional second line names the actual host beside
-                    // the working directory. A missing legacy host name
-                    // stays missing: locality can establish an icon, never
-                    // an invented machine name.
+                    // the working directory. Registry membership supplies
+                    // the short form; otherwise preserve the helm's full
+                    // name, including the legacy case where it sends none.
                     span { class: "session-row-line session-row-meta",
-                        if let Some(host_name) = &session.host_name {
-                            SessionHostName { name: host_name.clone(), locality, tooltip: false }
+                        if let Some(host_name) = host_short_name.as_ref().or(session.host_name.as_ref()) {
+                            SessionHostName { name: host_name.clone(), locality, tooltip: false, short_form: host_short_name.is_some() }
                             span {
                                 class: "session-host-separator",
                                 "data-separator": if session.working_copy.is_some() { "dot" } else { "colon" },
@@ -3141,6 +3142,7 @@ mod tests {
                         locality: HostLocality::Unknown,
                         host_icon: Default::default(),
                         host_color: Default::default(),
+                        host_short_name: None,
                         unavailable_cause: "waiting for supervisor",
                         activity: None,
                         deleting: false,
@@ -3437,6 +3439,7 @@ mod tests {
                         locality: HostLocality::Unknown,
                         host_icon: Default::default(),
                         host_color: Default::default(),
+                        host_short_name: None,
                         unavailable_cause: "waiting for supervisor",
                         activity: None,
                         deleting: false,
@@ -3632,6 +3635,7 @@ mod tests {
                         locality: HostLocality::Unknown,
                         host_icon: Default::default(),
                         host_color: Default::default(),
+                        host_short_name: None,
                         unavailable_cause: "waiting for supervisor",
                         activity: None,
                         deleting: false,
@@ -3736,6 +3740,7 @@ mod tests {
                             locality: HostLocality::Unknown,
                             host_icon: Default::default(),
                             host_color: Default::default(),
+                            host_short_name: None,
                             unavailable_cause: "waiting for supervisor",
                             activity: None,
                             deleting: false,
@@ -3842,6 +3847,7 @@ mod tests {
                         locality: HostLocality::Unknown,
                         host_icon: Default::default(),
                         host_color: Default::default(),
+                        host_short_name: None,
                         unavailable_cause: "waiting for supervisor",
                         activity: None,
                         deleting,
