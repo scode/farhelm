@@ -32,7 +32,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Fix menu highlighting.** In the host, session and restart menus, the first item stays highlighted when the pointer
   moves over another item, leaving two items highlighted. Check the other menus for the same problem and fix the shared
-  cause if there is one.
+  cause if there is one. Plan: `plans/queue/menu-single-highlight.md`.
 
 - Initial version of agent2agent comms.
 
