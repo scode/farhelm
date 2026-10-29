@@ -85,7 +85,7 @@ async function observePathRedraws(page: Page, needle: string) {
     const mutations = new MutationObserver(records => {
       for (const record of records) {
         if (record.type === 'attributes' && record.attributeName === 'hidden' && record.oldValue === null) state.hides++;
-        if (record.type === 'childList' && [...record.addedNodes].some(node => node.textContent === 'checking…')) state.restarts++;
+        if (record.type === 'childList' && [...record.addedNodes].some(node => node.textContent === 'Checking…')) state.restarts++;
       }
     });
     mutations.observe(tooltip, { attributes: true, attributeOldValue: true, childList: true });
@@ -132,7 +132,7 @@ for (const linkKind of ['plain', 'OSC']) {
         await waitForTermText(page, `TARGET ${label} TICK 0000`);
         await hoverPath(page, label);
         const tooltip = page.locator('#terminal .terminal-file-target');
-        await expect(tooltip).toContainText('checking…');
+        await expect(tooltip).toContainText('Checking…');
         await expect.poll(() => statRequests).toBe(1);
         await observePathRedraws(page, label);
         const peer = (await listSessions(request)).sessions.find(row => row.id === session.id);
@@ -148,7 +148,7 @@ for (const linkKind of ['plain', 'OSC']) {
         const pendingRequests = statRequests;
         await testInfo.attach('pending-hover-redraws', { body: JSON.stringify({ pendingRequests, pendingStart, pendingEnd }), contentType: 'application/json' });
         gate.release();
-        const result = targetKind === 'folder' ? 'folder: not downloadable' : 'click to download';
+        const result = targetKind === 'folder' ? 'Folder: not downloadable' : 'click to download';
         await expect(tooltip).toContainText(result);
         const readyStart = await snapshot();
         // sleep-ok: observe an answered hover through further real redraws; this is a no-restart window, not a readiness wait.
@@ -221,7 +221,7 @@ test('changed OSC display text starts a fresh hover at the same cells', async ({
     const cancelled = page.waitForEvent('requestfailed', req => req.url().endsWith(`/sessions/${encodeURIComponent(session.id)}/files/stat`));
     await hoverPath(page, 'OLD-LABEL');
     const tooltip = page.locator('#terminal .terminal-file-target');
-    await expect(tooltip).toContainText('checking…');
+    await expect(tooltip).toContainText('Checking…');
     await expect.poll(() => arrived).toBe(true);
     expect(statRequests).toBe(1);
     expect((await peer())?.status?.state, 'replacement peer must still be alive before input').toMatch(/running|idle/);
@@ -287,7 +287,7 @@ test('file hover shows decimal size tiers and a red cap refusal', async ({ page,
         return { expected, actual: getComputedStyle(element).borderLeftColor };
       }, token);
       expect(colors.actual).toBe(colors.expected);
-      if (tier === 'danger') await expect(tooltip.locator('.terminal-file-refusal')).toContainText('too large to download');
+      if (tier === 'danger') await expect(tooltip.locator('.terminal-file-refusal')).toContainText('Too large to download');
     }
     await testInfo.attach('file-hover-cap-refusal', { body: await tooltip.screenshot(), contentType: 'image/png' });
   } catch (error) {
@@ -340,7 +340,7 @@ for (const kind of ['local', 'ssh']) {
       const point = await hoverPath(page, basename);
       const tooltip = page.locator('#terminal .terminal-file-target');
       await expect(tooltip).toBeVisible();
-      await expect(tooltip).toContainText('checking…');
+      await expect(tooltip).toContainText('Checking…');
       await expect(tooltip).toHaveClass(/terminal-file-checking/);
       await expect(page.locator('#terminal .xterm-screen')).not.toHaveClass(/xterm-cursor-pointer/);
       let downloadRequests = 0;
@@ -424,7 +424,7 @@ test('file refusals, OSC file save and forbidden OSC schemes', async ({ page, re
     await attachSession(page, session.id);
     await page.keyboard.press('Enter');
     await waitForTermText(page, 'OSC-DATA');
-    for (const [name, refusal] of [['missing.txt', 'not found'], ['folder.dir', 'folder: not downloadable'], ['private.txt', 'not readable'], ['large.bin', '100 MB limit']]) {
+    for (const [name, refusal] of [['missing.txt', 'Not found'], ['folder.dir', 'Folder: not downloadable'], ['private.txt', 'Not readable'], ['large.bin', '100 MB limit']]) {
       await hoverPath(page, name);
       await expect(page.locator('#terminal .terminal-file-target')).toContainText(refusal);
       await expect(page.locator('#terminal .xterm-screen')).not.toHaveClass(/xterm-cursor-pointer/);
@@ -500,7 +500,7 @@ test('leaving cancels lookup and the next hover checks again', async ({ page, re
     await waitForTermText(page, 'fresh.txt');
     const failed = page.waitForEvent('requestfailed', req => req.url().endsWith('/files/stat'));
     await hoverPath(page, 'fresh.txt');
-    await expect(page.locator('#terminal .terminal-file-target')).toContainText('checking…');
+    await expect(page.locator('#terminal .terminal-file-target')).toContainText('Checking…');
     await expect.poll(() => arrived).toBe(true);
     const box = (await page.locator('#terminal .xterm-screen').boundingBox())!;
     await page.mouse.move(box.x + box.width - 2, box.y - 2);

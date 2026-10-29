@@ -318,7 +318,7 @@ for (const { harness, name } of AGENTS.filter((agent) => agent.harness !== "pi")
       observation.managed = true;
       await nudge();
       await expect(band).toBeVisible();
-      await band.getByRole("button", { name: "hide this trust hint for this occurrence", exact: true }).click();
+      await band.getByRole("button", { name: "Hide this trust hint for this occurrence", exact: true }).click();
       await expect(band).toHaveCount(0);
       observation.detailTitle = `closed-refresh-${harness}`;
       await nudge();

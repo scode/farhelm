@@ -1,0 +1,10 @@
+## Invented transcript for terminal development review (docs/docs-shots/SPEC.md).
+## Not a capture of a real session. Both .example domains are invented.
+## The replay writer expands \e to ESC. The OSC 8 span names a different
+## destination from its URL-looking text; no capture opens either address.
+Terminal link review
+
+Compare the displayed address with its actual destination:
+(\e]8;;https://target.example/review\e\https://display.example/review\e]8;;\e\)
+
+Terminal review ready.

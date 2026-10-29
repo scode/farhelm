@@ -67,6 +67,19 @@
       age: 86400,
       transcript: "filler-codex.txt",
     },
+    // Development review needs real OSC 8 bytes without changing the original
+    // open transcript. This older, quiet row leaves the existing representative
+    // sessions in their original order and reuses the ordinary replay writer.
+    {
+      title: "Review terminal links",
+      host: "local",
+      cwd: "~/src/farhelm",
+      wrapper: "claude",
+      status: "idle",
+      seen: true,
+      age: 172800,
+      transcript: "terminal-review.txt",
+    },
   ],
 
   // What the session launcher remembers, shown as its recent setups. A fresh

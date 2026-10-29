@@ -512,9 +512,9 @@ pub(crate) fn LaunchSequenceIndicator() -> Element {
                 .map(display_peer)
                 .unwrap_or_else(|| match reference {
                     TemplateReference::Number(key) | TemplateReference::Unbound(Some(key)) => {
-                        format!("unbound key {key}")
+                        format!("Unbound key {key}")
                     }
-                    _ => "unbound ⚡".into(),
+                    _ => "Unbound ⚡".into(),
                 })
         })
         .collect::<Vec<_>>();

@@ -599,14 +599,14 @@
     if (mismatch) {
       const warning = document.createElement('div');
       warning.className = 'terminal-link-target-warning';
-      warning.textContent = 'link text does not match where it goes';
+      warning.textContent = 'Link text does not match where it goes';
       lines.push(warning);
       const claimed = document.createElement('div');
       claimed.className = 'terminal-link-target-text';
-      claimed.textContent = `text says: ${shortenedTarget(visibleFormatCharacters(text.trim()))}`;
+      claimed.textContent = `Text says: ${shortenedTarget(visibleFormatCharacters(text.trim()))}`;
       lines.push(claimed);
       const goes = document.createElement('div');
-      goes.textContent = 'actually goes to:';
+      goes.textContent = 'Actually goes to:';
       lines.push(goes);
     }
     if (hostPart) {
