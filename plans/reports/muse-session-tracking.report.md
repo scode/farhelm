@@ -107,3 +107,78 @@ vendor or real-provider question run was made because question recognition is ex
 All four units passed the required single fresh-context gpt-6.1-sol/high gates in the implementation rounds. The
 complete amended conversation-resume PR passed a fresh review on that same model and effort with no actionable findings.
 The other units retain their reviewed patches. The independent resume check and the report's required cold read passed.
+
+### Landing
+
+Landed on the second delivery, with one test assertion added at landing. Muse sessions now resume the right conversation
+through the launch wrappers and show working, idle and directory-trust status read from Muse's own screens. As decided
+on your behalf, recognizing Muse's questions and approval dialogs is deferred: until it lands, a Muse session waiting
+for your answer can look idle. SPEC.md says so, and the plan's TODO entry is narrowed to that part.
+
+- #2785: a support window for older agent versions.
+- #2786: Muse as its own agent kind.
+- #2788: resuming Muse conversations.
+- #2789: reading Muse's status.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the plan was based, main gained the Trash footer (#2787) and TODO entries; nothing interacted. The first landing
+attempt found three existing tests still expecting Muse to be an agent Farhelm does not track, and a Restart with
+message that blamed a missing conversation when the real problem was a missing resume command. The redelivery fixed
+exactly those: Restart with now tells an older Muse session without a resume command to use Clone or Replace with. A
+fresh-context review of the whole plan found no database change, the protocol version raised for the new Muse values,
+Claude's behavior unchanged and the per-agent code rules followed. The protocol change means the helm and its
+supervisors must run matching versions, which the protocol check enforces. A second review of the redelivery found the
+fixes carried out with no test weakened, and one lost test check, restored at landing (below).
+
+#### Fixes made at landing
+
+- Rebuilding the Restart with test's Muse case had removed its only check that an agent launch whose agent has no
+  conversation reporting (Cursor or OpenCode) is told "<agent> sessions can't be resumed". The landing added that check
+  back, for Cursor, to #2788's test.
+
+#### Things you should know
+
+- The executor recorded the WebKit focus failure in the Restart with tests as an open flake (flake log, TODO.md's
+  Deflake list and the sweep's exclusion list), from its own failing run `ca41e45d-2ea0-486b-a8b1-7f1defad7146`; the
+  same check had failed at an earlier landing of another plan and passed on rerun.
+- Muse versions older than 1.4.14 will be started with Farhelm's hook configuration passed on the command line, which
+  nobody tried on those versions; if one rejects it, that session will not start. The plan's new support window for
+  older agent versions covers this.
+
+#### Possible follow-ups
+
+- Restart's own tooltip, for an older Muse session without a resume command, still says "this command launch did not opt
+  into Resume … Replace starts it over": it is an agent launch, and the text does not mention Clone.
+- The documentation for captured agent screens and AGENTS.md's "Agent screens" flow describe status reading and
+  re-capture as Claude and Codex only. Muse's screens were captured by hand, so re-capturing agent screens after a Muse
+  upgrade will not refresh them, and Muse's status reading could go stale unnoticed.
+
+#### Checks
+
+This round landed only this plan. On the stack as delivered:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, the check that every test delay states its reason, `dprint check`
+  across the repository, `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py`, the docs
+  website build, the workspace debug build and the UI's release web build: all passed.
+- The whole Rust workspace, `cargo nextest run --workspace --exclude farhelm-desktop`, with the pinned test runner and
+  tmux, run `d8d82520-09c7-4055-89a9-0f897c527c64`: 4510 passed, 40 skipped by design, and 1 failed: the known flake
+  "shallow pause resumes without reset or replay", in terminal code this plan does not touch. The UI's Rust tests,
+  `cargo nextest run -p farhelm-ui`, run `c9bbee9d-f168-4095-94c4-fb57ed9280b7`: all 805 passed. The UI's JavaScript
+  tests (`node --test` in `crates/farhelm-ui/js-tests`), run `5849ba43-7648-4bc9-8bbc-729554294f9b`: 358 passed.
+- `npx playwright test` in `e2e/` with `tests/named-conversations.spec.ts` and `tests/restart-with.spec.ts`, on Chromium
+  and WebKit, three workers each with its own helm and supervisors, no retries, run
+  `e1c5935e-6592-4e13-ba50-9b7042ffb001`: all 112 passed.
+- After the landing fix: `cargo fmt --all -- --check`, and the changed test alone,
+  `cargo nextest run -p farhelm-ui -E 'test(=session_view::tests::restart_with_availability_explains_each_unavailable_case)'`,
+  run `e5565ef8-2866-413c-a8e4-2ca8203e4e55`: passed.
+- Reused from the first landing attempt, on the plan before this delivery's test and message fixes: the workspace-trust,
+  guarded-permissions and Goose and Pi launcher browser specs, which all passed within run
+  `9f76f468-811e-4b98-9635-6cb2b6d1d86c`. That run failed overall, only in the named-conversations and restart-with
+  specs, which ran again above. Skipped: the rest of the browser suite (the UI changes are Muse's agent kind, its mark
+  and one Restart with message), the desktop app checks (no desktop code changed) and real Muse runs beyond the
+  executor's captures.
+
+The executor also ran the whole Rust workspace; this landing ran it again on the final version, with the affected
+browser specs. Apart from the PRs no longer being drafts, nothing in the executor's report became untrue at landing.
