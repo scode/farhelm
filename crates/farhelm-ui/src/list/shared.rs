@@ -277,11 +277,11 @@ pub(crate) fn SessionHostIcon(locality: HostLocality, icon: HostIcon, color: Hos
     match locality {
         HostLocality::Local => rsx! {
             HostMark { icon, color, local: true }
-            span { class: "visually-hidden", "local" }
+            span { class: "visually-hidden", "Local" }
         },
         HostLocality::Remote => rsx! {
             HostMark { icon, color }
-            span { class: "visually-hidden", "remote" }
+            span { class: "visually-hidden", "Remote" }
         },
         HostLocality::Unknown => rsx! {},
     }
@@ -1111,7 +1111,7 @@ pub(super) mod tests {
     fn an_option_label_names_the_phase_only_when_there_is_one_to_warn_about() {
         assert_eq!(
             option(1, "this machine", true).label(),
-            "local (this machine)"
+            "Local (this machine)"
         );
         assert_eq!(option(1, "My Laptop", true).label(), "My Laptop");
         assert_eq!(gui_host_name("this machine", false), "this machine");

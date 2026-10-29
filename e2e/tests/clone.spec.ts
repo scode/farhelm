@@ -219,7 +219,7 @@ test("opening a clone focuses search before any typing or mode click", async ({
     // for it to settle (sidebar.spec.ts's `waitForHostsListSettled`)
     // before opening the menu whose teardown is under test.
     await expect(
-      page.locator(".hosts-status", { hasText: "loading hosts" }),
+      page.locator(".hosts-status", { hasText: "Loading hosts" }),
     ).toHaveCount(0, { timeout: 20_000 });
     await installFocusTrace(page);
     let createPosts = 0;
@@ -296,7 +296,7 @@ test("opening a clone from the keyboard focuses search before any typing", async
     await attachSession(page, sourceId);
     await waitForTermText(page, "FAKE-AGENT READY");
     await expect(
-      page.locator(".hosts-status", { hasText: "loading hosts" }),
+      page.locator(".hosts-status", { hasText: "Loading hosts" }),
     ).toHaveCount(0, { timeout: 20_000 });
     await installFocusTrace(page);
     let createPosts = 0;
@@ -423,7 +423,7 @@ test("a deliberately entered name field keeps focus through the late catalog ren
       await attachSession(page, sourceId);
       await waitForTermText(page, "FAKE-AGENT READY");
       await expect(
-        page.locator(".hosts-status", { hasText: "loading hosts" }),
+        page.locator(".hosts-status", { hasText: "Loading hosts" }),
       ).toHaveCount(0, { timeout: 20_000 });
       await installFocusTrace(page);
       await openRowMenu(sourceRow);
@@ -506,7 +506,7 @@ test("a clone transfer retires the toggle return while ordinary Escape keeps it"
     await attachSession(page, source.id);
     await waitForTermText(page, "FAKE-AGENT READY");
     await expect(
-      page.locator(".hosts-status", { hasText: "loading hosts" }),
+      page.locator(".hosts-status", { hasText: "Loading hosts" }),
     ).toHaveCount(0, { timeout: 20_000 });
     await installFocusTrace(page);
     await armFocusGate(page, "toggle");
@@ -572,7 +572,7 @@ test("a closed opening's held focus work stays stale when released after reopen"
     await attachSession(page, source.id);
     await waitForTermText(page, "FAKE-AGENT READY");
     await expect(
-      page.locator(".hosts-status", { hasText: "loading hosts" }),
+      page.locator(".hosts-status", { hasText: "Loading hosts" }),
     ).toHaveCount(0, { timeout: 20_000 });
     await installFocusTrace(page);
     // Armed before opening A so both mount deliveries are captured no
@@ -702,7 +702,7 @@ test("composer search survives a held terminal reveal", async ({ page, request }
     await expect(sourceRow).toHaveAttribute("data-session-selected", "true", { timeout: 20_000 });
     await waitForHeldPrimaryReveal(page);
     await expect(
-      page.locator(".hosts-status", { hasText: "loading hosts" }),
+      page.locator(".hosts-status", { hasText: "Loading hosts" }),
     ).toHaveCount(0, { timeout: 20_000 });
     await installFocusTrace(page);
     try {
@@ -1052,7 +1052,7 @@ async function openEffortClone(
     await expect(sourceRow).toBeVisible({ timeout: 20_000 });
     await attachSession(page, sourceId);
     await waitForTermText(page, "FAKE-AGENT READY");
-    await expect(page.locator(".hosts-status", { hasText: "loading hosts" })).toHaveCount(0, { timeout: 20_000 });
+    await expect(page.locator(".hosts-status", { hasText: "Loading hosts" })).toHaveCount(0, { timeout: 20_000 });
     await openRowMenu(sourceRow);
     await sourceRow.locator(".session-row-clone").click();
     const form = page.locator('.create-session-form[role="dialog"]');

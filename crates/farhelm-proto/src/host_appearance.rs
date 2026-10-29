@@ -41,6 +41,30 @@ pub enum HostIcon {
 }
 
 impl HostIcon {
+    /// The picker label, separate from the case-sensitive storage and JSON word.
+    ///
+    /// Display casing must not change what older builds read from the database.
+    pub const fn display_name(self) -> &'static str {
+        match self {
+            Self::Cloud => "Cloud",
+            Self::House => "House",
+            Self::Flask => "Flask",
+            Self::Database => "Database",
+            Self::Chip => "Chip",
+            Self::Rocket => "Rocket",
+            Self::Gear => "Gear",
+            Self::Gem => "Gem",
+            Self::Hexagon => "Hexagon",
+            Self::Triangle => "Triangle",
+            Self::Ring => "Ring",
+            Self::Square => "Square",
+            Self::Bug => "Bug",
+            Self::Factory => "Factory",
+            Self::Castle => "Castle",
+            Self::Laptop => "Laptop",
+        }
+    }
+
     /// Picker order only; persisted values never refer to these positions.
     pub const ALL: [Self; 16] = [
         Self::Cloud,
@@ -130,6 +154,22 @@ pub enum HostColor {
 }
 
 impl HostColor {
+    /// The picker label, independent of the stable word used by storage and CSS.
+    ///
+    /// The display name is for people; callers persisting a choice use `as_str`.
+    pub const fn display_name(self) -> &'static str {
+        match self {
+            Self::Default => "Default",
+            Self::Lavender => "Lavender",
+            Self::Orchid => "Orchid",
+            Self::Teal => "Teal",
+            Self::Steel => "Steel",
+            Self::Sand => "Sand",
+            Self::Copper => "Copper",
+            Self::Red => "Red",
+        }
+    }
+
     /// Picker order only; persisted values never refer to these positions.
     pub const ALL: [Self; 8] = [
         Self::Default,

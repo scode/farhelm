@@ -104,7 +104,7 @@ async function action(page: Page, host: number, operation: Operation, retry = fa
   await expect(menu).toBeVisible();
   await menu.locator(retry ? ".provisioning-rerun" : ".provisioning-update").click();
   if (operation === "add") {
-    const question = page.getByRole("dialog", { name: "host setup", exact: true });
+    const question = page.getByRole("dialog", { name: "Host setup", exact: true });
     await expect(question).toBeVisible();
     await question.locator(".provisioning-confirm").click();
     await expect(question).toHaveCount(0);
@@ -361,7 +361,7 @@ test("uncertain Update survives old success and failed retries until correlated 
   const refusal = page.locator(".host-refusal-dialog");
   await expect(refusal).toContainText("controlled retry refusal");
   await expect(avatar(page, added.host_id)).toHaveAttribute("data-host-attention", "true");
-  await refusal.getByRole("button", { name: "close", exact: true }).click();
+  await refusal.getByRole("button", { name: "Close", exact: true }).click();
   await expect(refusal).toHaveCount(0);
 
   phase = "submit-refused";
@@ -529,7 +529,7 @@ for (const boundary of ["following", "submitting", "submitting-unvalidated"] as 
         acceptance.release();
       }
       const warning = row(page, added.host_id).locator(".provisioning-warning");
-      await expect(warning).toContainText(boundary === "submitting-unvalidated" ? "run identity could not be read" : "ssh destination changed");
+      await expect(warning).toContainText(boundary === "submitting-unvalidated" ? "run identity could not be read" : "SSH destination changed");
       await expect(avatar(page, added.host_id)).toHaveAttribute("data-host-attention", "true");
       if (boundary !== "submitting-unvalidated") {
         await expect(avatar(page, added.host_id)).toHaveAttribute("data-host-progress", "false");

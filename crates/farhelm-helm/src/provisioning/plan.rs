@@ -238,7 +238,7 @@ impl ProvisioningAction {
     fn step(&self, home: &Path) -> PlanStep {
         let (name, paths, explanation): (&str, Vec<&Path>, Option<String>) = match self {
             Self::EnsureDirectories { directories } => (
-                "create directories",
+                "Create directories",
                 directories
                     .iter()
                     .map(|directory| directory.path.as_path())
@@ -249,8 +249,8 @@ impl ProvisioningAction {
                 payload, temporary, ..
             } => (
                 match payload {
-                    PayloadKind::Farhelm => "upload the farhelm binary",
-                    PayloadKind::Tmux => "upload tmux",
+                    PayloadKind::Farhelm => "Upload the farhelm binary",
+                    PayloadKind::Tmux => "Upload tmux",
                 },
                 vec![temporary],
                 None,
@@ -262,8 +262,8 @@ impl ProvisioningAction {
                 ..
             } => (
                 match payload {
-                    PayloadKind::Farhelm => "install the farhelm binary",
-                    PayloadKind::Tmux => "install tmux",
+                    PayloadKind::Farhelm => "Install the farhelm binary",
+                    PayloadKind::Tmux => "Install tmux",
                 },
                 vec![destination, temporary],
                 None,
@@ -274,17 +274,17 @@ impl ProvisioningAction {
                 temporary,
                 ..
             } => (
-                "write the systemd user unit",
+                "Write the systemd user unit",
                 vec![destination, temporary],
                 Some(format!("Unit: {unit}")),
             ),
-            Self::DaemonReload => ("reload systemd user units", vec![], None),
+            Self::DaemonReload => ("Reload systemd user units", vec![], None),
             Self::EnableSupervisor {
                 unit_path,
                 persistent_run,
                 ..
             } => (
-                "enable and start the supervisor",
+                "Enable and start the supervisor",
                 vec![unit_path],
                 Some(persistent_run.clone()),
             ),
@@ -292,27 +292,27 @@ impl ProvisioningAction {
                 boot_start_if_enabled,
                 login_start_if_refused,
             } => (
-                "enable lingering, to start at boot",
+                "Enable lingering, to start at boot",
                 vec![],
                 Some(format!(
                     "{boot_start_if_enabled}; if lingering is refused, {login_start_if_refused}"
                 )),
             ),
-            Self::RestartSupervisor { .. } => ("restart the supervisor", vec![], None),
-            Self::AttachSupervisor => ("connect to the supervisor", vec![], None),
-            Self::DisableSupervisor { .. } => ("disable the supervisor", vec![], None),
+            Self::RestartSupervisor { .. } => ("Restart the supervisor", vec![], None),
+            Self::AttachSupervisor => ("Connect to the supervisor", vec![], None),
+            Self::DisableSupervisor { .. } => ("Disable the supervisor", vec![], None),
             Self::RemoveUnit { destination, .. } => {
-                ("remove the systemd user unit", vec![destination], None)
+                ("Remove the systemd user unit", vec![destination], None)
             }
             Self::StopSupervisor { .. } => {
-                ("stop the supervisor and its tmux server", vec![], None)
+                ("Stop the supervisor and its tmux server", vec![], None)
             }
             Self::RemoveDirectory { path } => (
-                "remove the install directory",
+                "Remove the install directory",
                 vec![path],
                 Some("The Farhelm binary and any private tmux in it are removed.".to_string()),
             ),
-            Self::ForgetHost => ("remove the host from the list", vec![], None),
+            Self::ForgetHost => ("Remove the host from the list", vec![], None),
         };
         PlanStep {
             id: self.label().to_string(),
@@ -703,11 +703,11 @@ impl PlanLayout {
             ProvisioningAction::EnableSupervisor {
                 unit: self.unit_name.clone(),
                 unit_path: unit_path.clone(),
-                persistent_run: "the supervisor runs persistently under the systemd user manager"
+                persistent_run: "The supervisor runs persistently under the systemd user manager"
                     .to_string(),
             },
             ProvisioningAction::EnableLinger {
-                boot_start_if_enabled: "the supervisor starts at boot if linger succeeds"
+                boot_start_if_enabled: "The supervisor starts at boot if linger succeeds"
                     .to_string(),
                 login_start_if_refused: "starts at login, not at boot".to_string(),
             },

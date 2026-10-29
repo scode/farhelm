@@ -16,6 +16,19 @@ pub enum Priority {
 }
 
 impl Priority {
+    /// The settings label, independent of ntfy's lowercase HTTP header vocabulary.
+    ///
+    /// Sending an alert must use `header`, even when the form shows this label.
+    pub fn display_label(self) -> &'static str {
+        match self {
+            Self::Min => "Min",
+            Self::Low => "Low",
+            Self::Default => "Default",
+            Self::High => "High",
+            Self::Urgent => "Urgent",
+        }
+    }
+
     /// Header spelling accepted by ntfy, independent of display formatting.
     pub fn header(self) -> &'static str {
         match self {

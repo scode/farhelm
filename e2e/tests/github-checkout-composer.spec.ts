@@ -100,7 +100,7 @@ async function openComposer(page: Page, host: LocalHost) {
   await page.locator(".new-session-button").click();
   const form = page.locator('.create-session-form[role="dialog"]');
   await expect(form).toBeVisible();
-  await expect(form.getByRole("combobox", { name: "host", exact: true })).toHaveAttribute("data-host-id", String(host.id));
+  await expect(form.getByRole("combobox", { name: "Host", exact: true })).toHaveAttribute("data-host-id", String(host.id));
   await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
   return form;
 }
@@ -1302,7 +1302,7 @@ test("switching hosts rejects the old checkout preview and checks setup for the 
     await expect.poll(() => localStarted).toBe(true);
     await expect(form.locator(".create-session-submit")).toBeDisabled();
     await expect(form.locator(".checkout-root-field")).toHaveCount(0);
-    const hostPicker = form.getByRole("combobox", { name: "host", exact: true });
+    const hostPicker = form.getByRole("combobox", { name: "Host", exact: true });
     await chooseLauncherHost(hostPicker, String(remote!.id));
     await expect(hostPicker).toHaveAttribute("data-host-id", String(remote!.id));
     await expect.poll(() => remoteStarted).toBe(true);

@@ -293,7 +293,7 @@ test(
       expect(headerBox.height + detailsBox.height, "browser chrome gains about 10px over the old 40px header plus 30px tabs").toBeLessThanOrEqual(62);
       expect(await page.locator(".tab-strip").evaluate((node) => node.scrollWidth > node.clientWidth),
         "tabs scroll instead of pushing the actions out of a 650px pane").toBe(true);
-      await expect(page.locator(".session-details-host .session-host")).toHaveText("local (this machine)");
+      await expect(page.locator(".session-details-host .session-host")).toHaveText("Local (this machine)");
       await expect(page.locator(".session-details-host .host-kind-icon")).toHaveCount(1);
       const identityOrder = await page.locator(".session-details").evaluate((node) =>
         Array.from(node.querySelectorAll(".status-badge, .title, .session-details-host, .status-time, .header-copy"))
@@ -699,8 +699,8 @@ test("header actions stay ordered, copy full values, and open the right flows", 
     await selectSessionActionWith(page, "Replace");
     await expect(form).toBeVisible();
     await expect(form.locator(".create-session-submit")).toHaveText("Replace");
-    await expect(form.locator(".create-session-submit")).toHaveAccessibleName(/^Replace Command · local \(this machine\) · \/tmp$/);
-    await expect(form.locator(".launch-composer-launch-context")).toHaveText(/^Command · local \(this machine\) · \/tmp$/);
+    await expect(form.locator(".create-session-submit")).toHaveAccessibleName(/^Replace Command · Local \(this machine\) · \/tmp$/);
+    await expect(form.locator(".launch-composer-launch-context")).toHaveText(/^Command · Local \(this machine\) · \/tmp$/);
     await form.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(form).toHaveCount(0);
   } finally {

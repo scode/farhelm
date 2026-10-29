@@ -484,7 +484,7 @@ pub(super) fn HostSettingsDialog(
                 class: "host-settings-dialog host-settings-refreshed",
                 role: "dialog",
                 aria_modal: "true",
-                aria_label: "host settings · {shown_name}",
+                aria_label: "Host settings · {shown_name}",
                 // Programmatically focusable only, for the isolation's
                 // keydown net and the shared initial-focus policy's no-control
                 // fallback; `-1` keeps it out of the Tab order.
@@ -508,19 +508,19 @@ pub(super) fn HostSettingsDialog(
                 HostDialogHeader {
                     host: host.clone(),
                     title: rsx! { span { class: "peer-value", dir: "ltr", "{shown_name}" } },
-                    dismiss_label: "close host settings",
-                    dismiss_tooltip: "close: done with this host's settings",
+                    dismiss_label: "Close host settings",
+                    dismiss_tooltip: "Close: done with this host's settings",
                     on_dismiss: move |_| on_close.call(()),
                 }
                 ScrollRegion { class: "dialog-body host-settings-body",
-                handle: DIALOG, selector: ".host-settings-body", name: "host settings",
+                handle: DIALOG, selector: ".host-settings-body", name: "Host settings",
                 recovery: settings_recovery(),
                 if manageable || alias_supported {
                 section { class: "host-settings-section", aria_label: "Connection",
                     h3 { class: "host-settings-section-title", "Connection" }
                 if manageable {
                     div { class: "host-settings-row", "data-setting": "destination",
-                        span { class: "host-settings-label", "destination" }
+                        span { class: "host-settings-label", "Destination" }
                         if editing == Some(EditField::Destination) {
                             HostDestinationForm {
                                 draft,
@@ -536,8 +536,8 @@ pub(super) fn HostSettingsDialog(
                             button {
                                 r#type: "button",
                                 class: "btn btn-neutral host-edit",
-                                aria_label: "edit destination",
-                                "data-tooltip": "edit: change the ssh destination Farhelm uses for this host",
+                                aria_label: "Edit destination",
+                                "data-tooltip": "Edit: change the SSH destination Farhelm uses for this host",
                                 disabled: busy || editing.is_some(),
                                 onclick: {
                                     // These are authenticated registry settings, not host advertisements.
@@ -545,7 +545,7 @@ pub(super) fn HostSettingsDialog(
                                     let destination = destination.raw().to_owned();
                                     move |_| on_edit_start.call((id, EditField::Destination, destination.clone()))
                                 },
-                                "edit"
+                                "Edit"
                             }
                         }
                         {outcome_for(SettingsField::Destination)}
@@ -553,7 +553,7 @@ pub(super) fn HostSettingsDialog(
                 }
                 if alias_supported {
                     div { class: "host-settings-row", "data-setting": "alias",
-                        span { class: "host-settings-label", "alias" }
+                        span { class: "host-settings-label", "Alias" }
                         if editing == Some(EditField::Alias) {
                             HostDestinationForm {
                                 draft,
@@ -569,15 +569,15 @@ pub(super) fn HostSettingsDialog(
                             button {
                                 r#type: "button",
                                 class: "btn btn-neutral host-alias",
-                                aria_label: "edit alias",
-                                "data-tooltip": "edit: change the name this host is shown under",
+                                aria_label: "Edit alias",
+                                "data-tooltip": "Edit: change the name this host is shown under",
                                 disabled: busy || editing.is_some(),
                                 onclick: {
                                     // As with destination, the editor owns the user's exact stored bytes.
                                     let alias = alias.as_ref().map(|alias| alias.raw().to_owned()).unwrap_or_default();
                                     move |_| on_edit_start.call((id, EditField::Alias, alias.clone()))
                                 },
-                                "edit"
+                                "Edit"
                             }
                         }
                         {outcome_for(SettingsField::Alias)}
@@ -588,40 +588,40 @@ pub(super) fn HostSettingsDialog(
                 if host.kind.supports_appearance() {
                     section { class: "host-settings-section host-settings-appearance", aria_label: "Appearance",
                         h3 { class: "host-settings-section-title", "Appearance" }
-                        span { class: "host-settings-label", "icon" }
-                        div { class: "host-appearance-icons", role: "group", aria_label: "icon",
+                        span { class: "host-settings-label", "Icon" }
+                        div { class: "host-appearance-icons", role: "group", aria_label: "Icon",
                             for icon in farhelm_proto::host_appearance::HostIcon::ALL {
                                 button {
                                     r#type: "button", class: "host-icon-choice",
-                                    aria_label: icon.as_str(), aria_pressed: host.icon == icon,
-                                    "data-tooltip": "icon: {icon.as_str()}",
+                                    aria_label: icon.display_name(), aria_pressed: host.icon == icon,
+                                    "data-tooltip": "Icon: {icon.display_name()}",
                                     disabled: busy || editing.is_some(),
                                     onclick: move |_| on_appearance.call((id, AppearanceChoice::Icon(icon))),
                                     HostMark { icon, color: host.color, local: host.kind.is_this_machine() }
                                 }
                             }
                         }
-                        span { class: "host-settings-label", "color" }
-                        div { class: "host-appearance-colors", role: "group", aria_label: "color",
+                        span { class: "host-settings-label", "Color" }
+                        div { class: "host-appearance-colors", role: "group", aria_label: "Color",
                             for color in farhelm_proto::host_appearance::HostColor::ALL {
                                 button {
                                     r#type: "button", class: "host-color-choice",
-                                    aria_label: color.as_str(), aria_pressed: host.color == color,
-                                    "data-tooltip": "color: {color.as_str()}",
+                                    aria_label: color.display_name(), aria_pressed: host.color == color,
+                                    "data-tooltip": "Color: {color.display_name()}",
                                     "data-host-color": color.as_str(),
                                     disabled: busy || editing.is_some(),
                                     onclick: move |_| on_appearance.call((id, AppearanceChoice::Color(color))),
                                     span { "aria-hidden": "true" }
                                 }
                             }
-                            span { class: "host-color-name", "{host.color.as_str()}" }
+                            span { class: "host-color-name", "{host.color.display_name()}" }
                         }
                         div { class: "host-appearance-preview",
-                            span { class: "host-settings-help", "in the session list" }
+                            span { class: "host-settings-help", "In the session list" }
                             div { class: "host-appearance-preview-row",
                                 span { class: "status-dot", "aria-hidden": "true" }
                                 span { class: "session-locality-slot", HostMark { icon: host.icon, color: host.color, local: host.kind.is_this_machine() } }
-                                span { "session" }
+                                span { "Session" }
                             }
                         }
                         {outcome_for(SettingsField::Appearance)}
@@ -631,7 +631,7 @@ pub(super) fn HostSettingsDialog(
                     h3 { class: "host-settings-section-title", "Permissions" }
                 div { class: "host-settings-yolo setting-group",
                     label { class: "host-yolo-without-asking setting-row",
-                        "data-tooltip": "start YOLO sessions on this host without asking first",
+                        "data-tooltip": "Start YOLO sessions on this host without asking first",
                         span { "Start YOLO sessions without asking" }
                         input {
                             r#type: "checkbox",
@@ -651,7 +651,7 @@ pub(super) fn HostSettingsDialog(
                 div { class: "host-settings-commands",
                     div { class: "setting-group",
                         label { class: "host-commands-without-asking setting-row",
-                            "data-tooltip": "let agents in this host's sessions start, stop, change and delete sessions and templates without asking first",
+                            "data-tooltip": "Let agents in this host's sessions start, stop, change and delete sessions and templates without asking first",
                             span { "Run farhelm commands without asking" }
                             input {
                                 r#type: "checkbox",
@@ -697,14 +697,14 @@ pub(super) fn HostSettingsDialog(
                 }
                 }
                 crate::modal_dialog::DialogFooter { class: "host-settings-actions",
-                    span { class: "dialog-footer-hint", "changes save as you make them" }
+                    span { class: "dialog-footer-hint", "Changes save as you make them" }
                     crate::modal_dialog::DialogActions {
                         button {
                             r#type: "button",
                             class: "btn btn-neutral host-settings-close",
-                            "data-tooltip": "close: done with this host's settings",
+                            "data-tooltip": "Close: done with this host's settings",
                             onclick: move |_| on_close.call(()),
-                            "close"
+                            "Close"
                         }
                     }
                 }
@@ -752,7 +752,7 @@ pub(super) fn HostRemoveDialog(
                 class: "host-settings-dialog host-remove-dialog host-dialog-framed",
                 role: "dialog",
                 aria_modal: "true",
-                aria_label: "remove host · {shown_name}",
+                aria_label: "Remove host · {shown_name}",
                 tabindex: "-1",
                 on_escape: {
                     let shown = shown.clone();
@@ -764,11 +764,11 @@ pub(super) fn HostRemoveDialog(
                 },
                 HostDialogHeader {
                     host: Some(host.clone()),
-                    title: rsx! { "remove host · " span { class: "peer-value", dir: "ltr", "{shown_name}" } },
+                    title: rsx! { "Remove host · " span { class: "peer-value", dir: "ltr", "{shown_name}" } },
                     summary: error.as_ref().map(|_| "Farhelm refused this action".to_string()),
                     summary_danger: error.is_some(),
-                    dismiss_label: "cancel host removal",
-                    dismiss_tooltip: "cancel: keep this host",
+                    dismiss_label: "Cancel host removal",
+                    dismiss_tooltip: "Cancel: keep this host",
                     on_dismiss: {
                         let shown = shown.clone();
                         move |_| {
@@ -779,7 +779,7 @@ pub(super) fn HostRemoveDialog(
                     },
                 }
                 ScrollRegion { class: "dialog-body host-settings-body",
-                    handle: DIALOG, selector: ".host-settings-body", name: "host removal details",
+                    handle: DIALOG, selector: ".host-settings-body", name: "Host removal details",
                     recovery: RecoveryFocus::new(".host-settings-close", None, true, RecoveryDelay::OneFrame),
                     p { class: "host-settings-value peer-value host-dialog-destination", dir: "ltr", "{destination}" }
                     p { class: "host-remove-explanation",
@@ -800,7 +800,7 @@ pub(super) fn HostRemoveDialog(
                         button {
                             r#type: "button",
                             class: "btn btn-neutral host-settings-close",
-                            "data-tooltip": "cancel: keep this host",
+                            "data-tooltip": "Cancel: keep this host",
                             disabled: busy,
                             autofocus: busy,
                             onclick: {
@@ -811,12 +811,12 @@ pub(super) fn HostRemoveDialog(
                                     }
                                 }
                             },
-                            "cancel"
+                            "Cancel"
                         }
                         button {
                             r#type: "button",
                             class: "btn btn-danger btn-outline",
-                            "data-tooltip": "remove it, and remove hosts without asking from now on",
+                            "data-tooltip": "Remove it, and remove hosts without asking from now on",
                             aria_describedby: "host-remove-permanent-hint",
                             disabled: busy,
                             onkeydown: crate::guard_confirmation_enter,
@@ -824,17 +824,17 @@ pub(super) fn HostRemoveDialog(
                                 let shown = shown.clone();
                                 move |_| on_remove.call((shown.clone(), true))
                             },
-                            "remove, don't ask again"
+                            "Remove, don't ask again"
                         }
                         button {
                             r#type: "button",
                             class: "btn btn-danger host-remove-confirm",
-                            "data-tooltip": "remove: forget this host; its supervisor and sessions keep running",
+                            "data-tooltip": "Remove: forget this host; its supervisor and sessions keep running",
                             disabled: busy,
                             autofocus: !busy,
                             onkeydown: crate::guard_confirmation_enter,
                             onclick: move |_| on_remove.call((shown.clone(), false)),
-                            "remove"
+                            "Remove"
                         }
                     }
                 }

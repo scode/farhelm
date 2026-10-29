@@ -32,7 +32,7 @@ installTerminalSuiteHooks();
 
 /** The Settings gear is the ordinary app boundary, independent of terminal selection. */
 async function waitForAppReady(page: Page): Promise<void> {
-  await expect(page.getByRole("button", { name: "settings", exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("button", { name: "Settings", exact: true })).toBeVisible({ timeout: 20_000 });
 }
 
 /** Verify the actual canvas as well as the owner's resolved palette. */
@@ -134,7 +134,7 @@ for (const initial of [
       await expect(page.locator("#main")).toHaveCount(1);
       await expect(page.locator("#main > *")).toHaveCount(0);
       await expect(page.locator("#main")).toHaveText("");
-      await expect(page.getByRole("button", { name: "settings", exact: true })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Settings", exact: true })).toHaveCount(0);
       await expectPalette(page, initial.expected);
       expect(await page.evaluate((key) => localStorage.getItem(key), appearanceKey)).toBe(initial.stored);
 
@@ -362,7 +362,7 @@ test("appearance choices survive Settings remounts and reloads", async ({ page }
     const oldRadio = await panel.getByRole("radio", { name: labels[choice], exact: true }).elementHandle();
     expect(oldRadio).not.toBeNull();
     await page.locator(".app-settings-close").click();
-    await expect(page.getByRole("dialog", { name: "settings", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("dialog", { name: "Settings", exact: true })).toHaveCount(0);
     expect(await oldRadio!.evaluate((radio) => radio.isConnected), "closing Settings must discard the old inputs").toBe(false);
     await oldRadio!.dispose();
     await expectChoice(await openAppearance(page), choice);
@@ -404,7 +404,7 @@ test("another same-origin page updates appearance and clearing restores System",
     await expectPalette(page, "light");
     await expectChoice(panel, "light");
     await page.locator(".app-settings-close").click();
-    await expect(page.getByRole("dialog", { name: "settings", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("dialog", { name: "Settings", exact: true })).toHaveCount(0);
     await clickAppearanceChoice(otherPanel, "dark");
     await expectPalette(page, "dark");
     panel = await openAppearance(page);

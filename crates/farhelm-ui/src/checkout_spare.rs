@@ -40,8 +40,8 @@ pub(crate) fn CheckoutSpareSettings() -> Element {
     rsx! {
         div { id: "checkout-spare", class: "checkout-spare-setting",
             label { class: "app-settings-choice setting-row",
-                "data-tooltip": "prepare one extra checkout per repository and host so the next launch can update it instead of cloning again",
-                span { "keep a checkout ready for faster launches" }
+                "data-tooltip": "Prepare one extra checkout per repository and host so the next launch can update it instead of cloning again",
+                span { "Keep a checkout ready for faster launches" }
                 input { r#type: "checkbox", class: "control-switch", checked: enabled, disabled: locked,
                     aria_describedby: "checkout-spare-help",
                     onchange: move |event| {
@@ -72,7 +72,7 @@ pub(crate) fn CheckoutSpareSettings() -> Element {
                 "On by default. Keeps one extra checkout per repository and host, using extra disk space. Farhelm prepares it through your login shell without prompting for credentials. The next launch updates that earlier clone: unchanged files keep older modification times, and Git hooks and checkout filters run ahead of time, then again only for the update. Turning this off affects future creates; each repository's spare is discarded at its next create on that host, or after 30 days unused. "
                 a { href: "https://farhelm.io/docs/using/start-a-session/#prepared-checkouts",
                     target: "_blank", rel: "noopener",
-                    "data-tooltip": "read how prepared checkouts differ from a fresh clone",
+                    "data-tooltip": "Read how prepared checkouts differ from a fresh clone",
                     onclick: move |event| {
                         event.prevent_default();
                         crate::app_bar::open_external_page("https://farhelm.io/docs/using/start-a-session/#prepared-checkouts");

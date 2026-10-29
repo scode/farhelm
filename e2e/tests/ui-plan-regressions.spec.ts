@@ -150,7 +150,7 @@ test("an unreachable host keeps its menu inside the minimum sidebar", async ({ p
   await page.goto("/");
   const host = page.locator(`[data-host-id="${remote.id}"]`);
   await showHostsPanel(page);
-  await expect(host.locator(".host-status-label")).toHaveText("unreachable, retrying");
+  await expect(host.locator(".host-status-label")).toHaveText("Unreachable, retrying");
   const handle = page.getByRole("separator", { name: "Sidebar width" });
   await expect(handle).toHaveAttribute("data-sidebar-bound", "true");
   await handle.focus();
@@ -159,7 +159,7 @@ test("an unreachable host keeps its menu inside the minimum sidebar", async ({ p
   // that public gesture before checking the host row's actual geometry.
   for (let step = 0; step < 10; step++) await page.keyboard.press("ArrowLeft");
   await expect(handle).toHaveAttribute("aria-valuenow", "296");
-  await expect(host.locator(".host-status-label")).toHaveAttribute("data-tooltip", "unreachable, retrying");
+  await expect(host.locator(".host-status-label")).toHaveAttribute("data-tooltip", "Unreachable, retrying");
   const sidebar = (await page.locator(".app-sidebar").boundingBox())!;
   const button = host.locator(".host-row-menu");
   const box = (await button.boundingBox())!;

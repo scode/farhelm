@@ -151,9 +151,9 @@ test("host-colored terminal frame follows local appearance and Settings", async 
     await expect(panes).toHaveAttribute("data-colored-frame", "false");
     await expect(terminal).toHaveCSS("box-shadow", "none");
 
-    const gear = page.getByRole("button", { name: "settings", exact: true });
-    const settings = page.getByRole("dialog", { name: "settings", exact: true });
-    const switcher = settings.getByRole("checkbox", { name: "color terminal frames by host", exact: true });
+    const gear = page.getByRole("button", { name: "Settings", exact: true });
+    const settings = page.getByRole("dialog", { name: "Settings", exact: true });
+    const switcher = settings.getByRole("checkbox", { name: "Color terminal frames by host", exact: true });
     await gear.click();
     await expect(switcher).not.toBeChecked();
     await switcher.setChecked(true);
@@ -178,8 +178,8 @@ test("host-colored terminal frame follows local appearance and Settings", async 
     await openHostMenu(page.locator(`.host-row[data-host-id="${local.id}"]`));
     await page.locator(".host-settings").click();
     const hostDialog = page.locator(".host-settings-dialog");
-    const teal = hostDialog.getByRole("group", { name: "color", exact: true })
-      .getByRole("button", { name: "teal", exact: true });
+    const teal = hostDialog.getByRole("group", { name: "Color", exact: true })
+      .getByRole("button", { name: "Teal", exact: true });
     await teal.click();
     await expect(teal).toHaveAttribute("aria-pressed", "true");
     await hostDialog.locator(".host-settings-close").click();
@@ -2496,7 +2496,7 @@ test("an inline confirming state survives a listing refresh; cancel still works 
     });
     await expect(row.locator(".session-agent")).toHaveAttribute(
       "data-tooltip",
-      `command — not YOLO, as asserted when the command was launched, by the user or by an agent — not checked by Farhelm — ${marker}`,
+      `command — Not YOLO, as asserted when the command was launched, by the user or by an agent — not checked by Farhelm — ${marker}`,
     );
 
     // Still confirming, still the same wording and title — a refresh must
@@ -3997,8 +3997,8 @@ test("compact rows retain distinct ended and harness glyphs within two character
     { id: "error", invocation: "opencode --auto", harness: "opencode", permission: "yolo", description: "OpenCode — YOLO, as asserted when the command was launched, by the user or by an agent — not checked by Farhelm — opencode --auto", launch: commandLaunchRow("opencode --auto {farhelm_args}", { yolo: true, agent: "open_code" }), status: { state: "error", detail: "cannot launch" }, annotation: null },
     { id: "default", invocation: "codex", harness: "codex", permission: "own-setting", description: /^Codex — Not classified · Agent's own setting\n[\s\S]*\n\nLaunched with: codex$/, launch: agentLaunchRow({ harness: "codex", model: null, effort: null, permissions: null }), status: { state: "idle" }, annotation: null },
     { id: "approve", invocation: "omp --approval-mode always-ask", harness: "omp", permission: "shielded", description: /^OMP — Approve: the agent asks before every tool action\n\n[\s\S]*\n\nLaunched with: omp$/, launch: agentLaunchRow({ harness: "omp", model: null, effort: null, permissions: "approve" }), status: { state: "idle" }, annotation: null },
-    { id: "full-auto", invocation: "codex --yolo", harness: "codex", permission: "shielded", description: "Codex — not YOLO, as asserted when the command was launched, by the user or by an agent — not checked by Farhelm — codex --yolo", launch: commandLaunchRow("codex --yolo {farhelm_args}", { agent: "codex" }), status: { state: "idle" }, annotation: null },
-    { id: "unknown", invocation: "codex --yolo", harness: "terminal", permission: "unknown", description: "command — unclassified — a command from before launch kinds, which Farhelm never classified — codex --yolo", launch: { kind: "legacy", invocation: "codex --yolo", agent_kind: "generic", resume_template: null }, status: { state: "idle" }, annotation: null },
+    { id: "full-auto", invocation: "codex --yolo", harness: "codex", permission: "shielded", description: "Codex — Not YOLO, as asserted when the command was launched, by the user or by an agent — not checked by Farhelm — codex --yolo", launch: commandLaunchRow("codex --yolo {farhelm_args}", { agent: "codex" }), status: { state: "idle" }, annotation: null },
+    { id: "unknown", invocation: "codex --yolo", harness: "terminal", permission: "unknown", description: "command — Unclassified — a command from before launch kinds, which Farhelm never classified — codex --yolo", launch: { kind: "legacy", invocation: "codex --yolo", agent_kind: "generic", resume_template: null }, status: { state: "idle" }, annotation: null },
   ];
   await patchPreferences(request, { compact: true });
   await page.route(SESSION_LISTING, (route) => fulfillAsHelm(route, {

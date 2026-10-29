@@ -869,10 +869,10 @@ for (const takeover of ["New", "settings", "Rename"]) {
         expect(opening).toBeTruthy();
         const form = page.locator(".create-session-form");
         if (takeover === "settings") {
-          await page.getByRole("button", { name: "settings", exact: true }).click();
-          const dialog = page.getByRole("dialog", { name: "settings", exact: true });
+          await page.getByRole("button", { name: "Settings", exact: true }).click();
+          const dialog = page.getByRole("dialog", { name: "Settings", exact: true });
           await expect(dialog).toBeVisible();
-          await dialog.getByRole("button", { name: "close settings", exact: true }).click();
+          await dialog.getByRole("button", { name: "Close settings", exact: true }).click();
           await expect(dialog).toHaveCount(0);
         } else if (source) {
           const row = page.locator(`[data-session-id="${source.id}"]`);
@@ -1171,7 +1171,7 @@ test("a quick preparation error survives New's first host binding", async ({ pag
     await chord(page);
     const form = page.locator(".create-session-form");
     await expect(form).toBeVisible();
-    await expect(form.getByRole("combobox", { name: "host", exact: true })).toHaveAttribute(
+    await expect(form.getByRole("combobox", { name: "Host", exact: true })).toHaveAttribute(
       "data-host-id",
       String(local!.id),
     );

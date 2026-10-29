@@ -71,16 +71,16 @@ test("Claude trust hint preserves the terminal and opens the opt-in caveats", as
     expect(after.height).toBeLessThan(before.height);
     await testInfo.attach("trust-hint", { body: await page.locator(".app-main").screenshot(), contentType: "image/png" });
 
-    const dialog = page.getByRole("dialog", { name: "settings", exact: true });
+    const dialog = page.getByRole("dialog", { name: "Settings", exact: true });
     const field = dialog.locator("#checkout-claude-trust");
-    const toggle = field.getByRole("checkbox", { name: 'answer Claude\'s "trust this folder?" for new checkouts', exact: true });
+    const toggle = field.getByRole("checkbox", { name: 'Answer Claude\'s "trust this folder?" for new checkouts', exact: true });
     // Exercise the band's own entry point at each layout. Selecting trust
     // through the gear helper here would hide a broken initial selection.
     for (const width of [390, 1280]) {
       await page.setViewportSize({ width, height: 900 });
       await band.getByRole("button", { name: "Settings and caveats", exact: true }).click();
-      await expect(dialog.locator('.app-settings-panel[aria-label="agent trust"]')).toBeVisible();
-      await expect(dialog.locator('.app-settings-panel[aria-label="sessions"]')).toBeHidden();
+      await expect(dialog.locator('.app-settings-panel[aria-label="Agent trust"]')).toBeVisible();
+      await expect(dialog.locator('.app-settings-panel[aria-label="Sessions"]')).toBeHidden();
       await expect(field).toBeFocused();
       await expect(toggle).toBeEnabled();
       await expect(toggle).not.toBeChecked();
@@ -91,11 +91,11 @@ test("Claude trust hint preserves the terminal and opens the opt-in caveats", as
       }), "settings opens scrolled to the opt-in").toBe(true);
       if (width === 390) {
         await expect(dialog.getByRole("button", { name: "‹ Settings", exact: true })).toBeVisible();
-        await expect(dialog.getByRole("navigation", { name: "settings sections", exact: true })).toBeHidden();
+        await expect(dialog.getByRole("navigation", { name: "Settings sections", exact: true })).toBeHidden();
         await dialog.getByRole("button", { name: "Close", exact: true }).click();
         await openSettings(page);
-        await expect(dialog.getByRole("checkbox", { name: "skip session confirmations", exact: true })).toBeFocused();
-        await expect(dialog.locator('.app-settings-panel[aria-label="agent trust"]')).toBeHidden();
+        await expect(dialog.getByRole("checkbox", { name: "Skip session confirmations", exact: true })).toBeFocused();
+        await expect(dialog.locator('.app-settings-panel[aria-label="Agent trust"]')).toBeHidden();
         await dialog.getByRole("button", { name: "Close", exact: true }).click();
       }
     }
@@ -120,7 +120,7 @@ test("Claude trust hint preserves the terminal and opens the opt-in caveats", as
     await expect(band).toHaveCount(0);
     await page.reload();
     await openSettings(page);
-    await expect(dialog.locator('.app-settings-panel[aria-label="sessions"]')).toBeVisible();
+    await expect(dialog.locator('.app-settings-panel[aria-label="Sessions"]')).toBeVisible();
     await selectSettingsSection(page, "agent trust");
     await expect(toggle).toBeChecked();
     await toggle.uncheck();
@@ -155,7 +155,7 @@ test("Claude trust hint preserves the terminal and opens the opt-in caveats", as
     await expect(other.locator(".claude-trust-surface")).toHaveAttribute("data-hint-dismissed", "true");
     await expect(other.locator(".claude-trust-band")).toHaveCount(0);
     await openSettings(page, "agent trust");
-    await field.getByRole("checkbox", { name: "show the hint when Claude asks about a managed checkout", exact: true }).check();
+    await field.getByRole("checkbox", { name: "Show the hint when Claude asks about a managed checkout", exact: true }).check();
     await dialog.getByRole("button", { name: "Close", exact: true }).click();
     await expect(band).toBeVisible();
     await expect(other.locator(".claude-trust-band")).toBeVisible();
@@ -260,7 +260,7 @@ test("Claude trust band discards a newer Settings overlay after its origin close
     await expect(band).toHaveCount(0);
     const dialog = await openSettings(page, "agent trust");
     const field = dialog.locator("#checkout-claude-trust");
-    const toggle = field.getByRole("checkbox", { name: "show the hint when Claude asks about a managed checkout", exact: true });
+    const toggle = field.getByRole("checkbox", { name: "Show the hint when Claude asks about a managed checkout", exact: true });
     await expect(toggle).toBeEnabled();
     await expect(toggle).not.toBeChecked();
     expect((await readPreferences(request)).claude_trust_hint_dismissed).toBe(false);
@@ -396,7 +396,7 @@ test("Claude trust band repairs an idle read crossing a Settings dismissal save"
     await expect(surface).toHaveAttribute("data-enabled", "false");
     await expect(surface).toHaveAttribute("data-hint-dismissed", "false");
     await expect(band).toBeVisible();
-    await expect(page.getByRole("dialog", { name: "settings", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("dialog", { name: "Settings", exact: true })).toHaveCount(0);
     stopTrustRoute = await drainedRoute(page, "**/api/checkout-claude-trust", async (route) => {
       if (route.request().method() !== "GET") return route.fallback();
       const response = await route.fetch();
@@ -428,7 +428,7 @@ test("Claude trust band repairs an idle read crossing a Settings dismissal save"
     expect((await readPreferences(request)).claude_trust_hint_dismissed).toBe(false);
     const dialog = await openSettings(page, "agent trust");
     const field = dialog.locator("#checkout-claude-trust");
-    const toggle = field.getByRole("checkbox", { name: "show the hint when Claude asks about a managed checkout", exact: true });
+    const toggle = field.getByRole("checkbox", { name: "Show the hint when Claude asks about a managed checkout", exact: true });
     await expect(toggle).toBeEnabled();
     await expect(toggle).toBeChecked();
     const committed = page.waitForResponse((reply) => reply.request().method() === "PUT"

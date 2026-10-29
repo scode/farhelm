@@ -3007,13 +3007,16 @@ pub(crate) fn SessionView(
 /// makes reading a long remedy depend on a pointer.
 #[component]
 fn SessionUnavailableCard(notice: SessionUnavailableNotice) -> Element {
+    // The cause is closed client wording, shared with standalone row labels.
+    // Here it continues a sentence; peer names and diagnostics never enter it.
+    let cause_clause = notice.cause.to_ascii_lowercase();
     rsx! {
         div { class: "session-unavailable-overlay host-stale-notice", role: "region",
             tabindex: "0", aria_label: "session unavailable",
             div { class: "session-unavailable-card", role: "status",
                 div { class: "session-unavailable-heading",
                     span { class: "delete-spinner", "aria-hidden": "true" }
-                    "Session unavailable — {notice.cause}"
+                    "Session unavailable — {cause_clause}"
                 }
                 PeerLine { class: "session-unavailable-explanation", parts: notice.explanation }
                 if !notice.detail.is_empty() {

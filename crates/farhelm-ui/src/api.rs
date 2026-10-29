@@ -546,7 +546,7 @@ pub(crate) async fn fetch_ntfy_settings(
     response
         .json()
         .await
-        .map_err(|_| "could not read ntfy alert settings".to_string())
+        .map_err(|_| "Could not read ntfy alert settings".to_string())
 }
 
 /// Explicit saves carry only a replacement token, never a fetched secret. The response's presence bit confirms replace/clear succeeded.
@@ -565,7 +565,7 @@ pub(crate) fn save_ntfy_settings(
         response
             .json()
             .await
-            .map_err(|_| "could not read saved ntfy alert settings".to_string())
+            .map_err(|_| "Could not read saved ntfy alert settings".to_string())
     }
 }
 
@@ -4477,7 +4477,7 @@ pub(crate) enum Commit {
 /// that has nothing to do with what they just did.
 fn unvalidated_note(error: impl std::fmt::Display, authority: &str) -> String {
     format!(
-        "the helm accepted this change, but its reply could not be read by this build ({error}); \
+        "The helm accepted this change, but its reply could not be read by this build ({error}); \
          {authority} is the authoritative view of what happened"
     )
 }
@@ -4537,7 +4537,7 @@ pub(crate) async fn probe_ssh_host(
     Ok(match resp.json::<ProbeResponse>().await {
         Ok(probed) => probed,
         Err(error) => ProbeResponse::Unvalidated(format!(
-            "the helm accepted the host probe, but its reply could not be read: {error}"
+            "The helm accepted the host probe, but its reply could not be read: {error}"
         )),
     })
 }
@@ -4557,7 +4557,7 @@ pub(crate) async fn probe_local_host(base: &str) -> Result<ProbeResponse, String
     Ok(match resp.json::<ProbeResponse>().await {
         Ok(probed) => probed,
         Err(error) => ProbeResponse::Unvalidated(format!(
-            "the helm accepted the local probe, but its reply could not be read: {error}"
+            "The helm accepted the local probe, but its reply could not be read: {error}"
         )),
     })
 }
@@ -4587,7 +4587,7 @@ pub(crate) async fn provision_host(
     Ok(match resp.json::<ProvisioningAccepted>().await {
         Ok(accepted) => ProvisioningSubmission::Accepted(accepted),
         Err(error) => ProvisioningSubmission::Unvalidated(format!(
-            "the helm accepted provisioning, but its run identity could not be read ({error}); \
+            "The helm accepted provisioning, but its run identity could not be read ({error}); \
              the hosts list and provisioning panels are the authoritative view of what happened"
         )),
     })
@@ -4601,7 +4601,7 @@ pub(crate) async fn plan_host_update(base: &str, host: HostId) -> Result<UpdateP
         return Err(refusal_text("POST", &url, resp).await);
     }
     resp.json::<UpdatePlan>().await.map_err(|error| {
-        format!("the helm planned the update, but its reply could not be read: {error}")
+        format!("The helm planned the update, but its reply could not be read: {error}")
     })
 }
 
@@ -4627,7 +4627,7 @@ pub(crate) async fn update_host(
     Ok(match resp.json::<ProvisioningAccepted>().await {
         Ok(accepted) => ProvisioningSubmission::Accepted(accepted),
         Err(error) => ProvisioningSubmission::Unvalidated(format!(
-            "the helm accepted the update, but its run identity could not be read ({error}); \
+            "The helm accepted the update, but its run identity could not be read ({error}); \
              this host's provisioning panel is the authoritative view of what happened"
         )),
     })
@@ -4695,7 +4695,7 @@ pub(crate) async fn uninstall_host(
     Ok(match resp.json::<ProvisioningAccepted>().await {
         Ok(accepted) => ProvisioningSubmission::Accepted(accepted),
         Err(error) => ProvisioningSubmission::Unvalidated(format!(
-            "the helm accepted the uninstall, but its run identity could not be read ({error}); \
+            "The helm accepted the uninstall, but its run identity could not be read ({error}); \
              the hosts list is the authoritative view of what happened"
         )),
     })
@@ -5028,7 +5028,7 @@ async fn answer_approval_request(
     }
     if expects_receipt && resp.status() != reqwest::StatusCode::NO_CONTENT {
         return Err(
-            "the host add answer did not confirm acceptance; no discovery was started".into(),
+            "The host add answer did not confirm acceptance; no discovery was started".into(),
         );
     }
     Ok(AnswerOutcome::Delivered)

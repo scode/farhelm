@@ -22,38 +22,38 @@ test("ntfy settings explicitly save, refuse, preserve and clear a token", async 
   const address = endpoint.address();
   if (!address || typeof address === "string") throw new Error("loopback server did not bind a TCP port");
   const serverUrl = `http://127.0.0.1:${address.port}`;
-  const dialog = page.getByRole("dialog", { name: "settings", exact: true });
+  const dialog = page.getByRole("dialog", { name: "Settings", exact: true });
   const section = dialog.getByRole("region", { name: "ntfy alerts" });
-  const priority = section.getByRole("group", { name: "priority", exact: true });
-  const topic = section.getByRole("textbox", { name: "topic", exact: true });
-  const password = section.getByLabel("access token (optional)", { exact: true });
+  const priority = section.getByRole("group", { name: "Priority", exact: true });
+  const topic = section.getByRole("textbox", { name: "Topic", exact: true });
+  const password = section.getByLabel("Access token (optional)", { exact: true });
   try {
     await openSettings(page, "notifications");
     await expect(topic).toBeEditable();
-    await expect(section.getByLabel("send ntfy alerts", { exact: true })).not.toBeChecked();
-    const server = section.getByRole("textbox", { name: "server URL", exact: true });
+    await expect(section.getByLabel("Send ntfy alerts", { exact: true })).not.toBeChecked();
+    const server = section.getByRole("textbox", { name: "Server URL", exact: true });
     await expect(server).toHaveValue("https://ntfy.sh");
     await expect(server).toHaveCSS("font-family", /JetBrains Mono/);
     const actions = section.locator(".dialog-actions");
-    await expect(actions.getByRole("button")).toHaveText(["send test", "save"]);
-    const save = actions.getByRole("button", { name: "save", exact: true });
-    const sendTest = actions.getByRole("button", { name: "send test", exact: true });
+    await expect(actions.getByRole("button")).toHaveText(["Send test", "Save"]);
+    const save = actions.getByRole("button", { name: "Save", exact: true });
+    const sendTest = actions.getByRole("button", { name: "Send test", exact: true });
     await expect(save).toHaveCSS("background-color", await resolveToken(page, "--accent-fill"));
     await expect(sendTest).toHaveCSS("background-color", await resolveToken(page, "--bg-2"));
     await server.fill(serverUrl);
     await topic.fill("browser-alerts");
     await password.fill("browser-token");
     await expect(priority.getByRole("button")).toHaveCount(5);
-    await expect(priority.getByRole("button", { name: original.priority, exact: true })).toHaveAttribute("aria-pressed", "true");
-    const high = priority.getByRole("button", { name: "high", exact: true });
+    await expect(priority.getByRole("button", { name: original.priority[0].toUpperCase() + original.priority.slice(1), exact: true })).toHaveAttribute("aria-pressed", "true");
+    const high = priority.getByRole("button", { name: "High", exact: true });
     await high.focus();
     await expect(high).toBeFocused();
     await high.press("Space");
     await expect(high).toHaveAttribute("aria-pressed", "true");
-    await section.getByLabel("send ntfy alerts", { exact: true }).check();
+    await section.getByLabel("Send ntfy alerts", { exact: true }).check();
     expect((await (await request.get("/api/ntfy-alerts")).json()).topic).toBe(original.topic);
     expect((await (await request.get("/api/ntfy-alerts")).json()).priority).toBe(original.priority);
-    await section.getByRole("button", { name: "save", exact: true }).click();
+    await section.getByRole("button", { name: "Save", exact: true }).click();
     await expect(section.getByRole("status")).toHaveText("ntfy alert settings saved");
     const saved = await (await request.get("/api/ntfy-alerts")).json();
     expect(saved).toEqual({ enabled: true, server_url: serverUrl, topic: "browser-alerts", priority: "high", token_set: true });
@@ -78,25 +78,25 @@ test("ntfy settings explicitly save, refuse, preserve and clear a token", async 
     await openSettings(page, "notifications");
     await expect(topic).toHaveValue("browser-alerts");
     await expect(password).toHaveValue("");
-    await expect(password).toHaveAttribute("placeholder", "token saved; leave blank to keep it");
+    await expect(password).toHaveAttribute("placeholder", "Token saved; leave blank to keep it");
     await expect(high).toHaveAttribute("aria-pressed", "true");
     // Native button Enter edits the draft, including a draft whose next Save
     // will be refused. It must neither save early nor erase the refused edit.
-    const urgent = priority.getByRole("button", { name: "urgent", exact: true });
+    const urgent = priority.getByRole("button", { name: "Urgent", exact: true });
     await urgent.focus();
     await expect(urgent).toBeFocused();
     await urgent.press("Enter");
     await expect(urgent).toHaveAttribute("aria-pressed", "true");
     expect((await (await request.get("/api/ntfy-alerts")).json()).priority).toBe("high");
     await topic.fill("bad/topic");
-    await section.getByRole("button", { name: "save", exact: true }).click();
+    await section.getByRole("button", { name: "Save", exact: true }).click();
     await expect(section.getByRole("alert")).toContainText("topic must contain");
     await expect(topic).toHaveValue("bad/topic");
     await expect(urgent).toHaveAttribute("aria-pressed", "true");
     expect((await (await request.get("/api/ntfy-alerts")).json()).topic).toBe("browser-alerts");
     expect((await (await request.get("/api/ntfy-alerts")).json()).priority).toBe("high");
     await topic.fill("browser-alerts-edited");
-    await section.getByRole("button", { name: "save", exact: true }).click();
+    await section.getByRole("button", { name: "Save", exact: true }).click();
     await expect(section.getByRole("status")).toHaveText("ntfy alert settings saved");
     expect((await (await request.get("/api/ntfy-alerts")).json()).token_set).toBe(true);
     expect((await (await request.get("/api/ntfy-alerts")).json()).priority).toBe("urgent");
@@ -104,15 +104,15 @@ test("ntfy settings explicitly save, refuse, preserve and clear a token", async 
     // secret's removal before Save, without teaching the form the token.
     const originHint = section.locator(".ntfy-token-origin-hint");
     await server.fill("http://localhost:1");
-    await expect(originHint).toHaveText("changing the server clears the saved token when you save");
+    await expect(originHint).toHaveText("Changing the server clears the saved token when you save");
     // Back on the saved server with only a path added: the hint must go away
     // again, which only a same-server comparison can do.
     await server.fill(`${serverUrl}/prefix`);
     await expect(originHint).toHaveCount(0);
-    await expect(password).toHaveAttribute("placeholder", "token saved; leave blank to keep it");
+    await expect(password).toHaveAttribute("placeholder", "Token saved; leave blank to keep it");
     await server.fill("http://localhost:1");
-    await expect(originHint).toHaveText("changing the server clears the saved token when you save");
-    await expect(password).toHaveAttribute("placeholder", "saved token will be cleared");
+    await expect(originHint).toHaveText("Changing the server clears the saved token when you save");
+    await expect(password).toHaveAttribute("placeholder", "Saved token will be cleared");
     await expect(password).toHaveAttribute("data-tooltip", /leaving it blank clears/);
     await password.fill("replacement-token");
     await expect(originHint).toHaveCount(0);
@@ -120,19 +120,19 @@ test("ntfy settings explicitly save, refuse, preserve and clear a token", async 
     await expect(originHint).toBeVisible();
     // Disable background sends before saving this intentionally non-listening
     // loopback origin; the fixture must never contact a public ntfy server.
-    await section.getByLabel("send ntfy alerts", { exact: true }).uncheck();
-    await section.getByRole("button", { name: "save", exact: true }).click();
+    await section.getByLabel("Send ntfy alerts", { exact: true }).uncheck();
+    await section.getByRole("button", { name: "Save", exact: true }).click();
     await expect(section.getByRole("status")).toHaveText("ntfy alert settings saved");
     expect((await (await request.get("/api/ntfy-alerts")).json()).token_set).toBe(false);
     await expect(originHint).toHaveCount(0);
-    await expect(password).toHaveAttribute("placeholder", "no token saved");
+    await expect(password).toHaveAttribute("placeholder", "No token saved");
     await server.fill(serverUrl);
     await password.fill("replacement-token");
-    await section.getByRole("button", { name: "save", exact: true }).click();
+    await section.getByRole("button", { name: "Save", exact: true }).click();
     await expect(section.getByRole("status")).toHaveText("ntfy alert settings saved");
     expect((await (await request.get("/api/ntfy-alerts")).json()).token_set).toBe(true);
-    await section.getByLabel("clear saved token", { exact: true }).check();
-    await section.getByRole("button", { name: "save", exact: true }).click();
+    await section.getByLabel("Clear saved token", { exact: true }).check();
+    await section.getByRole("button", { name: "Save", exact: true }).click();
     await expect(section.getByRole("status")).toHaveText("ntfy alert settings saved");
     expect((await (await request.get("/api/ntfy-alerts")).json()).token_set).toBe(false);
   } finally {
@@ -153,12 +153,12 @@ test("ntfy send test reports outcome while leaving unsaved fields alone", async 
   await page.goto("/");
   await openSettings(page, "notifications");
   const section = page.getByRole("region", { name: "ntfy alerts" });
-  const topic = section.getByRole("textbox", { name: "topic", exact: true });
+  const topic = section.getByRole("textbox", { name: "Topic", exact: true });
   await expect(topic).toBeEditable();
   const savedTopic = await topic.inputValue();
   await topic.fill("unsaved-topic");
-  const server = section.getByRole("textbox", { name: "server URL", exact: true });
-  const token = section.getByLabel("access token (optional)", { exact: true });
+  const server = section.getByRole("textbox", { name: "Server URL", exact: true });
+  const token = section.getByLabel("Access token (optional)", { exact: true });
   const savedServer = await server.inputValue();
   await server.fill("http://127.0.0.1:1");
   await token.fill("unsaved-browser-token");
@@ -171,7 +171,7 @@ test("ntfy send test reports outcome while leaving unsaved fields alone", async 
       ? { status: 502, body: "the ntfy server could not be reached" }
       : { status: 204 });
   });
-  await section.getByRole("button", { name: "send test", exact: true }).click();
+  await section.getByRole("button", { name: "Send test", exact: true }).click();
   await expect(section.getByRole("alert")).toHaveText("the ntfy server could not be reached");
   // Switching panes must not discard either rejected outcomes or unsaved
   // secrets. The send-test request above intentionally has no form payload.
@@ -181,16 +181,16 @@ test("ntfy send test reports outcome while leaving unsaved fields alone", async 
   await expect(topic).toHaveValue("unsaved-topic");
   await expect(server).toHaveValue("http://127.0.0.1:1");
   await expect(token).toHaveValue("unsaved-browser-token");
-  await section.getByRole("button", { name: "send test", exact: true }).click();
-  await expect(section.getByRole("status")).toHaveText("test alert sent");
+  await section.getByRole("button", { name: "Send test", exact: true }).click();
+  await expect(section.getByRole("status")).toHaveText("Test alert sent");
   await selectSettingsSection(page, "sessions");
   await selectSettingsSection(page, "notifications");
-  await expect(section.getByRole("status")).toHaveText("test alert sent");
+  await expect(section.getByRole("status")).toHaveText("Test alert sent");
   await expect(topic).toHaveValue("unsaved-topic");
   await expect(server).toHaveValue("http://127.0.0.1:1");
   await expect(token).toHaveValue("unsaved-browser-token");
   expect(sends).toBe(2);
-  await page.getByRole("dialog", { name: "settings", exact: true }).getByRole("button", { name: "Close", exact: true }).click();
+  await page.getByRole("dialog", { name: "Settings", exact: true }).getByRole("button", { name: "Close", exact: true }).click();
   await openSettings(page, "notifications");
   await expect(topic).toBeEditable();
   await expect(topic).toHaveValue(savedTopic);
@@ -212,18 +212,18 @@ test("ntfy settings load failure is visible and retry restores editing", async (
   await openSettings(page, "notifications");
   const section = page.getByRole("region", { name: "ntfy alerts" });
   await expect(section.getByRole("alert")).toHaveText("could not read ntfy alert settings");
-  await expect(section.getByRole("button", { name: "save", exact: true })).toBeDisabled();
-  await expect(section.getByRole("button", { name: "save", exact: true })).toHaveCSS("opacity", "1");
-  await expect(section.getByRole("button", { name: "save", exact: true })).toHaveCSS("background-color", await resolveToken(page, "--bg-2"));
-  const priority = section.getByRole("group", { name: "priority", exact: true });
+  await expect(section.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+  await expect(section.getByRole("button", { name: "Save", exact: true })).toHaveCSS("opacity", "1");
+  await expect(section.getByRole("button", { name: "Save", exact: true })).toHaveCSS("background-color", await resolveToken(page, "--bg-2"));
+  const priority = section.getByRole("group", { name: "Priority", exact: true });
   await expect(priority.getByRole("button")).toHaveCount(5);
   for (const value of ["min", "low", "default", "high", "urgent"]) {
-    await expect(priority.getByRole("button", { name: value, exact: true })).toBeDisabled();
+    await expect(priority.getByRole("button", { name: value[0].toUpperCase() + value.slice(1), exact: true })).toBeDisabled();
   }
-  await section.getByRole("button", { name: "retry loading", exact: true }).click();
-  await expect(section.getByRole("textbox", { name: "topic", exact: true })).toBeEditable();
-  await expect(section.getByRole("button", { name: "save", exact: true })).toBeEnabled();
+  await section.getByRole("button", { name: "Retry loading", exact: true }).click();
+  await expect(section.getByRole("textbox", { name: "Topic", exact: true })).toBeEditable();
+  await expect(section.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
   for (const value of ["min", "low", "default", "high", "urgent"]) {
-    await expect(priority.getByRole("button", { name: value, exact: true })).toBeEnabled();
+    await expect(priority.getByRole("button", { name: value[0].toUpperCase() + value.slice(1), exact: true })).toBeEnabled();
   }
 });

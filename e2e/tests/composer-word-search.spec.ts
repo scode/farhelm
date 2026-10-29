@@ -193,10 +193,10 @@ test("name and host labels apply one draft choice without launching", async ({ p
   const search = form.locator('.launch-composer-search input[role="combobox"]');
   const host = form.locator(".create-session-host");
   const options = await launcherHostOptions(host);
-  const local = options.filter({ hasText: "local (this machine)" });
+  const local = options.filter({ hasText: "Local (this machine)" });
   const localId = await local.getAttribute("data-host-id");
   expect(localId, "the local row must have a stable selector value").toBeTruthy();
-  const remote = options.filter({ hasNotText: "local (this machine)" }).first();
+  const remote = options.filter({ hasNotText: "Local (this machine)" }).first();
   const remoteId = await remote.getAttribute("data-host-id");
   const remoteLabel = (await remote.textContent())?.trim();
   expect(remoteId, "the fixture must offer another host to filter").toBeTruthy();
@@ -217,7 +217,7 @@ test("name and host labels apply one draft choice without launching", async ({ p
   await expect(search).toBeFocused();
 
   await search.fill("host:local");
-  await expect(form.getByRole("option", { name: "Host: local (this machine)", exact: true, selected: true }))
+  await expect(form.getByRole("option", { name: "Host: Local (this machine)", exact: true, selected: true }))
     .toBeVisible();
   await search.press("Enter");
   await expect(host).toHaveAttribute("data-host-id", localId!);

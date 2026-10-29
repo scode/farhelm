@@ -269,7 +269,7 @@ impl UpdaterHandle {
         })
         .map_err(|error| {
             tracing::warn!("updater: saving the automatic-updates setting: {error:#}");
-            "the choice could not be saved; the app's log has the reason".to_string()
+            "The choice could not be saved; the app's log has the reason".to_string()
         })
     }
 

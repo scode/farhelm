@@ -258,7 +258,7 @@ test("Rename wraps Close through Save while a real approval remains usable", asy
     expect(feed.openSockets(), "the owned feed must still be connected").toBe(1);
     feed.notify(2);
     const card = page.locator(`.approval-card[data-approval-id="${approvalId}"]`);
-    const allow = card.getByRole("button", { name: "allow", exact: true });
+    const allow = card.getByRole("button", { name: "Allow", exact: true });
     await expect(card).toBeVisible();
     await expect(allow).toBeVisible();
     await expect(allow).toBeEnabled();

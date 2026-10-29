@@ -402,10 +402,10 @@ fn changed_host_warning(before: &HostBinding, now: &HostBinding, submitting: boo
         "while it was being updated"
     };
     let changed = if before.id != now.id || before.kind != now.kind {
-        format!("this host's entry changed {when}")
+        format!("This host's entry changed {when}")
     } else if before.destination != now.destination {
         format!(
-            "this host's ssh destination changed from ‹{}› to ‹{}› {when}",
+            "This host's SSH destination changed from ‹{}› to ‹{}› {when}",
             before
                 .destination
                 .as_deref()
@@ -424,7 +424,7 @@ fn changed_host_warning(before: &HostBinding, now: &HostBinding, submitting: boo
             identity.map_or_else(|| "no identity reported".to_string(), display_identity)
         };
         format!(
-            "this host's identity changed from ‹{}› to ‹{}› {when} ({meaning})",
+            "This host's identity changed from ‹{}› to ‹{}› {when} ({meaning})",
             spell(before.identity.as_deref()),
             spell(now.identity.as_deref()),
         )
@@ -539,9 +539,9 @@ pub(crate) enum HostUpdateProgress {
     Running(UpdateProgressSummary),
 }
 
-/// Which lifecycle stage a pending `updating…` status stands for.
+/// Which lifecycle stage a pending `Updating…` status stands for.
 ///
-/// The user sees the same `updating…` in every stage; the stage is published
+/// The user sees the same `Updating…` in every stage; the stage is published
 /// only as the row's `data-update-phase` attribute. It exists because the
 /// row no longer opens its details while an update runs, so the planning,
 /// waiting-for-claim, and submitting indicators inside those details are
@@ -576,12 +576,12 @@ impl UpdatePendingPhase {
 
 impl UpdateProgressSummary {
     /// The word the row's inline status and its hover popup use for this
-    /// run: "setting up", "updating" or "uninstalling".
+    /// run: "Setting up", "Updating" or "Uninstalling".
     pub(crate) fn verb(&self) -> &'static str {
         match self.operation {
-            ProvisioningOperation::Add => "setting up",
-            ProvisioningOperation::Uninstall => "uninstalling",
-            ProvisioningOperation::Update => "updating",
+            ProvisioningOperation::Add => "Setting up",
+            ProvisioningOperation::Uninstall => "Uninstalling",
+            ProvisioningOperation::Update => "Updating",
         }
     }
 }
@@ -640,8 +640,12 @@ fn progress_step_name(step: &crate::api::ProvisioningStep) -> &str {
 /// Preserve unknown future words verbatim rather than refusing a whole snapshot.
 pub(crate) fn progress_step_status(status: &str) -> &str {
     match status {
-        "skipped" => "unchanged",
-        "degraded" => "warning",
+        "pending" => "Pending",
+        "running" => "Running",
+        "completed" => "Completed",
+        "failed" => "Failed",
+        "skipped" => "Unchanged",
+        "degraded" => "Warning",
         other => other,
     }
 }
@@ -1326,9 +1330,9 @@ fn PlanStepList(confirmation: String, body: PlanBody) -> Element {
                 button {
                     r#type: "button",
                     class: "btn btn-neutral provisioning-copy-plan",
-                    "data-tooltip": "copy the complete host plan",
+                    "data-tooltip": "Copy the complete host plan",
                     onclick: move |_| crate::session_view::copy_to_clipboard(&confirmation),
-                    "copy plan"
+                    "Copy plan"
                 }
             }
             ol { class: "provisioning-plan-steps",
@@ -1405,12 +1409,12 @@ fn PlanConfirmation(
                 button {
                     r#type: "button",
                     class: "btn btn-neutral provisioning-cancel",
-                    "data-tooltip": "cancel: change nothing on this host",
+                    "data-tooltip": "Cancel: change nothing on this host",
                     // Retiring an unsubmitted offer cannot affect the page
                     // token held by a different operation. Keep this fallback live.
                     autofocus: busy,
                     onclick: move |_| on_cancel.call(()),
-                    "cancel"
+                    "Cancel"
                 }
             }
         }
@@ -1446,14 +1450,14 @@ pub(crate) fn SetupPlanConfirmation(
     rsx! {
         settings_dialog::HostDialogHeader {
             host,
-            title: rsx! { "set up host · " span { class: "peer-value", dir: "ltr", "{name}" } },
+            title: rsx! { "Set up host · " span { class: "peer-value", dir: "ltr", "{name}" } },
             summary: if local { "Farhelm is not running here yet" } else { "Farhelm is not running there yet" },
-            dismiss_label: "cancel host setup",
-            dismiss_tooltip: "cancel: change nothing on this host",
+            dismiss_label: "Cancel host setup",
+            dismiss_tooltip: "Cancel: change nothing on this host",
             on_dismiss: on_cancel,
         }
         ScrollRegion { class: "dialog-body host-settings-body",
-            handle: settings_dialog::ADD_DIALOG, selector: ".host-settings-body", name: "host setup plan",
+            handle: settings_dialog::ADD_DIALOG, selector: ".host-settings-body", name: "Host setup plan",
             recovery: RecoveryFocus::new(".add-host-cancel", None, true, RecoveryDelay::OneFrame),
             PlanStepList { confirmation, body }
             if let Some(error) = error { {error} }
@@ -1466,30 +1470,30 @@ pub(crate) fn SetupPlanConfirmation(
             button {
                 r#type: "button",
                 class: "btn btn-neutral add-host-cancel",
-                "data-tooltip": "cancel: change nothing on this host",
+                "data-tooltip": "Cancel: change nothing on this host",
                 autofocus: busy,
                 onclick: move |_| on_cancel.call(()),
-                "cancel"
+                "Cancel"
             }
             button {
                 r#type: "button",
                 class: "btn btn-primary btn-outline host-setup-permanent",
-                "data-tooltip": "set up this host, and set up new hosts from now on without asking",
+                "data-tooltip": "Set up this host, and set up new hosts from now on without asking",
                 aria_describedby: "host-setup-permanent-hint",
                 disabled: busy,
                 onkeydown: crate::guard_confirmation_enter,
                 onclick: move |_| on_confirm.call(true),
-                "set up, don't ask again"
+                "Set up, don't ask again"
             }
             button {
                 r#type: "button",
                 class: "btn btn-primary provisioning-confirm",
-                "data-tooltip": "set up: set up this host as the plan above describes",
+                "data-tooltip": "Set up: set up this host as the plan above describes",
                 disabled: busy,
                 autofocus: !busy,
                 onkeydown: crate::guard_confirmation_enter,
                 onclick: move |_| on_confirm.call(false),
-                "set up"
+                "Set up"
             }
             }
         }
@@ -1521,13 +1525,13 @@ pub(crate) fn UninstallConfirmation(
     rsx! {
         settings_dialog::HostDialogHeader {
             host: Some(host),
-            title: rsx! { "uninstall Farhelm · " span { class: "peer-value", dir: "ltr", "{name}" } },
-            dismiss_label: "cancel Farhelm uninstall",
-            dismiss_tooltip: "cancel: leave Farhelm installed on this host",
+            title: rsx! { "Uninstall Farhelm · " span { class: "peer-value", dir: "ltr", "{name}" } },
+            dismiss_label: "Cancel Farhelm uninstall",
+            dismiss_tooltip: "Cancel: leave Farhelm installed on this host",
             on_dismiss: on_cancel,
         }
         ScrollRegion { class: "dialog-body host-settings-body",
-            handle: DialogHandle::new(settings_dialog::UNINSTALL_DIALOG_SELECTOR), selector: ".host-settings-body", name: "host uninstall plan",
+            handle: DialogHandle::new(settings_dialog::UNINSTALL_DIALOG_SELECTOR), selector: ".host-settings-body", name: "Host uninstall plan",
             recovery: RecoveryFocus::new(".uninstall-cancel", None, true, RecoveryDelay::OneFrame),
             PlanStepList { confirmation, body }
         }
@@ -1536,20 +1540,20 @@ pub(crate) fn UninstallConfirmation(
                 button {
                     r#type: "button",
                     class: "btn btn-neutral provisioning-cancel uninstall-cancel",
-                    "data-tooltip": "cancel: leave Farhelm installed on this host",
+                    "data-tooltip": "Cancel: leave Farhelm installed on this host",
                     autofocus: busy,
                     onclick: move |_| on_cancel.call(()),
-                    "cancel"
+                    "Cancel"
                 }
                 button {
                     r#type: "button",
                     class: "btn btn-danger provisioning-confirm uninstall-confirm",
-                    "data-tooltip": "uninstall: remove Farhelm from this host as described above",
+                    "data-tooltip": "Uninstall: remove Farhelm from this host as described above",
                     disabled: busy,
                     autofocus: !busy,
                     onkeydown: crate::guard_confirmation_enter,
                     onclick: move |_| on_confirm.call(()),
-                    "uninstall"
+                    "Uninstall"
                 }
             }
         }
@@ -1600,7 +1604,7 @@ async fn prepare(
                         .destination
                         .as_ref()
                         .map(|value| value.raw())
-                        .ok_or_else(|| "this ssh host has no destination to probe".to_string())?;
+                        .ok_or_else(|| "This SSH host has no destination to probe".to_string())?;
                     probe_ssh_host(
                         base,
                         destination,
@@ -1618,7 +1622,7 @@ async fn prepare(
                 }
                 HostKind::Unrecognized => {
                     return Err(
-                        "this build does not recognize the host kind, so it cannot provision it"
+                        "This build does not recognize the host kind, so it cannot provision it"
                             .to_string()
                             .into(),
                     );
@@ -1931,7 +1935,7 @@ where
                                     sticky: true,
                                     host_changed: false,
                                     text: format!(
-                                        "the update was submitted but its reply was lost ({error}); \
+                                        "The update was submitted but its reply was lost ({error}); \
                                          the run may have started, so its outcome is unknown"
                                     ),
                                 }));
@@ -2004,7 +2008,7 @@ async fn submit_accepted<R>(
             if same_update_target(&plan.binding, &current_binding.peek()) {
                 if accepted.run_id.is_empty() {
                     attention.failed(plan.operation);
-                    action_warning.set(Some("the helm accepted setup but returned no run identity, so its outcome is unknown".into()));
+                    action_warning.set(Some("The helm accepted setup but returned no run identity, so its outcome is unknown".into()));
                 }
                 attention.accepted(plan.operation, &accepted.run_id, attention_revision);
             }
@@ -2023,7 +2027,7 @@ async fn submit_accepted<R>(
                     attention.routed(accepted.host_id).failed(plan.operation);
                 }
                 action_warning.set(Some(format!(
-                    "the helm accepted run {} for host {}, but its progress could not yet be read: {}",
+                    "The helm accepted run {} for host {}, but its progress could not yet be read: {}",
                     accepted.run_id, accepted.host_id, error
                 )));
             }
@@ -2101,7 +2105,7 @@ async fn submit_accepted<R>(
             sticky: true,
             host_changed: false,
             text: format!(
-                "the helm accepted this update for host {} instead of this row; the plan is spent \
+                "The helm accepted this update for host {} instead of this row; the plan is spent \
                  and this row claims nothing from that run",
                 accepted.host_id
             ),
@@ -2117,7 +2121,7 @@ async fn submit_accepted<R>(
             epoch,
             sticky: true,
             host_changed: false,
-            text: "the helm accepted the update but returned no run identity, so its outcome is \
+            text: "The helm accepted the update but returned no run identity, so its outcome is \
                  unknown; this row claims nothing from that run"
                 .to_string(),
         }));
@@ -2144,7 +2148,7 @@ async fn submit_accepted<R>(
             sticky: true,
             host_changed: false,
             text: format!(
-                "update run {} ended without reporting its outcome; following the accepted run instead",
+                "Update run {} ended without reporting its outcome; following the accepted run instead",
                 prior.run_id
             ),
         }));
@@ -2257,7 +2261,7 @@ fn invalidate_intent_for_run(
         if let Some(warning) = competing_run_warning(
             held.as_ref(),
             counter,
-            "another provisioning run is already active on this host, so this update was \
+            "Another provisioning run is already active on this host, so this update was \
                  not submitted"
                 .to_string(),
         ) {
@@ -2286,10 +2290,10 @@ fn invalidate_intent_for_run(
         held.as_ref(),
         counter,
         if ours {
-            "an update is already running on this host, so the extra update was not submitted"
+            "An update is already running on this host, so the extra update was not submitted"
                 .to_string()
         } else {
-            "another provisioning run started on this host first, so this update was not \
+            "Another provisioning run started on this host first, so this update was not \
              submitted; following the running run instead"
                 .to_string()
         },
@@ -2472,7 +2476,7 @@ fn reconcile_tracked(
             sticky: true,
             host_changed: false,
             text: format!(
-                "update run {} ended without reporting its outcome; following the latest state instead",
+                "Update run {} ended without reporting its outcome; following the latest state instead",
                 old.run_id
             ),
         }));
@@ -2676,10 +2680,10 @@ impl PendingLine {
     /// exposed through the render value.
     fn text(self) -> &'static str {
         match self {
-            Self::CheckingLocalSetup => "checking automatic setup…",
-            Self::Planning => "planning…",
-            Self::WaitingToSubmit => "waiting to submit…",
-            Self::Submitting => "submitting…",
+            Self::CheckingLocalSetup => "Checking automatic setup…",
+            Self::Planning => "Planning…",
+            Self::WaitingToSubmit => "Waiting to submit…",
+            Self::Submitting => "Submitting…",
         }
     }
 }
@@ -4065,15 +4069,15 @@ pub(crate) fn ProvisioningPanel(
                         "data-provisioning-operation": "{run.operation}",
                         div { class: "provisioning-run-header",
                             span { class: "provisioning-title",
-                                "{run.operation} provisioning"
+                                "{run_display_label(run.operation)} provisioning"
                             }
-                            span { class: "provisioning-status", "{run.status}" }
+                            span { class: "provisioning-status", "{run_display_label(run.status)}" }
                             if let Some(fold_run_id) = run.fold_run {
                                 button {
                                     r#type: "button",
                                     class: "btn provisioning-run-fold",
-                                    "data-tooltip": "collapse this run's steps",
-                                    aria_label: "collapse this run's steps",
+                                    "data-tooltip": "Collapse this run's steps",
+                                    aria_label: "Collapse this run's steps",
                                     onclick: move |_| {
                                         let observed = confirmed_disclosure.peek().clone();
                                         if let Some(current) = observed
@@ -4085,7 +4089,7 @@ pub(crate) fn ProvisioningPanel(
                                             }));
                                         }
                                     },
-                                    "collapse"
+                                    "Collapse"
                                 }
                             }
                         }
@@ -4137,7 +4141,7 @@ pub(crate) fn ProvisioningPanel(
                             class: "host-settings-dialog host-add-dialog host-dialog-framed",
                             role: "dialog",
                             aria_modal: "true",
-                            aria_label: "host setup",
+                            aria_label: "Host setup",
                             tabindex: "-1",
                             // Cancel and Escape stay live while another
                             // operation holds the page token: dismissing the
@@ -4190,7 +4194,7 @@ pub(crate) fn ProvisioningPanel(
                             class: "host-settings-dialog host-uninstall-dialog host-dialog-framed",
                             role: "dialog",
                             aria_modal: "true",
-                            aria_label: "uninstall Farhelm from this host",
+                            aria_label: "Uninstall Farhelm from this host",
                             tabindex: "-1",
                             on_escape: {
                                 let shown = shown.clone();
@@ -4223,7 +4227,7 @@ pub(crate) fn ProvisioningPanel(
                         confirmation: shown.key().confirmation.clone(),
                         body: inline_plan,
                         busy: page_busy,
-                        confirm_label: "confirm update",
+                        confirm_label: "Confirm update",
                         on_confirm: {
                             let shown = shown.clone();
                             move |_| confirm.call((shown.clone(), false))
@@ -4281,10 +4285,26 @@ pub(crate) fn ProvisioningPanel(
                     class: "provisioning-trace",
                     hidden: !show_inline,
                     "data-provisioning-status": "{status_label(shape.status)}",
-                    "{operation_label(Some(shape.operation))} provisioning {status_label(shape.status)}"
+                    "{run_display_label(operation_label(Some(shape.operation)))} provisioning {run_display_label(status_label(shape.status))}"
                 }
             }
         }
+    }
+}
+
+/// Display known run words without changing the lowercase data handles.
+/// Unknown values remain verbatim so an older client does not reinterpret a
+/// future status; this mapping applies only to the app's finite run labels.
+fn run_display_label(word: &str) -> &str {
+    match word {
+        "setup" => "Setup",
+        "update" => "Update",
+        "uninstall" => "Uninstall",
+        "idle" => "Idle",
+        "running" => "Running",
+        "completed" => "Completed",
+        "failed" => "Failed",
+        other => other,
     }
 }
 
@@ -4691,7 +4711,7 @@ mod tests {
         };
         let run = body.run.as_ref().unwrap();
         assert_eq!(run.steps[0].name, "upload<U+200B>build");
-        assert_eq!(run.steps[0].status, "running");
+        assert_eq!(run.steps[0].status, "Running");
         assert_eq!(run.steps[0].id, "step-a");
         assert_eq!(run.steps[0].raw_status, "running");
         assert_eq!(
@@ -5750,7 +5770,7 @@ mod tests {
         };
         for submitting in [false, true] {
             let text = changed_host_warning(&before, &moved, submitting);
-            assert!(text.contains("ssh destination changed from ‹e2e@example.invalid› to ‹other\u{202e}@example.invalid›"));
+            assert!(text.contains("SSH destination changed from ‹e2e@example.invalid› to ‹other\u{202e}@example.invalid›"));
             assert!(!text.contains("identity changed"));
             assert!(text.contains(if submitting {
                 "while its update was being sent"
@@ -5782,7 +5802,7 @@ mod tests {
         assert!(!text.contains("a different Farhelm install now answers"));
         for changed in [local_binding(7), ssh_binding(8)] {
             let text = changed_host_warning(&before, &changed, false);
-            assert!(text.starts_with("this host's entry changed"));
+            assert!(text.starts_with("This host's entry changed"));
             assert!(!text.contains("identity-1"));
             assert!(!text.contains("e2e@example.invalid"));
         }
@@ -6129,8 +6149,8 @@ mod tests {
             summary.steps[4].message.as_deref(),
             Some("starts at login instead")
         );
-        assert_eq!(progress_step_status("skipped"), "unchanged");
-        assert_eq!(progress_step_status("degraded"), "warning");
+        assert_eq!(progress_step_status("skipped"), "Unchanged");
+        assert_eq!(progress_step_status("degraded"), "Warning");
         assert_eq!(progress_step_status("new-status"), "new-status");
         assert!(
             summary
@@ -6193,7 +6213,7 @@ mod tests {
             panic!("a running uninstall must show inline progress");
         };
         assert_eq!(summary.operation, ProvisioningOperation::Uninstall);
-        assert_eq!(summary.verb(), "uninstalling");
+        assert_eq!(summary.verb(), "Uninstalling");
         assert_eq!(summary.current_step.as_deref(), Some("remove-unit"));
         assert_eq!((summary.done, summary.total), (1, 2));
         assert_eq!(summary.started_at, started_at);
@@ -6207,7 +6227,7 @@ mod tests {
         else {
             panic!("a running setup must show inline progress");
         };
-        assert_eq!(setup_summary.verb(), "setting up");
+        assert_eq!(setup_summary.verb(), "Setting up");
 
         assert_eq!(
             derive_row_update_progress(None, None, Some(&view), None),

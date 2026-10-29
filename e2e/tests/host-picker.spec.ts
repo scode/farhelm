@@ -38,7 +38,7 @@ test("host picker supports mouse, navigation, typeahead, cancellation, and focus
   await page.goto("/");
   await page.locator(".new-session-button").click();
   const form = page.locator(".create-session-form");
-  const host = form.getByRole("combobox", { name: "host", exact: true });
+  const host = form.getByRole("combobox", { name: "Host", exact: true });
   await expect(host).toHaveAttribute("data-host-id", String(local.id));
   const options = await launcherHostOptions(host);
   await expect(options).toHaveCount(2);
@@ -106,7 +106,7 @@ test("host picker opened without click focus still owns the keyboard and closes 
   await page.goto("/");
   await page.locator(".new-session-button").click();
   const form = page.locator(".create-session-form");
-  const host = form.getByRole("combobox", { name: "host", exact: true });
+  const host = form.getByRole("combobox", { name: "Host", exact: true });
   await expect(host).toHaveAttribute("data-host-id", String(local.id));
   await expect(host).toBeEnabled();
   await expect(host, "fixture: the picker starts unfocused").not.toBeFocused();
@@ -173,7 +173,7 @@ test("host picker retains the empty value until hosts arrive", async ({ page }) 
     await host.focus();
     await expect(host).toBeFocused();
     await host.press("ArrowDown");
-    await expect(page.locator("#launcher-host-options")).toContainText("loading hosts");
+    await expect(page.locator("#launcher-host-options")).toContainText("Loading hosts");
     await host.press("Enter");
     await expect(host).toHaveAttribute("data-host-id", "");
     release();

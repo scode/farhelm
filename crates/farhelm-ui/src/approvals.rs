@@ -242,7 +242,7 @@ pub(crate) fn ApprovalCards() -> Element {
         div {
             class: "approval-cards",
             role: "region",
-            aria_label: "requests waiting for your approval",
+            aria_label: "Requests waiting for your approval",
             // Left live by `modal_isolation` while a dialog is open: an agent
             // waiting on a card must not wait on the dialog too.
             "data-modal-exempt": "true",
@@ -421,12 +421,12 @@ fn always_allow_tooltip(action: &ApprovalAction) -> &'static str {
         ApprovalAction::OpenUrl {
             local_network: true,
             ..
-        } => "always allow: stop asking about local-network links from this host",
+        } => "Always allow: stop asking about local-network links from this host",
         ApprovalAction::OpenUrl {
             local_network: false,
             ..
-        } => "always allow: stop asking about public links from this host",
-        _ => "always allow: stop asking about farhelm commands from this host",
+        } => "Always allow: stop asking about public links from this host",
+        _ => "Always allow: stop asking about farhelm commands from this host",
     }
 }
 
@@ -514,12 +514,12 @@ fn ApprovalCard(
             "data-approval-id": "{card.id}",
             "data-approval-kind": "{action_kind(&card.action)}",
             div { class: "approval-card-header",
-                span { class: "approval-card-badge", "agent request" }
-                h2 { id: "{heading}", class: "approval-card-heading", "{action_summary(&card.action)}" }
+                span { class: "approval-card-badge", "Agent request" }
+                h2 { id: "{heading}", class: "approval-card-heading", "{authored_words(action_summary(&card.action))}" }
                 span { class: "approval-card-count", "1 of {waiting} waiting" }
             }
             dl { class: "approval-card-requester",
-                Row { label: "from host", value: card.host_name.clone() }
+                Row { label: "From host", value: card.host_name.clone() }
                 for (index, row) in asking.into_iter().enumerate() {
                     CardDetail { key: "{index}", row }
                 }
@@ -566,11 +566,11 @@ fn ApprovalCard(
                 button {
                     r#type: "button",
                     class: if tunnel_available { "btn btn-neutral approval-allow" } else { "btn btn-primary approval-allow" },
-                    "data-tooltip": "allow: let this one request go ahead",
+                    "data-tooltip": "Allow: let this one request go ahead",
                     disabled: busy,
                     onclick: answer(ApprovalAnswer::Allow),
-                    if matches!(card.action, ApprovalAction::HostAdd { .. }) { "open add dialog" }
-                    else if tunnel_available { "Open" } else if preapproved { "open" } else { "allow" }
+                    if matches!(card.action, ApprovalAction::HostAdd { .. }) { "Open add dialog" }
+                    else if tunnel_available { "Open" } else if preapproved { "Open" } else { "Allow" }
                 }
                 if !preapproved && !tunnel_available && !card.action.requires_direct_allow() {
                 button {
@@ -579,17 +579,17 @@ fn ApprovalCard(
                     "data-tooltip": always_allow_tooltip(&card.action),
                     disabled: busy,
                     onclick: answer(ApprovalAnswer::AlwaysAllow),
-                    "always allow from "
+                    "Always allow from "
                     span { class: "peer-value", dir: "ltr", "{display_peer(&card.host_name)}" }
                 }
                 }
                 button {
                     r#type: "button",
                     class: "btn btn-neutral approval-deny",
-                    "data-tooltip": "deny: refuse this request; the agent is told you declined",
+                    "data-tooltip": "Deny: refuse this request; the agent is told you declined",
                     disabled: busy,
                     onclick: answer(ApprovalAnswer::Deny),
-                    if tunnel_available { "Deny" } else if preapproved { "dismiss" } else { "deny" }
+                    if tunnel_available { "Deny" } else if preapproved { "Dismiss" } else { "Deny" }
                 }
             }
         }
@@ -605,7 +605,7 @@ fn ApprovalCard(
 fn Row(label: &'static str, value: String) -> Element {
     rsx! {
         div { class: "approval-card-row",
-            dt { "{label}" }
+            dt { "{compact_label(label)}" }
             dd {
                 span { class: "peer-value", dir: "ltr", "{display_peer(&value)}" }
             }
@@ -643,10 +643,10 @@ fn CardDetail(row: CardRow) -> Element {
         },
         CardRow::Block(label, text) => rsx! {
             div { class: "approval-card-row approval-card-full approval-card-command",
-                dt { "{label}" }
+                dt { "{authored_words(label)}" }
                 dd { PeerBlock {
                     class: if matches!(label, "initial prompt" | "prompt") { "approval-card-block approval-card-prompt" } else { "approval-card-block" },
-                    scroll_label: matches!(label, "initial prompt" | "prompt").then(|| label.to_string()),
+                    scroll_label: matches!(label, "initial prompt" | "prompt").then(|| authored_words(label)),
                     text: text.into()
                 } }
             }
@@ -654,7 +654,7 @@ fn CardDetail(row: CardRow) -> Element {
         CardRow::Note(label, words) => rsx! {
             div { class,
                 dt { "{compact_label(label)}" }
-                dd { class: "approval-card-note", "{words}" }
+                dd { class: "approval-card-note", "{authored_words(words)}" }
             }
         },
         CardRow::Identity(label, identity) | CardRow::CopyIdentity(label, identity) => rsx! {
@@ -667,10 +667,10 @@ fn CardDetail(row: CardRow) -> Element {
                         button {
                             r#type: "button",
                             class: "btn btn-neutral",
-                            aria_label: "copy {compact_label(label)}",
-                            "data-tooltip": "copy: the complete session ID, including characters shown as escapes",
+                            aria_label: "Copy {compact_label_words(label)}",
+                            "data-tooltip": "Copy: the complete session ID, including characters shown as escapes",
                             onclick: move |_| crate::session_view::copy_to_clipboard(&identity),
-                            "copy"
+                            "Copy"
                         }
                     }
                 }
@@ -678,7 +678,7 @@ fn CardDetail(row: CardRow) -> Element {
         },
         CardRow::Permission(glyph) => rsx! {
             div { class,
-                dt { "permissions" }
+                dt { "Permissions" }
                 dd {
                     PermissionIcon { glyph }
                     "{permission_description(glyph)}"
@@ -700,22 +700,50 @@ fn full_width_row(row: &CardRow) -> bool {
     )
 }
 
-/// Shorten only labels whose context is already supplied by the card section.
+/// Present row keys as sentence-case labels, shortening only redundant context.
 ///
-/// Peer values remain untouched. Session target/source labels keep their
+/// Lowercase row keys still select layout and trust handling. Display spelling
+/// must not change those keys or any peer value. Session target/source labels keep their
 /// distinctions; only the requester and new-session facts have shorter names.
-/// The requester's labels keep a "from" prefix, matching its "from host" row:
+/// The requester's labels keep a "from" prefix, matching its "From host" row:
 /// rename, stop and restart cards label the session they act on as plain
 /// "session" and "session id", and two identically labelled sessions on one
 /// card would leave the user guessing which one is about to be stopped.
-fn compact_label(label: &'static str) -> &'static str {
+fn compact_label(label: &'static str) -> String {
+    authored_words(compact_label_words(label))
+}
+
+/// Keep row phrases usable after a verb as well as at the start of a label.
+///
+/// Copy buttons reuse these words after "Copy", where an ordinary noun stays
+/// lowercase while acronyms retain their spelling. The row itself capitalizes
+/// the phrase through `compact_label`; neither path changes semantic row keys.
+fn compact_label_words(label: &'static str) -> &'static str {
     match label {
         "asked by session" => "from session",
-        "asking session id" => "from session id",
+        "asking session id" => "from session ID",
+        "copied session id" => "copied session ID",
+        "session id" => "session ID",
+        "ssh destination" => "SSH destination",
         "new session on host" => "on host",
         "resume command" => "resume",
         _ => label,
     }
+}
+
+/// Capitalize only fixed UI words; peer values and serialized words bypass this.
+///
+/// The leading glyph on quick-launch labels stays intact. Looking at the first
+/// letter also preserves labels that already begin with an acronym such as URL.
+fn authored_words(words: &str) -> String {
+    let mut shown = words.to_string();
+    if let Some((index, letter)) = words
+        .char_indices()
+        .find(|(_, letter)| letter.is_ascii_alphabetic())
+    {
+        shown.replace_range(index..index + 1, &letter.to_ascii_uppercase().to_string());
+    }
+    shown
 }
 
 /// Decision content before presentation separates facts from full-width text.
@@ -762,7 +790,9 @@ fn action_kind(action: &ApprovalAction) -> &'static str {
     }
 }
 
-/// One line in this UI's own words saying what approving would do.
+/// Authored action phrases shared by the full card and compact queue.
+/// Each presentation formats its own leading case at its display boundary;
+/// these phrases are neither peer values nor protocol identifiers.
 fn action_summary(action: &ApprovalAction) -> &'static str {
     match action {
         ApprovalAction::OpenUrl { .. } => "open a link in your browser",
@@ -1528,12 +1558,14 @@ mod tests {
                 assert!(full_width_row(left_row) && full_width_row(right_row));
             }
         }
-        assert_eq!(compact_label("asking session id"), "from session id");
-        assert_eq!(compact_label("session id"), "session id");
+        assert_eq!(compact_label("asking session id"), "From session ID");
+        assert_eq!(compact_label("session id"), "Session ID");
     }
 
     /// Render the production row so tests catch accidental reuse of ordinary
     /// peer escaping, which would reintroduce the literal-escape collision.
+    /// Requester and target copy controls also retain their distinct spoken
+    /// roles without turning the sentence-internal noun into title case.
     #[test]
     fn session_identity_rows_render_full_escaped_ids_and_keep_prefix_looking_suffixes() {
         fn render(rows: Vec<CardRow>) -> Element {
@@ -1564,6 +1596,18 @@ mod tests {
                 2,
                 "both roles render the complete strict identity spelling: {texts:?}"
             );
+            let copy_names: Vec<_> = edits
+                .iter()
+                .filter_map(|edit| match edit {
+                    dioxus::core::Mutation::SetAttribute {
+                        name: "aria-label",
+                        value: dioxus::core::AttributeValue::Text(value),
+                        ..
+                    } => Some(value.as_str()),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(copy_names, ["Copy from session ID", "Copy session ID"]);
             assert!(
                 edits.iter().any(|edit| matches!(edit,
                 dioxus::core::Mutation::SetAttribute {
@@ -1618,7 +1662,14 @@ mod tests {
         };
         let answers = Rc::new(RefCell::new(Vec::new()));
         let mut dom = VirtualDom::new_with_props(render, (card, answers.clone()));
-        dom.rebuild_to_vec();
+        let edits = dom.rebuild_to_vec().edits;
+        // The full-card display owns its leading case independently of the
+        // shared phrase table and the request/peer identities below it.
+        assert!(edits.iter().any(|edit| matches!(edit,
+            dioxus::core::Mutation::CreateTextNode { value, .. }
+            | dioxus::core::Mutation::SetText { value, .. }
+            if value == "Stop a session's agent"
+        )));
         // Deny is the final control in ApprovalCard. Choosing it also avoids
         // any clipboard or native link side effect while exercising the real
         // answer closure after both session copy controls were rendered.
@@ -1740,7 +1791,7 @@ mod tests {
             "class",
             "approval-card-block approval-card-prompt"
         ));
-        assert!(attribute("aria-label", "prompt"));
+        assert!(attribute("aria-label", "Prompt"));
     }
 
     /// Delete cards must spell out the scope their guard actually permits.

@@ -533,7 +533,7 @@ test("keyboard focus shows the focused control's tooltip", async ({ page }) => {
   await gear.focus();
   await expect(gear).toBeFocused();
   await expect(tooltip(page)).toBeVisible();
-  await expect(tooltip(page)).toHaveText(/^settings/);
+  await expect(tooltip(page)).toHaveText(/^Settings/);
   await gear.blur();
   await expect(tooltip(page)).toBeHidden();
 });
@@ -550,7 +550,7 @@ test("an Escape dismissal ends when focus leaves the control", async ({ page }) 
   const gear = page.locator(".app-settings-toggle");
   const help = page.locator(".app-help-toggle");
   await gear.focus();
-  await expect(tooltip(page)).toHaveText(/^settings/);
+  await expect(tooltip(page)).toHaveText(/^Settings/);
   await page.keyboard.press("Escape");
   await expect(tooltip(page)).toBeHidden();
   await help.focus();
@@ -558,7 +558,7 @@ test("an Escape dismissal ends when focus leaves the control", async ({ page }) 
   await expect(tooltip(page)).toHaveText(/^help/);
   await gear.focus();
   await expect(gear).toBeFocused();
-  await expect(tooltip(page), "the dismissal must not outlive the focus").toHaveText(/^settings/);
+  await expect(tooltip(page), "the dismissal must not outlive the focus").toHaveText(/^Settings/);
 });
 
 /**
@@ -655,7 +655,7 @@ test("quiet focus survives asset reinstall and allows the first later hover", as
   await page.keyboard.press("Tab");
   await gear.focus();
   await expect(tooltip(page)).toBeVisible();
-  await expect(tooltip(page)).toHaveText(/^settings/);
+  await expect(tooltip(page)).toHaveText(/^Settings/);
   const source = await page.locator('script[src*="tooltip"]').first().getAttribute("src");
   expect(source, "premise: the installed shipped asset is present").toBeTruthy();
   await page.addScriptTag({ url: source! });
@@ -674,5 +674,5 @@ test("quiet focus survives asset reinstall and allows the first later hover", as
   await expect(tooltip(page)).toBeHidden();
   await gear.hover();
   await expect(tooltip(page)).toBeVisible();
-  await expect(tooltip(page)).toHaveText(/^settings/);
+  await expect(tooltip(page)).toHaveText(/^Settings/);
 });

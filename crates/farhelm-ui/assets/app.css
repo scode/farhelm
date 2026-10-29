@@ -3118,7 +3118,7 @@ a:any-link,
 /* Settings puts its switches after the text, so help at every nesting level
    aligns with that text rather than leaving space for a leading checkbox. */
 .app-settings-dialog > .host-settings-help,
-.app-settings-dialog[aria-label="settings"] .host-settings-help {
+.app-settings-dialog[aria-label="Settings"] .host-settings-help {
   margin: 0;
 }
 /* Feedback shares the pinned frame with settings, but its editors and
@@ -3519,17 +3519,17 @@ a:any-link,
   color: var(--fg-0);
 }
 .setting-row > span { min-width: 0; }
-.app-settings-dialog[aria-label="settings"] .host-settings-mark svg { width: 28px; height: 28px; }
+.app-settings-dialog[aria-label="Settings"] .host-settings-mark svg { width: 28px; height: 28px; }
 
 /* Settings shares the host-dialog frame with unrelated modals. Scope its wider
    two-column body here; the frame still owns the only scrollport and both exits. */
-.app-settings-dialog[aria-label="settings"] { width: min(760px, 100%); }
-.app-settings-dialog[aria-label="settings"] > .host-settings-body {
+.app-settings-dialog[aria-label="Settings"] { width: min(760px, 100%); }
+.app-settings-dialog[aria-label="Settings"] > .host-settings-body {
   grid-template-columns: 168px minmax(0, 1fr);
   gap: 20px;
   align-items: start;
 }
-.app-settings-dialog[aria-label="settings"] .app-settings-navigation {
+.app-settings-dialog[aria-label="Settings"] .app-settings-navigation {
   position: sticky;
   top: 0;
   display: grid;
@@ -3538,7 +3538,7 @@ a:any-link,
   padding-right: 12px;
   border-right: 1px solid var(--border-dialog);
 }
-.app-settings-dialog[aria-label="settings"] .app-settings-navigation button {
+.app-settings-dialog[aria-label="Settings"] .app-settings-navigation button {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -3557,39 +3557,39 @@ a:any-link,
    Their color follows the button, including inverse selected/focus states. */
 .settings-section-icon { display: inline-flex; flex: 0 0 14px; }
 .settings-section-icon > svg { width: 14px; height: 14px; }
-.app-settings-dialog[aria-label="settings"] .app-settings-navigation button:hover { background: var(--control-hover-bg); }
-.app-settings-dialog[aria-label="settings"] .app-settings-navigation button[aria-pressed="true"] {
+.app-settings-dialog[aria-label="Settings"] .app-settings-navigation button:hover { background: var(--control-hover-bg); }
+.app-settings-dialog[aria-label="Settings"] .app-settings-navigation button[aria-pressed="true"] {
   background: var(--accent-fill);
   border-color: var(--accent-edge);
   color: var(--on-fill);
 }
-.app-settings-dialog[aria-label="settings"] .app-settings-content { display: grid; gap: 14px; min-width: 0; }
+.app-settings-dialog[aria-label="Settings"] .app-settings-content { display: grid; gap: 14px; min-width: 0; }
 /* A hidden panel keeps its component state and JS-owned controls. Explicitly
    override the shared section grid so hidden cannot accidentally become visible. */
-.app-settings-dialog[aria-label="settings"] .app-settings-panel[hidden] { display: none; }
-.app-settings-dialog[aria-label="settings"] .app-settings-panel { border: 0; padding: 0; }
+.app-settings-dialog[aria-label="Settings"] .app-settings-panel[hidden] { display: none; }
+.app-settings-dialog[aria-label="Settings"] .app-settings-panel { border: 0; padding: 0; }
 /* The panel title names the navigation target; Notifications' own groups
    sit one heading level below it. Group headings match the 16px field labels,
    and panel titles exceed them, so weight and size both carry the hierarchy. */
-.app-settings-dialog[aria-label="settings"] .host-settings-section-title {
+.app-settings-dialog[aria-label="Settings"] .host-settings-section-title {
   color: var(--fg-0);
   font-size: 16px;
   font-weight: 600;
   letter-spacing: normal;
   text-transform: none;
 }
-.app-settings-dialog[aria-label="settings"] .app-settings-panel > h3 { font-size: 18px; font-weight: 700; }
-.app-settings-dialog[aria-label="settings"] .host-settings-help { line-height: 1.6; }
+.app-settings-dialog[aria-label="Settings"] .app-settings-panel > h3 { font-size: 18px; font-weight: 700; }
+.app-settings-dialog[aria-label="Settings"] .host-settings-help { line-height: 1.6; }
 /* Each agent's hint belongs to the same block as its trust choice. The
    shared grid separates descriptions from labels; a rule separates agents. */
-.app-settings-dialog[aria-label="settings"] .checkout-claude-trust { display: grid; gap: 8px; margin-top: 0; }
-.app-settings-dialog[aria-label="settings"] .checkout-claude-trust + .checkout-claude-trust {
+.app-settings-dialog[aria-label="Settings"] .checkout-claude-trust { display: grid; gap: 8px; margin-top: 0; }
+.app-settings-dialog[aria-label="Settings"] .checkout-claude-trust + .checkout-claude-trust {
   border-top: 1px solid var(--border-dim);
   padding-top: 16px;
 }
-.app-settings-dialog[aria-label="settings"] .checkout-claude-trust > .app-settings-choice:not(:first-child) { margin-top: 8px; }
-.app-settings-dialog[aria-label="settings"] .checkout-claude-trust > .claude-trust-caution { margin: 4px 0; }
-.app-settings-dialog[aria-label="settings"] .app-settings-back {
+.app-settings-dialog[aria-label="Settings"] .checkout-claude-trust > .app-settings-choice:not(:first-child) { margin-top: 8px; }
+.app-settings-dialog[aria-label="Settings"] .checkout-claude-trust > .claude-trust-caution { margin: 4px 0; }
+.app-settings-dialog[aria-label="Settings"] .app-settings-back {
   display: none;
   justify-self: start;
   border: 1px solid var(--border-dialog);
@@ -3603,11 +3603,11 @@ a:any-link,
 /* Like Templates, a phone shows the picker or the current pane. Both stay in
    the tree: changing the available width must not discard an unsaved field. */
 @media (max-width: 620px) {
-  .app-settings-dialog[aria-label="settings"] > .host-settings-body { grid-template-columns: minmax(0, 1fr); }
-  .app-settings-dialog[aria-label="settings"] .app-settings-navigation { display: none; border: 0; padding: 0; }
-  .app-settings-dialog[aria-label="settings"] .app-settings-back { display: block; }
-  .app-settings-dialog[aria-label="settings"] .app-settings-sections-open > .app-settings-navigation { display: grid; }
-  .app-settings-dialog[aria-label="settings"] .app-settings-sections-open > .app-settings-content { display: none; }
+  .app-settings-dialog[aria-label="Settings"] > .host-settings-body { grid-template-columns: minmax(0, 1fr); }
+  .app-settings-dialog[aria-label="Settings"] .app-settings-navigation { display: none; border: 0; padding: 0; }
+  .app-settings-dialog[aria-label="Settings"] .app-settings-back { display: block; }
+  .app-settings-dialog[aria-label="Settings"] .app-settings-sections-open > .app-settings-navigation { display: grid; }
+  .app-settings-dialog[aria-label="Settings"] .app-settings-sections-open > .app-settings-content { display: none; }
 }
 /* The folder field is shared by Settings and inline checkout setup; the
    command field is Settings-only. Both keep independent explicit saves and
@@ -3819,8 +3819,8 @@ a:any-link,
   color: var(--fg-1);
   font-size: 11px;
   font-weight: 500;
-  letter-spacing: .1em;
-  text-transform: uppercase;
+  letter-spacing: normal;
+  text-transform: none;
 }
 .host-settings-refreshed .host-settings-row .btn {
   padding: 2px 6px;
@@ -7931,7 +7931,7 @@ a:any-link,
   color: var(--warn);
   font-size: 12px;
   font-weight: 700;
-  text-transform: uppercase;
+  text-transform: none;
 }
 .approval-card-heading {
   margin: 0;

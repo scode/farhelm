@@ -543,8 +543,8 @@ test.describe("the M6.5 test debts", () => {
     // sharing a span with the sentence around it could lay that sentence
     // out, which is exactly what the split prevents. The whole line still
     // reads correctly, so the isolation costs nothing legible.
-    await expect(reported).not.toContainText("recorded as install");
-    await expect(detail).toContainText("recorded as install");
+    await expect(reported).not.toContainText("Recorded as install");
+    await expect(detail).toContainText("Recorded as install");
     await expect(detail).toContainText("the destination now reports");
   });
 });

@@ -146,8 +146,8 @@ test("browser Delete chord yields to a visible modal and an ordinary text field"
   try {
     await patchPreferences(request, { skip_session_confirmations: null });
     const terminal = await openLiveSession(page, session.id);
-    await page.getByRole("button", { name: "settings", exact: true }).click();
-    const dialog = page.getByRole("dialog", { name: "settings", exact: true });
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Settings", exact: true });
     await expect(dialog).toBeVisible();
     const close = dialog.getByRole("button", { name: "Close", exact: true });
     await close.focus();
@@ -306,8 +306,8 @@ test("browser Rename chord edits the filtered open session and returns live term
     await expect(terminal).toBeFocused();
     expect(Buffer.concat(binary).toString()).toBe(echoed.map((line) => `${line}\r`).join(""));
 
-    await page.getByRole("button", { name: "settings", exact: true }).click();
-    const settings = page.getByRole("dialog", { name: "settings", exact: true });
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    const settings = page.getByRole("dialog", { name: "Settings", exact: true });
     await expect(settings).toBeVisible();
     const close = settings.getByRole("button", { name: "Close", exact: true });
     await close.evaluate((node) => {

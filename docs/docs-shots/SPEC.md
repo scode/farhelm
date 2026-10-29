@@ -130,6 +130,16 @@ verify that the same host and install reconnect. Statuses remain real; no SSH co
 `visual-review/` shots are referenced by no docs page and are never published; the publisher selects only shots the docs
 pages reference. It shares the real fleet and machine-detail check with ordinary docs shots.
 
+For approval-card review, development staging may add one owned source using the existing fake-agent Spawn script. Its
+public launch command is portable; its private wrapper lives with the staged fleet. With the genuine GUI connected, the
+capture temporarily sets that local host's command and YOLO permissions to ask for the request while permitting its
+inherited command, preserving both exact prior values. It photographs the same real pending `spawn /tmp` request in both
+themes and at wide and measured 650px main-pane widths before the production expiry, then answers Deny, observes the
+source's refusal and verifies that no child appeared. Cleanup removes only that source and restores both permissions on
+failure too. Only the existing cwd/age rewrites apply to its listed row; approval replies, feed and statuses remain
+real. This exception supplies source state for development review; ordinary shots still never launch a session, and the
+requested child is never launched.
+
 For setup-progress review, this spec may also confirm the scenario's invented add-host plan against that same E2E-only
 backend. Its actions are simulated, as in the provisioning browser tests; no installation or SSH configuration changes.
 The capture holds an action through the backend's existing control file, photographs the real helm's running progress,
@@ -139,7 +149,9 @@ Connection and session statuses are still never rewritten.
 The same simulated setup action may fail at a controlled step for host-warning review. With Hosts closed, the capture
 photographs the warning on an ordinary and selected avatar, then holds a retry to show its progress ring beside the
 unacknowledged warning. The failure and progress come from the real helm's retained run; cleanup restores the backend
-control file and removes only the invented host as above.
+control file and removes only the invented host as above. The focused sentence-case selection also opens that retained
+failure in Hosts before retrying, to photograph its steps and Re-run menu. Opening Hosts acknowledges it, so this
+selection's retry shows progress after acknowledgement.
 
 - `scripts/docs-screenshots.sh --only <page>` captures that page's shots into `website/public/docs-shots-local/`, and
   the local docs preview shows them straight away, labelled as local captures. Look at every one: the arrow points at

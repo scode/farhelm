@@ -227,7 +227,7 @@ test("inactive host add stays a card and explicit opening cancels through Deny",
     await expect(card.locator(".approval-allow")).toBeEnabled();
     await expect(page.locator(".add-host-form")).toHaveCount(0);
     await setWindowFocused(page, true);
-    await card.getByRole("button", { name: "open add dialog", exact: true }).click();
+    await card.getByRole("button", { name: "Open add dialog", exact: true }).click();
     const form = page.locator(".add-host-form");
     await expect(form).toBeVisible();
     expect(staged.answers, "opening is not approval").toEqual([]);
@@ -502,7 +502,7 @@ test("a requester session title uses available card width before wrapping", asyn
   await stageApprovals(page, [launchRequest("requester-width", "devbox", title)]);
   await openSelected(page);
   const value = page.locator(".approval-card-requester .approval-card-row")
-    .filter({ has: page.locator("dt", { hasText: /^from session$/ }) }).locator("dd .peer-value");
+    .filter({ has: page.locator("dt", { hasText: /^From session$/ }) }).locator("dd .peer-value");
   await expect(value).toHaveText(title);
   // The vendored UI font is a layout input; a fallback's smaller glyphs can
   // otherwise hide the cramped column before the real face finishes loading.
@@ -718,7 +718,7 @@ test("a link approval opens synchronously with user activation and displays the 
   const card = page.locator(".approval-card");
   await expect(card).toContainText(url);
   await expect(card.locator(".approval-card-rows b"), "URL markup must remain text").toHaveCount(0);
-  await card.getByRole("button", { name: "allow", exact: true }).click();
+  await card.getByRole("button", { name: "Allow", exact: true }).click();
   await expect(card).toHaveCount(0);
   expect(staged.answers).toEqual([{ id: "link-allow", answer: "allow" }]);
   expect(await openedLinks(page)).toEqual([{ url, active: true }]);
@@ -732,12 +732,12 @@ for (const preapproved of [false, true]) {
     await openSelected(page);
     const card = page.locator(".approval-card");
     if (preapproved) {
-      await expect(card.getByRole("button", { name: "open", exact: true })).toBeEnabled();
+      await expect(card.getByRole("button", { name: "Open", exact: true })).toBeEnabled();
       await expect(card.locator(".approval-always-allow")).toHaveCount(0);
     } else {
       await expect(card).toContainText("It needs its own host permission, even when public links are allowed.");
     }
-    await card.getByRole("button", { name: preapproved ? "dismiss" : "deny", exact: true }).click();
+    await card.getByRole("button", { name: preapproved ? "Dismiss" : "Deny", exact: true }).click();
     await expect(card).toHaveCount(0);
     expect(staged.answers).toEqual([{ id: "link-deny", answer: "deny" }]);
     expect(await openedLinks(page)).toEqual([]);
@@ -809,7 +809,7 @@ test("a running prompt card keeps its full message and target facts readable", a
   await expect(card).toContainText("session is open in a client");
   // Claude has an observed bypass footer; Codex deliberately has no such detector.
   await expect(card.locator('.permission-glyph[data-glyph="yolo"]')).toBeVisible();
-  await expect(message).toHaveAttribute("aria-label", "prompt");
+  await expect(message).toHaveAttribute("aria-label", "Prompt");
   await expect.poll(() => message.evaluate((node) => node.scrollHeight > node.clientHeight), {
     message: "the complete message stays available in its bounded scrolling block",
   }).toBe(true);
@@ -820,15 +820,17 @@ test("a running prompt card keeps its full message and target facts readable", a
     return card.x >= main.x && card.right <= 1280 && actions.bottom <= 900;
   }, { message: "the card and its answer controls fit in the visible session pane" }).toBe(true);
   await page.screenshot({ path: info.outputPath("approval-running-prompt.png") });
-  await card.getByRole("button", { name: "allow", exact: true }).click();
+  await card.getByRole("button", { name: "Allow", exact: true }).click();
   await expect(card).toHaveCount(0);
   expect(staged.answers).toEqual([{ id: "running-prompt", answer: "allow" }]);
 });
 
 /** Read a labelled fact without confusing the requesting host with the host being changed. */
 function approvalValue(page: Page, label: string) {
+  // Callers name semantic facts; the rendered label also preserves ID's acronym.
+  const displayLabel = label.replace(/\bid\b/g, "ID").replace(/^[a-z]/, letter => letter.toUpperCase());
   return page.locator(".approval-card .approval-card-row")
-    .filter({ has: page.locator("dt").filter({ hasText: new RegExp(`^${label}$`) }) }).locator("dd");
+    .filter({ has: page.locator("dt").filter({ hasText: new RegExp(`^${displayLabel}$`) }) }).locator("dd");
 }
 
 /** Host edits need the complete before/after decision, with every peer value kept outside UI prose. */
@@ -850,7 +852,7 @@ test("a host edit card shows changed fields as escaped data and answers only thi
   }]);
   await openSelected(page);
   const card = page.locator('.approval-card[data-approval-kind="host_edit"]');
-  await expect(card.getByRole("heading")).toHaveText("change a host's alias, icon or color");
+  await expect(card.getByRole("heading")).toHaveText("Change a host's alias, icon or color");
   for (const [label, text] of [
     ["from host", "<b>requester</b><U+202E>"],
     ["from session", "<b>asking session</b><U+0009>"],
@@ -858,10 +860,10 @@ test("a host edit card shows changed fields as escaped data and answers only thi
     ["destination", "operator@<b>builder</b><U+001B>"],
     ["alias now", "<b>old alias</b><U+0009>"],
     ["new alias", "<b>new alias</b><U+202E>"],
-    ["icon now", "cloud"],
-    ["new icon", "rocket"],
-    ["color now", "default"],
-    ["new color", "teal"],
+    ["icon now", "Cloud"],
+    ["new icon", "Rocket"],
+    ["color now", "Default"],
+    ["new color", "Teal"],
   ]) {
     await expect(approvalValue(page, label)).toHaveText(text);
   }
@@ -876,9 +878,9 @@ test("a host edit card shows changed fields as escaped data and answers only thi
     "Each host change needs your approval, even when the requesting host can run Farhelm commands without asking.",
   );
   await expect(card.locator(".approval-always-allow")).toHaveCount(0);
-  await expect(card.locator(".approval-card-actions button")).toHaveText(["allow", "deny"]);
+  await expect(card.locator(".approval-card-actions button")).toHaveText(["Allow", "Deny"]);
   expect(staged.answers, "showing the decision is not approval").toEqual([]);
-  await card.getByRole("button", { name: "allow", exact: true }).click();
+  await card.getByRole("button", { name: "Allow", exact: true }).click();
   await expect(card).toHaveCount(0);
   expect(staged.answers).toEqual([{ id: "host-edit", answer: "allow" }]);
 });
@@ -896,7 +898,7 @@ for (const answer of ["allow", "deny"] as const) {
     }]);
     await openSelected(page);
     const card = page.locator('.approval-card[data-approval-kind="host_remove"]');
-    await expect(card.getByRole("heading")).toHaveText("remove a host");
+    await expect(card.getByRole("heading")).toHaveText("Remove a host");
     await expect(approvalValue(page, "from host")).toHaveText("requesting host");
     await expect(approvalValue(page, "from session")).toHaveText("asking session");
     await expect(approvalValue(page, "host")).toHaveText("<b>target host</b><U+202E>");
@@ -910,9 +912,9 @@ for (const answer of ["allow", "deny"] as const) {
       "Each host change needs your approval, even when the requesting host can run Farhelm commands without asking.",
     ]);
     await expect(card.locator(".approval-always-allow")).toHaveCount(0);
-    await expect(card.locator(".approval-card-actions button")).toHaveText(["allow", "deny"]);
+    await expect(card.locator(".approval-card-actions button")).toHaveText(["Allow", "Deny"]);
     expect(staged.answers, "showing the consequence is not approval").toEqual([]);
-    await card.getByRole("button", { name: answer, exact: true }).click();
+    await card.getByRole("button", { name: answer === "allow" ? "Allow" : "Deny", exact: true }).click();
     await expect(card).toHaveCount(0);
     expect(staged.answers).toEqual([{ id: "host-remove", answer }]);
   });

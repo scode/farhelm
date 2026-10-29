@@ -95,25 +95,25 @@ pub(crate) fn NtfySettings() -> Element {
                 "Send a session's title and host when it waits for you. Applies to every window using this helm. In the desktop app, keep the window open."
             }
             label { class: "app-settings-choice setting-row",
-                span { "send ntfy alerts" }
+                span { "Send ntfy alerts" }
                 input { r#type: "checkbox", class: "control-switch", checked: draft.read().enabled, disabled: locked,
-                    "data-tooltip": "send alerts when a session waits for you; Save applies this to every window using this helm",
+                    "data-tooltip": "Send alerts when a session waits for you; Save applies this to every window using this helm",
                     onchange: move |event| { draft.write().enabled = event.checked(); outcome.set(None); } }
             }
-            label { class: "checkout-root-label", span { "server URL" }
+            label { class: "checkout-root-label", span { "Server URL" }
                 input { r#type: "url", class: "font-mono", value: "{draft.read().server_url}", readonly: locked,
                     autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
                     "data-tooltip": "ntfy server that receives session alerts",
                     oninput: move |event| { draft.write().server_url = event.value(); outcome.set(None); } }
             }
-            label { class: "checkout-root-label", span { "topic" }
+            label { class: "checkout-root-label", span { "Topic" }
                 input { r#type: "text", value: "{draft.read().topic}", readonly: locked,
                     autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
-                    "data-tooltip": "topic to publish alerts to; subscribe to the same topic in your ntfy client",
+                    "data-tooltip": "Topic to publish alerts to; subscribe to the same topic in your ntfy client",
                     oninput: move |event| { draft.write().topic = event.value(); outcome.set(None); } }
             }
             p { class: "host-settings-help", "Anyone who knows an ntfy.sh topic can read its alerts. Choose a hard-to-guess topic." }
-            label { class: "checkout-root-label", span { "access token (optional)" }
+            label { class: "checkout-root-label", span { "Access token (optional)" }
                 // `new-password`, not `off`: browsers ignore `off` when they
                 // fill saved logins into a password field, and the helm's own
                 // web token is typically saved for this same origin. Filled
@@ -122,44 +122,46 @@ pub(crate) fn NtfySettings() -> Element {
                 input { r#type: "password", class: "ntfy-token", value: "{token}", readonly: locked || clear(),
                     autocomplete: "new-password", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
                     "data-tooltip": if clear() {
-                        "the saved access token will be cleared when you save"
+                        "The saved access token will be cleared when you save"
                     } else if origin_changed && draft.read().token_set {
-                        "optional token for this server; leaving it blank clears the previous server's saved token"
-                    } else { "optional server access token; leave blank to preserve the saved token" },
-                    placeholder: if token_will_clear { "saved token will be cleared" }
-                        else if draft.read().token_set { "token saved; leave blank to keep it" } else { "no token saved" },
+                        "Optional token for this server; leaving it blank clears the previous server's saved token"
+                    } else { "Optional server access token; leave blank to preserve the saved token" },
+                    placeholder: if token_will_clear { "Saved token will be cleared" }
+                        else if draft.read().token_set { "Token saved; leave blank to keep it" } else { "No token saved" },
                     oninput: move |event| { token.set(event.value()); outcome.set(None); } }
             }
             if draft.read().token_set && origin_changed && token().is_empty() && !clear() {
-                p { class: "host-settings-help ntfy-token-origin-hint", "changing the server clears the saved token when you save" }
+                p { class: "host-settings-help ntfy-token-origin-hint", "Changing the server clears the saved token when you save" }
             }
             label { class: "app-settings-choice setting-row",
-                span { "clear saved token" }
+                span { "Clear saved token" }
                 input { r#type: "checkbox", class: "control-switch", checked: clear(), disabled: locked,
-                    "data-tooltip": "remove the saved access token when you Save",
+                    "data-tooltip": "Remove the saved access token when you Save",
                     onchange: move |event| { clear.set(event.checked()); outcome.set(None); } }
             }
-            div { class: "checkout-root-label", span { "priority" }
-                div { class: "segmented-control", role: "group", aria_label: "priority",
+            div { class: "checkout-root-label", span { "Priority" }
+                div { class: "segmented-control", role: "group", aria_label: "Priority",
                     for priority in [Priority::Min, Priority::Low, Priority::Default, Priority::High, Priority::Urgent] {
                         button { r#type: "button", value: priority.header(), disabled: locked,
                             aria_pressed: draft.read().priority == priority,
-                            "data-tooltip": "priority used for session alerts; Save applies the selected priority",
+                            "data-tooltip": "Priority used for session alerts; Save applies the selected priority",
                             onclick: move |_| { draft.write().priority = priority; outcome.set(None); },
-                            "{priority.header()}"
+                            // Header words remain stable request values; only
+                            // the control's visible label uses sentence case.
+                            "{priority.display_label()}"
                         }
                     }
                 }
             }
             if let Some(error) = error {
                 p { class: "checkout-root-error", role: "alert", "{error}" }
-                button { r#type: "button", class: "btn btn-neutral", "data-tooltip": "load the saved ntfy alert settings again", onclick: move |_| load.restart(), "retry loading" }
+                button { r#type: "button", class: "btn btn-neutral", "data-tooltip": "Load the saved ntfy alert settings again", onclick: move |_| load.restart(), "Retry loading" }
             }
             // These actions share presentation, not a submission: Send test
             // uses saved settings and must never apply this draft implicitly.
             crate::modal_dialog::DialogActions {
                 button { r#type: "button", class: "btn btn-neutral", disabled: locked,
-                    "data-tooltip": "send one alert using the saved settings, including while alerts are switched off",
+                    "data-tooltip": "Send one alert using the saved settings, including while alerts are switched off",
                     onclick: move |_| {
                         if locked { return; }
                         busy.set(true); outcome.set(None);
@@ -167,12 +169,12 @@ pub(crate) fn NtfySettings() -> Element {
                         dioxus::core::spawn_forever(async move {
                             let result = test_ntfy_settings(&base).await;
                             if !mounted.get() { return; }
-                            busy.set(false); outcome.set(Some(result.map(|()| "test alert sent".into())));
+                            busy.set(false); outcome.set(Some(result.map(|()| "Test alert sent".into())));
                         });
-                    }, "send test"
+                    }, "Send test"
                 }
                 button { r#type: "button", class: "btn btn-primary", disabled: locked,
-                    "data-tooltip": "save ntfy alert settings for every window using this helm",
+                    "data-tooltip": "Save ntfy alert settings for every window using this helm",
                     onclick: move |_| {
                         if locked { return; }
                         busy.set(true); outcome.set(None);
@@ -189,11 +191,11 @@ pub(crate) fn NtfySettings() -> Element {
                                 Err(error) => outcome.set(Some(Err(error))),
                             }
                         });
-                    }, "save"
+                    }, "Save"
                 }
             }
             p { class: "host-settings-help", "Save before testing. Send test uses the saved settings, not this form's unsaved changes." }
-            if busy() { p { role: "status", "working…" } }
+            if busy() { p { role: "status", "Working…" } }
             if let Some(result) = outcome() {
                 match result {
                     Ok(message) => rsx! { p { class: "checkout-root-success", role: "status", "{message}" } },

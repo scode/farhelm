@@ -508,7 +508,7 @@ test("SSH command arrival preserves an independent approval owner", async ({ pag
     await expect.poll(() => requested).toBe(true);
     await expect(body.getByRole("status")).toHaveText("loading connection commands…");
     await expect(body).toHaveAttribute("tabindex", "0");
-    const answer = page.locator(`.approval-card[data-approval-id="${approvalId}"]`).getByRole("button", { name: "allow", exact: true });
+    const answer = page.locator(`.approval-card[data-approval-id="${approvalId}"]`).getByRole("button", { name: "Allow", exact: true });
     await expect(answer).toBeVisible();
     await expect(answer).toBeEnabled();
     expect(await answer.evaluate((node) => node.closest("[data-modal-exempt]") !== null)).toBe(true);
@@ -681,7 +681,7 @@ test("an approval's complete initial prompt is keyboard-scrollable", async ({ pa
   await page.goto("/");
   await expect(page.locator(".main-empty")).toHaveText("no sessions — create one");
   const card = page.locator('.approval-card[data-approval-id="keyboard-scroll-prompt"]');
-  const allow = card.getByRole("button", { name: "allow", exact: true });
+  const allow = card.getByRole("button", { name: "Allow", exact: true });
   await expect(allow).toBeEnabled();
   const region = card.locator(".approval-card-prompt");
   await expect(region).toHaveText(prompt);
