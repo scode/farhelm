@@ -24,6 +24,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Revisit containerized sessions writing the checkout's Git hooks.** Decided on the maintainer's behalf on 2026-10-29
+  when landing the Podman sandbox plan: it landed with the gap documented (SPEC.md and the docs page's caution) instead
+  of closed. A containerized agent can write the checkout's `.git` hooks and configuration and an agent's project
+  settings, which can later run with full account access outside the container. The options: make those read-only inside
+  the container (recommended), or warn before an ordinary session uses a checkout a container has used.
+
 - **Revisit deferring Muse question recognition.** Decided on the maintainer's behalf on 2026-10-29 for the Muse
   session-tracking plan: it ships conversation resume and working, idle and trust status for Muse, but not recognizing
   questions or approval dialogs during a conversation, because no provider usable without the maintainer's credentials
