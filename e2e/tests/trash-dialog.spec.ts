@@ -40,7 +40,7 @@ test("trash list stays keyboard-scrollable while every list action is disabled",
     await expect.poll(() => measuring, { message: "measurement remains held during keyboard input" }).toBe(true);
     await expect(dialog.locator(".checkout-trash-entry")).toHaveCount(20);
     const region = dialog.locator(".checkout-trash-body");
-    await expect(region).toHaveAccessibleName("archived checkouts");
+    await expect(region).toHaveAccessibleName("Archived checkouts");
     const actions = region.getByRole("button");
     expect(await actions.count(), "the list contains disabled actions, not an empty placeholder").toBeGreaterThan(0);
     for (const action of await actions.all()) await expect(action).toBeDisabled();
@@ -155,9 +155,9 @@ for (const fails of [false, true]) {
       const diagnostic = remote.locator(".checkout-trash-issue");
       await expect(diagnostic).toContainText("fixture archive identity unconfirmed");
       const diagnosticBefore = await diagnostic.innerText();
-      await expect(down).toContainText("not reachable");
+      await expect(down).toContainText("Not reachable");
       await expect(down.locator(".trash-entry-delete")).toHaveCount(0);
-      const selected = local.getByRole("button", {name: "delete archived-checkout-0 permanently", exact: true});
+      const selected = local.getByRole("button", {name: "Delete archived-checkout-0 permanently", exact: true});
       await expect(selected).toBeEnabled();
       await selected.scrollIntoViewIfNeeded();
       await expectExposed(selected, dialog.locator(".checkout-trash-body"));
@@ -278,22 +278,22 @@ test("trash entry deletes pause after rows move under the pointer", async ({page
   const remote = dialog.locator(`.checkout-trash-host[data-host-id="${ids[1]}"]`);
   await expect(local.locator(".checkout-trash-entry")).toHaveCount(2);
   // Every finished re-read starts a pause; let them all land before freezing time.
-  await expect(dialog).not.toContainText("measuring…");
+  await expect(dialog).not.toContainText("Measuring…");
   await page.clock.pauseAt(new Date(Date.now() + 5_000));
   await page.clock.runFor(700);
-  const aimed = local.getByRole("button", {name: "delete archived-checkout-0 permanently", exact: true});
+  const aimed = local.getByRole("button", {name: "Delete archived-checkout-0 permanently", exact: true});
   await expect(aimed).toBeEnabled();
   const box = (await aimed.boundingBox())!;
   const point = {x: box.x + box.width / 2, y: box.y + box.height / 2};
 
   inserted = true;
-  await remote.getByRole("button", {name: "delete archived-checkout-0 permanently", exact: true}).click();
+  await remote.getByRole("button", {name: "Delete archived-checkout-0 permanently", exact: true}).click();
   await expect.poll(() => calls.length, {message: "the remote delete was sent"}).toBe(1);
   await expect(local.locator(".checkout-trash-entry")).toHaveCount(3);
-  await expect(dialog).not.toContainText("measuring…");
+  await expect(dialog).not.toContainText("Measuring…");
   const under = () => page.evaluate(({x, y}) => document.elementFromPoint(x, y)?.closest("button")?.getAttribute("aria-label"), point);
-  expect(await under(), "premise: the inserted row now sits under the pointer").toBe("delete archived-checkout-new permanently");
-  const moved = local.getByRole("button", {name: "delete archived-checkout-new permanently", exact: true});
+  expect(await under(), "premise: the inserted row now sits under the pointer").toBe("Delete archived-checkout-new permanently");
+  const moved = local.getByRole("button", {name: "Delete archived-checkout-new permanently", exact: true});
   await expect(moved).toBeDisabled();
   await page.mouse.click(point.x, point.y);
   await page.clock.runFor(700);
@@ -361,7 +361,7 @@ for (const action of ["global", "host"] as const) {
       const start = action === "global" ? dialog.locator(".trash-delete-all") : section.locator(".trash-host-delete");
       await expect(entries).toHaveCount(3);
       await expect(start).toBeEnabled();
-      await expect(dialog).not.toContainText("measuring…");
+      await expect(dialog).not.toContainText("Measuring…");
       await expect(total).toHaveText("3 checkouts · 3.0 KiB on reachable hosts");
       await expect(status).toHaveText("");
       await expect(status).toHaveAttribute("role", "status");
@@ -393,7 +393,7 @@ for (const action of ["global", "host"] as const) {
         return faces.length > 0 && faces.every((face) => face.status === "loaded");
       }), { message: "pending cleanup elapsed time uses the loaded mono face" }).toBe(true);
       await expect(section.locator(".trash-entry-waiting")).toHaveCount(2);
-      for (const waiting of await section.locator(".trash-entry-waiting").all()) await expect(waiting).toHaveText("waiting");
+      for (const waiting of await section.locator(".trash-entry-waiting").all()) await expect(waiting).toHaveText("Waiting");
       await expect(section.locator(".trash-host-progress")).toHaveText("0 of 3 deleted");
       await expect(status).toHaveText("deleting… 3 checkouts left");
       await expect(total).toHaveText("3 checkouts · 3.0 KiB on reachable hosts");
@@ -450,7 +450,7 @@ for (const action of ["global", "host"] as const) {
       await expect(trigger).toHaveAttribute("data-count", "2");
       await expect(status).toHaveText("deleting… 2 checkouts left");
       await expect(section.locator(".trash-entry-elapsed")).toHaveText("0s");
-      await expect(section.locator(".trash-entry-waiting")).toHaveText("waiting");
+      await expect(section.locator(".trash-entry-waiting")).toHaveText("Waiting");
       expect(new Set(calls.flatMap((call) => call.ids)).size, "success advances to a different selected checkout").toBe(2);
       expect(listings).toHaveLength(readsBefore);
 
@@ -528,7 +528,7 @@ for (const failure of ["http", "transport"] as const) {
       const close = dialog.locator(".trash-close");
       await expect(dialog.locator(".checkout-trash-entry")).toHaveCount(6);
       await expect(dialog.locator(".trash-delete-all")).toBeEnabled();
-      await expect(dialog).not.toContainText("measuring…");
+      await expect(dialog).not.toContainText("Measuring…");
       const readsBefore = listings.length;
       await dialog.locator(".trash-delete-all").click();
       await expect(dialog.locator(".trash-confirm-submit")).toBeFocused();

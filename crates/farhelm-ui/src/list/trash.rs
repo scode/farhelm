@@ -94,7 +94,7 @@ struct Target {
 }
 
 /// What one in-place confirmation band shows and what confirming it deletes:
-/// the band it is drawn in (a host's, or `None` for "delete all" at the top
+/// the band it is drawn in (a host's, or `None` for "Delete all" at the top
 /// of the host list) and the targets frozen when it opened.
 ///
 /// It is the key of the dialog's [`ConfirmSlot`], so every opening's
@@ -116,7 +116,7 @@ enum Selection {
     /// starting it closes whatever band is open.
     Entry(Target),
     /// The band opening the user confirmed, as the render that drew its
-    /// "delete permanently" button saw it. The run deletes exactly the
+    /// "Delete permanently" button saw it. The run deletes exactly the
     /// targets that opening froze, and starting it consumes the opening.
     Band(ConfirmToken<Confirmation>),
 }
@@ -379,7 +379,7 @@ fn space(bytes: u64, partial: bool) -> String {
 /// remain interface prose without changing their combined accessible wording.
 fn archived_when(seconds: Option<i64>) -> Element {
     let Some(seconds) = seconds else {
-        return rsx! { "archive time unknown" };
+        return rsx! { "Archive time unknown" };
     };
     let (year, month, day) = farhelm_proto::time::civil_from_days(seconds.div_euclid(86400));
     let time = seconds.rem_euclid(86400);
@@ -388,7 +388,7 @@ fn archived_when(seconds: Option<i64>) -> Element {
         time / 3600,
         time % 3600 / 60
     );
-    rsx! { "archived " span { class: "font-mono", "{timestamp}" } }
+    rsx! { "Archived " span { class: "font-mono", "{timestamp}" } }
 }
 
 /// Dismiss the band opening `shown`, the one the cancelling render drew
@@ -410,7 +410,7 @@ fn cancel_confirmation(
     }
     if shown.key().host.is_none() {
         document::eval(
-            // A re-list can disable "delete all" while the confirmation is
+            // A re-list can disable "Delete all" while the confirmation is
             // open; focusing a disabled button does nothing and would drop
             // focus out of the dialog, so fall back to Close.
             "requestAnimationFrame(() => (document.querySelector('.trash-delete-all:enabled') ?? document.querySelector('.trash-close'))?.focus({preventScroll:true}))",
@@ -502,7 +502,7 @@ fn ConfirmBand(
         .map(|target| target.bytes)
         .fold(0, u64::saturating_add);
     let partial = confirm.targets.iter().any(|target| target.partial) || unchecked > 0;
-    rsx! { div { class: "checkout-trash-confirm", role: "group", aria_label: "confirm permanent checkout deletion",
+    rsx! { div { class: "checkout-trash-confirm", role: "group", aria_label: "Confirm permanent checkout deletion",
         // A confirmation can name more hosts than fit in the body. Reveal the
         // confirming answer and its Cancel fallback without moving the
         // pinned header; the warning remains available by scrolling upwards.
@@ -510,8 +510,8 @@ fn ConfirmBand(
         if count > 0 { p { "Delete {count} archived {checkouts(count)} ({space(bytes, partial)}) on " span { class: "peer-value", dir: "ltr", "{names}" } "? Work in them that was never committed or pushed is lost permanently." } }
         if unchecked > 0 { p { "Attempt cleanup of {unchecked} unchecked {unchecked_noun} on {unchecked_names}. Farhelm deletes any of these it can verify when cleanup runs; work in them that was never committed or pushed is lost permanently. The rest stay in place and may be forgotten from the trash." } }
         div { class: "checkout-trash-actions",
-            button { class: "btn btn-neutral trash-confirm-cancel", disabled: busy, onclick: { let shown = shown.clone(); move |_| oncancel.call(shown.clone()) }, "cancel" }
-            button { class: "btn btn-danger trash-confirm-submit", disabled: submit_disabled, onkeydown: crate::guard_confirmation_enter, onclick: move |_| onsubmit.call(shown.clone()), "delete permanently" }
+            button { class: "btn btn-neutral trash-confirm-cancel", disabled: busy, onclick: { let shown = shown.clone(); move |_| oncancel.call(shown.clone()) }, "Cancel" }
+            button { class: "btn btn-danger trash-confirm-submit", disabled: submit_disabled, onkeydown: crate::guard_confirmation_enter, onclick: move |_| onsubmit.call(shown.clone()), "Delete permanently" }
         }
     } }
 }
@@ -899,15 +899,15 @@ pub(super) fn TrashControl(
         move |answered: ConfirmToken<Confirmation>| dispatch.call(Selection::Band(answered));
     let (full, summary) = sidebar_summary(count, has_unchecked, all_ready);
     let tooltip = if !all_ready || has_unchecked {
-        format!("trash: {summary}. Click to see what is known.")
+        format!("Trash: {summary}. Click to see what is known.")
     } else if count == 0 {
-        "trash: empty. When you delete the last session using a managed checkout, its folder moves here instead of being deleted.".into()
+        "Trash: empty. When you delete the last session using a managed checkout, its folder moves here instead of being deleted.".into()
     } else {
         format!(
-            "trash: {summary}. A managed checkout moves here when the last session using it is deleted. Click to see them, or to delete them for good."
+            "Trash: {summary}. A managed checkout moves here when the last session using it is deleted. Click to see them, or to delete them for good."
         )
     };
-    let accessible_name = format!("checkout trash, {summary}");
+    let accessible_name = format!("Checkout trash, {summary}");
     // Measuring disables confirmation, but retained known sizes still belong
     // in the total. Selection eligibility must not silently turn it into zero.
     let total_bytes = current_hosts
@@ -961,12 +961,12 @@ pub(super) fn TrashControl(
                         h2 { id: "checkout-trash-title", class: "dialog-title", span { class: if busy { "trash-delete-icon deleting" } else { "trash-delete-icon" }, TrashIcon { full } } "Trash" }
                         span { class: "checkout-trash-total", "{count} {checkouts(count)} · {space(total_bytes, total_partial)} on reachable hosts" }
                         div { class: "checkout-trash-header-actions",
-                            button { class: "btn btn-danger trash-delete-all", disabled: busy || !all_ready || targets.is_empty(), onclick: move |_| { if deletion.peek().is_none() { confirmation.open(Confirmation { host: None, targets: targets.clone() }, ()); } }, "delete all" }
+                            button { class: "btn btn-danger trash-delete-all", disabled: busy || !all_ready || targets.is_empty(), onclick: move |_| { if deletion.peek().is_none() { confirmation.open(Confirmation { host: None, targets: targets.clone() }, ()); } }, "Delete all" }
                             // Native disabled controls suppress hover in some
                             // engines. The wrapper receives the explanation's
                             // pointer events while Close stays truly disabled.
                             span { class: "trash-close-help", "data-tooltip": busy.then_some("Available when deletion finishes."),
-                                button { class: "btn btn-neutral trash-close", disabled: busy, onclick: { let mut close = close.clone(); move |_| close() }, "close" }
+                                button { class: "btn btn-neutral trash-close", disabled: busy, onclick: { let mut close = close.clone(); move |_| close() }, "Close" }
                             }
                         }
                         // The status region stays mounted while idle so that a
@@ -980,7 +980,7 @@ pub(super) fn TrashControl(
                         }
                     }
                     ScrollRegion { class: "checkout-trash-body",
-                    handle: DialogHandle::new(DIALOG), selector: ".checkout-trash-body", name: "archived checkouts",
+                    handle: DialogHandle::new(DIALOG), selector: ".checkout-trash-body", name: "Archived checkouts",
                     recovery: RecoveryFocus::new(".trash-close", None, true, RecoveryDelay::OneFrame),
                     if let Some(shown) = shown.as_ref().filter(|shown| shown.key().host.is_none()).cloned() {
                         ConfirmBand { shown, busy, submit_disabled: busy || gate.busy(), oncancel: band_cancel, onsubmit: band_submit }
@@ -1004,8 +1004,8 @@ pub(super) fn TrashControl(
                             let show = deleting || !connected(host) || pending || listing.is_none_or(|listing| !listing.checkouts.is_empty() || !listing.issues.is_empty()) || !host_notices.is_empty();
                             let name = host.name.escaped();
                             let totals = listing.map(listing_totals);
-                            let host_count = totals.as_ref().map_or_else(|| "count unknown".into(), ListingTotals::count_label);
-                            let host_size = if connected(host) && hosts_known && pending { "measuring…".into() } else { totals.as_ref().map_or_else(|| "size unknown".into(), |totals| space(totals.bytes, totals.partial)) };
+                            let host_count = totals.as_ref().map_or_else(|| "Count unknown".into(), ListingTotals::count_label);
+                            let host_size = if connected(host) && hosts_known && pending { "Measuring…".into() } else { totals.as_ref().map_or_else(|| "Size unknown".into(), |totals| space(totals.bytes, totals.partial)) };
                             let paths = listing.map(|listing| listing.checkouts.iter().map(|entry| &entry.path)
                                 .chain(listing.issues.iter().map(|issue| &issue.path))
                                 .filter_map(|path| std::path::Path::new(path).parent().map(|path| path.display().to_string()))
@@ -1029,13 +1029,13 @@ pub(super) fn TrashControl(
                                                         confirmation.open(Confirmation { host: Some(action_host.id), targets: vec![target] }, ());
                                                     }
                                                 },
-                                                "delete all on " span { class: "peer-value", dir: "ltr", "{name}" }
+                                                "Delete all on " span { class: "peer-value", dir: "ltr", "{name}" }
                                             }
                                         }
                                         if let Some(shown) = shown.as_ref().filter(|shown| shown.key().host == Some(host.id)).cloned() {
                                             ConfirmBand { shown, busy, submit_disabled: busy || gate.busy(), oncancel: band_cancel, onsubmit: band_submit }
                                         }
-                                        if !connected(host) { p { "not reachable, so they can't be checked or deleted" } }
+                                        if !connected(host) { p { "Not reachable, so they can't be checked or deleted" } }
                                         if let Some(Err(error)) = entry.and_then(|entry| entry.reply.as_ref()) { div { class: "checkout-trash-issue peer-value", dir: "ltr", "{display_peer(error)}" } }
                                         if let Some(listing) = listing {
                                             if selection_size(listing) > MAX_SELECTION { p { "This host exceeds the 10,000-entry cleanup limit. Cleanup is unavailable for this listing." } }
@@ -1043,7 +1043,7 @@ pub(super) fn TrashControl(
                                                 {
                                                 let entry_host = host.id;
                                                 let entry_id = checkout.id.clone();
-                                                let delete_label = format!("delete {} permanently", display_peer(&checkout.name));
+                                                let delete_label = format!("Delete {} permanently", display_peer(&checkout.name));
                                                 let selected = host_progress.and_then(|run| run.positions.get(&checkout.id).map(|index| (run, *index)))
                                                     .filter(|(run, index)| !run.finished && *index >= run.next);
                                                 rsx! {
@@ -1053,7 +1053,7 @@ pub(super) fn TrashControl(
                                                         if let Some((run, index)) = selected {
                                                             if let Some(started_at) = run.started_at.filter(|_| index == run.next) {
                                                                 EntryProgress { started_at }
-                                                            } else { span { class: "trash-entry-waiting", "waiting" } }
+                                                            } else { span { class: "trash-entry-waiting", "Waiting" } }
                                                         }
                                                         button { class: "btn btn-danger btn-outline trash-entry-delete", aria_label: delete_label,
                                                             // An entry delete has no band of its own: keep it
@@ -1072,7 +1072,7 @@ pub(super) fn TrashControl(
                                                                         .and_then(|host| entry_target(host, state.peek().get(&entry_host), &entry_id)) }
                                                                 };
                                                                 if let Some(selected) = selected { dispatch.call(Selection::Entry(selected)); }
-                                                            }, "delete"
+                                                            }, "Delete"
                                                         }
                                                     }
                                                     div { class: "checkout-trash-entry-meta", BranchIcon {} span { class: "peer-value", dir: "ltr", "{display_peer(&checkout.repository)}" } span { {archived_when(checkout.archived_at)} } }
@@ -1083,7 +1083,7 @@ pub(super) fn TrashControl(
                                             for (index, issue) in listing.issues.iter().enumerate() { Issue { key: "listed-{index}", issue: issue.clone() } }
                                         }
                                         for (index, issue) in host_notices.iter().enumerate() { Issue { key: "outcome-{index}", issue: issue.clone() } }
-                                        for path in paths { div { class: "checkout-trash-path", "on disk: " span { class: "peer-value", dir: "ltr", "{display_peer(&path)}" } } }
+                                        for path in paths { div { class: "checkout-trash-path", "On disk: " span { class: "peer-value", dir: "ltr", "{display_peer(&path)}" } } }
                                     }
                                 }
                             }

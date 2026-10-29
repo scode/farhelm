@@ -10,6 +10,7 @@
  * The focused host/settings selection also denies one authentic Spawn request
  * after photographing it; the requested child is never launched. Ordinary
  * session review reuses the same staged rows and real resumable header source.
+ * Trash review reuses the approved archive listing and cancels its question.
  */
 import { expect, test, type APIRequestContext, type Locator, type Page, type Request as NetworkRequest } from "@playwright/test";
 import { cleanupSession, hostRowByName, listHosts, listSessions, openHostMenu, openRowMenu, patchPreferences, readPreferences, setLocalYoloWithoutAsking, showHostsPanel, showSessionsPanel } from "../tests/helpers/fleet";
@@ -52,6 +53,7 @@ const sentenceApprovalOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "senten
 const sentenceSessionsOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sentence-sessions";
 const sentenceSessionHintsOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sentence-session-hints";
 const sentenceHelpOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sentence-help";
+const sentenceTrashOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sentence-trash";
 
 /** Photograph native-only chrome with the goal's explicit CSS-only fallback.
  * The ordinary staged web app supplies the surrounding frame and terminals.
@@ -927,6 +929,111 @@ async function renameShots(page: Page, scenario: Scenario, name: string, include
   }
 }
 
+/** Show the approved archives and their global question, without deleting.
+ * The existing checkoutTrash listing rewrite supplies all three entries and
+ * refuses deletion. Wait for the product's row-movement guard before the
+ * listing; the question then owns main-answer focus and disables entry actions.
+ * Focused review takes only these two pictures. Dialog review also keeps its
+ * phone listing. Failure cleanup independently attempts cancellation, closing
+ * and viewport restoration, even if an earlier release fails.
+ */
+async function trashShots(page: Page, name: string, includePhone = false) {
+  const viewport = page.viewportSize()!;
+  const window = [page.locator("body")];
+  const trash = page.locator(".checkout-trash-dialog");
+  const question = trash.locator(".checkout-trash-confirm");
+  const deletes = trash.locator(".trash-entry-delete");
+  const deleteAll = trash.locator(".trash-delete-all");
+  const close = trash.locator(".trash-close");
+  // Painted controls must remain reachable without scrolling the pinned
+  // header or activating an answer merely to prove its hit target.
+  const reachable = async (controls: Locator[]) => {
+    for (const control of controls) {
+      await insideViewport(page, control);
+      expect(await control.evaluate(element => {
+        const box = element.getBoundingClientRect();
+        return element.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
+      }), "the trash control's center remains its actual hit target").toBe(true);
+    }
+  };
+  let bodyFailed = true;
+  try {
+    await page.locator(".checkout-trash-button").click();
+    await expect(trash).toHaveAccessibleName("Trash");
+    await expect(trash.locator(".checkout-trash-entry")).toHaveCount(3);
+    await expect(deletes).toHaveCount(3);
+    for (const button of await deletes.all()) {
+      await expect(button).toBeEnabled();
+      await expect(button).toHaveCSS("opacity", "1");
+    }
+    for (const basename of await trash.locator(".checkout-trash-entry-heading strong").all()) {
+      await expect(basename).toHaveCSS("font-family", /JetBrains Mono/);
+    }
+    await expect(trash.locator(".dialog-title")).toHaveCSS("font-family", /^Inter/);
+    await expect(deleteAll).toHaveText("Delete all");
+    await expect(close).toHaveText("Close");
+    for (const button of [deleteAll, close]) {
+      await expect(button).toBeEnabled();
+      await expect(button).toHaveCSS("font-family", /^Inter/);
+    }
+    await expect(trash.locator(".dialog-footer")).toHaveCount(0);
+    await insideViewport(page, trash.locator(".dialog-header"));
+    await reachable([deleteAll, close]);
+    await shot(page, `${name}-trash`, window, { pad: 0 });
+    await deleteAll.click();
+    await expect(question).toHaveAccessibleName("Confirm permanent checkout deletion");
+    const submit = question.locator(".trash-confirm-submit");
+    const cancel = question.locator(".trash-confirm-cancel");
+    // Observe the product's initial handoff. Never activate this main answer,
+    // even though the approved listing rewrite would refuse its request.
+    await expect(submit).toBeFocused();
+    await expect(submit).toHaveText("Delete permanently");
+    await expect(cancel).toHaveText("Cancel");
+    for (const button of [submit, cancel]) {
+      await expect(button).toBeEnabled();
+      await expect(button).toHaveCSS("font-family", /^Inter/);
+    }
+    for (const button of await deletes.all()) await expect(button).toBeDisabled();
+    await insideViewport(page, question);
+    await reachable([deleteAll, close, submit, cancel]);
+    await shot(page, `${name}-trash-confirmation`, window, { pad: 0 });
+    await cancel.click();
+    await expect(question).toBeHidden();
+    if (includePhone) {
+      await page.setViewportSize({ width: 390, height: 520 });
+      // Resizing re-arms the same row-movement guard. The phone picture keeps
+      // its original resting-control premise instead of bypassing that pause.
+      for (const button of await deletes.all()) {
+        await expect(button).toBeEnabled();
+        await expect(button).toHaveCSS("opacity", "1");
+      }
+      await insideViewport(page, trash.locator(".dialog-header"));
+      await reachable([deleteAll, close]);
+      await shot(page, `${name}-trash-phone`, window, { pad: 0 });
+    }
+    bodyFailed = false;
+  } finally {
+    await cleanupOwnedSteps(bodyFailed, [
+      ["cancel the owned trash question", async () => {
+        const cancel = question.locator(".trash-confirm-cancel");
+        if (await cancel.isVisible()) await cancel.click();
+        await expect(question).toBeHidden();
+      }],
+      ["close the owned trash dialog", async () => {
+        // Close cancels an open band before it closes the dialog. Retain that
+        // supported fallback if the separate Cancel step could not finish.
+        if (await question.isVisible()) {
+          await close.click();
+          await expect(question).toBeHidden();
+        }
+        if (await trash.isVisible()) await close.click();
+        await expect(trash).toBeHidden();
+      }],
+      ["restore the exact trash viewport", () => page.setViewportSize(viewport)],
+    ]);
+  }
+}
+
 /** Photograph changed dialog frames and answers, cancelling every operation.
  * Rename's refusal is real: a newline is an invalid title, whereas an empty
  * title is legal. Templates only edits an unsaved draft. YOLO stops at the
@@ -970,32 +1077,7 @@ async function dialogShots(page: Page, request: APIRequestContext, scenario: Sce
   await expect(templates).toBeHidden();
   await page.setViewportSize(viewport);
 
-  await page.locator(".checkout-trash-button").click();
-  const trash = page.locator(".checkout-trash-dialog");
-  await expect(trash.locator(".checkout-trash-entry")).toHaveCount(3);
-  for (const button of await trash.locator(".trash-entry-delete").all()) await expect(button).toBeEnabled();
-  await expect(trash.locator(".dialog-footer")).toHaveCount(0);
-  await shot(page, `${name}-trash`, window, { pad: 0 });
-  await trash.locator(".trash-delete-all").click();
-  // The existing inline question initially focuses its enabled main answer.
-  // Photograph that handoff, then cancel without sending a delete request.
-  await expect(trash.locator(".trash-confirm-submit")).toBeFocused();
-  await shot(page, `${name}-trash-confirmation`, window, { pad: 0 });
-  await trash.locator(".trash-confirm-cancel").click();
-  await expect(trash.locator(".trash-confirm-cancel")).toBeHidden();
-  if (includePhone) {
-    await page.setViewportSize({ width: 390, height: 520 });
-    // Resizing arms Trash's existing row-movement guard. Photograph its
-    // resting controls only after that guard releases them again.
-    for (const button of await trash.locator(".trash-entry-delete").all()) {
-      await expect(button).toBeEnabled();
-      await expect(button).toHaveCSS("opacity", "1");
-    }
-    await shot(page, `${name}-trash-phone`, window, { pad: 0 });
-    await page.setViewportSize(viewport);
-  }
-  await page.keyboard.press("Escape");
-  await expect(trash).toBeHidden();
+  await trashShots(page, name, includePhone);
   await launcherYoloShots(page, request, name, includePhone);
 
   // The consent controller is desktop-only. This established preview route
@@ -2141,6 +2223,10 @@ for (const colorScheme of ["dark", "light"] as const) {
         await expect(page.locator(".build-skew")).toHaveCount(0);
         const name = `visual-review/${colorScheme}-${width}`;
         const window = [page.locator("body")];
+        if (sentenceTrashOnly) {
+          await trashShots(page, name);
+          return;
+        }
         if (sentenceSessionsOnly || sentenceSessionHintsOnly) {
           await sentenceSessionShots(page, request, scenario, name);
           return;
