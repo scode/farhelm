@@ -413,3 +413,27 @@ passed its review gate, and the last code PR removes this plan's TODO.md entry. 
 section exists, its latest entry must also be satisfied. Then close the plan per `plans/.agents/executing.md`,
 "Executing one plan" (steps 11 and 12): deliver its report through the queue script, write a closing entry in its log,
 and stop the watchdog. Never edit `plans/` yourself.
+
+## Blocked
+
+Blocked on 2026-10-29 (claim 1138ff).
+
+### Muse questions need a supported test provider or a scope decision
+
+Muse sessions previously had no conversation resume and only basic working/idle status. The agreed scope includes
+resuming the right conversation, showing work and rest, and noticing questions Muse asks during a conversation. The
+draft stack now implements resume through wrappers and reads Muse's real working, idle and directory-trust screens. It
+does not yet recognize questions or approval dialogs during a conversation, so the TODO remains open.
+
+The private Muse 1.4.14 runs verified hooks and those screens with the offline echo provider. No supported way to make
+echo ask a structured question was found. The private authenticated-provider setup refused for missing credentials; an
+attempt through a custom localhost endpoint stopped at an undocumented model-catalog response before any question could
+run. Extending that probe would mean guessing the provider protocol. No operator credentials or saved Muse configuration
+were copied or changed. This does not establish a limitation in Muse's question screens.
+
+Which supported provider setup should the executor use to capture a real question and its dismissal without signing in
+or changing operator configuration? The recommended option is an already usable authenticated test provider, or a
+documented provider fixture protocol: that preserves the requested question recognition and needs only normal Muse
+screen captures. The alternative is to accept the current resume/work/idle/trust support as a smaller scope and defer
+conversation questions and approvals; those can still look idle while Muse waits for an answer. That narrows the
+explicit all-three-parts decision and needs approval before this plan can be called complete.
