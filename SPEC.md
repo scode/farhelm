@@ -137,7 +137,9 @@ acknowledge the warning, and an unrelated successful action does not clear it. S
 the same failed setup run. Hosts never opens by itself. The Hosts header's `Update all` action makes the same authorized
 Update request for each remote host whose individual Update action is available at the click. A host already busy with
 setup or another run is skipped rather than queued for a later update; the local host is excluded. Each remote host
-keeps its own validation, progress, and result, so one failure does not hide or delay the others. V1 provisioning
+keeps its own validation, progress, and result, so one failure does not hide or delay the others. Having an available
+Update action does not itself mean the host needs an update: the rail's update badge and the session-list update prompts
+require a compatible older build or a lower protocol, as well as an available remote Update action. V1 provisioning
 targets any Linux host with a usable systemd user manager, on the two architectures cross-compiled supervisor binaries
 exist for. The distribution is not a requirement — nothing provisioning does is distribution-specific — so the plan
 names whichever one it found rather than refusing; CI exercises Ubuntu. Hosts whose basic command-line tools come from
@@ -1771,6 +1773,22 @@ the filled primary action. Destructive confirmations use the danger tier, and ex
 retain their purpose-built styling. Sessions on an unreachable host stay in the list from the helm's last-known
 knowledge (which survives helm restarts), with a neutral cause mark such as `Waiting for supervisor` or
 `Host needs update`, rather than vanishing. Compact rows carry the same cause in accessible text and hover help.
+
+The Hosts control at the foot of the rail carries an `↑` whenever any rail avatar has an available-update badge. It is
+red when any update is required, amber otherwise; its accessible name and hover help give the number of hosts. While
+Hosts is closed and only optional updates are available, a card at the bottom of the session list points toward that
+control, names the hosts, and offers **Update all now**, **Show hosts**, and a close control. Update all now sends the
+ordinary authorized Update request for exactly the named hosts, independently; Show hosts opens management. Closing the
+card leaves the badge and hides the card until a host outside the dismissed set gains an update or the helm build
+changes. This dismissal lives only in interface memory, so reloading shows the card again.
+
+When any host requires an update, a danger-toned banner at the top of the session list replaces that card. It names a
+single host or gives the count, explains that an older supervisor protocol makes its sessions unreachable, and offers
+**Update now** (or **Update all three**, with the count spelled out through nine) and **Show hosts**. It cannot be
+dismissed and updates exactly the required hosts. Optional updates return to the card once none is required. Neither
+surface shows while Hosts is open. These prompts use the same available-update test as the rail; up-to-date, newer,
+local, busy and not-yet-loaded hosts do not contribute.
+
 Lifecycle operations against an unreachable host are refused with a clear error; nothing queues for later delivery in
 v1. Such a session shows one calm accent card naming the cause, with the helm's remedy and smaller diagnostics beneath
 it. Its metadata — title, directory, last-known status — remains available, with last-known status and age in exactly

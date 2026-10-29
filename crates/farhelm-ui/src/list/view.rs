@@ -20,11 +20,12 @@ use crate::api::{
 };
 use crate::app_bar::AppBar;
 use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
+use crate::hosts::updates::{self, HostUpdateBanner, HostUpdateCard, UpdateDismissal};
 use crate::hosts::{HostFlow, HostsPanel, HostsRead, host_rows_moved};
 use crate::modal_dialog::FocusTarget;
 use crate::ops::{ConfirmToken, OpLock, ReadGate, use_confirm_slot, use_confirm_slots};
 use crate::peer::PeerText;
-use crate::provisioning::ProvisioningTraceShape;
+use crate::provisioning::{ActionRequest, ProvisioningMenuState, ProvisioningTraceShape};
 use crate::reader::{SurfaceReader, Trigger, request_read};
 use crate::rows::{
     self, absence_is_evidence, apply_optimistic_renames, count_banner,
@@ -869,6 +870,47 @@ pub(crate) fn ListView(
     // panel because navigating away can unmount the task that reported them.
     let mutation_busy_hosts = use_signal(HashSet::<HostId>::new);
     let provisioning_busy_hosts = use_signal(HashSet::<HostId>::new);
+    // The permanently mounted host rows own provisioning. Sharing their
+    // published offers and request inbox lets discovery work while management
+    // is concealed, without adding a second planner or update lifecycle.
+    let provisioning_menu_states = use_signal(HashMap::<HostId, ProvisioningMenuState>::new);
+    let mut provisioning_action_requests = use_signal(HashMap::<HostId, ActionRequest>::new);
+    let host_updates = use_memo(move || {
+        updates::classify(
+            hosts.read().hosts().unwrap_or_default(),
+            &provisioning_menu_states.read(),
+            &provisioning_busy_hosts.read(),
+        )
+    });
+    let mut update_dismissal = use_signal(|| None::<UpdateDismissal>);
+    // Later responses can name another build after the safety verdict has
+    // latched its first mismatch. Reminder identity follows that separate
+    // observation and never changes whether this client is safe to reconnect.
+    let update_helm_build = use_memo(move || {
+        crate::skew::HELM_BUILD_OBSERVED
+            .read()
+            .clone()
+            .unwrap_or_else(|| crate::skew::CLIENT_BUILD.to_owned())
+    });
+    use_effect(move || {
+        let invalidated = update_dismissal.read().as_ref().is_some_and(|dismissal| {
+            dismissal.invalidated_by(&host_updates.read(), &update_helm_build.read())
+        });
+        if invalidated {
+            // Forget the dismissal once a new update appears, so that losing
+            // that new row again cannot silently hide the old reminder.
+            update_dismissal.set(None);
+        }
+    });
+    let request_shown_updates = use_callback(move |shown: Vec<crate::Host>| {
+        let requests = updates::requests_for_shown(
+            &shown,
+            hosts.peek().hosts().unwrap_or_default(),
+            &provisioning_menu_states.peek(),
+            &provisioning_busy_hosts.peek(),
+        );
+        provisioning_action_requests.write().extend(requests);
+    });
     // Per-session, not one shared slot: a stop failing on session A must
     // not blank out session B's still-fresh success (or vice versa), and
     // a LATER success on any session must not silently erase an EARLIER
@@ -1154,6 +1196,16 @@ pub(crate) fn ListView(
     // Presentation never owns the list reader, selection, or disclosure.
     // Both surfaces stay mounted so hidden host work can finish normally.
     let mut hosts_panel_open = use_signal(|| false);
+    let show_hosts_from_update = {
+        let popovers = popovers.clone();
+        use_callback(move |_| {
+            popovers.close_open_in(&[AnchorRegion::Hosts, AnchorRegion::Sessions]);
+            hosts_panel_open.set(true);
+            host_menu_open.set(None);
+            menu_open.set(None);
+            FocusTarget::new(".hosts-panel-toggle", None, false).focus();
+        })
+    };
     // One client-local details choice for every host row, reset on page mount.
     // HostsPanel remains permanently mounted below and owns every write;
     // this shared handle lets accepted reads compare its actual visible
@@ -3496,6 +3548,43 @@ pub(crate) fn ListView(
     use_rendered_movement_between(&identity_snapshot, |before, after| {
         capture_identity_movement(&popovers, before, after)
     });
+    // Banner insertion, heading wrap, and card growth can move session anchors
+    // or clamp the content scroller without resizing the sidebar itself. Only
+    // their rendered copy and presence belong in this key: connection churn,
+    // action bindings, and concealed prompts contribute no layout movement.
+    let update_prompt_layout = {
+        let updates = host_updates.read();
+        let required = if hosts_panel_open() {
+            &[][..]
+        } else {
+            updates.required.as_slice()
+        };
+        let names = if updates::card_visible(
+            &updates,
+            update_dismissal.read().as_ref(),
+            &update_helm_build.read(),
+            hosts_panel_open(),
+        ) {
+            updates
+                .optional
+                .iter()
+                .map(|host| host.name.escaped())
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        (
+            required.len(),
+            (required.len() == 1).then(|| required[0].name.escaped()),
+            names,
+        )
+    };
+    use_rendered_movement_between(&update_prompt_layout, |_, _| {
+        // Capture before DOM edits and deliver only to those existing opening
+        // leases. A menu opened after this render measures the new layout and
+        // cannot receive a deferred close from the previous geometry.
+        MovementCapture::Merge(popovers.capture_region(AnchorRegion::Sessions))
+    });
     // Every session whose menu an outside click may have to dismiss: the one
     // whose menu is open, plus any row still holding a delete or replace
     // confirmation. Sorted so the relays render in a stable order. Each
@@ -4070,7 +4159,12 @@ pub(crate) fn ListView(
         hosts_toggle: rsx! {
             button {
                 r#type: "button", class: "btn btn-neutral hosts-panel-toggle",
-                aria_label: "Hosts", "data-tooltip": "Hosts: show host management",
+                aria_label: host_updates.read().toggle_label(),
+                "data-tooltip": if host_updates.read().len() == 0 {
+                    "Hosts: show host management".to_owned()
+                } else {
+                    format!("{}; show host management", host_updates.read().toggle_label())
+                },
                 aria_pressed: hosts_panel_open(), aria_expanded: hosts_panel_open(),
                 aria_controls: "host-management-panel",
                 onclick: {
@@ -4084,12 +4178,25 @@ pub(crate) fn ListView(
                     }
                 },
                 crate::icons::ActionIcon { glyph: crate::icons::ActionGlyph::Hosts }
+                if host_updates.read().len() > 0 {
+                    span { class: "hosts-toggle-update", aria_hidden: "true",
+                        "data-update-kind": if host_updates.read().required.is_empty() { "optional" } else { "required" },
+                        "↑"
+                    }
+                }
             }
         },
         // The rail and footer remain reachable while this content scrolls.
         // Owners below stay mounted; filtering never deselects a session.
         div { class: "sidebar-content",
         onscroll: move |_| hosts_panel_layout_epoch += 1,
+        if !hosts_panel_open() && !host_updates.read().required.is_empty() {
+            HostUpdateBanner {
+                hosts: host_updates.read().required.clone(),
+                on_update: request_shown_updates,
+                on_show_hosts: show_hosts_from_update,
+            }
+        }
         // The host list is one permanent surface. Keeping the component
         // mounted is a lifecycle requirement, not only a layout choice:
         // discovery, planning, and mutation replies must retain their owner.
@@ -4111,6 +4218,8 @@ pub(crate) fn ListView(
             ops,
             mutation_busy_hosts,
             provisioning_busy_hosts,
+            provisioning_menu_states,
+            provisioning_action_requests,
             provisioning_trace_shapes,
             provisioning_auto_details,
             host_menu_open,
@@ -4666,6 +4775,26 @@ pub(crate) fn ListView(
                 on_cancel: on_rename_cancel,
             }
         }
+        }
+        // This is a sibling of sidebar-content, not part of its scrollable
+        // body. The sidebar flex column reserves its bounded height beside
+        // the footer; only the host-name region scrolls within the card.
+        if updates::card_visible(&host_updates.read(), update_dismissal.read().as_ref(), &update_helm_build.read(), hosts_panel_open()) {
+            HostUpdateCard {
+                hosts: host_updates.read().optional.clone(),
+                on_update: request_shown_updates,
+                on_show_hosts: show_hosts_from_update,
+                on_dismiss: {
+                    let shown = host_updates();
+                    let build = update_helm_build();
+                    move |_| {
+                        update_dismissal.set(Some(UpdateDismissal::new(&shown, build.clone())));
+                        // The dismiss control disappears with its card; return
+                        // keyboard focus to the persistent discovery control.
+                        FocusTarget::new(".hosts-panel-toggle", None, false).focus();
+                    }
+                },
+            }
         }
         }
     }
