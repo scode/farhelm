@@ -171,3 +171,101 @@ reads were audited from successful delivered results, not filenames or tool-call
 
 All required gates for the recorded scope are complete. The residual source-only layout limits and inherited follow-ups
 are stated above for review after landing.
+
+### Landing
+
+Landed with fixes at landing: you asked the monitor in conversation, for this plan only, to fix failing tests rather
+than send it back, and to land it unless a blocker was serious. The last Steel plan changes Farhelm's authored lowercase
+labels, notices, placeholders and tooltip leads to sentence case across the app, quotes the new labels in SPEC.md,
+SPEC_impl.md and 22 website guides, and removes the Steel TODO entry, since all five Steel plans have now landed.
+
+- #2767: session setup (launcher and templates).
+- #2771: hosts, Settings and approvals.
+- #2772: Help and feedback.
+- #2773: session controls.
+- #2774: checkout trash.
+- #2775: device sign-in.
+- #2776: terminal hints.
+- #2781: the remaining interface notices.
+- #2777: the specifications.
+- #2778: the website guides.
+
+#### What landed since the stack was based, and whether it interacted
+
+Nothing but plan bookkeeping, TODO edits and trailing-review records landed since the plan was based, and while it
+merged, two TODO entries of yours (the menu highlighting bug, #2783, and the containerized-sessions plan, #2782);
+nothing interacted. A fresh-context reviewer found that no machine-read value changed: stored settings, wire values,
+command output and the priority value sent with phone notifications keep their old lowercase words, and only text shown
+to people changed.
+
+#### Fixes made at landing
+
+The whole browser suite found 47 failures in 24 tests: 23 failed on both engines and one on WebKit only. 22 of those
+tests still looked for the old lowercase wording, in test files the plan did not touch and in lines it missed in files
+it did, for example the "Host setup" dialog, the "Set up" and "Cancel" answers, and notices that now start with a
+capital letter. The landing updated those expectations to the new wording, changing only letter case, each checked
+against the product's source; one became stricter. All of these fixes are in #2781. The executor's selected test runs
+had not caught any of this.
+
+One test showed a real regression, also fixed in #2781: the hover explanation of a disabled "Restart with…" menu item is
+meant to end "use Replace with…", and the code that adds the closing "…" looked for the old lowercase text, so the "…"
+was silently lost after the recasing. It now matches the new text. A second fresh-context reviewer checked every fix and
+searched the interface and tests for any other code that compares against the old lowercase text; it found none that
+still matters.
+
+The remaining failure, a WebKit-only focus check in the Restart with tests, passed when rerun. A focus race in WebKit is
+a guess, not shown, so the rerun does not clear it; it is not recorded as a flake on one observation.
+
+#### Things you should know
+
+- As decided earlier for this plan, the wording of many states was reviewed from source rather than photographed: the
+  desktop App settings and update notices, native file-type and tunnel settings, SSH connection help, host-removal and
+  host-identity confirmations, the notification list and its states, interrupted-session cards, shell-tab warnings,
+  approval queue and link notices, startup failures, and file-transfer, reconnect, build-version and save errors.
+- No unit test covers the code that fixes up the Restart with explanation; only a browser test caught its break. A unit
+  test, or writing "Replace with…" directly in the explanation text, would stop the next wording change from silently
+  breaking it. Its neighbouring rewrite for "replace starts it over" no longer matches anything and can be deleted.
+- The supervisor's refusal of a plain Restart, shown when a command launch has no resume command, still says "so replace
+  starts it over" in lowercase; it was outside this plan.
+- The effort level label now reads "Xhigh"; no recorded decision covers that casing.
+- Agents now get a template refusal starting "Template … was not applied", while the neighbouring refusal still starts
+  "template … sets a host".
+- SPEC.md's lists of Goose and OMP modes still say `smart approve` in lowercase, from this plan's own spec PR.
+- SPEC.md and the agent instructions quote two host settings as "… here without asking" while the interface says "…
+  without asking", and the website's editorial rules use two labels as examples that no longer exist in that form. Both
+  predate this plan.
+
+#### Checks
+
+This round landed only this plan. On the stack as delivered, up to the remaining-notices PR (the specification and guide
+PRs above it change only text):
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, the web-target UI lint
+  `cargo clippy -p farhelm-ui --target wasm32-unknown-unknown --features web -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`,
+  `cargo check -p farhelm-desktop`, the check that every test delay states its reason, the workspace debug build, the
+  UI's release web build and `scripts/check-desktop-assets.sh`: all passed.
+- The UI's Rust tests, `cargo nextest run -p farhelm-ui`, run `f03b248b-5bf9-41a3-a9da-be65917041a8`: all 805 passed;
+  its desktop-build tests, run `2b744068-29b5-4e7e-81f3-839f0262ac3c`: all 988 passed. The UI's JavaScript and
+  stylesheet tests (`node --test` in `crates/farhelm-ui/js-tests`), run `d3454c3f-02e0-4cb1-8679-9182604bf41f`: 358
+  passed.
+- `npx playwright test` in `e2e/`, the whole browser suite on Chromium and WebKit, three workers each with its own helm
+  and supervisors, no retries, run `26c0a5a9-c6c2-49b6-8207-cf6d8ab4874b`: 2721 passed, 14 skipped by design, 47 failed
+  (the failures the landing fixed, above).
+- The whole Rust workspace, `cargo nextest run --workspace --exclude farhelm-desktop`, with the pinned test runner and
+  tmux, run `b4720622-4fee-4aa5-b6b1-1a1430ccdbcb`: 4486 passed, 40 skipped by design, and 1 failed: the known terminal
+  flow-control flake "shallow pause resumes without reset or replay", in code this plan does not touch.
+
+After the landing fixes, at the top of the stack:
+
+- `cargo fmt --all -- --check`, the web-target UI lint, `dprint check` across the repository,
+  `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py`, the docs website build and the
+  UI's release web build: all passed.
+- The tests whose expectations were fixed (each had stopped at its first stale string, so their later lines had not run)
+  and the Restart with cases, on Chromium and WebKit, run `cc18e348-8326-4004-b292-bce5d70174c0`: all 52 passed. As you
+  asked in conversation, the whole suite was not run again for case-only test fixes.
+- Skipped: the desktop smoke tests (the desktop-only changes are wording, covered by the desktop-build UI tests above)
+  and the native Mac app (not runnable here).
+
+The report's checks were the executor's selected runs, and it treats them as enough; the whole browser suite at landing
+showed they were not (above). This landing ran the whole browser suite and the whole Rust workspace.
