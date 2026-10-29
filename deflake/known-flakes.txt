@@ -16,3 +16,4 @@ playwright terminal-reconnect.spec.ts view-changes-do-not-postpone-a-recovery  #
 playwright replace.spec.ts plain Replace keeps a newer same-source key after old header YOLO cancellation  # same-source-replace-menu-after-yolo-cancellation
 playwright terminal-restart.spec.ts don't ask again on a refused YOLO replace marks the host, then replaces with the override  # interrupted-card-replace-click-lost
 nextest farhelm-ui api::save_order::tests::a_hung_save_releases_waiters_at_their_deadline  # hung-save-waiter-times-out-early
+playwright restart-with.spec.ts restart with keeps gap focus and container Enter uses its enabled action  # restart-with-dialog-focus

@@ -1271,6 +1271,7 @@ enum SupervisorCmd {
 enum HookVendor {
     Claude,
     Codex,
+    Muse,
     Goose,
     Pi,
     Omp,
@@ -1278,10 +1279,12 @@ enum HookVendor {
 }
 
 impl HookVendor {
+    /// Keep the CLI entry point authoritative over the callback's vendor field.
     fn report_vendor(self) -> farhelm_proto::ReportVendor {
         match self {
             HookVendor::Claude => farhelm_proto::ReportVendor::Claude,
             HookVendor::Codex => farhelm_proto::ReportVendor::Codex,
+            HookVendor::Muse => farhelm_proto::ReportVendor::Muse,
             HookVendor::Goose => farhelm_proto::ReportVendor::Goose,
             HookVendor::Pi => farhelm_proto::ReportVendor::Pi,
             HookVendor::Omp => farhelm_proto::ReportVendor::Omp,

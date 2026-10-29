@@ -606,7 +606,7 @@ pub(crate) fn with_workspace_trust(
 
 /// What an agent type's resume command adds to its start command to select
 /// the captured conversation, or `None` for an agent type Farhelm cannot
-/// resume (no conversation reporting: Muse, Cursor, OpenCode).
+/// resume (no conversation reporting: Cursor, OpenCode).
 ///
 /// Appended after every start-command choice: each agent type reads these
 /// selectors wherever they stand among its options, and the start commands
@@ -616,18 +616,21 @@ fn resume_arguments(harness: LaunchHarness) -> Option<&'static [&'static str]> {
     match harness {
         LaunchHarness::Claude => Some(&["--resume", CONVERSATION_PLACEHOLDER]),
         LaunchHarness::Codex => Some(&["resume", CONVERSATION_PLACEHOLDER]),
+        LaunchHarness::Muse => Some(&["resume", CONVERSATION_PLACEHOLDER]),
         LaunchHarness::Goose => Some(&["--resume", "--session-id", CONVERSATION_PLACEHOLDER]),
         LaunchHarness::Pi => Some(&["--session", CONVERSATION_PLACEHOLDER]),
         LaunchHarness::Omp | LaunchHarness::Grok => Some(&["--resume", CONVERSATION_PLACEHOLDER]),
-        LaunchHarness::Muse | LaunchHarness::Cursor | LaunchHarness::OpenCode => None,
+        LaunchHarness::Cursor | LaunchHarness::OpenCode => None,
     }
 }
 
 /// Resolve a one-time conversation start while leaving the ordinary launch unchanged.
 ///
-/// Reporting harnesses use their composed resume command directly. Harnesses
-/// without conversation integration have a selector only for this start: adding them
-/// to `resume_arguments` would incorrectly offer ordinary Restart afterwards.
+/// Reporting harnesses use their composed resume command directly. Cursor and
+/// OpenCode have a separate selector only for this start: adding them to
+/// `resume_arguments` would incorrectly offer ordinary Restart afterwards.
+/// Older stored Muse launches also retain their missing resume command; named
+/// start still works without backfilling an ordinary Restart command.
 pub(crate) fn named_start(
     launch: &SessionLaunch,
     value: String,
@@ -647,6 +650,7 @@ pub(crate) fn named_start(
         integration.filled_named_resume_argv(&value)?
     } else {
         let suffix: &[&str] = match selection.harness {
+            // Existing launches are not migrated when Muse gains capture.
             LaunchHarness::Muse => &["resume"],
             LaunchHarness::Cursor => &["--resume"],
             LaunchHarness::OpenCode => &["--session"],
@@ -889,6 +893,43 @@ mod tests {
         }
     }
 
+    /// Stored Muse launches gain the derived kind without gaining a saved
+    /// resume command. Their one-time named start must still work, preserve
+    /// wrapper and permission choices, and leave ordinary Restart unavailable.
+    #[test]
+    fn older_muse_launches_keep_named_start_without_backfilling_resume() {
+        let mut input = selection(LaunchHarness::Muse);
+        input.wrapper_prefix = Some(vec!["env".into(), "WRAPPED=yes".into()]);
+        let mut launch = super::compile(input).expect("Muse compiles");
+        let SessionLaunch::Agent { resume, .. } = &mut launch else {
+            panic!("agent launch");
+        };
+        *resume = None;
+        let original = launch.clone();
+        assert_eq!(launch.agent_kind(), AgentKind::Muse);
+        let snapshot = farhelm_supervisor::agent_kind::IntegrationSnapshot::of(&launch);
+        assert_eq!(
+            snapshot.restart_offer(Some("captured-id"), 0),
+            farhelm_proto::RestartOffer::NoResumeCommand
+        );
+        let named = super::named_start(&launch, "saved-id".into()).expect("old named start works");
+        assert_eq!(
+            named.argv,
+            [
+                "env",
+                "WRAPPED=yes",
+                "muse",
+                "--permission-profile",
+                ":auto-review",
+                "resume",
+                "saved-id",
+                FARHELM_ARGS_PLACEHOLDER
+            ]
+        );
+        assert_eq!(launch, original);
+        assert_eq!(launch.resume_argv().expect("valid launch"), None);
+    }
+
     /// User text must not become an option or a second placeholder pass.
     /// Unknown ids remain valid launch arguments; Farhelm does not inspect
     /// vendor stores, and relative session files resolve in the session folder.
@@ -936,7 +977,7 @@ mod tests {
                 vec!["grok", "--no-leader"],
                 Some("--resume"),
             ),
-            (LaunchHarness::Muse, vec!["muse"], None),
+            (LaunchHarness::Muse, vec!["muse"], Some("resume")),
             (LaunchHarness::Cursor, vec!["cursor-agent"], None),
             (LaunchHarness::Omp, vec!["omp"], Some("--resume")),
         ] {
@@ -1057,8 +1098,8 @@ mod tests {
     /// Spec: every agent type's composed start command ends in
     /// `{farhelm_args}`; an agent type with conversation reporting also gets
     /// a resume command, which is the start command, that type's resume
-    /// selector with `{conversation}`, then `{farhelm_args}`; Muse, Cursor
-    /// and OpenCode get none. Every composed launch passes the launch rules.
+    /// selector with `{conversation}`, then `{farhelm_args}`; Cursor and
+    /// OpenCode get none. Every composed launch passes the launch rules.
     ///
     /// Why: SPEC.md has Farhelm compose both commands from the same choices
     /// and Restart run the resume command as composed. `{farhelm_args}` at
@@ -1083,10 +1124,11 @@ mod tests {
             let suffix: Option<&[&str]> = match harness {
                 LaunchHarness::Claude => Some(&["--resume"]),
                 LaunchHarness::Codex => Some(&["resume"]),
+                LaunchHarness::Muse => Some(&["resume"]),
                 LaunchHarness::Goose => Some(&["--resume", "--session-id"]),
                 LaunchHarness::Pi => Some(&["--session"]),
                 LaunchHarness::Omp | LaunchHarness::Grok => Some(&["--resume"]),
-                LaunchHarness::Muse | LaunchHarness::Cursor | LaunchHarness::OpenCode => None,
+                LaunchHarness::Cursor | LaunchHarness::OpenCode => None,
             };
             let expected = suffix.map(|suffix| {
                 let mut resume = start[..start.len() - 1].to_vec();
@@ -1259,7 +1301,7 @@ mod tests {
             (
                 LaunchHarness::Muse,
                 vec!["--permission-profile", ":auto-review"],
-                None,
+                Some("resume"),
             ),
             (
                 LaunchHarness::Omp,

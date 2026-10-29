@@ -31,6 +31,7 @@
 //!   ancestor's verified record corrects a child-first conversation choice.
 //! - [`NotificationKind::ClaudePinCorrected`]: Claude admission, when a recorded
 //!   ancestor corrects a child-first conversation choice.
+//! - [`NotificationKind::MusePinCorrected`]: the same correction for Muse.
 //!
 //! # The wording rule
 //!
@@ -71,16 +72,20 @@ pub(crate) enum NotificationKind {
     /// A recorded Claude ancestor corrected a conversation selected by its child.
     /// This records the prior Restart target, so later capture does not resolve it.
     ClaudePinCorrected,
+    /// A recorded Muse ancestor corrected a conversation selected by its child.
+    /// The prior Restart target remains relevant after successful capture.
+    MusePinCorrected,
 }
 
 impl NotificationKind {
-    const ALL: [Self; 6] = [
+    const ALL: [Self; 7] = [
         Self::HookSilent,
         Self::HookNotAdded,
         Self::ResumeWithdrawn,
         Self::ReporterMismatch,
         Self::CodexPinCorrected,
         Self::ClaudePinCorrected,
+        Self::MusePinCorrected,
     ];
 
     /// Whether Resume becoming available ends this warning's condition.
@@ -92,7 +97,8 @@ impl NotificationKind {
             Self::HookNotAdded
             | Self::ReporterMismatch
             | Self::CodexPinCorrected
-            | Self::ClaudePinCorrected => false,
+            | Self::ClaudePinCorrected
+            | Self::MusePinCorrected => false,
         }
     }
 
@@ -108,7 +114,8 @@ impl NotificationKind {
             NotificationKind::ResumeWithdrawn
             | NotificationKind::ReporterMismatch
             | NotificationKind::CodexPinCorrected
-            | NotificationKind::ClaudePinCorrected => false,
+            | NotificationKind::ClaudePinCorrected
+            | NotificationKind::MusePinCorrected => false,
         }
     }
 
@@ -122,6 +129,7 @@ impl NotificationKind {
             NotificationKind::ReporterMismatch => "reporter_mismatch",
             NotificationKind::CodexPinCorrected => "codex_pin_corrected",
             NotificationKind::ClaudePinCorrected => "claude_pin_corrected",
+            NotificationKind::MusePinCorrected => "muse_pin_corrected",
         }
     }
 }
@@ -137,6 +145,11 @@ pub(crate) const CODEX_PIN_CORRECTED_TEXT: &str = "Farhelm had been following a 
 pub(crate) const CLAUDE_PIN_CORRECTED_TEXT: &str = "Farhelm had been following a Claude conversation \
     started by another Claude process in this session. A Restart before now would have resumed \
     that conversation. Farhelm now follows the conversation of the Claude process that started it.";
+
+/// Preserve the earlier Restart consequence, once per launch, in Muse's terms.
+pub(crate) const MUSE_PIN_CORRECTED_TEXT: &str = "Farhelm had been following a Muse conversation \
+    started by another Muse process in this session. A Restart before now would have resumed \
+    that conversation. Farhelm now follows the conversation of the Muse process that started it.";
 
 /// Explain the missed report using the same agent name and timing as Restart.
 ///

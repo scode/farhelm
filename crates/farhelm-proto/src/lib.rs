@@ -1314,7 +1314,7 @@ pub enum RestartOffer {
     #[default]
     NotCaptured,
     /// Farhelm has no conversation reporting for this session's agent: the
-    /// agent type is one Farhelm cannot resume (Cursor, Muse, OpenCode), or
+    /// agent type is one Farhelm cannot resume (Cursor, OpenCode), or
     /// the session runs a command Farhelm does not know as an agent type.
     NoConversationReporting,
     /// The session's agent type reports conversations, but its launch has
@@ -1498,8 +1498,7 @@ crate::enum_with_all! {
         /// Grok's tracked native launch kind. Capture policy is added separately,
         /// but this identity must survive launch snapshots now.
         Grok,
-        /// Muse's native launch kind, kept distinct even before conversation
-        /// reporting and specialized screen reading are available.
+        /// Muse Code, with per-launch hooks and positional conversation capture.
         Muse,
         /// Explicitly non-integrated: no status heuristics beyond the
         /// generic ones and no conversation-identity capture, whatever the
@@ -1558,15 +1557,15 @@ impl AgentKind {
             AgentKind::Claude => Some(RestartReadiness::ShortlyAfterStart),
             // Its MCP reporter extension reports as Goose loads it.
             AgentKind::Goose => Some(RestartReadiness::AtStart),
-            // Codex fires SessionStart at first prompt submission, not at
+            // Codex and Muse fire SessionStart at first prompt submission, not at
             // process start; a session never prompted never reports.
-            AgentKind::Codex => Some(RestartReadiness::FirstPrompt),
+            AgentKind::Codex | AgentKind::Muse => Some(RestartReadiness::FirstPrompt),
             // Both save their conversation file only once it holds the
             // agent's first reply, and report a resumable file only then.
             AgentKind::Pi | AgentKind::Omp => Some(RestartReadiness::FirstReply),
             // Grok's hooks are installed by the user, not injected.
             AgentKind::Grok => Some(RestartReadiness::FirstPromptWithHooks),
-            AgentKind::Muse | AgentKind::Generic => None,
+            AgentKind::Generic => None,
         }
     }
 
@@ -2504,6 +2503,8 @@ pub enum ReportVendor {
     Omp,
     /// xAI's Grok Build CLI, via manually configured lifecycle hooks.
     Grok,
+    /// Muse Code, via the per-launch JSON hooks override.
+    Muse,
 }
 
 /// How much of a session a delete may find still alive and go ahead anyway:
@@ -5173,13 +5174,13 @@ mod tests {
             if readiness.is_none() {
                 let expected_name = match kind {
                     AgentKind::Generic => None,
-                    AgentKind::Muse => Some("Muse"),
                     AgentKind::Claude
                     | AgentKind::Codex
                     | AgentKind::Goose
                     | AgentKind::Pi
                     | AgentKind::Omp
-                    | AgentKind::Grok => {
+                    | AgentKind::Grok
+                    | AgentKind::Muse => {
                         panic!("reporting kind {kind:?} must declare its readiness")
                     }
                 };

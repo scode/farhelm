@@ -38,7 +38,7 @@ pub(crate) use std::time::Duration;
 pub(crate) use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 /// Private files and kind-named entry points shared by tests that need to
-/// launch a realistic Claude or Codex fixture. The directory is deliberately
+/// launch a realistic Claude, Codex or Muse fixture. The directory is deliberately
 /// owned by the harness so it outlives every child that uses those paths.
 pub(crate) struct CaptureFixtures {
     home: farhelm_teststate::TestDir,
@@ -1681,7 +1681,7 @@ pub(crate) async fn fixture_harness_with_seams(
 ) -> (Harness, CaptureFixtures) {
     let home = farhelm_teststate::tempdir().expect("agent home");
     let bin = farhelm_teststate::tempdir().expect("agent bin");
-    for kind in ["claude", "codex"] {
+    for kind in ["claude", "codex", "muse"] {
         std::os::unix::fs::symlink(fixtures_bin(), bin.path().join(kind))
             .expect("symlink the farhelm binary under an agent's own name");
     }

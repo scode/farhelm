@@ -3036,3 +3036,42 @@ oversized full JSON was reconciled in a separately bounded audit; its original r
 Class: fixture-premise
 
 Cause: established
+
+## 2026-10-29 — Restart-with dialog focus (e2e/tests/restart-with.spec.ts)
+
+`restart with keeps gap focus and container Enter uses its enabled action` failed in WebKit in the selected
+named-conversations/restart-with run `ca41e45d-2ea0-486b-a8b1-7f1defad7146`. After clicking YOLO, the action was
+enabled, but `dialog.focus()` did not leave the dialog focused within the five-second assertion window. The case took
+10.522 s; Chromium passed it in 2.993 s. All other 111 cases passed. One exact WebKit retry passed unchanged in 6.0 s,
+run `143efecd-81a2-4e44-8ba1-8275f8fdb7ed`. The Muse plan's landing Decision records the same case failing at earlier
+landings, but those observations were not independently reclassified here. Cause unknown. Open in TODO.md and excluded
+from future deflake sweeps; the focus assertion remains intact.
+
+```text
+Error: expect(locator).toBeFocused() failed
+Locator:  locator('.create-session-form[data-launcher-mode=restart]')
+Expected: focused
+Received: inactive
+Timeout:  5000ms
+```
+
+The tested tree was `dd5009839e4862c7646f94e89f3407ebcd41e494`, dirty only with the Muse structured-launch fixture,
+missing-resume explanation/test and named-conversation expectation corrections. Both runs recorded source fingerprint
+`f815ee88e1ffa1d981fede105c4f6ed5b968c05047fe41dc26be1842038c0fe5`. The selected command was
+`npx playwright test tests/named-conversations.spec.ts tests/restart-with.spec.ts`, both engines, three workers with one
+stack each, zero retries. The retry used `--project=webkit-restart-with` and the unique case title as its grep, one case
+on one worker. An earlier anchored-selector attempt, `53e946eb-c1fc-49c2-aed1-18b75e3f8d9f`, selected no tests and is
+not an assertion observation. No application or test code changed between these runs.
+
+Linux x86_64, kernel 6.8.0-147-generic, Node 26.12.1, Playwright 1.64.0, locale C.UTF-8. Actual tmux was 3.7c,
+executable SHA256 `3590826b41cd0671f16fce6b08d11ef6ac75cc548373c7eb98204273e4f0539f`. Ambient `FARHELM_*` was scrubbed;
+the selected run supplied `FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR`, and the generic retry supplied
+only the latter. Compiler and browser build identities, contemporaneous load and other agents' activity are unavailable.
+Clippy overlapped the selected run's startup, then finished; no owned build overlapped the retry. The changed Muse
+refusal branch handles a missing resume command, while this case uses a resumable Codex fixture; the focus code was
+unchanged. No cause is inferred from that distinction. Full failed UUID evidence, screenshots and traces remain in
+private temporary storage and may expire.
+
+Class: pointer-focus
+
+Cause: unknown

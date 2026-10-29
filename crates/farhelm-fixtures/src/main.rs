@@ -82,8 +82,8 @@ enum Cmd {
         /// fixture's own flags — the per-launch hook flags, or anything a
         /// test's resume template places there. Every script tolerates the
         /// tail; only the record-writing scripts (`claude-record`,
-        /// `codex-record`) print the process argv in their `FAKE-AGENT
-        /// ARGV:` marker, which is where a test asserts on injection
+        /// `codex-record`, `muse-hook-report`) print the process argv in
+        /// their `FAKE-AGENT ARGV:` marker, which is where a test asserts on injection
         /// without the fixture understanding the injected flags.
         ///
         /// The `agent-relay` script is the one that reads the injected tail
@@ -98,8 +98,10 @@ enum Cmd {
         /// The conversation-capture and restart integration fixtures
         /// (`conversation_identity_capture.rs`, `restart_with_resume.rs`)
         /// ARE this binary, symlinked as `claude` or `codex` and invoked as
-        /// `farhelm-fixtures fake-agent`. A supervisor that appends real-vendor
-        /// flags to that argv the way it does for the genuine CLI —
+        /// `farhelm-fixtures fake-agent`. Muse's `muse-hook-report` uses the
+        /// same tail to read its actual `-c hooks=<JSON>` callbacks. A
+        /// supervisor that appends real-vendor flags to that argv the way
+        /// it does for the genuine CLI —
         /// `--settings <json>` for Claude-kind sessions, or
         /// `--dangerously-bypass-hook-trust -c ... -c ...` for Codex-kind
         /// ones — would otherwise hand clap flags it has no arm for, and
@@ -257,6 +259,40 @@ mod tests {
             Some(std::path::PathBuf::from("/tmp/fake-agent-home"))
         );
         assert_eq!(extra, vec!["--settings", "{}"]);
+    }
+
+    /// Muse's real resume selector precedes its injected hooks table. Both
+    /// must reach the fixture unchanged so it can consume the selector and
+    /// execute Muse's actual callback rather than a Claude-shaped stand-in.
+    #[farhelm_testtrace::test]
+    fn muse_hook_fixture_preserves_resume_and_injected_hooks() {
+        let hooks = r#"hooks={"SessionStart":[{"hooks":[{"type":"command","command":"farhelm internal hook --vendor muse","timeout":60}]}]}"#;
+        let cli = Cli::try_parse_from([
+            "muse",
+            "fake-agent",
+            "--script",
+            "muse-hook-report",
+            "--record-home",
+            "/tmp/fixture-home",
+            "resume",
+            "019a0000-0000-7000-8000-000000000001",
+            "-c",
+            hooks,
+        ])
+        .expect("Muse fixture parses");
+        let Cmd::FakeAgent { script, extra, .. } = cli.command else {
+            panic!("fake agent command");
+        };
+        assert_eq!(script, fake_agent::Script::MuseHookReport);
+        assert_eq!(
+            extra,
+            [
+                "resume",
+                "019a0000-0000-7000-8000-000000000001",
+                "-c",
+                hooks
+            ]
+        );
     }
 
     /// `--report-conversation` binds as a named flag ahead of an injected

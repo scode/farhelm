@@ -1,7 +1,7 @@
 //! `farhelm internal hook`: a bounded vendor callback that reports the
 //! conversation identity the agent is currently using.
 //!
-//! Claude and Codex report SessionStart and Stop. Grok uses three manually
+//! Claude, Codex and Muse report SessionStart and Stop. Grok uses three manually
 //! configured callbacks (`SessionStart`, `UserPromptSubmit`, and `Stop`) so
 //! the first event can select a UUID and later events can supply its exact
 //! record path. In every case this module runs as a short-lived child below
@@ -22,8 +22,8 @@
 //! is visible to the human using the agent.
 //!
 //! 1. **Silence on stdout and stderr, except for one deliberate line.**
-//!    The identity work itself writes nothing to either descriptor. Claude
-//!    and Codex feed `SessionStart` stdout into the model's context, and hook
+//!    The identity work itself writes nothing to either descriptor. Claude,
+//!    Codex and Muse feed `SessionStart` stdout into the model's context, and hook
 //!    failures may surface in the vendor UI, so a
 //!    diagnostic printed to either stream here is at best noise in
 //!    someone's terminal and at worst text the model reads as instruction.
@@ -184,9 +184,8 @@ pub const HOOK_BUDGET: Duration = Duration::from_secs(30);
 ///
 /// ## Why stdout reaches the model at all
 ///
-/// Claude and Codex, the two integrations that enable this announcement,
-/// treat plain-text stdout from `SessionStart` as model context. Both were
-/// checked rather than assumed:
+/// Claude, Codex and Muse treat plain-text stdout from `SessionStart` as
+/// model context. These integrations were checked rather than assumed:
 ///
 /// - Claude Code (<https://code.claude.com/docs/en/hooks>): "For most
 ///   events, Claude Code writes stdout to the debug log and doesn't show
@@ -198,15 +197,17 @@ pub const HOOK_BUDGET: Duration = Duration::from_secs(30);
 ///   "Plain text on `stdout` is added as extra developer context." Most
 ///   other Codex hook events say the opposite ("Plain text on `stdout` is
 ///   ignored"), so this is an event-specific guarantee, not a general one.
+/// - Muse Code 1.4.14: an installed-binary probe with a private configuration
+///   showed `SessionStart` stdout in the next request's developer context.
 ///
 /// That symmetry is why there is no Codex-specific fallback here — no file
 /// under farhelm's state directory, no `model_instructions_file` override.
-/// One mechanism serves both announcement-enabled vendors. Grok's manually
+/// One mechanism serves all announcement-enabled vendors. Grok's manually
 /// configured callbacks stay silent and never request this line.
 ///
 /// ## Why the wording is constrained
 ///
-/// Both vendors decide plain-text-versus-JSON by SHAPE: stdout that starts
+/// Claude and Codex decide plain-text-versus-JSON by SHAPE: stdout that starts
 /// with `{` and ends with `}` is parsed as JSON, and Codex fails the hook
 /// run outright when that parse does not succeed. So this line must not
 /// begin with `{`. It also stays ASCII and single-line: it is spliced into
@@ -461,11 +462,27 @@ fn new_report(
 /// absent-or-agreeing passes. Agreement grants nothing — the entry point
 /// is authoritative either way.
 fn parse_payload(bytes: &[u8], entry_vendor: ReportVendor) -> Result<HookReport, &'static str> {
-    use farhelm_supervisor::agent_kind::LocatorVendor;
     let value: serde_json::Value = serde_json::from_slice(bytes).map_err(|_| "unparsable")?;
-    if entry_vendor == ReportVendor::Grok {
-        return parse_grok_payload(&value);
+    match entry_vendor {
+        ReportVendor::Grok => parse_grok_payload(&value),
+        ReportVendor::Muse => parse_muse_payload(&value),
+        ReportVendor::Claude
+        | ReportVendor::Codex
+        | ReportVendor::Goose
+        | ReportVendor::Pi
+        | ReportVendor::Omp => parse_session_payload(&value, entry_vendor),
     }
+}
+
+/// Parse the shared session-id vocabulary while preserving raw admission evidence.
+///
+/// Muse uses these same fields but adds child markers in its adapter. Keeping
+/// that translation outside this parser leaves other vendors' evidence unchanged.
+fn parse_session_payload(
+    value: &serde_json::Value,
+    entry_vendor: ReportVendor,
+) -> Result<HookReport, &'static str> {
+    use farhelm_supervisor::agent_kind::LocatorVendor;
     let session_id = match value.get("session_id") {
         None | Some(serde_json::Value::Null) => return Err("missing-session-id"),
         Some(serde_json::Value::String(id)) => id,
@@ -486,6 +503,7 @@ fn parse_payload(bytes: &[u8], entry_vendor: ReportVendor) -> Result<HookReport,
     let entry_name = match entry_vendor {
         ReportVendor::Claude => "claude",
         ReportVendor::Codex => "codex",
+        ReportVendor::Muse => "muse",
         ReportVendor::Goose => "goose",
         ReportVendor::Pi => "pi",
         ReportVendor::Omp => "omp",
@@ -505,7 +523,9 @@ fn parse_payload(bytes: &[u8], entry_vendor: ReportVendor) -> Result<HookReport,
     if let Some(expected) = match entry_vendor {
         ReportVendor::Pi => Some(LocatorVendor::Pi),
         ReportVendor::Omp => Some(LocatorVendor::Omp),
-        ReportVendor::Claude | ReportVendor::Codex | ReportVendor::Goose => None,
+        ReportVendor::Claude | ReportVendor::Codex | ReportVendor::Goose | ReportVendor::Muse => {
+            None
+        }
         ReportVendor::Grok => unreachable!("Grok payloads use their dual-spelling parser"),
     } {
         let session_file = match value.get("session_file") {
@@ -537,6 +557,31 @@ fn parse_payload(bytes: &[u8], entry_vendor: ReportVendor) -> Result<HookReport,
         value.get("hook_event_name").cloned(),
         value.get("agent_id").cloned(),
     ))
+}
+
+/// Preserve Muse's child evidence for the common pre-write refusal.
+///
+/// Muse 1.4.14 marks native children with `subagent_id` and `child_session_id`;
+/// their `session_id` names the child. A nonempty or malformed marker must
+/// survive even when another marker is absent, null or empty. Malformed values
+/// take precedence so a conflicting string cannot hide a malformed field.
+fn parse_muse_payload(value: &serde_json::Value) -> Result<HookReport, &'static str> {
+    let mut report = parse_session_payload(value, ReportVendor::Muse)?;
+    let markers = ["agent_id", "subagent_id", "child_session_id"].map(|field| value.get(field));
+    let malformed = markers.into_iter().flatten().find(|marker| {
+        !matches!(
+            marker,
+            serde_json::Value::Null | serde_json::Value::String(_)
+        )
+    });
+    let child = markers
+        .into_iter()
+        .flatten()
+        .find(|marker| matches!(marker, serde_json::Value::String(text) if !text.is_empty()));
+    if let Some(marker) = malformed.or(child) {
+        report.agent_id = Some(marker.clone());
+    }
+    Ok(report)
 }
 
 /// Parse the three manually configured Grok callbacks into one bounded,
@@ -747,6 +792,11 @@ mod tests {
     /// ignored hook tests). It carries two fields Claude's does not.
     const CODEX_PAYLOAD: &str = r#"{"session_id":"0198d3ac-0000-7000-8000-000000000000","transcript_path":"/home/u/.codex/sessions/x.jsonl","cwd":"/home/u/src","hook_event_name":"SessionStart","model":"gpt-5-codex","permission_mode":"default","source":"startup"}"#;
 
+    /// Muse Code 1.4.14's parent callback shapes, with a fixture working
+    /// directory. A null transcript is ordinary evidence, not a missing id.
+    const MUSE_PAYLOAD: &str = r#"{"session_id":"01a18601-735c-7de3-b1dd-a97e6d57db34","transcript_path":null,"cwd":"/tmp/project","hook_event_name":"SessionStart","source":"startup"}"#;
+    const MUSE_STOP_PAYLOAD: &str = r#"{"session_id":"01a18601-735c-7de3-b1dd-a97e6d57db34","transcript_path":null,"cwd":"/tmp/project","hook_event_name":"Stop","stop_hook_active":false}"#;
+
     /// A stdin budget short enough to keep the timeout test fast while
     /// staying far above the scheduling jitter of a loaded CI runner.
     const TEST_BUDGET: Duration = Duration::from_millis(300);
@@ -806,6 +856,41 @@ mod tests {
         assert_eq!(
             report.transcript_path,
             Some(serde_json::json!("/tmp/claude/transcript.jsonl"))
+        );
+    }
+
+    /// Muse reports its UUID directly at startup, resume and end of turn.
+    /// Null transcript evidence must stay null; capture cannot depend on a
+    /// vendor file that the callback did not name.
+    #[farhelm_testtrace::test]
+    fn parses_the_observed_muse_parent_callbacks() {
+        for source in ["startup", "resume"] {
+            let payload = MUSE_PAYLOAD.replace("startup", source);
+            let report = parse_payload(payload.as_bytes(), ReportVendor::Muse)
+                .expect("Muse parent start parses");
+            assert_eq!(report.vendor, ReportVendor::Muse);
+            assert_eq!(report.conversation, "01a18601-735c-7de3-b1dd-a97e6d57db34");
+            assert_eq!(report.source, source);
+            assert_eq!(report.transcript_path, Some(serde_json::Value::Null));
+            assert_eq!(
+                report.hook_event_name,
+                Some(serde_json::json!("SessionStart"))
+            );
+            assert_eq!(report.agent_id, None);
+        }
+        let report = parse_payload(MUSE_STOP_PAYLOAD.as_bytes(), ReportVendor::Muse)
+            .expect("Muse parent Stop parses without source");
+        assert_eq!(report.conversation, "01a18601-735c-7de3-b1dd-a97e6d57db34");
+        assert_eq!(report.source, "");
+        assert_eq!(report.hook_event_name, Some(serde_json::json!("Stop")));
+        assert_eq!(report.agent_id, None);
+        assert_eq!(
+            parse_payload(
+                br#"{"session_id":"abc","vendor":"claude"}"#,
+                ReportVendor::Muse
+            )
+            .unwrap_err(),
+            "vendor-mismatch"
         );
     }
 
@@ -876,15 +961,17 @@ mod tests {
             (br#"{"session_id":""}"#, "empty-session-id"),
             (oversized.as_bytes(), "oversized-session-id"),
         ];
-        for (payload, expected) in cases {
-            let reason = parse_payload(payload, ReportVendor::Claude)
-                .expect_err("payload should be rejected");
-            assert_eq!(
-                reason,
-                expected,
-                "payload {:?}",
-                String::from_utf8_lossy(payload)
-            );
+        for vendor in [ReportVendor::Claude, ReportVendor::Muse] {
+            for (payload, expected) in cases {
+                let reason =
+                    parse_payload(payload, vendor).expect_err("payload should be rejected");
+                assert_eq!(
+                    reason,
+                    expected,
+                    "{vendor:?} payload {:?}",
+                    String::from_utf8_lossy(payload)
+                );
+            }
         }
     }
 
@@ -1551,6 +1638,117 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Muse's native children name their own UUID, so their callback must
+    /// not replace an unapplied parent report. Each supported marker is
+    /// sufficient by itself, and empty or conflicting markers cannot erase
+    /// malformed evidence. This also refuses a child marked as parent Stop.
+    #[farhelm_testtrace::test]
+    fn muse_child_markers_preserve_the_parent_report() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        run_with(
+            Some(credential(dir.path())),
+            Cursor::new(MUSE_PAYLOAD.as_bytes().to_vec()),
+            TEST_BUDGET,
+            None,
+            ReportVendor::Muse,
+        );
+        let latest = hook_report::session_dir(dir.path(), "sess-1")
+            .expect("valid id")
+            .join(hook_report::Slot::Latest.file_name());
+        let original = std::fs::read(&latest).expect("foreground report exists");
+        let parent: HookReport = serde_json::from_slice(&original).expect("parent report parses");
+        assert_eq!(parent.vendor, ReportVendor::Muse);
+        assert_eq!(parent.conversation, "01a18601-735c-7de3-b1dd-a97e6d57db34");
+        let cases = [
+            (
+                serde_json::json!({"subagent_id":"skill-reminder", "child_session_id":"child-id"}),
+                serde_json::json!("skill-reminder"),
+            ),
+            (
+                serde_json::json!({"agent_id":"child-agent", "subagent_id":null, "child_session_id":""}),
+                serde_json::json!("child-agent"),
+            ),
+            (
+                serde_json::json!({"agent_id":"", "subagent_id":"", "child_session_id":"child-id"}),
+                serde_json::json!("child-id"),
+            ),
+            (
+                serde_json::json!({"agent_id":null, "subagent_id":7, "child_session_id":""}),
+                serde_json::json!(7),
+            ),
+            (
+                serde_json::json!({"agent_id":"", "subagent_id":null, "child_session_id":{}}),
+                serde_json::json!({}),
+            ),
+            (
+                serde_json::json!({"agent_id":false, "subagent_id":"child", "child_session_id":null}),
+                serde_json::json!(false),
+            ),
+            (
+                serde_json::json!({"agent_id":"child", "subagent_id":[], "child_session_id":""}),
+                serde_json::json!([]),
+            ),
+        ];
+        for event in ["SessionStart", "Stop", "SubagentStart", "SubagentStop"] {
+            for (index, (markers, expected)) in cases.iter().enumerate() {
+                let mut payload = markers.clone();
+                payload["session_id"] = serde_json::json!("01a18601-7696-79a0-a1bd-b0adc128f73a");
+                payload["hook_event_name"] = serde_json::json!(event);
+                payload["transcript_path"] = serde_json::Value::Null;
+                let bytes = payload.to_string().into_bytes();
+                let parsed =
+                    parse_payload(&bytes, ReportVendor::Muse).expect("child evidence parses");
+                assert_eq!(
+                    parsed.agent_id.as_ref(),
+                    Some(expected),
+                    "{event}: {markers}"
+                );
+                let reason = subagent_refusal(Some(expected)).expect("case is refusing evidence");
+                let log = dir.path().join(format!("{event}-{index}.log"));
+                run_with(
+                    Some(credential(dir.path())),
+                    Cursor::new(bytes),
+                    TEST_BUDGET,
+                    Some(log.clone()),
+                    ReportVendor::Muse,
+                );
+                assert!(single_line(&log).contains(&format!(" bad-payload {reason} ")));
+                assert_eq!(
+                    std::fs::read(&latest).expect("parent report remains"),
+                    original
+                );
+            }
+        }
+    }
+
+    /// Stop must select Muse's current parent conversation even without a
+    /// preceding SessionStart, so ancestor correction can use end-of-turn
+    /// callbacks after an outage. It occupies only the ordinary Latest slot.
+    #[farhelm_testtrace::test]
+    fn muse_stop_writes_the_current_conversation_to_the_latest_slot() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        run_with(
+            Some(credential(dir.path())),
+            Cursor::new(MUSE_STOP_PAYLOAD.as_bytes().to_vec()),
+            TEST_BUDGET,
+            None,
+            ReportVendor::Muse,
+        );
+        let session = hook_report::session_dir(dir.path(), "sess-1").expect("valid id");
+        let latest = session.join(hook_report::Slot::Latest.file_name());
+        let report: HookReport =
+            serde_json::from_slice(&std::fs::read(latest).expect("Stop report"))
+                .expect("Stop report parses");
+        assert_eq!(report.vendor, ReportVendor::Muse);
+        assert_eq!(report.conversation, "01a18601-735c-7de3-b1dd-a97e6d57db34");
+        assert_eq!(report.source, "");
+        assert_eq!(report.hook_event_name, Some(serde_json::json!("Stop")));
+        assert_eq!(
+            std::fs::read_dir(session).expect("drop directory").count(),
+            1
+        );
     }
 
     /// Spec: a payload naming a sub-agent is logged as `bad-payload

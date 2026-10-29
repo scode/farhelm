@@ -283,11 +283,11 @@ pub(crate) fn fake_agent_launch(
     let argv = shell_words::split(invocation).expect("a fixture invocation splits");
     let suffix: Option<&[&str]> = match selection.harness {
         LaunchHarness::Claude => Some(&["--resume"]),
-        LaunchHarness::Codex => Some(&["resume"]),
+        LaunchHarness::Codex | LaunchHarness::Muse => Some(&["resume"]),
         LaunchHarness::Goose => Some(&["--resume", "--session-id"]),
         LaunchHarness::Pi => Some(&["--session"]),
         LaunchHarness::Omp | LaunchHarness::Grok => Some(&["--resume"]),
-        LaunchHarness::Muse | LaunchHarness::Cursor | LaunchHarness::OpenCode => None,
+        LaunchHarness::Cursor | LaunchHarness::OpenCode => None,
     };
     let resume = suffix.map(|suffix| {
         let mut resume = argv.clone();
@@ -840,10 +840,21 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
 
         if selection.harness == LaunchHarness::Muse {
             explicit_muse_id = Some(created.id.clone());
+            // This forwarding fixture supplies the helm's resume shape but
+            // never runs Muse's report callback. Tracking must wait for a
+            // report rather than treating that saved command as an identity.
+            assert_eq!(live.launch.agent_kind(), farhelm_proto::AgentKind::Muse);
+            assert!(matches!(
+                &live.launch,
+                farhelm_proto::SessionLaunch::Agent {
+                    resume: Some(_),
+                    ..
+                }
+            ));
             assert_eq!(
                 live.restart_offer,
-                farhelm_proto::RestartOffer::NoConversationReporting,
-                "Muse remains Generic; this fixture must not invent resume support"
+                farhelm_proto::RestartOffer::NotCaptured,
+                "Muse supports resume, but this fixture has not reported a conversation"
             );
         }
         if selection.harness == LaunchHarness::OpenCode {

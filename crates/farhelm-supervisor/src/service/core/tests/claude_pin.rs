@@ -1,4 +1,4 @@
-//! Claude's durable process authority, exercised through the report dispatcher.
+//! Claude and Muse's durable authority, exercised through the report dispatcher.
 //!
 //! These tests supply recorded, already-anchored ancestry. Process walking and
 //! pane anchoring belong to corridor and end-to-end tests; the live test process
@@ -10,20 +10,54 @@ use crate::procs::{ChainLink, ProcessIdentity};
 use crate::store::StoredSessionNotification;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-/// Seed a historical Claude capture in both representations without launching tmux.
+/// Each vendor runs the same authority scenarios through its own public dispatch.
+/// The notice expectation stays separate so shared admission cannot mislabel Muse.
+#[derive(Clone, Copy)]
+struct PinCase {
+    kind: AgentKind,
+    vendor: farhelm_proto::ReportVendor,
+    resume_selector: &'static str,
+    notice_kind: &'static str,
+    notice_text: &'static str,
+}
+
+const CLAUDE: PinCase = PinCase {
+    kind: AgentKind::Claude,
+    vendor: farhelm_proto::ReportVendor::Claude,
+    resume_selector: "--resume",
+    notice_kind: "claude_pin_corrected",
+    notice_text: crate::service::notifications::CLAUDE_PIN_CORRECTED_TEXT,
+};
+const MUSE: PinCase = PinCase {
+    kind: AgentKind::Muse,
+    vendor: farhelm_proto::ReportVendor::Muse,
+    resume_selector: "resume",
+    notice_kind: "muse_pin_corrected",
+    notice_text: crate::service::notifications::MUSE_PIN_CORRECTED_TEXT,
+};
+
+/// Seed a historical plain-id capture in both representations without tmux.
 /// Its version-0 Resume offer is the upgrade contract: introducing a process pin
 /// must not withdraw a capture that already worked before the pin existed.
-async fn seed_claude_pin_session(sup: &Arc<Supervisor>, id: &str) {
-    let integration = program_snapshot("claude");
+async fn seed_pin_session(sup: &Arc<Supervisor>, id: &str, case: PinCase) {
+    let integration = IntegrationSnapshot {
+        kind: case.kind,
+        wrapper_prefix_words: 0,
+        resume_template: Some(vec![
+            case.kind.word().into(),
+            case.resume_selector.into(),
+            crate::agent_kind::CONVERSATION_PLACEHOLDER.into(),
+        ]),
+    };
     let launch = farhelm_proto::SessionLaunch::Legacy {
-        invocation: "claude".into(),
-        agent_kind: AgentKind::Claude,
+        invocation: case.kind.word().into(),
+        agent_kind: case.kind,
         resume_template: integration.resume_template.clone(),
     };
     let row = StoredSession {
         id: id.into(),
         parent: None,
-        title: "Claude pin fixture".into(),
+        title: "Positional pin fixture".into(),
         created_at: now_unix(),
         last_activity_at: now_unix(),
         last_work_started_at: 0,
@@ -47,8 +81,8 @@ async fn seed_claude_pin_session(sup: &Arc<Supervisor>, id: &str) {
     sup.store.insert_session(row, None).await.unwrap();
     let mut entry = entry_with(None, LastOutcome::Running);
     entry.info.id = id.into();
-    entry.info.agent_kind = AgentKind::Claude;
-    entry.info.invocation = "claude".into();
+    entry.info.agent_kind = case.kind;
+    entry.info.invocation = case.kind.word().into();
     entry.info.launch = launch.clone();
     entry.snapshot = IntegrationSnapshot::of(&launch);
     entry.generation = 0;
@@ -67,9 +101,13 @@ async fn seed_claude_pin_session(sup: &Arc<Supervisor>, id: &str) {
 }
 
 /// Build the mutation-free evidence admission receives after the report drain.
-/// Runtime images deliberately convey no Claude identity. Synthetic identities
+/// Runtime images deliberately convey no vendor identity. Synthetic identities
 /// describe saved evidence only; no test relies on a synthetic PID being alive.
-fn claude_pin_report(conversation: &str, processes: &[ProcessIdentity]) -> ReportedConversation {
+fn positional_pin_report(
+    case: PinCase,
+    conversation: &str,
+    processes: &[ProcessIdentity],
+) -> ReportedConversation {
     assert!(!processes.is_empty(), "a report needs an emitter");
     let mut chain = vec![ChainLink {
         pid: 999_001,
@@ -82,7 +120,7 @@ fn claude_pin_report(conversation: &str, processes: &[ProcessIdentity]) -> Repor
                 "internal",
                 "hook",
                 "--vendor",
-                "claude",
+                case.kind.word(),
             ]
             .iter()
             .map(|word| word.as_bytes().to_vec())
@@ -104,7 +142,7 @@ fn claude_pin_report(conversation: &str, processes: &[ProcessIdentity]) -> Repor
             }),
     );
     ReportedConversation {
-        vendor: farhelm_proto::ReportVendor::Claude,
+        vendor: case.vendor,
         conversation: conversation.into(),
         source: "startup".into(),
         transcript_path: None,
@@ -172,7 +210,7 @@ async fn observe_claude_pin(sup: &Arc<Supervisor>, id: &str) -> ClaudePinState {
     }
 }
 
-/// Assert a successful report kept Claude's old Resume contract while changing
+/// Assert a successful report kept the version-0 Resume contract while changing
 /// authority. The decoded process and ancestor list distinguish the winning
 /// report from a conversation-only write or an accidental version-1 promotion.
 async fn assert_claude_pin(
@@ -197,14 +235,16 @@ async fn assert_claude_pin(
 /// Child-first selection is reversible without retracting historical Resume.
 /// Repeated reports retain earlier correction authority, and successive ancestors
 /// share one unresolved warning describing the earlier mistaken Restart target.
-#[farhelm_testtrace::test]
-async fn claude_pin_corrects_ancestors_once_and_keeps_version_zero_resume() {
+async fn pin_corrects_ancestors_once_and_keeps_version_zero_resume(case: PinCase) {
+    let claude_pin_report = |conversation: &str, processes: &[ProcessIdentity]| {
+        positional_pin_report(case, conversation, processes)
+    };
     let state = StateDir::new();
     let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
         .await
         .unwrap();
     let id = "claude-pin-correction";
-    seed_claude_pin_session(&sup, id).await;
+    seed_pin_session(&sup, id, case).await;
     let parent = ProcessIdentity::read(std::process::id()).unwrap();
     let child = ProcessIdentity {
         pid: 900_010,
@@ -233,12 +273,9 @@ async fn claude_pin_corrects_ancestors_once_and_keeps_version_zero_resume() {
     let corrected = assert_claude_pin(&sup, id, "parent", parent, &[higher]).await;
     assert_eq!(corrected.notifications.len(), 1);
     let notice = &corrected.notifications[0];
-    assert_eq!(notice.kind, "claude_pin_corrected");
+    assert_eq!(notice.kind, case.notice_kind);
     assert_eq!(notice.generation, 0);
-    assert_eq!(
-        notice.notification.text,
-        crate::service::notifications::CLAUDE_PIN_CORRECTED_TEXT
-    );
+    assert_eq!(notice.notification.text, case.notice_text);
     assert!(!notice.notification.resolved);
     sup.report_conversation(id, claude_pin_report("higher", &[higher]))
         .await
@@ -250,14 +287,16 @@ async fn claude_pin_corrects_ancestors_once_and_keeps_version_zero_resume() {
 /// A live emitter retains authority against both direct and shelled descendants.
 /// An unrelated reporter and a reused PID cannot acquire that authority either;
 /// each refusal must leave the complete durable and published result unchanged.
-#[farhelm_testtrace::test]
-async fn claude_pin_refuses_descendants_rivals_and_reused_pids() {
+async fn pin_refuses_descendants_rivals_and_reused_pids(case: PinCase) {
+    let claude_pin_report = |conversation: &str, processes: &[ProcessIdentity]| {
+        positional_pin_report(case, conversation, processes)
+    };
     let state = StateDir::new();
     let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
         .await
         .unwrap();
     let id = "claude-pin-live";
-    seed_claude_pin_session(&sup, id).await;
+    seed_pin_session(&sup, id, case).await;
     let parent = ProcessIdentity::read(std::process::id()).unwrap();
     let child = ProcessIdentity {
         pid: 900_020,
@@ -305,14 +344,16 @@ async fn claude_pin_refuses_descendants_rivals_and_reused_pids() {
 /// The current test process with a different start token proves PID reuse without
 /// guessing whether a synthetic PID exists; exec-like image changes do not erase
 /// that same identity from a descendant's ancestry.
-#[farhelm_testtrace::test]
-async fn claude_pin_releases_dead_authority_only_outside_its_chain() {
+async fn pin_releases_dead_authority_only_outside_its_chain(case: PinCase) {
+    let claude_pin_report = |conversation: &str, processes: &[ProcessIdentity]| {
+        positional_pin_report(case, conversation, processes)
+    };
     let state = StateDir::new();
     let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
         .await
         .unwrap();
     let id = "claude-pin-release";
-    seed_claude_pin_session(&sup, id).await;
+    seed_pin_session(&sup, id, case).await;
     let live = ProcessIdentity::read(std::process::id()).unwrap();
     let dead = ProcessIdentity {
         start: live.start.wrapping_add(1),
@@ -364,8 +405,10 @@ async fn claude_pin_releases_dead_authority_only_outside_its_chain() {
 /// The liveness and write seams distinguish those failures from a normal rival
 /// refusal; ancestor correction reaches adoption while process reads are
 /// unavailable because recorded ancestor authority precedes pin liveness.
-#[farhelm_testtrace::test]
-async fn claude_pin_preserves_all_state_on_evidence_validation_and_write_failures() {
+async fn pin_preserves_all_state_on_evidence_validation_and_write_failures(case: PinCase) {
+    let claude_pin_report = |conversation: &str, processes: &[ProcessIdentity]| {
+        positional_pin_report(case, conversation, processes)
+    };
     let state = StateDir::new();
     let fail_process = Arc::new(AtomicBool::new(true));
     let process_reads = Arc::new(AtomicUsize::new(0));
@@ -404,7 +447,7 @@ async fn claude_pin_preserves_all_state_on_evidence_validation_and_write_failure
     .await
     .unwrap();
     let id = "claude-pin-failure";
-    seed_claude_pin_session(&sup, id).await;
+    seed_pin_session(&sup, id, case).await;
     let parent = ProcessIdentity::read(std::process::id()).unwrap();
     let child = ProcessIdentity {
         pid: 900_040,
@@ -482,15 +525,19 @@ async fn claude_pin_preserves_all_state_on_evidence_validation_and_write_failure
     let corrected = assert_claude_pin(&sup, id, "parent", parent, &[]).await;
     assert_eq!(process_reads.load(Ordering::SeqCst), 1);
     assert_eq!(corrected.notifications.len(), 1);
-    assert_eq!(corrected.notifications[0].kind, "claude_pin_corrected");
+    assert_eq!(corrected.notifications[0].kind, case.notice_kind);
     assert!(!corrected.notifications[0].notification.resolved);
 }
 
-/// Claude's Stop carries a complete current identity, rather than Codex's
+/// These vendors' Stop carries a complete current identity, rather than Codex's
 /// confirmation-only evidence. Keeping source empty matches the callback shape
 /// whose admission must not depend on a preceding SessionStart reaching Farhelm.
-fn claude_stop_report(conversation: &str, processes: &[ProcessIdentity]) -> ReportedConversation {
-    let mut report = claude_pin_report(conversation, processes);
+fn positional_stop_report(
+    case: PinCase,
+    conversation: &str,
+    processes: &[ProcessIdentity],
+) -> ReportedConversation {
+    let mut report = positional_pin_report(case, conversation, processes);
     report.source.clear();
     report.hook_event_name = Some(serde_json::json!("Stop"));
     report
@@ -499,14 +546,16 @@ fn claude_stop_report(conversation: &str, processes: &[ProcessIdentity]) -> Repo
 /// Stop can recover an unpinned launch and select its later current conversation.
 /// A shorter repeat must retain the first report's correction ancestors, and
 /// neither selection introduces transcript confirmation or version-1 provenance.
-#[farhelm_testtrace::test]
-async fn claude_stop_selects_without_session_start_and_preserves_pin_ancestors() {
+async fn stop_selects_without_session_start_and_preserves_pin_ancestors(case: PinCase) {
+    let claude_stop_report = |conversation: &str, processes: &[ProcessIdentity]| {
+        positional_stop_report(case, conversation, processes)
+    };
     let state = StateDir::new();
     let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
         .await
         .unwrap();
     let id = "claude-stop-selection";
-    seed_claude_pin_session(&sup, id).await;
+    seed_pin_session(&sup, id, case).await;
     let emitter = ProcessIdentity::read(std::process::id()).unwrap();
     let ancestor = ProcessIdentity {
         pid: 900_050,
@@ -533,14 +582,19 @@ async fn claude_stop_selects_without_session_start_and_preserves_pin_ancestors()
 /// An ancestor's end-of-turn report repairs child-first capture immediately.
 /// A second, higher ancestor may correct again, but the launch retains one
 /// unresolved warning about what an earlier Restart would have resumed.
-#[farhelm_testtrace::test]
-async fn claude_stop_corrects_child_first_capture_and_notifies_once() {
+async fn stop_corrects_child_first_capture_and_notifies_once(case: PinCase) {
+    let claude_pin_report = |conversation: &str, processes: &[ProcessIdentity]| {
+        positional_pin_report(case, conversation, processes)
+    };
+    let claude_stop_report = |conversation: &str, processes: &[ProcessIdentity]| {
+        positional_stop_report(case, conversation, processes)
+    };
     let state = StateDir::new();
     let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
         .await
         .unwrap();
     let id = "claude-stop-correction";
-    seed_claude_pin_session(&sup, id).await;
+    seed_pin_session(&sup, id, case).await;
     let parent = ProcessIdentity::read(std::process::id()).unwrap();
     let child = ProcessIdentity {
         pid: 900_060,
@@ -565,12 +619,9 @@ async fn claude_stop_corrects_child_first_capture_and_notifies_once() {
     let parent_state = assert_claude_pin(&sup, id, "parent", parent, &[higher]).await;
     assert_eq!(parent_state.notifications.len(), 1);
     let notice = &parent_state.notifications[0];
-    assert_eq!(notice.kind, "claude_pin_corrected");
+    assert_eq!(notice.kind, case.notice_kind);
     assert_eq!(notice.generation, 0);
-    assert_eq!(
-        notice.notification.text,
-        crate::service::notifications::CLAUDE_PIN_CORRECTED_TEXT
-    );
+    assert_eq!(notice.notification.text, case.notice_text);
     assert!(!notice.notification.resolved);
 
     sup.report_conversation(id, claude_stop_report("higher", &[higher]))
@@ -587,8 +638,13 @@ async fn claude_stop_corrects_child_first_capture_and_notifies_once() {
 /// so hook silence cannot pass merely because every hook already hides errors.
 /// A failed authoritative write supplies a positive warning control, proving the
 /// same capture and level spelling actually observe admission's diagnostics.
-#[farhelm_testtrace::test]
-async fn claude_stop_silences_rivals_but_preserves_validation_and_write_errors() {
+async fn stop_silences_rivals_but_preserves_validation_and_write_errors(case: PinCase) {
+    let claude_pin_report = |conversation: &str, processes: &[ProcessIdentity]| {
+        positional_pin_report(case, conversation, processes)
+    };
+    let claude_stop_report = |conversation: &str, processes: &[ProcessIdentity]| {
+        positional_stop_report(case, conversation, processes)
+    };
     let state = StateDir::new();
     let fail_process = Arc::new(AtomicBool::new(false));
     let process_reads = Arc::new(AtomicUsize::new(0));
@@ -627,7 +683,7 @@ async fn claude_stop_silences_rivals_but_preserves_validation_and_write_errors()
     .await
     .unwrap();
     let id = "claude-stop-silence";
-    seed_claude_pin_session(&sup, id).await;
+    seed_pin_session(&sup, id, case).await;
     let parent = ProcessIdentity::read(std::process::id()).unwrap();
     let rival = ProcessIdentity {
         pid: 900_070,
@@ -728,4 +784,88 @@ async fn claude_stop_silences_rivals_but_preserves_validation_and_write_errors()
         2,
         "same-emitter Stop needs no liveness read even when that read would fail"
     );
+}
+
+/// Claude's original ancestor-correction and version-0 contract survives sharing.
+#[farhelm_testtrace::test]
+async fn claude_pin_corrects_ancestors_once_and_keeps_version_zero_resume() {
+    pin_corrects_ancestors_once_and_keeps_version_zero_resume(CLAUDE).await;
+}
+
+/// Muse's own report dispatch corrects ancestors and posts one Muse warning.
+#[farhelm_testtrace::test]
+async fn muse_pin_corrects_ancestors_once_and_keeps_version_zero_resume() {
+    pin_corrects_ancestors_once_and_keeps_version_zero_resume(MUSE).await;
+}
+
+/// Claude retains authority against nested, unrelated and reused process identities.
+#[farhelm_testtrace::test]
+async fn claude_pin_refuses_descendants_rivals_and_reused_pids() {
+    pin_refuses_descendants_rivals_and_reused_pids(CLAUDE).await;
+}
+
+/// Muse must refuse rivals through the public dispatcher, not merely the pin judge.
+#[farhelm_testtrace::test]
+async fn muse_pin_refuses_descendants_rivals_and_reused_pids() {
+    pin_refuses_descendants_rivals_and_reused_pids(MUSE).await;
+}
+
+/// Claude releases dead authority only when it is absent from the incoming chain.
+#[farhelm_testtrace::test]
+async fn claude_pin_releases_dead_authority_only_outside_its_chain() {
+    pin_releases_dead_authority_only_outside_its_chain(CLAUDE).await;
+}
+
+/// Muse shares the dead-pin release boundary without an executable-name exception.
+#[farhelm_testtrace::test]
+async fn muse_pin_releases_dead_authority_only_outside_its_chain() {
+    pin_releases_dead_authority_only_outside_its_chain(MUSE).await;
+}
+
+/// Claude's unknown liveness, generation and write failures remain mutation-free.
+#[farhelm_testtrace::test]
+async fn claude_pin_preserves_all_state_on_evidence_validation_and_write_failures() {
+    pin_preserves_all_state_on_evidence_validation_and_write_failures(CLAUDE).await;
+}
+
+/// Muse cannot publish capture or a notice after failed evidence or durable adoption.
+#[farhelm_testtrace::test]
+async fn muse_pin_preserves_all_state_on_evidence_validation_and_write_failures() {
+    pin_preserves_all_state_on_evidence_validation_and_write_failures(MUSE).await;
+}
+
+/// Claude's Stop remains an independent selecting report with retained ancestry.
+#[farhelm_testtrace::test]
+async fn claude_stop_selects_without_session_start_and_preserves_pin_ancestors() {
+    stop_selects_without_session_start_and_preserves_pin_ancestors(CLAUDE).await;
+}
+
+/// Muse's observed source-less Stop can recover a missed first-prompt report.
+#[farhelm_testtrace::test]
+async fn muse_stop_selects_without_session_start_and_preserves_pin_ancestors() {
+    stop_selects_without_session_start_and_preserves_pin_ancestors(MUSE).await;
+}
+
+/// Claude's ancestor Stop corrects child-first capture once per launch as before.
+#[farhelm_testtrace::test]
+async fn claude_stop_corrects_child_first_capture_and_notifies_once() {
+    stop_corrects_child_first_capture_and_notifies_once(CLAUDE).await;
+}
+
+/// Muse's parent turn repairs a child-first pin with its own correction wording.
+#[farhelm_testtrace::test]
+async fn muse_stop_corrects_child_first_capture_and_notifies_once() {
+    stop_corrects_child_first_capture_and_notifies_once(MUSE).await;
+}
+
+/// Claude's ordinary rival Stops stay quiet while authoritative failures still warn.
+#[farhelm_testtrace::test]
+async fn claude_stop_silences_rivals_but_preserves_validation_and_write_errors() {
+    stop_silences_rivals_but_preserves_validation_and_write_errors(CLAUDE).await;
+}
+
+/// Muse's child turn must not create repeated warnings, even with unknown liveness.
+#[farhelm_testtrace::test]
+async fn muse_stop_silences_rivals_but_preserves_validation_and_write_errors() {
+    stop_silences_rivals_but_preserves_validation_and_write_errors(MUSE).await;
 }

@@ -2570,8 +2570,8 @@ behavior, so protocol skew refuses the peer until its ordinary supervisor update
 unmanaged. The normal skew-aware update path remains unchanged.
 
 `SessionInfo.workspace_trust_prompt` is separate from the retained Claude-only flag. The ticker reads Claude and Codex
-through their integration readers and Muse through the exhaustive launch-harness seam, because Muse shares Generic's
-activity kind. The flag defaults false in older cached snapshots, resets with the run or failed capture, and shares the
+through their integration readers and Muse through the exhaustive launch-harness seam, independently of its activity
+reading. The flag defaults false in older cached snapshots, resets with the run or failed capture, and shares the
 existing activity cell across renames. Codex recognition uses its captured 0.159.0 folder-access menu (`waiting-trust`)
 and the reported Quit variant (`waiting-derived-trust-quit`, derived from that capture): the Back choice requires
 `esc back`, and Quit requires `esc quit`. Muse uses a captured 1.4.10-R6427.1 startup trust menu. Both require the
@@ -3038,22 +3038,22 @@ refusal. No global geometry cache or new asset file is introduced.
   The first admitted selecting report pins its emitter and records the Codex-image ancestors above it, each by PID and
   kernel start token. A nullable JSON `codex_report_pin` column on the session row holds this launch authority
   separately from the conversation locator. The historical SQL name and JSON shape are retained for the shared
-  `ReportPin` used by Claude and Codex; a session has only one agent kind, so no migration or vendor tag is needed.
-  Schema 31 defaults existing rows to NULL without backfill. Admission reads the pin under the capture claim and writes
-  it through `Store::admit_pinned_conversation` in the same CAS as the conversation, fencing the complete prior binding
-  and exact previous pin. The writer takes the replacement ownership version explicitly: Codex passes 1 and Claude
-  passes 0; the previous version remains an independent CAS precondition. No in-memory pin mirror is needed. Relaunch
-  clears it, and abort does not restore it. Later reports must come from the pinned emitter, preserving the original
-  stored ancestry rather than replacing it with a later snapshot. A recorded Codex ancestor takes precedence: its
-  verified record independently selects and corrects both pin and conversation, never inheriting the child's file or
-  persistent thread. A correction records the once-per-launch Codex correction notification in the same transaction as
-  adoption; notification-write failure rolls back the correction, and reload restores it even if publication was
-  interrupted. It does not resolve on capture because it records the prior mistaken target. An unverified ancestor
-  changes nothing, and its unready Stop is acknowledged without effect. A pin whose process is gone, reused or
-  non-running releases for a fresh emitter only if the pin is absent from the new report's chain; descendants cannot
-  inherit authority after its exit. Unavailable process evidence does not release it. Rows already running across an
-  upgrade start unpinned: a nested child's first selecting report after upgrade may pin it, and the root's next report
-  corrects and notifies. There is no upgrade suppression.
+  `ReportPin` used by Claude, Codex and Muse; a session has only one agent kind, so no migration or vendor tag is
+  needed. Schema 31 defaults existing rows to NULL without backfill. Admission reads the pin under the capture claim and
+  writes it through `Store::admit_pinned_conversation` in the same CAS as the conversation, fencing the complete prior
+  binding and exact previous pin. The writer takes the replacement ownership version explicitly: Codex passes 1, while
+  Claude and Muse pass 0; the previous version remains an independent CAS precondition. No in-memory pin mirror is
+  needed. Relaunch clears it, and abort does not restore it. Later reports must come from the pinned emitter, preserving
+  the original stored ancestry rather than replacing it with a later snapshot. A recorded Codex ancestor takes
+  precedence: its verified record independently selects and corrects both pin and conversation, never inheriting the
+  child's file or persistent thread. A correction records the once-per-launch Codex correction notification in the same
+  transaction as adoption; notification-write failure rolls back the correction, and reload restores it even if
+  publication was interrupted. It does not resolve on capture because it records the prior mistaken target. An
+  unverified ancestor changes nothing, and its unready Stop is acknowledged without effect. A pin whose process is gone,
+  reused or non-running releases for a fresh emitter only if the pin is absent from the new report's chain; descendants
+  cannot inherit authority after its exit. Unavailable process evidence does not release it. Rows already running across
+  an upgrade start unpinned: a nested child's first selecting report after upgrade may pin it, and the root's next
+  report corrects and notifies. There is no upgrade suppression.
 
   Process evidence is necessary but not sufficient: threads may share a process. A versioned `codex:` locator binds the
   reported runtime session ID to an absolute transcript path and a separately verified persistent thread ID. The bounded
@@ -3130,10 +3130,10 @@ refusal. No global geometry cache or new asset file is introduced.
   own restrictive corridor to the anchored chain — only the reporter plus a narrow trampoline between runtime and
   reporter; any other session-hosting runtime or unclassified intermediary below the emitter refuses. Codex attributes
   its hook-shaped reporter through shell-`-c` trampolines to the innermost native `codex`, accepts arbitrary ancestry
-  above it, and applies its durable process pin. Claude selects its emitter by position through the same narrow hook
-  trampolines, accepts arbitrary ancestry above it, and uses the shared pin with every ancestor eligible to correct it.
-  Grok retains exactly one native image with the required `--no-leader` option. Admission runs five steps: cheap
-  envelope/kind/generation gating with no vendor I/O (the report file's discriminator check re-applied against the
+  above it, and applies its durable process pin. Claude and Muse select their emitter by position through the same
+  narrow hook trampolines, accepts arbitrary ancestry above it, and uses the shared pin with every ancestor eligible to
+  correct it. Grok retains exactly one native image with the required `--no-leader` option. Admission runs five steps:
+  cheap envelope/kind/generation gating with no vendor I/O (the report file's discriminator check re-applied against the
   fenced resolution, plus raw event/source/agent-identity validation before diagnostic sanitation); the unbounded
   capture claim (one shared session-keyed `capture_locks` registry for report admission and readiness refresh, never the
   lifecycle claim; slow waits are logged for diagnostics) and a reload comparing kind, generation, and the complete
@@ -3160,24 +3160,25 @@ refusal. No global geometry cache or new asset file is introduced.
   Relaunch always resumes (see "Restart only resumes"), so it preserves the capture and its provenance together; the
   restart claim compares the version alongside the identity, so a provenance change under an unchanged conversation
   still invalidates a stale claim. Protocol 28 introduced the required closed-enum report discriminator that the doorway
-  gates on; protocol 29 adds Grok to that closed enum together with its agent-kind and launch-harness variants. Senders
-  predating either required variant fail closed at decode and at the missing CLI flag alike. Migration 21 adds
-  `omp_reporter_asset` (nullable `TEXT`, identical in fresh DDL and `ALTER`): the gated reporter asset's file name as
-  installed by the session's current launch, written pre-spawn — after the launch spec publishes, before tmux can start
-  anything — from the one place that decides injection and fenced on the launch generation, so no report of the
-  generation can arrive ahead of its provenance. Migration 22 adds `omp_launch_program` the same way: the program that
-  launch's argv started, retained beside the marker so admission classifies the current launch rather than the resume
-  template (a future resume's command). OMP admission requires the marker to name the current binary's asset with the
-  file's bytes re-verified, so changing the asset breaks reporting for every OMP session already running (see "What
-  running sessions hold across versions"); pre-21 rows adopt `NULL` and fail closed. OMP takes no Codex-style exception:
-  every older OMP row has Restart unavailable (`not_captured`) until its first proven report.
+  gates on; protocol 29 adds Grok to that closed enum together with its agent-kind and launch-harness variants. Protocol
+  65 adds Muse's agent kind and report discriminator; its launch harness already existed. Senders predating either
+  required variant fail closed at decode and at the missing CLI flag alike. Migration 21 adds `omp_reporter_asset`
+  (nullable `TEXT`, identical in fresh DDL and `ALTER`): the gated reporter asset's file name as installed by the
+  session's current launch, written pre-spawn — after the launch spec publishes, before tmux can start anything — from
+  the one place that decides injection and fenced on the launch generation, so no report of the generation can arrive
+  ahead of its provenance. Migration 22 adds `omp_launch_program` the same way: the program that launch's argv started,
+  retained beside the marker so admission classifies the current launch rather than the resume template (a future
+  resume's command). OMP admission requires the marker to name the current binary's asset with the file's bytes
+  re-verified, so changing the asset breaks reporting for every OMP session already running (see "What running sessions
+  hold across versions"); pre-21 rows adopt `NULL` and fail closed. OMP takes no Codex-style exception: every older OMP
+  row has Restart unavailable (`not_captured`) until its first proven report.
 
   **Interim ownership states.** The discriminator gate applies to every kind now: it is envelope, migrated together.
-  Attribution proofs apply to Claude, Codex, Grok, and OMP. Goose and Pi retain their existing acceptance behind the
-  discriminator gate, and new framework entry points default to deny rather than allow. Claude admission runs under the
-  shared capture claim, reloading the complete binding and pin before attribution and committing them in one CAS. The
-  report's anchored chain (`procs::claude_corridor`), skipping the hook's narrow `sh -c` trampolines, identifies the
-  first remaining process as the emitter at any depth below the pane; the pane anchor itself ends that search. Every
+  Attribution proofs apply to Claude, Codex, Muse, Grok, and OMP. Goose and Pi retain their existing acceptance behind
+  the discriminator gate, and new framework entry points default to deny rather than allow. Claude admission runs under
+  the shared capture claim, reloading the complete binding and pin before attribution and committing them in one CAS.
+  The report's anchored chain (`procs::positional_corridor`), skipping the hook's narrow `sh -c` trampolines, identifies
+  the first remaining process as the emitter at any depth below the pane; the pane anchor itself ends that search. Every
   process above the emitter through the pane is retained as a correction ancestor. It is positional on purpose: no
   executable, command-line, or environment rule recognizes Claude. Claude's native binary is named after its version and
   npm installs run under `node`, so an image rule would have to track install layouts, and the injected `--settings`
@@ -3210,49 +3211,74 @@ refusal. No global geometry cache or new asset file is introduced.
   `SubagentStop`; reports carrying a sub-agent marker remain dropped. These observations do not establish behavior for
   other Claude versions or every permission mode.
 
-  **The per-launch identity hook.** Claude Code's `/clear` and Codex's `/new` can replace the conversation inside a live
-  process. Farhelm needs the agent's explicit report so Resume does not return to the discarded conversation. Both
-  vendors fire a `SessionStart` hook whose payload carries that id, and both accept a hook supplied on the command line
-  for a single launch, so farhelm passes itself as that hook (`farhelm internal hook --vendor <adapter>`, which drops
-  its report as a file for the supervisor to apply; see "Report files" below) and lets the agent state its own identity.
-  The `--vendor` flag is the report envelope's discriminator, sourced from the installed entry point rather than
-  inferred from the payload; the Goose helper supplies its own value internally so the persisted declaration keeps
-  invoking the same command, while the Pi/OMP assets pass theirs on the spawned command line and keep their JSON
-  `vendor` field purely as a consistency check. Claude takes `SessionStart` and `Stop` entries in `--settings <json>`,
-  each with a 60-second timeout; Codex takes
-  `--dangerously-bypass-hook-trust -c features.hooks=true -c hooks.SessionStart=… -c hooks.Stop=…`. Per-launch is the
-  whole point: nothing is written to `~/.claude` or to Codex's active configuration home (`$CODEX_HOME` when set,
-  `~/.codex` otherwise), no trust state is left behind, and flags cannot outlive the process they were passed to — which
-  is what keeps SPEC.md's no-agent-configuration rule intact rather than merely bent. The costs are accepted
-  deliberately, and both are scoped to the launches that actually carry the injected flags rather than to Codex launches
-  in general: on those, Codex prints a hook-trust warning line above its composer, and with trust bypassed any hook the
-  user has in that same configuration home but has not trusted runs too. The same bypass covers a trusted project's own
-  `.codex/` hooks: Codex loads a project's hooks only once the folder is trusted (Farhelm's managed-checkout Codex trust
-  setting or the user's own answer to Codex's trust prompt), and on an injected launch they then run without Codex's
-  per-hook review. That is accepted because trusting a workspace already hands its Codex configuration, MCP servers
-  included, the ability to run commands, and because skipping injection there would drop conversation identity, and so
-  resume, for trusted checkouts. It is accepted only until hook installation becomes an explicit step surfaced to the
-  user, where the user is told what is being installed and accepts specific hooks; after that, launches no longer pass
-  the per-launch bypass. Codex fires `SessionStart` at the first prompt rather than at process start, so a Codex
-  session's identity arrives only once the user has typed something, where Claude's arrives at startup. The flags go
-  where the launch's `{farhelm_args}` stands (see "Launch kinds: one resolved launch"); nothing reads the rest of the
-  command. Only a legacy session, from before launch kinds, still gets the previous release's injection, appended after
-  its argv, and for it three invocation shapes disqualify a launch, which is skipped with a logged reason rather than
-  made to work: an argv that already carries `--settings` (Claude honors only the last one, so injecting ours would
-  silently drop the user's), an argv already steering Codex's own hook configuration (a second bypass flag risks a
-  rejected command line, and the `hooks.`/`features.hooks` tables are the user's once they touch them), and — for either
-  vendor — an argv containing a bare `--` (our flags would become prompt text). `FARHELM_AGENT_HOOKS` in the
-  supervisor's environment — `all`, `none`, or a comma list of kinds — turns injection off wholesale or per kind, read
-  once at supervisor start and carried as a seam value. Without an accepted report, a new session cannot be restarted;
-  no nearby record can supply a substitute identity.
+  **Muse positional ownership.** Muse shares Claude's positional corridor and pinned plain-ID admission, including the
+  capture claim, authoritative kind/generation reload, complete-binding-plus-pin CAS, preserved original ancestors,
+  dead-pin release only outside the full incoming chain, and unknown-liveness refusal. Its versioned native executable
+  can disappear when the vendor launcher updates, so recognizing an executable or install path would make capture depend
+  on vendor layout. Arbitrary resident wrapper chains remain admissible. A recorded ancestor corrects pin and
+  conversation together with `MusePinCorrected`, unresolved and posted once per launch with Muse wording. Relaunch
+  clears the shared pin, even on abort; no Muse-specific store column or pin migration is needed. Muse retains ownership
+  version 0 and a false versioned-proof predicate, like Claude. Its `Stop` is an ordinary selecting report; a rival
+  `Stop` is acknowledged without mutation or refusal warning, even when pin liveness is unavailable.
+
+  Muse Code 1.4.14 was checked with offline echo-provider and interactive runs. `SessionStart` fires at the first
+  prompt, with the current UUID at `session_id` and source `startup` or `resume`; `Stop` carries the current UUID and no
+  source. `/clear` and `/new` change the UUID immediately but defer the next `SessionStart` to prompt submission, so old
+  capture can remain until that report. The hook runs directly below the stable Muse process in the observed runs.
+  Native reminder children in that same process emitted `SubagentStart` and `SubagentStop`, with `subagent_id` and
+  `child_session_id`; their UUIDs did not appear in the subscribed parent `SessionStart` or `Stop`. That evidence covers
+  the observed reminders, not every native child or side chat. Muse's parser preserves `agent_id`, `subagent_id` and
+  `child_session_id` evidence for common child refusal, including malformed-marker rejection. No same-process hazard
+  requiring an exact-record check was established, so admission and Resume read neither Muse's session files nor its
+  live session index. The callback UUID alone fills `resume <uuid>` under the pin contract.
+
+  **The per-launch identity hook.** Claude Code's `/clear`, Codex's `/new`, and Muse's `/clear` or `/new` can replace
+  the conversation inside a live process. Farhelm needs the agent's explicit report so Resume does not return to the
+  discarded conversation. All three vendors fire a `SessionStart` hook whose payload carries that id and accept a hook
+  supplied on the command line for a single launch, so farhelm passes itself as that hook
+  (`farhelm internal hook --vendor <adapter>`, which drops its report as a file for the supervisor to apply; see "Report
+  files" below) and lets the agent state its own identity. The `--vendor` flag is the report envelope's discriminator,
+  sourced from the installed entry point rather than inferred from the payload; the Goose helper supplies its own value
+  internally so the persisted declaration keeps invoking the same command, while the Pi/OMP assets pass theirs on the
+  spawned command line and keep their JSON `vendor` field purely as a consistency check. Claude takes `SessionStart` and
+  `Stop` entries in `--settings <json>`, each with a 60-second timeout; Codex takes
+  `--dangerously-bypass-hook-trust -c features.hooks=true -c hooks.SessionStart=… -c hooks.Stop=…`. Muse takes
+  `-c hooks=<JSON>` with Claude-shaped command arrays for `SessionStart` and `Stop`, each with a 60-second timeout. Muse
+  1.4.14 is the verified minimum; Farhelm does not probe versions or add compatibility code for stale harnesses
+  (SPEC.md, "Supported user environments"). No Muse plugin installation, approval or configuration write is needed.
+  Per-launch is the whole point: nothing is written to `~/.claude` or to Codex's active configuration home
+  (`$CODEX_HOME` when set, `~/.codex` otherwise), no trust state is left behind, and flags cannot outlive the process
+  they were passed to — which is what keeps SPEC.md's no-agent-configuration rule intact rather than merely bent. The
+  costs are accepted deliberately, and both are scoped to the launches that actually carry the injected flags rather
+  than to Codex launches in general: on those, Codex prints a hook-trust warning line above its composer, and with trust
+  bypassed any hook the user has in that same configuration home but has not trusted runs too. The same bypass covers a
+  trusted project's own `.codex/` hooks: Codex loads a project's hooks only once the folder is trusted (Farhelm's
+  managed-checkout Codex trust setting or the user's own answer to Codex's trust prompt), and on an injected launch they
+  then run without Codex's per-hook review. That is accepted because trusting a workspace already hands its Codex
+  configuration, MCP servers included, the ability to run commands, and because skipping injection there would drop
+  conversation identity, and so resume, for trusted checkouts. It is accepted only until hook installation becomes an
+  explicit step surfaced to the user, where the user is told what is being installed and accepts specific hooks; after
+  that, launches no longer pass the per-launch bypass. Codex fires `SessionStart` at the first prompt rather than at
+  process start, so a Codex session's identity arrives only once the user has typed something, where Claude's arrives at
+  startup. Muse also reports at the first prompt. The flags go where the launch's `{farhelm_args}` stands (see "Launch
+  kinds: one resolved launch"); nothing reads the rest of the command. Only a legacy session, from before launch kinds,
+  still gets the previous release's injection, appended after its argv, and for it these invocation shapes disqualify a
+  launch, which is skipped with a logged reason rather than made to work: an argv that already carries `--settings`
+  (Claude honors only the last one, so injecting ours would silently drop the user's), an argv already steering Codex's
+  own hook configuration (a second bypass flag risks a rejected command line, and the `hooks.`/`features.hooks` tables
+  are the user's once they touch them), an argv already configuring Muse's `hooks` or `hooks.*` through `-c` (those
+  settings belong to the user), and — for any of these vendors — an argv containing a bare `--` (our flags would become
+  prompt text). `FARHELM_AGENT_HOOKS` in the supervisor's environment — `all`, `none`, or a comma list of kinds — turns
+  injection off wholesale or per kind, read once at supervisor start and carried as a seam value. Without an accepted
+  report, a new session cannot be restarted; no nearby record can supply a substitute identity.
   `website/src/content/docs/docs/how-it-works/agent-hook-injection.md` is the user-facing account of the same mechanism.
   The injected command line outlives the binary that wrote it, so it is part of what newer binaries keep accepting (see
   "What running sessions hold across versions").
 
-  Claude's and Codex's Stop hooks carry no instructions announcement: only SessionStart adds that context. Sessions
-  launched before Stop was injected retain their old argv until relaunch. For Codex, a pending clear in one of them
-  cannot be confirmed; for Claude, ancestor correction waits for another SessionStart rather than the end of a turn. No
-  polling or upgrade machinery compensates for those accepted gaps.
+  Claude's, Codex's and Muse's Stop hooks carry no instructions announcement: only SessionStart adds that context.
+  Sessions launched before Stop was injected retain their old argv until relaunch. For Codex, a pending clear in one of
+  them cannot be confirmed; for Claude, ancestor correction waits for another SessionStart rather than the end of a
+  turn. No polling or upgrade machinery compensates for those accepted gaps.
 
   **Report files.** The hook never talks to the supervisor and never waits for it. It reads the vendor's payload
   (bounded at 30 s, for a vendor that holds stdin open, under the 60 s outer timers Farhelm sets or documents; Pi and
@@ -3260,16 +3286,16 @@ refusal. No global geometry cache or new asset file is introduced.
   `hook-reports/<session-id>/` under the state directory (the socket's parent), and exits 0. It requires the launch's
   complete credential environment, as before, but carries no token: the file sits in the supervisor's private state
   directory, and attribution, not a secret, is what stops a nested agent's report. Each session has fixed slots, each
-  replaced by rename: `latest.json` for the single-report integrations, including Claude. Claude's SessionStart and Stop
-  both select the current conversation under the pin, so the newest report suffices without a separate confirmation
-  slot. Codex and Grok use `selection.json` (`SessionStart`) and `enrichment.json` (Codex Stop; Grok's later events),
-  drained selection first. Enrichment is refused without its selection, and the separate slot keeps a long outage's
-  enrichments from evicting it. The directory is therefore bounded at two files with no queue, cap, or eviction rule.
-  Two hooks firing at once still race for a slot, and the later rename wins. A report that names a sub-agent is never
-  written, since it would take the slot of a pending report from the session's own agent and then be refused; a nested
-  runtime that carries no such marker (a second Grok started inside a Grok session, whose hooks are global) can still
-  take that slot, within one pass while the supervisor runs or across an outage, and is then refused, which is an
-  accepted gap.
+  replaced by rename: `latest.json` for the single-report integrations, including Claude and Muse. Their SessionStart
+  and Stop both select the current conversation under the pin, so the newest report suffices without a separate
+  confirmation slot. Codex and Grok use `selection.json` (`SessionStart`) and `enrichment.json` (Codex Stop; Grok's
+  later events), drained selection first. Enrichment is refused without its selection, and the separate slot keeps a
+  long outage's enrichments from evicting it. The directory is therefore bounded at two files with no queue, cap, or
+  eviction rule. Two hooks firing at once still race for a slot, and the later rename wins. A report that names a
+  sub-agent is never written, since it would take the slot of a pending report from the session's own agent and then be
+  refused; a nested runtime that carries no such marker (a second Grok started inside a Grok session, whose hooks are
+  global) can still take that slot, within one pass while the supervisor runs or across an outage, and is then refused,
+  which is an accepted gap.
 
   The supervisor applies waiting reports on recursive file-watch events and at the start of every reconciliation pass
   (`capture_now`: the 2 s ticker, startup, reload, Restart) and does nothing while it is not recording. It takes a slot
@@ -3287,9 +3313,9 @@ refusal. No global geometry cache or new asset file is introduced.
   would be discarded as the old launch's. The watch task also waits for the drain lock, so an event is never lost to an
   already-running drain. Every settled report leaves a verdict line in the session's hook log, beside the hook's own
   `written` line: `acked`, or `refused` with the error kind and reason. An `acked` Stop need not change the
-  conversation: Claude's pin can silently turn a rival away, and Codex can acknowledge a Stop without effect. Delete
-  removes the drop directory; a pass removes one whose session no longer exists, which a hook racing the delete can
-  recreate. The supervisor creates the report root with mode 0700 before attaching notify's recommended recursive
+  conversation: Claude's or Muse's pin can silently turn a rival away, and Codex can acknowledge a Stop without effect.
+  Delete removes the drop directory; a pass removes one whose session no longer exists, which a hook racing the delete
+  can recreate. The supervisor creates the report root with mode 0700 before attaching notify's recommended recursive
   watcher (inotify on Linux, default FSEvents on macOS). An independent task drains the whole root; a single stored wake
   coalesces bursts and retains events during a drain. A 100 ms pause between drains bounds the feedback from retried
   reports linked back into place. Access events are ignored so the drain's own reads cannot keep waking it. The timer
@@ -3405,19 +3431,21 @@ refusal. No global geometry cache or new asset file is introduced.
   developer context" — event-specific, since most other Codex hook events say plain stdout is ignored. Because Codex
   does inject it, there is NO Codex fallback: no file under farhelm's state directory and no `model_instructions_file`
   or `instructions` config override, both of which exist but replace the vendor's own base instructions rather than
-  adding to them. One mechanism, both vendors. Two shape constraints follow from the vendors and are pinned by tests:
-  stdout starting with `{` and ending with `}` is parsed as JSON by both (and a failed parse fails the hook run outright
-  on Codex), and the line is one line, ASCII, and short, because every session pays for it whether or not anyone ever
-  says `$farhelm`. The full instructions are printed only on demand by `farhelm agent instructions`, whose verb list is
-  generated by walking the binary's own clap definition rather than transcribed — a verb that exists but goes
-  undocumented is one no agent ever discovers, and nothing else would notice. `FARHELM_AGENT_INSTRUCTIONS` in the
-  supervisor's environment — `on` (the default, also what unset or empty means) or `off` — controls the flag, read once
-  at supervisor start and carried as a seam value beside `FARHELM_AGENT_HOOKS`. Read once for a sharper reason than
-  symmetry: Codex fires `SessionStart` at the user's first prompt, arbitrarily long after the launch, so a live
-  environment read would let a session launched under one setting announce under another. The two switches are separate
-  because they fail in different directions — no hooks costs identity capture, no pointer costs an agent knowing the CLI
-  exists — and because the pointer rides on the hook, every skip that suppresses injection suppresses the pointer with
-  it.
+  adding to them. Muse 1.4.14 also feeds SessionStart stdout into developer context, verified in the offline-provider
+  run, so Muse uses that same `--announce` line without a delivery overlay. Its Stop command omits `--announce`.
+  Successful and deliberately failing hook commands produced no hook output on the observed Muse terminal. Two shape
+  constraints follow from Claude and Codex and are pinned by tests: stdout starting with `{` and ending with `}` is
+  parsed as JSON by both (and a failed parse fails the hook run outright on Codex), and the line is one line, ASCII, and
+  short, because every session pays for it whether or not anyone ever says `$farhelm`. The full instructions are printed
+  only on demand by `farhelm agent instructions`, whose verb list is generated by walking the binary's own clap
+  definition rather than transcribed — a verb that exists but goes undocumented is one no agent ever discovers, and
+  nothing else would notice. `FARHELM_AGENT_INSTRUCTIONS` in the supervisor's environment — `on` (the default, also what
+  unset or empty means) or `off` — controls the flag, read once at supervisor start and carried as a seam value beside
+  `FARHELM_AGENT_HOOKS`. Read once for a sharper reason than symmetry: Codex fires `SessionStart` at the user's first
+  prompt, arbitrarily long after the launch, so a live environment read would let a session launched under one setting
+  announce under another. The two switches are separate because they fail in different directions — no hooks costs
+  identity capture, no pointer costs an agent knowing the CLI exists — and because the pointer rides on the hook, every
+  skip that suppresses injection suppresses the pointer with it.
 - Per-session spawn credential: random token in the session's environment (`FARHELM_SESSION_ID`,
   `FARHELM_SESSION_TOKEN`, socket path), checked by the supervisor on the unix socket. These variables, like the rest of
   what a session holds, stay meaningful to newer binaries (see "What running sessions hold across versions").
@@ -4193,30 +4221,31 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   after the withdrawal is committed, and only on a clean verdict, not a read error; the background refresh and Grok's
   final check before a Restart both record it), an OMP launch whose recorded reporter is older than this build's or
   whose installed reporter file is there with different contents (a missing or unreadable file records nothing), and a
-  Claude or Codex process pin corrected after a recorded ancestor replaces a child-first conversation (verified against
-  the exact record for Codex). These are separate `ClaudePinCorrected` and `CodexPinCorrected` kinds. Each correction
-  records the consequence for Restart before adoption and remains unresolved, giving one notification per launch. The
-  first two say Restart cannot resume, so they are refused whenever the launch's row holds a captured conversation,
-  checked in the same statement as the insert, which is also what closes the race between a report's commit and the
-  tripwire. The listing carries the last 10 on `SessionInfo::notifications` as sequence number, time, text and an
-  additive `resolved` bool (false omitted and the decode default): the kind and generation stay private to the store and
-  supervisor's in-memory notification snapshot, because an enum on `SessionInfo` that a newer supervisor extended would
-  make the whole record fail to decode in an older helm, which drops a session it cannot decode. The field is additive
-  with a decode default, so an older helm shows no bell and an older supervisor sends none, and needed no protocol bump.
-  Replies are built from immutable entries, so the list lives in a session-scoped cell beside the activity time, seeded
-  from the store when an entry is built from a row and replaced after each recording or resolution, which then sends the
-  `SessionsChanged` hint. Each capture pass resolves the silent-hook and resume-withdrawn kinds only when the generic
-  restart offer is Resume, rather than merely when a captured conversation exists. This includes reports admitted before
-  startup publishes the entry. An unresolved non-resolving kind or an earlier launch's warning remains history; clearing
-  in the helm does not remove it from the store. The in-memory snapshot retains kind and generation beside the wire
-  fields, so a pass with no unresolved, resolving kind for the current launch skips the store call entirely. An eligible
-  pass uses two indexed updates in one transaction. The resolve SQL compares the exact captured conversation and
-  generation on the session row, so an earlier Resume observation cannot erase a later withdrawal. Notification reloads
-  order snapshots by newest sequence and then resolved count: with the newest sequence fixed, only resolution changes,
-  and it only grows; reopening raises the sequence. Schema 28 adds `resolved_at` on the forward ladder, preserving old
-  unresolved history; older supervisors refuse the upgraded database on downgrade, as accepted for this change. The helm
-  keeps read and cleared state as two per-session sequence marks ("read through N", "cleared through N") in a
-  `session_notification_marks` table beside `session_seen`, keyed and cleaned up the same way, set by the two endpoints
+  Claude, Codex or Muse process pin corrected after a recorded ancestor replaces a child-first conversation (verified
+  against the exact record for Codex). These are separate `ClaudePinCorrected`, `CodexPinCorrected` and
+  `MusePinCorrected` kinds. Each correction records the consequence for Restart before adoption and remains unresolved,
+  giving one notification per launch. The first two say Restart cannot resume, so they are refused whenever the launch's
+  row holds a captured conversation, checked in the same statement as the insert, which is also what closes the race
+  between a report's commit and the tripwire. The listing carries the last 10 on `SessionInfo::notifications` as
+  sequence number, time, text and an additive `resolved` bool (false omitted and the decode default): the kind and
+  generation stay private to the store and supervisor's in-memory notification snapshot, because an enum on
+  `SessionInfo` that a newer supervisor extended would make the whole record fail to decode in an older helm, which
+  drops a session it cannot decode. The field is additive with a decode default, so an older helm shows no bell and an
+  older supervisor sends none, and needed no protocol bump. Replies are built from immutable entries, so the list lives
+  in a session-scoped cell beside the activity time, seeded from the store when an entry is built from a row and
+  replaced after each recording or resolution, which then sends the `SessionsChanged` hint. Each capture pass resolves
+  the silent-hook and resume-withdrawn kinds only when the generic restart offer is Resume, rather than merely when a
+  captured conversation exists. This includes reports admitted before startup publishes the entry. An unresolved
+  non-resolving kind or an earlier launch's warning remains history; clearing in the helm does not remove it from the
+  store. The in-memory snapshot retains kind and generation beside the wire fields, so a pass with no unresolved,
+  resolving kind for the current launch skips the store call entirely. An eligible pass uses two indexed updates in one
+  transaction. The resolve SQL compares the exact captured conversation and generation on the session row, so an earlier
+  Resume observation cannot erase a later withdrawal. Notification reloads order snapshots by newest sequence and then
+  resolved count: with the newest sequence fixed, only resolution changes, and it only grows; reopening raises the
+  sequence. Schema 28 adds `resolved_at` on the forward ladder, preserving old unresolved history; older supervisors
+  refuse the upgraded database on downgrade, as accepted for this change. The helm keeps read and cleared state as two
+  per-session sequence marks ("read through N", "cleared through N") in a `session_notification_marks` table beside
+  `session_seen`, keyed and cleaned up the same way, set by the two endpoints
   `PUT /api/sessions/{id}/notifications/read` and `PUT /api/sessions/{id}/notifications/cleared`, each taking
   `{"through": N}`. A mark never moves backwards and is clamped to the newest sequence number the helm's cached row
   holds, so a mark can never cover an entry that arrives later; the fleet-events revision is bumped only when a mark
@@ -5496,16 +5525,16 @@ its own migration and adoption rules instead.) So the following are a compatibil
 wire format:
 
 - The hook command lines and their flags: `farhelm internal hook --vendor <adapter>`, with or without `--announce`, as
-  injected into Claude's `--settings` and Codex's `-c hooks.…` overrides and as the user installs it for Grok (see "The
-  per-launch identity hook" under Supervisor internals), and the outer timeouts those declarations carry, which bound
-  how long a newer hook, and anything in front of it, may take. Sessions launched before an earlier upgrade still hold
-  Claude's or Codex's old five-second limit, which a hook that only writes a file fits easily; only a vendor holding
-  stdin open could push one past it. The supervisor's recognition of those shapes counts too: hook attribution for
-  Claude, Codex, Grok and OMP matches the reporter's `<farhelm> internal hook …` argv and its `sh -c` trampoline
-  syntactically, never by path, so that an upgraded supervisor still accepts an older hook. Those command lines run
-  whatever binary is installed when they fire, so an already-running session's hooks start writing report files after an
-  update with nothing re-issued; the report file format is versioned, and a supervisor refuses a version it does not
-  read (the brief update gap described under "Report files").
+  injected into Claude's `--settings`, Codex's `-c hooks.…` overrides and Muse's `-c hooks=…`, and as the user installs
+  it for Grok (see "The per-launch identity hook" under Supervisor internals), and the outer timeouts those declarations
+  carry, which bound how long a newer hook, and anything in front of it, may take. Sessions launched before an earlier
+  upgrade still hold Claude's or Codex's old five-second limit, which a hook that only writes a file fits easily; only a
+  vendor holding stdin open could push one past it. The supervisor's recognition of those shapes counts too: hook
+  attribution for Claude, Codex, Muse, Grok and OMP matches the reporter's `<farhelm> internal hook …` argv and its
+  `sh -c` trampoline syntactically, never by path, so that an upgraded supervisor still accepts an older hook. Those
+  command lines run whatever binary is installed when they fire, so an already-running session's hooks start writing
+  report files after an update with nothing re-issued; the report file format is versioned, and a supervisor refuses a
+  version it does not read (the brief update gap described under "Report files").
 - Goose's stored reporter declaration, in full: the extension name `farhelm-reporter`, its
   `sh -c 'exec "${FARHELM_GOOSE_REPORTER_EXE:-farhelm}" internal goose-hook'` command, and the fallback to `farhelm` on
   `PATH`. Goose replays it on every resume, including a manual one long after the Farhelm session is gone: Farhelm adds
@@ -5670,10 +5699,11 @@ only exception to the ordinary create-time immutability of a session's launch.
 Protocol 50 adds a transient `NamedConversationStart { conversation, argv }` beside `with` and ordinary create inputs.
 The browser's raw `conversation` stays outside `LaunchSelection`, history and templates. The helm validates it with the
 supervisor's existing id/token checks and fills the six existing ordinary resume templates through `fill_slots`, without
-parsing captured locator provenance. Muse, Cursor and OpenCode get one-time suffixes in the helm only (`resume`,
-`--resume`, `--session` respectively); their ordinary `resume` stays absent. Exhaustive harness facts state whether a
-named start is offered, whether it takes a session file, and whether it can report afterwards; labels stay in the UI
-composer.
+parsing captured locator provenance. Muse now uses its ordinary `resume <uuid>` template too. Cursor and OpenCode get
+one-time suffixes in the helm only (`--resume` and `--session` respectively); their ordinary `resume` stays absent. A
+Muse fallback suffix remains for older stored launches that have no resume command. Exhaustive harness facts state
+whether a named start is offered, whether it takes a session file, and whether it can report afterwards; labels stay in
+the UI composer.
 
 The supervisor validates agent-only eligibility, raw selector and bounded executable argv before admission. Its shared
 start-shape check requires one whole Farhelm argument slot, no unfilled conversation slot and no placeholder program.
@@ -5709,25 +5739,28 @@ Restart with, clone and replace, inheritance, the YOLO guard and mark, and the i
 
 The helm composes an agent launch's start command with `{farhelm_args}` last, and for an agent type with conversation
 reporting a resume command that adds the type's resume selector after the start command's choices and then
-`{farhelm_args}`; Muse, Cursor and OpenCode get none. `{farhelm_args}` sits where the previous release appended
-Farhelm's arguments, so an upgraded session and a new one spawn alike. `LaunchSelection.wrapper_prefix` stores optional
-literal words before both composed commands, including Goose's leading `env` words. The field is omitted when absent;
-the protocol bump refuses older peers rather than translating the new launch shape. OMP attribution skips exactly that
-many words before classifying the agent program, without relaxing its process proof. At spawn the supervisor fills
-`{cwd}` (and the compiler's Codex trust markers `{codex:trusted-cwd}` and `{codex:untrusted-cwd}`, which predate launch
-kinds and are filled in any launch that contains one, a command launch included, so a command copied from a composed
-Codex launch keeps working; SPEC.md states this as the one exception to a command launch running as written), then
-replaces `{farhelm_args}` with the declared kind's own arguments (`AgentIntegration::farhelm_args`, asked for a start or
-a resume and never shown the command) and puts that kind's reporter settings in `LaunchSpec.env`, which the shim sets on
-the agent process alone, after scrubbing inherited reporter variables. Goose is the one kind whose integration the
-environment still switches: its reporter is persisted in the resumed session, so a resume carries no argument and only
-`FARHELM_GOOSE_REPORTER_ENABLED` turns it on or off. A legacy session goes through the previous release's injection
-(`AgentIntegration::inject_hooks`, with its shape checks and `env` prefix). Its only other reader of a command line is
-OMP's process attribution (`classify_omp_launch`), which reads the program word of every OMP launch, new ones included,
-to choose how the running process is matched to the session; it decides nothing about YOLO, agent type or resume. The
-`env`-prefix helpers in `farhelm_proto::yolo` stay for these two. The command-line YOLO classifier, resume derivation
-(`default_resume_template`, the ambiguous-selector refusals, the selector strippers) and kind derivation from the
-program's basename are gone.
+`{farhelm_args}`; Cursor and OpenCode get none. Muse adds `resume {conversation}`, retaining the already-composed
+permission flags and wrapper prefix. Older stored Muse agent launches derive the Muse kind from their saved harness and
+gain hooks through their existing `{farhelm_args}` at their next start, but retain their missing stored resume command
+and offer `NoResumeCommand` until recreated; there is no resume backfill or migration. `{farhelm_args}` sits where the
+previous release appended Farhelm's arguments, so an upgraded session and a new one spawn alike.
+`LaunchSelection.wrapper_prefix` stores optional literal words before both composed commands, including Goose's leading
+`env` words. The field is omitted when absent; the protocol bump refuses older peers rather than translating the new
+launch shape. OMP attribution skips exactly that many words before classifying the agent program, without relaxing its
+process proof. At spawn the supervisor fills `{cwd}` (and the compiler's Codex trust markers `{codex:trusted-cwd}` and
+`{codex:untrusted-cwd}`, which predate launch kinds and are filled in any launch that contains one, a command launch
+included, so a command copied from a composed Codex launch keeps working; SPEC.md states this as the one exception to a
+command launch running as written), then replaces `{farhelm_args}` with the declared kind's own arguments
+(`AgentIntegration::farhelm_args`, asked for a start or a resume and never shown the command) and puts that kind's
+reporter settings in `LaunchSpec.env`, which the shim sets on the agent process alone, after scrubbing inherited
+reporter variables. Goose is the one kind whose integration the environment still switches: its reporter is persisted in
+the resumed session, so a resume carries no argument and only `FARHELM_GOOSE_REPORTER_ENABLED` turns it on or off. A
+legacy session goes through the previous release's injection (`AgentIntegration::inject_hooks`, with its shape checks
+and `env` prefix). Its only other reader of a command line is OMP's process attribution (`classify_omp_launch`), which
+reads the program word of every OMP launch, new ones included, to choose how the running process is matched to the
+session; it decides nothing about YOLO, agent type or resume. The `env`-prefix helpers in `farhelm_proto::yolo` stay for
+these two. The command-line YOLO classifier, resume derivation (`default_resume_template`, the ambiguous-selector
+refusals, the selector strippers) and kind derivation from the program's basename are gone.
 
 Supervisor schema 26 converts each row in one transaction by `SessionLaunch::from_pre_launch_kinds`: a row with a stored
 structured selection becomes an agent launch whose stored start and resume commands gain `{farhelm_args}` at the end,

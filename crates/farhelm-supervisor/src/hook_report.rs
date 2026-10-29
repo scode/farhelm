@@ -656,6 +656,7 @@ mod tests {
             ReportVendor::Goose,
             ReportVendor::Pi,
             ReportVendor::Omp,
+            ReportVendor::Muse,
         ] {
             assert_eq!(report(vendor, Some("SessionStart")).slot(), Slot::Latest);
         }
