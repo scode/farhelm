@@ -365,28 +365,46 @@ exists, its latest entry must also be satisfied. Then close the plan per `plans/
 plan" (steps 11 and 12): deliver its report through the queue script, write a closing entry in its log, and stop the
 watchdog. Never edit `plans/` yourself.
 
-## Blocked
+## Decisions
 
-Blocked while landing on 2026-10-29 (claim bf129d).
+### 2026-10-29: answer to a blocked question
 
-### Landing stopped: a stylesheet test still expects the old menu hover highlight
+The question, as the executor put it:
 
-The landing monitor did not merge this plan; its PR (#2803) has not merged and main holds nothing of it. The plan makes
-menus show one highlighted item: moving the pointer over an item now moves keyboard focus there, instead of a separate
-hover highlight beside the focused one.
+> Blocked while landing on 2026-10-29 (claim bf129d).
+>
+> ### Landing stopped: a stylesheet test still expects the old menu hover highlight
+>
+> The landing monitor did not merge this plan; its PR (#2803) has not merged and main holds nothing of it. The plan
+> makes menus show one highlighted item: moving the pointer over an item now moves keyboard focus there, instead of a
+> separate hover highlight beside the focused one.
+>
+> The round's checks ran on this plan stacked with three others on current main. One check failed because of this plan:
+> the UI's stylesheet test "solid selection uses inverse roles at actual owners, metadata, marks and focus"
+> (`node --test` in `crates/farhelm-ui/js-tests`, run `0a122921-4d83-4168-a49d-7e348510c07a`). Its list of highlighted
+> menu-item states still includes the hover state of session-row and host-row menu items, and requires the selected
+> colors (filled background, inverse text, icon and description) on each entry; the plan removed those hover rules. The
+> focus entries in the same list still pass. The plan's own menu-focus tests and its browser spec passed, and the whole
+> browser suite (run `10af6125-cdc5-4afc-bc9a-369377c00195`) and the Rust workspace (run
+> `43959a88-f565-461e-b3dd-760d8725cf4a`) showed nothing else attributable to it.
+>
+> ### What should happen to this plan?
+>
+> - **Send it back to its executor (recommended).** Answer with: drop the hover state from that test's list of
+>   highlighted menu-item selectors and keep the focus entries; run the UI's JavaScript tests and the menu-highlight and
+>   sidebar browser specs on both engines.
+> - **Land it now and fix the test afterwards.** Main would carry a failing stylesheet test until then.
 
-The round's checks ran on this plan stacked with three others on current main. One check failed because of this plan:
-the UI's stylesheet test "solid selection uses inverse roles at actual owners, metadata, marks and focus" (`node --test`
-in `crates/farhelm-ui/js-tests`, run `0a122921-4d83-4168-a49d-7e348510c07a`). Its list of highlighted menu-item states
-still includes the hover state of session-row and host-row menu items, and requires the selected colors (filled
-background, inverse text, icon and description) on each entry; the plan removed those hover rules. The focus entries in
-the same list still pass. The plan's own menu-focus tests and its browser spec passed, and the whole browser suite (run
-`10af6125-cdc5-4afc-bc9a-369377c00195`) and the Rust workspace (run `43959a88-f565-461e-b3dd-760d8725cf4a`) showed
-nothing else attributable to it.
+The maintainer's answer:
 
-### What should happen to this plan?
+Answered by the landing monitor on the maintainer's behalf under `plans/.agents/landing.md`, "Answering blocks": a
+landing that failed mainly because tests fail goes back with an instruction to fix them.
 
-- **Send it back to its executor (recommended).** Answer with: drop the hover state from that test's list of highlighted
-  menu-item selectors and keep the focus entries; run the UI's JavaScript tests and the menu-highlight and sidebar
-  browser specs on both engines.
-- **Land it now and fix the test afterwards.** Main would carry a failing stylesheet test until then.
+Decision: send it back to its executor.
+
+- In the UI stylesheet test "solid selection uses inverse roles at actual owners, metadata, marks and focus", drop the
+  session-row and host-row menu items' hover state from the list of highlighted menu-item selectors and keep their focus
+  entries, which already require every selected color.
+- Run the UI's JavaScript tests and the menu-highlight and sidebar browser specs on both engines.
+
+No judgment call is made here, so no TODO entry is recorded.
