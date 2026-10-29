@@ -279,7 +279,7 @@ activity status. Guarded selects Muse's AI reviewer and workspace sandbox; the y
 sandboxing and trusts the workspace for the run. Muse-specific hooks, conversation capture/resume, and waiting-state
 recognition are not implemented. Muse's managed-checkout trust setting adds `--trust-workspace` when Farhelm composes an
 agent launch into a managed checkout. With it off, Farhelm adds no trust flag; YOLO or vendor configuration may still
-grant trust.
+grant trust. Muse follows the agent-version support rule under "Supported user environments".
 
 OpenCode is an agent type. Its model is optional and uses OpenCode's configured default when omitted. For an explicit
 choice, Farhelm suggests `opencode/glm-5.3-flash`, `opencode/grok-4.5`, `opencode/grok-4.6`, `opencode/glm-5.3`,
@@ -3720,6 +3720,9 @@ Goose sub-agent, a nested Goose run, or a child Pi that loads Farhelm's reporter
 
 Confirmed 2026-09-28: bash and zsh are the supported login shells, for agent launches and terminal tabs alike. Other
 login shells are unsupported: Farhelm need not make them work, detect them, or refuse them with a tailored message.
+
+An agent harness version is supported until a newer release of that harness has been out for two weeks. Things move fast
+in this space; Farhelm adds no code or complexity to support older versions.
 
 tmux is an implementation detail. The supported tmux is either the pinned build Farhelm itself installs or ships, or the
 stock tmux package of the platform's standard package source (the Linux distribution, or Homebrew on a Mac), at or above
