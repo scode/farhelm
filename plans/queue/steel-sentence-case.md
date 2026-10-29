@@ -518,117 +518,143 @@ Decision: keep the current capture contract and allow source-only review for the
 This judgment call is recorded as a near-term TODO.md entry so the maintainer can revisit it; a later change of mind is
 a follow-up, not a reason to stop this plan.
 
-## Blocked
+### 2026-10-29: answer to a blocked question
 
-Blocked on 2026-10-29 (claim 06b703).
+The question, as the executor put it:
 
-### Finish the sentence-case sweep without adding capture machinery
+> Blocked on 2026-10-29 (claim 06b703).
+>
+> ### Finish the sentence-case sweep without adding capture machinery
+>
+> The requested sweep replaces authored lowercase labels with sentence case throughout Farhelm. The independently
+> reviewed drafts cover the launcher and templates, Settings and ordinary host controls, approval cards, Help and
+> feedback, session menus and navigation, checkout trash, device sign-in, and terminal and shortcut hints. The specs and
+> guides quote the completed controls, retaining the current spelling where a control remains pending. The Steel TODO
+> entry remains because the sweep is incomplete. No draft is ready or merged.
+>
+> The earlier decision permits source review for desktop App settings and update notices, native file-type settings,
+> loaded SSH help, and host-removal confirmation. That work is included. The remaining controls below are different
+> presentations, outside that exception. Their intended wording is retained for resumption, but has not been included in
+> a finished product draft:
+>
+> - Host identity adoption and the inline Update button; queued approvals, expired approval notices and link errors.
+> - The notification list; whole-list loading, empty and failure states; partial-list count warnings.
+> - Interrupted-session cards, shell-tab closing and tab-limit warnings, session-action and lease errors, and
+>   hidden-text copy warnings.
+> - Native startup failures, the Terminal setting for tunnels, and global tunnel errors. The tunnel setting is separate
+>   from the already approved native file-type settings.
+> - File-transfer and native-open results, attachment notices, reconnect and build-version warnings, and remaining
+>   transport or save errors. A file hover does not show a completed transfer, and the sign-in form does not show the
+>   separate build-version warning.
+>
+> The permitted real capture fleet does not currently supply these distinct presentations. Browser tests with simulated
+> replies can check behavior, but cannot replace the plan's required screenshots. Creating new response substitutions,
+> native test modes or action sources would expand the capture contract. A screenshot of an ordinary menu or notice
+> cannot honestly be described as a picture of these absent states.
+>
+> **Decision requested:** extend source review to the remaining case-only wording in the presentations listed above? I
+> recommend that narrow extension. Keep the exact Sol/high code reviewer and Opus 5.5/high visual reviewer; have the
+> latter inspect the wording, markup and wrapping rules while explicitly reporting which states were not photographed.
+> This preserves the full wording sweep without building more capture machinery, but accepts less direct evidence about
+> layout in those states. It authorizes no response/status rewrite, native fixture, confirmed launch or deletion, SSH
+> change, live-installation action, or screenshot publication.
+>
+> The alternative is to retain the screenshot requirement and separately authorize the smallest additional producer for
+> each missing presentation. That gives stronger pixel evidence and adds fixture work to a capitalization change.
+> Leaving their labels lowercase would leave the requested sweep incomplete.
+>
+> ### The guides need a separate visual-review disposition
+>
+> The website draft changes only UI-label quotations in 22 existing guides. It changes no headings, links, commands,
+> components, styles or screenshot references. Its code review and normal website build check the label correspondence,
+> content and links. The spec-only draft changes no rendered screen and needs no screenshot target.
+>
+> The guide paragraphs are visible presentation. Existing reviewed app images show the quoted controls, but do not show
+> those paragraphs or prove that proportional capital letters leave their wrapping unchanged. The plan prescribes staged
+> app captures, and its source-review exception does not cover website prose. The website draft's visual gate is
+> therefore explicitly pending.
+>
+> **Decision requested:** accept the existing app-image provenance plus source review and the website build for these 22
+> case-only pages, retaining the exact visual reviewer and reporting the unphotographed prose? I recommend this bounded
+> exception; the residual risk is ordinary paragraph wrapping. If website pixels are required instead, explicitly permit
+> a short-lived private rendering of the exact built site with bounded coverage of the changed prose. That would be a
+> different capture method; no new site server, image matrix or screenshot refresh has been started.
+>
+> ### Review and validation so far
+>
+> The finished product drafts passed their prescribed Sol/high and Opus 5.5/high gates. Every required image in those
+> reviews was delivered individually and checked; reused images keep their original provenance. Equivalent values in
+> shared photographed controls were mapped from source, rather than claimed as separately photographed. The named
+> native/SSH/removal exception remains limited to its recorded surfaces.
+>
+> Only focused checks were run. The full two-hour battery was not run. Matching application builds were reused where
+> product bytes were unchanged. The most recent terminal run passed six checks and failed the same shared Settings
+> selector on both engines: sentence case made the sidebar Settings button collide with a trust-hint Settings button.
+> The helper now selects the sidebar footer, preserving its ordinary initial-pane assertions. That repair passed code
+> review, was folded into the owning Settings draft, and the two failed checks then passed on both engines. The failed
+> run remains retained, rather than being relabeled as a pass. Earlier retained failures and narrower corrections remain
+> recorded in the plan's working log.
+>
+> The reviews also found inherited issues outside capitalization: a hard-to-see host Save button, Welcome's outdated
+> description of Help's location, limited sidebar scroll affordance, minor tooltip/metadata layout observations, and the
+> sign-in error's literal command backticks. They were recorded, not silently fixed. No production behavior, peer/user
+> text, command, path or protocol value was changed to manufacture a picture.
+>
+> Latest focused evidence: checkout-trash browser checks passed 4/4 in run `bf32b3f4-d9c7-4b5b-bc0b-f031af0f07cd`;
+> device sign-in passed 2/2 in `e3c1dedd-7214-4828-bae1-ce60088d0517`. Terminal checks in
+> `d3140f41-fe99-4f0b-824f-d1dcfc7de5b7` supplied six passes and the two selector failures; only those failures were
+> rerun, passing 2/2 in `4e544799-29c8-40cf-bad3-7ed1fe36f003`. The matching web build
+> `d0d48f9e-a085-47a1-b3e6-c9c9585f646d` remains applicable after the test-only selector repair. The final focused
+> capture runs produced 8 checkout-trash images (`8eac76c0-e0f2-4dac-a950-1fcf25c30510`), 8 sign-in images
+> (`99c55ff5-f879-4170-8f23-f454b5ae935a`) and 24 terminal images (`636d772f-d4d0-4e1e-a786-1deb4b9b030c`), each with
+> all four theme/width cases passing. The unrelated approval capture case intentionally skipped in these selections. The
+> exact visual reviews inspected every resulting image plus nine references each, with no missing or failed image reads.
+>
+> Scoped formatting and byte comparisons passed for the two specs and all 22 guides. The recorded
+> `bun install --frozen-lockfile` made no dependency changes (`88049cc8-327e-48b9-acf7-8036450715b7`); `bun run build`
+> generated the site, search index and sitemap and validated every internal link
+> (`d7444320-b592-404d-b33d-fa8fc410e7de`). It reported empty-language-collection and missing-404-entry warnings from
+> unchanged site configuration. Application, desktop, installer and feedback-handler tests were skipped for this prose
+> because their inputs did not change. Earlier focused commands, retained failures, review dispositions and reuse
+> boundaries remain in `farhelm-plan-steel-sentence-case-log.md` beside the checkouts. Nothing failed was counted as a
+> successful command.
+>
+> ### Consistent draft stack
+>
+> - [Session launcher and templates, #2767](https://github.com/scode/farhelm/pull/2767/changes).
+> - [Settings, hosts and ordinary approvals, #2771](https://github.com/scode/farhelm/pull/2771/changes), including the
+>   corrected sidebar Settings test helper.
+> - [Help, feedback and Welcome, #2772](https://github.com/scode/farhelm/pull/2772/changes).
+> - [Session controls and navigation, #2773](https://github.com/scode/farhelm/pull/2773/changes).
+> - [Checkout trash, #2774](https://github.com/scode/farhelm/pull/2774/changes).
+> - [Device sign-in, #2775](https://github.com/scode/farhelm/pull/2775/changes).
+> - [Terminal and shortcut hints, #2776](https://github.com/scode/farhelm/pull/2776/changes).
+> - [Spec quotations, #2777](https://github.com/scode/farhelm/pull/2777/changes).
+> - [Guide quotations, #2778](https://github.com/scode/farhelm/pull/2778/changes), consistent and code/build checked,
+>   with its visual gate pending the website decision above.
+>
+> The first eight drafts are gated for their bounded scope; the ninth is an unfinished draft. This is a blocked partial
+> delivery, not a claim that the plan is complete or ready to land.
 
-The requested sweep replaces authored lowercase labels with sentence case throughout Farhelm. The independently reviewed
-drafts cover the launcher and templates, Settings and ordinary host controls, approval cards, Help and feedback, session
-menus and navigation, checkout trash, device sign-in, and terminal and shortcut hints. The specs and guides quote the
-completed controls, retaining the current spelling where a control remains pending. The Steel TODO entry remains because
-the sweep is incomplete. No draft is ready or merged.
+The maintainer's answer:
 
-The earlier decision permits source review for desktop App settings and update notices, native file-type settings,
-loaded SSH help, and host-removal confirmation. That work is included. The remaining controls below are different
-presentations, outside that exception. Their intended wording is retained for resumption, but has not been included in a
-finished product draft:
+Answered by the landing monitor on the maintainer's behalf under `plans/.agents/landing.md`, "Answering blocks". After
+the previous answer, the maintainer said in conversation, verbatim: "Hey, that's fine. You can cancel the to-do. That's
+totally fine. We don't need to build that extra mechanism." This answer follows that.
 
-- Host identity adoption and the inline Update button; queued approvals, expired approval notices and link errors.
-- The notification list; whole-list loading, empty and failure states; partial-list count warnings.
-- Interrupted-session cards, shell-tab closing and tab-limit warnings, session-action and lease errors, and hidden-text
-  copy warnings.
-- Native startup failures, the Terminal setting for tunnels, and global tunnel errors. The tunnel setting is separate
-  from the already approved native file-type settings.
-- File-transfer and native-open results, attachment notices, reconnect and build-version warnings, and remaining
-  transport or save errors. A file hover does not show a completed transfer, and the sign-in form does not show the
-  separate build-version warning.
+Decisions, taking both recommendations:
 
-The permitted real capture fleet does not currently supply these distinct presentations. Browser tests with simulated
-replies can check behavior, but cannot replace the plan's required screenshots. Creating new response substitutions,
-native test modes or action sources would expand the capture contract. A screenshot of an ordinary menu or notice cannot
-honestly be described as a picture of these absent states.
+- Extend source review to the remaining case-only wording in the presentations the Blocked question lists (host identity
+  adoption and the inline Update button; queued and expired approvals and link errors; the notification list and its
+  loading, empty, failure and count states; interrupted-session cards, shell-tab closing and tab-limit warnings,
+  session-action and lease errors and hidden-text copy warnings; native startup failures, the Terminal setting for
+  tunnels and global tunnel errors; file-transfer and native-open results, attachment notices, reconnect and
+  build-version warnings and the remaining transport or save errors). Keep the code reviewer and the visual reviewer;
+  the visual reviewer inspects the wording, markup and wrapping rules and the report names the states that were not
+  photographed. Build no new response substitutions, native test modes or action sources.
+- Accept the existing app-image provenance plus source review and the website build for the 22 guide pages whose only
+  change is the case of quoted UI labels. Render no website pixels; the report names the unphotographed prose.
+- Finish the sweep with these and land it; fix the Settings selector collision the last run found.
 
-**Decision requested:** extend source review to the remaining case-only wording in the presentations listed above? I
-recommend that narrow extension. Keep the exact Sol/high code reviewer and Opus 5.5/high visual reviewer; have the
-latter inspect the wording, markup and wrapping rules while explicitly reporting which states were not photographed.
-This preserves the full wording sweep without building more capture machinery, but accepts less direct evidence about
-layout in those states. It authorizes no response/status rewrite, native fixture, confirmed launch or deletion, SSH
-change, live-installation action, or screenshot publication.
-
-The alternative is to retain the screenshot requirement and separately authorize the smallest additional producer for
-each missing presentation. That gives stronger pixel evidence and adds fixture work to a capitalization change. Leaving
-their labels lowercase would leave the requested sweep incomplete.
-
-### The guides need a separate visual-review disposition
-
-The website draft changes only UI-label quotations in 22 existing guides. It changes no headings, links, commands,
-components, styles or screenshot references. Its code review and normal website build check the label correspondence,
-content and links. The spec-only draft changes no rendered screen and needs no screenshot target.
-
-The guide paragraphs are visible presentation. Existing reviewed app images show the quoted controls, but do not show
-those paragraphs or prove that proportional capital letters leave their wrapping unchanged. The plan prescribes staged
-app captures, and its source-review exception does not cover website prose. The website draft's visual gate is therefore
-explicitly pending.
-
-**Decision requested:** accept the existing app-image provenance plus source review and the website build for these 22
-case-only pages, retaining the exact visual reviewer and reporting the unphotographed prose? I recommend this bounded
-exception; the residual risk is ordinary paragraph wrapping. If website pixels are required instead, explicitly permit a
-short-lived private rendering of the exact built site with bounded coverage of the changed prose. That would be a
-different capture method; no new site server, image matrix or screenshot refresh has been started.
-
-### Review and validation so far
-
-The finished product drafts passed their prescribed Sol/high and Opus 5.5/high gates. Every required image in those
-reviews was delivered individually and checked; reused images keep their original provenance. Equivalent values in
-shared photographed controls were mapped from source, rather than claimed as separately photographed. The named
-native/SSH/removal exception remains limited to its recorded surfaces.
-
-Only focused checks were run. The full two-hour battery was not run. Matching application builds were reused where
-product bytes were unchanged. The most recent terminal run passed six checks and failed the same shared Settings
-selector on both engines: sentence case made the sidebar Settings button collide with a trust-hint Settings button. The
-helper now selects the sidebar footer, preserving its ordinary initial-pane assertions. That repair passed code review,
-was folded into the owning Settings draft, and the two failed checks then passed on both engines. The failed run remains
-retained, rather than being relabeled as a pass. Earlier retained failures and narrower corrections remain recorded in
-the plan's working log.
-
-The reviews also found inherited issues outside capitalization: a hard-to-see host Save button, Welcome's outdated
-description of Help's location, limited sidebar scroll affordance, minor tooltip/metadata layout observations, and the
-sign-in error's literal command backticks. They were recorded, not silently fixed. No production behavior, peer/user
-text, command, path or protocol value was changed to manufacture a picture.
-
-Latest focused evidence: checkout-trash browser checks passed 4/4 in run `bf32b3f4-d9c7-4b5b-bc0b-f031af0f07cd`; device
-sign-in passed 2/2 in `e3c1dedd-7214-4828-bae1-ce60088d0517`. Terminal checks in `d3140f41-fe99-4f0b-824f-d1dcfc7de5b7`
-supplied six passes and the two selector failures; only those failures were rerun, passing 2/2 in
-`4e544799-29c8-40cf-bad3-7ed1fe36f003`. The matching web build `d0d48f9e-a085-47a1-b3e6-c9c9585f646d` remains applicable
-after the test-only selector repair. The final focused capture runs produced 8 checkout-trash images
-(`8eac76c0-e0f2-4dac-a950-1fcf25c30510`), 8 sign-in images (`99c55ff5-f879-4170-8f23-f454b5ae935a`) and 24 terminal
-images (`636d772f-d4d0-4e1e-a786-1deb4b9b030c`), each with all four theme/width cases passing. The unrelated approval
-capture case intentionally skipped in these selections. The exact visual reviews inspected every resulting image plus
-nine references each, with no missing or failed image reads.
-
-Scoped formatting and byte comparisons passed for the two specs and all 22 guides. The recorded
-`bun install --frozen-lockfile` made no dependency changes (`88049cc8-327e-48b9-acf7-8036450715b7`); `bun run build`
-generated the site, search index and sitemap and validated every internal link (`d7444320-b592-404d-b33d-fa8fc410e7de`).
-It reported empty-language-collection and missing-404-entry warnings from unchanged site configuration. Application,
-desktop, installer and feedback-handler tests were skipped for this prose because their inputs did not change. Earlier
-focused commands, retained failures, review dispositions and reuse boundaries remain in
-`farhelm-plan-steel-sentence-case-log.md` beside the checkouts. Nothing failed was counted as a successful command.
-
-### Consistent draft stack
-
-- [Session launcher and templates, #2767](https://github.com/scode/farhelm/pull/2767/changes).
-- [Settings, hosts and ordinary approvals, #2771](https://github.com/scode/farhelm/pull/2771/changes), including the
-  corrected sidebar Settings test helper.
-- [Help, feedback and Welcome, #2772](https://github.com/scode/farhelm/pull/2772/changes).
-- [Session controls and navigation, #2773](https://github.com/scode/farhelm/pull/2773/changes).
-- [Checkout trash, #2774](https://github.com/scode/farhelm/pull/2774/changes).
-- [Device sign-in, #2775](https://github.com/scode/farhelm/pull/2775/changes).
-- [Terminal and shortcut hints, #2776](https://github.com/scode/farhelm/pull/2776/changes).
-- [Spec quotations, #2777](https://github.com/scode/farhelm/pull/2777/changes).
-- [Guide quotations, #2778](https://github.com/scode/farhelm/pull/2778/changes), consistent and code/build checked, with
-  its visual gate pending the website decision above.
-
-The first eight drafts are gated for their bounded scope; the ninth is an unfinished draft. This is a blocked partial
-delivery, not a claim that the plan is complete or ready to land.
+No TODO entry is recorded for these calls: the maintainer has said this approach is fine and the extra capture machinery
+is not wanted.
