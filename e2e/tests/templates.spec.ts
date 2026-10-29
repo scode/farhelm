@@ -861,6 +861,72 @@ async function storedTemplate(request: APIRequestContext, name: string) {
   return body.templates.find((template: any) => template.name === name);
 }
 
+/** Container settings need both template entry points for daily use: the
+ * editor must retain invalid text without saving it, and Save as template
+ * must copy the complete choice instead of only its visible on/off switch.
+ * No session is launched; the actual helm store distinguishes edits from saves. */
+test("container templates edit, apply, save and explicitly clear the complete choice", async ({ page, request }, testInfo) => {
+  const source = `container-source-${Date.now()}`;
+  const saved = `${source}-saved`;
+  const config = { engine: "podman", image_file: "/images/agent archive.oci", api_proxy_port: 43210, github_token_file: "/tokens/github" };
+  try {
+    await putTemplate(request, source, { kind: "agent", agent: "codex", container: config });
+    const dialog = await openTemplates(page);
+    await dialog.locator(".templates-row-name").getByText(source, { exact: true }).click();
+    await expect(dialog.getByRole("checkbox", { name: "Containerized", exact: true })).toBeChecked();
+    const port = dialog.getByLabel("API proxy port", { exact: true });
+    await expect(port).toHaveValue("43210");
+    const viewport = page.viewportSize()!;
+    for (const width of [1100, 390]) {
+      await page.setViewportSize({ width, height: viewport.height });
+      for (const label of ["Image file", "API proxy port", "GitHub token file"]) {
+        await expect.poll(() => dialog.getByLabel(label, { exact: true }).evaluate(input =>
+          input.getBoundingClientRect().right - input.closest(".templates-field-controls")!.getBoundingClientRect().right,
+        )).toBeLessThanOrEqual(1);
+      }
+      await port.scrollIntoViewIfNeeded();
+      await page.screenshot({ path: testInfo.outputPath(`container-template-${width}.png`), animations: "disabled" });
+    }
+    await page.setViewportSize(viewport);
+    await port.fill("65536");
+    await dialog.locator(".templates-save").click();
+    await expect(dialog.locator(".templates-error").last()).toContainText("between 1 and 65535");
+    expect((await storedTemplate(request, source)).fields.container).toEqual(config);
+    await expect(port).toHaveValue("65536");
+    await port.fill("43211");
+    await dialog.locator(".templates-save").click();
+    await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
+    const edited = { ...config, api_proxy_port: 43211 };
+    expect((await storedTemplate(request, source)).fields.container).toEqual(edited);
+    await dialog.getByRole("button", { name: "Close templates", exact: true }).click();
+    const form = await openNew(page);
+    await applyTemplate(form, source);
+    await expect(form.getByLabel("Image file", { exact: true })).toHaveValue(config.image_file);
+    await expect(form.getByLabel("API proxy port", { exact: true })).toHaveValue("43211");
+    await expect(form.getByLabel("GitHub token file", { exact: true })).toHaveValue(config.github_token_file);
+    await form.locator(".launch-composer-save-template").click();
+    const panel = form.locator(".save-template-panel");
+    await expect(panel.locator('[data-field="container"]')).toBeChecked();
+    await panel.locator(".save-template-name").fill(saved);
+    await panel.locator(".save-template-save").click();
+    await expect(form).toHaveCount(0);
+    expect((await storedTemplate(request, saved)).fields.container).toEqual(edited);
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("checkbox", { name: "Containerized", exact: true }).uncheck();
+    await dialog.locator(".templates-save").click();
+    await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
+    expect((await storedTemplate(request, saved)).fields.container).toBeNull();
+    await dialog.getByRole("button", { name: "Remove containerized", exact: true }).click();
+    await dialog.locator(".templates-save").click();
+    await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
+    expect((await storedTemplate(request, saved)).fields).not.toHaveProperty("container");
+  } finally {
+    await page.unrouteAll({ behavior: "wait" });
+    await deleteTemplate(request, source);
+    await deleteTemplate(request, saved);
+  }
+});
+
 for (const width of [1100, 390]) {
   /**
    * A held write disables every visible control in both responsive editors.

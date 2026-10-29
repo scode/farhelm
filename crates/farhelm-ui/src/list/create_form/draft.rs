@@ -15,6 +15,7 @@
 //! their fixed rules; private template replay never recursively publishes or
 //! retires a pair. Permission recovery stores immutable values, not edit code.
 
+use crate::container_controls::ContainerDraft;
 use dioxus::prelude::*;
 
 use crate::github_checkout::{GithubPreview, PreviewAuthority};
@@ -82,6 +83,7 @@ pub(super) struct LaunchDraft {
     permission_flags: String,
     wrapper: String,
     wrapper_explicit: bool,
+    container: ContainerDraft,
     tab: LaunchTab,
     invocation: String,
     invocation_raw_seed: Option<String>,
@@ -145,6 +147,7 @@ impl LaunchDraft {
             permission_flags: String::new(),
             wrapper: String::new(),
             wrapper_explicit: false,
+            container: ContainerDraft::default(),
             tab: LaunchTab::Agent,
             invocation: String::new(),
             invocation_raw_seed: None,
@@ -212,6 +215,24 @@ impl LaunchDraft {
     /// Remembered wrappers are visible without becoming explicit template edits.
     pub(super) fn wrapper_explicit(&self) -> bool {
         self.wrapper_explicit
+    }
+
+    /// Container text belongs to this opening, never to remembered defaults.
+    pub(super) fn container(&self) -> ContainerDraft {
+        self.container.clone()
+    }
+
+    /// A selected container must never silently fall back to a host launch.
+    /// The form supplies managed placement evidence from the current destination
+    /// or an unchanged copied checkout on the same confirmed host installation.
+    pub(super) fn container_refusal(&self, managed_destination: bool) -> Option<String> {
+        if self.tab != LaunchTab::Agent || !self.container.enabled {
+            return None;
+        }
+        if !managed_destination {
+            return Some("Containerized sessions require a managed checkout".into());
+        }
+        self.container.config().err()
     }
 
     /// The active launch kind; each group's dormant values remain intact.
@@ -683,6 +704,7 @@ impl LaunchDraft {
     /// Reuse structured normalization after the post-mint missing-agent and
     /// wrapper guards, before that caller refuses a changed active mode.
     pub(super) fn structured_selection(&self) -> Option<LaunchSelection> {
+        self.container.config().ok()?;
         let mut selection = self.editing_selection(self.harness?);
         if !self.is_restart() {
             selection.permissions = crate::launch_composer::normalized_permissions(
@@ -743,6 +765,8 @@ impl LaunchDraft {
             Some("session name")
         } else if f.prompt.is_some() {
             Some("initial prompt")
+        } else if f.container.is_some() {
+            Some("container settings")
         } else if self.tab == LaunchTab::Command && f.resume_command == Some(None) {
             Some("resume choice")
         } else {
@@ -772,7 +796,7 @@ impl LaunchDraft {
                 &self.permission_flags,
             ),
             wrapper_prefix: super::wrapper_words(&self.wrapper).ok().flatten(),
-            container: None,
+            container: self.container.config().ok().flatten(),
             workspace_trust: None,
         }
     }
@@ -784,6 +808,17 @@ impl LaunchDraft {
         super::wrapper_words(&self.wrapper).ok()?;
         self.retry_permissions()?;
         self.structured_selection()
+    }
+
+    /// Incomplete inputs stay editable but never compare equal to host execution.
+    /// Dormant edits on Command do not retire an unrelated command retry.
+    pub(super) fn edit_container(&mut self, value: ContainerDraft) -> bool {
+        let before = self.container.config();
+        let after = value.config();
+        let changed = self.tab == LaunchTab::Agent
+            && !matches!((before, after), (Ok(before), Ok(after)) if before == after);
+        self.container = value;
+        changed
     }
 
     /// Effective permission and Custom words share one request identity. Raw
@@ -1028,6 +1063,7 @@ impl LaunchDraft {
         self.permissions_explicit = false;
         self.wrapper.clear();
         self.wrapper_explicit = false;
+        self.container = ContainerDraft::default();
     }
 
     /// A stored launch replaces only the structured group and is explicit.
@@ -1048,6 +1084,7 @@ impl LaunchDraft {
         );
         self.permission_flags = joined(selection.permission_flags.as_ref());
         self.wrapper = joined(selection.wrapper_prefix.as_ref());
+        self.container = ContainerDraft::from_config(selection.container.as_ref());
         self.permissions_explicit = true;
         self.wrapper_explicit = true;
         before.is_none() || before != self.retry_selection()
@@ -1138,6 +1175,7 @@ pub(super) struct DraftFields {
     pub(super) structured_permission_flags: Memo<String>,
     pub(super) structured_wrapper: Memo<String>,
     pub(super) wrapper_is_explicit: Memo<bool>,
+    pub(super) container: Memo<ContainerDraft>,
 }
 
 /// Existing picker handles observed only after a scalar edit earns admission.
@@ -1455,6 +1493,18 @@ impl LaunchDraftState {
     /// Admission preserves raw explicitness even when quoting changes no words.
     pub(super) fn edit_wrapper(self, text: String) -> bool {
         self.apply_ordinary(|draft| draft.edit_wrapper(text))
+    }
+
+    /// The ordinary live gate protects retries from late container input events.
+    pub(super) fn edit_container(self, edit: crate::container_controls::ContainerEdit) -> bool {
+        self.apply_ordinary(|draft| {
+            if draft.is_restart() {
+                return false;
+            }
+            let mut value = draft.container();
+            value.apply(edit);
+            draft.edit_container(value)
+        })
     }
 
     /// Custom flags share every ordinary editor's live queued-event protection.
@@ -2364,6 +2414,9 @@ impl LaunchDraftState {
         if let Some(prefix) = fields.wrapper_prefix {
             draft.edit_wrapper(prefix.as_ref().map(shell_words::join).unwrap_or_default());
         }
+        if let Some(container) = fields.container {
+            draft.edit_container(ContainerDraft::from_config(container.as_ref()));
+        }
         // Template-owned command text deliberately discards peer raw seeds.
         if let Some(command) = fields.command {
             draft.apply_template_invocation(command);
@@ -2883,6 +2936,7 @@ pub(super) fn use_launch_draft(
         structured_permission_flags: use_memo(move || value.read().permission_flags()),
         structured_wrapper: use_memo(move || value.read().wrapper()),
         wrapper_is_explicit: use_memo(move || value.read().wrapper_explicit()),
+        container: use_memo(move || value.read().container()),
     };
     LaunchDraftState {
         value,
@@ -2913,6 +2967,53 @@ fn observe_search_agent_fields(fields: DraftFields) {
 mod tests {
     use super::super::LauncherMode;
     use super::*;
+
+    /// Copying a launch retains its isolation intent. An incomplete correction
+    /// cannot project as an ordinary host launch, and a folder destination must
+    /// explain its incompatibility instead of discarding the container choice.
+    #[test]
+    fn container_copies_and_invalid_edits_preserve_isolation_intent() {
+        let mut draft = LaunchDraft::new(None);
+        draft.choose_harness(
+            LaunchHarness::Codex,
+            None,
+            String::new(),
+            ChoiceOrigin::Control,
+        );
+        assert_eq!(structured(&draft).container, None);
+        let mut container = ContainerDraft {
+            enabled: true,
+            image_file: "/images/agent.oci".into(),
+            api_proxy_port: "43210".into(),
+            github_token_file: "/tokens/github".into(),
+        };
+        draft.edit_container(container.clone());
+        assert!(
+            draft
+                .container_refusal(false)
+                .unwrap()
+                .contains("managed checkout")
+        );
+        draft.choose_destination_type(true);
+        assert_eq!(draft.container_refusal(true), None);
+        let selection = structured(&draft);
+        assert_eq!(selection.container, container.config().unwrap());
+        let mut copied = LaunchDraft::new(None);
+        copied.restore_launch(&selection, Some(LaunchHarness::Codex));
+        assert_eq!(copied.container(), container);
+        container.api_proxy_port = "bad port".into();
+        assert!(copied.edit_container(container.clone()));
+        assert!(copied.structured_selection().is_none());
+        assert_eq!(copied.container(), container);
+        copied.choose_tab(LaunchTab::Command);
+        assert_eq!(
+            copied.container_refusal(false),
+            None,
+            "dormant agent choices do not block Command"
+        );
+        copied.choose_tab(LaunchTab::Agent);
+        assert!(copied.container_refusal(false).is_some());
+    }
 
     /// Exercise the stored-command comparison without mounting catalog readers.
     /// The production source seeder supplies this same normalized baseline.
@@ -3044,6 +3145,42 @@ mod tests {
             draft.restart_baseline,
             "validation did not apply the later effort"
         );
+    }
+
+    /// A template cannot turn an ordinary Restart with into initial container
+    /// creation. An explicit off reset is an equal held value and stays a no-op.
+    #[test]
+    fn restart_templates_cannot_introduce_containerization() {
+        use farhelm_proto::launcher::{LaunchTemplate, TemplateFields};
+        let draft = restart_draft(None);
+        let template = |container| LaunchTemplate {
+            name: "isolation".into(),
+            fields: TemplateFields {
+                container: Some(container),
+                ..Default::default()
+            },
+        };
+        let config = farhelm_proto::ContainerConfig {
+            engine: farhelm_proto::ContainerEngine::Podman,
+            image_file: "/images/agent.oci".into(),
+            api_proxy_port: 43210,
+            github_token_file: None,
+        };
+        let refused = super::super::validated_template_batch(
+            &[template(Some(config))],
+            &[],
+            &[],
+            true,
+            &draft,
+            None,
+        )
+        .unwrap_err();
+        assert!(refused.contains("container settings"), "{refused}");
+        let (_, _, cleaned) =
+            super::super::validated_template_batch(&[template(None)], &[], &[], true, &draft, None)
+                .unwrap();
+        assert_eq!(cleaned[0].fields.container, None);
+        assert_eq!(draft.restart_edit(), draft.restart_baseline);
     }
 
     /// Each held value may be repeated without losing an accompanying edit;

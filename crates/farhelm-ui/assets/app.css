@@ -6325,6 +6325,24 @@ a:any-link,
   font-size: 12px;
 }
 
+/* This label owns one checkbox row. The ordinary launch grid deliberately
+   flattens text-field labels, which would split this switch from its name. */
+.launch-composer-container-toggle,
+.create-session-form .launch-composer-container-choice > .launch-composer-container-toggle {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+.create-session-form .launch-composer-container-choice > .launch-composer-container-toggle {
+  grid-column: 2;
+}
+/* Text labels reuse templates-field's themed, border-box input treatment in
+   both editors; the checkbox never inherits its full-width text styling. */
+.launch-composer-container-field input {
+  font-family: var(--font-mono);
+}
+
 /* The one-time selector grows with the launcher, including the fixed-width
    Restart with dialog, while its help stays below the labelled input. */
 .named-conversation-choice,
@@ -7219,6 +7237,7 @@ a:any-link,
   .create-session-form .launch-composer-choice > :not(.launch-composer-section-label):not(label),
   .create-session-form .launch-composer-choice > label > :not(.launch-composer-section-label),
   .create-session-form .launch-composer-name-taken { grid-column: 1; }
+  .create-session-form .launch-composer-container-choice > .launch-composer-container-toggle { grid-column: 1; }
   .create-session-form .launch-composer-choice .launch-composer-section-label,
   .launch-composer-row-label { padding-top: 0; }
   .launch-command-yolo > legend { float: none; width: auto; margin-right: 0; }

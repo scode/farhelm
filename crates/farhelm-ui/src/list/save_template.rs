@@ -69,6 +69,7 @@ impl Candidate {
                     .then_some(state.permissions);
                 fields.permission_flags = state.permission_flags.clone();
                 fields.wrapper_prefix = Some(state.wrapper_prefix.clone());
+                fields.container = Some(state.container.clone());
                 // Clone and recents mark their launch choices explicit even
                 // when this agent has no corresponding control. A forced mode
                 // or unsupported reset is not a choice the launcher can save.
@@ -93,6 +94,7 @@ impl Candidate {
                     && match field {
                         Field::Permissions => explicit.permissions,
                         Field::Wrapper => explicit.wrapper,
+                        Field::Container => state.container.is_some(),
                         Field::Host => explicit.host,
                         Field::Destination => {
                             explicit.folder
@@ -160,6 +162,13 @@ fn choice_text(field: Field, fields: &TemplateFields, host_label: &str) -> Strin
                 .unwrap_or_else(|| "None".into()),
         ),
         Field::Command => fields.command.clone(),
+        Field::Container => Some(match &fields.container {
+            Some(Some(config)) => format!(
+                "Podman · {} · port {}",
+                config.image_file, config.api_proxy_port
+            ),
+            _ => "Off".into(),
+        }),
         Field::Yolo => fields
             .yolo
             .map(|v| if v { "YOLO" } else { "Keeps safety checks" }.into()),
@@ -381,6 +390,44 @@ mod tests {
     }
     use farhelm_proto::launcher::{TemplateContext, apply_template};
     use farhelm_proto::{LaunchEffort, LaunchHarness, LaunchPermission};
+
+    /// The complete container choice is a single reusable edit, including the
+    /// token's path. Command saves cannot accidentally include a dormant agent
+    /// configuration, and an unchecked choice leaves stacked templates alone.
+    #[test]
+    fn container_save_keeps_the_whole_choice_only_on_the_agent_tab() {
+        let config = farhelm_proto::ContainerConfig {
+            engine: farhelm_proto::ContainerEngine::Podman,
+            image_file: "/images/agent.oci".into(),
+            api_proxy_port: 43210,
+            github_token_file: Some("/tokens/github".into()),
+        };
+        let mut state = LauncherState {
+            kind: Some(LauncherKind::Agent),
+            container: Some(config.clone()),
+            ..Default::default()
+        };
+        let candidate = Candidate::from_state(&state, ExplicitChoices::default());
+        assert!(candidate.checked.contains(&Field::Container));
+        assert_eq!(
+            candidate.selected(&candidate.checked).container,
+            Some(Some(config))
+        );
+        assert_eq!(candidate.selected(&[]).container, None);
+        state.kind = Some(LauncherKind::Command);
+        assert_eq!(
+            Candidate::from_state(&state, ExplicitChoices::default())
+                .fields
+                .container,
+            None
+        );
+        state.kind = Some(LauncherKind::Agent);
+        state.container = None;
+        let off = Candidate::from_state(&state, ExplicitChoices::default());
+        assert_eq!(off.fields.container, Some(None));
+        assert!(!off.checked.contains(&Field::Container));
+        assert_eq!(off.selected(&[Field::Container]).container, Some(None));
+    }
 
     /// Remembered prefixes appear in the save panel without silently becoming
     /// template edits. A deliberate empty choice remains a checked null reset.

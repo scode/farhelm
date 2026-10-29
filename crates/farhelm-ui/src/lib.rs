@@ -48,6 +48,8 @@
 //! - `launch_controls`: the values-in, changes-out structured choice controls
 //!   used by every session-launcher mode and the template editor. Their
 //!   caller owns held-field admission, history, and operation identity.
+//! - `container_controls`: raw, opening-local container inputs shared by the
+//!   launcher and templates; credential contents stay on the session's host.
 //! - `hosts`: the hosts panel (PLAN_M6.md item 6) — the per-host state
 //!   chips SPEC.md requires to be always visible, the add/edit/remove/
 //!   adopt/retry management surface, and the renderer-free wording helpers
@@ -141,6 +143,7 @@ mod checkout_post_clone;
 mod checkout_root;
 mod checkout_spare;
 mod claude_trust;
+mod container_controls;
 #[cfg(native_desktop)]
 pub mod desktop;
 
