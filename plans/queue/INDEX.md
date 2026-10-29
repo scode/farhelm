@@ -6,5 +6,5 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `menu-single-highlight.md` — Menus highlight one item at a time: hovering an item moves keyboard focus to it, so a click-opened menu no longer keeps its first item lit beside the hovered one (after `steel-sentence-case.md`)
 - [in-flight 452a43] `terminal-zoom-icons.md` — Terminal text size: magnifier zoom-out and zoom-in buttons with the current size in points between them, replacing "A−" and "A+"
 - [in-flight 745f28] `host-update-discoverability.md` — Host updates you can't miss: an ↑ on the Hosts button, a card offering "Update all now" for optional updates, a banner for required ones, and a Settings switch for the helm to update remote hosts automatically
-- [in-flight 5e82af] `new-terminal-button.md` — The new-terminal control becomes a square icon-only "+" after a divider, so it no longer reads as another tab
+- [complete] `new-terminal-button.md` — The new-terminal control becomes a square icon-only "+" after a divider, so it no longer reads as another tab
 - [pending] `host-short-names.md` — Hosts get a short name (alias, else the first hostname label), shown under each rail icon, beside it when the rail expands on hover, and on session rows
