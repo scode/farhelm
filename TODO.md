@@ -249,6 +249,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Make host aliases/names visible in the new layout.** Consider how the new host list can show each host's alias or
   name at a glance; today they are easy to miss.
 
+- **Keep the version readout clickable in the steel UI.** In the new steel interface the version no longer seems
+  clickable to check for updates (the app bar's `check_readout` renders it as a button in the old layout). Confirm
+  whether this is just a dev-build artifact, and restore the affordance if the steel layout dropped it.
+
 ## Doc todo
 
 - Tell users that a working-copy (checkout) root must be a location only they can write: Farhelm is not designed for
