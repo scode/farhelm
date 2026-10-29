@@ -1969,9 +1969,11 @@ whatever the agent renders is what you see. There is no composer, no message abs
   submit (verified against both, 2026-08-19). Other programs receive the same bytes and interpret them per their own
   line editing — stock emacs-mode zsh inserts a newline, bash's default quietly ignores the pair — the same outcomes
   those shells give under a reference terminal that encodes the chord identically (Ghostty).
-- Terminal text size is adjustable: Cmd+Shift with + or − on macOS, Ctrl+Shift elsewhere, or the A− / A+ buttons at the
-  start of the action group on the right of the session's top row, step every open terminal's text size together, hidden
-  tabs included, within a fixed range, and each terminal is resized so the program inside sees its new rows and columns.
+- Terminal text size is adjustable: Cmd+Shift with + or − on macOS, Ctrl+Shift elsewhere, or the magnifier − / + buttons
+  at the start of the action group on the right of the session's top row, step every open terminal's text size together,
+  hidden tabs included, within a fixed range, and each terminal is resized so the program inside sees its new rows and
+  columns. The buttons share one border with a fixed-width, display-only readout of the current size in points between
+  them. The readout follows button and shortcut changes, reloads and rebuilt session controls without adding a tab stop.
   While a terminal is open the shortcut works wherever focus is and never reaches the terminal's program or the browser;
   Cmd/Ctrl with = or − and no Shift stay the browser's own page zoom. On Linux this takes over Ctrl+Shift+− (Ctrl+_,
   undo in readline and emacs) inside the terminal, accepted 2026-10-02. The keys are the ones at the US-layout positions
@@ -2010,17 +2012,17 @@ whatever the agent renders is what you see. There is no composer, no message abs
   the selected session leaves no row to mark — the bottom bar's session name remains the identifier in that state, and
   the main pane deliberately stays put (filtering the list is not deselecting).
 - The typical session view has one top row, with terminal tabs and the desktop tunnel pill on the left and text size
-  (A−, A+), Restart ▾, Replace ▾, Clone and Delete on the right, followed by the terminal and a slim details bar below
-  it. Restart and Replace are split buttons: the main part performs the ordinary action, including its existing
-  confirmation; the caret opens a menu offering that action and Restart with… or Replace with…. The icon-and-label
-  controls keep their compact height. Text size, both parts of each split button, Clone, Delete and the tunnel pill
-  remain fully visible and keyboard reachable from a 650px main pane; only the tab strip takes the remaining width and
-  scrolls horizontally when needed. Narrower panes may clip the row, which never wraps. The bottom bar is about one
-  tab-strip row high and shows, in order, status, session name, host, age, the managed-checkout branch mark when
-  present, directory, and command line. The host's icon and name follow the session list's rules, with the host
-  prominent beside the session name; a missing host name omits the host rather than inventing one. Directory display
-  still abbreviates the home directory to `~`. Keyboard order follows the top row, terminal, then bottom bar. The
-  terminal loses no height in the steady state. Conditional notices stay between the top row and terminal; a stale
+  (zoom out, size in points, zoom in), Restart ▾, Replace ▾, Clone and Delete on the right, followed by the terminal and
+  a slim details bar below it. Restart and Replace are split buttons: the main part performs the ordinary action,
+  including its existing confirmation; the caret opens a menu offering that action and Restart with… or Replace with….
+  The icon-and-label controls keep their compact height. Text size, both parts of each split button, Clone, Delete and
+  the tunnel pill remain fully visible and keyboard reachable from a 650px main pane; only the tab strip takes the
+  remaining width and scrolls horizontally when needed. Narrower panes may clip the row, which never wraps. The bottom
+  bar is about one tab-strip row high and shows, in order, status, session name, host, age, the managed-checkout branch
+  mark when present, directory, and command line. The host's icon and name follow the session list's rules, with the
+  host prominent beside the session name; a missing host name omits the host rather than inventing one. Directory
+  display still abbreviates the home directory to `~`. Keyboard order follows the top row, terminal, then bottom bar.
+  The terminal loses no height in the steady state. Conditional notices stay between the top row and terminal; a stale
   session's status appears only in its stale notice, not again in the bottom bar. Restart and its menu's matching
   entries are greyed out when the session cannot resume its conversation (see Lifecycle operations); their tooltips and
   accessible descriptions explain the specific reason, such as an agent type without conversation reporting, a command

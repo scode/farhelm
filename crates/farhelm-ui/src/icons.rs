@@ -74,6 +74,8 @@ pub(crate) enum ActionGlyph {
     Add,
     Templates,
     ChevronDown,
+    ZoomOut,
+    ZoomIn,
     Restart,
     Replace,
     Clone,
@@ -147,6 +149,20 @@ pub(crate) fn ActionIcon(
             },
         ),
         ActionGlyph::ChevronDown => ("chevron-down", rsx! { path { d: "M3 5l4 4 4-4" } }),
+        ActionGlyph::ZoomOut | ActionGlyph::ZoomIn => (
+            if glyph == ActionGlyph::ZoomOut {
+                "zoom-out"
+            } else {
+                "zoom-in"
+            },
+            rsx! {
+                circle { cx: "5.5", cy: "5.5", r: "3.5" }
+                path { d: "M8 8l4 4M3.5 5.5h4" }
+                if glyph == ActionGlyph::ZoomIn {
+                    path { d: "M5.5 3.5v4" }
+                }
+            },
+        ),
         ActionGlyph::Restart => (
             "restart",
             rsx! {

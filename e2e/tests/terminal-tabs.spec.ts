@@ -1458,8 +1458,8 @@ async function terminalSizes(
 }
 
 // Terminal text size (SPEC.md, Terminal experience): Ctrl+Shift +/- (this
-// suite's engines run on Linux, so Ctrl rather than Cmd) and the strip's
-// A-/A+ buttons step EVERY mounted terminal together, hidden tabs included,
+// suite's engines run on Linux, so Ctrl rather than Cmd) and the top row's
+// zoom buttons step EVERY mounted terminal together, hidden tabs included,
 // refit each one so its program sees the new rows and columns, and the size
 // survives a reload because it is remembered in the page's own storage.
 //
@@ -1493,6 +1493,12 @@ test("terminal text size steps every terminal, reaches the pty, and is remembere
     const before = await terminalSizes(page);
     expect(before.terminal?.font, "test premise: a fresh browser starts at the default").toBe(14);
     expect(before[tabEl]?.font, "test premise: the tab is mounted").toBe(14);
+    const readout = page.locator('[data-terminal-font-size]');
+    await expect(readout).toHaveText("14");
+    await expect(page.locator('[data-text-size="smaller"] [data-glyph="zoom-out"]')).toHaveCount(1);
+    await expect(page.locator('[data-text-size="larger"] [data-glyph="zoom-in"]')).toHaveCount(1);
+    expect(await readout.evaluate((element) => element.tagName)).toBe("SPAN");
+    expect(await readout.evaluate((element) => (element as HTMLElement).tabIndex)).toBe(-1);
 
     // The shortcut, with focus inside the agent terminal: it must step the
     // size there too, which is the case where xterm would otherwise get the
@@ -1508,11 +1514,14 @@ test("terminal text size steps every terminal, reaches the pty, and is remembere
         return [now.terminal.font, now[tabEl].font];
       })
       .toEqual([15, 15]);
+    await expect(readout).toHaveText("15");
 
     // The buttons: two steps up, to 17. A click hands focus back to the
     // terminal, or typing after it would go nowhere.
     await page.locator('[data-text-size="larger"]').click();
+    await expect(readout).toHaveText("16");
     await page.locator('[data-text-size="larger"]').click();
+    await expect(readout).toHaveText("17");
     await expect
       .poll(async () => {
         const now = await terminalSizes(page);
@@ -1534,6 +1543,7 @@ test("terminal text size steps every terminal, reaches the pty, and is remembere
         return [now.terminal.font, now[tabEl].font];
       })
       .toEqual([16, 16]);
+    await expect(readout).toHaveText("16");
 
     // Bigger text, same pane: both grids shrank, the hidden one included.
     const after = await terminalSizes(page);
@@ -1564,8 +1574,54 @@ test("terminal text size steps every terminal, reaches the pty, and is remembere
     await expect
       .poll(async () => (await terminalSizes(page)).terminal?.font, { timeout: 20_000 })
       .toBe(16);
+    await expect(readout).toHaveText("16");
   } finally {
     if (id) await cleanupSession(request, id);
+  }
+});
+
+/** Rebuilt controls must paint the JS-owned size rather than wait for a step.
+ * Switching sessions remounts the readout while retaining the page's size;
+ * crossing 9/10 also proves the display-only slot cannot move either button.
+ */
+test("terminal text size readout survives switching sessions with fixed button positions", async ({ page, request }) => {
+  const ids: string[] = [];
+  try {
+    const first = await createTabSession(request, `zoom-first-${Date.now()}`);
+    ids.push(first.id);
+    const second = await createTabSession(request, `zoom-second-${Date.now()}`);
+    ids.push(second.id);
+    await page.goto("/");
+    await attachSession(page, first.id);
+    const readout = page.locator('[data-terminal-font-size]');
+    await expect(readout).toHaveText("14");
+    for (let size = 13; size >= 9; size--) {
+      await page.locator('[data-text-size="smaller"]').click();
+      await expect(readout).toHaveText(String(size));
+    }
+    const smaller = page.locator('[data-text-size="smaller"]');
+    const larger = page.locator('[data-text-size="larger"]');
+    const before = [await smaller.boundingBox(), await larger.boundingBox()];
+    expect(before.every(Boolean), "premise: both buttons are visible at 9 points").toBe(true);
+    await larger.click();
+    await expect(readout).toHaveText("10");
+    expect([await smaller.boundingBox(), await larger.boundingBox()]).toEqual(before);
+    const original = await readout.elementHandle();
+    expect(original, "premise: the first session owns a mounted readout").not.toBeNull();
+    await attachSession(page, second.id);
+    await expect.poll(() => original!.evaluate((element) => element.isConnected), {
+      message: "session switching must actually rebuild the control",
+    }).toBe(false);
+    await expect(readout).toHaveText("10");
+    await expect.poll(async () => (await terminalSizes(page)).terminal?.font).toBe(10);
+    await attachSession(page, first.id);
+    await expect(readout).toHaveText("10");
+    await expect.poll(async () => (await terminalSizes(page)).terminal?.font).toBe(10);
+    await test.info().attach("terminal-zoom-controls", {
+      body: await page.locator(".session-topbar").screenshot(), contentType: "image/png",
+    });
+  } finally {
+    for (const id of ids) await cleanupSession(request, id);
   }
 });
 

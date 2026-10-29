@@ -7626,14 +7626,37 @@ a:any-link,
 .terminal-text-size {
   display: flex;
   flex-shrink: 0;
-  gap: 2px;
   margin-left: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-2);
 }
 
-.tab-text-size {
+.terminal-text-size .tab-text-size {
   font-size: 12px;
-  padding: 3px 8px;
+  padding: 2px 8px;
+  border: 0;
+  border-radius: 0;
   white-space: nowrap;
+}
+.terminal-text-size .tab-text-size:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+.terminal-text-size .tab-text-size:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+
+/* A fixed point-size slot keeps both buttons still at the 9/10 boundary.
+   Its width also leaves room for the native tunnel pill at the 650px floor,
+   where the buttons already use tighter padding. It is display-only;
+   JS owns its text, and keyboard focus skips it. */
+.terminal-text-size-readout {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 22px;
+  flex: 0 0 22px;
+  border-inline: 1px solid var(--border);
+  color: var(--fg-1);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 
 /* One tab is TWO sibling buttons in a wrapper (HTML forbids nesting a

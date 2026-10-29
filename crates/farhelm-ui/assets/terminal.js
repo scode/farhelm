@@ -364,7 +364,7 @@
   // ## Terminal text size
   //
   // The user steps every terminal's text size with Cmd+Shift +/- (Ctrl+Shift
-  // off macOS) or the A-/A+ buttons at the right end of the tab strip, and
+  // off macOS) or the zoom buttons in the session's top row, and
   // the size is remembered PER DEVICE in this origin's localStorage, not as
   // a helm preference: it is about the screen in front of the user, which
   // another client of the same helm does not share (SPEC.md, Terminal
@@ -2675,6 +2675,16 @@
   );
 
   window.farhelmTerm = {
+    /** Paint JS-owned size into every mounted readout without a Rust state copy.
+     * Script load and each span's mount both call this: whichever arrives last
+     * paints, including a session switch or a terminal surface returning.
+     */
+    paintFontSize() {
+      for (const readout of document.querySelectorAll('[data-terminal-font-size]')) {
+        readout.textContent = String(terminalFontSize);
+      }
+    },
+
     /** Restore startup focus after a first-open welcome dismissal.
      * A reveal behind the card deliberately withheld focus and will not replay
      * that handoff by itself. Only the selected, visible island can take it;
@@ -2700,7 +2710,7 @@
      * range the size stays unchanged, but a clicked button still hands
      * keyboard focus back to the terminal.
      *
-     * Called by the shortcut above and by the tab strip's A-/A+ buttons.
+     * Called by the shortcut above and by the top row's zoom buttons.
      */
     stepFontSize(delta) {
       const next = clampFontSize(terminalFontSize + delta);
@@ -2717,7 +2727,8 @@
           island.fit.fit();
         }
       }
-      // A click on the A-/A+ buttons leaves focus on the button, and
+      window.farhelmTerm.paintFontSize();
+      // A click on the zoom buttons leaves focus on the button, and
       // nothing else moves it back (the session view only refocuses a
       // terminal when the selection changes), so typing would go nowhere
       // and Enter would step the size again. Hand focus back to the
@@ -5736,4 +5747,5 @@
       lastSync = null;
     },
   };
+  window.farhelmTerm.paintFontSize();
 })();

@@ -232,11 +232,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   which only managed checkouts get today. Git breaks inside the container for a folder that is a git worktree or a
   subfolder of a repository, since only the folder itself is mounted.
 
-- **Replace the A−/A+ terminal text-size buttons with zoom icons.** The two buttons at the right end of a session's tab
-  strip label the text-size step as "A−" and "A+", which does not read as an action. Use recognizable zoom-out and
-  zoom-in icons (a magnifier with − / +) instead, keeping the tooltips and keyboard-shortcut help. Plan:
-  `plans/queue/terminal-zoom-icons.md`.
-
 - **Add an "update all hosts" button and an auto-update setting.** In the current interface, updating hosts is hidden
   behind clicks and hard to discover. Put a clearly visible update control (an "update all hosts" button or similar)
   where users look for it, and add a setting to always auto-update. Plan: `plans/queue/host-update-discoverability.md`.
@@ -328,6 +323,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   classification reruns passed: `e3ebe846-ebc4-44da-9a7c-cf6981037ca2`, `eaf03d42-4533-48b6-9fc6-21ffa08944f1`, and
   `7a80d996-edd8-46aa-8d82-f1ca43c6d5c8`. Cause unknown; preserve the keyboard visibility assertion (FLAKES.md,
   2026-10-29).
+
+- **Native tunnel preview exceeds WebKit's case budget.**
+  `native tunnel preview keeps ports and actions inside a 650px pane` in `e2e/tests/header.spec.ts` timed out during
+  cleanup at its unchanged 60-second deadline in recorder `1fc8687c-1044-4c63-83f9-dfddf8da2604`, then passed unchanged
+  in 58 seconds in `9ebdc54c-8229-4787-a96b-19c2836e083e`. The new-terminal-button report records the same case timing
+  out twice and passing unchanged in 58.7 seconds. Cause unknown; the narrow timing margin is a hypothesis, not a
+  diagnosed fix.
 
 - **Restart-with dialog loses focus in WebKit.**
   `restart with keeps gap focus and container Enter uses its enabled action` in `e2e/tests/restart-with.spec.ts` failed
