@@ -287,7 +287,7 @@ render dropped from all three at the source — there is nothing for the list to
 to detect: the flag is the whole of what the UI reads off a reply about completeness, and the rows are never compared
 against the counts (that comparison was the paged design's "underfilled listing" detector, and it went with the pages).
 "Short" is one predicate with two readers rather than a rule each place restates: it is exactly the condition the count
-banner prints "showing N of M" for, the same answer decides whether an absence may be read as a departure (otherwise the
+banner prints "Showing N of M" for, the same answer decides whether an absence may be read as a departure (otherwise the
 missing row's optimistic rename is retired, its editor is left usable, and — if it is the selected one — its pane is
 left alone). Automatic selection uses only listed candidates even on a short reply; it never resolves missing visits
 directly. A complete authoritative absence changes a ListView-owned rename editor to an unavailable-target state instead
@@ -471,14 +471,14 @@ overlay card's edge, and the deleting row takes no tint or edge of its own, whic
 it usually already is. Action buttons use three deliberate tiers on the shared ghost `.btn` base: `.btn-primary` is the
 normal periwinkle affirmative, `.btn-neutral` is the quiet secondary treatment, and `.btn-danger` is reserved for
 destructive confirmations. A permanent answer uses the outlined form of its one-off tier: the YOLO confirmation's
-"Start, and don't ask again on this host" and host removal's "remove, don't ask again" keep the danger color, while host
-setup's "set up, don't ask again" keeps the primary color. Each leaves its one-off action as the filled choice. The
+"Start, and don't ask again on this host" and host removal's "Remove, don't ask again" keep the danger color, while host
+setup's "Set up, don't ask again" keeps the primary color. Each leaves its one-off action as the filled choice. The
 maintainer chose (2026-09-30) not to make a permanent answer the filled one that draws the reflex click. The host row's
 inline update action is another deliberate outlined treatment: amber (`--warn`) for an optional update and red
 (`--danger-strong`) for a required one. Its outline signals urgency without presenting an update as a destructive
 confirmation. Being outlined, it preserves the sidebar's one-filled-control rule. Pressed disclosures use
 `--accent-fill-hover` so an open trigger is distinct from a resting primary. The normal-primary entry is scoped per
-SURFACE, not per screen: the sidebar's resting chrome carries exactly one filled control (`new session`), and each
+SURFACE, not per screen: the sidebar's resting chrome carries exactly one filled control (`New session`), and each
 dialog or popup that floats over it may supply its own affirmative primary. The sidebar's secondary actions use the
 neutral tier; menu items, tabs, composer selections, relays, and other explicit exemptions retain their ghost or
 purpose-built styling. Destructive menu items remain red text, while their confirmation buttons use the danger tier.
@@ -596,7 +596,7 @@ terminal; they were consolidated into one roughly 40px header above the tabs bef
 to go somewhere rather than merely shrink. The restart offer's explanation became the restart button's tooltip and its
 `aria-describedby` target: SPEC.md's rule that Restart always resumes and, when it cannot, is greyed out with the
 specific reason is carried by the button's accessible name (`aria-label` and, alongside the further elaboration, its
-tooltip) — naming the offer (`resume conversation` or `restart unavailable`) rather than the action. An unavailable
+tooltip) — naming the offer (`Resume conversation` or `Restart unavailable`) rather than the action. An unavailable
 Restart, like an unavailable Restart with, is `aria-disabled` rather than natively disabled, so its tooltip stays
 hoverable in webviews and its click handler is what refuses. The directory and invocation buttons carry their full
 values in their tooltips, shrink before the session title and host, and reveal a clipboard affordance on hover or
@@ -731,14 +731,14 @@ focus. Its header gives the known host count, an unpersisted global details swit
 control. Every row always shows its name and a muted actions toggle that appears on hover, keyboard focus, or a coarse
 pointer, in the same narrow trailing gutter as the session-row actions toggle, and shows its phase dot except while a
 setup, update or uninstall runs, when the progress line below the name takes its place; connected reads `Connected`
-unless the helm marks a compatible older build, in which case the amber `old version` advisory is shown, or a newer one
-(`newer_version`), in which case the amber `too new` advisory is shown. A skew whose peer protocol is the higher one
-also reads `too new`, but keeps the red styling of every skew, since that host cannot be used until one side is updated.
-Either way the `too new` label's hover names both versions, and Update (and a rerun of a failed Update) is not offered.
+unless the helm marks a compatible older build, in which case the amber `Old version` advisory is shown, or a newer one
+(`newer_version`), in which case the amber `Too new` advisory is shown. A skew whose peer protocol is the higher one
+also reads `Too new`, but keeps the red styling of every skew, since that host cannot be used until one side is updated.
+Either way the `Too new` label's hover names both versions, and Update (and a rerun of a failed Update) is not offered.
 Other phases use humanized prose and retain the stable wire token in their data attribute. A protocol-incompatible
-supervisor remains the red `needs update` case; an unparseable build leaves a connected host's age unknown and keeps the
-ordinary connected label. When an older SSH host has Update available, a compact outlined `↑ update` button appears
-alongside `old version` or `needs update`, amber for the former and red for a lower-protocol peer. It shares the fleet
+supervisor remains the red `Needs update` case; an unparseable build leaves a connected host's age unknown and keeps the
+ordinary connected label. When an older SSH host has Update available, a compact outlined `↑ Update` button appears
+alongside `Old version` or `Needs update`, amber for the former and red for a lower-protocol peer. It shares the fleet
 update eligibility predicate (remote kind, not newer, menu offer present, no live provisioning work) and sends the same
 bound Update request as the menu. The button sits outside the status region; that region retains its phase words through
 an accessible label. Its hover uses escaped peer builds and explains urgency and installing the helm's version. Current,
@@ -1006,7 +1006,7 @@ The leading `name:` label offers one action carrying its whole value, including 
 registry rows as the GUI selector; `host:local` uses the row's local kind rather than its mutable display name.
 Accepting either action does not launch and keeps search as the focus target. A host action also takes over a clone's
 inferred host and retires the old history destination and idempotency key, just as changing the host selector does. The
-GUI labels an unaliased local row `local (this machine)` in the selector, Hosts page, and confirmed-local session rows,
+GUI labels an unaliased local row `Local (this machine)` in the selector, Hosts page, and confirmed-local session rows,
 while preserving aliases and the registry's own `this machine` name. A session row without confirmed locality retains
 the name supplied by the helm; the GUI does not infer locality from its text.
 
@@ -2040,7 +2040,7 @@ show. A lie about those damages only that host, where the supervisor already has
 reaches beyond its own host (another host's sessions, another supervisor, the helm's machine, or the helm's own state
 such as settings and credentials) is allowed only where the spec grants it, and a request's arrival on a supervisor
 connection adds nothing to that grant. The grants are the agent verbs any agent may use, each carried out only once the
-user has approved it or the requesting host's "run farhelm commands from this host without asking" setting is on
+user has approved it or the requesting host's "Run farhelm commands from this host without asking" setting is on
 (SPEC.md, Agent-spawned sessions; see "Permission prompts for agent actions"). Changes to hosts themselves (an agent's
 host add, edit and remove) happen only on the user's Allow of that one request, never on the connection's authority:
 neither the requesting host's "without asking" setting nor an Always allow answer covers them, and even an approved edit
@@ -2832,7 +2832,7 @@ fifteen-minute request deadline; the ordinary mutation deadline stays sixty seco
 finishes. Confirmed removals immediately leave the listing and its count and size totals. Run state retains each host's
 frozen denominator, confirmed removal count, queue position and current request's monotonic start time. The current
 checkout shows the shared reduced-motion-aware spinner and a once-per-second elapsed display; queued checkouts say
-"waiting". Both trash icons turn upside down and bob with stepped timing within the looping-indicator cap, use the
+"Waiting". Both trash icons turn upside down and bob with stepped timing within the looping-indicator cap, use the
 universal inactive-window pause, and stay upside down without animation under Reduce Motion. The mounted status region
 counts remaining checkouts, separately naming unchecked records. Per-record issues accumulate across replies. A lost
 cleanup reply stops that host's remaining queue and warns that some contents may already be deleted; it never claims
@@ -4006,7 +4006,7 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   the VIEW is — the denominator the UI's "N matching of M sessions" prints — and it deliberately does not move when a
   query narrows membership, because a denominator that tracked the query would compare a number against itself. A row
   whose payload no longer decodes is in NEITHER count: it is dropped at the read with a warning, so `total` and
-  `matching` describe rows a client can see and "showing 4 of 5" never appears over a row nobody can render (the
+  `matching` describe rows a client can see and "Showing 4 of 5" never appears over a row nobody can render (the
   corruption is for the log). The ordinary list reads as unfiltered — "M sessions" — and the filtered wording belongs to
   filters a person applied.
 - Helm schema 65 removes the global bare-ID unique index. The cache's `(host_id, session_id)` primary key is its only
@@ -4065,7 +4065,7 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   session's metadata to remain available beside the calm card naming the cause, so that read is served from the cache
   and marked stale, while a reachable host's detail is always fetched live — the cache exists for the stale list, not as
   a general serving layer. The live path reads the owner's whole list, which is the only list the wire serves.
-- `POST /api/sessions/{id}/replace` (SPEC.md's "replace") is a composition of the create and delete this section already
+- `POST /api/sessions/{id}/replace` (SPEC.md's "Replace") is a composition of the create and delete this section already
   describes, not a third code path: it routes the source by owner lookup exactly like any other lifecycle operation,
   reads the source's row live from the owning host (the same live read `clone_for_agent`'s agent-CLI clone performs, and
   for the same reason — the cache is for the stale list, never a source for a fresh mutation), copies that row's stored
@@ -4215,7 +4215,7 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   moved. Building rows for the UI, the helm keeps at most the 10 newest entries whatever a supervisor sent, drops
   cleared ones, and reports the read mark so the UI can tell unread from read. Clearing deletes nothing in the
   supervisor; the cap ages records out there. The UI renders each text as peer text, marks resolved entries grey with a
-  "resolved" word, and excludes them from unread counts and "new" styling without moving the helm's read mark.
+  "Resolved" word, and excludes them from unread counts and "new" styling without moving the helm's read mark.
 - Per-session "seen" state (the idle dot's grey/blue split and the read/unread toggle; SPEC.md, Status) lives in its own
   `session_seen` table keyed by `(host_id, session_id)`, not as a `session_cache` column: that cache is replaced
   WHOLESALE by each host's refresh, so a column there would need every refresh to carry forward a viewer fact the
@@ -4471,7 +4471,7 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   hook.
 - `farhelm helm run` — run the helm (flags: `--port`, `--state-dir`, `--ui-dist`, `--ensure-hosts <file>`,
   `--payload-dir <dir>` (env `FARHELM_HELM_PAYLOAD_DIR`), `--release-base-url <url>` (env `FARHELM_RELEASE_BASE_URL`)).
-  The last two select where "add host" provisioning payloads come from — an operator-staged directory (verified not at
+  The last two select where "Add host" provisioning payloads come from — an operator-staged directory (verified not at
   all, D3) or a download source other than the default, this build's own release on get.farhelm.io (D2); `--payload-dir`
   wins if both are given (D18). It takes no session or transport flags: M1's `--ssh`, `--cwd`, `--agent`, `--title`,
   `--remote-farhelm`, and `--remote-state-dir` were dropped with M6's registry (user decision 2026-08-04). A helm drives
@@ -5048,7 +5048,7 @@ captured success clears with a new request, the next run, a restart failure, or 
 announcement provenance, not update readiness itself. Expiry and dismissal belong to the component, keyed by activity
 and request identity rather than every published change: Installed-record or reinstall-warning changes must not stretch
 the timer or revive hidden text. The same pair rejects a callback or dismissal from an earlier request, even when watch
-delivery skipped checking between identical answers. Successful readiness has hidden "update ready" words in the live
+delivery skipped checking between identical answers. Successful readiness has hidden "Update ready" words in the live
 region while the red toggle owns the visible outcome. The live-region child is keyed by request so an identical later
 phrase still replaces its text-bearing node. The status is a persistently mounted polite live region beside either
 version rendering, with bounded, ellipsized text, the existing reduced-motion-aware spinner, and a keyboard-accessible
@@ -5172,7 +5172,7 @@ keeps no result for a deleted host, so the confirming client builds its success 
 Uninstall's host actions have only an SSH implementation: the local row is refused at planning, and the direct-local
 executor answers them with an error rather than an implementation nothing can reach.
 
-The Hosts header's `update all` button reads the current host snapshot and enqueues the same binding-captured UPDATE
+The Hosts header's `Update all` button reads the current host snapshot and enqueues the same binding-captured UPDATE
 request that each available SSH row's menu would send. The row's permanently mounted provisioning panel retains its own
 intent, one-use plan, submission claim, and progress. Rows with no current Update offer are skipped, so an ADD in flight
 cannot turn the header click into a delayed update after setup finishes. All eligible rows begin planning without
@@ -5429,10 +5429,10 @@ with a clear error at the edge (helm↔supervisor connect, client↔helm load) p
 helm compares the peer and its own build strings as semantic versions for an advisory age signal: prerelease ordering
 applies, build metadata does not change precedence, and an unparsable value leaves age unknown and false. That signal
 adds `old_version` and `newer_version` to the connected REST state, without changing the `connected` phase or
-operational routing; the incompatible protocol case is displayed as `needs update`, or `too new` when the peer's
+operational routing; the incompatible protocol case is displayed as `Needs update`, or `Too new` when the peer's
 protocol is the higher one. A development helm (version `0.0.0` with a prerelease, what every build from source reports)
 never calls a connected peer newer and never refuses Update as a downgrade, since it sorts below every release; a skew
-is judged by protocol versions alone, so a skewed host with the higher protocol reads `too new` there too. Protocol
+is judged by protocol versions alone, so a skewed host with the higher protocol reads `Too new` there too. Protocol
 version bumps with any incompatible change — which includes a field whose omission changes what the receiver DOES, not
 only changes to frames and message sets. A serde-additive field can still be semantically load-bearing: the
 non-displacing attach is the worked example (a peer that ignores it displaces a client it was asked to leave alone,
@@ -5836,7 +5836,7 @@ assignments refuse in template order. An equal agent must never reach reconcilia
 permissions or clear model and effort. Prompt and command-resume removal remain refused; search results and recents
 retain their presence-based checks. The helm's `farhelm spawn` keeps the strict host flag.
 
-The launcher's "save as template" panel shares the snapshot reader used for application, including raw relayed text,
+The launcher's "Save as template" panel shares the snapshot reader used for application, including raw relayed text,
 destination and name. A pure mapping offers only the active tab's values and marks explicit choices separately from
 remembered defaults and Clone's inherited placement. A folder-explicit flag is separate from its raw-text ownership:
 picking a directory retains a raw seed while still pre-checking it. The inline panel removes unchecked fields through
@@ -5883,7 +5883,7 @@ save/discard/keep-editing prompt. Save keeps the selected editor and refreshes i
 copy with a free name. A rename saves the new name before deleting the old one, so a failure in between leaves both;
 saving under a name another template already has is refused in the panel rather than overwriting that template. A
 pending or failed name-list read cannot prove a new name is free. Delete checks the stored snapshot, not the unsaved
-draft, against the existing template shape rules. If it fails, the control says "delete permanently" and deletion clears
+draft, against the existing template shape rules. If it fails, the control says "Delete permanently" and deletion clears
 any Undo; the ordinary save path could not restore that snapshot. Otherwise Delete retains the stored template
 client-side for about ten seconds; undo freshly reads the names before restoring and refuses a taken name. The two
 delete kinds have separate, always-mounted buttons, switched with `hidden`, whose handlers each carry a fixed kind.
@@ -6061,7 +6061,7 @@ that host, listings included, is refused with the slots' ordinary "too many in f
 waiting requests from one host is already more than a user answers at once, and a separate cap would only move the
 refusal.
 
-The "run farhelm commands from this host without asking" setting is `hosts.commands_without_asking` in `helm.db` (schema
+The "Run farhelm commands from this host without asking" setting is `hosts.commands_without_asking` in `helm.db` (schema
 40), off by default, and reset to off whenever the row adopts a different install, exactly as the YOLO setting is.
 "Always allow" on a card stores it only if the card's connection is still live, and stores it only while the host row
 still records the install identity it had when the request arrived (`allow_commands_for_identity`, under the host write
