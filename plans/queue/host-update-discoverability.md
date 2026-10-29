@@ -385,3 +385,45 @@ passed its code review gate, and the last PR removes both TODO.md entries. Open,
 exists, its latest entry must also be satisfied. Then close the plan per `plans/.agents/executing.md`, "Executing one
 plan" (steps 11 and 12): deliver its report through the queue script, write a closing entry in its log, and stop the
 watchdog. Never edit `plans/` yourself.
+
+## Blocked
+
+Blocked while landing on 2026-10-29 (claim ed19df).
+
+### Landing stopped: two database migration tests and the new setting's hover text
+
+The landing monitor did not merge this plan; its PRs (#2807, #2808) have not merged and main holds nothing of it. The
+plan makes host updates easier to find (an update prompt in the session list) and adds a Settings switch, "Update remote
+hosts automatically", under Hosts, which updates remote hosts on older builds when they connect.
+
+The round's checks ran on this plan stacked with three others on current main. A fresh-context review found the
+automatic updates safe as specified (off by default, remote hosts only, through the manual Update path). Three checks
+failed because of this plan:
+
+- Two helm tests of the settings database's history, "checkout open existing refuses older schema without migrating" and
+  "checkout migration from 26 recreates the config tables" (`cargo nextest run --workspace --exclude farhelm-desktop`,
+  run `43959a88-f565-461e-b3dd-760d8725cf4a`), fail. The tests rebuild a version-26 database by removing what later
+  versions added and compare it with the frozen version-26 definitions; that removal step was not told about the plan's
+  new preferences column for the automatic update setting, so the rebuilt database still has it. The frozen definitions
+  and the migration are correct.
+- The browser sweep "sidebar surfaces give every control hover text" (`e2e/tests/tooltip-coverage.spec.ts`, run
+  `10af6125-cdc5-4afc-bc9a-369377c00195`, both engines) finds the new "Update remote hosts automatically" switch in
+  Settings without hover text, which every control needs; its neighbour "Set up new hosts without asking" has one.
+
+The review also noted that the Update guide on the docs website still says remote hosts are never updated automatically,
+and that the Manage hosts page does not mention the new setting or prompt.
+
+Two things for you to know, neither a reason to stop: the plan raises the settings database to version 68, a one-way
+upgrade, so a helm built before it (the v0.32.0 release candidates included) cannot open the store afterwards, which
+matters for rolling back and for devbuilds; and a remote host whose automatic update keeps failing is retried on every
+reconnect.
+
+### What should happen to this plan?
+
+- **Send it back to its executor (recommended).** Answer with: in the tests' step that rebuilds a version-26 database,
+  also remove the new automatic-update preferences column, as it already removes every other column added after version
+  26, leaving the frozen definitions and the migration as they are; give the new switch hover text the way its neighbour
+  has it; update the Update guide's sentence and mention the setting and prompt on the Manage hosts page; run the helm
+  crate's tests and the settings, host-updates and tooltip-coverage browser specs on both engines.
+- **Land it now and fix afterwards.** Main would carry two failing migration tests, a control without hover text, and a
+  docs page that contradicts the new setting.
