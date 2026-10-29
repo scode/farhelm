@@ -34,6 +34,8 @@
 // - Shows 300 ms after the pointer comes to rest on a target (each movement
 //   inside it starts the wait over), or after a target gains focus that
 //   matches `:focus-visible` (keyboard navigation, not a click).
+//   Menu hover also moves focus; menu-focus.js marks that synchronous move so
+//   it retains pointer ownership even when the engine matches :focus-visible.
 // - Shows at once, with no new delay, when another target is entered while
 //   one is showing or within 300 ms of the pointer (or keyboard focus)
 //   leaving one, so a user
@@ -93,9 +95,9 @@
 //
 // The pure decisions (`placeTooltip`, `instantFollowOn`, `scrollMovesTarget`)
 // are exported under CommonJS as well as installed on `window`, the same
-// dual install term-bytes.js uses. Everything stateful is exercised by the
-// browser suite (e2e/tests/tooltip.spec.ts), which is where the wiring to
-// real pointer, focus and scroll events can actually be observed.
+// dual install term-bytes.js uses. The unit harness also exercises menu hover's
+// synchronous focus provenance and rest timers. The browser suite
+// (e2e/tests/tooltip.spec.ts) observes real pointer, focus and scroll wiring.
 (function () {
   /** How long the pointer rests on a target, or keyboard focus stays on one, before the tooltip shows. */
   const SHOW_DELAY_MS = 300;
@@ -473,9 +475,18 @@
       "focusin",
       (event) => {
         const next = tooltipTarget(event.target);
+        if (next === null || next === suppressed) return;
+        // A menu hover is pointer-owned even after keyboard use. Establish
+        // its timer here too: arrows can move focus away while the pointer
+        // stays on this item, so later movement need not fire pointerover.
+        // An existing pointer timer survives schedule's same-target path.
+        if (event.target === win.__farhelmMenuPointerFocus) {
+          schedule(next, false);
+          return;
+        }
         // A text field matches `:focus-visible` even when clicked, so the
         // press that focused it is what keeps its tooltip down here.
-        if (next === null || next === suppressed || !focusVisible(event.target)) return;
+        if (!focusVisible(event.target)) return;
         schedule(next, true);
       },
       true,

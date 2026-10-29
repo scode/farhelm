@@ -882,36 +882,40 @@ it could no longer indicate the opening row. Commands have small decorative line
 non-focusable rules: rename, mark read/unread and pin/unpin; clone and replace with; replace; stop; delete. Only groups
 with available commands contribute rules. Replace, stop and delete are red; replace with stays neutral because it opens
 the editable session launcher. Every command has a visible muted description exposed as an accessible description, so
-the accessible command name remains the action word. Hover and focus fill each command inside the panel with rounded
-inset corners. **One at a time:** at most one row's menu is open, and it closes on any layout change that could have
-moved the row it was measured against (a sidebar scroll or resize, the host list's shape changing, the create form
-opening, the row reordering under a refresh), because the panel's coordinates are a one-time snapshot. **Keyboard:** it
-is a real `role="menu"` and behaves like one — opening it (pointer, Enter, Space, ArrowDown) lands focus on the first
-command and ArrowUp opens onto the last; arrows step and wrap, Home/End jump; the whole menu is a single tab stop via
-roving `tabindex`, so Tab leaves rather than walking the commands; Escape closes; and every close that took the menu
-away from a focused item hands focus back to the toggle rather than dropping it on the document body — except the two
-transfers, Rename and a clone/replace-with acceptance, whose newly mounted dialogs own focus instead, so the teardown
-retires its return rather than racing their mount handoff. An item made inert by an in-flight operation stays focusable
-and refuses on activation (`aria-disabled`) rather than going natively `disabled`, because a browser cannot focus a
-disabled control and a menu that went busy under the user would otherwise swallow every navigation key. Arrows step from
-whichever item actually has focus, including one the user focused by pointer or screen reader in the middle of an arrow
-burst. A page-side check rejects navigation focus moves after independent focus, including requests already sent across
-the desktop webview. Each request retains the page's independent-focus epoch from its key press; a synchronous input
-relay updates Rust with the current focus event's source before the original event, so a user landing at the in-flight
-target also retires older requested destinations. Initial menu focus uses the same function without that check and does
-not invalidate navigation. Nothing activates without Enter or Space on the visibly focused item. The row tint is owned
-by the menu's open state, not by `:focus-within`: a dismissal may return focus to the toggle while the pointer is
-elsewhere, and that focused toggle must not make the row look as though its menu is still open. The focused toggle or
-menu item retains the normal `:focus-visible` indicator, so pointer-return focus and keyboard focus remain visually
-distinct without changing the dismissal or focus-return contract. **Confirm in place:** a destructive item swaps the
-panel's own contents for the consequence line and a confirm/cancel pair with focus on the enabled confirming answer, or
-Cancel while busy, rather than opening a second surface; that sub-state is a `role="dialog"` inside the same positioned
-box, and it survives the panel closing, which is why it deliberately does not answer Escape. The one exception is a
-pointer going down outside the open menu: that closes the menu and answers a showing confirmation with cancel, since a
-click elsewhere is the user leaving the question, and a prompt kept for the next open would greet them with a question
-they already walked away from. Every other dismissal still preserves it. Outside dismissal also never takes focus back
-from the control the pointer went to: the toggle handback only reclaims focus that is on nothing, on the document body,
-or still inside a row menu.
+the accessible command name remains the action word. Mouse or pen movement onto a command moves focus there without
+scrolling. Focus alone fills the command with rounded inset corners: arrow navigation moves that fill even while the
+pointer remains over a different command, and leaving the menu keeps the last focused item. Disabled commands remain
+focusable without a fill. **One at a time:** at most one row's menu is open, and it closes on any layout change that
+could have moved the row it was measured against (a sidebar scroll or resize, the host list's shape changing, the create
+form opening, the row reordering under a refresh), because the panel's coordinates are a one-time snapshot.
+**Keyboard:** it is a real `role="menu"` and behaves like one — opening it (pointer, Enter, Space, ArrowDown) lands
+focus on the first command and ArrowUp opens onto the last; arrows step and wrap, Home/End jump; the whole menu is a
+single tab stop via roving `tabindex`, so Tab leaves rather than walking the commands; Escape closes; and every close
+that took the menu away from a focused item hands focus back to the toggle rather than dropping it on the document body
+— except the two transfers, Rename and a clone/replace-with acceptance, whose newly mounted dialogs own focus instead,
+so the teardown retires its return rather than racing their mount handoff. An item made inert by an in-flight operation
+stays focusable and refuses on activation (`aria-disabled`) rather than going natively `disabled`, because a browser
+cannot focus a disabled control and a menu that went busy under the user would otherwise swallow every navigation key.
+Arrows step from whichever item actually has focus, including one the user hovered or focused by screen reader in the
+middle of an arrow burst. A page-side check rejects navigation focus moves after independent focus, including requests
+already sent across the desktop webview. Each request retains the page's independent-focus epoch from its key press; a
+synchronous input relay updates Rust with the current focus event's source before the original event, so a user landing
+at the in-flight target also retires older requested destinations. Initial menu focus uses the same function without
+that check and does not invalidate navigation; a hover that precedes that opening request can therefore be overtaken by
+it. Pointer-made focus keeps hover help's rest delay and hides the help on pointer leave, even when the engine marks
+that scripted focus as focus-visible after keyboard use. Nothing activates without Enter or Space on the visibly focused
+item. The row tint is owned by the menu's open state, not by `:focus-within`: a dismissal may return focus to the toggle
+while the pointer is elsewhere, and that focused toggle must not make the row look as though its menu is still open. The
+focused toggle or menu item retains the normal `:focus-visible` indicator, so pointer-return focus and keyboard focus
+remain visually distinct without changing the dismissal or focus-return contract. **Confirm in place:** a destructive
+item swaps the panel's own contents for the consequence line and a confirm/cancel pair with focus on the enabled
+confirming answer, or Cancel while busy, rather than opening a second surface; that sub-state is a `role="dialog"`
+inside the same positioned box, and it survives the panel closing, which is why it deliberately does not answer Escape.
+The one exception is a pointer going down outside the open menu: that closes the menu and answers a showing confirmation
+with cancel, since a click elsewhere is the user leaving the question, and a prompt kept for the next open would greet
+them with a question they already walked away from. Every other dismissal still preserves it. Outside dismissal also
+never takes focus back from the control the pointer went to: the toggle handback only reclaims focus that is on nothing,
+on the document body, or still inside a row menu.
 
 Each session confirmation mount schedules focus on its enabled confirming answer, falling back to Cancel if disabled.
 The script supplements native autofocus because browsers can ignore it after a document's first prompt, including when

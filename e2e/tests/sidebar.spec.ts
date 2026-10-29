@@ -2674,7 +2674,7 @@ test("the actions menu has a raised surface and inset choices", async ({ page, r
     expect(surface.borderWidth).toBe("1px");
     expect(surface.shadow, "the shadow is what says this is in FRONT of the rows").not.toBe("none");
 
-    // Each choice has room for an inset hover/focus fill, including its
+    // Each choice has room for an inset focus fill, including its
     // icon and description, without spilling over the panel's corners.
     const items = await panel.evaluate((element) => {
       const panelBox = element.getBoundingClientRect();
@@ -2705,11 +2705,14 @@ test("the actions menu has a raised surface and inset choices", async ({ page, r
     const highlightText = await tokenColor(page, "--on-fill");
     expect(restingFill, "an unhighlighted menu choice must differ from selection").not.toBe(highlightFill);
     await clone.hover();
+    await expect(clone).toBeFocused();
     await expect(clone).toHaveCSS("background-color", highlightFill);
     await expect(clone).toHaveCSS("color", highlightText);
     await page.mouse.move(0, 0);
-    // Rename holds focus after opening; pin sits between it and clone.
-    await page.keyboard.press("ArrowDown");
+    // Hover transfers focus to Clone and leaving retains it. Pin is the
+    // preceding command, so arrows must continue from that pointer choice.
+    await expect(clone).toBeFocused();
+    await page.keyboard.press("ArrowUp");
     await expect(panel.locator(".session-row-pin")).toBeFocused();
     await page.keyboard.press("ArrowDown");
     await expect(clone).toBeFocused();

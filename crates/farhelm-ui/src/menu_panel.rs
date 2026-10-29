@@ -57,6 +57,10 @@
 //! The presentation helpers render subject and command copy independently
 //! of those mechanics. Callers keep native item buttons and place headers
 //! outside the menu role, so shared anatomy cannot alter keyboard ownership.
+//! Mouse and pen movement use the page's shared listener to focus the hovered
+//! item without scrolling. That independent focus follows the same relay and
+//! cancellation path as a screen reader, so later arrows start from the item
+//! under the pointer rather than an older requested destination.
 
 use std::collections::HashMap;
 use std::hash::Hash;

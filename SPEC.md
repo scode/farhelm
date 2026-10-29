@@ -2040,10 +2040,11 @@ whatever the agent renders is what you see. There is no composer, no message abs
   row's delete prompt shows. Restart's confirmation is likewise anchored under its top-row button; Escape cancels these
   questions and returns focus to the terminal. The session-confirmation setting skips the top row's Delete, Replace and
   Restart questions, the interrupted-card Replace question, and tab Close, using the screen's consent and existing
-  guards. Split menus follow the app's shared keyboard rules: arrows and Home/End move between choices, Escape or Tab
-  closes the menu and returns focus to its caret. Cancelling Restart with returns to that persistent caret. An
-  unavailable plain Restart does not hide an independently available Restart with; the menu remains available to inspect
-  reasons.
+  guards. Split menus follow the app's shared keyboard rules: mouse or pen movement focuses the hovered choice without
+  scrolling, arrows and Home/End move between choices, and only the focused enabled choice has the highlight fill.
+  Leaving the menu keeps that focus; Escape or Tab closes the menu and returns focus to its caret. Cancelling Restart
+  with returns to that persistent caret. An unavailable plain Restart does not hide an independently available Restart
+  with; the menu remains available to inspect reasons.
 - One attached client per session, enforced by the supervisor: attaching from a second client visibly detaches the
   first, which keeps a non-live snapshot and an explicit take-control action. No shared-input mirroring in v1.
 - A viewer that is slow is served slowly, for as long as it takes. Honoring that can briefly slow the agent's OUTPUT — a
