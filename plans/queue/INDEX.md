@@ -2,5 +2,5 @@
 
 One line per plan that has not landed, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` lines, at the end unless the maintainer places them elsewhere. A landed plan moves to `plans/REPORTS.md` until the maintainer has reviewed its report. This file is excluded from dprint so a line is never rewrapped.
 
-- [landing cef6c2] `muse-session-tracking.md` — Muse Code session tracking on the Codex and Claude model: hooks, conversation capture for Restart, and waiting/working status
+- [blocked] `muse-session-tracking.md` — Muse Code session tracking on the Codex and Claude model: hooks, conversation capture for Restart, and waiting/working status
 - [pending] `podman-sandbox.md` — Experimental containerized sessions on Linux: the agent runs in a rootless podman container that sees only its managed checkout, one API-proxy port on the host and an optional GitHub token, with terminal tabs inside the container

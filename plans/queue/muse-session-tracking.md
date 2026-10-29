@@ -459,3 +459,44 @@ Decision: accept the smaller scope now and defer question recognition.
 
 This judgment call is recorded as a near-term TODO.md entry so the maintainer can revisit it; a later change of mind is
 a follow-up, not a reason to stop this plan.
+
+## Blocked
+
+Blocked while landing on 2026-10-29 (claim cef6c2).
+
+### Landing stopped: three existing tests still expect Muse to have no conversation tracking
+
+The landing monitor did not merge this plan. None of its four PRs (#2785, #2786, #2788, #2789) has merged, and main
+holds nothing of it. The plan gives Muse sessions conversation resume and working, idle and trust status; recognizing
+Muse's questions was deferred by the previous answer.
+
+A fresh-context review found the previous answer carried out, the per-agent code rules followed, no database change, the
+protocol version raised for the new Muse values, and Claude's behavior unchanged. The source checks, the website build,
+the UI's JavaScript tests and the release web build passed. Three tests that existed before this plan still expect Muse
+to behave like an agent Farhelm does not track, and fail now that it is tracked:
+
+- In the whole Rust workspace (`cargo nextest run --workspace --exclude farhelm-desktop`, run
+  `61bf0e8f-7e59-4c60-9a2e-1213e0c05264`), the end-to-end test "structured launches forward to ready processes and
+  survive a fresh generation" expects a Muse session's restart offer to be "no conversation reporting" ("Muse remains
+  Generic; this fixture must not invent resume support") and gets "no resume command". Its other failure in that run was
+  the known terminal flow-control flake.
+- The UI's Rust test "restart with availability explains each unavailable case" (`cargo nextest run -p farhelm-ui`, run
+  `4b274466-8d9b-49d7-84f0-088c79181d41`) expects Restart with to say "Muse sessions can't be resumed" and gets "No
+  captured conversation to resume". The review had already noted that for a Muse session without a resume command (one
+  created before this change, say) that new message is inaccurate: the real reason is the missing resume command, and
+  the way out is Clone or Replace with.
+- The browser test "named conversation labels and reporting help follow the selected agent" (`npx playwright test` with
+  `tests/named-conversations.spec.ts`, run `9f76f468-811e-4b98-9635-6cb2b6d1d86c`, both engines) expects the launcher's
+  help that "Farhelm will not capture" a Muse conversation, which is now gone.
+
+The same browser run had one more failure, a WebKit focus check in the Restart with tests, which also failed once at an
+earlier landing on another plan and passed on rerun there; it is not this plan's.
+
+### What should happen to this plan?
+
+- **Send it back to its executor (recommended).** Answer with: update these three tests to Muse's new, tracked behavior;
+  make Restart with's explanation for a Muse session without a resume command say that, the way it already does for a
+  command launch without one; run the whole Rust workspace and the named-conversations and restart-with browser specs on
+  both engines.
+- **Land it now and fix the tests afterwards.** Main would carry three failing tests and an inaccurate Restart with
+  message until then.
