@@ -1,10 +1,59 @@
 # Trailing code review checkpoint
 
-Last reviewed commit: `d64ae3a81547729100529d210d3ea50434ff933d`
+Last reviewed commit: `da9d7411fd5c69255ea6d0b857a6a3aa48bd0c6c`
 
 This is the exclusive starting point for the next trailing code review of `main`. Advance it only after completing the
 procedure in [AGENTS.md](AGENTS.md#trailing-code-review), together with any resulting queue updates. A proposed
 checkpoint reaches `main` only when its review-result PR is merged.
+
+## Review through da9d7411
+
+Reviewed range: `d64ae3a81547729100529d210d3ea50434ff933d..da9d7411fd5c69255ea6d0b857a6a3aa48bd0c6c`, 26 commits. The
+exclusive checkpoint and inclusive main tip were fetched and pinned, with ancestry verified. Recording-time fetches
+found the same main and checkpoint. No later commit is claimed reviewed.
+
+The review is **complete** under the persistent-review protocol. All 134 individual commit/path patches, including
+intermediate changes and deleted text, were reconstructed exactly from 135 immutable parts and assigned once across 15
+bounded functional groups. Three independent auditors checked potentially highest exclusions, including withdrawn and
+prose-only candidates. Every combined mandatory assignment remained below 2,000 lines and 64 KiB. Surrounding source and
+coverage sections were inspected selectively; no assigned patch text remains unread.
+
+All 18 reviewer identities used Codex `gpt-6-astra`, high reasoning, and completed initial review, later-turn synthesis
+and separate discovery on the same identities. There were 62 actual turns and 24 discovery passes. Three productive
+discovery passes received further searches: the refusal-fixture issue, target-hover directionality and focused tunnel
+Allow concern. Every group ended with an inspected, credible empty search. Late cross-group exclusions received
+independent source checks and renewed discovery. No recording or independent-exclusion step remains unresolved.
+
+Five new records are retained, all **other**. One is source-confirmed: a folder-dropdown test's mock refusal omits the
+build stamp and puts its later assertions into version-mismatch mode. No actual test failure or false pass is claimed.
+Four remain **unverified after investigation**: notices becoming unreachable in an extremely short launcher; a delayed
+launch using choices different from those shown; the target hover grouping ordinary right-to-left host/folder text
+differently; and repeated/composing Enter reaching the focused Allow tunnels button without a fresh affirmative action.
+Each record preserves its source basis, investigation, missing native or producer premise and possible coverage. No
+security or user-work-loss route was established. No existing item is extended or removed.
+
+Independent exclusions remain narrow: captured answer tokens and destructive preconditions, explicitly accepted
+single-Trash click-time identity, ordinary template buttons, simulated capture backends, bodyless uninstall planning,
+Undo restoring values rather than execution authority, Custom flags clearing across agents, preview revision checks,
+named-conversation refusal before managed retry, historical trust stripping and separate Command assertions.
+Cancel-first focus and guarded container Enter do not settle the retained directly focused Allow concern.
+Reachable-scrolling acceptance does not settle unreachable content. These are not blanket subsystem-safety verdicts.
+
+Private evidence is retained under run `2b7a8eaf-c4e9-42ab-be93-1acf29106132`. `completion.md` is the compact record;
+`completion.json` preserves assignments, manifests, exact session identities, actual turns, replies, progress and final
+delivery audits. `finding-events.json` and `dispositions.json` retain all 112 reviewer-local finding identities and
+their histories, independent verdicts and queue mappings. The 106 latest open and six withdrawn identities include
+duplicates and audit verdicts, not 112 distinct bugs. All 26 mandatory manifests have complete delivery evidence.
+Rejected clipped reads earned no credit. One reviewer initially wrapped its packets and received zero delivery credit;
+the same identity reread supported raw packets before synthesis. Another initially omitted immediate log appends for
+prose candidates; its truthful delayed records and independent audits preserve them. No manual transcript fallback was
+used. Delivery proves neither attention nor understanding, correctness or exhaustiveness.
+
+This was source-only. No product/runtime suite, browser/native experiment, vendor-agent turn or live-installation action
+ran, and no historical runtime pass was reused. Validation covers changed Markdown, whitespace, queue/index consistency,
+record fields, exact patch assignment and instruction pointers; the pointer check retains two unrelated existing
+warnings. No fixes, triage decisions or plan actions were executed. This checkpoint proposal stays in a draft PR for
+separate manual merging; writing it does not advance main.
 
 ## Review through d64ae3a8
 
