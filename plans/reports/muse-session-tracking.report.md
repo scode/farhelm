@@ -1,101 +1,109 @@
 # Muse session tracking
 
+## Since the last review
+
+The conversation-resume PR, #2788, now includes the three missed test updates and the corrected Restart with explanation
+requested by the latest Decision. Older Muse launches without a resume command are told to use Clone or Replace with.
+The end-to-end fixture now supplies Muse's real resume selector and expects tracking to wait for a report; the launcher
+test expects Muse capture and uses Cursor to check the warning's layout. The other three PRs are unchanged apart from
+rebasing onto main, including the landed Trash work. The capture PR also records the pre-existing WebKit focus failure
+in FLAKES, TODO and the deflake exclusion list, as the repository requires for established latent flakes.
+
 ## What this was about
 
-Muse could run in a Farhelm session, but Restart could not resume its conversation. This work adds conversation resume
-through resident wrappers and reads Muse's working, idle and directory-trust screens. The original scope also included
-questions and approvals during a conversation. The 2026-10-29 Decision accepts the smaller scope and defers that
-recognition; the original TODO now names only the deferred work. The separate TODO recording that scope judgment
-remains.
+Muse could run in a Farhelm session, but Restart could not resume its conversation. This stack adds conversation resume
+through resident wrappers and reads Muse's working, idle and directory-trust screens. The earlier Decision accepts that
+smaller scope and defers recognizing questions and approvals during a conversation. The original TODO now names only
+that deferred work; the separate TODO recording the scope judgment remains.
 
 ## Things you should know
 
-Muse 1.4.14 is the minimum verified version. Farhelm supplies hooks for each launch without installing a plugin or
-changing Muse's configuration. Real private runs with the offline echo provider verified the conversation identifier,
-start and end-of-turn reports, resume, and the start hook's instructions announcement. Muse uses the same positional
-attribution and shared conversation pin as Claude, including correction when a parent reports after its child.
+Muse 1.4.14 is the minimum verified version. Farhelm supplies hooks per launch without installing a plugin or changing
+Muse's configuration. Private offline-echo runs verified conversation identifiers, start and end-of-turn reports,
+resume, and the start hook's instructions announcement. Capture shares Claude's positional attribution and conversation
+pin, including correction when a parent reports after its child.
 
-Working, Thinking, the resting composer and directory trust are covered by captured Muse screens. General conversation
-questions and approval dialogs remain unverified and unrecognized: **a Muse session can show Idle while Muse waits for
-an answer**. This is now explicit in SPEC's Status section and on the Muse documentation page. No supported way to make
-echo ask a real question was found. The bounded custom-provider probe stopped before a question at an undocumented
-provider response; that is a test-setup limitation, not proof that Muse cannot show recognizable questions. No operator
-credentials or saved configuration were copied or changed, and no further provider reverse engineering was done.
+General conversation questions and approval dialogs remain unrecognized: **a Muse session can show Idle while Muse waits
+for an answer**. SPEC and the Muse documentation state this limitation. No further provider investigation, sign-in,
+operator credential use or saved-configuration changes were made in this correction round.
 
-Existing stored Muse launches gain the new integration on their next start, but retain their absent resume command.
-Recreate those sessions through Clone or Replace with to gain resumable launches; there is no migration or backfill. The
-new Muse agent kind bumps the peer protocol to 65, so update the helm and supervisors together. The support policy now
-allows two weeks after a newer agent release before dropping the older version, without extra compatibility code.
+Existing stored Muse launches gain the integration on their next start but keep their absent resume command. Recreate
+them through Clone or Replace with to gain resumable launches; there is no migration or backfill. The peer protocol is
+now 65, so update the helm and supervisors together. The support policy permits dropping an older agent version two
+weeks after a newer release, without adding compatibility code.
 
 The changed documentation pages are Muse, Agent wrappers, the agents support matrix and Agent hook injection. No preview
 server was started during unattended execution. The four PRs remain drafts for the landing monitor.
 
 ## Open questions and possible follow-ups
 
-Recognizing conversation questions and approval dialogs requires an authenticated test provider or a documented provider
-fixture protocol that can make Muse ask a real question, followed by real screen captures. That work remains in TODO; it
-is outside the approved delivery scope. The maintainer can also revisit the smaller-scope decision through its separate
-near-term TODO entry.
+Recognizing conversation questions and approval dialogs needs a supported authenticated test provider or documented
+fixture protocol that can make Muse ask a real question, followed by real screen captures. It remains in TODO and is
+outside the approved scope. The maintainer can revisit the smaller-scope judgment through its separate TODO entry.
+
+Two existing open Rust flakes recurred: the shallow-pause terminal reset assertion (FLAKES, October 9 and 17) and the
+hung-save deadline assertion (October 22). Both passed an isolated retry. WebKit's Restart with focus check also failed
+and passed an exact retry; it is now recorded in FLAKES and TODO. Their causes remain unresolved, the assertions were
+left intact, and the failed runs remain failures.
 
 ## The PRs
 
 - [#2785 — agent version support policy](https://github.com/scode/farhelm/pull/2785/changes).
 - [#2786 — Muse's own integration kind](https://github.com/scode/farhelm/pull/2786/changes).
-- [#2788 — Muse conversation resume](https://github.com/scode/farhelm/pull/2788/changes).
+- [#2788 — Muse conversation resume and landing corrections](https://github.com/scode/farhelm/pull/2788/changes).
 - [#2789 — Muse working, idle and directory-trust status](https://github.com/scode/farhelm/pull/2789/changes).
 
 ## Checks run, reused and skipped
 
-This completion round changed only SPEC wording and the deferred TODO. `dprint check SPEC.md TODO.md` passed after
-formatting. `python3 scripts/check-agents-md.py` passed with zero errors and two existing warnings in historical
-citations. `python3 releasing/check-changelog.py format` passed. A recorded
-`cd website && bun install --frozen-lockfile && bun run build` passed, including internal links and anchors, run
-`acada2f8-c1e8-424c-98ad-e5ef25f4b717`. It built 32 pages using Node 26.12.1 and Bun 1.4.2; existing empty i18n/404
-content warnings did not prevent the build.
+The requested `cargo nextest run --workspace --exclude farhelm-desktop` completed with 4,509 runtime passes, two
+failures and 40 skipped tests, run `a5463c08-8bbb-4f54-9da7-322c4bd92be2`. JUnit additionally counts successful fixture
+setup. The failures were the two existing flakes above; the corrected Muse cases and the wrapper, capture and status
+tests passed. An exact two-case retry passed, run `da530b61-ca5a-4db3-8875-305227edfc03`, command
+`cargo nextest run -p farhelm --test e2e -p farhelm-ui --lib -E 'test(=terminal_backpressure::shallow_pause_resumes_without_reset_or_replay) | test(=api::save_order::tests::a_hung_save_releases_waiters_at_their_deadline)'`.
+No full Rust rerun was made. Both records are retained; a later pass does not replace the failed observation.
 
-The following focused runtime evidence is reused from the implementation round. All commands ran through the recorder on
-Linux x86_64 with nextest 0.9.148, pinned tmux 3.7c, four slots and zero retries. Their complete reports and retained
-output were inspected; selected-out cases are not counted as runtime passes. The rebase changed none of the four
-commits' patches; upstream added only queue/TODO bookkeeping, and this round changed no executable or fixture bytes.
-Each recorded dirty source tree below identifies the actual tested input rather than claiming its base HEAD was the
-finished implementation.
+The exact structured-launch and Restart with availability tests passed, run `4ac613d1-c217-43e4-9161-70ec104e1b4c`:
+`cargo nextest run -p farhelm --test e2e -p farhelm-ui --lib -E 'test(=structured_launches::structured_launches_forward_to_ready_processes_and_survive_a_fresh_generation) | test(restart_with_availability_explains_each_unavailable_case)'`.
+Both runtime cases and fixture setup passed; 1207 cases were selected out. The tested dirty source above `dd500983` has
+fingerprint `f815ee88e1ffa1d981fede105c4f6ed5b968c05047fe41dc26be1842038c0fe5`.
 
-- Kind integration: `362f4ae5-2ad9-449a-ae6b-84cfb84ee2d0`, 199 passes, 3448 selected out. Command:
-  `cargo nextest run -p farhelm-proto -p farhelm-supervisor -p farhelm-helm -p farhelm-ui --lib -E 'package(farhelm-proto) | test(/muse|structured_launches_round_trip_with_their_matching_kind|new_agent_kinds_round_trip_and_unknown_spellings_fail_decode|kinds_without_a_dedicated_reader|session_agent_kind_decodes_tolerantly|every_agent_type_composes|explicit_choices|a_custom_model/)'`.
-  Tested the dirty kind implementation above `1ccf3909`, source fingerprint beginning `1551068609a65d97`. Reuse is
-  confined to unaffected coverage; the historical conversion and store correction use the following two runs.
-- Corrected historical conversion: `9b274ef6-44a5-45b4-9887-9c2314b1a53f`, 6 passes, 181 selected out, command
-  `cargo nextest run -p farhelm-proto --lib -E 'test(session_launch::tests::)'`; dirty source above `1ccf3909`,
-  fingerprint beginning `82644fc8fab831c1`.
-- Corrected Muse storage fixture: `9900b030-a3d2-4e47-b5da-add20e65c271`, 1 pass, 1339 selected out, command
-  `cargo nextest run -p farhelm-supervisor --lib -E 'test(=store::tests::structured_launches_round_trip_with_their_matching_kind)'`;
-  dirty source above `1ccf3909`, fingerprint beginning `cc70cd02dbe6a6bf`.
-- Capture, hooks, launch compilation and shared Claude regressions: `f38327a9-c5d7-494b-af5d-56608bc13689`, 158 runtime
-  passes across six binaries, 3309 selected out. JUnit additionally counts one setup case. Command:
-  `cargo nextest run -p farhelm-supervisor -p farhelm-proto -p farhelm-helm -p farhelm -p farhelm-fixtures --lib --bins --test e2e -E 'test(agent_kind::tests::) | test(agent_kind::muse::) | test(procs::tests::claude_) | test(procs::tests::muse_) | test(service::core::tests::claude_pin::) | test(hook_report::tests::) | test(service::notifications::tests::) | test(launches::tests::) | (package(farhelm-proto) & test(/every_reporting_kind|session_launch::tests::/)) | test(hook::tests::) | test(muse_hook_fixture_preserves_resume_and_injected_hooks) | test(/a_two_level_resident_wrapper_captures_and_resumes_(claude|muse)|a_shelled_out_(muse_)?child_cannot_replace_the_foreground_report|child_first_(claude|muse)_capture_is_corrected_by_stop_and_resumes_parent/)'`.
-  Dirty capture source above `e9130741`, fingerprint beginning `19d370fa85bc2096`, subsequently committed as `f541585f`.
-  All six Claude/Muse wrapper, rival-report and ancestor-correction end-to-end witnesses passed; their retained output
-  had no runtime substrate-skip marker.
-- Screen interpretation and captured fixtures: `0b9cb84a-fca5-4050-9d0d-cfc1006e3750`, 24 passes, 1330 selected out,
-  command
-  `cargo nextest run -p farhelm-supervisor --lib -E 'test(agent_kind::screen_reader::tests::) | test(agent_kind::screen_fixtures::)'`.
-  Dirty status source above `f541585f`, fingerprint beginning `18ede09408e6d222`, subsequently committed as `f1f599aa`
-  with a prose-only SPEC correction. No runtime substrate-skip marker was present.
+All three Rust commands used Linux x86_64, nextest 0.9.148, pinned tmux 3.7c, four slots and zero retries on that same
+source fingerprint. Reports and output are complete, with no runtime substrate-skip marker. Selected-out cases are not
+runtime passes.
 
-The prior round also passed all-target Clippy for proto, supervisor, helm, CLI, fixtures and UI, shipped CLI-bin Clippy
-without test seams, Rust formatting, changed-file dprint and the source sleep checker (322 delays, none unexplained).
-Those results remain applicable to unchanged product/test source. The earlier store compile failure
-`25a85753-907f-49aa-b6c2-19bccafddb06` is retained as a same-session namespace error corrected before the exact store
-retry; it is not a passing run or a latent flake. Incomplete provider probes remain retained and are not question
-coverage.
+The requested `npx playwright test tests/named-conversations.spec.ts tests/restart-with.spec.ts` ran 112 cases with
+three workers and zero retries, run `ca41e45d-2ea0-486b-a8b1-7f1defad7146`: Chromium 56 passed; WebKit 55 passed and one
+failed. Both engines passed the corrected Muse reporting-help case. The remaining failure was the same
+gap-focus/container-Enter case identified by the landing Decision. Its unchanged exact WebKit retry passed one case, run
+`143efecd-81a2-4e44-8ba1-8275f8fdb7ed`, using `--project=webkit-restart-with` and the case title as grep. That generic
+recording has complete output and cleanup but does not claim strict browser-mode count validation. An earlier anchored
+grep selected no tests, run `53e946eb-c1fc-49c2-aed1-18b75e3f8d9f`; it is retained and supplies no assertion evidence.
+The selected browser run has complete validated reports, no skips or unstarted cases, full output and clean teardown.
+Both browser observations used the same source fingerprint above, pinned tmux and Playwright 1.64.0. Ordinary retained
+desktop/phone screenshots were inspected; the warning and input fit and wrap within the launcher.
 
-No full Rust battery, browser, desktop, installer or provisioning suite ran for this completion round. The existing
-focused checks cover the application changes, and the final edits are ordinary prose. No real-provider question test was
-run: that behavior is explicitly deferred. The website build supplies the previously uncovered page/link evidence.
+Rust formatting and the source sleep checker passed for the corrections: 322 delays, none unexplained. Repository dprint
+does not include the changed TypeScript spec; its no-files exit was not counted as a pass.
+
+`cargo clippy -p farhelm-ui -p farhelm --all-targets -- -D warnings`, `cargo build`, and the Dioxus 0.7.10 release web
+build passed. The initial `dx` invocation selected Deno's unrelated command; selecting the installed pinned Dioxus
+binary resolved that build-tool collision without changing source or configuration.
+
+The final flake record is documentation and exclusion-list bookkeeping only. `dprint check TODO.md FLAKES.md` passed;
+the earlier runtime and Clippy evidence remains applicable because no executable, fixture or browser-test source changed
+after those runs. No further runtime tests were launched for that record.
+
+The previous website build and internal-link validation passed, run `acada2f8-c1e8-424c-98ad-e5ef25f4b717`, building 32
+pages with Node 26.12.1 and Bun 1.4.2. It is reused for the unchanged Muse documentation: this round changes no website
+source, and the upstream Trash documentation changes do not interact with these pages. Prior shipped-CLI-bin Clippy,
+changelog formatting and agent-instruction checks remain applicable to unchanged inputs.
+
+Desktop, installer, provisioning and the full browser battery were skipped because these corrections change ordinary
+restart wording and test premises; the requested two browser specs exercise the affected browser behavior. No additional
+vendor or real-provider question run was made because question recognition is explicitly deferred.
 
 ## Review gate's outcome
 
-All four implementation units passed the required single fresh-context gpt-6.1-sol/high gate in the prior round, after
-the historical-conversion/storage and central Status documentation findings were fixed. The status unit's old overall
-scope objection is superseded by the recorded smaller-scope Decision. A fresh final review of the complete amended
-status unit by gpt-6.1-sol/high passed with no findings. The independent resume check also passed.
+All four units passed the required single fresh-context gpt-6.1-sol/high gates in the implementation rounds. The
+complete amended conversation-resume PR passed a fresh review on that same model and effort with no actionable findings.
+The other units retain their reviewed patches. The independent resume check and the report's required cold read passed.
