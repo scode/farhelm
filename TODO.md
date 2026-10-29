@@ -240,10 +240,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   surfaces update availability once the host list is open; when at least one host needs an update, show an upgrade arrow
   on that icon itself, so updates are visible at a glance. Plan: `plans/queue/host-update-discoverability.md`.
 
-- **Make the "+ Terminal" control look distinct from a terminal tab.** The button that creates a new terminal is styled
-  so close to a real tab that it reads as another tab. Visually separate it from tabs, or otherwise make it clear that
-  it creates a terminal. Plan: `plans/queue/new-terminal-button.md`.
-
 - **Auto-assign a host alias from the left-most hostname label.** When a host is added, derive its alias automatically
   from the left-most part of the hostname (for example, `my-server.example.com` becomes `my-server`) instead of leaving
   it unset or requiring a manual pick. Plan: `plans/queue/host-short-names.md`.

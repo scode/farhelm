@@ -199,7 +199,7 @@ frame from before this step (S5).
 S7 restored).
 5. Press on the agent tab, move about 120 right while held, release; then do
 the same on the delete button. Require the frame unchanged both times:
-a control never drags the window. Click + terminal once to open a shell tab.
+a control never drags the window. Click the new-terminal button (+) after the tabs once to open a shell tab.
 Click the agent tab and require it selected; click the shell tab and require it
 selected (S8); click the agent tab and require it selected again. Then click
 delete once and require its confirmation panel to open under the top row, with
