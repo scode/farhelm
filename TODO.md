@@ -235,14 +235,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   which only managed checkouts get today. Git breaks inside the container for a folder that is a git worktree or a
   subfolder of a repository, since only the folder itself is mounted.
 
-- **Add an "update all hosts" button and an auto-update setting.** In the current interface, updating hosts is hidden
-  behind clicks and hard to discover. Put a clearly visible update control (an "update all hosts" button or similar)
-  where users look for it, and add a setting to always auto-update. Plan: `plans/queue/host-update-discoverability.md`.
-
-- **Show an upgrade arrow on the hosts icon when any host needs an update.** The hosts icon in the bottom-left only
-  surfaces update availability once the host list is open; when at least one host needs an update, show an upgrade arrow
-  on that icon itself, so updates are visible at a glance. Plan: `plans/queue/host-update-discoverability.md`.
-
 - **Auto-assign a host alias from the left-most hostname label.** When a host is added, derive its alias automatically
   from the left-most part of the hostname (for example, `my-server.example.com` becomes `my-server`) instead of leaving
   it unset or requiring a manual pick. Plan: `plans/queue/host-short-names.md`.

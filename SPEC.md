@@ -116,18 +116,18 @@ in user-owned directories). If some optional step cannot be done without privile
 so and continues without it rather than escalating. Before touching the host for initial setup, the helm states exactly
 what it is about to do in concrete terms — the files it will place and where, the systemd units it will create, and that
 the supervisor will run persistently and start at boot — and proceeds only on confirmation. Remote updates use the same
-one-use plan mechanism behind the same authority, but the user's Update click is the authorization: no plan is shown for
-confirmation. Update never downgrades a host: it installs the helm's own build, so a host whose supervisor reports a
-newer build is refused with both versions named, and the user updates the helm instead. It also refuses a host whose
-supervisor reports a database schema newer than the helm's build can open, which happens after a development build ran
-there; that host needs a build at least that new. While an update is running, its host row stays folded and shows
-`Updating…` until a progress snapshot is available, then shows the current step, completed-step count, and
-client-measured elapsed time inline in the status spot; hovering that status shows the count, the elapsed time, and
-every step of the run with its status and the current one highlighted (in a window too short for the whole list, the
-list keeps the current step in view), since the sidebar is too narrow to show a long step name, let alone the rest of
-the run. Reduced-motion settings replace the animated indicator with a static one. Remote binary upload appears as a
-separate step before installation, so the user can tell when network transfer is still underway. The row and its hover
-use the helm's readable names for the same steps in the plan, with completed work checked green, the running step
+one-use plan mechanism behind the same authority, but the user's Update click or explicit automatic-update opt-in is the
+authorization: no plan is shown for confirmation. Update never downgrades a host: it installs the helm's own build, so a
+host whose supervisor reports a newer build is refused with both versions named, and the user updates the helm instead.
+It also refuses a host whose supervisor reports a database schema newer than the helm's build can open, which happens
+after a development build ran there; that host needs a build at least that new. While an update is running, its host row
+stays folded and shows `Updating…` until a progress snapshot is available, then shows the current step, completed-step
+count, and client-measured elapsed time inline in the status spot; hovering that status shows the count, the elapsed
+time, and every step of the run with its status and the current one highlighted (in a window too short for the whole
+list, the list keeps the current step in view), since the sidebar is too narrow to show a long step name, let alone the
+rest of the run. Reduced-motion settings replace the animated indicator with a static one. Remote binary upload appears
+as a separate step before installation, so the user can tell when network transfer is still underway. The row and its
+hover use the helm's readable names for the same steps in the plan, with completed work checked green, the running step
 pulsing amber (static under reduced motion), pending work grey, unchanged work grey, degraded work as an amber warning,
 and failure red with the helm's reason. Success returns the status spot to its normal label and leaves the row folded
 unless global details are on. Failure or an uncertain outcome still expands the row so its step list and diagnostic
@@ -139,14 +139,27 @@ Update request for each remote host whose individual Update action is available 
 setup or another run is skipped rather than queued for a later update; the local host is excluded. Each remote host
 keeps its own validation, progress, and result, so one failure does not hide or delay the others. Having an available
 Update action does not itself mean the host needs an update: the rail's update badge and the session-list update prompts
-require a compatible older build or a lower protocol, as well as an available remote Update action. V1 provisioning
-targets any Linux host with a usable systemd user manager, on the two architectures cross-compiled supervisor binaries
-exist for. The distribution is not a requirement — nothing provisioning does is distribution-specific — so the plan
-names whichever one it found rather than refusing; CI exercises Ubuntu. Hosts whose basic command-line tools come from
-BusyBox rather than GNU coreutils or its usual replacements are not a supported target: Farhelm accommodates them only
-where that takes a trivial change, and spends no further complexity on them. Everything else — no usable systemd user
-manager, or an architecture with no payload — falls back to the manual path (run the binary yourself), which always
-remains available, on the best-effort basis described in [Supported host setup](#supported-host-setup).
+require a compatible older build or a lower protocol, as well as an available remote Update action.
+
+**Update remote hosts automatically** in Settings is off by default for new and existing installations. While on, the
+helm starts that same authorized Update for each host with an update by the badge's test, including required protocol
+updates, even with no interface open. Enabling it also considers hosts that already need an update. The local host, busy
+hosts and newer builds are excluded; busy hosts are reconsidered when their work finishes. Progress and failure are the
+ordinary Update progress and failure in Hosts. A failed automatic attempt is not retried until that host's connection
+incarnation changes after failure or the helm restarts; switching the preference off and on does not clear this memory.
+A planning refusal starts no run: the helm logs the reason and remembers that failed attempt under the same no-retry
+rule. The badge and prompt remain, so a manual Update can show the refusal. There is no separate automatic failure
+surface. Turning the switch off prevents new automatic starts, including planning still in flight; it does not cancel an
+accepted run.
+
+V1 provisioning targets any Linux host with a usable systemd user manager, on the two architectures cross-compiled
+supervisor binaries exist for. The distribution is not a requirement — nothing provisioning does is
+distribution-specific — so the plan names whichever one it found rather than refusing; CI exercises Ubuntu. Hosts whose
+basic command-line tools come from BusyBox rather than GNU coreutils or its usual replacements are not a supported
+target: Farhelm accommodates them only where that takes a trivial change, and spends no further complexity on them.
+Everything else — no usable systemd user manager, or an architecture with no payload — falls back to the manual path
+(run the binary yourself), which always remains available, on the best-effort basis described in
+[Supported host setup](#supported-host-setup).
 
 Provisioning is idempotent and doubles as recovery: re-running it against an already-provisioned host — including from a
 brand-new helm whose registry was lost — detects the existing supervisor and re-registers the host with all its sessions
@@ -439,7 +452,8 @@ qualifying failures show as described above. The desktop settings dialog has a s
 automatically, on by default; turning it off stops the startup and daily checks and the background installs, while
 on-demand checks keep working and the red readout still appears for a version installed by hand. With automatic updates
 off, the user updates through an on-demand check or by running the installer, as before. None of this applies to the web
-UI, to a build from main, or to remote hosts, which the host list's own update actions handle.
+UI, to a build from main, or to remote hosts. Remote hosts have their own Update actions and the separate,
+off-by-default **Update remote hosts automatically** setting described under Topology.
 
 The installer, run by hand, intentionally trusts get.farhelm.io over TLS: it learns the latest stable release from
 get.farhelm.io, downloads that release's `SHA256SUMS` from it and the release archives through it, over HTTPS only (no
@@ -1545,53 +1559,58 @@ someone picks is remembered by the helm as one preference shared by every client
 session, visit history and compact-row choice, and most recent activity is what a client shows until someone picks
 otherwise. The same shared preference row carries terminal web-link click ownership, the quick-launch template name and
 number-key bindings, the session-confirmation opt-out, the quick-launch naming choice, terminal-frame coloring, the
-desktop download-opening types, and whether host setup or host removal confirmation should be skipped after an explicit
-permanent answer; a client that has already loaded its preferences keeps its previous behavior until it reloads, except
-that automatic session selection rereads the shared visits immediately before choosing, template shortcuts read their
-bindings on each invocation and the desktop helm reads the current file-opening list for each hover and open request.
-The gear at the foot of the host rail opens a settings dialog. Its left sidebar lists **Sessions**, **Appearance**,
-**Hosts**, **Terminal**, **Checkouts**, **Agent trust** and **Notifications**, followed by **App** only in a desktop app
-whose updater is active. Each section has an icon; the selected one uses the solid selection fill. One selected section
-appears beside the list, with a matching heading; notifications keeps **Sounds** and **ntfy alerts** sub-headings. The
-header and footer stay pinned while the body scrolls. At 620px wide and below, the dialog shows either the selected
-section or the list; **‹ Settings** returns to the list. The gear always opens sessions and focuses its first switch,
-including at phone width. Trust hints instead open agent trust at the relevant switch and scroll its block into view.
-Section buttons follow the platform's normal Tab rules. Switching sections preserves unsaved fields, outcome lines and
-pending saves; closing discards unsaved fields. Escape and either close control return focus to the gear. **Appearance**
-chooses **System**, **Dark** or **Light** for this device, with System as the default. System follows the device's
-current appearance, including changes while Farhelm stays open; an explicit choice overrides it. The browser or desktop
-webview remembers the choice locally, independently of the helm. The resolved palette applies before application content
-appears, and changes immediately without reloading. The terminal keeps its dark colors in both palettes. Sessions has an
-off-by-default **Skip session confirmations** switch. Its help names Delete, Replace, Restart and tab Close and excludes
-YOLO, host and trash questions (see Lifecycle operations). Beside it, **Name sessions on quick launch** is on by
-default, including when the helm has never stored a choice. Turning it off disables the naming prompt for quick
-launches. Beside it, **Color terminal frames by host** starts off and colors every session's thin terminal frame to
-match its host icon when turned on. The **Hosts** section has the switches `Set up new hosts without asking` and
-`Remove hosts without asking`, on when the respective confirmation is skipped. Turning one off restores that
-confirmation; turning one on makes the same choice as the host dialog's permanent answer. Changes take effect
-immediately in the current client. Each switch explains the current behavior, and each host dialog's permanent answer
-points to the gear as the place to undo it. The **Terminal** section chooses whether web links open in Farhelm without
-passing the click on (the default), open in Farhelm and also pass the click on, or only pass the click on. The latter
-two choices explain the risk of a second browser tab and that a program without mouse reporting cannot act on a click.
-This choice covers every client of the helm and takes effect in every mounted terminal of the current client
-immediately; other open clients pick it up when they reload, like the host choices. In the desktop app, the **Terminal**
-section also has tunnel consent and a free-form, comma-separated **File types to open with Cmd-click** field (Ctrl-click
-outside macOS). It defaults to `md, txt, json`; saving an empty list disables opening while downloads still save. This
-field requires an explicit, acknowledged save, but its value lives in the shared preference row. The dialog shows one
-prominent warning beside the field for each listed type outside `md`, `txt`, `json` and `log`; HTML-like types have a
-browser-specific warning, and all other unrecognized types have a generic warning. The warnings follow the draft as
-typed, including when another entry is malformed. A refused save leaves the draft and current helm policy unchanged and
-shows the reason inline. Under **Notifications**, sounds has three device switches (see Status), and **ntfy alerts** has
-an off-by-default switch, server URL (default `https://ntfy.sh`), topic, optional access token, and priority (Min, Low,
-Default, High, Urgent; default Default). These are explicitly saved helm configuration, shared by every client, outside
-the preference row. Save refusals appear inline. The stored token is never returned: the form shows whether one exists
-and allows replacing or clearing it. Changing to another server clears a saved token unless a new one is entered, and
-the form says so before saving. **Send test** uses the saved configuration, even while disabled, and reports success or
-failure inline. The **Checkouts** section holds the explicitly saved all-hosts checkout folder and, below it, a
-monospace multi-line post-clone command field and the default-on **Keep a checkout ready for faster launches** switch
-(see [Managed checkouts](#managed-checkouts)). The switch's help explains one extra checkout's disk space per repository
-and host, promptless login-shell preparation, earlier file times and Git hooks/filters, and discard on the next create
-or after 30 days unused; it links the full earlier-clone caveats. The folder's help explains expansion on each host,
+desktop download-opening types, automatic remote-host updates, and whether host setup or host removal confirmation
+should be skipped after an explicit permanent answer; a client that has already loaded its preferences keeps its
+previous behavior until it reloads, except that automatic session selection rereads the shared visits immediately before
+choosing, template shortcuts read their bindings on each invocation and the desktop helm reads the current file-opening
+list for each hover and open request. The gear at the foot of the host rail opens a settings dialog. Its left sidebar
+lists **Sessions**, **Appearance**, **Hosts**, **Terminal**, **Checkouts**, **Agent trust** and **Notifications**,
+followed by **App** only in a desktop app whose updater is active. Each section has an icon; the selected one uses the
+solid selection fill. One selected section appears beside the list, with a matching heading; notifications keeps
+**Sounds** and **ntfy alerts** sub-headings. The header and footer stay pinned while the body scrolls. At 620px wide and
+below, the dialog shows either the selected section or the list; **‹ Settings** returns to the list. The gear always
+opens sessions and focuses its first switch, including at phone width. Trust hints instead open agent trust at the
+relevant switch and scroll its block into view. Section buttons follow the platform's normal Tab rules. Switching
+sections preserves unsaved fields, outcome lines and pending saves; closing discards unsaved fields. Escape and either
+close control return focus to the gear. **Appearance** chooses **System**, **Dark** or **Light** for this device, with
+System as the default. System follows the device's current appearance, including changes while Farhelm stays open; an
+explicit choice overrides it. The browser or desktop webview remembers the choice locally, independently of the helm.
+The resolved palette applies before application content appears, and changes immediately without reloading. The terminal
+keeps its dark colors in both palettes. Sessions has an off-by-default **Skip session confirmations** switch. Its help
+names Delete, Replace, Restart and tab Close and excludes YOLO, host and trash questions (see Lifecycle operations).
+Beside it, **Name sessions on quick launch** is on by default, including when the helm has never stored a choice.
+Turning it off disables the naming prompt for quick launches. Beside it, **Color terminal frames by host** starts off
+and colors every session's thin terminal frame to match its host icon when turned on. The **Hosts** section has the
+switches `Set up new hosts without asking` and `Remove hosts without asking`, on when the respective confirmation is
+skipped. Turning one off restores that confirmation; turning one on makes the same choice as the host dialog's permanent
+answer. Changes take effect immediately in the current client. Each switch explains the current behavior, and each host
+dialog's permanent answer points to the gear as the place to undo it. Hosts also has **Update remote hosts
+automatically**, off unless explicitly enabled, with help explaining that the helm updates remote hosts as soon as
+updates are available, with no window open, and never updates its own machine this way. This shared choice survives helm
+restarts; other clients read it on reload, while the helm acts on a committed change immediately. A failed save restores
+the last known value and shows an adjacent error, then reconciles only this field with the helm if the request's outcome
+is uncertain. The **Terminal** section chooses whether web links open in Farhelm without passing the click on (the
+default), open in Farhelm and also pass the click on, or only pass the click on. The latter two choices explain the risk
+of a second browser tab and that a program without mouse reporting cannot act on a click. This choice covers every
+client of the helm and takes effect in every mounted terminal of the current client immediately; other open clients pick
+it up when they reload, like the host choices. In the desktop app, the **Terminal** section also has tunnel consent and
+a free-form, comma-separated **File types to open with Cmd-click** field (Ctrl-click outside macOS). It defaults to
+`md, txt, json`; saving an empty list disables opening while downloads still save. This field requires an explicit,
+acknowledged save, but its value lives in the shared preference row. The dialog shows one prominent warning beside the
+field for each listed type outside `md`, `txt`, `json` and `log`; HTML-like types have a browser-specific warning, and
+all other unrecognized types have a generic warning. The warnings follow the draft as typed, including when another
+entry is malformed. A refused save leaves the draft and current helm policy unchanged and shows the reason inline. Under
+**Notifications**, sounds has three device switches (see Status), and **ntfy alerts** has an off-by-default switch,
+server URL (default `https://ntfy.sh`), topic, optional access token, and priority (Min, Low, Default, High, Urgent;
+default Default). These are explicitly saved helm configuration, shared by every client, outside the preference row.
+Save refusals appear inline. The stored token is never returned: the form shows whether one exists and allows replacing
+or clearing it. Changing to another server clears a saved token unless a new one is entered, and the form says so before
+saving. **Send test** uses the saved configuration, even while disabled, and reports success or failure inline. The
+**Checkouts** section holds the explicitly saved all-hosts checkout folder and, below it, a monospace multi-line
+post-clone command field and the default-on **Keep a checkout ready for faster launches** switch (see
+[Managed checkouts](#managed-checkouts)). The switch's help explains one extra checkout's disk space per repository and
+host, promptless login-shell preparation, earlier file times and Git hooks/filters, and discard on the next create or
+after 30 days unused; it links the full earlier-clone caveats. The folder's help explains expansion on each host,
 first-use folder creation, and that command-line host overrides keep their folder. The command's help explains that it
 runs in each new checkout on its host, after cloning and before the agent starts, that changes affect future checkouts
 only, and that command-line host overrides keep their command. The installed desktop app's dialog also has an **App**
@@ -3262,7 +3281,8 @@ Further requirements:
   directly with a consumer subscription, unmodified.
 - Updates are never forced: the desktop app installs new stable releases in the background by default, but the user can
   turn that off and then update by hand or pin a version with the installer; an installed update takes effect at the
-  next start of Farhelm, which Restart to update only brings forward; remote hosts are updated only when the user asks.
+  next start of Farhelm, which Restart to update only brings forward; remote hosts are updated by an explicit Update
+  action or the separate, off-by-default automatic remote-host update setting.
 
 ## Non-goals for v1
 

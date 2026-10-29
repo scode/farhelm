@@ -378,6 +378,9 @@ impl ListSort {
 /// gets everywhere else in this codebase.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, Deserialize)]
 pub(crate) struct Preferences {
+    /// Shared authorization for helm-owned remote updates; absent stays off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) auto_update_remote_hosts: Option<bool>,
     /// A NULL choice uses the desktop opener's default; an empty choice disables it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) open_extensions: Option<String>,
@@ -800,6 +803,7 @@ pub(crate) fn save_agent_trust(
 /// them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PreferenceField {
+    AutoUpdateRemoteHosts,
     ClaudeTrustHintDismissed,
     CodexTrustHintDismissed,
     MuseTrustHintDismissed,
@@ -826,7 +830,10 @@ impl PreferenceField {
     fn has_shared_rollback(self) -> bool {
         matches!(
             self,
-            Self::NameSessionOnQuickLaunch | Self::ColorTerminalFrames | Self::TerminalLinkClick
+            Self::NameSessionOnQuickLaunch
+                | Self::ColorTerminalFrames
+                | Self::TerminalLinkClick
+                | Self::AutoUpdateRemoteHosts
         )
     }
 
@@ -834,6 +841,9 @@ impl PreferenceField {
     /// This normalized fallback is never an automatic preference patch.
     fn rollback_from(self, preferences: &Preferences) -> PreferenceValue {
         match self {
+            Self::AutoUpdateRemoteHosts => PreferenceValue::AutoUpdateRemoteHosts(
+                preferences.auto_update_remote_hosts == Some(true),
+            ),
             Self::NameSessionOnQuickLaunch => PreferenceValue::NameSessionOnQuickLaunch(
                 preferences.name_session_on_quick_launch != Some(false),
             ),
@@ -856,6 +866,7 @@ impl PreferenceField {
     /// The field's wire key in a `PUT /api/preferences` patch.
     fn key(self) -> &'static str {
         match self {
+            PreferenceField::AutoUpdateRemoteHosts => "auto_update_remote_hosts",
             PreferenceField::WelcomeSeen => "welcome_seen",
             PreferenceField::ClaudeTrustHintDismissed => "claude_trust_hint_dismissed",
             PreferenceField::CodexTrustHintDismissed => "codex_trust_hint_dismissed",
@@ -885,6 +896,7 @@ impl PreferenceField {
 /// helm route's typed-validation concern.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum PreferenceValue {
+    AutoUpdateRemoteHosts(bool),
     ClaudeTrustHintDismissed(bool),
     CodexTrustHintDismissed(bool),
     MuseTrustHintDismissed(bool),
@@ -913,6 +925,7 @@ impl PreferenceValue {
     /// Select the independent queue slot that serializes writes for this value.
     fn field(&self) -> PreferenceField {
         match self {
+            Self::AutoUpdateRemoteHosts(_) => PreferenceField::AutoUpdateRemoteHosts,
             Self::WelcomeSeen(_) => PreferenceField::WelcomeSeen,
             Self::ClaudeTrustHintDismissed(_) => PreferenceField::ClaudeTrustHintDismissed,
             Self::CodexTrustHintDismissed(_) => PreferenceField::CodexTrustHintDismissed,
@@ -941,7 +954,8 @@ impl PreferenceValue {
             Self::QuickLaunchTemplate(value) => serde_json::json!(value),
             Self::TerminalLinkClick(value) => serde_json::json!(value.key()),
             Self::TemplateShortcuts(value) => serde_json::json!(value),
-            Self::WelcomeSeen(value)
+            Self::AutoUpdateRemoteHosts(value)
+            | Self::WelcomeSeen(value)
             | Self::ClaudeTrustHintDismissed(value)
             | Self::CodexTrustHintDismissed(value)
             | Self::MuseTrustHintDismissed(value)
@@ -1036,6 +1050,7 @@ struct PreferenceWrites {
     session_confirmations: FieldWrite,
     name_session_on_quick_launch: FieldWrite,
     color_terminal_frames: FieldWrite,
+    auto_update_remote_hosts: FieldWrite,
     quick_launch_template: FieldWrite,
     template_shortcuts: FieldWrite,
     feedback_contact: FieldWrite,
@@ -1105,11 +1120,12 @@ impl PreferenceWrites {
         receiver
     }
 
-    /// Seed the three shared fallbacks from the same snapshot the gate displays.
+    /// Seed shared fallbacks from the same snapshot the gate displays.
     /// A crossing GET cannot replace an active field's established baseline;
     /// defaults after a failed read only initialize a missing fallback.
     fn seed_rollbacks(&mut self, seed: &Preferences, read_succeeded: bool) {
         for field in [
+            PreferenceField::AutoUpdateRemoteHosts,
             PreferenceField::NameSessionOnQuickLaunch,
             PreferenceField::ColorTerminalFrames,
             PreferenceField::TerminalLinkClick,
@@ -1196,6 +1212,7 @@ impl PreferenceWrites {
             PreferenceField::SessionConfirmations => &mut self.session_confirmations,
             PreferenceField::NameSessionOnQuickLaunch => &mut self.name_session_on_quick_launch,
             PreferenceField::ColorTerminalFrames => &mut self.color_terminal_frames,
+            PreferenceField::AutoUpdateRemoteHosts => &mut self.auto_update_remote_hosts,
             PreferenceField::QuickLaunchTemplate => &mut self.quick_launch_template,
             PreferenceField::TemplateShortcuts => &mut self.template_shortcuts,
             PreferenceField::FeedbackContact => &mut self.feedback_contact,
@@ -1350,6 +1367,7 @@ impl PreferenceWrites {
             PreferenceField::SessionConfirmations => &self.session_confirmations,
             PreferenceField::NameSessionOnQuickLaunch => &self.name_session_on_quick_launch,
             PreferenceField::ColorTerminalFrames => &self.color_terminal_frames,
+            PreferenceField::AutoUpdateRemoteHosts => &self.auto_update_remote_hosts,
             PreferenceField::QuickLaunchTemplate => &self.quick_launch_template,
             PreferenceField::TemplateShortcuts => &self.template_shortcuts,
             PreferenceField::FeedbackContact => &self.feedback_contact,
@@ -1399,7 +1417,7 @@ impl PreferenceWrite {
 
     /// The current record's rollback fallback, absent after supersession.
     ///
-    /// Only naming, frame colors and terminal link-click receipts support this
+    /// Only shared Settings scalar receipts support this
     /// method; another field is a programmer error. The fallback is a displayed
     /// effective value (unset values decode to defaults), not proof of the
     /// helm's current value after an unknown write outcome. Never resubmit it.
@@ -1409,7 +1427,7 @@ impl PreferenceWrite {
 
     /// Refine this scalar's fallback from one corrective GET while still current.
     ///
-    /// The same three-field restriction as `rollback_value` applies. Apply only
+    /// The same shared-scalar restriction as `rollback_value` applies. Apply only
     /// the returned field to the shared snapshot, with no await before doing so;
     /// a superseded read returns None and must not change state or show an error.
     pub(crate) fn reconcile(self, preferences: &Preferences) -> Option<PreferenceValue> {
@@ -1578,7 +1596,7 @@ fn preference_write_completion(
 /// receipt before reporting or reverting either outcome, since an already-
 /// delivered result can precede a newer click. The writer outlives the caller;
 /// the waiter need not outlive a component unless
-/// its optimistic state does (the three shared Settings scalars do).
+/// its optimistic state does (the shared Settings scalars do).
 pub(crate) fn observe_preference(
     base: &str,
     value: PreferenceValue,
@@ -7258,6 +7276,45 @@ mod preference_write_tests {
         assert!(!queue.record(value));
         assert_eq!(waiting.try_recv(), Ok(Some(false)));
         assert!(!queue.is_current(write));
+    }
+
+    /// Remote-update authorization uses its own queue slot and an off fallback.
+    /// A refused latest save discards the optimistic opt-in, then a corrective
+    /// read can recover a committed value without resending the mutation.
+    #[farhelm_testtrace::test]
+    fn automatic_host_update_save_rolls_back_and_reconciles_one_field() {
+        let mut queue = PreferenceWrites::default();
+        let defaults: Preferences = serde_json::from_str("{}").unwrap();
+        assert_eq!(defaults.auto_update_remote_hosts, None);
+        queue.seed_rollbacks(&defaults, true);
+        let value = PreferenceValue::AutoUpdateRemoteHosts(true);
+        assert_eq!(value.field().key(), "auto_update_remote_hosts");
+        assert_eq!(value.wire_value(), serde_json::json!(true));
+        let (write, mut waiting, _) = queue.observe(value.clone());
+        assert_eq!(queue.next_to_send(write.field), Some(value));
+        queue.writer_lost(write.field);
+        assert_eq!(waiting.try_recv(), Ok(Some(false)));
+        assert_eq!(queue.pending(write.field), None);
+        assert_eq!(
+            queue.rollback_value(write),
+            Some(PreferenceValue::AutoUpdateRemoteHosts(false))
+        );
+        let fetched = Preferences {
+            auto_update_remote_hosts: Some(true),
+            compact: Some(true),
+            ..Default::default()
+        };
+        assert_eq!(
+            queue.reconcile(write, &fetched),
+            Some(PreferenceValue::AutoUpdateRemoteHosts(true))
+        );
+        assert_eq!(queue.pending(PreferenceField::Compact), None);
+        drop(queue.observe(PreferenceValue::AutoUpdateRemoteHosts(false)));
+        assert!(
+            !queue.is_current(write),
+            "a newer click owns even an equal displayed choice"
+        );
+        assert_eq!(queue.reconcile(write, &defaults), None);
     }
 
     /// Losing the writer discards its pending choice without promoting it into

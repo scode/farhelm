@@ -8605,6 +8605,7 @@ mod tests {
     #[test]
     fn the_remembered_permissions_word_seeds_only_a_mode_this_build_knows() {
         let with = |word: Option<&str>| super::api::Preferences {
+            auto_update_remote_hosts: None,
             visit_history: Vec::new(),
             open_extensions: None,
             list_sort: None,

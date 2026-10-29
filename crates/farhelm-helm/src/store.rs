@@ -329,7 +329,7 @@ pub struct FolderHistoryEntry {
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 67;
+const SCHEMA_VERSION: i64 = 68;
 
 /// Shared visits are bounded independently of fleet size. Stale references
 /// remain ordinary history entries until later visits push them out.
@@ -1046,6 +1046,9 @@ pub fn is_known_remembered_permissions_word(text: &str) -> bool {
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Preferences {
+    /// Only true authorizes the helm to update eligible remote hosts without a window.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_update_remote_hosts: Option<bool>,
     /// Only true authorizes desktop loopback tunnels; unset and false both disable them.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tunnel_consent: Option<bool>,
@@ -1147,6 +1150,13 @@ pub struct Preferences {
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PreferencePatch {
+    /// Null disables automatic updates; omission preserves the shared authorization.
+    #[serde(
+        default,
+        deserialize_with = "double_option_bool",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub auto_update_remote_hosts: Option<Option<bool>>,
     /// Null revokes consent just like false; omission preserves the stored choice.
     #[serde(
         default,
@@ -2181,6 +2191,7 @@ pub struct HelmStore {
 /// - 65: drop bare-ID uniqueness; the host/session primary key is the cache identity.
 /// - 66: shared recent visit history, without inventing legacy visits.
 /// - 67: default-on prepared checkout policy for future managed creates.
+/// - 68: nullable automatic remote-host updates, off until explicitly authorized.
 fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -2397,7 +2408,8 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
                  -- created, so a fresh database matches a migrated one.
                  remembered_wrapper_prefixes TEXT NOT NULL DEFAULT '{{}}',
                  open_extensions TEXT,
-                 visit_history TEXT NOT NULL DEFAULT '[]'
+                 visit_history TEXT NOT NULL DEFAULT '[]',
+                 auto_update_remote_hosts INTEGER CHECK (auto_update_remote_hosts IN (0, 1))
              ) STRICT;
              -- Successful structured creates are reusable only for the
              -- installation that actually accepted them. The stored
@@ -2489,7 +2501,7 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 67;",
+              PRAGMA user_version = 68;",
         ))
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -4006,6 +4018,20 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
             .context("migrating helm.db to schema version 67")?;
         version = 67;
     }
+    if version == 67 {
+        // Existing installations must not authorize remote mutations on upgrade.
+        let present: bool = tx.query_row(
+            "SELECT count(*) != 0 FROM pragma_table_info('preferences') WHERE name = 'auto_update_remote_hosts'",
+            [], |row| row.get(0),
+        )?;
+        if !present {
+            tx.execute_batch("ALTER TABLE preferences ADD COLUMN auto_update_remote_hosts INTEGER CHECK (auto_update_remote_hosts IN (0, 1));")
+                .context("adding automatic remote-host update preference")?;
+        }
+        tx.execute_batch("PRAGMA user_version = 68;")
+            .context("migrating helm.db to schema version 68")?;
+        version = 68;
+    }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
         // release the write lock cleanly rather than leaving it to an
@@ -5079,12 +5105,13 @@ impl HelmStore {
         self.conn.call("preference read task panicked", move |conn: &mut Connection| -> anyhow::Result<Preferences> {
             conn
                 .query_row(
-                    "SELECT list_sort, last_selected, compact, remembered_permissions, codex_trust_hint_dismissed, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations, quick_launch_template, template_shortcuts, welcome_seen, claude_trust_hint_dismissed, tunnel_consent, name_session_on_quick_launch, muse_trust_hint_dismissed, pi_trust_hint_dismissed, color_terminal_frames, remembered_wrapper_prefixes, open_extensions, visit_history \
+                    "SELECT list_sort, last_selected, compact, remembered_permissions, codex_trust_hint_dismissed, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations, quick_launch_template, template_shortcuts, welcome_seen, claude_trust_hint_dismissed, tunnel_consent, name_session_on_quick_launch, muse_trust_hint_dismissed, pi_trust_hint_dismissed, color_terminal_frames, remembered_wrapper_prefixes, open_extensions, visit_history, auto_update_remote_hosts \
                      FROM preferences WHERE singleton = 1",
                     [],
                     |row| {
                         let remembered_permissions: Option<String> = row.get(3)?;
                         Ok(Preferences {
+                            auto_update_remote_hosts: row.get(22)?,
                             codex_trust_hint_dismissed: row.get(4)?,
                             muse_trust_hint_dismissed: row.get(16)?,
                             pi_trust_hint_dismissed: row.get(17)?,
@@ -5161,6 +5188,8 @@ impl HelmStore {
             // is what lets a NULL value mean "clear" rather than "keep",
             // which a COALESCE could not express.
             let welcome_seen_present = patch.welcome_seen.is_some();
+            let auto_update_remote_hosts_present = patch.auto_update_remote_hosts.is_some();
+            let auto_update_remote_hosts = patch.auto_update_remote_hosts.flatten();
             let tunnel_consent_present = patch.tunnel_consent.is_some();
             let tunnel_consent = patch.tunnel_consent.flatten();
             let welcome_seen = patch.welcome_seen.flatten();
@@ -5219,8 +5248,8 @@ impl HelmStore {
             tx
                 .execute(
                     "INSERT INTO preferences \
-                         (singleton, list_sort, last_selected, compact, remembered_permissions, codex_trust_hint_dismissed, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations, quick_launch_template, template_shortcuts, welcome_seen, claude_trust_hint_dismissed, tunnel_consent, name_session_on_quick_launch, muse_trust_hint_dismissed, pi_trust_hint_dismissed, color_terminal_frames, open_extensions, visit_history) \
-                     VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?19, ?21, ?23, ?25, ?27, ?29, ?31, ?33, ?35, ?37, ?39, ?41) \
+                         (singleton, list_sort, last_selected, compact, remembered_permissions, codex_trust_hint_dismissed, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations, quick_launch_template, template_shortcuts, welcome_seen, claude_trust_hint_dismissed, tunnel_consent, name_session_on_quick_launch, muse_trust_hint_dismissed, pi_trust_hint_dismissed, color_terminal_frames, open_extensions, visit_history, auto_update_remote_hosts) \
+                     VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?19, ?21, ?23, ?25, ?27, ?29, ?31, ?33, ?35, ?37, ?39, ?41, ?42) \
                      ON CONFLICT (singleton) DO UPDATE SET \
                          list_sort = CASE WHEN ?10 THEN excluded.list_sort ELSE list_sort END, \
                          last_selected = CASE WHEN ?11 THEN excluded.last_selected \
@@ -5247,7 +5276,8 @@ impl HelmStore {
                          muse_trust_hint_dismissed = CASE WHEN ?34 THEN excluded.muse_trust_hint_dismissed ELSE muse_trust_hint_dismissed END, \
                          pi_trust_hint_dismissed = CASE WHEN ?36 THEN excluded.pi_trust_hint_dismissed ELSE pi_trust_hint_dismissed END, \
                          color_terminal_frames = CASE WHEN ?38 THEN excluded.color_terminal_frames ELSE color_terminal_frames END, \
-                         open_extensions = CASE WHEN ?40 THEN excluded.open_extensions ELSE open_extensions END",
+                         open_extensions = CASE WHEN ?40 THEN excluded.open_extensions ELSE open_extensions END, \
+                         auto_update_remote_hosts = CASE WHEN ?43 THEN excluded.auto_update_remote_hosts ELSE auto_update_remote_hosts END",
                     rusqlite::params![
                         sort,
                         selected,
@@ -5289,7 +5319,9 @@ impl HelmStore {
                         color_terminal_frames_present,
                         open_extensions,
                         open_extensions_present,
-                        history
+                        history,
+                        auto_update_remote_hosts,
+                        auto_update_remote_hosts_present
                     ],
                 )
                 .context("writing the client preference")?;
@@ -8840,6 +8872,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN remembered_wrapper_prefixes;
                  ALTER TABLE preferences DROP COLUMN open_extensions;
                  ALTER TABLE preferences DROP COLUMN visit_history;
+                 ALTER TABLE preferences DROP COLUMN auto_update_remote_hosts;
                  ALTER TABLE preferences DROP COLUMN template_shortcuts;
                  ALTER TABLE preferences DROP COLUMN quick_launch_template;
                  ALTER TABLE preferences DROP COLUMN skip_session_confirmations;
@@ -8870,6 +8903,10 @@ mod tests {
                     .is_err()
             );
             assert!(conn.prepare("SELECT entry_uuid FROM hosts").is_err());
+            assert_eq!(conn.query_row(
+                "SELECT count(*) FROM pragma_table_info('preferences') WHERE name = 'auto_update_remote_hosts'",
+                [], |row| row.get::<_, i64>(0),
+            ).unwrap(), 0, "premise: schema 27 has no future automatic-update preference");
         }
         drop(store);
         let migrated = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
@@ -11392,6 +11429,7 @@ mod tests {
                 muse_trust_hint_dismissed: None,
                 pi_trust_hint_dismissed: None,
                 tunnel_consent: None,
+                auto_update_remote_hosts: None,
             },
             "a selection write must not discard the sort written before it"
         );
@@ -11427,6 +11465,7 @@ mod tests {
                 muse_trust_hint_dismissed: None,
                 pi_trust_hint_dismissed: None,
                 tunnel_consent: None,
+                auto_update_remote_hosts: None,
             },
             "a later sort replaces the earlier one, and an empty patch is a no-op"
         );
@@ -11461,6 +11500,7 @@ mod tests {
                 muse_trust_hint_dismissed: None,
                 pi_trust_hint_dismissed: None,
                 tunnel_consent: None,
+                auto_update_remote_hosts: None,
             },
             "an explicit null clears selection and its visits without changing settings"
         );
@@ -11544,6 +11584,7 @@ mod tests {
                 muse_trust_hint_dismissed: None,
                 pi_trust_hint_dismissed: None,
                 tunnel_consent: None,
+                auto_update_remote_hosts: None,
             },
             "null clears exactly the permissions memory and disturbs nothing else"
         );
@@ -11928,9 +11969,77 @@ mod tests {
         );
     }
 
+    /// Upgrading must never grant remote-mutation permission. The new nullable
+    /// field starts off, preserves unrelated settings and survives reopening;
+    /// sparse writes and null retain the same semantics as other preferences.
+    #[farhelm_testtrace::test]
+    async fn schema_68_automatic_host_updates_start_off_and_persist() {
+        let (dir, store) = fresh_store().await;
+        assert_eq!(
+            store.preferences().await.unwrap().auto_update_remote_hosts,
+            None
+        );
+        store
+            .update_preferences(PreferencePatch {
+                compact: Some(Some(true)),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let path = dir.path().join("helm.db");
+        drop(store);
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch("ALTER TABLE preferences DROP COLUMN auto_update_remote_hosts; PRAGMA user_version = 67;").unwrap();
+        assert_eq!(conn.query_row("SELECT count(*) FROM pragma_table_info('preferences') WHERE name = 'auto_update_remote_hosts'", [], |row| row.get::<_, i64>(0)).unwrap(), 0,
+            "fixture premise: the previous schema cannot store this authorization");
+        drop(conn);
+        let store = HelmStore::open(&path).await.unwrap();
+        let preferences = store.preferences().await.unwrap();
+        assert_eq!(preferences.auto_update_remote_hosts, None);
+        assert_eq!(preferences.compact, Some(true));
+        store
+            .update_preferences(PreferencePatch {
+                auto_update_remote_hosts: Some(Some(true)),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        store
+            .update_preferences(PreferencePatch::default())
+            .await
+            .unwrap();
+        drop(store);
+        let store = HelmStore::open(&path).await.unwrap();
+        assert_eq!(
+            store.preferences().await.unwrap().auto_update_remote_hosts,
+            Some(true)
+        );
+        assert_eq!(store.schema_version, 68);
+        store
+            .update_preferences(PreferencePatch {
+                auto_update_remote_hosts: Some(None),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let preferences = store.preferences().await.unwrap();
+        assert_eq!(preferences.auto_update_remote_hosts, None);
+        assert_eq!(preferences.compact, Some(true));
+        // An older helm's schema guard sees 68, rather than opening a database
+        // in which it could silently ignore an active remote-mutation policy.
+        let conn = Connection::open(&path).unwrap();
+        assert_eq!(
+            conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            68
+        );
+    }
+
     /// An upgrade gains empty visit history without inventing visits from the
     /// legacy selection or losing settings. Its DDL must match a fresh install,
-    /// and a version-only rewind must preserve already-recorded visits.
+    /// and a version-only rewind must preserve already-recorded visits. Future
+    /// preference columns leave the historical fixture too, so the ladder adds
+    /// them after visit history rather than retaining a current-schema position.
     #[farhelm_testtrace::test]
     async fn schema_66_starts_empty_visits_and_preserves_legacy_preferences() {
         let (dir, store) = fresh_store().await;
@@ -11948,13 +12057,19 @@ mod tests {
         let conn = Connection::open(&path).unwrap();
         let fresh_schema = schema_objects(&conn);
         conn.execute_batch(
-            "ALTER TABLE preferences DROP COLUMN visit_history; PRAGMA user_version = 65;",
+            "ALTER TABLE preferences DROP COLUMN visit_history;
+             ALTER TABLE preferences DROP COLUMN auto_update_remote_hosts;
+             PRAGMA user_version = 65;",
         )
         .unwrap();
         assert_eq!(conn.query_row(
             "SELECT count(*) FROM pragma_table_info('preferences') WHERE name = 'visit_history'",
             [], |row| row.get::<_, i64>(0),
         ).unwrap(), 0, "premise: the preceding schema has no visit history");
+        assert_eq!(conn.query_row(
+            "SELECT count(*) FROM pragma_table_info('preferences') WHERE name = 'auto_update_remote_hosts'",
+            [], |row| row.get::<_, i64>(0),
+        ).unwrap(), 0, "premise: schema 65 has no future automatic-update preference");
         drop(conn);
         let migrated = HelmStore::open(&path).await.unwrap();
         let preferences = migrated.preferences().await.unwrap();
@@ -13978,6 +14093,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN remembered_wrapper_prefixes;
                  ALTER TABLE preferences DROP COLUMN open_extensions;
                  ALTER TABLE preferences DROP COLUMN visit_history;
+                 ALTER TABLE preferences DROP COLUMN auto_update_remote_hosts;
                  ALTER TABLE preferences DROP COLUMN template_shortcuts;
                  ALTER TABLE preferences DROP COLUMN quick_launch_template;
                  ALTER TABLE preferences DROP COLUMN skip_session_confirmations;
@@ -14000,6 +14116,10 @@ mod tests {
             )
             .expect("replace current history with the schema-22 shape");
             assert!(conn.prepare("SELECT entry_uuid FROM hosts").is_err());
+            assert_eq!(conn.query_row(
+                "SELECT count(*) FROM pragma_table_info('preferences') WHERE name = 'auto_update_remote_hosts'",
+                [], |row| row.get::<_, i64>(0),
+            ).unwrap(), 0, "premise: schema 22 has no future automatic-update preference");
             conn.execute(
                 "INSERT INTO create_history_sessions (host_id, host_identity, session_id, creation_seq)
                  VALUES (?1, 'identity-kept', 'old-admission', 1)",
@@ -14171,6 +14291,7 @@ mod tests {
                 muse_trust_hint_dismissed: None,
                 pi_trust_hint_dismissed: None,
                 tunnel_consent: None,
+                auto_update_remote_hosts: None,
             },
             "compact defaults absent, sort survives, and an unowned legacy selection clears"
         );
@@ -14254,6 +14375,7 @@ mod tests {
                 muse_trust_hint_dismissed: None,
                 pi_trust_hint_dismissed: None,
                 tunnel_consent: None,
+                auto_update_remote_hosts: None,
             },
             "permissions defaults absent, other choices survive, and an unowned selection clears"
         );

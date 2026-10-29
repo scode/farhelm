@@ -2,7 +2,7 @@
  * These tests keep real configuration or preference reads and the host registry,
  * so a checkbox that changes only its appearance cannot satisfy the round trip.
  */
-import { expect, test } from "./helpers/evidence";
+import { expect, newObservedContext, test } from "./helpers/evidence";
 import { resolveToken } from "./helpers/color";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { clickDialogGap } from "./helpers/dialog-gap";
@@ -11,7 +11,7 @@ import { drainedRoute } from "./helpers/drained-route";
 import { requireHelmBuild } from "./helpers/helm-build";
 import { attachSession } from "./helpers/term";
 import { openSettings, selectSettingsSection, settingsSectionLabels, type SettingsSection } from "./helpers/settings";
-import type { APIRequestContext, Page, Request, Route } from "@playwright/test";
+import type { APIRequestContext, BrowserContext, Page, Request, Route } from "@playwright/test";
 import { request as independentRequest } from "@playwright/test";
 import { harnessAuthorizationHeaders } from "./helpers/device-auth";
 import { currentStackSlot } from "../stack-slots";
@@ -20,6 +20,7 @@ import {
   createSession,
   forceBuildSkew,
   hostRowByName,
+  listHosts,
   openHostMenu,
   patchPreferences,
   readPreferences,
@@ -116,9 +117,34 @@ async function endPreferenceSaveTest(
   ]);
 }
 
+/** The maintained stack owns a local supervisor and a remote SSH test host.
+ * Authorization tests must wait until every remote is connected to this same
+ * build, so enabling the real policy cannot accidentally test provisioning.
+ * Keep the harness's registry intact; a local-only assumption hides its topology.
+ */
+async function awaitCurrentFixtureHosts(request: APIRequestContext): Promise<void> {
+  const helmBuild = requireHelmBuild(await request.get("/api/hosts"), "automatic-update fixture readiness");
+  let last: Awaited<ReturnType<typeof listHosts>> = [];
+  await expect.poll(async () => {
+    last = await listHosts(request);
+    return last.some((host) => host.kind === "local") && last.every((host) => host.kind === "local" ||
+      (host.kind === "ssh" && host.state.phase === "connected" && host.state.old_version === false &&
+        host.state.newer_version === false && host.state.build_version === helmBuild));
+  }, { timeout: 30_000, message: "every fixture remote must be connected on the helm's build with no update or protocol skew" })
+    .toBe(true).catch((error) => {
+      const summary = last.slice(0, 16).map((host) => ({ id: host.id, kind: host.kind,
+        phase: host.state.phase, old: host.state.old_version, newer: host.state.newer_version,
+        sameBuild: host.state.build_version === helmBuild }));
+      throw new Error(`${String(error)}\nlast fixture readiness (${last.length} hosts): ${JSON.stringify(summary)}`);
+    });
+}
+
 // Claude and Codex cover the two hint implementations. Muse uses the same
 // workspace component as Codex; Pi has no question-hint switch.
 for (const choice of [
+  { field: "auto_update_remote_hosts", saved: false, next: true, section: "hosts", role: "checkbox",
+    name: "Update remote hosts automatically", oldName: "Update remote hosts automatically", oldChecked: false,
+    error: "Could not save whether to update remote hosts automatically. Try again." },
   { field: "color_terminal_frames", saved: false, next: true, section: "sessions", role: "checkbox",
     name: "Color terminal frames by host", oldName: "Color terminal frames by host", oldChecked: false,
     error: "Could not save whether to color terminal frames. Try again." },
@@ -148,6 +174,9 @@ for (const choice of [
     let writes = 0;
     let bodyFailed = true;
     try {
+      if (choice.field === "auto_update_remote_hosts") {
+        await awaitCurrentFixtureHosts(request);
+      }
       await patchPreferences(request, { [choice.field]: choice.saved });
       expect((await readPreferences(request))[choice.field], "the helm holds the explicit fixture choice").toBe(choice.saved);
       stopRoute = await drainedRoute(page, "**/api/preferences", async (route) => {
@@ -848,7 +877,7 @@ test("settings keeps both close controls pinned around its grouped scrolling bod
     await page.setViewportSize({ width, height: 560 });
     await gear.click();
     await expect(dialog.getByRole("checkbox", { name: "Skip session confirmations", exact: true })).toBeFocused();
-    await expect(dialog.getByRole("checkbox", { includeHidden: true })).toHaveCount(18);
+    await expect(dialog.getByRole("checkbox", { includeHidden: true })).toHaveCount(19);
     await page.evaluate(() => document.fonts.ready);
     await selectSettingsSection(page, "agent trust");
     await expect(dismiss).toHaveAttribute("data-tooltip", "Close settings; unsaved fields are discarded");
@@ -896,7 +925,7 @@ test("settings keeps both close controls pinned around its grouped scrolling bod
   await page.setViewportSize({ width: 1280, height: 5000 });
   await gear.click();
   await selectSettingsSection(page, "agent trust");
-  await expect(dialog.getByRole("checkbox", { includeHidden: true })).toHaveCount(18);
+  await expect(dialog.getByRole("checkbox", { includeHidden: true })).toHaveCount(19);
   const tall = await body.evaluate((el) => ({ content: el.scrollHeight, height: el.clientHeight }));
   expect(tall.height).toBeGreaterThan(0);
   expect(tall.content, "a tall window must fit the settings without scrolling").toBeLessThanOrEqual(tall.height);
@@ -923,7 +952,7 @@ test("settings navigation keeps mounted panes and follows the narrow list path",
   await expect(navigation.getByRole("button")).toHaveText(webSettingsSections.map(section => settingsSectionLabels[section]));
   await expect(navigation.getByRole("button", { name: "App", exact: true })).toHaveCount(0);
   await expect(panels).toHaveCount(webSettingsSections.length);
-  await expect(dialog.getByRole("checkbox", { includeHidden: true })).toHaveCount(18);
+  await expect(dialog.getByRole("checkbox", { includeHidden: true })).toHaveCount(19);
   await expect(dialog.getByRole("checkbox", { name: "Skip session confirmations", exact: true })).toBeFocused();
   for (const section of webSettingsSections) {
     const panel = await selectSettingsSection(page, section);
@@ -1017,6 +1046,80 @@ test("settings navigation keeps mounted panes and follows the narrow list path",
   await expect(navigation).toBeHidden();
   await expect(back).toBeVisible();
   await expect(dialog.getByRole("checkbox", { name: "Skip session confirmations", exact: true })).toBeFocused();
+});
+
+/** Automatic remote updates are shared authorization, not a local checkbox.
+ * Real GET/PUT persistence, reload and a fresh second client distinguish the
+ * helm's value from optimistic component state. The fixture's remote hosts must
+ * be connected on the helm's build before enabling the real policy.
+ */
+test("automatic host updates default off and persist across clients without changing other settings", async ({ page, request, browser, timeline }) => {
+  const previous = await readPreferences(request);
+  let peerContext: BrowserContext | undefined;
+  let peer: Page | undefined;
+  let stopRoute = async () => {};
+  let stopPeerRoute = async () => {};
+  let writes = 0;
+  let bodyFailed = true;
+  const observePreferenceWrite = async (route: Route) => {
+    if (route.request().method() === "PUT" && "auto_update_remote_hosts" in route.request().postDataJSON()) writes++;
+    await route.continue();
+  };
+  try {
+    await awaitCurrentFixtureHosts(request);
+    await patchPreferences(request, { auto_update_remote_hosts: null, compact: true, terminal_link_click: "both" });
+    const initial = await readPreferences(request);
+    expect(initial.auto_update_remote_hosts, "fixture premise: the helm has no stored authorization").toBeUndefined();
+    expect(initial.compact).toBe(true);
+    expect(initial.terminal_link_click).toBe("both");
+    stopRoute = await drainedRoute(page, "**/api/preferences", observePreferenceWrite);
+    await page.goto("/");
+    let dialog = await openSettings(page, "hosts");
+    let toggle = dialog.getByRole("checkbox", { name: "Update remote hosts automatically", exact: true });
+    await expect(toggle).not.toBeChecked();
+    await expect(toggle).toBeEnabled();
+    expect(writes, "opening Settings must not grant or persist authorization").toBe(0);
+    expect((await readPreferences(request)).auto_update_remote_hosts).toBeUndefined();
+
+    const slot = currentStackSlot();
+    peerContext = await newObservedContext(browser, timeline, { baseURL: slot.baseURL, storageState: slot.authStatePath });
+    peer = await peerContext.newPage();
+    stopPeerRoute = await drainedRoute(peer, "**/api/preferences", observePreferenceWrite);
+    for (const enabled of [true, false]) {
+      await toggle.setChecked(enabled);
+      await expect.poll(async () => (await readPreferences(request)).auto_update_remote_hosts).toBe(enabled);
+      const persisted = await readPreferences(request);
+      expect(persisted.compact, "authorization writes must leave unrelated fields alone").toBe(true);
+      expect(persisted.terminal_link_click).toBe("both");
+      await page.reload();
+      dialog = await openSettings(page, "hosts");
+      toggle = dialog.getByRole("checkbox", { name: "Update remote hosts automatically", exact: true });
+      await expect(toggle).toBeChecked({ checked: enabled });
+      await expect(toggle).toBeEnabled();
+      // Each navigation seeds from the helm independently. No claim is made
+      // that an already-open Settings dialog live-syncs another client's write.
+      await peer.goto("/");
+      const peerDialog = await openSettings(peer, "hosts");
+      await expect(peerDialog.getByRole("checkbox", { name: "Update remote hosts automatically", exact: true }))
+        .toBeChecked({ checked: enabled });
+    }
+    expect(writes, "only the two explicit clicks may write the policy").toBe(2);
+    bodyFailed = false;
+  } finally {
+    await endPreferenceSaveTest(page, async () => {
+      await stopRoute();
+      await stopPeerRoute();
+    }, () => {}, async () => {
+      try { await peerContext?.close(); }
+      finally {
+        await patchPreferences(request, {
+          auto_update_remote_hosts: previous.auto_update_remote_hosts ?? null,
+          compact: previous.compact ?? null,
+          terminal_link_click: previous.terminal_link_click ?? null,
+        });
+      }
+    }, bodyFailed);
+  }
 });
 
 /** Naming defaults on without writing a choice during Settings open. The real
@@ -1842,7 +1945,7 @@ test("settings dismisses a row menu, isolates the page and returns focus on Esca
     const dialog = page.getByRole("dialog", { name: "Settings", exact: true });
     await expect(dialog).toBeVisible();
     await expect(page.locator('[role="menu"]')).toHaveCount(0);
-    await expect(dialog.getByRole("checkbox", { includeHidden: true })).toHaveCount(18);
+    await expect(dialog.getByRole("checkbox", { includeHidden: true })).toHaveCount(19);
     const setup = dialog.getByRole("checkbox", { name: "Set up new hosts without asking", exact: true });
     await expect(dialog.getByRole("checkbox", { name: "Skip session confirmations", exact: true })).toBeFocused();
     await selectSettingsSection(page, "hosts");
@@ -1895,7 +1998,7 @@ test("settings dismisses a row menu, isolates the page and returns focus on Esca
         expect(alignment.overflowing).toBe(false);
         for (const left of [...alignment.choices, ...alignment.help]) expect(left).toBeCloseTo(alignment.heading, 0);
       }
-      expect(measuredSwitches, "every mounted switch must be measured in its visible pane").toBe(18);
+      expect(measuredSwitches, "every mounted switch must be measured in its visible pane").toBe(19);
     }
     // Space exercises the native input rather than Playwright's checked-state
     // setter, and the real helm reply proves the preference writer still runs.

@@ -1,5 +1,9 @@
 //! Process-local orchestration authority for probes and one run per host.
 
+#[path = "automatic.rs"]
+mod automatic;
+pub(crate) use automatic::AutomaticUpdates;
+
 use super::backend::{
     ActionOutcome, BackendFailure, PreparedPayload, ProbeObservation, ProbeTarget,
     ProvisioningBackend, ReachOutcome, SystemBackend, path_text, stage_payload,
@@ -59,6 +63,16 @@ pub(super) struct ProvisioningMemory {
     pub(super) runs: HashMap<HostId, ProvisioningView>,
     pub(super) busy: std::collections::HashSet<HostId>,
     tasks: HashMap<HostId, tokio::task::JoinHandle<()>>,
+    /// Bind failure suppression to the automatic run, so a simultaneous manual
+    /// run cannot accidentally claim or clear the automatic retry boundary.
+    automatic_runs: HashMap<HostId, AutomaticRun>,
+}
+
+/// The connection at failure, which can differ from the one planning observed:
+/// an update may reconnect after learning its install paths before it fails.
+struct AutomaticRun {
+    run_id: String,
+    failed_incarnation: Option<u64>,
 }
 
 /// A confirmed plan retains the registration inputs used before execution.
@@ -144,6 +158,10 @@ pub(crate) struct ProvisioningService {
     layout: PlanLayout,
     local_farhelm: PathBuf,
     pub(super) memory: tokio::sync::Mutex<ProvisioningMemory>,
+    /// Order policy commits against the final automatic busy/progress claim.
+    /// Held only for local authorization and admission, never for host locks or
+    /// remote work; manual Update does not acquire it.
+    pub(crate) automatic_update_admission: tokio::sync::Mutex<()>,
     run_slots: Arc<tokio::sync::Semaphore>,
     /// Serializes ADD confirmations from looking up the destination's row
     /// to the run claiming its host, so two confirmations for the same
@@ -165,6 +183,10 @@ pub(crate) struct ProvisioningService {
     /// its actor is reconciled.
     #[cfg(test)]
     pub(super) registry_sync_gate: std::sync::Mutex<Option<Arc<RegistrySyncGate>>>,
+    /// Hold the next automatic attempt immediately before its admission lock,
+    /// so a completed opt-out can be ordered before the final policy check.
+    #[cfg(test)]
+    pub(super) automatic_admission_gate: std::sync::Mutex<Option<AutomaticAdmissionHold>>,
     /// Stands in for this helm's build in [`Self::helm_build`]: every test
     /// binary is a development build (`0.0.0-unreleased`), for which
     /// nothing is ever newer, so the downgrade refusal needs a release
@@ -173,8 +195,9 @@ pub(crate) struct ProvisioningService {
     pub(super) helm_build_override: std::sync::Mutex<Option<String>>,
 }
 
-/// A one-shot hold on [`ProvisioningService::sync_registry`]; see
-/// `registry_sync_gate`.
+/// A one-shot hold on a named test boundary. Registry reconciliation and
+/// automatic admission use independent instances so tests release only the
+/// operation whose lifetime they are proving.
 #[cfg(test)]
 pub(super) struct RegistrySyncGate {
     /// Notified when registration reaches the reconcile.
@@ -182,6 +205,15 @@ pub(super) struct RegistrySyncGate {
     /// Notified by the test to let the reconcile run.
     pub(super) release: tokio::sync::Notify,
 }
+
+/// Keep an optional sender inside the held admission future. Its receiver's
+/// cancellation proves that future was dropped before the test releases the
+/// hold; an empty action list alone would leave detached admission unobserved.
+#[cfg(test)]
+pub(super) type AutomaticAdmissionHold = (
+    Arc<RegistrySyncGate>,
+    Option<tokio::sync::oneshot::Sender<()>>,
+);
 
 /// The attach step's failure for a state in which the helm answered the
 /// supervisor this run installed and refused it, or `None` for any other
@@ -285,6 +317,15 @@ fn schema_refusal(host_schema: Option<i64>) -> Option<String> {
 }
 
 impl ProvisioningService {
+    /// Drive one real scan with caller-owned attempt memory, without a timer or
+    /// background scheduling, so retry tests can name the exact event boundary.
+    #[cfg(test)]
+    pub(super) async fn scan_automatic_updates(
+        self: &Arc<Self>,
+        attempted: &mut HashMap<HostId, u64>,
+    ) -> anyhow::Result<()> {
+        automatic::scan(self, attempted).await
+    }
     /// Production composition uses real process/file operations and
     /// resolves `selection`/`release_build` (D13, D18) into a real payload
     /// source via [`production_payloads`] — see that function for what each
@@ -313,6 +354,7 @@ impl ProvisioningService {
                 layout: PlanLayout::production(helm_state_dir),
                 local_farhelm,
                 memory: tokio::sync::Mutex::new(ProvisioningMemory::default()),
+                automatic_update_admission: tokio::sync::Mutex::new(()),
                 run_slots: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_RUNS)),
                 add_confirmations: Arc::default(),
                 plan_slots: tokio::sync::Semaphore::new(MAX_CONCURRENT_PLANS),
@@ -321,6 +363,8 @@ impl ProvisioningService {
                 fail_registry_sync: std::sync::atomic::AtomicBool::new(false),
                 #[cfg(test)]
                 registry_sync_gate: std::sync::Mutex::new(None),
+                #[cfg(test)]
+                automatic_admission_gate: std::sync::Mutex::new(None),
                 #[cfg(test)]
                 helm_build_override: std::sync::Mutex::new(None),
             }));
@@ -338,6 +382,7 @@ impl ProvisioningService {
             layout: PlanLayout::production(helm_state_dir),
             local_farhelm,
             memory: tokio::sync::Mutex::new(ProvisioningMemory::default()),
+            automatic_update_admission: tokio::sync::Mutex::new(()),
             run_slots: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_RUNS)),
             add_confirmations: Arc::default(),
             plan_slots: tokio::sync::Semaphore::new(MAX_CONCURRENT_PLANS),
@@ -346,6 +391,8 @@ impl ProvisioningService {
             fail_registry_sync: std::sync::atomic::AtomicBool::new(false),
             #[cfg(test)]
             registry_sync_gate: std::sync::Mutex::new(None),
+            #[cfg(test)]
+            automatic_admission_gate: std::sync::Mutex::new(None),
             #[cfg(test)]
             helm_build_override: std::sync::Mutex::new(None),
         }))
@@ -368,12 +415,14 @@ impl ProvisioningService {
             layout,
             local_farhelm,
             memory: tokio::sync::Mutex::new(ProvisioningMemory::default()),
+            automatic_update_admission: tokio::sync::Mutex::new(()),
             run_slots: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_RUNS)),
             add_confirmations: Arc::default(),
             plan_slots: tokio::sync::Semaphore::new(MAX_CONCURRENT_PLANS),
             progress_read_slots: tokio::sync::Semaphore::new(MAX_CONCURRENT_PROGRESS_READS),
             fail_registry_sync: std::sync::atomic::AtomicBool::new(false),
             registry_sync_gate: std::sync::Mutex::new(None),
+            automatic_admission_gate: std::sync::Mutex::new(None),
             helm_build_override: std::sync::Mutex::new(None),
         })
     }
@@ -1225,7 +1274,8 @@ impl ProvisioningService {
         crate::run_owned(async move { service.start_update_owned(host, request).await }).await
     }
 
-    /// The body of [`Self::start_update`], run on a helm-owned task.
+    /// Consume manual confirmation without ordering it against automatic policy.
+    /// Both paths still share the same busy claim, executor and revalidation.
     async fn start_update_owned(
         self: Arc<Self>,
         host: HostId,
@@ -1239,6 +1289,63 @@ impl ProvisioningService {
             return Err(anyhow::Error::new(ProvisioningRequestError::UnknownPlan));
         }
         self.start_run(host, pending, false).await
+    }
+
+    /// Admit an automatic plan in the same order as durable policy commits.
+    /// None means opt-out or a changed connection consumed the plan without a
+    /// run or failed attempt. Admission waits belong to the cancellable listener.
+    /// The gate ends at the busy/progress claim; only then does ordinary owned
+    /// launch begin, with no suspension between claim and spawning that owner.
+    async fn start_automatic_update(
+        self: &Arc<Self>,
+        host: HostId,
+        entry_uuid: String,
+        incarnation: u64,
+        request: ProvisionRequest,
+    ) -> anyhow::Result<Option<RunAccepted>> {
+        #[cfg(test)]
+        {
+            let hold = self
+                .automatic_admission_gate
+                .lock()
+                .expect("automatic admission gate mutex poisoned")
+                .take();
+            if let Some((gate, _drop_witness)) = hold {
+                gate.reached.notify_one();
+                gate.release.notified().await;
+            }
+        }
+        let policy = self.automatic_update_admission.lock().await;
+        let pending = self.consume_plan(&request.probe_id).await?;
+        if !matches!(pending.confirmation, PendingConfirmation::Update { host: planned, .. } if planned == host)
+        {
+            return Err(anyhow::Error::new(ProvisioningRequestError::UnknownPlan));
+        }
+        if self.store.preferences().await?.auto_update_remote_hosts != Some(true) {
+            return Ok(None);
+        }
+        let run_id = {
+            let mut memory = self.memory.lock().await;
+            // No await separates the final connection capture from its
+            // busy/progress claim. Policy remains locked across both.
+            if !self.manager.status(host).is_some_and(|current| {
+                current.entry_uuid == entry_uuid && current.incarnation == incarnation
+            }) {
+                return Ok(None);
+            }
+            Self::claim_run(&mut memory, host, &pending, false, true)?
+        };
+        drop(policy);
+        let service = Arc::clone(self);
+        // run_owned spawns before its first suspension. Keep this direct await
+        // adjacent to the synchronous claim so cancellation cannot strand busy.
+        crate::run_owned(async move {
+            service
+                .launch_claimed_run(host, pending, run_id)
+                .await
+                .map(Some)
+        })
+        .await
     }
 
     /// Plan removing Farhelm from a remote host and retain the plan behind a
@@ -1636,23 +1743,60 @@ impl ProvisioningService {
     /// Start a run for `host`. `claimed` says the caller already put `host`
     /// in the busy set (ADD claims an existing row before rewriting it; see
     /// [`Self::start_add`]); otherwise the claim is made here.
+    /// Manual starts do not acquire the automatic-policy gate; they share only
+    /// the host's ordinary busy claim and executor with automatic updates.
     async fn start_run(
         self: &Arc<Self>,
         host: HostId,
         pending: PendingPlan,
         claimed: bool,
     ) -> anyhow::Result<RunAccepted> {
-        let run_id = uuid::Uuid::new_v4().to_string();
-        {
+        let run_id = {
             let mut memory = self.memory.lock().await;
-            if !claimed && !memory.busy.insert(host) {
-                return Err(anyhow::Error::new(ProvisioningRequestError::Busy(host)));
-            }
-            memory.runs.insert(
+            Self::claim_run(&mut memory, host, &pending, claimed, false)?
+        };
+        self.launch_claimed_run(host, pending, run_id).await
+    }
+
+    /// Publish one admission while the caller holds provisioning memory. This
+    /// synchronous boundary lets automatic policy ordering cover the claim
+    /// without also serializing host locks or minutes of executor work.
+    fn claim_run(
+        memory: &mut ProvisioningMemory,
+        host: HostId,
+        pending: &PendingPlan,
+        claimed: bool,
+        automatic: bool,
+    ) -> anyhow::Result<String> {
+        if !claimed && !memory.busy.insert(host) {
+            return Err(anyhow::Error::new(ProvisioningRequestError::Busy(host)));
+        }
+        let run_id = uuid::Uuid::new_v4().to_string();
+        memory.runs.insert(
+            host,
+            ProvisioningView::for_plan(host, run_id.clone(), &pending.plan),
+        );
+        if automatic {
+            memory.automatic_runs.insert(
                 host,
-                ProvisioningView::for_plan(host, run_id.clone(), &pending.plan),
+                AutomaticRun {
+                    run_id: run_id.clone(),
+                    failed_incarnation: None,
+                },
             );
         }
+        Ok(run_id)
+    }
+
+    /// Finish an already-published admission on its owned task. Policy changes
+    /// do not cancel this run, and its potentially slow host lock cannot delay
+    /// a later opt-out acknowledgement.
+    async fn launch_claimed_run(
+        self: &Arc<Self>,
+        host: HostId,
+        pending: PendingPlan,
+        run_id: String,
+    ) -> anyhow::Result<RunAccepted> {
         // The provisioning lock, not the cache-write lock: the run holds it
         // for minutes, and the host's session list must keep updating
         // meanwhile. See `ActorHandle::provision_lock`.
@@ -1661,6 +1805,7 @@ impl ProvisioningService {
             let mut memory = self.memory.lock().await;
             memory.busy.remove(&host);
             memory.runs.remove(&host);
+            memory.automatic_runs.remove(&host);
             return Err(error);
         }
         self.manager.events().bump();
@@ -1724,6 +1869,7 @@ impl ProvisioningService {
         let mut memory = self.memory.lock().await;
         let task = memory.tasks.remove(&host);
         memory.runs.remove(&host);
+        memory.automatic_runs.remove(&host);
         memory.busy.remove(&host);
         let removed: std::collections::HashSet<String> = memory
             .plans
@@ -2074,6 +2220,21 @@ impl ProvisioningService {
         self.manager.events().bump();
     }
 
+    /// Freeze automatic retry suppression before releasing busy and publishing
+    /// failure. Installation may have changed the connection during this run;
+    /// that is not a fresh connection observed after failure.
+    fn remember_automatic_failure(&self, memory: &mut ProvisioningMemory, host: HostId) {
+        let run_id = memory.runs.get(&host).and_then(|run| run.run_id.as_ref());
+        if let Some(automatic) = memory.automatic_runs.get_mut(&host)
+            && run_id == Some(&automatic.run_id)
+        {
+            automatic.failed_incarnation =
+                self.manager.status(host).map(|status| status.incarnation);
+        }
+    }
+
+    /// Keep pre-execution refusals as failed progress with the same retry
+    /// boundary as failures in a concrete installation action.
     async fn finish_preflight_failure(&self, host: HostId, message: String) {
         let mut memory = self.memory.lock().await;
         if let Some(run) = memory.runs.get_mut(&host) {
@@ -2084,6 +2245,7 @@ impl ProvisioningService {
                 step.message = Some(message);
             }
         }
+        self.remember_automatic_failure(&mut memory, host);
         memory.busy.remove(&host);
         drop(memory);
         self.manager.events().bump();
@@ -2245,6 +2407,7 @@ impl ProvisioningService {
             run.status = RunStatus::Failed;
             run.message = Some(message);
         }
+        self.remember_automatic_failure(&mut memory, host);
         memory.busy.remove(&host);
         drop(memory);
         self.manager.events().bump();

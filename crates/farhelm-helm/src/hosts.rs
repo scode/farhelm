@@ -351,7 +351,7 @@ fn version_flags(peer: &str, ours: &str) -> (bool, bool) {
 /// tested against
 /// fixed hypothetical versions. A test that compared literals with the real
 /// build stamp broke on every release bump that crossed one of its literals.
-fn build_is_older(peer: &str, ours: &str) -> bool {
+pub(crate) fn build_is_older(peer: &str, ours: &str) -> bool {
     release_order(peer, ours) == Some(std::cmp::Ordering::Less)
 }
 

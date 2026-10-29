@@ -58,6 +58,10 @@ they reload.
 
 ## Update a host
 
+The **Hosts** button shows an up-arrow when a host has an update. The session list also shows a card for optional
+updates, or a banner when a host must be updated before you can use it. Both let you update those hosts or open the host
+list; you can dismiss the optional card.
+
 When a remote host runs an older version of Farhelm than your Mac, an **↑ Update** button appears beside its name: amber
 when updating is optional, red when the host cannot connect until it is updated. Hover over it to see both versions.
 Clicking it updates the host straight away, without asking, and shows the progress in its place. **Update all** at the
@@ -65,6 +69,11 @@ top of the host list updates every remote host at once.
 
 Updating a host does not interrupt its sessions: they keep running through the update.
 If Farhelm cannot plan an update, a dialog shows the reason before anything changes.
+
+To have Farhelm update remote hosts as soon as updates are available, turn on **Update remote hosts automatically** in
+Settings, under **Hosts**. It starts off. Once on, it works whenever Farhelm is running, which on your Mac means while
+the app is open. It never updates your Mac. The choice applies to every remote host; other open Farhelm windows pick it
+up when they reload.
 
 ## Uninstall Farhelm from a remote host
 

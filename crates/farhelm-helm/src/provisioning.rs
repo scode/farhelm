@@ -32,7 +32,7 @@ pub(crate) use http::{
 };
 pub(crate) use payloads::PayloadSelection;
 pub use release_payloads::{RELEASE_KEY_RING, verify_signed_metadata, verify_signed_sums};
-pub(crate) use service::{ProvisioningService, RunTask};
+pub(crate) use service::{AutomaticUpdates, ProvisioningService, RunTask};
 
 #[cfg(test)]
 mod tests {
@@ -1298,11 +1298,16 @@ mod tests {
         )
     }
 
+    /// Wait for a real admitted run to finish, including background admission.
+    /// The empty view is Completed with no run ID; that idle state must not
+    /// satisfy a caller whose listener has not yet started its Update.
     async fn wait_finished(service: &ProvisioningService, host: HostId) -> ProvisioningView {
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 let view = service.view(host).await.unwrap();
-                if matches!(view.status, RunStatus::Completed | RunStatus::Failed) {
+                if view.run_id.is_some()
+                    && matches!(view.status, RunStatus::Completed | RunStatus::Failed)
+                {
                     return view;
                 }
                 tokio::task::yield_now().await;
@@ -1310,6 +1315,641 @@ mod tests {
         })
         .await
         .expect("provisioning run did not finish")
+    }
+
+    /// A refused automatic plan consumes this incarnation's attempt, but an
+    /// off preference or an already busy host consumes neither the probe nor
+    /// its future opportunity. Toggle cycling is not permission to retry.
+    #[farhelm_testtrace::test]
+    async fn automatic_updates_skip_off_and_busy_then_remember_refusals() {
+        let (builder, host) = FleetBuilder::new()
+            .await
+            .ssh(
+                "update.example",
+                HostScript {
+                    build: "1.0.0".into(),
+                    ..Default::default()
+                },
+            )
+            .await;
+        let harness = builder.start().await;
+        harness.state._automatic_updates.stop();
+        harness
+            .await_state(host, |state| matches!(state, HostState::Connected { .. }))
+            .await;
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::failing_probe(root.path().into(), "planted refusal");
+        let service = service(&harness, backend.clone(), root.path());
+        *service.helm_build_override.lock().unwrap() = Some("2.0.0".into());
+        let mut attempted = HashMap::new();
+        service
+            .scan_automatic_updates(&mut attempted)
+            .await
+            .unwrap();
+        assert!(attempted.is_empty());
+        assert!(
+            backend.probe.lock().unwrap().is_some(),
+            "off must not inspect a remote"
+        );
+        harness
+            .store
+            .update_preferences(crate::store::PreferencePatch {
+                auto_update_remote_hosts: Some(Some(true)),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        service.memory.lock().await.busy.insert(host);
+        service
+            .scan_automatic_updates(&mut attempted)
+            .await
+            .unwrap();
+        assert!(attempted.is_empty());
+        assert!(
+            backend.probe.lock().unwrap().is_some(),
+            "busy is a skip, not a failed attempt"
+        );
+        service.memory.lock().await.busy.remove(&host);
+        let incarnation = harness.manager.status(host).unwrap().incarnation;
+        service
+            .scan_automatic_updates(&mut attempted)
+            .await
+            .unwrap();
+        assert_eq!(attempted.get(&host), Some(&incarnation));
+        assert!(
+            backend.probe.lock().unwrap().is_none(),
+            "eligible remote reached ordinary planning"
+        );
+        assert!(
+            service.memory.lock().await.runs.is_empty(),
+            "a planning refusal starts no run"
+        );
+        *backend.probe.lock().unwrap() = Some(Err(BackendFailure::new(
+            "second probe",
+            "must remain untouched",
+        )));
+        for enabled in [true, false, true] {
+            harness
+                .store
+                .update_preferences(crate::store::PreferencePatch {
+                    auto_update_remote_hosts: Some(Some(enabled)),
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+            service
+                .scan_automatic_updates(&mut attempted)
+                .await
+                .unwrap();
+            assert!(
+                backend.probe.lock().unwrap().is_some(),
+                "same connection never retries a refusal"
+            );
+        }
+        harness.fleet.kill_connection(host);
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                harness
+                    .await_state(host, |state| matches!(state, HostState::Connected { .. }))
+                    .await;
+                if harness.manager.status(host).unwrap().incarnation != incarnation {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("fixture must reconnect with a fresh incarnation");
+        service
+            .scan_automatic_updates(&mut attempted)
+            .await
+            .unwrap();
+        assert!(
+            backend.probe.lock().unwrap().is_none(),
+            "a fresh connection admits another attempt"
+        );
+    }
+
+    /// Wait for the listener's completed-scan boundary, not a scheduling delay.
+    /// The count advances only after the real scan finishes, before its next
+    /// revision wait; a later event cannot be mistaken for startup work.
+    async fn wait_for_automatic_scan(scans: &mut tokio::sync::watch::Receiver<u64>, minimum: u64) {
+        let _completed = tokio::time::timeout(
+            Duration::from_secs(5),
+            scans.wait_for(|count| *count >= minimum),
+        )
+        .await
+        .expect("automatic listener must finish the named scan")
+        .expect("automatic listener must remain alive");
+    }
+
+    /// Channel closure witnesses destruction of the real listener future. A
+    /// stop request alone is cooperative and does not establish that boundary.
+    async fn wait_for_automatic_listener_end(scans: &mut tokio::sync::watch::Receiver<u64>) {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while scans.changed().await.is_ok() {}
+        })
+        .await
+        .expect("the automatic listener future must be destroyed");
+    }
+
+    /// Stop and drop must both destroy a suspended, unaccepted admission. The
+    /// one-shot sender lives only in that held future; its destruction before
+    /// releasing the hold proves cancellation, rather than a quiet observation
+    /// window in which a detached admission could still resume later.
+    #[farhelm_testtrace::test]
+    async fn stopping_or_dropping_automatic_listener_cancels_pending_admission() {
+        for drop_owner in [false, true] {
+            let (builder, host) = FleetBuilder::new()
+                .await
+                .ssh(
+                    "update.example",
+                    HostScript {
+                        build: "1.0.0".into(),
+                        ..Default::default()
+                    },
+                )
+                .await;
+            let harness = builder.start().await;
+            harness.state._automatic_updates.stop();
+            harness
+                .await_state(host, |state| matches!(state, HostState::Connected { .. }))
+                .await;
+            let root = tempfile::tempdir().unwrap();
+            let backend = FakeBackend::skewed(root.path().into());
+            let service = service(&harness, backend.clone(), root.path());
+            *service.helm_build_override.lock().unwrap() = Some("2.0.0".into());
+            harness
+                .store
+                .update_preferences(crate::store::PreferencePatch {
+                    auto_update_remote_hosts: Some(Some(true)),
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+            let gate = Arc::new(RegistrySyncGate {
+                reached: tokio::sync::Notify::new(),
+                release: tokio::sync::Notify::new(),
+            });
+            let (drop_witness, mut dropped) = tokio::sync::oneshot::channel();
+            *service.automatic_admission_gate.lock().unwrap() =
+                Some((Arc::clone(&gate), Some(drop_witness)));
+            let mut listener = Some(AutomaticUpdates::start(&service));
+            let mut scans = listener.as_ref().unwrap().completed_scans();
+            tokio::time::timeout(Duration::from_secs(5), gate.reached.notified())
+                .await
+                .expect("real listener reaches the pre-admission suspension");
+            {
+                let memory = service.memory.lock().await;
+                assert!(
+                    memory.runs.is_empty() && !memory.busy.contains(&host),
+                    "fixture premise: this attempt is not accepted"
+                );
+            }
+            assert!(backend.operations.lock().unwrap().is_empty());
+            assert!(
+                matches!(
+                    dropped.try_recv(),
+                    Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+                ),
+                "fixture premise: held admission still owns its drop witness before cancellation"
+            );
+            if drop_owner {
+                drop(listener.take());
+            } else {
+                listener.as_ref().unwrap().stop();
+            }
+            tokio::time::timeout(Duration::from_secs(5), dropped)
+                .await
+                .expect("held admission future must be destroyed before release")
+                .expect_err("drop witness is never sent; cancellation destroys its sender");
+            wait_for_automatic_listener_end(&mut scans).await;
+            gate.release.notify_one();
+            let memory = service.memory.lock().await;
+            assert!(memory.runs.is_empty() && !memory.busy.contains(&host));
+            assert!(backend.operations.lock().unwrap().is_empty());
+            drop(memory);
+            assert_eq!(
+                harness
+                    .store
+                    .preferences()
+                    .await
+                    .unwrap()
+                    .auto_update_remote_hosts,
+                Some(true),
+                "cancellation is proved with authorization still enabled"
+            );
+        }
+    }
+
+    /// A claimed run owns its remaining launch even if its listener disappears.
+    /// The intentionally held host lock suspends launch after progress/busy are
+    /// published; cancelling and observing listener destruction before releasing
+    /// it must still produce the same run's ordinary failure and clear busy.
+    #[farhelm_testtrace::test]
+    async fn accepted_automatic_run_outlives_listener_cancellation() {
+        let (builder, host) = FleetBuilder::new()
+            .await
+            .ssh(
+                "update.example",
+                HostScript {
+                    build: "1.0.0".into(),
+                    ..Default::default()
+                },
+            )
+            .await;
+        let harness = builder.start().await;
+        harness.state._automatic_updates.stop();
+        harness
+            .await_state(host, |state| matches!(state, HostState::Connected { .. }))
+            .await;
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::skewed(root.path().into());
+        *backend.fail.lock().unwrap() = Some("create-directories".into());
+        let service = service(&harness, backend.clone(), root.path());
+        *service.helm_build_override.lock().unwrap() = Some("2.0.0".into());
+        harness
+            .store
+            .update_preferences(crate::store::PreferencePatch {
+                auto_update_remote_hosts: Some(Some(true)),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let held = harness.manager.host_provision_lock(host).await;
+        let listener = AutomaticUpdates::start(&service);
+        let mut scans = listener.completed_scans();
+        let run_id = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(run_id) = service.view(host).await.unwrap().run_id {
+                    return run_id;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the automatic run must publish its admission before the held host lock");
+        assert!(service.memory.lock().await.busy.contains(&host));
+        assert!(
+            backend.operations.lock().unwrap().is_empty(),
+            "fixture premise: admitted launch is still held before host actions"
+        );
+        listener.stop();
+        wait_for_automatic_listener_end(&mut scans).await;
+        drop(held);
+        let failed = wait_finished(&service, host).await;
+        assert_eq!(failed.run_id.as_deref(), Some(run_id.as_str()));
+        assert_eq!(failed.status, RunStatus::Failed);
+        assert_eq!(
+            backend.operations.lock().unwrap().as_slice(),
+            ["create-directories"]
+        );
+        assert!(!service.memory.lock().await.busy.contains(&host));
+    }
+
+    /// A completed opt-out wins over a plan held immediately before admission.
+    /// Test both preference-write ownership branches, including a patch that
+    /// also revokes tunnel consent. A skipped plan consumes no retry opportunity.
+    #[farhelm_testtrace::test]
+    async fn automatic_admission_rechecks_committed_opt_out_without_consuming_retry() {
+        for combined_consent in [false, true] {
+            let (builder, host) = FleetBuilder::new()
+                .await
+                .ssh(
+                    "update.example",
+                    HostScript {
+                        build: "1.0.0".into(),
+                        ..Default::default()
+                    },
+                )
+                .await;
+            let harness = builder.start().await;
+            harness.state._automatic_updates.stop();
+            harness
+                .await_state(host, |state| matches!(state, HostState::Connected { .. }))
+                .await;
+            let root = tempfile::tempdir().unwrap();
+            let backend = FakeBackend::skewed(root.path().into());
+            *backend.fail.lock().unwrap() = Some("create-directories".into());
+            let service = service(&harness, backend.clone(), root.path());
+            *service.helm_build_override.lock().unwrap() = Some("2.0.0".into());
+            let state = Arc::new(AppState::with_provisioning(
+                Arc::clone(&harness.manager),
+                harness.store.clone(),
+                Arc::clone(&service),
+                crate::ServingMode::Standalone,
+            ));
+            state._automatic_updates.stop();
+            harness
+                .store
+                .update_preferences(crate::store::PreferencePatch {
+                    auto_update_remote_hosts: Some(Some(true)),
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+            let gate = Arc::new(RegistrySyncGate {
+                reached: tokio::sync::Notify::new(),
+                release: tokio::sync::Notify::new(),
+            });
+            *service.automatic_admission_gate.lock().unwrap() = Some((Arc::clone(&gate), None));
+            let scanning = Arc::clone(&service);
+            let scan = tokio::spawn(async move {
+                let mut attempted = HashMap::new();
+                scanning
+                    .scan_automatic_updates(&mut attempted)
+                    .await
+                    .unwrap();
+                attempted
+            });
+            tokio::time::timeout(Duration::from_secs(5), gate.reached.notified())
+                .await
+                .expect("automatic plan reaches its pre-admission hold");
+            assert!(
+                service.memory.lock().await.runs.is_empty(),
+                "fixture premise: the held plan has not been admitted"
+            );
+            assert!(backend.operations.lock().unwrap().is_empty());
+            let patch = if combined_consent {
+                serde_json::json!({"auto_update_remote_hosts":false,"tunnel_consent":false})
+            } else {
+                serde_json::json!({"auto_update_remote_hosts":false})
+            };
+            let response = crate::preferences::put_preferences(
+                State(Arc::clone(&state)),
+                axum::Json(serde_json::from_value(patch).unwrap()),
+            )
+            .await
+            .into_response();
+            assert_eq!(response.status(), StatusCode::NO_CONTENT);
+            assert_eq!(
+                harness
+                    .store
+                    .preferences()
+                    .await
+                    .unwrap()
+                    .auto_update_remote_hosts,
+                Some(false)
+            );
+            gate.release.notify_one();
+            let mut attempted = tokio::time::timeout(Duration::from_secs(5), scan)
+                .await
+                .expect("revoked admission completes")
+                .unwrap();
+            assert!(
+                attempted.is_empty(),
+                "opt-out is a skip, not a failed attempt"
+            );
+            {
+                let memory = service.memory.lock().await;
+                assert!(
+                    memory.runs.is_empty() && memory.busy.is_empty() && memory.plans.is_empty()
+                );
+            }
+            assert!(
+                backend.operations.lock().unwrap().is_empty(),
+                "a completed opt-out forbids every host action"
+            );
+            // Re-enabling the same connection gets a fresh probe rather than
+            // inheriting a failure marker from the policy skip.
+            *backend.probe.lock().unwrap() = Some(Ok(ProbeObservation::SkewedSupervisor {
+                database_schema: None,
+                peer_build: "1.0.0".into(),
+                dial_farhelm: root.path().join("farhelm"),
+                dial_state_dir: Some(root.path().join("state")),
+            }));
+            let response = crate::preferences::put_preferences(
+                State(Arc::clone(&state)),
+                axum::Json(
+                    serde_json::from_value(serde_json::json!({"auto_update_remote_hosts":true}))
+                        .unwrap(),
+                ),
+            )
+            .await
+            .into_response();
+            assert_eq!(response.status(), StatusCode::NO_CONTENT);
+            service
+                .scan_automatic_updates(&mut attempted)
+                .await
+                .unwrap();
+            assert_eq!(
+                wait_finished(&service, host).await.status,
+                RunStatus::Failed
+            );
+            assert_eq!(
+                backend.operations.lock().unwrap().as_slice(),
+                ["create-directories"]
+            );
+        }
+    }
+
+    /// The listener is owned by the helm rather than an interface. A real
+    /// preference notification starts normal provisioning without a router or
+    /// window, and retains the ordinary failed-run progress for clients.
+    #[farhelm_testtrace::test]
+    async fn automatic_updates_wake_without_a_window() {
+        let (builder, host) = FleetBuilder::new()
+            .await
+            .ssh(
+                "update.example",
+                HostScript {
+                    build: "1.0.0".into(),
+                    ..Default::default()
+                },
+            )
+            .await;
+        let harness = builder.start().await;
+        harness.state._automatic_updates.stop();
+        harness
+            .await_state(host, |state| matches!(state, HostState::Connected { .. }))
+            .await;
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::skewed(root.path().into());
+        *backend.fail.lock().unwrap() = Some("create-directories".into());
+        let service = service(&harness, backend.clone(), root.path());
+        *service.helm_build_override.lock().unwrap() = Some("2.0.0".into());
+        assert_eq!(
+            harness
+                .store
+                .preferences()
+                .await
+                .unwrap()
+                .auto_update_remote_hosts,
+            None
+        );
+        let listener = AutomaticUpdates::start(&service);
+        let mut scans = listener.completed_scans();
+        wait_for_automatic_scan(&mut scans, 1).await;
+        assert!(
+            service.memory.lock().await.runs.is_empty(),
+            "fixture premise: the completed initial off scan starts nothing"
+        );
+        assert!(
+            backend.probe.lock().unwrap().is_some(),
+            "the initial off scan did not inspect the host"
+        );
+        harness
+            .store
+            .update_preferences(crate::store::PreferencePatch {
+                auto_update_remote_hosts: Some(Some(true)),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        harness.manager.events().bump();
+        let failed = wait_finished(&service, host).await;
+        assert_eq!(failed.status, RunStatus::Failed);
+        assert!(
+            failed
+                .message
+                .as_deref()
+                .unwrap_or_default()
+                .contains("create-directories")
+        );
+        listener.stop();
+        assert_eq!(
+            backend.operations.lock().unwrap().as_slice(),
+            ["create-directories"]
+        );
+    }
+
+    /// A host that becomes old after the enabled listener's initial scan must
+    /// wake the same no-window path. Neither startup nor an enabling write can
+    /// satisfy this proof: authorization stays on while the fleet changes.
+    #[farhelm_testtrace::test]
+    async fn automatic_updates_wake_for_a_newly_eligible_host() {
+        let (builder, host) = FleetBuilder::new()
+            .await
+            .ssh(
+                "update.example",
+                HostScript {
+                    build: "2.0.0".into(),
+                    ..Default::default()
+                },
+            )
+            .await;
+        let harness = builder.start().await;
+        harness.state._automatic_updates.stop();
+        harness
+            .await_state(host, |state| matches!(state, HostState::Connected { .. }))
+            .await;
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::skewed(root.path().into());
+        *backend.fail.lock().unwrap() = Some("create-directories".into());
+        let service = service(&harness, backend.clone(), root.path());
+        *service.helm_build_override.lock().unwrap() = Some("2.0.0".into());
+        harness
+            .store
+            .update_preferences(crate::store::PreferencePatch {
+                auto_update_remote_hosts: Some(Some(true)),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let listener = AutomaticUpdates::start(&service);
+        let mut scans = listener.completed_scans();
+        wait_for_automatic_scan(&mut scans, 1).await;
+        assert!(service.memory.lock().await.runs.is_empty());
+        assert!(
+            backend.probe.lock().unwrap().is_some(),
+            "fixture premise: enabled startup saw an up-to-date host"
+        );
+        assert!(
+            matches!(harness.manager.state(host), Some(HostState::Connected { build_version, .. }) if build_version == "2.0.0")
+        );
+        harness
+            .fleet
+            .edit(host, |script| script.build = "1.0.0".into());
+        harness.fleet.kill_connection(host);
+        let failed = wait_finished(&service, host).await;
+        listener.stop();
+        assert_eq!(failed.status, RunStatus::Failed);
+        assert!(
+            failed
+                .message
+                .as_deref()
+                .unwrap_or_default()
+                .contains("create-directories")
+        );
+        assert_eq!(
+            backend.operations.lock().unwrap().as_slice(),
+            ["create-directories"]
+        );
+    }
+
+    /// Failure releases the normal busy claim and publishes a revision. The
+    /// attempt reservation must survive that boundary so the next real scan
+    /// cannot replace failed progress with another run on the same connection.
+    #[farhelm_testtrace::test]
+    async fn automatic_failed_run_is_not_retried_by_its_completion() {
+        let (builder, host) = FleetBuilder::new()
+            .await
+            .ssh(
+                "update.example",
+                HostScript {
+                    build: "1.0.0".into(),
+                    ..Default::default()
+                },
+            )
+            .await;
+        let harness = builder.start().await;
+        harness.state._automatic_updates.stop();
+        harness
+            .await_state(host, |state| matches!(state, HostState::Connected { .. }))
+            .await;
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::skewed(root.path().into());
+        *backend.fail.lock().unwrap() = Some("daemon-reload".into());
+        backend
+            .block_first
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let service = service(&harness, backend.clone(), root.path());
+        *service.helm_build_override.lock().unwrap() = Some("2.0.0".into());
+        harness
+            .store
+            .update_preferences(crate::store::PreferencePatch {
+                auto_update_remote_hosts: Some(Some(true)),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let mut attempted = HashMap::new();
+        let original_incarnation = harness.manager.status(host).unwrap().incarnation;
+        service
+            .scan_automatic_updates(&mut attempted)
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), backend.entered.notified())
+            .await
+            .expect("first action reached its fixture gate");
+        harness
+            .await_state(host, |state| matches!(state, HostState::Connected { .. }))
+            .await;
+        assert_ne!(
+            harness.manager.status(host).unwrap().incarnation,
+            original_incarnation,
+            "fixture premise: learning the install paths caused an update-owned reconnect"
+        );
+        backend.release.notify_one();
+        let failed = wait_finished(&service, host).await;
+        assert_eq!(failed.status, RunStatus::Failed);
+        assert!(!service.memory.lock().await.busy.contains(&host));
+        assert_eq!(attempted.get(&host), Some(&original_incarnation));
+        service
+            .scan_automatic_updates(&mut attempted)
+            .await
+            .unwrap();
+        assert_eq!(service.view(host).await.unwrap().run_id, failed.run_id);
+        assert_eq!(
+            backend
+                .operations
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|operation| operation.as_str() == "daemon-reload")
+                .count(),
+            1
+        );
     }
 
     /// A successful discovery is use-as-is: it creates the SSH registry row
