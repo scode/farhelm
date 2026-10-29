@@ -315,6 +315,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Deflake
 
+- **Folder reset stays outside the dropdown viewport in WebKit.**
+  `composer folder dropdown preserves keyboard launch and grouped history` in `e2e/tests/sidebar.spec.ts` selected the
+  reset option but failed its viewport assertion in sweep run `e0526613-832f-4fba-b023-b38cc064e5c2`. All three isolated
+  classification reruns passed: `e3ebe846-ebc4-44da-9a7c-cf6981037ca2`, `eaf03d42-4533-48b6-9fc6-21ffa08944f1`, and
+  `7a80d996-edd8-46aa-8d82-f1ca43c6d5c8`. Cause unknown; preserve the keyboard visibility assertion (FLAKES.md,
+  2026-10-29).
+
 - **Restart-with dialog loses focus in WebKit.**
   `restart with keeps gap focus and container Enter uses its enabled action` in `e2e/tests/restart-with.spec.ts` failed
   after the YOLO choice when `dialog.focus()` did not leave the dialog focused. The two-spec browser run
