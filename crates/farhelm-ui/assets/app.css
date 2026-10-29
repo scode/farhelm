@@ -7667,16 +7667,35 @@ a:any-link,
   flex-shrink: 0;
 }
 
-/* The add control shares the tabs' size so the strip stays one even height,
-   but not their ghost look: tabs are the strip's selection (an exemption from
-   the button tiers), while "+ terminal" is an action and wears the neutral
-   tier from its class list. Ghost, it read as one more unselected tab. */
-.tab,
-.tab-add {
+.tab {
   font-size: 12px;
   padding: 3px 10px;
   white-space: nowrap;
   flex-shrink: 0;
+}
+
+/* The neutral tier fixed the ghost add action reading as an unselected tab
+   (#959). A separate divider and square plus now distinguish creating a tab
+   from choosing one, while keeping that action tier and the strip's height. */
+.tab-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+/* This decoration has no action: leave its gap outside the button's target. */
+.tab-add-divider {
+  width: 1px;
+  height: 16px;
+  align-self: center;
+  margin: 0 2px;
+  background: var(--border-dim);
+  flex-shrink: 0;
+  pointer-events: none;
 }
 
 /* The radius keeps the two halves reading as one rounded pill when either

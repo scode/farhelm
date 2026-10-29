@@ -313,6 +313,9 @@ test("normal, neutral, danger, and exempt buttons keep their deliberate tiers", 
     // it must not share the tabs' ghost exemption, or it reads as one more
     // unselected tab.
     await expectNeutral(".tab-add");
+    // The icon has no visible label; its accessible name must still describe
+    // the action independently of the neighboring terminal tabs.
+    await expect(page.locator(".tab-add")).toHaveAccessibleName("New terminal");
   } finally {
     await cleanupSession(request, session.id);
   }

@@ -2122,13 +2122,17 @@ pub(crate) fn SessionView(
                             on_close: on_close_tab.clone(),
                         }
                     }
+                    // The divider sits outside the action's hit target so the
+                    // square plus reads as creating a tab, not selecting one.
+                    span { class: "tab-add-divider", aria_hidden: "true" }
                     button {
                         r#type: "button",
                         class: "btn btn-neutral tab-add",
-                        "data-tooltip": "+ Terminal: open a shell tab in the session's folder",
+                        aria_label: "New terminal",
+                        "data-tooltip": "New terminal: open a shell tab in the session's folder",
                         disabled: opening_tab() || lifecycle.busy(),
                         onclick: on_add_tab,
-                        "+ Terminal"
+                        ActionIcon { glyph: ActionGlyph::Add, size: 13 }
                     }
                 }
                 }

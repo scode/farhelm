@@ -138,7 +138,7 @@ Press and move about 120 image pixels right while held on the agent tab, then
 on delete, releasing each. Query window_frame after EACH; require unchanged
 frame. A control must never drag the window. Inspect and dismiss any ordinary
 panel before its following click test, without deleting a session.
-Open + terminal once. Click agent tab and verify selection, click shell tab and
+Click the new-terminal button (+) after the tabs once. Click agent tab and verify selection, click shell tab and
 verify selection (S8, capture/measure), then click agent tab again. Click delete
 and require its confirmation to open with unchanged frame (S9, capture/measure).
 Cancel without deleting, then close the shell tab with its own close control,

@@ -174,13 +174,13 @@ together. Historical manifests with no declared P1 check report it as not planne
    On each of the two rows, double-click empty background and require a zoom, then find empty band background again in
    the zoomed window and double-click there, requiring the frame from before. Press and move on a terminal tab, on the
    delete button and on the settings gear and require the frame to stay put: a control never drags the window. Open a
-   shell tab with + terminal, then click the agent tab, the shell tab and the agent tab again, requiring each to become
-   selected, then click delete and require its confirmation to open, cancel it without deleting, and close the shell tab
-   again; click the settings gear and require its dialog to open, then close it, with the frame unchanged throughout.
-   The contract fixes ten native images, which is all the executor retains: one before the first gesture, one after each
-   drag, one zoomed and one restored per row, one with the shell tab selected by a click, one with the agent tab
-   selected again and the delete confirmation open, and one with settings open. This check runs after the session steps
-   because a fresh install has no session, and so no main-pane row, at startup.
+   shell tab with the new-terminal button (+) after the tabs, then click the agent tab, the shell tab and the agent tab
+   again, requiring each to become selected, then click delete and require its confirmation to open, cancel it without
+   deleting, and close the shell tab again; click the settings gear and require its dialog to open, then close it, with
+   the frame unchanged throughout. The contract fixes ten native images, which is all the executor retains: one before
+   the first gesture, one after each drag, one zoomed and one restored per row, one with the shell tab selected by a
+   click, one with the agent tab selected again and the delete confirmation open, and one with settings open. This check
+   runs after the session steps because a fresh install has no session, and so no main-pane row, at startup.
 
    Native CUA crops images to the app, so an unchanged crop cannot prove that the window stayed put. The fixed
    `window_frame` operation reads the owned app's window ID, process ID and frame from the guest's public window-server

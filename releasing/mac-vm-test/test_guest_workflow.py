@@ -82,7 +82,7 @@ separates missing CUA input from a Farhelm failure.
                        'confirmation panel to open', 'without deleting anything', 'exactly these ten',
                        'settings gear', "Finder window's title bar", 'could-not-run, not fail', 'do not create one',
                        'Window > Zoom', 'Press on the sidebar',
-                       'Click + terminal once', 'click the shell tab and require it', 'only the agent tab remains',
+                       'Click the new-terminal button (+) after the tabs once', 'click the shell tab and require it', 'only the agent tab remains',
                        'icon view', 'unselected folder icon'):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, text)
