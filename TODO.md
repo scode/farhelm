@@ -228,30 +228,27 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Replace the A−/A+ terminal text-size buttons with zoom icons.** The two buttons at the right end of a session's tab
   strip label the text-size step as "A−" and "A+", which does not read as an action. Use recognizable zoom-out and
-  zoom-in icons (a magnifier with − / +) instead, keeping the tooltips and keyboard-shortcut help.
+  zoom-in icons (a magnifier with − / +) instead, keeping the tooltips and keyboard-shortcut help. Plan:
+  `plans/queue/terminal-zoom-icons.md`.
 
 - **Add an "update all hosts" button and an auto-update setting.** In the current interface, updating hosts is hidden
   behind clicks and hard to discover. Put a clearly visible update control (an "update all hosts" button or similar)
-  where users look for it, and add a setting to always auto-update.
+  where users look for it, and add a setting to always auto-update. Plan: `plans/queue/host-update-discoverability.md`.
 
 - **Show an upgrade arrow on the hosts icon when any host needs an update.** The hosts icon in the bottom-left only
   surfaces update availability once the host list is open; when at least one host needs an update, show an upgrade arrow
-  on that icon itself, so updates are visible at a glance.
+  on that icon itself, so updates are visible at a glance. Plan: `plans/queue/host-update-discoverability.md`.
 
 - **Make the "+ Terminal" control look distinct from a terminal tab.** The button that creates a new terminal is styled
   so close to a real tab that it reads as another tab. Visually separate it from tabs, or otherwise make it clear that
-  it creates a terminal.
+  it creates a terminal. Plan: `plans/queue/new-terminal-button.md`.
 
 - **Auto-assign a host alias from the left-most hostname label.** When a host is added, derive its alias automatically
   from the left-most part of the hostname (for example, `my-server.example.com` becomes `my-server`) instead of leaving
-  it unset or requiring a manual pick.
+  it unset or requiring a manual pick. Plan: `plans/queue/host-short-names.md`.
 
 - **Make host aliases/names visible in the new layout.** Consider how the new host list can show each host's alias or
-  name at a glance; today they are easy to miss.
-
-- **Keep the version readout clickable in the steel UI.** In the new steel interface the version no longer seems
-  clickable to check for updates (the app bar's `check_readout` renders it as a button in the old layout). Confirm
-  whether this is just a dev-build artifact, and restore the affordance if the steel layout dropped it.
+  name at a glance; today they are easy to miss. Plan: `plans/queue/host-short-names.md`.
 
 - **Show all keybindings with command-/.** Add a keybinding that shows every keyboard shortcut at a glance, so users can
   discover them instead of having to remember them.
