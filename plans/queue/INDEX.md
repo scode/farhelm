@@ -6,4 +6,4 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `terminal-zoom-icons.md` — Terminal text size: magnifier zoom-out and zoom-in buttons with the current size in points between them, replacing "A−" and "A+"
 - [complete] `host-update-discoverability.md` — Host updates you can't miss: an ↑ on the Hosts button, a card offering "Update all now" for optional updates, a banner for required ones, and a Settings switch for the helm to update remote hosts automatically
 - [complete] `new-terminal-button.md` — The new-terminal control becomes a square icon-only "+" after a divider, so it no longer reads as another tab
-- [pending] `host-short-names.md` — Hosts get a short name (alias, else the first hostname label), shown under each rail icon, beside it when the rail expands on hover, and on session rows
+- [in-flight 6cde81] `host-short-names.md` — Hosts get a short name (alias, else the first hostname label), shown under each rail icon, beside it when the rail expands on hover, and on session rows
