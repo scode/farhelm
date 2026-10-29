@@ -138,10 +138,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Make auto-tunneling safe.** Figure out how to make auto-tunneling properly safe: can we use some hostname trick so
   the service does not present as localhost? TBD. Pinggy? TBD.
 
-- **Session tracking for Muse Code.** Add what Muse Code still lacks beyond being a launchable terminal agent:
-  per-launch hooks/instructions, capture of the correct conversation identity for resume, and recognition of its
-  waiting/status signals. The built-in `muse` and `muse-yolo` profiles currently run with generic activity status and no
-  hooks or conversation resume; these are Farhelm integration gaps, not established limitations of Muse. Plan:
+- **Recognize Muse Code questions and approvals.** Detect questions and approval dialogs during a conversation from real
+  Muse screens. These can currently look idle while Muse waits for an answer. Capturing them needs an authenticated test
+  provider or a documented provider fixture protocol that can ask a real question. Plan:
   `plans/queue/muse-session-tracking.md`.
 
 - **Support Kimi Code.** Add Moonshot's Kimi Code CLI as an agent type: terminal launches with guarded and YOLO

@@ -2570,13 +2570,13 @@ behavior, so protocol skew refuses the peer until its ordinary supervisor update
 unmanaged. The normal skew-aware update path remains unchanged.
 
 `SessionInfo.workspace_trust_prompt` is separate from the retained Claude-only flag. The ticker reads Claude and Codex
-through their integration readers and Muse through the exhaustive launch-harness seam, independently of its activity
-reading. The flag defaults false in older cached snapshots, resets with the run or failed capture, and shares the
-existing activity cell across renames. Codex recognition uses its captured 0.159.0 folder-access menu (`waiting-trust`)
-and the reported Quit variant (`waiting-derived-trust-quit`, derived from that capture): the Back choice requires
-`esc back`, and Quit requires `esc quit`. Muse uses a captured 1.4.10-R6427.1 startup trust menu. Both require the
-dialog's choices and current footer instead of matching isolated transcript words. Pi has no trust recognizer; its
-setting still supplies its project-resource approval flag.
+through their integration readers and Muse through its integration reader or the exhaustive launch-harness seam,
+independently of its activity reading. The flag defaults false in older cached snapshots, resets with the run or failed
+capture, and shares the existing activity cell across renames. Codex recognition uses its captured 0.159.0 folder-access
+menu (`waiting-trust`) and the reported Quit variant (`waiting-derived-trust-quit`, derived from that capture): the Back
+choice requires `esc back`, and Quit requires `esc quit`. Muse uses captured 1.4.10-R6427.1 and 1.4.14 startup trust
+menus. Both require the dialog's choices and current footer instead of matching isolated transcript words. Pi has no
+trust recognizer; its setting still supplies its project-resource approval flag.
 
 Each host caches repository objects at `<state_dir>/repo-cache/<owner>/<name>.git`, derived from the validated,
 lowercased repository pair. The supervisor passes that absolute path in the preparation's `repo_cache_path`; it is not
@@ -2923,16 +2923,24 @@ refusal. No global geometry cache or new asset file is introduced.
   `scripts/capture-agent-screens.py` re-captures from the installed agents (`docs/agent-screen-fixtures.md`). The
   earlier Codex-only masking of its composer out of change comparison is gone: whenever it applied, the Codex reader now
   recognizes the composer and answers from content, so the comparison no longer decides anything there.
+
+  Muse also has a dedicated reader, based on manually captured 1.4.14 screens. A ruled `❯` composer followed by its
+  model/workspace footer anchors idle; an adjacent `Working (… · esc to interrupt)` or `Thinking (… · esc to interrupt)`
+  line above it anchors working. The timer begins with an ASCII digit; the animated glyph, provider, workspace and
+  permission label are not fixed. Its current workspace-trust menu anchors waiting and takes precedence over work. No
+  in-conversation question or approval dialog has been verified. Unknown screens use generic change counting; neither
+  hook events nor the pane title supplies Muse status. The old trust-only fixtures remain hint evidence, while the new
+  version directory also holds working and idle captures.
 - Permission-footer evidence: the same sampling pass calls the exhaustive launch-harness reader in
-  `agent_kind::screen_reader`, independently of the activity kind (Muse and Cursor use generic activity). Its optional
-  bool latches `ActivitySample::screen_yolo` on the first definite YOLO reading of a run and hints connected helms only
-  when that value changes. Later non-YOLO readings, unrecognized modes and covered footers cannot clear it. Rename
-  shares this run cell; restart replaces it. After a supervisor restart it is false until the next definite sample. The
-  shared `entry_info` builder publishes it as an additive bool omitted when false; helm cache merges take that incoming
-  value as given, including a restart's false. The sidebar escalates the drawn launch glyph and puts the vendor wording
-  ahead of its existing hover/accessibility description. No admission or inheritance path reads this field. Captured
-  grids live separately under `tests/fixtures/status-lines/`, with vendor version and capture date, because these
-  permission screens do not satisfy the activity-fixture contract.
+  `agent_kind::screen_reader`, independently of the activity kind. Its optional bool latches
+  `ActivitySample::screen_yolo` on the first definite YOLO reading of a run and hints connected helms only when that
+  value changes. Later non-YOLO readings, unrecognized modes and covered footers cannot clear it. Rename shares this run
+  cell; restart replaces it. After a supervisor restart it is false until the next definite sample. The shared
+  `entry_info` builder publishes it as an additive bool omitted when false; helm cache merges take that incoming value
+  as given, including a restart's false. The sidebar escalates the drawn launch glyph and puts the vendor wording ahead
+  of its existing hover/accessibility description. No admission or inheritance path reads this field. Captured grids
+  live separately under `tests/fixtures/status-lines/`, with vendor version and capture date, because these permission
+  screens do not satisfy the activity-fixture contract.
 - Last-activity timestamp: the same ticker that samples for status also DATES the work it sees, into a
   `last_activity_at` column on the session row and onto the wire. It drives the row's displayed age and the helm's
   seen/unseen comparison, seeded to the session's creation time so one that has never produced output has an honest age,

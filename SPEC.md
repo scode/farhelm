@@ -274,12 +274,14 @@ private leader still permits Grok's native subagents. Grok uses generic activity
 selected permission flags before `--resume <conversation-id>`, but it does not offer Resume until the capture
 integration has verified an exact conversation. See [Grok](website/src/content/docs/docs/agents/grok.md).
 
-Muse support uses `muse --permission-profile :auto-review` for guarded launches and `muse --yolo` for YOLO, with generic
-activity status. Guarded selects Muse's AI reviewer and workspace sandbox; the yolo variant skips approval prompts and
-sandboxing and trusts the workspace for the run. Muse 1.4.14 or later receives per-launch `SessionStart` and `Stop`
-hooks, without a plugin installation or edits to Muse's own configuration. The conversation becomes known at the first
-prompt, and Restart resumes its reported UUID with `muse resume <conversation-id>`, keeping the launch's permission
-flags. A supported Muse that cannot report still launches; without a captured conversation Restart explains why it is
+Muse support uses `muse --permission-profile :auto-review` for guarded launches and `muse --yolo` for YOLO. Its screen
+reader recognizes Working and Thinking above the composer, the composer at rest, and the workspace-trust question. Other
+in-conversation questions and approval dialogs have not been verified; unfamiliar screens use generic activity status.
+Guarded selects Muse's AI reviewer and workspace sandbox; the yolo variant skips approval prompts and sandboxing and
+trusts the workspace for the run. Muse 1.4.14 or later receives per-launch `SessionStart` and `Stop` hooks, without a
+plugin installation or edits to Muse's own configuration. The conversation becomes known at the first prompt, and
+Restart resumes its reported UUID with `muse resume <conversation-id>`, keeping the launch's permission flags. A
+supported Muse that cannot report still launches; without a captured conversation Restart explains why it is
 unavailable. Muse's managed-checkout trust setting adds `--trust-workspace` when Farhelm composes an agent launch into a
 managed checkout. With it off, Farhelm adds no trust flag; YOLO or vendor configuration may still grant trust. Muse
 follows the agent-version support rule under "Supported user environments".
@@ -1760,13 +1762,15 @@ clients automatically; the agent-spawn behavior below is one instance of this ge
 ### Status
 
 Each client can play distinct sounds when a session starts waiting, when a new agent approval request arrives, and when
-an agent goes from running to idle. Only Claude and Codex report Waiting today. Settings has sounds controls under
-**Notifications**, with one switch per event, remembered per device: waiting and approval default on, turn finished off.
-The open session stays quiet while its window is active; initial page-load or sign-in state makes no sound. Status
-sounds follow the sidebar's current host selector and filters; changing that view silently records its existing
-statuses. New approval requests sound regardless of those filters, because their cards are always shown. Each
-observation plays only its most urgent enabled, non-quiet event: approval, waiting, then turn finished. Browser playback
-needs a prior user gesture; blocked playback is discarded, never queued. Every open client makes its own sounds.
+an agent goes from running to idle. Claude and Codex report Waiting; Muse reports it for workspace trust only, with
+in-conversation questions and approvals still unverified. Such sessions can show Idle while Muse waits for an answer.
+Settings has sounds controls under **Notifications**, with one switch per event, remembered per device: waiting and
+approval default on, turn finished off. The open session stays quiet while its window is active; initial page-load or
+sign-in state makes no sound. Status sounds follow the sidebar's current host selector and filters; changing that view
+silently records its existing statuses. New approval requests sound regardless of those filters, because their cards are
+always shown. Each observation plays only its most urgent enabled, non-quiet event: approval, waiting, then turn
+finished. Browser playback needs a prior user gesture; blocked playback is discarded, never queued. Every open client
+makes its own sounds.
 
 Each session shows one of: **Running** (agent actively working), **Waiting** (a detected pending question or approval
 directed at the user), **Idle** (agent alive and at rest, no pending ask), **Exited** (process ended), **Interrupted**
@@ -1838,23 +1842,23 @@ all, never one counted from 1970.
 Running/waiting/idle discrimination for raw TUIs is inherently heuristic, and the waiting/idle boundary especially so.
 The bar: best-effort observation of the agent's screen, through one screen reader per agent type. The generic reader,
 used by every agent without a dedicated one, knows nothing about the agent: a screen that keeps changing is running, one
-that stopped changing is idle, and it never reports waiting. Claude Code and Codex have dedicated readers that recognize
-what those agents draw — their busy indicators, their input prompt at rest, and the dialogs in which they ask the user
-something — and answer from that, so an idle agent's own redraws read idle. A screen they recognize as carrying no state
-(a menu the user opened) leaves the previous status in place, and a screen they do not recognize at all falls back to
-the generic reader. Their rules are held to real screens captured from the vendors' current releases; see
-`docs/agent-screen-fixtures.md`. A reader never creates lifecycle state. Wrong status must be cosmetic only — status
-detection must never gate or delay the user's interaction with the terminal. Agent-requested prompt delivery is a narrow
-exception: the owning supervisor refuses a target reading waiting or unknown rather than risk answering a dialog (see
-Agent-spawned sessions). A mistaken reading may therefore refuse that request or let it reach an unrecognized dialog; it
-never gates the user's own typing. Status also decides whether Restart and Restart with ask before stopping a live agent
-(see Lifecycle operations), where a wrong reading costs at most a skipped or an extra confirmation. A recognized dialog
-also defers the missing-conversation warning's clock until an Enter outside that dialog, as described below; this does
-not delay delivering input. Farhelm-supplied integration must not make vendor configuration a condition of launching an
-agent. Grok is the explicit opt-in exception for conversation capture: users install its three documented hook entries
-themselves, while an unconfigured Grok still launches normally and cannot be restarted. OMP and Grok both use generic
-activity only. Their approval prompts show the generic running/idle classification, never waiting — a settled scope
-decision, not a reader waiting to be written.
+that stopped changing is idle, and it never reports waiting. Claude Code, Codex and Muse have dedicated readers that
+recognize what those agents draw — their busy indicators, their input prompt at rest, and verified question dialogs
+(workspace trust only for Muse) — and answer from that, so an idle agent's own redraws read idle. A screen they
+recognize as carrying no state (a menu the user opened) leaves the previous status in place, and a screen they do not
+recognize at all falls back to the generic reader. Their rules are held to real screens captured from the vendors'
+current releases; see `docs/agent-screen-fixtures.md`. A reader never creates lifecycle state. Wrong status must be
+cosmetic only — status detection must never gate or delay the user's interaction with the terminal. Agent-requested
+prompt delivery is a narrow exception: the owning supervisor refuses a target reading waiting or unknown rather than
+risk answering a dialog (see Agent-spawned sessions). A mistaken reading may therefore refuse that request or let it
+reach an unrecognized dialog; it never gates the user's own typing. Status also decides whether Restart and Restart with
+ask before stopping a live agent (see Lifecycle operations), where a wrong reading costs at most a skipped or an extra
+confirmation. A recognized dialog also defers the missing-conversation warning's clock until an Enter outside that
+dialog, as described below; this does not delay delivering input. Farhelm-supplied integration must not make vendor
+configuration a condition of launching an agent. Grok is the explicit opt-in exception for conversation capture: users
+install its three documented hook entries themselves, while an unconfigured Grok still launches normally and cannot be
+restarted. OMP and Grok both use generic activity only. Their approval prompts show the generic running/idle
+classification, never waiting — a settled scope decision, not a reader waiting to be written.
 
 **Ntfy alerts** optionally reach the user away from the screen. Once enabled and configured in settings, the helm sends
 one alert when a session becomes waiting and remains so for 10 seconds, once per waiting spell. Leaving and re-entering

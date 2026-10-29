@@ -27,6 +27,12 @@ have no resume command for **Restart** to use; recreate them through **Clone** o
 never becomes restartable after a prompt, see
 [When something goes wrong](/docs/how-it-works/agent-hook-injection/#when-something-goes-wrong).
 
+## Status
+
+Farhelm reads Muse's working indicator and idle prompt to show whether the session is running or idle. It shows
+**waiting** for Muse's directory-trust question. Questions and approval dialogs during a conversation have not been
+verified, so they may look idle while Muse waits for you.
+
 ## Gotchas and quirks
 
 - Guarded selects Muse's auto-review profile with `--permission-profile :auto-review`, overriding an unrestricted

@@ -22,13 +22,13 @@
 //!   parts of their screen while idle (Claude Code's `/clear` hint, Codex's
 //!   recap block and rate-limit footer), and change counting reads every
 //!   such redraw as work.
-//! - RECOGNIZED CONTENT ("anchored" readings): the Claude Code and Codex
+//! - RECOGNIZED CONTENT ("anchored" readings): the dedicated agent
 //!   readers know what their agent draws — its spinner, its input box, the
 //!   key-hint footer of every dialog that asks the user something — and
 //!   answer from that, whatever the screen did since the last sample. The
 //!   rules are anchored on wording and layout observed in real captures
-//!   (`tests/fixtures/screens/`, re-captured by
-//!   `scripts/capture-agent-screens.py`), preferring text the vendor shows
+//!   (`tests/fixtures/screens/`, captured by
+//!   `scripts/capture-agent-screens.py` or the manual TUI procedure), preferring text the vendor shows
 //!   the user as an instruction over decoration such as spinner glyphs.
 //!
 //! A dedicated reader that recognizes none of its anchors (a vendor UI
@@ -64,8 +64,8 @@ use farhelm_proto::AgentKind;
 /// `None` means there is no definite reading; `Some(false)` means a recognized
 /// non-bypass footer. The sampler keeps bypass evidence once seen, regardless of
 /// later readings. This is advisory display evidence, not permission authority.
-/// Dispatch uses the launch harness because Muse and Cursor share the generic
-/// activity reader, and a legacy integration kind does not declare a harness.
+/// Dispatch uses the launch harness because permission modes belong to the
+/// launch configuration, and a legacy integration kind does not declare a harness.
 #[warn(clippy::wildcard_enum_match_arm)]
 pub(crate) fn status_line_yolo(harness: farhelm_proto::LaunchHarness, text: &str) -> Option<bool> {
     use farhelm_proto::LaunchHarness;
@@ -87,11 +87,11 @@ pub(crate) fn status_line_yolo(harness: farhelm_proto::LaunchHarness, text: &str
     }
 }
 
-/// Read workspace trust using the launch harness when activity kinds lose that identity.
+/// Read workspace trust for an explicitly declared launch or its activity kind.
 ///
-/// Muse shares Generic's activity reader, so only a declared Muse launch can
-/// advertise its dialog. Command and legacy launches retain their kind's reader;
-/// unrelated Generic command output must never become Muse trust evidence.
+/// The launch-harness route preserves hints for existing Muse launches. Command
+/// and legacy launches retain their kind's reader; unrelated Generic command
+/// output must never become Muse trust evidence.
 #[warn(clippy::wildcard_enum_match_arm)]
 pub(crate) fn workspace_trust_prompt(
     harness: Option<farhelm_proto::LaunchHarness>,
@@ -382,11 +382,11 @@ pub(crate) fn reader_for(kind: AgentKind) -> &'static dyn ScreenReader {
     match kind {
         AgentKind::Claude => &ClaudeReader,
         AgentKind::Codex => &CodexReader,
+        AgentKind::Muse => &MuseReader,
         AgentKind::Goose
         | AgentKind::Pi
         | AgentKind::Omp
         | AgentKind::Grok
-        | AgentKind::Muse
         | AgentKind::Generic => &GenericReader,
     }
 }
@@ -424,6 +424,85 @@ fn any_contains(lines: &[&str], needle: &str) -> bool {
 struct GenericReader;
 
 impl ScreenReader for GenericReader {}
+
+// ---------------------------------------------------------------------
+// Muse Code (observed on 1.4.14)
+// ---------------------------------------------------------------------
+
+/// Muse's explicit turn indicator and ruled composer distinguish work from rest.
+///
+/// Both Working and Thinking were captured above the composer during an offline
+/// echo turn. The title is unnecessary: the on-screen instruction carries the
+/// evidence. Trust is the only captured question shape; unfamiliar dialogs keep
+/// change counting rather than borrowing another agent's question vocabulary.
+struct MuseReader;
+
+impl ScreenReader for MuseReader {
+    fn trust_prompt(&self, text: &str) -> bool {
+        muse_trust_prompt(text)
+    }
+
+    fn has_screen_rules(&self) -> bool {
+        true
+    }
+
+    fn read(&self, counts: SampleCounts, screen: &Screen<'_>) -> Reading {
+        if self.trust_prompt(screen.text) {
+            return Reading::anchored(ScreenState::Waiting);
+        }
+        let lines = content_lines(screen.text);
+        let Some(top_rule) = muse_composer_top(&lines) else {
+            return generic_reading(counts);
+        };
+        if top_rule > 0 && is_muse_working_line(lines[top_rule - 1]) {
+            return Reading::anchored(ScreenState::Working);
+        }
+        Reading::anchored(ScreenState::Idle)
+    }
+}
+
+/// Locate Muse's current composer, excluding submitted prompts in the transcript.
+///
+/// The composer opens with a horizontal rule and a `❯` row, and closes with
+/// another rule immediately before its model/workspace footer. Draft text may
+/// wrap between the prompt and closing rule. Neither the provider name, working
+/// directory nor optional permission label is fixed.
+fn muse_composer_top(lines: &[&str]) -> Option<usize> {
+    let [.., bottom_rule, footer] = lines else {
+        return None;
+    };
+    let is_rule = |line: &str| !line.is_empty() && line.chars().all(|c| c == '─');
+    if !is_rule(bottom_rule) || !footer.contains(" · ") {
+        return None;
+    }
+    (1..lines.len() - 2)
+        .rev()
+        .find(|&index| lines[index].starts_with('❯') && is_rule(lines[index - 1]))
+        .map(|index| index - 1)
+}
+
+/// Match the observed turn instruction without depending on an animated glyph.
+///
+/// Placement above the composer is checked by the caller, so matching text in an
+/// unsent draft cannot become working evidence. Other verbs and timer formats
+/// have no captured evidence and are not inferred.
+fn is_muse_working_line(line: &str) -> bool {
+    let mut chars = line.trim().chars();
+    let Some(glyph) = chars.next() else {
+        return false;
+    };
+    if glyph.is_alphanumeric() || glyph.is_whitespace() || chars.next() != Some(' ') {
+        return false;
+    }
+    let rest = chars.as_str();
+    let Some(timer) = rest
+        .strip_prefix("Working (")
+        .or_else(|| rest.strip_prefix("Thinking ("))
+    else {
+        return false;
+    };
+    timer.starts_with(|c: char| c.is_ascii_digit()) && timer.ends_with(" · esc to interrupt)")
+}
 
 // ---------------------------------------------------------------------
 // Claude Code (observed on 2.1.285 and 2.1.296)
@@ -894,8 +973,8 @@ mod tests {
         }
     }
 
-    /// Muse has no dedicated activity kind, so the same captured dialog can
-    /// produce a hint only for an explicitly declared Muse launch. Its footer
+    /// A Generic command needs an explicitly declared Muse launch to produce a
+    /// Muse trust hint. Its footer
     /// must remain current; echoing the dialog above subsequent output is not
     /// evidence of a question waiting to be answered.
     #[test]
@@ -1029,6 +1108,78 @@ mod tests {
         reader_for(kind).read(counts(9, 0), &Screen { text, title })
     }
 
+    /// Muse's own kind recognizes the captured trust question even without a
+    /// launch-harness declaration. Completing the dialog withdraws both the
+    /// hint and the waiting reading; Generic commands inherit neither.
+    #[test]
+    fn muse_reader_recognizes_only_a_current_trust_question() {
+        let trust = include_str!("../../tests/fixtures/screens/muse/1.4.14/waiting-trust.txt");
+        let reader = reader_for(AgentKind::Muse);
+        assert!(reader.trust_prompt(trust));
+        assert!(!reader.claude_trust_prompt(trust));
+        assert!(workspace_trust_prompt(None, reader, trust));
+        assert!(!reader_for(AgentKind::Generic).trust_prompt(trust));
+        assert_eq!(
+            read(AgentKind::Muse, trust, ""),
+            Reading::anchored(ScreenState::Waiting)
+        );
+        let completed = format!("{trust}\nThe workspace is trusted.");
+        assert!(!reader.trust_prompt(&completed));
+        assert!(!read(AgentKind::Muse, &completed, "").anchored);
+    }
+
+    /// Working-shaped text in the transcript or an unsent draft is not a turn
+    /// indicator. The current composer and the adjacent vendor instruction
+    /// distinguish the real captured turn from those ordinary idle screens.
+    #[test]
+    fn muse_working_indicator_must_sit_above_the_current_composer() {
+        let working = include_str!("../../tests/fixtures/screens/muse/1.4.14/working-echo.txt");
+        let indicator = "◇ Working (0s · esc to interrupt)";
+        assert!(
+            working.contains(indicator),
+            "fixture premise: busy line exists"
+        );
+        let finished = working.replace(indicator, &format!("{indicator}\n◆ The turn is complete."));
+        assert_eq!(
+            read(AgentKind::Muse, &finished, "").state,
+            ScreenState::Idle
+        );
+        let draft = working
+            .replace(indicator, "◆ The turn is complete.")
+            .replace(
+                "\n❯\n",
+                &format!("\n❯ Explain this indicator:\n{indicator}\n"),
+            );
+        assert!(
+            draft.contains("❯ Explain this indicator:"),
+            "fixture premise: composer replaced"
+        );
+        assert_eq!(read(AgentKind::Muse, &draft, "").state, ScreenState::Idle);
+        let without_composer = working.split(indicator).next().expect("split has a prefix");
+        assert!(!read(AgentKind::Muse, without_composer, "").anchored);
+    }
+
+    /// Unfamiliar Muse screens keep ordinary change counting. A title borrowed
+    /// from another agent cannot supply unsupported Muse waiting/work evidence.
+    #[test]
+    fn muse_unrecognized_screens_keep_generic_history() {
+        let reader = reader_for(AgentKind::Muse);
+        assert!(reader.has_screen_rules());
+        assert!(!reader.wants_title());
+        for history in [counts(1, 0), counts(9, QUIET_SAMPLES_BEFORE_IDLE)] {
+            assert_eq!(
+                reader.read(
+                    history,
+                    &Screen {
+                        text: "A vendor screen not yet captured",
+                        title: "[ ! ] Action Required"
+                    }
+                ),
+                generic_reading(history)
+            );
+        }
+    }
+
     /// The generic rule's two edges: idle needs both a comparison and a
     /// full quiet streak, and nothing about it is anchored.
     ///
@@ -1068,7 +1219,6 @@ mod tests {
             AgentKind::Pi,
             AgentKind::Omp,
             AgentKind::Grok,
-            AgentKind::Muse,
             AgentKind::Generic,
         ] {
             let reader = reader_for(kind);

@@ -1,4 +1,5 @@
-//! Real agent screens captured by `scripts/capture-agent-screens.py`, and the
+//! Real agent screens captured by `scripts/capture-agent-screens.py` or the
+//! manual procedure in `.agents/real-agent-tui.md`, and the
 //! tests that hold them to their contract.
 //!
 //! Each fixture is one visible tmux grid (`capture-pane -p`, the command the
@@ -23,15 +24,13 @@ use std::path::{Path, PathBuf};
 /// whatever it last concluded.
 const EXPECTED_STATES: &[&str] = &["working", "waiting", "idle", "unknown"];
 
-/// Harnesses with dedicated activity readers and complete automated captures.
-/// Muse's manually captured trust dialog supplies only hint evidence: it does
-/// not give the Generic activity reader a new working/waiting/idle contract.
-const HARNESSES: &[&str] = &["claude", "codex"];
+/// Harnesses represented by real or explicitly derived screen fixtures.
+const HARNESSES: &[&str] = &["claude", "codex", "muse"];
 
 /// One captured screen with the state the capture tool drove the agent into.
 #[derive(Debug)]
 pub(crate) struct ScreenFixture {
-    /// A dedicated activity harness, or Muse's trust-only manual capture.
+    /// The harness whose terminal was captured.
     pub(crate) harness: String,
     /// The vendor's version string the screen was captured from.
     pub(crate) version: String,
@@ -63,7 +62,7 @@ pub(crate) fn load_fixtures() -> Vec<ScreenFixture> {
     for harness_dir in sorted_dirs(&root) {
         let harness = file_name(&harness_dir);
         assert!(
-            HARNESSES.contains(&harness.as_str()) || harness == "muse",
+            HARNESSES.contains(&harness.as_str()),
             "unexpected harness directory {}",
             harness_dir.display()
         );
@@ -140,6 +139,13 @@ fn file_name(path: &Path) -> String {
         .to_string()
 }
 
+/// Older Muse trust-only captures predate its activity reader and stay useful
+/// for workspace hints. They promise no working/idle coverage; later versions
+/// join the same complete activity contract as Claude and Codex.
+fn has_activity_contract(fixture: &ScreenFixture) -> bool {
+    fixture.harness != "muse" || fixture.version != "1.4.10-R6427.1"
+}
+
 /// Whether `text` holds something shaped like an email address: a local part
 /// and a dotted domain around one `@`, both built from address characters.
 ///
@@ -168,7 +174,7 @@ const SCRUBBED_EMAIL: &str = "user@example.com";
 
 /// The capture tool's structural contract holds for every committed screen:
 /// names parse to a known state, each has a title sidecar, and every captured
-/// version of both harnesses shows the agent working, waiting, and idle.
+/// activity version of every harness shows the agent working, waiting, and idle.
 ///
 /// Why it matters: these fixtures are the only thing tying the screen readers
 /// to what the vendors really draw. A misnamed file silently drops out of
@@ -188,7 +194,7 @@ fn screen_fixtures_are_well_formed_and_cover_every_live_state() {
     for harness in HARNESSES {
         let mut versions: Vec<&str> = fixtures
             .iter()
-            .filter(|fixture| fixture.harness == *harness)
+            .filter(|fixture| fixture.harness == *harness && has_activity_contract(fixture))
             .map(|fixture| fixture.version.as_str())
             .collect();
         versions.dedup();
@@ -259,13 +265,11 @@ fn screen_fixtures_email_detector_matches_addresses_only() {
 #[test]
 fn screen_fixtures_read_as_the_state_they_were_captured_in() {
     let mut failures = Vec::new();
-    for fixture in load_fixtures()
-        .into_iter()
-        .filter(|fixture| HARNESSES.contains(&fixture.harness.as_str()))
-    {
+    for fixture in load_fixtures().into_iter().filter(has_activity_contract) {
         let kind = match fixture.harness.as_str() {
             "claude" => AgentKind::Claude,
             "codex" => AgentKind::Codex,
+            "muse" => AgentKind::Muse,
             other => panic!("no agent kind for harness {other}"),
         };
         let expected = match fixture.expected.as_str() {
