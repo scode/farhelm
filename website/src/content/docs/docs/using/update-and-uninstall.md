@@ -20,9 +20,9 @@ a copy of Farhelm you built yourself never updates itself.
 When a newer version is installed than the one you are running, the version number at the top of the sidebar turns red,
 with an up-arrow in front of it. Hover over it to see which version is waiting.
 
-Select the version number and choose **restart to update**: Farhelm quits and opens again on the new version. Your
+Select the version number and choose **Restart to update**: Farhelm quits and opens again on the new version. Your
 sessions keep running while it does, as they do whenever you quit Farhelm
-([What survives what](/docs/how-it-works/what-survives-what/)). **what's new** in the same menu opens the
+([What survives what](/docs/how-it-works/what-survives-what/)). **What's new** in the same menu opens the
 [release notes](/docs/release-notes/), which say what changed in each release.
 
 You do not have to restart right away. The update also takes effect the next time Farhelm opens, whether you quit and
@@ -31,14 +31,14 @@ reopen it or your Mac reboots.
 ## Check for an update now
 
 To check right away, select the version number at the top of the sidebar, unless an update is already waiting. You can
-also select the **?** button there and choose **check for updates**, or choose **update** in the menu of your Mac's own
+also select the **?** button there and choose **Check for updates**, or choose **Update** in the menu of your Mac's own
 row in the host list. Each one installs a new release if there is one. Beside the version number the app shows
-**checking…**, then **installing…**, **up to date**, or **check failed**. **up to date** stays for about five seconds;
-**check failed** stays until you dismiss it or check again, and hovering over it gives the reason.
+**Checking…**, then **Installing…**, **Up to date**, or **Check failed**. **Up to date** stays for about five seconds;
+**Check failed** stays until you dismiss it or check again, and hovering over it gives the reason.
 
 A check Farhelm makes by itself shows nothing while it goes well; when it installs an update, the version number turns
-red. If downloading or installing an update fails, **check failed** appears right away. If Farhelm cannot reach the
-update server, for example because your Mac is offline, it tries again the next day, and shows **check failed** only
+red. If downloading or installing an update fails, **Check failed** appears right away. If Farhelm cannot reach the
+update server, for example because your Mac is offline, it tries again the next day, and shows **Check failed** only
 once that has kept failing for three days. A failure shown this way stays until a check succeeds, a newer version is
 installed, or you dismiss it.
 
@@ -51,8 +51,8 @@ interrupted works the same way: run it again to finish removing Farhelm, or run 
 
 ## Turn automatic updates off
 
-Select the gear at the top of the sidebar, choose **app**, and turn off **install updates automatically**. Farhelm then
-stops checking by itself. **check for updates** and your Mac's **update** still work, and you can still update by
+Select the gear at the top of the sidebar, choose **App**, and turn off **Install updates automatically**. Farhelm then
+stops checking by itself. **Check for updates** and your Mac's **Update** still work, and you can still update by
 running the installer again, as in [Install Farhelm](/docs/get-started/install/). The red version number still appears
 when a newer version is installed, however it got there.
 
@@ -75,4 +75,4 @@ shows which hosts run an older version and lets you update them; see
 
 To remove Farhelm, see [Uninstall Farhelm](/docs/get-started/uninstall/). Uninstall keeps your managed checkouts,
 including their trash and [prepared checkouts](/docs/using/start-a-session/#prepared-checkouts) inside the directory set
-as **checkout folder**.
+as **Checkout folder**.

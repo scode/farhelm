@@ -21,26 +21,26 @@ the bar below the terminal.
 />
 
 Restart always continues the session's own conversation; there is no restart that starts a new one. When Farhelm has no
-conversation it can resume, because the agent cannot report one or none was captured, **restart** is greyed out and
+conversation it can resume, because the agent cannot report one or none was captured, **Restart** is greyed out and
 hovering over it says why. Right after a launch that is usually just a wait: Farhelm captures a Codex conversation once
 you submit your first prompt, a Pi or OMP conversation after the agent's first reply, a Claude conversation a few
 seconds after it starts, a Goose conversation as soon as it starts, and a Grok conversation after your first prompt,
-once [its hooks](/docs/agents/grok/#setup) are installed; **restart** can take a couple of seconds more to become
+once [its hooks](/docs/agents/grok/#setup) are installed; **Restart** can take a couple of seconds more to become
 available. If it never comes, replace is how you start the session over. [Supported agents](/docs/agents/) says which
 agents Farhelm can resume, and a command you run yourself needs an agent and a resume command declared for it; see
 [Custom commands](/docs/agents/custom-commands/).
 
-**restart with** resumes the conversation the same way, with different settings. It opens the
+**Restart with** resumes the conversation the same way, with different settings. It opens the
 [session launcher](/docs/using/start-a-session/) filled in with this session's choices, where you can change the model,
 effort, permission mode or wrapper prefix; the agent, host, directory, session name and first message stay as they are. For an agent Farhelm can resume, you can also name the conversation it should enter. If
-Farhelm never learned its id, **restart with** remains available and requires the id or, for Pi and OMP, the session
+Farhelm never learned its id, **Restart with** remains available and requires the id or, for Pi and OMP, the session
 file. Muse, Cursor and OpenCode still cannot use Restart with. Enter on one of its choices picks it and restarts
-with the result (in the model field, Enter only picks the model); when the button says **stop and restart**, because the agent is working, Enter also confirms stopping
+with the result (in the model field, Enter only picks the model); when the button says **Stop and restart**, because the agent is working, Enter also confirms stopping
 it first.
 
-For Codex, Muse and Pi in a managed checkout, **replace with** and **clone** use the current
-[trust setting](/docs/using/start-a-session/#trust-in-managed-checkouts), as does **restart with** where available.
-Plain **restart** and **replace** keep the trust carried by the saved launch.
+For Codex, Muse and Pi in a managed checkout, **Replace with** and **Clone** use the current
+[trust setting](/docs/using/start-a-session/#trust-in-managed-checkouts), as does **Restart with** where available.
+Plain **Restart** and **Replace** keep the trust carried by the saved launch.
 
 The entered conversation is a choice for this start only, as in [the session launcher](/docs/using/start-a-session/#continue-a-conversation-you-know).
 Farhelm keeps the previous conversation until the agent reports the new one. Codex reports at your first prompt, so
@@ -48,17 +48,17 @@ Restart before then still opens the previous conversation. Goose cannot report a
 conversation forgets the old one and leaves later Restart unavailable. The same happens for an agent whose Farhelm
 hooks are turned off with `FARHELM_AGENT_HOOKS`, except Grok, whose hooks are the ones you install.
 
-**replace** starts the agent again from a fresh conversation, with the same agent, settings, and directory. It makes a
+**Replace** starts the agent again from a fresh conversation, with the same agent, settings, and directory. It makes a
 new session in this one's place, so the old conversation, shell tabs, and terminal history all go, and it asks you to
-confirm first; press Enter to go ahead. **replace with** opens the [session launcher](/docs/using/start-a-session/) filled in with this session's
-choices; change anything but the host, and the new session takes this one's place. **clone** opens the launcher the same
+confirm first; press Enter to go ahead. **Replace with** opens the [session launcher](/docs/using/start-a-session/) filled in with this session's
+choices; change anything but the host, and the new session takes this one's place. **Clone** opens the launcher the same
 way but leaves this session alone, so you end up with two. None of these sends an
 [initial prompt](/docs/using/start-a-session/#supply-the-first-message) again.
 
-While the agent is working (its status is running), **restart** asks you to confirm first, since restarting stops it.
+While the agent is working (its status is running), **Restart** asks you to confirm first, since restarting stops it.
 An agent that is idle or waiting for you is stopped and restarted without asking, and a session whose agent has already
-ended restarts straight away. **restart** never asks the YOLO question, even for a YOLO session, since it relaunches a
-choice you already made; **restart with** asks it when the new settings are YOLO and the host asks before YOLO
+ended restarts straight away. **Restart** never asks the YOLO question, even for a YOLO session, since it relaunches a
+choice you already made; **Restart with** asks it when the new settings are YOLO and the host asks before YOLO
 launches; [Confirm a YOLO launch](/docs/using/start-a-session/#confirm-a-yolo-launch) covers its answers.
 
 ## Stop or delete
@@ -71,15 +71,15 @@ launches; [Confirm a YOLO launch](/docs/using/start-a-session/#confirm-a-yolo-la
 Both are in a session's menu in the [session list](/docs/using/session-list/), and delete is also the red button at the
 right of the row above the terminal, beside its tabs. Delete asks you to confirm, with one exception: from the session
 list, a session that has already ended and has no shell tabs open is deleted at once.
-When a confirmation opens, Enter confirms it; **cancel** backs out. The YOLO question still starts on **cancel**.
+When a confirmation opens, Enter confirms it; **Cancel** backs out. The YOLO question still starts on **Cancel**.
 
 **Cmd+W** in the Mac app, or **Ctrl+Shift+Backspace** in a browser, deletes the open session the same way as its Delete
 button, including the confirmation setting below. Escape cancels the Restart, Replace or Delete question under those
 buttons and returns you to the terminal.
 
-To delete, replace, restart and close shell tabs on the first click, turn on **skip session confirmations** in
-the **sessions** section of **settings**, behind the gear beside the sidebar version. It starts off and applies to your
-helm; other open windows pick it up when they reload. YOLO, host and trash questions keep their own rules, and **restart with** still opens the
+To delete, replace, restart and close shell tabs on the first click, turn on **Skip session confirmations** in
+the **Sessions** section of **Settings**, behind the gear beside the sidebar version. It starts off and applies to your
+helm; other open windows pick it up when they reload. YOLO, host and trash questions keep their own rules, and **Restart with** still opens the
 launcher.
 
 For a [managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout), the checkout stays while another

@@ -5,7 +5,7 @@ sidebar:
   order: 60
 ---
 
-To run a known agent through a wrapper, choose the agent in the session launcher's **agent** tab and enter a **wrapper
+To run a known agent through a wrapper, choose the agent in the session launcher's **Agent** tab and enter a **Wrapper
 prefix**, such as `with-endpoint --profile work --`. Farhelm puts those words before the command it would otherwise run,
 including on resume. It still chooses the agent's arguments, reads its status, and follows its conversation where that
 agent supports it. The wrapper must run that agent and pass its arguments and environment through. Farhelm takes your
@@ -30,13 +30,13 @@ nothing.
 
 ## A custom wrapper command, field by field
 
-On the session launcher's **command** tab, four fields matter:
+On the session launcher's **Command** tab, four fields matter:
 
-- **agent command**: `my-wrapper run {cwd} claude {farhelm_args}`
-- **runs in YOLO mode**: your answer, **yes (YOLO)** or **no**. Farhelm believes it and never reads the command to check
+- **Agent command**: `my-wrapper run {cwd} claude {farhelm_args}`
+- **Runs in YOLO mode**: your answer, **Yes (YOLO)** or **No**. Farhelm believes it and never reads the command to check
   it, and it covers the resume command too.
-- **agent type**: Claude — the agent the wrapper ends up running, never the wrapper itself
-- **resume command**, which appears once you tick **resume**:
+- **Agent type**: Claude — the agent the wrapper ends up running, never the wrapper itself
+- **Resume command**, which appears once you tick **Resume**:
   `my-wrapper run {cwd} claude --resume {conversation} {farhelm_args}`
 
 `{cwd}` is a whole word or it is nothing. An argument either equals `{cwd}` exactly, in which case it is replaced, or it
@@ -84,7 +84,7 @@ cannot be restarted at all, only replaced.
 
 ## What the wrapper must pass through
 
-With a prefix on the **agent** tab, Farhelm composes the agent's arguments and places them after your prefix. With a
+With a prefix on the **Agent** tab, Farhelm composes the agent's arguments and places them after your prefix. With a
 custom command, it puts its arguments exactly where `{farhelm_args}` stands, and only there; for an agent that takes
 none it stands for nothing. Those arguments turn the agent's conversation reporting on, as
 [Agent hook injection](/docs/how-it-works/agent-hook-injection/) describes. A resume is no exception: the resume command
@@ -103,7 +103,7 @@ starts Claude without `exec`. Farhelm follows the first Claude process whose con
 started inside the session cannot replace a conversation already reported by its parent. If that nested Claude reports
 first, Farhelm may briefly follow its conversation. When the Claude that started it next reports at the end of a turn,
 or at start, resume, `/clear`, or compact, Farhelm switches to that conversation and tells you in the session's
-notifications what a **restart** before the switch would have resumed. If the followed Claude exits and you start a
+notifications what a **Restart** before the switch would have resumed. If the followed Claude exits and you start a
 fresh one in the same terminal, Farhelm can follow the new one. Sessions already running before end-of-turn reporting
 was added gain it on relaunch; until then, correction waits for another start, resume, `/clear`, or compact.
 
@@ -111,17 +111,17 @@ Codex also works through a wrapper that stays running, including one named `code
 Codex process whose conversation it accepts; wrappers above that process do not need to replace themselves. If another
 Codex process started inside the session reports first, Farhelm may briefly follow its conversation. When the Codex
 process that started it reports, Farhelm switches to that conversation and tells you in the session's notifications what
-a **restart** before the switch would have resumed. If the followed Codex exits and you start a fresh one in the same
+a **Restart** before the switch would have resumed. If the followed Codex exits and you start a fresh one in the same
 terminal, Farhelm can follow the new one. The native Codex executable must still be named `codex`; a renamed one cannot
-supply the conversation **restart** needs.
+supply the conversation **Restart** needs.
 
 Grok accepts a wrapper that `exec`s Grok or stays resident as Grok's one parent process, unless that resident wrapper is
 itself named `grok` or its program is named `grok-` followed by anything. A deeper resident chain prevents Farhelm from
-following the conversation, leaving **restart** unavailable. Its hooks still have to be
+following the conversation, leaving **Restart** unavailable. Its hooks still have to be
 [installed](/docs/agents/grok/#setup), and the wrapper must pass through its environment.
 
 OMP accepts a prefix wrapper only when the wrapper `exec`s OMP, leaving no extra process between the session and OMP's
-own launcher. A resident wrapper can run OMP, but Farhelm will not follow its conversation, so **restart** stays
+own launcher. A resident wrapper can run OMP, but Farhelm will not follow its conversation, so **Restart** stays
 unavailable. The same process rule applies when you write a custom command.
 
 Four variables travel in the environment rather than on the command line: `FARHELM_SESSION_ID` (which session this is —

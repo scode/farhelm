@@ -19,7 +19,7 @@ terminal yourself, and everything it prints shows up here. Farhelm does not sit 
 
 The slim bar under the terminal shows the session's name and host, followed by its age, directory, and command. The host
 has the same icon and color as in the [session list](/docs/using/session-list/), so you can see where you are working.
-The **sessions** section in Settings can also [color the terminal's frame](/docs/using/manage-hosts/#host-settings) to
+The **Sessions** section in Settings can also [color the terminal's frame](/docs/using/manage-hosts/#host-settings) to
 match its host.
 Click the directory or command to copy it; your home directory appears as `~`.
 
@@ -38,8 +38,8 @@ button or Cmd+Q.
 Each shell tab is named **Terminal 1**, **Terminal 2**, and so on, and runs on the same host as the agent, in the
 session's directory. It belongs to the session: it keeps running when you switch to another session, and deleting the
 session closes it. Closing a tab yourself asks you to confirm first, since it ends whatever is running in it; press Enter
-to confirm, or **cancel** to keep it open. You can skip that question with
-[skip session confirmations](/docs/using/stop-restart-resume/#stop-or-delete) under **sessions** in settings.
+to confirm, or **Cancel** to keep it open. You can skip that question with
+[Skip session confirmations](/docs/using/stop-restart-resume/#stop-or-delete) under **Sessions** in settings.
 
 **A−** and **A+** at the right end of the tab strip change the terminal's text size, as do Cmd+Shift+minus and
 Cmd+Shift+plus.
@@ -58,7 +58,7 @@ picture out. If that picture was really a separate image, paste it on its own.
 
 Clicking a web link in the terminal opens it once in your browser. Farhelm keeps that click from reaching the program,
 so an agent that opens links itself does not open a second tab. If a program needs those clicks, change
-the link choices under [**terminal** in settings](/docs/using/session-list/#terminal-links). File downloads keep working
+the link choices under [**Terminal** in settings](/docs/using/session-list/#terminal-links). File downloads keep working
 the same way under every choice.
 
 Some programs print a link under text of their own; hovering over one of
@@ -77,7 +77,7 @@ it into Downloads, chooses a new name if needed, and tells you where it went. A 
 
 In the desktop app, **Cmd-click** on your Mac (**Ctrl-click** on Linux) also opens the saved copy in its default app.
 By default, `.md`, `.txt` and `.json` files open; other types are saved without opening. You can change the list under
-**terminal** in the [settings dialog](/docs/using/session-list/#terminal-links). Save an empty list if you want
+**Terminal** in the [settings dialog](/docs/using/session-list/#terminal-links). Save an empty list if you want
 Cmd-click to download without opening. The hover shows when opening is available, and the message tells you if the file
 was saved but could not be opened. In a browser, modifier-click still only downloads. See the
 [security model](/docs/how-it-works/security-model/) before opening agent-provided files.
@@ -100,7 +100,7 @@ The first time, Farhelm asks you to accept a security warning. A page opened thi
 browser: it can read cookies from other services on `127.0.0.1`, since ports do not separate cookies, and it bypasses
 your browser's private-network checks. Any program on your Mac can connect to the tunnel. Ordinary links from another
 `127.0.0.1` page into the browser helm are also refused; opening the helm from the address bar or a bookmark still works.
-You can turn tunnels off under **terminal** in settings, which closes the ones already open.
+You can turn tunnels off under **Terminal** in settings, which closes the ones already open.
 
 Open tunnels appear below the row of tabs and action buttons, with the port on your Mac, the host's port, and a close
 button. The port on your Mac is one your Mac picks, never the host's port number, so an app that puts its own
@@ -116,7 +116,7 @@ does not forward browser-login callbacks automatically. When an agent asks to op
 ## When the connection drops
 
 If Farhelm loses its connection to the session, a card over the dimmed last screen explains what it is waiting for,
-with details below. The view reattaches by itself when the connection is back. The **reconnect now** button tries again straight
+with details below. The view reattaches by itself when the connection is back. The **Reconnect now** button tries again straight
 away when the connection from your window dropped; when the host itself is unavailable, the card instead shows any
 steps needed to reach it again. What keeps running during an outage is covered in
 [What survives what](/docs/how-it-works/what-survives-what/).

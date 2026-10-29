@@ -20,7 +20,7 @@ every version kept inside it, and the `farhelm` command from `~/.local/bin`. It 
 `~/.local/state/farhelm`: your list of hosts, preferences, session history, logs, and the repository caches for managed
 checkouts. Your projects, your agents, tmux, and your managed checkouts (including their trash and
 [prepared checkouts](/docs/using/start-a-session/#prepared-checkouts) in `.farhelm-spares` inside the directory set as
-**checkout folder**) are not touched. To see the list without changing anything, add `--dry-run`. If Farhelm is still
+**Checkout folder**) are not touched. To see the list without changing anything, add `--dry-run`. If Farhelm is still
 open when you confirm, it refuses and asks you to quit it first, and nothing is removed. It also refuses while any other
 program still runs a version of Farhelm, and names the `lsof` command that shows which one, so you can quit it and run
 uninstall again. If an uninstall is interrupted, running it again finishes it.
@@ -36,12 +36,12 @@ To remove your data as well, delete `~/.local/state/farhelm` once the uninstall 
 ## From a remote host
 
 Uninstalling on your Mac does not touch your remote hosts, and their sessions keep running. To remove Farhelm from a
-remote host, select **uninstall** in that host's `⋯` menu in the host list; see
+remote host, select **Uninstall** in that host's `⋯` menu in the host list; see
 [Manage hosts](/docs/using/manage-hosts/#uninstall-farhelm-from-a-remote-host).
 
 Farhelm needs to reach the host to do this, so it can check that no session is still running there. If the host shows as
-unreachable or with a problem in the list, fix that first, then choose **uninstall** again. Farhelm also refuses in a
+unreachable or with a problem in the list, fix that first, then choose **Uninstall** again. Farhelm also refuses in a
 few less common cases, such as a host where Farhelm was set up by running `farhelm helm setup` on the host itself, and
 says why when it does. The one exception is finishing an uninstall that stopped partway: once it has removed Farhelm's
-service and Farhelm's supervisor there has stopped, the host is expected to look unreachable, and choosing **uninstall**
+service and Farhelm's supervisor there has stopped, the host is expected to look unreachable, and choosing **Uninstall**
 again still finishes the job.

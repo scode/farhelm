@@ -102,11 +102,11 @@ details.</p>
 
 ## Permission modes
 
-The session launcher's **agent** tab also accepts a **wrapper prefix** for every agent here. Farhelm keeps composing the
+The session launcher's **Agent** tab also accepts a **Wrapper prefix** for every agent here. Farhelm keeps composing the
 agent's command and runs it through those words; see [Agent wrappers](/docs/agents/agent-wrappers/) for the wrapper's
 requirements. The prefix does not change which permission mode you chose.
 
-Choose **custom** to supply your own permission flags for Claude, Codex, Grok, Muse, Cursor or OMP. They replace
+Choose **Custom** to supply your own permission flags for Claude, Codex, Grok, Muse, Cursor or OMP. They replace
 Farhelm's permission flags; you are responsible for making sure they only change permissions. Farhelm does not check
 what they do, so the session gets the amber YOLO shield and hosts that ask before YOLO launches still ask.
 
@@ -149,7 +149,7 @@ shows the launch choice until Farhelm sees the status line again. The shield nev
 launch choice. This changes only the display; Farhelm's confirmations and permission choices for new sessions still
 follow the launch.
 
-Cursor's **agent's own setting** has a grey dashed shield. Hosts that ask before YOLO launches treat it as YOLO,
+Cursor's **Agent's own setting** has a grey dashed shield. Hosts that ask before YOLO launches treat it as YOLO,
 because Farhelm cannot promise a safety check. The same applies to older Claude, Codex, Grok and Muse sessions started without permission flags:
 restart, plain Replace and copies keep their old command. Use **Clone**, **Replace with** or **Restart with** to build
 a new guarded launch. On a host that asks first, plain Replace of an older session asks for confirmation too.

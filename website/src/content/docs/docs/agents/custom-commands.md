@@ -12,26 +12,26 @@ they work, and what is and is not supported, may change.
 
 :::
 
-The session launcher's **command** tab runs any command line as a session. Use it for an agent Farhelm does not know, or
+The session launcher's **Command** tab runs any command line as a session. Use it for an agent Farhelm does not know, or
 for one it does know when you want to start it your own way: through a wrapper that needs a directory argument or a
-different resume command, with flags the **agent** tab does not offer, or from a different install. For a wrapper that
+different resume command, with flags the **Agent** tab does not offer, or from a different install. For a wrapper that
 only needs to run Farhelm's agent command, use the [agent tab's wrapper prefix](/docs/agents/agent-wrappers/) instead.
 What Farhelm can then do for a custom-command session depends on what you tell it, and the **Command** column of the
 [support matrix](/docs/agents/) sums that up.
 
 ## The fields
 
-- **agent command**: the command line to run. Write `{cwd}` as a whole argument where the command wants the session's
+- **Agent command**: the command line to run. Write `{cwd}` as a whole argument where the command wants the session's
   directory, and Farhelm fills it in at every launch and restart.
-- **runs in YOLO mode**: **yes (YOLO)** or **no**, and you have to pick one. Guarded can approve actions automatically
+- **Runs in YOLO mode**: **Yes (YOLO)** or **No**, and you have to pick one. Guarded can approve actions automatically
   through a classifier, AI reviewer or sandbox, so no prompt by itself does not mean YOLO
   ([Permission modes](/docs/agents/#permission-modes)). Farhelm never reads the command to work out which; it takes your
   answer, and asks you to [confirm a YOLO launch](/docs/using/start-a-session/#confirm-a-yolo-launch) on hosts that ask.
   An agent cannot give this answer for you, so an agent cannot start a command at all on a host that asks before YOLO
   launches ([Approve what agents do](/docs/using/approve-agent-requests/#yolo-sessions-and-custom-commands)).
-- **agent type**, optional: the agent the command ends up running. Leave it empty for anything that is not one of the
+- **Agent type**, optional: the agent the command ends up running. Leave it empty for anything that is not one of the
   agents Farhelm knows.
-- **resume**, and the **resume command** it reveals: how to start the command again on the same conversation, so the
+- **Resume**, and the **Resume command** it reveals: how to start the command again on the same conversation, so the
   session can be restarted.
 
 ## Declaring the agent
@@ -48,9 +48,9 @@ Your command has to pass those arguments on to the agent: a wrapper that drops t
 
 ## Making it restartable
 
-A command can be restarted only when it declares an agent Farhelm can track, ticks **resume**, and has a resume command
+A command can be restarted only when it declares an agent Farhelm can track, ticks **Resume**, and has a resume command
 with `{conversation}` and `{farhelm_args}` in it, each once, as a whole argument. Farhelm puts the tracked conversation
-where `{conversation}` stands. Without all of that, **restart** stays greyed out and replace is how you start over.
+where `{conversation}` stands. Without all of that, **Restart** stays greyed out and replace is how you start over.
 
 The resume command is usually the start command plus the agent's own way of picking a conversation:
 
@@ -63,7 +63,7 @@ The resume command is usually the start command plus the agent's own way of pick
 | Pi        | `--session {conversation} {farhelm_args}`                                 |
 
 So `claude --model sonnet {farhelm_args}` resumes as `claude --model sonnet --resume {conversation} {farhelm_args}`.
-Your answer to **runs in YOLO mode** covers the resume command too.
+Your answer to **Runs in YOLO mode** covers the resume command too.
 
 Each agent's own page notes anything its custom commands need beyond this, such as Grok's `--no-leader` and Goose's
 `session`.
@@ -78,4 +78,4 @@ and the limitations of remote login callbacks. A command can ask explicitly with
 ## Reusing a command
 
 Save a command and its fields as a [launch template](/docs/using/launch-templates/) to start it again without typing it,
-or choose **clone** on a session started from it.
+or choose **Clone** on a session started from it.

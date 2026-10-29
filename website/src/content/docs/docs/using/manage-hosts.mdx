@@ -7,7 +7,7 @@ sidebar:
 
 import Screenshot from '../../../../components/Screenshot.astro';
 
-The host list at the top of the sidebar holds every machine that runs your sessions: your Mac, listed as **local (this
+The host list at the top of the sidebar holds every machine that runs your sessions: your Mac, listed as **Local (this
 machine)**, and each Linux machine you added. Each row's dot says whether Farhelm can reach that host right now. Adding
 a host is covered in [Add a remote host](/docs/get-started/add-a-remote-host/).
 
@@ -18,12 +18,12 @@ a host is covered in [Add a remote host](/docs/get-started/add-a-remote-host/).
   alt="A remote host's menu, opened from its three dots, with retry, settings, uninstall, and remove explained."
 />
 
-**update** installs your Mac's version of Farhelm on the host; [Update a host](#update-a-host) has more. Other items
+**Update** installs your Mac's version of Farhelm on the host; [Update a host](#update-a-host) has more. Other items
 appear only when a host needs attention, such as setting Farhelm up on a host that does not have it yet. Your Mac's own
-row has no **uninstall** or **remove**. In the Farhelm app installed on your Mac, its **update** checks for a new
+row has no **Uninstall** or **Remove**. In the Farhelm app installed on your Mac, its **Update** checks for a new
 release of Farhelm and installs it, as [Update or uninstall Farhelm](/docs/using/update-and-uninstall/) describes. In a
 browser, or in a copy of Farhelm that is not installed in `~/Applications`, it is greyed out instead.
-If **retry** or **adopt** fails, a dialog shows why.
+If **Retry** or **Adopt** fails, a dialog shows why.
 
 ## Host settings
 
@@ -51,16 +51,16 @@ For any host, choose an icon and a color under **Appearance** to tell its sessio
 appears beside its sessions, in the host list and quick switcher, and in the session launcher's host picker. Each choice saves
 as you make it and appears in your other open Farhelm windows. Your Mac starts with a red laptop mark, which you can change.
 
-In Settings, **color terminal frames by host** under **sessions** adds a thin frame around every terminal in its host's
+In Settings, **Color terminal frames by host** under **Sessions** adds a thin frame around every terminal in its host's
 color. It starts off. The terminal background and text colors stay the same. The switch is kept by the
 [helm](/docs/how-it-works/the-pieces/), so it applies in every Farhelm window; other open windows pick up a change when
 they reload.
 
 ## Update a host
 
-When a remote host runs an older version of Farhelm than your Mac, an **↑ update** button appears beside its name: amber
+When a remote host runs an older version of Farhelm than your Mac, an **↑ Update** button appears beside its name: amber
 when updating is optional, red when the host cannot connect until it is updated. Hover over it to see both versions.
-Clicking it updates the host straight away, without asking, and shows the progress in its place. **update all** at the
+Clicking it updates the host straight away, without asking, and shows the progress in its place. **Update all** at the
 top of the host list updates every remote host at once.
 
 Updating a host does not interrupt its sessions: they keep running through the update.
@@ -68,10 +68,10 @@ If Farhelm cannot plan an update, a dialog shows the reason before anything chan
 
 ## Uninstall Farhelm from a remote host
 
-**uninstall** first shows what it will remove from the host: the [supervisor](/docs/how-it-works/the-pieces/)'s service
+**Uninstall** first shows what it will remove from the host: the [supervisor](/docs/how-it-works/the-pieces/)'s service
 and Farhelm's program files, each with its path there. It also names the directory that holds the host's Farhelm data,
 which it keeps. It also stops the tmux Farhelm ran the host's sessions in. Nothing changes until you select
-**uninstall** in that dialog. Once it is done, the host is gone from the list. A short line above it confirms the
+**Uninstall** in that dialog. Once it is done, the host is gone from the list. A short line above it confirms the
 removal; hover over the line to see where the data remains, or use its Copy button to copy that directory's path. You
 can dismiss the line with ×. Delete the directory on the host yourself if you want the data gone too.
 
@@ -79,15 +79,15 @@ Uninstall never stops a session for you. If any session on the host has not ende
 its status is not known yet), or still has a terminal tab open, it says which ones and does nothing. Stop those sessions
 and close their terminal tabs first, as in [Stop, restart, and resume](/docs/using/stop-restart-resume/). Do not start a
 session on the host while the uninstall runs: one started then can end along with Farhelm. Uninstall also needs Farhelm
-to be connected to the host so it can check. If its row shows **unreachable, retrying**, **needs update**, **too new**,
-**identity mismatch**, **identity unverified** or **duplicate**, fix that first: the refusal says how, and so do the
-host's [details](#see-more-about-each-host). **remove** still works. A few less common setups are
+to be connected to the host so it can check. If its row shows **Unreachable, retrying**, **Needs update**, **Too new**,
+**Identity mismatch**, **Identity unverified** or **Duplicate**, fix that first: the refusal says how, and so do the
+host's [details](#see-more-about-each-host). **Remove** still works. A few less common setups are
 refused too, with the reason shown in a dialog: a host where Farhelm was set up by running `farhelm helm setup` on the
 host itself (its own `farhelm uninstall` removes it), one whose Farhelm runs from somewhere unexpected, and one whose
-`~/.local/lib/farhelm` directory is a symbolic link or has something mounted on or inside it. **remove** still works for all of them.
+`~/.local/lib/farhelm` directory is a symbolic link or has something mounted on or inside it. **Remove** still works for all of them.
 
 If something goes wrong partway, the host stays in the list and its details show which steps finished. Choose
-**uninstall** again to finish the job; it picks up where it stopped. Once a failed uninstall has removed the service
+**Uninstall** again to finish the job; it picks up where it stopped. Once a failed uninstall has removed the service
 and Farhelm's supervisor there has stopped, the next one can finish even though the host no longer answers.
 
 To remove Farhelm from your Mac, see [Uninstall Farhelm](/docs/get-started/uninstall/).
@@ -101,7 +101,7 @@ To remove Farhelm from your Mac, see [Uninstall Farhelm](/docs/get-started/unins
 
 As the dialog says, removing a host only makes Farhelm forget it. Nothing is stopped or uninstalled on the host, and
 adding the same destination again brings back its sessions, though their pins, and which ones you had already looked
-at, start fresh. **cancel** or Escape leaves the host where it was.
+at, start fresh. **Cancel** or Escape leaves the host where it was.
 The dialog stays open until Farhelm answers; if removal is refused, it shows why. If you chose to skip the confirmation,
 a refusal opens a short dialog instead.
 
@@ -112,26 +112,26 @@ a refusal opens a short dialog instead.
   alt="The Settings dialog with hosts selected, showing the section list and the switches for asking before setting up or removing hosts."
 />
 
-The gear beside the version number at the top of the sidebar opens Settings at **sessions**. Choose **hosts** in its
-section list for these two questions. Turning on **set up new hosts without asking** or **remove hosts without asking**
+The gear beside the version number at the top of the sidebar opens Settings at **Sessions**. Choose **Hosts** in its
+section list for these two questions. Turning on **Set up new hosts without asking** or **Remove hosts without asking**
 skips that question for actions you start in the UI; turn it off to be asked again.
 [Agents' host requests](/docs/using/approve-agent-requests/#host-changes) still need your approval. These two apply to
 every host, and other open Farhelm windows pick up a change when they reload.
 
 Choose a section to see its settings. Unsaved fields keep what you typed while you switch sections; closing Settings
-discards those drafts. At phone width, **‹ settings** returns to the section list.
+discards those drafts. At phone width, **‹ Settings** returns to the section list.
 
-**sessions** holds **color terminal frames by host**, **name sessions on quick launch** (covered in
-[Launch templates](/docs/using/launch-templates/#quick-launch)), and **skip session confirmations**, which covers
+**Sessions** holds **Color terminal frames by host**, **Name sessions on quick launch** (covered in
+[Launch templates](/docs/using/launch-templates/#quick-launch)), and **Skip session confirmations**, which covers
 [session actions and shell-tab close](/docs/using/stop-restart-resume/#stop-or-delete) without changing these host
-choices or YOLO and trash questions. **terminal** holds the [terminal link choices](/docs/using/session-list/#terminal-links)
+choices or YOLO and trash questions. **Terminal** holds the [terminal link choices](/docs/using/session-list/#terminal-links)
 and, in the desktop app, file types to open with a modifier-click and
-[tunnels](/docs/using/work-in-a-session/#open-a-remote-localhost-link). **checkouts** holds **checkout folder**, **post-clone command** and
-[**keep a checkout ready for faster launches**](/docs/using/start-a-session/#prepared-checkouts), while **agent trust** holds the managed-checkout trust switches; both are covered in
+[tunnels](/docs/using/work-in-a-session/#open-a-remote-localhost-link). **Checkouts** holds **Checkout folder**, **Post-clone command** and
+[**Keep a checkout ready for faster launches**](/docs/using/start-a-session/#prepared-checkouts), while **Agent trust** holds the managed-checkout trust switches; both are covered in
 [Start a session](/docs/using/start-a-session/#start-from-a-managed-checkout).
 
-**notifications** groups [sounds](/docs/using/session-list/#sounds-when-an-agent-needs-you) and
-[ntfy alerts](/docs/using/session-list/#ntfy-alerts). In the installed Farhelm app on your Mac, **app** holds **install
+**Notifications** groups [sounds](/docs/using/session-list/#sounds-when-an-agent-needs-you) and
+[ntfy alerts](/docs/using/session-list/#ntfy-alerts). In the installed Farhelm app on your Mac, **App** holds **Install
 updates automatically**, which is about updating Farhelm itself; see
 [Turn automatic updates off](/docs/using/update-and-uninstall/#turn-automatic-updates-off).
 

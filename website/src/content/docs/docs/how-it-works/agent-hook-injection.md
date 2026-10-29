@@ -13,7 +13,7 @@ details of how it works, and what is and is not supported, may change.
 :::
 
 Farhelm uses conversation reporters to learn which conversation you are in from Claude, Codex, Goose, Pi, OMP, and Grok,
-so **restart** can resume the last conversation it learned of. Restarting after `/clear` or `/new`, before Farhelm has
+so **Restart** can resume the last conversation it learned of. Restarting after `/clear` or `/new`, before Farhelm has
 learned of the new conversation, can bring back the earlier one; for some agents that happens only at your next prompt
 or reply. Claude, Codex, Goose, Pi, and OMP get their reporter from the launch Farhelm builds. Grok requires three
 user-installed hook entries because its supported hook surface is configuration-based. Farhelm never edits that
@@ -159,12 +159,12 @@ model's context, which is the whole delivery mechanism — nothing is written to
 
 ## What you will see
 
-Claude: the session's **restart** button becomes available within a few seconds of launch, before you have typed
+Claude: the session's **Restart** button becomes available within a few seconds of launch, before you have typed
 anything, because Claude fires the hook at process start. This works through
 [multiple wrappers that stay running](/docs/agents/agent-wrappers/). Farhelm follows the first Claude process whose
 conversation it accepts. Another Claude started inside the session cannot replace a conversation already reported by its
 parent. If the nested Claude reports first, the parent's next report at the end of a turn, or at start, resume,
-`/clear`, or compact, switches Farhelm to its conversation. A session notification explains what **restart** would have
+`/clear`, or compact, switches Farhelm to its conversation. A session notification explains what **Restart** would have
 resumed before the switch. If the followed Claude exits, a fresh Claude in the same terminal can report its own
 conversation. Sessions already running before end-of-turn reporting was added keep their old command until relaunch, so
 their correction still waits for start, resume, `/clear`, or compact. Claude 2.1.310 can briefly display its own
@@ -182,7 +182,7 @@ Farhelm cannot tell which process is Codex. Farhelm verifies the exact root tran
 `CODEX_HOME` points somewhere else. Farhelm follows the first Codex process whose conversation it accepts, even through
 launchers that stay running above it. A nested invocation cannot replace a conversation already reported by its parent.
 If the nested invocation reports first, a verified report from the Codex process that started it switches Farhelm to
-that conversation, with a session notification explaining what **restart** would have resumed before the switch. If the
+that conversation, with a session notification explaining what **Restart** would have resumed before the switch. If the
 followed Codex exits, a fresh Codex in the same terminal can report its own conversation. After an attributed `/clear`,
 an unwritten transcript means no resume offer yet, not permission to resume the discarded conversation. Farhelm waits
 for that exact file rather than searching for another one. Historical bare captured IDs remain stored but are not
@@ -231,14 +231,14 @@ whose off position removes a feature must not be flipped by a typo.
 
 Turning `FARHELM_AGENT_HOOKS` off prevents new conversations from being saved for a restart by Claude, Codex, Goose, Pi,
 and OMP. A session with no saved conversation cannot be restarted. Turning the switch off does not erase a conversation
-already saved for the current launch, but a **restart with** that names another conversation forgets it, because no
-report can replace it: plain **restart** is then unavailable, and **restart with** can still open a conversation you
+already saved for the current launch, but a **Restart with** that names another conversation forgets it, because no
+report can replace it: plain **Restart** is then unavailable, and **Restart with** can still open a conversation you
 name ([Stop, restart, and resume](/docs/using/stop-restart-resume/#the-headers-actions)). Grok's manual hooks are
 independent of this switch; remove or disable those entries in Grok itself when you want them off.
 
 ## When something goes wrong
 
-The symptom is a session whose **restart** stays greyed out when it should not, or that resumes a stale conversation.
+The symptom is a session whose **Restart** stays greyed out when it should not, or that resumes a stale conversation.
 Look in this order.
 
 **1. The per-session hook log**, `<state dir>/hook-log/<session id>.log`, where `<state dir>` is the supervisor's state
@@ -329,7 +329,7 @@ entries name the absolute Farhelm binary.
 
 In every one of these failure cases the session keeps working. The only thing at stake is which conversation the restart
 offer points at. Without an accepted report, a new session cannot be restarted, but if you know the conversation's id
-(for Pi and OMP, its session file), **restart with** can resume it
+(for Pi and OMP, its session file), **Restart with** can resume it
 ([Stop, restart, and resume](/docs/using/stop-restart-resume/#the-headers-actions)). Previously saved conversations
 remain available to restart under the agent's usual rules; a failed or skipped reporter supplies no new conversation to
 resume.
