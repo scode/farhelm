@@ -540,9 +540,15 @@ header Close.
 
 Templates keeps its existing root scroll owner and selected editor's local footer, using the same shared heading and
 action presentation. The leave question reads Keep editing, Discard, Save but still focuses Save when it opens. Its
-single header Close continues through the draft-departure guard. Trash keeps its deliberate pinned-header exception:
-shared title and surface styling, with totals, progress, Delete all and Close together above the archive scroll body,
-and no footer or extra icon-tile height.
+single header Close continues through the draft-departure guard. Trash uses the shared header without an icon tile: the
+title retains its can, the total is its summary, and header close shares footer Close's live dismissal guard and
+disabled-hover explanation. Its archive ScrollRegion sits above a pinned footer containing the always-mounted progress
+status and Close, then Delete all. Global confirmation uses a conditional, bounded ScrollRegion immediately above that
+footer; per-host bands remain in the archive body. Both regions retain native keyboard entry and recover toward footer
+controls. Initial focus stays on footer Close; sequential Tab follows header close, body, confirmation when present,
+then footer actions. Phone widths use the shared full-width action stack. At ordinary heights the global question keeps
+its bounded natural height before the archive list gets the remaining space. Short windows compact only Trash's header
+vertical spacing; the archive body and global confirmation retain enough height for keyboard entry and the answers.
 
 Nothing on screen may redraw on its own more than 10 times per second. "On its own" means an indicator or decoration
 that moves, fades, spins, or blinks while nothing about the state it shows has changed; drawing new content because new
@@ -913,7 +919,9 @@ an existing question remounts. Confirm buttons consume repeated or composing Ent
 opening key cannot also answer the question. A shared header key handler cancels any still-open Restart, Replace or
 Delete question on Escape, releases its lifecycle claim and returns focus to the selected terminal after unmount. Host
 dialogs retain quiet scripted focus and independent Escape selectors; trash focuses and scrolls its confirming answer
-into view. YOLO and Restart with keep their Cancel default.
+into view within the archive body for a host question or the separate confirmation region for Delete all. Cancelling a
+global question returns to footer Delete all, falling back to footer Close if a re-list disabled the trigger. YOLO and
+Restart with keep their Cancel default.
 
 **Answers bind to what was drawn.** A handler for something the user answered or confirmed acts on what the render that
 drew the control showed, never on state it reads when it runs. A click or key can be handled after later renders, a

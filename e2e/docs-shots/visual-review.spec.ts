@@ -10,13 +10,14 @@
  * The focused host/settings selection also denies one authentic Spawn request
  * after photographing it; the requested child is never launched. Ordinary
  * session review reuses the same staged rows and real resumable header source.
- * Trash review reuses the approved archive listing and cancels its question.
+ * Trash review reuses the approved archive listing. Footer review also holds
+ * delete requests, then releases them into the existing staged refusal.
  * Browser sign-in review uses fresh credential-free contexts and submits only
  * an empty token, photographing local validation without an exchange request.
  * Terminal review hovers real replay bytes and temporarily attaches a second
  * owned view, restoring the first through its ordinary reclaim control.
  */
-import { expect, test, type APIRequestContext, type Browser, type BrowserContext, type Locator, type Page, type Request as NetworkRequest } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Browser, type BrowserContext, type Locator, type Page, type Request as NetworkRequest, type Route } from "@playwright/test";
 import { cleanupSession, hostRowByName, listHosts, listSessions, openHostMenu, openRowMenu, patchPreferences, readPreferences, setLocalYoloWithoutAsking, showHostsPanel, showSessionsPanel } from "../tests/helpers/fleet";
 import { setLocalCommandsWithoutAsking } from "../tests/helpers/approvals";
 import { cleanupOwnedSteps } from "../tests/helpers/cleanup";
@@ -58,6 +59,7 @@ const sentenceSessionsOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "senten
 const sentenceSessionHintsOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sentence-session-hints";
 const sentenceHelpOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sentence-help";
 const sentenceTrashOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sentence-trash";
+const trashFooterOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "trash-footer";
 const sentenceAuthOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sentence-auth";
 const sentenceTerminalOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sentence-terminal";
 
@@ -1299,11 +1301,12 @@ async function launcherYoloShots(page: Page, request: APIRequestContext, name: s
   await page.setViewportSize(viewport);
 }
 
-/** Show the ordinary title editor and a real refusal without saving a title.
- * Both capture paths share the same supervisor validation boundary. Cleanup
- * cancels the owned dialog and restores its viewport even when capture fails.
+/** Show the ordinary title editor and optionally a real refusal without saving.
+ * Footer comparison needs only the untouched editor. Other review selections
+ * share the supervisor validation boundary; cleanup cancels the owned dialog
+ * and restores its viewport even when capture fails or comparison returns early.
  */
-async function renameShots(page: Page, scenario: Scenario, name: string, includePhone = false) {
+async function renameShots(page: Page, scenario: Scenario, name: string, includePhone = false, comparisonOnly = false) {
   const viewport = page.viewportSize()!;
   const window = [page.locator("body")];
   try {
@@ -1316,7 +1319,10 @@ async function renameShots(page: Page, scenario: Scenario, name: string, include
     await expect(rename).toHaveAccessibleName("Rename session");
     await expect(rename.locator(".rename-input")).toHaveAccessibleName("New session title");
     await expect(rename.locator(".rename-input")).toBeFocused();
+    await insideViewport(page, rename.locator(".dialog-header"));
+    await insideViewport(page, rename.locator(".dialog-footer"));
     await shot(page, `${name}-rename`, window, { pad: 0 });
+    if (comparisonOnly) return;
     await rename.locator(".rename-input").fill("review\ninvalid");
     const [refusal] = await Promise.all([
       page.waitForResponse((response) => response.request().method() === "POST" && response.url().endsWith(`/api/sessions/${encodeURIComponent(id)}/rename`)),
@@ -1355,11 +1361,56 @@ async function renameShots(page: Page, scenario: Scenario, name: string, include
   }
 }
 
+/** Declare the target frame independently of the state-driving instrumentation.
+ * Before captures replace only this helper with the old header expectations;
+ * the submitted version must require the footer rather than accept either UI.
+ */
+async function expectTrashFrame(page: Page, trash: Locator, confirming = false) {
+  const footer = trash.locator(".dialog-footer");
+  await expect(footer).toHaveCount(1);
+  await expect(footer.locator(".trash-close")).toHaveCount(1);
+  await expect(footer.locator(".trash-delete-all")).toHaveCount(1);
+  await expect(footer.locator(".checkout-trash-progress[role='status']")).toHaveCount(1);
+  await expect(trash.locator(".dialog-header .dialog-close")).toHaveCount(1);
+  await insideViewport(page, trash.locator(".dialog-header"));
+  await insideViewport(page, footer);
+  if (confirming) {
+    const question = trash.locator(".checkout-trash-confirm");
+    const region = trash.locator(":scope > .checkout-trash-global-confirmation");
+    await expect(trash.locator(".checkout-trash-body .checkout-trash-confirm")).toHaveCount(0);
+    await expect(region.locator(":scope > .checkout-trash-confirm")).toHaveCount(1);
+    // The warning may exceed its scrollport; its unclipped content bounds
+    // need not fit above the footer. The region must, and the caller probes
+    // both answers' actual painted hit targets after the focus handoff.
+    await insideViewport(page, region);
+    const box = (await region.boundingBox())!;
+    if (trashFooterOnly) {
+      // These ordinary fixtures have three archives on two short-named hosts.
+      // The safety text must be visible with the answers, rather than losing
+      // all of its space to the archive list. Extreme long names are exercised
+      // separately by the 360×300 keyboard-scroll tests.
+      const warning = (await question.locator("p").boundingBox())!;
+      expect(warning.y, "the ordinary question starts inside its scrollport").toBeGreaterThanOrEqual(box.y - 1);
+      expect(warning.y + warning.height).toBeLessThanOrEqual(box.y + box.height + 1);
+    }
+    for (const answer of await question.locator("button").all()) {
+      await insideViewport(page, answer);
+      const button = (await answer.boundingBox())!;
+      // A visible center alone can conceal a clipped edge. The complete
+      // answer must fit its local scrollport, allowing only pixel rounding.
+      expect(button.y).toBeGreaterThanOrEqual(box.y - 1);
+      expect(button.y + button.height).toBeLessThanOrEqual(box.y + box.height + 1);
+    }
+    const actions = (await footer.boundingBox())!;
+    expect(box.y + box.height, "the global confirmation scrollport meets its pinned footer").toBeCloseTo(actions.y, 0);
+  }
+}
+
 /** Show the approved archives and their global question, without deleting.
  * The existing checkoutTrash listing rewrite supplies all three entries and
  * refuses deletion. Wait for the product's row-movement guard before the
  * listing; the question then owns main-answer focus and disables entry actions.
- * Focused review takes only these two pictures. Dialog review also keeps its
+ * Sentence review takes only these two pictures. Dialog review also keeps its
  * phone listing. Failure cleanup independently attempts cancellation, closing
  * and viewport restoration, even if an earlier release fails.
  */
@@ -1372,7 +1423,7 @@ async function trashShots(page: Page, name: string, includePhone = false) {
   const deleteAll = trash.locator(".trash-delete-all");
   const close = trash.locator(".trash-close");
   // Painted controls must remain reachable without scrolling the pinned
-  // header or activating an answer merely to prove its hit target.
+  // frame or activating an answer merely to prove its hit target.
   const reachable = async (controls: Locator[]) => {
     for (const control of controls) {
       await insideViewport(page, control);
@@ -1387,6 +1438,7 @@ async function trashShots(page: Page, name: string, includePhone = false) {
     await page.locator(".checkout-trash-button").click();
     await expect(trash).toHaveAccessibleName("Trash");
     await expect(trash.locator(".checkout-trash-entry")).toHaveCount(3);
+    await expect(trash.locator(".checkout-trash-host:has(.checkout-trash-entry)")).toHaveCount(2);
     await expect(deletes).toHaveCount(3);
     for (const button of await deletes.all()) {
       await expect(button).toBeEnabled();
@@ -1402,8 +1454,8 @@ async function trashShots(page: Page, name: string, includePhone = false) {
       await expect(button).toBeEnabled();
       await expect(button).toHaveCSS("font-family", /^Inter/);
     }
-    await expect(trash.locator(".dialog-footer")).toHaveCount(0);
-    await insideViewport(page, trash.locator(".dialog-header"));
+    await expect(close).toBeFocused();
+    await expectTrashFrame(page, trash);
     await reachable([deleteAll, close]);
     await shot(page, `${name}-trash`, window, { pad: 0 });
     await deleteAll.click();
@@ -1420,11 +1472,12 @@ async function trashShots(page: Page, name: string, includePhone = false) {
       await expect(button).toHaveCSS("font-family", /^Inter/);
     }
     for (const button of await deletes.all()) await expect(button).toBeDisabled();
-    await insideViewport(page, question);
+    await expectTrashFrame(page, trash, true);
     await reachable([deleteAll, close, submit, cancel]);
     await shot(page, `${name}-trash-confirmation`, window, { pad: 0 });
     await cancel.click();
     await expect(question).toBeHidden();
+    await expect(deleteAll).toBeFocused();
     if (includePhone) {
       await page.setViewportSize({ width: 390, height: 520 });
       // Resizing re-arms the same row-movement guard. The phone picture keeps
@@ -1433,7 +1486,7 @@ async function trashShots(page: Page, name: string, includePhone = false) {
         await expect(button).toBeEnabled();
         await expect(button).toHaveCSS("opacity", "1");
       }
-      await insideViewport(page, trash.locator(".dialog-header"));
+      await expectTrashFrame(page, trash);
       await reachable([deleteAll, close]);
       await shot(page, `${name}-trash-phone`, window, { pad: 0 });
     }
@@ -1457,6 +1510,140 @@ async function trashShots(page: Page, name: string, includePhone = false) {
       }],
       ["restore the exact trash viewport", () => page.setViewportSize(viewport)],
     ]);
+  }
+}
+
+/** Hold genuine renderer work, then refuse every staged ID without forwarding.
+ * The scenario's existing two hosts supply one active request apiece and one
+ * queued checkout. The release only falls through to installCheckoutTrash's
+ * permanent refusal; a failure must never expose invented IDs to real deletion.
+ */
+async function trashPendingShot(page: Page, request: APIRequestContext, scenario: Scenario, name: string) {
+  const trash = page.locator(".checkout-trash-dialog");
+  const close = trash.locator(".trash-close");
+  const status = trash.locator(".checkout-trash-progress");
+  const hosts = await realHosts(request);
+  const expected = new Map<number, string[]>();
+  for (const archive of scenario.checkout_trash ?? []) {
+    const declared = scenario.hosts.find(host => host.key === archive.host);
+    expect(declared, "each staged archive declares its real fleet host").toBeDefined();
+    const host = hosts.find(host => declared!.kind === "local" ? host.kind === "local" : host.destination === declared!.ssh);
+    expect(host, "the scenario host exists in the owned staged fleet").toBeDefined();
+    expected.set(host!.id, [...(expected.get(host!.id) ?? []), `docs-${archive.host}-${archive.checkout}`]);
+  }
+  expect(expected.size, "pending review needs archives on two genuine hosts").toBe(2);
+  expect([...expected.values()].map(ids => ids.length).sort()).toEqual([1, 2]);
+
+  let release!: () => void;
+  const ready = new Promise<void>(resolve => { release = resolve; });
+  const calls: { host: number; ids: string[]; expected_incarnation: number }[] = [];
+  let outstanding = 0;
+  const deletePath = (url: URL) => url.pathname === "/api/checkout-trash/delete";
+  const holdDelete = async (route: Route) => {
+    outstanding++;
+    try {
+      calls.push(route.request().postDataJSON());
+      await ready;
+      await route.fallback();
+    } finally {
+      outstanding--;
+    }
+  };
+  let bodyFailed = true;
+  await page.route(deletePath, holdDelete);
+  try {
+    await page.locator(".checkout-trash-button").click();
+    await expect(trash).toHaveAccessibleName("Trash");
+    await expect(trash.locator(".checkout-trash-entry")).toHaveCount(3);
+    await expect(close).toBeFocused();
+    for (const [host, ids] of expected) {
+      await expect(trash.locator(`.checkout-trash-host[data-host-id="${host}"] .checkout-trash-entry`)).toHaveCount(ids.length);
+    }
+    for (const action of await trash.locator(".trash-entry-delete").all()) {
+      await expect(action).toBeEnabled();
+      await expect(action).toHaveCSS("opacity", "1");
+    }
+    await expect(status).toHaveAttribute("role", "status");
+    await expect(status).toHaveText("");
+    await expectTrashFrame(page, trash);
+    await trash.locator(".trash-delete-all").click();
+    const question = trash.locator(".checkout-trash-confirm");
+    await expect(question).toHaveAccessibleName("Confirm permanent checkout deletion");
+    await expect(question.locator(".trash-confirm-submit")).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect.poll(() => calls.map(call => call.host).sort((a, b) => a - b), {
+      message: "both real staged hosts reach their first held delete response",
+    }).toEqual([...expected.keys()].sort((a, b) => a - b));
+    for (const call of calls) {
+      expect(call.ids, "each host dispatches only one frozen archive at a time").toHaveLength(1);
+      expect(expected.get(call.host), "only that host's scenario archives may be selected").toContain(call.ids[0]);
+      expect(call.expected_incarnation, "pending work retains its connected incarnation").toBeGreaterThan(0);
+    }
+    await expect(question).toBeHidden();
+    await expect(status).toHaveText("Deleting… 3 checkouts left");
+    for (const [host, ids] of expected) {
+      await expect(trash.locator(`.checkout-trash-host[data-host-id="${host}"] .trash-host-progress`)).toHaveText(`0 of ${ids.length} deleted`);
+    }
+    await expect(trash.locator(".trash-entry-progress .delete-spinner")).toHaveCount(2);
+    await expect(trash.locator(".trash-entry-waiting")).toHaveText("Waiting");
+    const closeControls = trash.locator(".trash-close, .dialog-header .dialog-close");
+    for (const control of await closeControls.all()) {
+      await expect(control).toBeDisabled();
+      const explanation = control.locator("..");
+      await expect(explanation).toHaveAttribute("data-tooltip", "Available when deletion finishes.");
+      await insideViewport(page, explanation);
+    }
+    await expect(trash.locator(".trash-delete-all")).toBeDisabled();
+    await insideViewport(page, status);
+    await expectTrashFrame(page, trash);
+    await trash.focus();
+    await expect(trash).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(trash).toBeVisible();
+    await expect(status).toHaveText("Deleting… 3 checkouts left");
+    expect(calls, "neither held host starts its next checkout").toHaveLength(2);
+    await shot(page, `${name}-trash-deleting`, [page.locator("body")], { pad: 0 });
+    bodyFailed = false;
+  } finally {
+    await cleanupOwnedSteps(bodyFailed, [
+      ["release and drain only the owned delete hold", async () => {
+        release();
+        await expect.poll(() => outstanding, { message: "held callbacks finish through the staged refusal" }).toBe(0);
+        await page.unroute(deletePath, holdDelete);
+      }],
+      ["observe refused cleanup while its fleet is alive", async () => {
+        if (!await trash.isVisible()) return;
+        await expect(status).toHaveText("");
+        await expect(close).toBeEnabled();
+        await expect(trash.locator(".checkout-trash-entry")).toHaveCount(3);
+        await expect(page.locator(".build-skew")).toHaveCount(0);
+      }],
+      ["close the owned pending-review dialog", async () => {
+        const cancel = trash.locator(".trash-confirm-cancel");
+        if (await cancel.isVisible()) await cancel.click();
+        if (await trash.isVisible()) await close.click();
+        await expect(trash).toBeHidden();
+      }],
+    ]);
+  }
+}
+
+/** Keep footer review to three Trash states and one unchanged dialog baseline.
+ * These are whole-window dimensions, not the legacy main-pane measurement.
+ * Each pending run ends in a refusal before the next size opens the same fleet.
+ */
+async function trashFooterShots(page: Page, request: APIRequestContext, scenario: Scenario, colorScheme: "dark" | "light") {
+  const viewport = page.viewportSize()!;
+  try {
+    for (const [width, size] of [["wide", { width: 1600, height: 1000 }], ["phone", { width: 390, height: 520 }]] as const) {
+      await page.setViewportSize(size);
+      const name = `visual-review/${colorScheme}-${width}`;
+      await renameShots(page, scenario, name, false, true);
+      await trashShots(page, name);
+      await trashPendingShot(page, request, scenario, name);
+    }
+  } finally {
+    await page.setViewportSize(viewport);
   }
 }
 
@@ -2594,6 +2781,8 @@ async function toolbarShots(page: Page, name: string) {
 
 for (const colorScheme of ["dark", "light"] as const) {
   for (const width of ["wide", "main-650"] as const) {
+    // Footer review supplies its own true phone case once per palette.
+    if (trashFooterOnly && width === "main-650") continue;
     if (sentenceAuthOnly) {
       /** The prompt replaces the app, so the legacy main-650 loop key means
        * a 650px whole window here. This callback deliberately requests no
@@ -2661,6 +2850,10 @@ for (const colorScheme of ["dark", "light"] as const) {
         await expect(page.locator(".build-skew")).toHaveCount(0);
         const name = `visual-review/${colorScheme}-${width}`;
         const window = [page.locator("body")];
+        if (trashFooterOnly) {
+          await trashFooterShots(page, request, scenario, colorScheme);
+          return;
+        }
         if (sentenceTerminalOnly) {
           await sentenceTerminalShots(page, request, scenario, name, colorScheme);
           await unboundShortcutShots(page, request, name);

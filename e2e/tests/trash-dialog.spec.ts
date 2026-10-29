@@ -7,17 +7,18 @@ import { expect, test } from "./helpers/evidence";
 import { type APIRequestContext, type Locator, type Page } from "@playwright/test";
 import { localHostId, patchPreferences, readPreferences, stubFeed } from "./helpers/fleet";
 import { fulfillAsHelm, installTerminalSuiteHooks } from "./helpers/terminal-suite";
-import { expectKeyboardScroll } from "./helpers/keyboard-scroll";
+import { expectKeyboardScroll, expectKeyboardScrollFromControl } from "./helpers/keyboard-scroll";
 
 installTerminalSuiteHooks();
 
 /**
  * A pending measurement disables every action inside the retained list, so no
  * child can accidentally supply keyboard access for its scroll owner. Tab from
- * the pinned Close button must still reach and scroll that overflowing list in
+ * the header close must still reach and scroll that overflowing list in
  * WebKit as well as Chromium; no pointer or script scroll substitutes for it.
  * Once measurement restores real actions, the redundant body stop disappears
- * without taking focus from Close, and Tab enters the first enabled action.
+ * without taking focus from footer Close. Tab then follows the visible footer
+ * actions, wraps through header close and enters the first enabled body action.
  */
 test("trash list stays keyboard-scrollable while every list action is disabled", async ({ page, request }) => {
   await stubArchives(page, request, ["keyboard-local"], 20);
@@ -44,7 +45,8 @@ test("trash list stays keyboard-scrollable while every list action is disabled",
     const actions = region.getByRole("button");
     expect(await actions.count(), "the list contains disabled actions, not an empty placeholder").toBeGreaterThan(0);
     for (const action of await actions.all()) await expect(action).toBeDisabled();
-    await expectKeyboardScroll(page, dialog.locator(".trash-close"), region);
+    await expect(dialog.locator(".trash-close")).toBeFocused();
+    await expectKeyboardScroll(page, dialog.locator(".trash-header-close"), region);
     for (const action of await actions.all()) await expect(action).toBeDisabled();
     const close = dialog.locator(".trash-close");
     await close.focus();
@@ -55,9 +57,13 @@ test("trash list stays keyboard-scrollable while every list action is disabled",
     await expect(region).not.toHaveAttribute("role");
     await expect(region).not.toHaveAttribute("aria-label");
     // The shared recovery can defer two frames. Cross that boundary before
-    // claiming that withdrawing the old stop preserved the chosen header.
+    // claiming that withdrawing the old stop preserved the chosen footer.
     await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
     await expect(close).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(dialog.locator(".trash-delete-all")).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(dialog.locator(".trash-header-close")).toBeFocused();
     await page.keyboard.press("Tab");
     await expect(dialog.locator(".trash-host-delete").first()).toBeFocused();
     await page.keyboard.press("Home");
@@ -356,8 +362,9 @@ for (const action of ["global", "host"] as const) {
       const section = dialog.locator(`.checkout-trash-host[data-host-id="${host}"]`);
       const entries = section.locator(".checkout-trash-entry");
       const close = dialog.locator(".trash-close");
+      const headerClose = dialog.locator(".trash-header-close");
       const total = dialog.locator(".checkout-trash-total");
-      const status = dialog.locator(".checkout-trash-progress");
+      const status = dialog.locator(".dialog-footer .checkout-trash-progress");
       const start = action === "global" ? dialog.locator(".trash-delete-all") : section.locator(".trash-host-delete");
       await expect(entries).toHaveCount(3);
       await expect(start).toBeEnabled();
@@ -399,15 +406,17 @@ for (const action of ["global", "host"] as const) {
       await expect(total).toHaveText("3 checkouts · 3.0 KiB on reachable hosts");
       await expect(trigger).toHaveAttribute("data-count", "3");
       await expect(close).toBeDisabled();
-      const closeHelp = dialog.locator(".trash-close-help");
-      await expect(closeHelp).toHaveAttribute("data-tooltip", "Available when deletion finishes.");
+      await expect(headerClose).toBeDisabled();
       // The explanation must be reachable over a genuinely disabled control,
       // including WebKit's native disabled-button pointer suppression.
-      await closeHelp.hover();
-      await page.clock.runFor(400);
-      await expect(page.locator("body > .farhelm-tooltip")).toHaveText("Available when deletion finishes.");
-      await expect(page.locator("body > .farhelm-tooltip")).toBeVisible();
-      await page.mouse.move(0, 0);
+      for (const closeHelp of [dialog.locator(".trash-close-help"), dialog.locator(".trash-header-close-help")]) {
+        await expect(closeHelp).toHaveAttribute("data-tooltip", "Available when deletion finishes.");
+        await closeHelp.hover();
+        await page.clock.runFor(400);
+        await expect(page.locator("body > .farhelm-tooltip")).toHaveText("Available when deletion finishes.");
+        await expect(page.locator("body > .farhelm-tooltip")).toBeVisible();
+        await page.mouse.move(0, 0);
+      }
       for (const icon of icons) {
         await expect(icon).toHaveClass(/\bdeleting\b/);
         await expect(icon).toHaveCSS("animation-name", reduced ? "none" : "trash-delete-bob");
@@ -440,6 +449,21 @@ for (const action of ["global", "host"] as const) {
       expect(calls, "the held request neither times out at 60s nor starts its neighbour").toHaveLength(1);
       expect(listings, "held deletes do not trigger speculative listing refreshes").toHaveLength(readsBefore);
 
+      // The shared phone footer consumes two answer rows and a progress row.
+      // Keep the list's keyboard entry usable even at the shortest supported
+      // stress frame, while both dismissal controls remain truly disabled.
+      await page.setViewportSize({width: 360, height: 300});
+      await page.clock.runFor(50);
+      const body = dialog.locator(".checkout-trash-body");
+      expect(await body.evaluate(node => node.clientHeight), "busy phone list retains a usable scrollport").toBeGreaterThanOrEqual(32);
+      for (const control of [dialog.locator(".trash-close-help"), dialog.locator(".trash-header-close-help"), status]) {
+        await expectExposed(control);
+      }
+      await test.info().attach("trash-busy-phone-list-height", {
+        body: JSON.stringify({viewport: page.viewportSize(), listHeight: await body.evaluate(node => node.clientHeight)}),
+        contentType: "application/json",
+      });
+
       gates[0].release();
       await expect.poll(() => calls.length, {message: "the second request follows the first confirmed reply"}).toBe(2);
       await expect(first).toHaveCount(0);
@@ -469,7 +493,10 @@ for (const action of ["global", "host"] as const) {
       await page.clock.runFor(100);
       await expect(close).toBeFocused();
       await expect(close).toBeEnabled();
-      await expect(closeHelp).not.toHaveAttribute("data-tooltip", "Available when deletion finishes.");
+      await expect(headerClose).toBeEnabled();
+      for (const closeHelp of [dialog.locator(".trash-close-help"), dialog.locator(".trash-header-close-help")]) {
+        await expect(closeHelp).not.toHaveAttribute("data-tooltip", "Available when deletion finishes.");
+      }
       await expect(total).toHaveText("1 checkout · 1.0 KiB on reachable hosts");
       await expect(trigger).toHaveAttribute("data-count", "1");
       await expect(entries).toHaveCount(1);
@@ -755,7 +782,8 @@ for (const width of [1000, 360]) {
   /**
    * Global actions stay visible regardless of archive-list length. Long host
    * names make the confirmation taller than the short body, so its safe and
-   * destructive actions must be revealed without moving the pinned header.
+   * destructive actions must be revealed in their own bounded region without
+   * moving the pinned header/footer or consuming the archive list's entry.
    */
   test(`trash header and global confirmation remain reachable at width ${width}`, async ({ page, request }) => {
     const names = ["layout-local", ...[1, 2, 3].map((i) => `archive-host-${i}-` + "long-name-".repeat(20))];
@@ -769,32 +797,87 @@ for (const width of [1000, 360]) {
     await expect(dialog.locator(".checkout-trash-entry")).toHaveCount(48);
     const all = dialog.locator(".trash-delete-all");
     const close = dialog.locator(".trash-close");
+    const headerClose = dialog.locator(".trash-header-close");
     const total = dialog.locator(".checkout-trash-total");
     await expect(all).toBeEnabled();
     await test.info().attach("trash-header-top", { body: await page.screenshot(), contentType: "image/png" });
-    await expect(dialog.locator(".checkout-trash-header .trash-delete-all")).toHaveCount(1);
+    await expect(close).toBeFocused();
+    await expect(headerClose).not.toBeFocused();
+    const footer = dialog.locator(".dialog-footer");
+    await expect(footer.locator(".dialog-actions button")).toHaveText(["Close", "Delete all"]);
+    await expect(dialog.locator(".checkout-trash-header .trash-delete-all, .checkout-trash-header .trash-close")).toHaveCount(0);
     await expect(dialog.locator(".dialog-header .dialog-title")).toHaveText("Trash");
-    await expect(dialog.locator(".dialog-footer, footer")).toHaveCount(0);
+    await expect(footer).toHaveCount(1);
     const body = dialog.locator(".checkout-trash-body");
     expect(await body.evaluate((node) => node.scrollHeight > node.clientHeight + 1), "archives overflow the body").toBe(true);
     await page.mouse.move(0, 0);
-    for (const control of [all, close, total]) await expectExposed(control);
+    for (const control of [all, close, total, headerClose]) await expectExposed(control);
+    const idleHeight = await body.evaluate(node => node.clientHeight);
+    expect(idleHeight, "idle list has a usable scrollport").toBeGreaterThanOrEqual(32);
+    if (width === 360) {
+      const actions = footer.locator(".dialog-actions");
+      const bounds = (await actions.boundingBox())!;
+      for (const control of [close, all]) {
+        expect((await control.boundingBox())!.width, "each phone action fills the shared action row").toBeCloseTo(bounds.width, 0);
+      }
+    }
     const tops = [(await all.boundingBox())!.y, (await close.boundingBox())!.y];
     await body.evaluate((node) => { node.scrollTop = node.scrollHeight; });
     expect(await body.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
-    for (const control of [all, close, total]) await expectExposed(control);
+    for (const control of [all, close, total, headerClose]) await expectExposed(control);
     expect([(await all.boundingBox())!.y, (await close.boundingBox())!.y]).toEqual(tops);
     expect(await dialog.evaluate((node) => node.scrollTop)).toBe(0);
     await test.info().attach("trash-header-bottom", { body: await page.screenshot(), contentType: "image/png" });
 
     await all.click();
-    const confirm = body.locator(":scope > .checkout-trash-confirm");
+    const region = dialog.locator(".checkout-trash-global-confirmation");
+    const confirm = region.locator(":scope > .checkout-trash-confirm");
+    await expect(body.locator(".checkout-trash-confirm")).toHaveCount(0);
     await expect(confirm).toContainText("Delete 48 archived checkouts");
     const cancel = confirm.locator(".trash-confirm-cancel");
     const submit = confirm.locator(".trash-confirm-submit");
     await expect(submit).toBeFocused();
-    for (const control of [cancel, submit]) await expectExposed(control, body);
-    for (const control of [all, close]) await expectExposed(control);
+    for (const control of [cancel, submit]) await expectExposed(control, region);
+    for (const control of [all, close, headerClose]) await expectExposed(control);
+    const regionBox = (await region.boundingBox())!;
+    expect(regionBox.y + regionBox.height).toBeCloseTo((await footer.boundingBox())!.y, 0);
+    const confirmingHeight = await body.evaluate(node => node.clientHeight);
+    expect(confirmingHeight, "confirmation leaves a usable archive scrollport").toBeGreaterThanOrEqual(32);
+    await test.info().attach("trash-list-heights", {
+      body: JSON.stringify({viewport: page.viewportSize(), idleHeight, confirmingHeight}), contentType: "application/json",
+    });
+    // Per-host bulk actions stay available while a global question is open;
+    // those native controls, rather than an extra region stop, supply entry.
+    const hostDeletes = body.locator(".trash-host-delete");
+    await expect(hostDeletes).toHaveCount(names.length);
+    for (const action of await hostDeletes.all()) await expect(action).toBeEnabled();
+    await expectKeyboardScrollFromControl(page, headerClose, hostDeletes.first(), body);
+    for (let index = 1; index < names.length; index++) {
+      await page.keyboard.press("Tab");
+      await expect(hostDeletes.nth(index)).toBeFocused();
+    }
+    await page.keyboard.press("Tab");
+    await expect(cancel).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(submit).toBeFocused();
+    // Pointer-opened questions retain quiet focus; returning by native Tab
+    // must still expose the shared keyboard ring on the permanent answer.
+    expect(await submit.evaluate(node => node.matches(":focus-visible"))).toBe(true);
+    await expect(submit).toHaveCSS("outline-style", "solid");
+    await expect(submit).toHaveCSS("outline-width", "2px");
+    await page.keyboard.press("Tab");
+    await expect(close).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(all).toBeFocused();
+    // Its native answers provide keyboard entry, and scrolling them into view
+    // must leave the long warning accessible in the same local scrollport.
+    await cancel.focus();
+    await page.keyboard.press("Home");
+    await expect.poll(() => region.evaluate(node => node.scrollTop)).toBe(0);
+    await page.keyboard.press("PageDown");
+    await expect.poll(() => region.evaluate(node => node.scrollTop)).toBeGreaterThan(0);
+    await submit.focus();
+    await expectExposed(submit, region);
     expect(await dialog.evaluate((node) => node.scrollTop)).toBe(0);
     await test.info().attach("trash-global-confirmation", { body: await page.screenshot(), contentType: "image/png" });
     await page.keyboard.press("Escape");
@@ -805,5 +888,14 @@ for (const width of [1000, 360]) {
     await cancel.click();
     await expect(confirm).toHaveCount(0);
     await expect(all).toBeFocused();
+    await all.click();
+    await expect(submit).toBeFocused();
+    await headerClose.click();
+    await expect(confirm).toHaveCount(0);
+    await expect(all).toBeFocused();
+    await expect(dialog).toBeVisible();
+    await headerClose.click();
+    await expect(dialog).toHaveCount(0);
+    await expect(trigger).toBeFocused();
   });
 }

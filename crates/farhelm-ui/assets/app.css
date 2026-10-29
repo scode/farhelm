@@ -8369,7 +8369,6 @@ a:any-link,
   font-size: 12px;
 }
 
-.checkout-trash-header,
 .checkout-trash-host-header,
 .checkout-trash-entry-heading,
 .checkout-trash-actions {
@@ -8379,23 +8378,18 @@ a:any-link,
   gap: 10px;
 }
 
-/* Global actions cannot depend on the length of the archive list. Only the
-   body scrolls; wrapping the fixed header keeps both buttons usable on phones. */
-.checkout-trash-dialog .checkout-trash-header {
-  flex-shrink: 0;
-  flex-wrap: wrap;
-  gap: 10px;
-  padding: 18px;
-  border-bottom: 1px solid var(--border);
-}
-.checkout-trash-header-actions { display: flex; flex-shrink: 0; gap: 10px; margin-left: auto; }
+/* The shared header and footer keep their height while archives scroll.
+   Both native close buttons hand disabled hover to their own wrapper. */
 .trash-close-help { display: inline-flex; }
-/* Hover reaches the wrapper even where native disabled buttons suppress it. */
-.trash-close:disabled { pointer-events: none; }
-.checkout-trash-total { flex: 1 1 12em; min-width: 0; color: var(--fg-1); }
-.checkout-trash-progress { flex-basis: 100%; color: var(--fg-1); }
+.trash-close-help > .trash-close { width: 100%; }
+.trash-header-close-help { display: inline-flex; flex-shrink: 0; align-self: flex-start; }
+.trash-close:disabled,
+.trash-header-close:disabled { pointer-events: none; }
+/* Foreground roles alone are too similar to signal unavailability. Match the
+   neutral footer Close without dimming the wrapper's busy explanation. */
+.trash-header-close:disabled { opacity: 0.5; }
 /* Idle, the status region stays in the accessibility tree but takes no row
-   in the wrapped header; `display: none` would remove it from that tree. */
+   in the footer; `display: none` would remove it from that tree. */
 .checkout-trash-progress.idle { position: absolute; }
 /* Both persistent and dialog cans show the same run. Two keyframe intervals
    with four steps each make eight changes per second; the universal inactive
@@ -8413,18 +8407,51 @@ a:any-link,
   .trash-delete-icon.deleting { animation: none; }
 }
 .checkout-trash-body {
-  min-height: 0;
+  /* A short phone frame must retain a keyboard-scrollable piece of the list
+     beside the bounded global question and the two-row action footer. */
+  flex: 1 1 auto;
+  min-height: 32px;
+  box-sizing: border-box;
   overflow: auto;
-  padding: 0 18px 18px;
+  padding: 0 24px 18px;
 }
 /* Match host plans: the enclosing frame must not clip the keyboard ring. */
-.checkout-trash-body:focus-visible { outline-offset: -2px; }
+.checkout-trash-body:focus-visible,
+.checkout-trash-global-confirmation:focus-visible { outline-offset: -2px; }
 
-.checkout-trash-header h2 {
-  display: flex;
+.checkout-trash-title {
+  display: inline-flex;
   align-items: center;
   gap: 8px;
-  margin: 0;
+}
+
+/* Long host names must not push either the archive entry or footer out of a
+   short window. The answers reveal within this local scrollport on mount;
+   scrolling back up retains the complete warning and frozen host names. */
+.checkout-trash-global-confirmation {
+  /* Give the ordinary question its natural height before the archive list:
+     otherwise a long list can leave only the answers visible on a phone. */
+  flex: 0 0 auto;
+  /* Long warning text must not surrender the answer row to the archive
+     list's larger flex basis. This also leaves room for its focus ring. */
+  min-height: 44px;
+  max-height: 32dvh;
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--fg-1) var(--bg-1);
+}
+/* Only the global question meets the frame; host questions retain the inset
+   of their own cards. Align this question and its answers with footer actions. */
+.checkout-trash-global-confirmation > .checkout-trash-confirm { padding-inline: 24px; }
+.checkout-trash-global-confirmation .checkout-trash-actions { scroll-margin-block: 4px; }
+/* At the 300px stress frame the shared phone footer still keeps both action
+   rows. Compact only the heading's vertical breathing room so the list and
+   confirmation can each retain their keyboard entry without moving actions. */
+@media (max-height: 480px) {
+  .checkout-trash-dialog .dialog-header { padding-block: 16px; }
+  /* At extreme heights both scrollports must yield to the pinned chrome.
+     Their minimums preserve archive entry and the revealed answer row. */
+  .checkout-trash-global-confirmation { flex-shrink: 1; max-height: 24dvh; }
 }
 
 .checkout-trash-dialog p {
@@ -8688,6 +8715,7 @@ a:any-link,
 .tunnel-consent-dialog .dialog-body { font-size: 14px; line-height: 1.5; }
 .rename-dialog .dialog-close:disabled,
 .templates-dialog .dialog-close:disabled,
+.checkout-trash-dialog .dialog-close:disabled,
 .tunnel-consent-dialog .dialog-close:disabled { color: var(--fg-2); cursor: default; }
 .tunnel-error-notice {
   position: fixed;

@@ -282,7 +282,9 @@ async function installDocsRewrites(page: Page, request: APIRequestContext, scena
  * every other shot should not. The archive time, name and path are built the
  * way Farhelm records them, so the dialog shows what a real archive would.
  * Requests to delete are refused outright rather than passed on: no shot
- * empties the trash, and a fake listing must never reach real deletion.
+ * empties the trash, and a fake listing must never reach real deletion. Footer
+ * review holds requests above this route and drains them into this same refusal;
+ * its build stamp matters even on a refusal, since the client classifies both.
  */
 async function installCheckoutTrash(page: Page, request: APIRequestContext, scenario: Scenario, now: number) {
   const ids = await hostIds(request, scenario);
@@ -294,7 +296,7 @@ async function installCheckoutTrash(page: Page, request: APIRequestContext, scen
   const keyById = new Map([...ids.entries()].map(([key, id]) => [id, key]));
   const stamp = (seconds: number) => new Date(seconds * 1000).toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
   await page.route((url) => url.pathname === "/api/checkout-trash/delete", (route) =>
-    route.fulfill({ status: 409, body: "docs capture: the staged trash cannot be emptied" }),
+    route.fulfill({ headers: { "x-farhelm-build": build }, status: 409, body: "docs capture: the staged trash cannot be emptied" }),
   );
   await page.route((url) => url.pathname === "/api/checkout-trash/list", async (route) => {
     const { host } = route.request().postDataJSON() as { host: number };
