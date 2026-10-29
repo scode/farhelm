@@ -256,6 +256,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Show all keybindings with command-/.** Add a keybinding that shows every keyboard shortcut at a glance, so users can
   discover them instead of having to remember them.
 
+- **Emacs-style quick launch by typed template names.** Add a quick launch that also supports typing template names
+  separated by spaces, so `cmd+x myproject codex Enter` launches my project in Codex. Faster than `tl:...` in the
+  launcher.
+
 ## Doc todo
 
 - Tell users that a working-copy (checkout) root must be a location only they can write: Farhelm is not designed for
