@@ -24,6 +24,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Revisit the host rail's widened names taking no clicks.** Decided on the maintainer's behalf on 2026-10-29 when the
+  host-short-names landing failed: the rail's widened part, which shows full host names over the session list, is
+  display only. It takes no clicks and does not keep the rail open, so the rail widens only while the pointer is over
+  the narrow rail or keyboard focus is inside it, and picking a host with a click no longer leaves the list's sort
+  control covered. The other option was to let the widened names be clicked to pick a host, which needs the rail to stay
+  open while the pointer is over them and some other way to reach the controls underneath.
+
 - **Revisit containerized sessions writing the checkout's Git hooks.** Decided on the maintainer's behalf on 2026-10-29
   when landing the Podman sandbox plan: it landed with the gap documented (SPEC.md and the docs page's caution) instead
   of closed. A containerized agent can write the checkout's `.git` hooks and configuration and an agent's project
