@@ -707,7 +707,7 @@
   // the state EVERY reattach passes through. In-page DOM, like every other
   // notice this file paints, because wry's WKWebView has no native dialogs
   // at all (MT-5).
-  const CONNECTING_TEXT = "connecting — catching up on this terminal's history…";
+  const CONNECTING_TEXT = "Connecting — catching up on this terminal's history…";
 
   // What the banner says when the watchdog expires on a socket that never
   // finished connecting AND recovery cannot run — no matching helm, the
@@ -1448,10 +1448,10 @@
       const button = document.createElement("button");
       button.type = "button";
       button.className = "btn btn-neutral terminal-reconnect-now";
-      button.textContent = controls.text.manual || "reconnect now";
+      button.textContent = controls.text.manual || "Reconnect now";
       // Farhelm's own hover tooltip (tooltip.js) reads this; every control
       // in the page carries one, including the two this script builds.
-      button.dataset.tooltip = "reconnect now: try to reattach this terminal right away";
+      button.dataset.tooltip = "Reconnect now: try to reattach this terminal right away";
       // Closes over the ELEMENT ID, never this controller: the id is what
       // stays true across every rebuild of the recovery behind it, and
       // `reconnectNow` looks the current one up.
@@ -1565,7 +1565,7 @@
    * correctness one rather than bookkeeping. An AUTOMATIC attempt attaches
    * `if_unowned` — it refuses rather than displacing, because nobody asked
    * for it and this view may well have been taken over while it had no
-   * socket to be told on. A MANUAL one (the "reconnect now" control) is a
+   * socket to be told on. A MANUAL one (the "Reconnect now" control) is a
    * user pressing a button, which is the same intent every other attach
    * carries, so it displaces exactly as opening a session does.
    */
@@ -2486,7 +2486,7 @@
     // under the pointer. Each attempt unmounts its island, which hands the
     // placeholder back to the stylesheet, and `runReconnect` paints it
     // again a moment later: on a fast ladder that destroyed and rebuilt
-    // the "reconnect now" button several times a second, which the browser
+    // the "Reconnect now" button several times a second, which the browser
     // suite caught on WebKit as a click that could never land. Skipping
     // here means the surface — and the control on it — persists for the
     // whole recovery, and the only thing that changes is its sentence.
@@ -3090,7 +3090,7 @@
 
     /**
      * Make this terminal's next reconnect attempt NOW, skipping whatever
-     * is left of its current wait — the "reconnect now" control
+     * is left of its current wait — the "Reconnect now" control
      * `paintReconnect` puts on the recovery surface.
      *
      * It does not reset the ladder, and that is deliberate: an impatient

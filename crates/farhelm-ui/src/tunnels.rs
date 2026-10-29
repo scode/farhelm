@@ -166,7 +166,7 @@ impl TunnelController {
     /// The caller releases the claim after its final create/answer, preventing duplicate opens.
     async fn prepare(mut self, base: &str, source: Source) -> Result<bool, String> {
         if *self.busy.peek() {
-            return Err("another tunnel action is still waiting".into());
+            return Err("Another tunnel action is still waiting".into());
         }
         self.busy.set(true);
         let result = self.prepare_claimed(base, source).await;
@@ -189,7 +189,7 @@ impl TunnelController {
         let consent = if let Some(session) = session {
             let state = api::fetch_tunnels(base, session).await?;
             if !state.available {
-                return Err("tunneling is unavailable for this session".into());
+                return Err("Tunneling is unavailable for this session".into());
             }
             self.preferences.0.write().tunnel_consent = Some(state.consent);
             state.consent
@@ -462,7 +462,7 @@ pub(crate) fn TunnelControls() -> Element {
             // link beside it whose preview it overlaps refuses the click.
             div { class: "tunnel-error-notice", role: "alert", "data-link-cover": "true",
                 span { "{display_peer(error)}" }
-                button { r#type: "button", class: "btn btn-neutral", onclick: move |_| controller.notice.set(None), "dismiss" }
+                button { r#type: "button", class: "btn btn-neutral", onclick: move |_| controller.notice.set(None), "Dismiss" }
             }
         }
         if let Some(shown) = shown {
@@ -499,7 +499,7 @@ pub(crate) fn TunnelControls() -> Element {
                         },
                     }
                     ScrollRegion { class: "dialog-body host-settings-body",
-                        handle: DIALOG, selector: ".host-settings-body", name: "tunnel security warning",
+                        handle: DIALOG, selector: ".host-settings-body", name: "Tunnel security warning",
                         recovery: RecoveryFocus::new(".tunnel-cancel", None, true, RecoveryDelay::OneFrame),
                         p { strong { "A remote page opened through a tunnel runs at 127.0.0.1 on this Mac. It can read cookies set by other services on 127.0.0.1; different ports do not keep those cookies separate." } }
                         p { "Your browser treats it as a local page, so its private-network checks do not apply. Any program on this Mac can connect to an open tunnel." }
@@ -563,7 +563,7 @@ pub(crate) fn TunnelSettings() -> Element {
     let allowed = controller.preferences.0.read().tunnel_consent == Some(true);
     rsx! {
         label { class: "app-settings-choice setting-row",
-            span { "allow tunnels from remote sessions" }
+            span { "Allow tunnels from remote sessions" }
             input { r#type: "checkbox", class: "control-switch tunnel-settings-switch",
                 checked: allowed, disabled: (controller.busy)() || reading(), aria_describedby: "tunnel-settings-help",
                 onchange: move |event| {
@@ -578,7 +578,7 @@ pub(crate) fn TunnelSettings() -> Element {
                         match completion.await {
                             Ok(Ok(())) => {},
                             Ok(Err(reason)) => error.set(Some(reason)),
-                            Err(_) => error.set(Some("the tunnel setting could not be saved; try again".into())),
+                            Err(_) => error.set(Some("The tunnel setting could not be saved; try again".into())),
                         }
                     });
                 }
@@ -1304,7 +1304,7 @@ mod tests {
             );
 
             // A still-claimed controller answers this with
-            // `Poll::Ready(Err(_))` ("another tunnel action is still
+            // `Poll::Ready(Err(_))` ("Another tunnel action is still
             // waiting"); an admitted action reaches its own warning instead.
             let mut next = Box::pin(controller.prepare("unused", Source::Settings));
             assert!(

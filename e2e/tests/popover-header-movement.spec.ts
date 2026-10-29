@@ -364,7 +364,7 @@ for (const kind of ["menu", "bell"] as const) {
     const { toggle, panel, focus } = await openPopup(page, target, kind);
     const { y: beforeY, ...before } = await geometry(target);
     await expect(focus).toBeFocused();
-    const activation = await notice.getByRole("button", { name: "dismiss", exact: true }).evaluate((button: HTMLButtonElement) => {
+    const activation = await notice.getByRole("button", { name: "Dismiss", exact: true }).evaluate((button: HTMLButtonElement) => {
       const focused = document.activeElement;
       const popupOwnedFocus = !!focused?.closest(".session-row-menu-panel, .session-bell-panel");
       button.click();
@@ -486,7 +486,7 @@ for (const kind of ["menu", "bell"] as const) {
     );
     fixture.notify();
     expect((await failed).status()).toBe(503);
-    await expect(page.locator(".status.error")).toContainText("failed to load sessions");
+    await expect(page.locator(".status.error")).toContainText("Failed to load sessions");
     await expect(page.locator(".session-row")).toHaveCount(0);
     fixture.failListings(false);
     await fixture.refresh();

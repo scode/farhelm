@@ -97,7 +97,7 @@ pub(super) async fn remaining(
     std::future::poll_fn(|cx| {
         if started.elapsed() >= timeout || deadline.as_mut().poll(cx).is_ready() {
             return std::task::Poll::Ready(Err(super::SendError::Request(
-                "request timed out waiting for earlier configuration saves".into(),
+                "Request timed out waiting for earlier configuration saves".into(),
             )));
         }
         if waiting.as_mut().poll(cx).is_ready() {

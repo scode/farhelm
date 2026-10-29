@@ -2503,7 +2503,7 @@ test.describe("multi-host", () => {
     // which is not where the identity is named.
     await openHostMenu(row);
     await expect(row.locator(".host-adopt .session-row-menu-label")).toHaveText(
-      "adopt identity-after",
+      "Adopt identity-after",
     );
   });
 
@@ -3935,7 +3935,7 @@ test.describe("multi-host", () => {
         await expect(status.locator(".status-dot")).toBeVisible();
       }
       if (updateKind) {
-        const button = row.getByRole("button", { name: /^update / });
+        const button = row.getByRole("button", { name: /^Update / });
         await expect(button).toBeVisible();
         await expect(button).toHaveAttribute("data-update-kind", updateKind);
         await expect(button).toHaveAttribute("data-tooltip", new RegExp(`update ${updateKind}`));
@@ -4056,7 +4056,7 @@ test.describe("multi-host", () => {
         await page.goto("/");
         await showHostsPanel(page);
         const row = page.locator(`[data-host-id="${hostId}"]`);
-        const button = row.getByRole("button", { name: `update ${name}`, exact: true });
+        const button = row.getByRole("button", { name: `Update ${name}`, exact: true });
         await expect(button).toBeVisible();
         await expect(row.getByRole("status", { name: "Old version" })).toHaveCount(1);
         await row.hover();

@@ -330,7 +330,7 @@ pub(crate) fn RenameDialog(
                     }
                     if unavailable {
                         p { class: "rename-unavailable",
-                            "this session is no longer available; copy the draft or cancel"
+                            "This session is no longer available; copy the draft or Cancel"
                         }
                     }
                     if let Some(error) = error {

@@ -646,7 +646,7 @@ test("local manual remedy growth moves and closes the lower host menu", async ({
   await expect(manual).toContainText(MANUAL_SHORT);
   const shortManualHeight = (await manual.boundingBox())!.height;
   const ordinary = await fixture.localRow.locator(".host-detail").textContent();
-  expect(ordinary).toBe("no supervisor is running on this machine");
+  expect(ordinary).toBe("No supervisor is running on this machine");
   await expect(fixture.localRow.locator(".host-remedy:not(.provisioning-manual)")).toHaveCount(0);
   const manualClass = await manual.getAttribute("class");
 

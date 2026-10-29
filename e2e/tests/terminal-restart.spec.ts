@@ -210,7 +210,7 @@ test("an interrupted session's view leads with the resume offer, and declining c
   await expect(notice).toBeVisible();
   await expect(notice).toContainText("host restart paused this session");
   await expect(notice).toContainText("resumes this session's own conversation");
-  await expect(notice.locator(".restart-from-notice")).toHaveText("restart");
+  await expect(notice.locator(".restart-from-notice")).toHaveText("Restart");
   await expect(notice.locator(".restart-from-notice")).toHaveClass(/btn-primary/);
   await expect(notice.locator(".restart-from-notice")).toHaveAttribute("aria-label", "Resume conversation");
   expect(counter.restartRequests).toBe(0);
@@ -313,7 +313,7 @@ test("an interrupted legacy session offers Replace with, prefilled with its comm
   const notice = page.locator(".interrupted-card");
   await expect(notice).toBeVisible();
   await expect(notice).toContainText("choose Replace with");
-  await expect(notice).not.toContainText("replace starts it over");
+  await expect(notice).not.toContainText("Replace starts it over");
   await expect(notice.locator(".replace-from-notice")).toHaveCount(0);
   await notice.locator(".replace-with-from-notice").click();
   const form = page.locator(".create-session-form");

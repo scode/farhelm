@@ -2006,9 +2006,9 @@ fn AppBody() -> Element {
                                 // that state (see `ListView`).
                                 div { class: "main-empty",
                                     match *fleet_empty.read() {
-                                        Some(true) => "no sessions — create one",
+                                        Some(true) => "No sessions — create one",
                                         Some(false) => "",
-                                        None => "loading sessions…",
+                                        None => "Loading sessions…",
                                     }
                                 }
                             },

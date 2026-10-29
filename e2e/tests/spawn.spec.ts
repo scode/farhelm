@@ -124,7 +124,7 @@ test("a fake agent spawns children that appear without refreshing the observer",
     // launch.
     await submitPrompt(driver, `spawn ${unparentedDir}`, 100);
     await answerCard(page, "allow", [
-      "start a new session running the asking session's own launch",
+      "Start a new session running the asking session's own launch",
       unparentedDir,
       "fake-agent --script spawn",
     ]);

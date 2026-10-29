@@ -538,7 +538,7 @@ test("placement follows the empty pane, session mount, and approval remount", as
     body: JSON.stringify({ sessions: [], total: 0, matching: 0, truncated: false }),
   }));
   await page.goto("/");
-  await expect(page.locator(".main-empty")).toHaveText("no sessions — create one");
+  await expect(page.locator(".main-empty")).toHaveText("No sessions — create one");
   await expect(page.locator(".app-main .tab-strip")).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => {
     const main = document.querySelector(".app-main")!.getBoundingClientRect();

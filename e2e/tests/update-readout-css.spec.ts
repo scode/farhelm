@@ -18,11 +18,11 @@ async function mountReadout(page: Page, spinning: boolean): Promise<void> {
   const html = `<!doctype html><meta charset="utf-8"><style>${css}</style>
     <button id="parking">parking</button>
     <div class="app-bar" style="margin:20px;width:320px">
-      <button type="button" class="app-version app-version-check" aria-label="check for updates">
+      <button type="button" class="app-version app-version-check" aria-label="Check for updates">
         <span class="app-version-text">v0.28.2</span>
         <span class="app-version-refresh ${spinning ? "app-version-refresh-spinning" : ""}">↻</span>
       </button>
-      <span class="app-update-status">${spinning ? "checking…" : ""}</span>
+      <span class="app-update-status">${spinning ? "Checking…" : ""}</span>
     </div>
     <span id="normal" style="color:var(--fg-1)"></span>
     <span id="dim" style="color:var(--fg-2)"></span>
@@ -70,7 +70,7 @@ async function palette(page: Page) {
 /** The persistent hint stays dim at rest and responds identically to pointer and keyboard discovery. */
 test("version hint brightens and turns on hover and keyboard focus", async ({ page }) => {
   await mountReadout(page, false);
-  const button = page.getByRole("button", { name: "check for updates", exact: true });
+  const button = page.getByRole("button", { name: "Check for updates", exact: true });
   const colors = await palette(page);
   await page.mouse.move(0, 0);
   await expect(button).not.toBeFocused();
@@ -96,8 +96,8 @@ test("version hint brightens and turns on hover and keyboard focus", async ({ pa
 /** Progress retains its own motion through hover/focus, and reduced motion keeps its words without a spin. */
 test("visible check owns the refresh spin and honors reduced motion", async ({ page }) => {
   await mountReadout(page, true);
-  const button = page.getByRole("button", { name: "check for updates", exact: true });
-  await expect(page.locator(".app-update-status")).toHaveText("checking…");
+  const button = page.getByRole("button", { name: "Check for updates", exact: true });
+  await expect(page.locator(".app-update-status")).toHaveText("Checking…");
   expect((await readoutStyle(page)).animation).toBe("farhelm-delete-spin");
   await button.hover();
   const hovered = (await readoutStyle(page)).transform;
@@ -113,7 +113,7 @@ test("visible check owns the refresh spin and honors reduced motion", async ({ p
 
   await page.emulateMedia({ reducedMotion: "reduce" });
   await expect.poll(() => readoutStyle(page)).toMatchObject({ animation: "none", transform: "none" });
-  await expect(page.locator(".app-update-status")).toHaveText("checking…");
+  await expect(page.locator(".app-update-status")).toHaveText("Checking…");
 });
 
 /** Run the shipped handoff script against the desktop-only DOM transition.

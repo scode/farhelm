@@ -139,7 +139,7 @@ test('modifier opening is native-only and save outcomes survive opener refusal',
     };
     await fixture.addon.download('report.pdf', event);
     assert.deepEqual(requested, { operation: 'download', path: '/output/report.pdf', open: opens });
-    assert.match(fixture.notice().textContent, native ? /^saved to / : /^downloaded /);
+    assert.match(fixture.notice().textContent, native ? /^Saved to / : /^Downloaded /);
     if (opens) assert.match(fixture.notice().textContent, /not opened: only document types open/);
     assert.equal(fixture.addon.failureMessage, false);
     fixture.addon.dispose();
@@ -147,7 +147,7 @@ test('modifier opening is native-only and save outcomes survive opener refusal',
   const success = noticeFixture(true, true, false, true);
   success.addon.request = async () => ({ json: async () => ({ path: '/Downloads/notes.md', opened: true }) });
   await success.addon.download('report.pdf', { metaKey: true });
-  assert.equal(success.notice().textContent, 'saved to /Downloads/notes.md · opened');
+  assert.equal(success.notice().textContent, 'Saved to /Downloads/notes.md · opened');
   success.addon.dispose();
 });
 
@@ -167,10 +167,10 @@ test('a native modified click saves without opening when hover offered only down
       };
       await fixture.addon.download('report.pdf', isMac ? { metaKey: true } : { ctrlKey: true });
       assert.deepEqual(requested, { operation: 'download', path: '/output/report.pdf', open: false });
-      assert.equal(fixture.notice().textContent, 'saved to /Downloads/report.pdf · not opened: opening was not offered');
+      assert.equal(fixture.notice().textContent, 'Saved to /Downloads/report.pdf · not opened: opening was not offered');
       assert.equal(fixture.addon.failureMessage, false);
       await fixture.addon.download('report.pdf');
-      assert.equal(fixture.notice().textContent, 'saved to /Downloads/report.pdf', 'an ordinary save needs no opening explanation');
+      assert.equal(fixture.notice().textContent, 'Saved to /Downloads/report.pdf', 'an ordinary save needs no opening explanation');
       fixture.addon.dispose();
     }
   }
@@ -765,7 +765,7 @@ test('browser and native successes fade, while a failure waits for a terminal cl
     const fixture = noticeFixture(native);
     fixture.addon.request = async () => native ? { json: async () => ({ path: '/Downloads/report.pdf' }) } : new Response('bytes');
     await fixture.addon.download('report.pdf');
-    assert.match(fixture.notice().textContent, native ? /^saved to / : /^downloaded /);
+    assert.match(fixture.notice().textContent, native ? /^Saved to / : /^Downloaded /);
     assert.equal(fixture.notice().classList.contains('showing'), true);
     const [id, timer] = [...fixture.timers].find(([, timer]) => timer.delay === 5000);
     fixture.timers.delete(id);
@@ -774,7 +774,7 @@ test('browser and native successes fade, while a failure waits for a terminal cl
     assert.equal(fixture.notice().getAttribute('aria-hidden'), 'true');
     fixture.addon.request = async () => { throw new Error('read sentinel'); };
     await fixture.addon.download('report.pdf');
-    assert.equal(fixture.notice().textContent, 'download failed: read sentinel');
+    assert.equal(fixture.notice().textContent, 'Download failed: read sentinel');
     assert.equal([...fixture.timers.values()].some(timer => timer.delay > 0), false);
     fixture.listeners.get('click')();
     assert.equal(fixture.notice().textContent, '');

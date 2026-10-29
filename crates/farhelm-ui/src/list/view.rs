@@ -187,7 +187,7 @@ impl RestartBridge {
     pub(crate) fn begin(self, edit: api::RestartEdit) -> Result<(), String> {
         let alive = self.current.try_read().is_ok();
         if !alive {
-            return Err("the session view closed; reopen restart with".into());
+            return Err("The session view closed; reopen restart with".into());
         }
         self.before.call(edit)
     }
@@ -2131,7 +2131,7 @@ pub(crate) fn ListView(
             let outcome = stop_session(&base, &id).await;
             match outcome.err() {
                 Some(e) => {
-                    errors.write().insert(id.clone(), format!("stop: {e}"));
+                    errors.write().insert(id.clone(), format!("Stop: {e}"));
                     end_row_op(&id);
                 }
                 None => {
@@ -2247,7 +2247,7 @@ pub(crate) fn ListView(
             }
             match outcome.err() {
                 Some(e) => {
-                    errors.write().insert(id.clone(), format!("delete: {e}"));
+                    errors.write().insert(id.clone(), format!("Delete: {e}"));
                     deleting.write().remove(&id);
                     end_row_op(&id);
                     // A refusal changed nothing on the host, so no fleet
@@ -2483,7 +2483,7 @@ pub(crate) fn ListView(
         if !header_do_delete(request.id.clone(), request.guard) {
             errors.write().insert(
                 request.id,
-                "delete: not started, another operation is in progress; try again".to_string(),
+                "Delete: not started, another operation is in progress; try again".to_string(),
             );
         }
     });
@@ -2546,7 +2546,7 @@ pub(crate) fn ListView(
                         // endpoint text already identifies the replacement too.
                         errors
                             .write()
-                            .insert(id.clone(), format!("replace: {reason}"));
+                            .insert(id.clone(), format!("Replace: {reason}"));
                     }
                     ReplaceResult::QuestionHandled => {}
                 }
@@ -2960,7 +2960,7 @@ pub(crate) fn ListView(
                     refresh(Trigger::Explicit);
                 }
                 Err(e) => {
-                    errors.write().insert(id.clone(), format!("rename: {e}"));
+                    errors.write().insert(id.clone(), format!("Rename: {e}"));
                     if rename_result_owns_editor(rename_editor.peek().as_ref(), generation) {
                         rename_error.set(Some((generation, e)));
                     }
@@ -3314,7 +3314,7 @@ pub(crate) fn ListView(
                     refresh(Trigger::Explicit);
                 }
                 Err(error) => {
-                    errors.insert(id, format!("clear notifications: {error}"));
+                    errors.insert(id, format!("Clear notifications: {error}"));
                 }
             }
         });
@@ -3340,7 +3340,7 @@ pub(crate) fn ListView(
                     refresh(Trigger::Explicit);
                 }
                 Err(error) => {
-                    errors.insert(id, format!("pin: {error}"));
+                    errors.insert(id, format!("Pin: {error}"));
                 }
             }
         });
@@ -3679,15 +3679,15 @@ pub(crate) fn ListView(
                                                 None,
                                             ),
                                         ] => {
-                                            "no template is marked ⚡ for quick launch".to_string()
+                                            "No template is marked ⚡ for quick launch".to_string()
                                         }
                                         [
                                             crate::launch_sequence::TemplateReference::Number(key)
                                             | crate::launch_sequence::TemplateReference::Unbound(
                                                 Some(key),
                                             ),
-                                        ] => format!("no template is bound to key {key}"),
-                                        _ => "a template in this sequence is unbound or missing"
+                                        ] => format!("No template is bound to key {key}"),
+                                        _ => "A template in this sequence is unbound or missing"
                                             .to_string(),
                                     })
                                 } else {
@@ -3732,7 +3732,7 @@ pub(crate) fn ListView(
                                     // rather than an unrelated binding hint in Templates.
                                     if open_new.call(None) {
                                         initial_create_error.set(Some(format!(
-                                            "template {name} is no longer available"
+                                            "Template {name} is no longer available"
                                         )));
                                     }
                                 } else {
@@ -3761,7 +3761,7 @@ pub(crate) fn ListView(
                                         context: entry.clone(),
                                         templates: Default::default(),
                                         refusal: Some(format!(
-                                            "couldn't load templates: {message}"
+                                            "Couldn't load templates: {message}"
                                         )),
                                     },
                                 );
@@ -3770,7 +3770,7 @@ pub(crate) fn ListView(
                                 && open_new.call(None)
                             {
                                 initial_create_error
-                                    .set(Some(format!("couldn't prepare quick launch: {message}")));
+                                    .set(Some(format!("Couldn't prepare quick launch: {message}")));
                             }
                         }
                     }
@@ -4418,16 +4418,16 @@ pub(crate) fn ListView(
                 button {
                     class: "btn",
                     r#type: "button",
-                    "data-tooltip": "dismiss: hide this notice",
+                    "data-tooltip": "Dismiss: hide this notice",
                     onclick: move |_| {
                         delete_notice.dismiss();
                     },
-                    "dismiss"
+                    "Dismiss"
                 }
             }
         }
         match &*listing.read() {
-            None => rsx! { div { class: "status", hidden: hosts_panel_open(), "loading sessions…" } },
+            None => rsx! { div { class: "status", hidden: hosts_panel_open(), "Loading sessions…" } },
             // The helm's refusal text, rendered as the peer text it may
             // quote (see `api::refusal_text`).
             Some(Err(e)) => rsx! {
@@ -4435,7 +4435,7 @@ pub(crate) fn ListView(
                 crate::peer::PeerLine {
                     class: "status error".to_string(),
                     parts: vec![
-                        crate::peer::DetailPart::text("failed to load sessions: "),
+                        crate::peer::DetailPart::text("Failed to load sessions: "),
                         crate::peer::DetailPart::peer(e.clone()),
                     ],
                 }
@@ -4447,7 +4447,7 @@ pub(crate) fn ListView(
                 // `rows::is_empty_fleet` for why the request has to be
                 // consulted and what taking this branch would suppress.
                 if rows::is_empty_fleet(listing) {
-                    div { class: "status", hidden: hosts_panel_open(), "no sessions" }
+                    div { class: "status", hidden: hosts_panel_open(), "No sessions" }
                 } else {
                     // A filter that matched nothing says so in words, beside
                     // the banner's numbers. Without it the page is a count
@@ -4753,7 +4753,7 @@ fn seen_toggle_report(
                 }
             }
             Err(error) => {
-                errors.insert(id, format!("seen: {error}"));
+                errors.insert(id, format!("Seen: {error}"));
             }
         }
     }
@@ -5466,7 +5466,7 @@ mod tests {
         dom.in_runtime(|| {
             assert_eq!(
                 errors.peek().get("s1").map(String::as_str),
-                Some("seen: refused"),
+                Some("Seen: refused"),
                 "a mounted list shows the failure on the row"
             );
             assert_eq!(*successes.peek(), 0, "a failure requests no refresh");

@@ -679,7 +679,7 @@ test("an approval's complete initial prompt is keyboard-scrollable", async ({ pa
   }));
   await page.setViewportSize({ width: 1100, height: 850 });
   await page.goto("/");
-  await expect(page.locator(".main-empty")).toHaveText("no sessions — create one");
+  await expect(page.locator(".main-empty")).toHaveText("No sessions — create one");
   const card = page.locator('.approval-card[data-approval-id="keyboard-scroll-prompt"]');
   const allow = card.getByRole("button", { name: "Allow", exact: true });
   await expect(allow).toBeEnabled();

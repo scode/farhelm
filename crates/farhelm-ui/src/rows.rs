@@ -755,7 +755,7 @@ pub(crate) fn count_banner(listing: &SessionListing) -> CountBanner {
         (false, _, true) => (
             "banner truncation-banner",
             format!(
-                "showing {shown} of {} sessions{TRUNCATION_NOTE}",
+                "Showing {shown} of {} sessions{TRUNCATION_NOTE}",
                 listing.total
             ),
         ),
@@ -770,7 +770,7 @@ pub(crate) fn count_banner(listing: &SessionListing) -> CountBanner {
         (true, Some(matching), true) => (
             "banner truncation-banner filtered",
             format!(
-                "showing {shown} of {matching} matching sessions ({} in all){TRUNCATION_NOTE}",
+                "Showing {shown} of {matching} matching sessions ({} in all){TRUNCATION_NOTE}",
                 listing.total
             ),
         ),
@@ -786,7 +786,7 @@ pub(crate) fn count_banner(listing: &SessionListing) -> CountBanner {
         (true, None, true) => (
             "banner truncation-banner filtered",
             format!(
-                "showing {shown} of {} sessions{TRUNCATION_NOTE}{FILTER_UNSUPPORTED_NOTE}",
+                "Showing {shown} of {} sessions{TRUNCATION_NOTE}{FILTER_UNSUPPORTED_NOTE}",
                 listing.total
             ),
         ),
@@ -1708,13 +1708,13 @@ mod tests {
             (
                 listing(4, 4, true),
                 "banner truncation-banner",
-                "showing 4 of 4 sessions — could not read the list to the end",
+                "Showing 4 of 4 sessions — could not read the list to the end",
             ),
             // The shape the browser suite drives.
             (
                 listing(2, 700, true),
                 "banner truncation-banner",
-                "showing 2 of 700 sessions — could not read the list to the end",
+                "Showing 2 of 700 sessions — could not read the list to the end",
             ),
             // Zero rows left under the cap is still a cut list, not the
             // empty-list case (which `ListView` handles before ever
@@ -1722,7 +1722,7 @@ mod tests {
             (
                 listing(0, 3, true),
                 "banner truncation-banner",
-                "showing 0 of 3 sessions — could not read the list to the end",
+                "Showing 0 of 3 sessions — could not read the list to the end",
             ),
         ];
         for (listing, class, text) in cases {
@@ -1789,7 +1789,7 @@ mod tests {
         assert_eq!(banner.class, "banner truncation-banner filtered");
         assert_eq!(
             banner.text,
-            "showing 20 of 40 matching sessions (700 in all) — could not read the list to the end"
+            "Showing 20 of 40 matching sessions (700 in all) — could not read the list to the end"
         );
     }
 
@@ -1909,7 +1909,7 @@ mod tests {
         assert_eq!(banner.class, "banner truncation-banner filtered");
         assert_eq!(
             banner.text,
-            "showing 20 of 700 sessions — could not read the list to the end — this helm does \
+            "Showing 20 of 700 sessions — could not read the list to the end — this helm does \
              not support filtering, so the filter was ignored"
         );
     }

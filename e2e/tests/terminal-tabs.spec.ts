@@ -1783,7 +1783,7 @@ test("a failing detail read leaves the tabs and their terminals alone", async ({
     await expect(notice, "one answered failure is silent while the next answer is held").toHaveCount(0);
     secondFailure.release();
     await expect.poll(() => failures, { timeout: 20_000 }).toBeGreaterThanOrEqual(3);
-    await expect(notice).toHaveText("could not refresh this session; showing the last state this client read");
+    await expect(notice).toHaveText("Could not refresh this session; showing the last state this client read");
 
     await expect(page.locator(".tab-slot")).toHaveCount(1);
     expect(await mountedIslands(page)).toEqual(before);
@@ -2158,7 +2158,7 @@ test("the close confirmation shows its exact consequence sentence", async ({
     id = session.id;
     await page.locator(".tab-close").click();
     await expect(page.locator(".tab-confirm .confirm-consequence")).toHaveText(
-      "closing kills this terminal's shell and every process it started:",
+      "Closing kills this terminal's shell and every process it started:",
     );
   } finally {
     if (id) await cleanupSession(request, id);

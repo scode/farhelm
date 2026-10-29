@@ -64,7 +64,7 @@
 //! bundle, or the development bundle started by `scripts/desktop-smoke.sh`):
 //!
 //! 1. Drag a real file from the file manager onto the AGENT terminal of an
-//!    open session. Expect: an "attaching …" line, then the host path
+//!    open session. Expect: an "Attaching …" line, then the host path
 //!    inserted at the cursor, and the file present under the session's
 //!    attachments directory with its bytes intact. This is the one that
 //!    fails if wry swallows the drop — see `main.rs`'s
@@ -486,13 +486,13 @@ pub(crate) fn attachment_status_element_id(terminal_element_id: &str) -> String 
 /// a meter) and deliberately naming the file: with several terminals on
 /// screen and a transfer that outlives a tab switch, "uploading" alone
 /// would not tell the user what is going where.
-const BUSY_ONE_TEXT: &str = "attaching {name}…";
+const BUSY_ONE_TEXT: &str = "Attaching {name}…";
 
 /// While several transfers are running at once — a multi-file drop, or a
 /// second drop landing on a terminal that is still sending the first.
-/// `{count}` is how many, so three files in flight read "attaching 3
+/// `{count}` is how many, so three files in flight read "Attaching 3
 /// files…". The per-file form above takes over as soon as one is left.
-const BUSY_MANY_TEXT: &str = "attaching {count} files…";
+const BUSY_MANY_TEXT: &str = "Attaching {count} files…";
 
 /// A transfer that failed. `{name}` is the file, `{reason}` the helm's own
 /// message — the supervisor's words, modulo the surrounding whitespace
@@ -502,7 +502,7 @@ const BUSY_MANY_TEXT: &str = "attaching {count} files…";
 /// question the user is about to have: the path they were waiting for is
 /// not there, and SPEC.md's "an attachment must never disappear silently"
 /// is only honored if the failure explains the absence.
-const FAILED_TEXT: &str = "attaching {name} failed: {reason} — no path was inserted";
+const FAILED_TEXT: &str = "Attaching {name} failed: {reason} — no path was inserted";
 
 /// A dropped directory, detected up front through the drag-entry API.
 /// `{name}` is the directory.
@@ -512,7 +512,7 @@ const DIRECTORY_TEXT: &str =
 /// The losing image bucket may contain a genuine fresh placeholder-named file.
 /// Name the original item and state the heuristic rather than claiming a duplicate.
 const OMITTED_IMAGE_TEXT: &str =
-    "left out {name}, which looked like the clipboard's copy of another pasted file";
+    "Left out {name}, which looked like the clipboard's copy of another pasted file";
 
 /// A dropped item whose bytes could not be read, which is how a directory
 /// arrives on an engine with no drag-entry API (PLAN_M4.md item 7's
@@ -535,7 +535,7 @@ const UNREADABLE_TEXT: &str = "{name} could not be read, so nothing was uploaded
 /// No `{name}`: a payload can carry several files, and the reason has
 /// nothing to do with which.
 pub(crate) const DETACHED_TEXT: &str =
-    "this terminal is not connected, so nothing was attached — reconnect and try again";
+    "This terminal is not connected, so nothing was attached — reconnect and try again";
 
 /// An upload that finished after its terminal lost its socket.
 ///
@@ -556,7 +556,7 @@ const LANDED_TEXT: &str =
 /// vanish from the status line (SPEC.md: an attachment must never disappear
 /// silently).
 const INTERRUPTED_UNSENT_TEXT: &str =
-    "attaching {name} was interrupted before it was sent, so nothing was uploaded";
+    "Attaching {name} was interrupted before it was sent, so nothing was uploaded";
 
 /// An upload cut off after its request started, for the same reasons as
 /// above. `{name}` is the file.
@@ -565,7 +565,7 @@ const INTERRUPTED_UNSENT_TEXT: &str =
 /// the helm may have finished publishing the file before the abort reached
 /// it (SPEC.md, Attachments: a failure must tell a definitely unpublished
 /// upload apart from one whose outcome is unknown).
-const INTERRUPTED_UNKNOWN_TEXT: &str = "attaching {name} was interrupted — it may have reached the host anyway, but no path was inserted";
+const INTERRUPTED_UNKNOWN_TEXT: &str = "Attaching {name} was interrupted — it may have reached the host anyway, but no path was inserted";
 
 /// An upload the helm refused without saying why — a status code and an
 /// empty body. `{status}` is that code.
@@ -574,7 +574,7 @@ const INTERRUPTED_UNKNOWN_TEXT: &str = "attaching {name} was interrupted — it 
 /// other sentence in this module is: what the user reads when their
 /// attachment fails is reviewable prose, not an implementation detail of
 /// the fetch wrapper.
-const HTTP_STATUS_TEXT: &str = "the helm answered {status} with no message";
+const HTTP_STATUS_TEXT: &str = "The helm answered {status} with no message";
 
 /// A 200 whose body was not the pinned REST contract's `{"path": …}` —
 /// unparsable, or parsed with no usable path in it.
@@ -582,7 +582,7 @@ const HTTP_STATUS_TEXT: &str = "the helm answered {status} with no message";
 /// Treated as a failure rather than a success with nothing to insert:
 /// something published or did not, and this client cannot tell which, so
 /// the only honest report is that no path arrived.
-const NO_PATH_TEXT: &str = "the upload reply carried no usable path";
+const NO_PATH_TEXT: &str = "The upload reply carried no usable path";
 
 /// What an upload's reply says when it came from a DIFFERENT build of the
 /// helm than this page was loaded from (PLAN_M6.md item 6).
@@ -594,7 +594,7 @@ const NO_PATH_TEXT: &str = "the upload reply carried no usable path";
 /// (this transfer) before the remedy, since a line about versions on an
 /// attachment error would otherwise read as a non-sequitur. `{helm}` is
 /// what the helm reported.
-const SKEW_TEXT: &str = "this page was built against a different farhelm than the helm now running ({helm}), so this \
+const SKEW_TEXT: &str = "This page was built against a different Farhelm than the helm now running ({helm}), so this \
      upload may not behave as expected — reload to pick up the matching interface";
 
 /// What an upload's reply says when it carried NO build stamp at all.
@@ -604,7 +604,7 @@ const SKEW_TEXT: &str = "this page was built against a different farhelm than th
 /// and — since a conforming helm both sends the header and exposes it to
 /// this cross-origin read — a reply without one is a peer that is not this
 /// build, which is the same conclusion by a different route.
-const SKEW_SILENT_TEXT: &str = "this page was built against a different farhelm than the helm now running (it reports no \
+const SKEW_SILENT_TEXT: &str = "This page was built against a different Farhelm than the helm now running (it reports no \
      build at all), so this upload may not behave as expected — reload to pick up the matching \
      interface";
 

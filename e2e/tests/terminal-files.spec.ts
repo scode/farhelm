@@ -366,7 +366,7 @@ for (const kind of ['local', 'ssh']) {
       expect(await download.failure()).toBeNull();
       expect(fs.readFileSync((await download.path())!, 'utf8')).toBe(content);
       const notice = page.locator('#terminal .terminal-file-message');
-      await expect(notice).toContainText(`downloaded ${basename}`);
+      await expect(notice).toContainText(`Downloaded ${basename}`);
       await expect(notice).toHaveClass(/showing/);
       const terminalBox = (await page.locator('#terminal .xterm').boundingBox())!;
       const noticeBox = (await notice.boundingBox())!;
@@ -455,7 +455,7 @@ test('file refusals, OSC file save and forbidden OSC schemes', async ({ page, re
     expect(fs.existsSync(path.join(directory, 'ok.txt'))).toBe(false);
     await page.mouse.click(vanished.x, vanished.y);
     const notice = page.locator('#terminal .terminal-file-message');
-    await expect(notice).toContainText('download failed:');
+    await expect(notice).toContainText('Download failed:');
     await expect(notice).toHaveClass(/showing/);
     // A blank terminal cell dismisses the failure without starting another save.
     const screen = (await page.locator('#terminal .xterm-screen').boundingBox())!;

@@ -202,7 +202,7 @@ impl DeletionRun {
                 )
             });
         let status = format!(
-            "deleting… {checkouts_left} {} left",
+            "Deleting… {checkouts_left} {} left",
             checkouts(checkouts_left)
         );
         if unchecked_left == 0 {

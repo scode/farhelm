@@ -4416,7 +4416,7 @@ test("truncation banner shows when the listing reports truncated", async ({
   // `filtered` modifier — even though the reply beside it does carry a
   // matching count.
   await expect(page.locator(".truncation-banner")).toHaveText(
-    "showing 2 of 700 sessions — could not read the list to the end",
+    "Showing 2 of 700 sessions — could not read the list to the end",
   );
   await expect(page.locator(".truncation-banner.filtered")).toHaveCount(0);
 });

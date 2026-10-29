@@ -440,7 +440,7 @@ test("with no session open the main pane's half of the band drags", async ({ pag
   await page.setViewportSize({ width: 1100, height: 700 });
   await page.goto("/");
   // Fixture premise: the empty-fleet state, in the ordinary layout.
-  await expect(page.locator(".main-empty")).toHaveText("no sessions — create one");
+  await expect(page.locator(".main-empty")).toHaveText("No sessions — create one");
   await expect(page.locator(".session-topbar")).toHaveCount(0);
   await expect(page.locator(".build-skew")).toHaveCount(0);
   await page.locator(".app-shell").evaluate((node) => node.classList.add("macos-window"));

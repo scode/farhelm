@@ -231,7 +231,7 @@ fn terminal_ws_path_on(session_id: &str, tab_id: Option<&str>, lease: &str, rout
 /// reap really does go after them, which is exactly the consequence a user
 /// cannot see coming from the word "close".
 pub(crate) const CLOSE_TAB_CONSEQUENCE: &str =
-    "closing kills this terminal's shell and every process it started:";
+    "Closing kills this terminal's shell and every process it started:";
 
 /// `tab_errors`' entries in a stable display order, newest-agnostic and
 /// purely lexical by key.
@@ -295,8 +295,8 @@ pub(crate) fn TabStripItem(
                 // as nothing useful to a screen reader — the accessible
                 // name has to carry the tab's identity instead, or every
                 // tab's close button would announce identically.
-                "aria-label": "close {label}",
-                "data-tooltip": "close {label}, ending its shell and everything it started",
+                "aria-label": "Close {label}",
+                "data-tooltip": "Close {label}, ending its shell and everything it started",
                 disabled: busy,
                 onclick: move |_| on_close.call(close_id.clone()),
                 "×"
@@ -484,7 +484,7 @@ mod tests {
     fn close_tab_consequence_states_the_kill_and_its_reach() {
         assert_eq!(
             CLOSE_TAB_CONSEQUENCE,
-            "closing kills this terminal's shell and every process it started:",
+            "Closing kills this terminal's shell and every process it started:",
             "the exact sentence is the contract — it is the last thing a user reads before \
              destroying a shell and everything under it, so a reworded or softened version is a \
              change to review, not an implementation detail to drift"

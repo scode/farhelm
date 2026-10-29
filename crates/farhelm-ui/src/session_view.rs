@@ -744,7 +744,7 @@ pub(crate) fn SessionView(
         match mint_lease().await {
             Ok(minted) => lease.set(Some(minted)),
             Err(reason) => lease_error.set(Some(format!(
-                "could not generate this view's terminal lease, so no terminal was attached \
+                "Could not generate this view's terminal lease, so no terminal was attached \
                  (without one, this session's terminals would take each other over): {reason}"
             ))),
         }
@@ -1347,7 +1347,7 @@ pub(crate) fn SessionView(
             _ => false,
         };
         if !same_kind {
-            return Err("the session's launch kind and agent type cannot be changed here".into());
+            return Err("The session's launch kind and agent type cannot be changed here".into());
         }
         drop(shown);
         begin_restart.call(());
@@ -1470,7 +1470,7 @@ pub(crate) fn SessionView(
                 Err(e) => {
                     tab_errors
                         .write()
-                        .insert(TAB_OPEN_ERROR_KEY.to_string(), format!("open tab: {e}"));
+                        .insert(TAB_OPEN_ERROR_KEY.to_string(), format!("Open tab: {e}"));
                 }
             }
             opening_tab.set(false);
@@ -1520,7 +1520,7 @@ pub(crate) fn SessionView(
                 Err(e) => {
                     tab_errors
                         .write()
-                        .insert(tab_id.clone(), format!("close tab: {e}"));
+                        .insert(tab_id.clone(), format!("Close tab: {e}"));
                 }
             }
             closing_tabs.write().remove(&tab_id);
@@ -2491,7 +2491,7 @@ pub(crate) fn SessionView(
             if let Some(err) = replace_error.read().clone() {
                 PeerLine {
                     class: "replace-error".to_string(),
-                    parts: vec![DetailPart::text("replace: "), DetailPart::peer(err)],
+                    parts: vec![DetailPart::text("Replace: "), DetailPart::peer(err)],
                 }
             }
             // Worded to state the FACT (the helm stopped listing this
@@ -2512,14 +2512,14 @@ pub(crate) fn SessionView(
             // gone. Collapsing them would attribute one cause to the other.
             if refresh_stale() {
                 div { class: "refresh-stale",
-                    "the helm stopped listing this session, so what is shown here may be out of \
+                    "The helm stopped listing this session, so what is shown here may be out of \
                      date — it was deleted from another client, or there are more sessions than \
                      the helm lists at once"
                 }
             }
             if detail_failures() >= 2 {
                 div { class: "refresh-stale session-refresh-error", role: "status",
-                    "could not refresh this session; showing the last state this client read"
+                    "Could not refresh this session; showing the last state this client read"
                 }
             }
             // Metadata remains in one band, independent of whether this
@@ -2574,26 +2574,26 @@ pub(crate) fn SessionView(
                                 }
                                 notice_restart(false);
                             },
-                            "restart"
+                            "Restart"
                         }
                     }
                     if card_offers_replace_with {
                         button {
                             r#type: "button",
                             class: "btn btn-primary replace-with-from-notice",
-                            "data-tooltip": "replace with: edit the settings, then swap this session for a new one",
+                            "data-tooltip": "Replace with: edit the settings, then swap this session for a new one",
                             disabled: lifecycle.busy(),
                             onclick: move |_| {
                                 cancel_replace_intent();
                                 prefill_request.set(Some(crate::list::HeaderPrefillRequest::ReplaceWith(card_replace_with_session.clone())));
                             },
-                            "replace with"
+                            "Replace with"
                         }
                     } else {
                         button {
                             r#type: "button",
                             class: "btn btn-primary replace-from-notice",
-                            "data-tooltip": "replace: swap this session for a fresh conversation with the same settings",
+                            "data-tooltip": "Replace: swap this session for a fresh conversation with the same settings",
                             disabled: lifecycle.busy(),
                             "aria-expanded": "{confirming_replace.is_open()}",
                             onclick: move |_| {
@@ -2605,7 +2605,7 @@ pub(crate) fn SessionView(
                                     }
                                 }
                             },
-                            "replace"
+                            "Replace"
                         }
                     }
                     if let Some(shown_card_replace) = card_replace_shown.clone() {
@@ -2615,7 +2615,7 @@ pub(crate) fn SessionView(
                             button {
                                 r#type: "button",
                                 class: "btn btn-danger replace-confirm-submit",
-                                "data-tooltip": "replace this session now, as described",
+                                "data-tooltip": "Replace this session now, as described",
                                 disabled: replacing(),
                                 autofocus: !replacing(),
                                 onkeydown: crate::guard_confirmation_enter,
@@ -2633,19 +2633,19 @@ pub(crate) fn SessionView(
                                         }
                                     }
                                 },
-                                "confirm replace"
+                                "Confirm replace"
                             }
                             button {
                                 r#type: "button",
                                 class: "btn btn-neutral replace-cancel",
-                                "data-tooltip": "cancel: keep this session as it is",
+                                "data-tooltip": "Cancel: keep this session as it is",
                                 autofocus: replacing(),
                                 onclick: move |_| {
                                     if confirming_replace.take(&shown_card_replace).is_some() {
                                         cancel_replace_intent();
                                     }
                                 },
-                                "cancel"
+                                "Cancel"
                             }
                         }
                     }
@@ -2676,7 +2676,7 @@ pub(crate) fn SessionView(
                         button {
                             r#type: "button",
                             class: "btn btn-danger confirm-delete confirm-close-tab",
-                            "data-tooltip": "close this tab, ending its shell and everything it started",
+                            "data-tooltip": "Close this tab, ending its shell and everything it started",
                             disabled: closing_tabs.read().contains(shown_close.key()),
                             autofocus: !closing_tabs.read().contains(shown_close.key()),
                             onkeydown: crate::guard_confirmation_enter,
@@ -2685,12 +2685,12 @@ pub(crate) fn SessionView(
                                 let shown_close = shown_close.clone();
                                 move |_| confirm_close_tab(shown_close.clone())
                             },
-                            "confirm close"
+                            "Confirm close"
                         }
                         button {
                             r#type: "button",
                             class: "btn btn-neutral confirm-cancel",
-                            "data-tooltip": "cancel: keep the tab open",
+                            "data-tooltip": "Cancel: keep the tab open",
                             // Confirm owns initial focus unless its request is
                             // already running; Cancel remains a usable fallback.
                             autofocus: closing_tabs.read().contains(shown_close.key()),
@@ -2698,7 +2698,7 @@ pub(crate) fn SessionView(
                                 let shown_close = shown_close.clone();
                                 move |_| confirming_close.cancel_for(&shown_close)
                             },
-                            "cancel"
+                            "Cancel"
                         }
                     }
                 }
@@ -2885,7 +2885,7 @@ pub(crate) fn SessionView(
                                 }
                             } else {
                                 div { class: "terminal-not-mounted",
-                                    "this session reports more than {MAX_MOUNTED_TAB_ISLANDS} terminal tabs; \
+                                    "This session reports more than {MAX_MOUNTED_TAB_ISLANDS} terminal tabs; \
                                      this one is listed but not attached (close some to attach it)"
                                 }
                                 // No terminal here, so nothing paints this
@@ -3396,18 +3396,18 @@ fn interrupted_surface_text(
     let clause = offer_clause(offer, kind, true);
     let note = feedback_note(offer, true);
     // A legacy session's card offers Replace with, never plain Replace, so
-    // its text must not promise that "replace starts it over".
+    // its text must not promise that "Replace starts it over".
     if replace_with {
         return if offer.can_restart() {
             format!(
-                "a host restart paused this session; it needs an intentional restart. Farhelm \
+                "A host restart paused this session; it needs an intentional restart. Farhelm \
                  will wait for you to choose Restart or Replace with — {clause}."
             )
         } else if offer == RestartOffer::NotCaptured {
             // The same ended explanation as the Restart tooltip's, with the
             // card's own way to start over.
             format!(
-                "a host restart paused this session. Farhelm will wait for you to choose Replace \
+                "A host restart paused this session. Farhelm will wait for you to choose Replace \
                  with — {}.{note}",
                 not_captured_clause(
                     kind,
@@ -3416,7 +3416,7 @@ fn interrupted_surface_text(
                 )
             )
         } else {
-            "a host restart paused this session. Farhelm will wait for you to choose Replace \
+            "A host restart paused this session. Farhelm will wait for you to choose Replace \
              with — this session was created before launch kinds, so it cannot resume, and \
              Replace with opens the launcher with its command to start it over."
                 .to_string()
@@ -3424,11 +3424,11 @@ fn interrupted_surface_text(
     }
     if offer.can_restart() {
         format!(
-            "a host restart paused this session; it needs an intentional restart. Farhelm will wait for you to choose Restart or Replace — {clause}."
+            "A host restart paused this session; it needs an intentional restart. Farhelm will wait for you to choose Restart or Replace — {clause}."
         )
     } else {
         format!(
-            "a host restart paused this session. Farhelm will wait for you to choose Replace — {clause}.{note}"
+            "A host restart paused this session. Farhelm will wait for you to choose Replace — {clause}.{note}"
         )
     }
 }
@@ -3491,7 +3491,7 @@ fn copy_warning(what: &str, value: &str) -> Option<String> {
     value
         .chars()
         .any(farhelm_proto::text::is_presentation_unsafe)
-        .then(|| format!("⚠ the copied {what} contains hidden characters, displayed as <U+…>"))
+        .then(|| format!("⚠ The copied {what} contains hidden characters, displayed as <U+…>"))
 }
 
 /// Copy exact bytes through the native bridge first, then the browser fallback.
@@ -3574,7 +3574,7 @@ mod tests {
         );
         assert_eq!(
             copy_warning("command", spoofed).as_deref(),
-            Some("⚠ the copied command contains hidden characters, displayed as <U+…>")
+            Some("⚠ The copied command contains hidden characters, displayed as <U+…>")
         );
         assert_eq!(copy_warning("command", "claude --resume"), None);
     }
@@ -3981,7 +3981,7 @@ mod tests {
                     feedback_note(offer, true)
                 );
                 assert!(
-                    card.starts_with("a host restart paused this session"),
+                    card.starts_with("A host restart paused this session"),
                     "{card}"
                 );
                 assert!(
@@ -3999,7 +3999,7 @@ mod tests {
     }
 
     /// Spec: a legacy session's interrupted card names Replace with, never
-    /// plain Replace, and never says "replace starts it over", whether or
+    /// plain Replace, and never says "Replace starts it over", whether or
     /// not it can restart.
     ///
     /// Why: plain Replace refuses a legacy session (SPEC.md's launch-kinds
@@ -4027,11 +4027,11 @@ mod tests {
                 );
             }
             assert!(
-                card.starts_with("a host restart paused this session"),
+                card.starts_with("A host restart paused this session"),
                 "{card}"
             );
             assert!(card.contains("Replace with"), "{card}");
-            assert!(!card.contains("replace starts it over"), "{card}");
+            assert!(!card.contains("Replace starts it over"), "{card}");
             assert_eq!(
                 card.contains("Restart or Replace with"),
                 offer.can_restart(),
