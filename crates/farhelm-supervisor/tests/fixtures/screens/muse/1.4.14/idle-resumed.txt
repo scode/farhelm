@@ -1,0 +1,42 @@
+
+  Muse Code 1.4.14
+
+  resumed session 00000000-0000-4000-8000-000000000001
+
+❯ hello Muse probe
+
+◆ echo: hello Muse probe
+
+  session 00000000-0000-4000-8000-000000000001 does not record a usable model for provider echo; using the provider default model
+
+❯ status probe hello
+
+◆ echo: status probe hello
+
+❯ capture busy probe
+
+◆ echo: capture busy probe
+
+❯ one more bounded status probe
+
+◆ echo: one more bounded status probe
+
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ Type @ to search and insert workspace file paths
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  echo · /workspace/project · YOLO
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
