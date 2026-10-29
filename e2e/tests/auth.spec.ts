@@ -193,12 +193,12 @@ test("blank and rejected tokens stay on the prompt and allow retry", async ({
   await page.goto(baseURL!);
 
   await page.locator(".auth-submit").click();
-  await expect(page.getByRole("alert")).toContainText("enter the token");
+  await expect(page.getByRole("alert")).toContainText("Enter the token");
   expect(exchanges, "blank input must not reach the exchange endpoint").toBe(0);
 
   await page.locator(".auth-token-input").fill("AAAAAAAAAAAAAAAAAAAAAA");
   await page.locator(".auth-submit").click();
-  await expect(page.getByRole("alert")).toContainText("that token was not accepted");
+  await expect(page.getByRole("alert")).toContainText("That token was not accepted");
   await expect(page.locator(".auth-page")).toBeVisible();
   expect(exchanges).toBe(1);
 

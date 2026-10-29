@@ -11,8 +11,10 @@
  * after photographing it; the requested child is never launched. Ordinary
  * session review reuses the same staged rows and real resumable header source.
  * Trash review reuses the approved archive listing and cancels its question.
+ * Browser sign-in review uses fresh credential-free contexts and submits only
+ * an empty token, photographing local validation without an exchange request.
  */
-import { expect, test, type APIRequestContext, type Locator, type Page, type Request as NetworkRequest } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Browser, type Locator, type Page, type Request as NetworkRequest } from "@playwright/test";
 import { cleanupSession, hostRowByName, listHosts, listSessions, openHostMenu, openRowMenu, patchPreferences, readPreferences, setLocalYoloWithoutAsking, showHostsPanel, showSessionsPanel } from "../tests/helpers/fleet";
 import { setLocalCommandsWithoutAsking } from "../tests/helpers/approvals";
 import { cleanupOwnedSteps } from "../tests/helpers/cleanup";
@@ -54,6 +56,7 @@ const sentenceSessionsOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "senten
 const sentenceSessionHintsOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sentence-session-hints";
 const sentenceHelpOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sentence-help";
 const sentenceTrashOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sentence-trash";
+const sentenceAuthOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sentence-auth";
 
 /** Photograph native-only chrome with the goal's explicit CSS-only fallback.
  * The ordinary staged web app supplies the surrounding frame and terminals.
@@ -182,6 +185,111 @@ async function focusedShot(page: Page, name: string, control: Locator, gapPanel?
   expect(await control.evaluate((element) => element.matches(":focus-visible")), "tooltip handling must preserve visible keyboard focus").toBe(true);
   if (!showTooltip) await expect(page.locator(".farhelm-tooltip")).toBeHidden();
   await shot(page, name, [page.locator("body")], { pad: 0 }, true);
+}
+
+/** Photograph the real browser prompt and its local empty-token refusal.
+ * The owned context explicitly starts without cookies, stored origins or
+ * authorization headers; it never reads the capture's authenticated state.
+ * Ordinary unauthorized app reads produce the prompt without routing replies.
+ * No token is acquired or typed. The observer stays through cleanup so a late
+ * exchange request cannot escape the proof that blank submission stayed local.
+ * Auth has no sidebar: both widths measure the whole window, not a main pane.
+ * Native bootstrap and successful sign-in are outside this capture.
+ */
+async function sentenceAuthShots(browser: Browser, baseURL: string, colorScheme: "dark" | "light", constrained: boolean) {
+  const viewport = { width: constrained ? 650 : 1600, height: 1000 };
+  const context = await browser.newContext({
+    baseURL,
+    storageState: { cookies: [], origins: [] },
+    extraHTTPHeaders: {},
+    colorScheme,
+    reducedMotion: "reduce",
+    viewport,
+  });
+  let exchanges = 0;
+  const observe = (request: NetworkRequest) => {
+    if (request.method() === "POST" && new URL(request.url()).pathname === "/api/auth/token") exchanges++;
+  };
+  context.on("request", observe);
+  let bodyFailed = true;
+  try {
+    const page = await context.newPage();
+    await page.goto("/");
+    const auth = page.locator(".auth-page");
+    const form = auth.locator("form.auth-card");
+    const heading = form.getByRole("heading", { name: "Authenticate this device", exact: true });
+    const input = form.getByLabel("Web token", { exact: true });
+    const submit = form.getByRole("button", { name: "Continue", exact: true });
+    const alert = form.getByRole("alert");
+    await expect(auth).toBeVisible();
+    await expect(auth.locator("form")).toHaveCount(1);
+    await expect(form).toBeVisible();
+    await expect(heading).toBeVisible();
+    await expect(page.locator(".app-main, .host-rail")).toHaveCount(0);
+    await expect(alert).toHaveCount(0);
+    await expect(page.locator("html")).toHaveAttribute("data-appearance", colorScheme);
+    await page.evaluate(() => document.fonts.ready.then(() => undefined));
+    expect(page.viewportSize(), "auth widths describe the complete window").toEqual(viewport);
+    await expect(input).toHaveAttribute("type", "password");
+    await expect(input).toBeEnabled();
+    await expect(input).toHaveValue("");
+    // Observe the product's autofocus before sending any input. Focusing the
+    // field ourselves would conceal a failed handoff from the replaced app.
+    await expect(input).toBeFocused();
+    await expect(submit).toBeEnabled();
+    await expect(submit).toHaveAttribute("data-tooltip", "Continue: sign in with this token");
+    for (const text of [heading, form.locator('label[for="farhelm-token"]'), input, submit]) {
+      await expect(text).toHaveCSS("font-family", /^Inter/);
+    }
+    await expect(form.locator("code")).toHaveCSS("font-family", /JetBrains Mono/);
+    /** Check the painted form and real hit targets before either picture.
+     * Visibility alone would accept a control covered by another surface.
+     */
+    const reachable = async () => {
+      await insideViewport(page, form);
+      for (const control of [input, submit]) {
+        await insideViewport(page, control);
+        expect(await control.evaluate(element => {
+          const box = element.getBoundingClientRect();
+          return element.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
+        }), "auth controls retain their actual center hit targets").toBe(true);
+      }
+    };
+    await reachable();
+    const name = `visual-review/${colorScheme}-${constrained ? "window-650" : "wide"}`;
+    await shot(page, `${name}-auth-prompt`, [page.locator("body")], { pad: 0 });
+
+    // Native Tab establishes the action's keyboard modality and actual help.
+    // Enter submits the still-empty draft through the product's local guard.
+    await input.press("Tab");
+    await expect(submit).toBeFocused();
+    expect(await submit.evaluate(element => element.matches(":focus-visible"))).toBe(true);
+    await expect(input).toHaveValue("");
+    await submit.press("Enter");
+    await expect(alert).toHaveText("Enter the token printed by `farhelm helm token show`");
+    await expect(input).toHaveValue("");
+    await expect(input).toBeEnabled();
+    await expect(submit).toBeEnabled();
+    await expect(submit).toBeFocused();
+    await reachable();
+    await insideViewport(page, alert);
+    expect(exchanges, "blank submission never reaches token exchange").toBe(0);
+    await expect(page.locator(".farhelm-tooltip")).toHaveText("Continue: sign in with this token");
+    await insideViewport(page, page.locator(".farhelm-tooltip"));
+    await focusedShot(page, `${name}-auth-blank-token`, submit);
+    bodyFailed = false;
+  } finally {
+    // Each page and the context get independent close attempts. Keep passive
+    // observation until both finish, and detach even if either close fails.
+    await cleanupOwnedSteps(bodyFailed, [
+      ...context.pages().map((page): [string, () => Promise<void>] => ["close an owned auth page", () => page.close()]),
+      ["close the owned auth context", () => context.close()],
+      ["remove auth observer and verify no token exchange", () => {
+        context.off("request", observe);
+        expect(exchanges, "auth review sends no token exchange, including during cleanup").toBe(0);
+      }],
+    ]);
+  }
 }
 
 /** Select a real staged terminal only after its replay and transcript are visible. */
@@ -2168,6 +2276,18 @@ async function toolbarShots(page: Page, name: string) {
 
 for (const colorScheme of ["dark", "light"] as const) {
   for (const width of ["wide", "main-650"] as const) {
+    if (sentenceAuthOnly) {
+      /** The prompt replaces the app, so the legacy main-650 loop key means
+       * a 650px whole window here. This callback deliberately requests no
+       * page/request fixture: those would load authenticated capture state
+       * before an early return could isolate the browser prompt.
+       */
+      test(`${colorScheme} ${width === "main-650" ? "window-650" : width}`, async ({ browser, baseURL }) => {
+        if (!baseURL) throw new Error("auth review needs the docs fixture's local base URL");
+        await sentenceAuthShots(browser, baseURL, colorScheme, width === "main-650");
+      });
+      continue;
+    }
     /**
      * The main-pane measurement keeps the narrow case meaningful when a later
      * plan widens the sidebar for the host rail. Native controls and real menus
@@ -2647,7 +2767,9 @@ for (const colorScheme of ["dark", "light"] as const) {
  * GUI/feed must be connected before the authenticated source asks. Deny is
  * the only answer, and every cleanup step runs after an earlier failure too.
  */
-test("sentence-case ordinary approval in both themes and widths", async ({ page, request }) => {
+// Skip at registration for auth review, before authenticated fixtures load.
+const ordinaryApprovalTest = sentenceAuthOnly ? test.skip : test;
+ordinaryApprovalTest("sentence-case ordinary approval in both themes and widths", async ({ page, request }) => {
   test.skip(!sentenceHostsSettingsOnly && !sentenceApprovalOnly, "the owned Spawn source is staged only for the focused selection");
   const fleet = readFleet();
   const source = fleet.spawnReview;
