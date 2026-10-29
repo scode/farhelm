@@ -83,7 +83,7 @@ pub(crate) fn DesktopBootstrapGate() -> Element {
             })) {
                 state
                     .write()
-                    .fail(format!("sending desktop authentication over IPC: {error}"));
+                    .fail(format!("Sending desktop authentication over IPC: {error}"));
                 return;
             }
             let exchange = match eval.recv::<DesktopExchange>().await {
@@ -91,19 +91,19 @@ pub(crate) fn DesktopBootstrapGate() -> Element {
                 Err(error) => {
                     state
                         .write()
-                        .fail(format!("desktop authentication IPC failed: {error}"));
+                        .fail(format!("Desktop authentication IPC failed: {error}"));
                     return;
                 }
             };
             if let Some(error) = exchange.error {
                 state
                     .write()
-                    .fail(format!("desktop authentication failed: {error}"));
+                    .fail(format!("Desktop authentication failed: {error}"));
                 return;
             }
             if !exchange.ready {
                 state.write().fail(
-                    "desktop authentication IPC did not confirm browser bootstrap completion"
+                    "Desktop authentication IPC did not confirm browser bootstrap completion"
                         .to_string(),
                 );
                 return;
@@ -154,7 +154,7 @@ pub(crate) fn DesktopBootstrapGate() -> Element {
                     button {
                         class: "btn btn-primary auth-submit",
                         r#type: "button",
-                        "data-tooltip": "retry: try starting Farhelm again",
+                        "data-tooltip": "Retry: try starting Farhelm again",
                         onclick: move |_| require_desktop_webview_reauth(),
                         "Retry"
                     }

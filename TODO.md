@@ -106,13 +106,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   certain task, command, or produced a given output — rather than only by name. What gets indexed and how the search is
   exposed are TBD.
 
-- **Visual redesign: Steel.** Restyle the app as the "Steel" design the maintainer settled on 2026-10-25 from mockups:
-  blue-gray and periwinkle colors with a light counterpart, Inter for the interface, a host rail with a hosts panel, the
-  sort order as the list title over a status filter, split Restart and Replace buttons, a tunnel pill, one dialog and
-  menu anatomy, and sentence case. The reference mockups are `docs/design/steel/mockups.html`. Plans:
-  `plans/queue/steel-foundation.md`, `plans/queue/steel-sidebar.md`, `plans/queue/steel-session-chrome.md`,
-  `plans/queue/steel-dialogs.md`, `plans/queue/steel-sentence-case.md`.
-
 - **Treat the GUI–helm connection as infallible.** Decided by the maintainer on 2026-10-26 during triage of the review
   queue's highest bucket (`TRIAGE_OUTCOMES.md`, `template-delete-lost-reply-loses-undo.md`), in their words: "The UI and
   the Helm fundamentally should have an infallible connection. If the connection in any way fails then (a) for desktop

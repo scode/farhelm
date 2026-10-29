@@ -1154,7 +1154,7 @@ for (const ordinaryCopy of [false, true]) {
       expect(buffer, "and the text sibling is not pasted either").not.toContain("/home/somebody/");
       expect(uploads.count(), "file precedence still uploads only the file reference").toBe(1);
       const note = page.locator('[data-terminal="agent"] .attach-error');
-      await expect(note).toHaveText("left out image.png, which looked like the clipboard's copy of another pasted file");
+      await expect(note).toHaveText("Left out image.png, which looked like the clipboard's copy of another pasted file");
     } finally {
       if (id) await cleanupSession(request, id);
     }
@@ -1647,7 +1647,7 @@ test("error text carrying replacement tokens renders literally", async ({ page, 
     const error = page.locator('[data-terminal="agent"] .attach-error');
     await expect(error).toBeVisible();
     expect(await error.textContent()).toBe(
-      `attaching {reason}.txt failed: ${hostileReason} — no path was inserted`,
+      `Attaching {reason}.txt failed: ${hostileReason} — no path was inserted`,
     );
   } finally {
     if (id) await cleanupSession(request, id);

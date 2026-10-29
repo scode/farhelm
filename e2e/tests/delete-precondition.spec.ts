@@ -138,7 +138,7 @@ test(`an ${skip ? "opted-out tabs-only" : "unconfirmed"} delete sends the precon
 
     await row.locator(".session-row-delete").click();
 
-    await expect(row.locator(".action-error")).toContainText(`delete: ${REFUSAL}`);
+    await expect(row.locator(".action-error")).toContainText(`Delete: ${REFUSAL}`);
     expect(deleteUrls).toHaveLength(1);
     expect(new URL(deleteUrls[0]).searchParams.get("only_if_nothing_alive")).toBe(skip ? null : "true");
     expect(new URL(deleteUrls[0]).searchParams.get("only_if_agent_ended")).toBe(skip ? "true" : null);

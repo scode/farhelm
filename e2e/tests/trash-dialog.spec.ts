@@ -168,7 +168,7 @@ for (const fails of [false, true]) {
       expect(calls[0].expected_incarnation).toBeGreaterThan(0);
       await expect(dialog.locator(".checkout-trash-confirm")).toHaveCount(0);
       await expect(local.locator(".trash-host-progress")).toHaveText("0 of 1 deleted");
-      await expect(dialog.locator(".checkout-trash-progress")).toHaveText("deleting… 1 checkout left");
+      await expect(dialog.locator(".checkout-trash-progress")).toHaveText("Deleting… 1 checkout left");
       const current = local.locator(".checkout-trash-entry").filter({hasText: "archived-checkout-0"});
       await expect(current.locator(".trash-entry-progress .delete-spinner")).toBeVisible();
       await expect(local.locator(".trash-entry-waiting")).toHaveCount(0);
@@ -395,7 +395,7 @@ for (const action of ["global", "host"] as const) {
       await expect(section.locator(".trash-entry-waiting")).toHaveCount(2);
       for (const waiting of await section.locator(".trash-entry-waiting").all()) await expect(waiting).toHaveText("Waiting");
       await expect(section.locator(".trash-host-progress")).toHaveText("0 of 3 deleted");
-      await expect(status).toHaveText("deleting… 3 checkouts left");
+      await expect(status).toHaveText("Deleting… 3 checkouts left");
       await expect(total).toHaveText("3 checkouts · 3.0 KiB on reachable hosts");
       await expect(trigger).toHaveAttribute("data-count", "3");
       await expect(close).toBeDisabled();
@@ -448,7 +448,7 @@ for (const action of ["global", "host"] as const) {
       await expect(section.locator(".checkout-trash-host-header")).toContainText("2 checkouts · 2.0 KiB");
       await expect(total).toHaveText("2 checkouts · 2.0 KiB on reachable hosts");
       await expect(trigger).toHaveAttribute("data-count", "2");
-      await expect(status).toHaveText("deleting… 2 checkouts left");
+      await expect(status).toHaveText("Deleting… 2 checkouts left");
       await expect(section.locator(".trash-entry-elapsed")).toHaveText("0s");
       await expect(section.locator(".trash-entry-waiting")).toHaveText("Waiting");
       expect(new Set(calls.flatMap((call) => call.ids)).size, "success advances to a different selected checkout").toBe(2);
@@ -458,7 +458,7 @@ for (const action of ["global", "host"] as const) {
       await expect.poll(() => calls.length, {message: "a per-record issue does not stop this host's queue"}).toBe(3);
       await expect(section.locator(".checkout-trash-issue")).toContainText(issue.message);
       await expect(section.locator(".trash-host-progress")).toHaveText("1 of 3 deleted");
-      await expect(status).toHaveText("deleting… 1 checkout left");
+      await expect(status).toHaveText("Deleting… 1 checkout left");
       await expect(section.locator(".trash-entry-progress .delete-spinner")).toHaveCount(1);
       await expect(section.locator(".trash-entry-waiting")).toHaveCount(0);
       await expect(total).toHaveText("2 checkouts · 2.0 KiB on reachable hosts");
@@ -538,14 +538,14 @@ for (const failure of ["http", "transport"] as const) {
         await expect(section.locator(".trash-entry-progress .delete-spinner")).toHaveCount(1);
         await expect(section.locator(".trash-entry-waiting")).toHaveCount(2);
       }
-      await expect(status).toHaveText("deleting… 6 checkouts left");
+      await expect(status).toHaveText("Deleting… 6 checkouts left");
       await expect(trigger).toHaveAttribute("data-count", "6");
       gates[0][0].release();
       await expect(sections[0].locator(".checkout-trash-issue")).toContainText("cleanup reply could not be confirmed");
       await expect(sections[0].locator(".checkout-trash-issue")).toContainText("may already");
       await expect(sections[0].locator(".trash-entry-progress, .trash-entry-waiting")).toHaveCount(0);
       await expect(sections[0].locator(".trash-host-progress")).toHaveText("0 of 3 deleted");
-      await expect(status).toHaveText("deleting… 3 checkouts left");
+      await expect(status).toHaveText("Deleting… 3 checkouts left");
       await expect(trigger).toHaveAttribute("data-count", "6");
       expect(listings).toHaveLength(readsBefore);
       for (let index = 0; index < 3; index++) {
@@ -556,7 +556,7 @@ for (const failure of ["http", "transport"] as const) {
         if (index < 2) {
           await expect.poll(() => calls[1].length, {message: "the healthy host advances after each confirmed deletion"}).toBe(index + 2);
           await expect(trigger).toHaveAttribute("data-count", String(5 - index));
-          await expect(status).toHaveText(`deleting… ${2 - index} ${index === 0 ? "checkouts" : "checkout"} left`);
+          await expect(status).toHaveText(`Deleting… ${2 - index} ${index === 0 ? "checkouts" : "checkout"} left`);
           expect(listings, "completed requests do not refetch while another is pending").toHaveLength(readsBefore);
         }
       }
@@ -637,7 +637,7 @@ for (const width of [1000, 360]) {
           await expect(status).toHaveText("");
           await page.keyboard.press("Enter");
           await expect.poll(() => ids.map((id) => attempts.get(id) ?? 0), { message: "both host requests reached the held boundary" }).toEqual([1, 1]);
-          await expect(status).toHaveText("deleting… 2 checkouts left");
+          await expect(status).toHaveText("Deleting… 2 checkouts left");
           for (const section of sections) await expect(section.locator(".trash-host-progress")).toHaveText("0 of 1 deleted");
           await expect(close).toBeDisabled();
           await expect(dialog.locator(".trash-close-help")).toHaveAttribute("data-tooltip", "Available when deletion finishes.");
@@ -655,10 +655,10 @@ for (const width of [1000, 360]) {
           await expect(dialog).toBeFocused();
           await page.keyboard.press("Escape");
           await expect(dialog).toBeVisible();
-          await expect(status).toHaveText("deleting… 2 checkouts left");
+          await expect(status).toHaveText("Deleting… 2 checkouts left");
 
           held[0].release();
-          await expect(status).toHaveText("deleting… 1 checkout left");
+          await expect(status).toHaveText("Deleting… 1 checkout left");
           await expect(sections[0].locator(".trash-host-progress")).toHaveText(firstFails ? "0 of 1 deleted" : "1 of 1 deleted");
           await expect(sections[1].locator(".trash-host-progress")).toHaveText("0 of 1 deleted");
           if (firstFails) await expect(sections[0].locator(".checkout-trash-issue")).toContainText("fixture cleanup unavailable");
@@ -687,7 +687,7 @@ for (const width of [1000, 360]) {
             await expect(confirmation.locator(".trash-confirm-submit")).toBeFocused();
             await page.keyboard.press("Enter");
             await expect.poll(() => attempts.get(ids[0]), { message: "one-host retry reached its held boundary" }).toBe(2);
-            await expect(status).toHaveText("deleting… 1 checkout left");
+            await expect(status).toHaveText("Deleting… 1 checkout left");
             await expect(sections[0].locator(".trash-host-progress")).toHaveText("0 of 1 deleted");
             await expect(sections[1].locator(".trash-host-progress")).toHaveCount(0);
             releaseRetry();

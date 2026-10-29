@@ -477,7 +477,7 @@ fn host_update_title(state: &HostPhase) -> Option<String> {
             build_version,
             ..
         } => Some(format!(
-            "this host runs farhelm {}; this helm runs {}; update optional; click to update this host to the helm's version",
+            "This host runs Farhelm {}; this helm runs {}; update optional; click to update this host to the helm's version",
             build_version.escaped(),
             crate::skew::CLIENT_BUILD,
         )),
@@ -488,7 +488,7 @@ fn host_update_title(state: &HostPhase) -> Option<String> {
             our_build,
             ..
         } if peer_protocol < our_protocol => Some(format!(
-            "this host runs farhelm {} (protocol {peer_protocol}); this helm runs {} (protocol {our_protocol}); update required; click to update this host to the helm's version",
+            "This host runs Farhelm {} (protocol {peer_protocol}); this helm runs {} (protocol {our_protocol}); update required; click to update this host to the helm's version",
             peer_build.escaped(),
             our_build.escaped(),
         )),
@@ -4017,7 +4017,7 @@ fn HostRow(
     let adopt_identity = adoptable(&host.state).map(str::to_string);
     let adopt_label = adopt_identity
         .as_deref()
-        .map(|reported| format!("adopt {}", display_identity(reported)));
+        .map(|reported| format!("Adopt {}", display_identity(reported)));
     let lines = host_row_lines(&host, details_open, local_setup);
     let shown_name = gui_host_name(host.name.raw(), host.kind.is_this_machine());
     // Keep peer-owned destination and version values isolated in the same
@@ -4373,7 +4373,7 @@ fn HostRow(
                         class: "btn host-update-button",
                         "data-update-kind": urgency,
                         "data-tooltip": host_update_title(&host.state),
-                        aria_label: format!("update {shown_name}"),
+                        aria_label: format!("Update {shown_name}"),
                         // The tooltip's builds and urgency, for assistive
                         // technology, which the tooltip does not reach.
                         aria_describedby: host_update_title(&host.state).map(|_| format!("host-update-description-{id}")),
@@ -4395,7 +4395,7 @@ fn HostRow(
                             }
                         },
                         span { "aria-hidden": "true", "↑" }
-                        "update"
+                        "Update"
                     }
                 }
                 if let Some(text) = too_new_title(&host.state) {
@@ -4557,7 +4557,7 @@ fn HostRow(
                                         menu_panel::MenuItemCopy {
                                             label: rsx! { span { class: "peer-value", dir: "ltr", "{label}" } },
                                             description_id: "host-menu-adopt-description",
-                                            description: rsx! { "accept the supervisor's identity" },
+                                            description: rsx! { "Accept the supervisor's identity" },
                                         }
                                     }
                                 }

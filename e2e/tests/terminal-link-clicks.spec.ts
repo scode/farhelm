@@ -208,7 +208,7 @@ test("file disclosure and transfer messages preserve path differences", async ({
     expect(await name.evaluate(el => getComputedStyle(el).whiteSpace)).toBe("pre-wrap");
     await page.mouse.click(point.x, point.y);
     const notice = page.locator("#terminal .terminal-file-message.showing");
-    await expect(notice).toHaveText(`download failed: /output/${shown}`);
+    await expect(notice).toHaveText(`Download failed: /output/${shown}`);
     expect(await notice.evaluate(el => getComputedStyle(el).whiteSpace)).toBe("pre-wrap");
   } finally {
     await cleanupSession(request, session.id);
@@ -846,7 +846,7 @@ test.describe("covered terminal disclosures", () => {
       await page.mouse.click(point.x, point.y);
       expect((await downloaded).suggestedFilename()).toBe("report.txt");
       expect(transfers).toBe(1);
-      await expect(page.locator("#terminal .terminal-file-message.showing")).toHaveText("downloaded report.txt");
+      await expect(page.locator("#terminal .terminal-file-message.showing")).toHaveText("Downloaded report.txt");
     } catch (error) {
       bodyFailed = true;
       throw error;
@@ -967,7 +967,7 @@ test.describe("covered terminal disclosures", () => {
       await page.mouse.click(point.x, point.y);
       expect((await downloaded).suggestedFilename()).toBe("report.txt");
       expect(transfers).toBe(1);
-      await expect(page.locator("#terminal .terminal-file-message.showing")).toHaveText("downloaded report.txt");
+      await expect(page.locator("#terminal .terminal-file-message.showing")).toHaveText("Downloaded report.txt");
     } catch (error) {
       bodyFailed = true;
       throw error;

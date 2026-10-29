@@ -52,7 +52,7 @@ for (const viewport of [
     const footer = form.locator(".launch-composer-footer");
     const primary = form.locator(".create-session-submit");
     await expect(primary).toHaveText("Launch");
-    await expect(primary).toHaveAccessibleName(/^launch Command · .+ · \/work\/projects\/a-long-folder-name-for-launch-summary$/);
+    await expect(primary).toHaveAccessibleName(/^Launch Command · .+ · \/work\/projects\/a-long-folder-name-for-launch-summary$/);
     await expect(footer.locator(".launch-composer-launch-context")).toContainText("Command · ");
     await expect(footer.locator(".launch-composer-summary")).toHaveCount(0);
     expect(await body.evaluate((node) => node.clientHeight > 0 && node.scrollHeight > node.clientHeight + 1),

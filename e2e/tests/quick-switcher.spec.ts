@@ -62,7 +62,7 @@ test("opening a template reports the launcher's catalog read failure", async ({ 
     await page.keyboard.press("Enter");
     const form = page.locator(".create-session-form");
     const error = form.locator(".launch-composer-template-error");
-    await expect(error).toContainText("couldn't load templates");
+    await expect(error).toContainText("Couldn't load templates");
     await expect(error).toContainText("launcher template list unavailable");
     await expect(error).not.toContainText("deleted");
     expect(reads).toBe(2);

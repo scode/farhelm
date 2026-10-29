@@ -75,7 +75,7 @@ enum Choice {
 /// Only product-authored explanations enter here; this does not recase peer values.
 fn menu_description(description: String) -> String {
     let description = description
-        .replace("use replace with", "use Replace with…")
+        .replace("use Replace with", "use Replace with…")
         .replace("replace starts it over", "Replace starts it over");
     let description = description.trim_end_matches('.');
     let mut chars = description.chars();

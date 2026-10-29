@@ -190,7 +190,7 @@
         const { done, value } = await reader.read();
         if (done) return new Blob(chunks, { type: 'application/octet-stream' });
         size += value.byteLength;
-        if (size > MAX_BYTES) throw new Error('too large to download (100 MB limit)');
+        if (size > MAX_BYTES) throw new Error('Too large to download (100 MB limit)');
         chunks.push(value);
       }
     } finally {
@@ -436,7 +436,7 @@
         body: JSON.stringify({ path, save_to_downloads: operation === 'download' && this.native, open }),
         signal,
       });
-      if (!response.ok) throw new Error((await response.text()).slice(0, 4096).trim() || 'download refused');
+      if (!response.ok) throw new Error((await response.text()).slice(0, 4096).trim() || 'Download refused');
       return response;
     }
 
@@ -507,7 +507,7 @@
       if (!this.admitDisclosure(this.term.element.querySelector(':scope > .terminal-file-target'))) return;
       const controller = new AbortController();
       this.transfers.add(controller);
-      this.message('downloading…');
+      this.message('Downloading…');
       try {
         // The current policy can become more permissive after hover. Its
         // click-time check may refuse an advertised opening, but cannot add
@@ -520,7 +520,7 @@
           if (controller.signal.aborted) return;
           const outcome = open ? result.opened ? ' · opened' : ` · not opened: ${result.open_error}` :
             requestedOpen ? ' · not opened: opening was not offered' : '';
-          this.message(`saved to ${result.path}${outcome}`, 'success');
+          this.message(`Saved to ${result.path}${outcome}`, 'success');
         } else {
           const blob = await boundedBlob(response);
           if (controller.signal.aborted) return;
@@ -539,10 +539,10 @@
             URL.revokeObjectURL(url);
             this.urls.delete(url);
           }, 0);
-          this.message(`downloaded ${anchor.download}`, 'success');
+          this.message(`Downloaded ${anchor.download}`, 'success');
         }
       } catch (error) {
-        if (!controller.signal.aborted) this.message(`download failed: ${error.message}`, 'failure');
+        if (!controller.signal.aborted) this.message(`Download failed: ${error.message}`, 'failure');
       } finally {
         this.transfers.delete(controller);
       }

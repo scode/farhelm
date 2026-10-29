@@ -240,7 +240,7 @@ pub(crate) fn note_build(resp: &reqwest::Response) {
 ///   that reports no build at all is one that predates the reporting.
 fn skew_notice(skew: &Skew) -> Vec<DetailPart> {
     let mut parts = vec![
-        DetailPart::text("this page was loaded from farhelm "),
+        DetailPart::text("This page was loaded from Farhelm "),
         DetailPart::mono_peer(CLIENT_BUILD),
     ];
     match skew {

@@ -486,7 +486,7 @@ test("retry-exhaustion-shows-reprobe-phase", async ({ page, request }) => {
     await expect(
       surface,
       "past the active window the terminal promises to keep checking on its own",
-    ).toContainText("retrying every");
+    ).toContainText("Retrying every");
     // The attempt count kept climbing across the phase boundary rather than
     // restarting: six rungs, then probes.
     const attempt = Number(await surface.getAttribute("data-reconnect-attempt"));

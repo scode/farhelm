@@ -3964,7 +3964,7 @@ mod tests {
         assert!(
             !attribute_values(&none, "aria-label")
                 .iter()
-                .any(|label| label.starts_with("notifications")),
+                .any(|label| label.starts_with("Notifications")),
         );
 
         let read = bell_row_edits(vec![notification(2, "b"), notification(1, "a")], 2, false);
@@ -3976,7 +3976,7 @@ mod tests {
         );
         assert!(
             attribute_values(&read, "aria-label")
-                .contains(&"notifications for stable: none unread".to_string())
+                .contains(&"Notifications for stable: none unread".to_string())
         );
 
         let unread = bell_row_edits(vec![notification(3, "c"), notification(2, "b")], 1, false);
@@ -3988,12 +3988,12 @@ mod tests {
         assert!(attribute_values(&unread, "data-glyph").contains(&"bell-unread".to_string()));
         assert!(
             attribute_values(&unread, "aria-label")
-                .contains(&"notifications for stable: 2 unread".to_string())
+                .contains(&"Notifications for stable: 2 unread".to_string())
         );
         assert!(
             attribute_values(&unread, "data-tooltip")
                 .iter()
-                .any(|tooltip| tooltip.starts_with("notifications: 2 unread")),
+                .any(|tooltip| tooltip.starts_with("Notifications: 2 unread")),
             "the bell has hover help naming the count"
         );
         assert!(
@@ -4062,7 +4062,7 @@ mod tests {
         let quiet = bell_row_edits(vec![resolved.clone()], 0, false);
         assert!(
             attribute_values(&quiet, "aria-label")
-                .contains(&"notifications for stable: none unread".into())
+                .contains(&"Notifications for stable: none unread".into())
         );
         assert!(
             !attribute_values(&quiet, "class")
@@ -4085,7 +4085,7 @@ mod tests {
         assert!(attribute_values(&reopened, "class").contains(&"session-bell-entry new".into()));
         assert!(
             attribute_values(&reopened, "aria-label")
-                .contains(&"notifications for stable: 1 unread".into())
+                .contains(&"Notifications for stable: 1 unread".into())
         );
     }
 

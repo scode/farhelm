@@ -56,7 +56,7 @@ pub(super) fn bell_label(title: &PeerText, unread: usize) -> String {
 /// session), so the typed `menu_panel::clamp_title` exposes hidden characters
 /// before cutting the accessible name.
 fn list_label(title: &PeerText) -> String {
-    format!("notifications for {}", clamp_title(title))
+    format!("Notifications for {}", clamp_title(title))
 }
 
 /// "1 unread", "3 unread" or "none unread", shared by the accessible name
@@ -171,7 +171,7 @@ pub(super) fn NotificationBell(
     use_rendered_movement(&age_columns, || registration.capture_current(&session_id));
     let label = bell_label(&title, unread);
     let tooltip = format!(
-        "notifications: {}; click to list them",
+        "Notifications: {}; click to list them",
         unread_phrase(unread)
     );
     let newest = notifications.iter().map(|n| n.seq).max().unwrap_or(0);
@@ -304,7 +304,7 @@ fn NotificationList(
                 });
             },
             div { class: "session-row-menu-header",
-                div { class: "session-row-menu-title", "notifications" }
+                div { class: "session-row-menu-title", "Notifications" }
             }
             ul { class: "session-bell-entries",
                 for notification in notifications.iter() {
@@ -314,17 +314,18 @@ fn NotificationList(
                         "data-notification-seq": "{notification.seq}",
                         span { class: "session-bell-entry-meta",
                             if notification.resolved {
-                                span { class: "session-bell-resolved", "resolved" }
+                                span { class: "session-bell-resolved", "Resolved" }
                             } else if notification.is_unread_after(read_through) {
                                 // A word as well as the colour, so the
                                 // distinction survives without colour vision.
-                                span { class: "session-bell-new", "new" }
+                                span { class: "session-bell-new", "New" }
                             }
                             if let Some(stamp) = ActivityStamp::new(now, notification.at) {
                                 span {
                                     class: "session-bell-age",
                                     "data-tooltip": "{stamp.absolute}",
-                                    if stamp.age == "now" { "now" } else { "{stamp.age} ago" }
+                                // Relative ages share the row's value vocabulary; badges are labels.
+                                if stamp.age == "now" { "now" } else { "{stamp.age} ago" }
                                 }
                             }
                         }
@@ -339,9 +340,9 @@ fn NotificationList(
                 button {
                     r#type: "button",
                     class: "btn session-bell-clear",
-                    "data-tooltip": "clear: remove these notifications for every window",
+                    "data-tooltip": "Clear: remove these notifications for every window",
                     onclick: move |_| on_clear.call(()),
-                    "clear all"
+                    "Clear all"
                 }
             }
         }
@@ -429,12 +430,12 @@ mod tests {
         let label = bell_label(&SPOOF.into(), 2);
         assert_eq!(
             label,
-            format!("notifications for {}: 2 unread", display_peer(SPOOF))
+            format!("Notifications for {}: 2 unread", display_peer(SPOOF))
         );
         assert!(!label.contains('\u{202E}') && !label.contains('\u{200B}'));
         assert_eq!(
             bell_label(&"plain".into(), 0),
-            "notifications for plain: none unread"
+            "Notifications for plain: none unread"
         );
     }
 }

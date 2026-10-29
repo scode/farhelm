@@ -103,7 +103,7 @@ for (const surface of ["sidebar", "header"] as const) {
       await replace.click();
       await confirm.click();
       const error = surface === "header" ? page.locator(".replace-error") : sourceRow.locator(".action-error").first();
-      await expect(error).toContainText("replace:");
+      await expect(error).toContainText("Replace:");
       expect(keys).toHaveLength(1);
       expect(keys[0]).toEqual(expect.any(String));
       expect(keys[0].length).toBeGreaterThan(0);
@@ -397,7 +397,7 @@ for (const surface of ["sidebar", "header"] as const) {
       expect(keys).toHaveLength(2);
       expect(keys[1]).toBe(keys[0]);
       await confirmSidebarReplace(row(page, other.id));
-      await expect(row(page, other.id).locator(".action-error").first()).toContainText("replace:");
+      await expect(row(page, other.id).locator(".action-error").first()).toContainText("Replace:");
       // Closing this errored menu moves its error back into the row and can
       // shift the source below it. Settle that layout before the next pointer
       // gesture; the older YOLO question and replacement intents must survive.
@@ -409,7 +409,7 @@ for (const surface of ["sidebar", "header"] as const) {
       await expect(otherToggle).toHaveAttribute("aria-expanded", "false");
       await expect(question).toHaveCount(1);
       await confirmSidebarReplace(sourceRow);
-      await expect(sourceRow.locator(".action-error").first()).toContainText("replace:");
+      await expect(sourceRow.locator(".action-error").first()).toContainText("Replace:");
       expect(keys).toHaveLength(3);
       expect(keys[2]).not.toBe(keys[0]);
       await expect(question).toHaveCount(1);
@@ -502,7 +502,7 @@ for (const olderAction of ["late refusal", "YOLO cancellation"] as const) {
       }
 
       await confirmSidebarReplace(newerRow);
-      await expect(newerRow.locator(".action-error").first()).toContainText("replace:");
+      await expect(newerRow.locator(".action-error").first()).toContainText("Replace:");
       expect(keys).toHaveLength(1);
       expect(keys[0]).toEqual(expect.any(String));
       expect(keys[0].length).toBeGreaterThan(0);
@@ -553,7 +553,7 @@ test("plain Replace gets a fresh sidebar key after cancelling header Replace wit
     await expect(page.locator(".build-skew")).toHaveCount(0);
     const sourceRow = row(page, source.id);
     await confirmSidebarReplace(sourceRow);
-    await expect(sourceRow.locator(".action-error").first()).toContainText("replace:");
+    await expect(sourceRow.locator(".action-error").first()).toContainText("Replace:");
     expect(keys).toHaveLength(1);
     await selectSessionActionWith(page, "Replace");
     const launcherCancel = page.locator(".launch-composer-cancel");

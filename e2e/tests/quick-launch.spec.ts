@@ -537,7 +537,7 @@ test("a sequence naming a deleted template reveals New with the missing name", a
     await page.keyboard.press("Enter");
     const form = page.locator(".create-session-form");
     await expect(form).toBeVisible();
-    await expect(form.locator(".create-session-error")).toContainText(`template ${names[0]} is no longer available`);
+    await expect(form.locator(".create-session-error")).toContainText(`Template ${names[0]} is no longer available`);
     await expect(page.locator(".templates-dialog")).toHaveCount(0);
     expect(creates).toBe(0);
   } catch (error) {
@@ -1107,7 +1107,7 @@ for (const failed of [false, true]) {
         // An immediate refusal can roll back before click() returns. Waiting
         // for an optimistic pressed state would require the bug to survive.
         await expect(dialog.locator(".templates-error")).toHaveText(
-          "the quick-launch mark may not have been saved; showing the mark read from Farhelm",
+          "The quick-launch mark may not have been saved; showing the mark read from Farhelm",
         );
         await expect(mark).toHaveAttribute("aria-pressed", "false");
         await expect(oldMark).toHaveAttribute("aria-pressed", "true");
@@ -1176,7 +1176,7 @@ test("a quick preparation error survives New's first host binding", async ({ pag
       String(local!.id),
     );
     await expect(form).not.toHaveAttribute("data-create-target-fingerprint", "");
-    await expect(form.locator(".create-session-error")).toContainText("couldn't prepare quick launch");
+    await expect(form.locator(".create-session-error")).toContainText("Couldn't prepare quick launch");
     await expect(form.locator(".create-session-error")).toContainText("quick preference-read fixture failure");
     expect(failed).toBe(1);
   } finally {
@@ -1231,7 +1231,7 @@ test("a refusal after target change reveals the spent quick-launch draft", async
     gate.release();
     await expect(form).toBeVisible();
     await expect(form.locator(".launch-composer-refusal-text")).toHaveText(
-      "Not launched. a launch for an earlier setup was refused",
+      "Not launched. A launch for an earlier setup was refused",
     );
     await expect(form).not.toContainText("old-target fixture refusal");
     await expect(form.getByLabel("Agent command", { exact: true })).toHaveValue(FAKE_AGENT);
@@ -1782,7 +1782,7 @@ test("quick launch reveals an offline host without dispatching a create", async 
     await chord(page);
     const form = page.locator(".create-session-form");
     await expect(form).toBeVisible();
-    await expect(form.locator(".create-session-host-note")).toContainText("the selected host is unavailable");
+    await expect(form.locator(".create-session-host-note")).toContainText("The selected host is unavailable");
     await expect(form.locator(".create-session-submit")).toBeDisabled();
     await expect(form.getByLabel("Agent command", { exact: true })).toHaveValue(FAKE_AGENT);
     expect(creates).toBe(0);
@@ -1856,7 +1856,7 @@ test("the template mark moves, survives rename, and stays cleared after undo", a
     await expect.poll(async () => (await readPreferences(request)).quick_launch_template).toBe(b);
     await expect(dialog.locator('.templates-quick-mark[aria-pressed="true"]')).toHaveCount(1);
     await dialog.getByText(b, { exact: true }).click();
-    await expect(dialog.locator(".templates-quick-state")).toContainText("quick launch");
+    await expect(dialog.locator(".templates-quick-state")).toContainText("Quick launch");
     await dialog.locator(".templates-name").fill(renamed);
     await dialog.getByRole("button", { name: "Save", exact: true }).click();
     await expect.poll(async () => (await readPreferences(request)).quick_launch_template).toBe(renamed);

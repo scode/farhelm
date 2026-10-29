@@ -65,6 +65,8 @@ const DESKTOP_STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 /// Dispatch a file the embedded helm has just published to its default app.
 /// This is separate from hardened webbrowser: local paths are admitted only
 /// by the download handler's extension policy, never by the HTTP(S) opener.
+/// Errors become the reason after `not opened:` in the save notice, so their
+/// authored text stays a lowercase clause rather than a standalone label.
 #[cfg(target_os = "macos")]
 fn open_saved_file(path: &Path) -> Result<(), String> {
     let status = Command::new("/usr/bin/open")
@@ -86,6 +88,8 @@ fn open_saved_file(path: &Path) -> Result<(), String> {
 /// application synchronously; waiting for it in the helm's blocking pool
 /// would leave the save response pending and could also block app shutdown.
 /// GIO reports dispatch failure instead of the launched application's exit.
+/// Its error is the lowercase continuation after `not opened:` in the save
+/// notice, matching the other refusal reasons supplied by the helm.
 #[cfg(target_os = "linux")]
 fn open_saved_file(path: &Path) -> Result<(), String> {
     use gio::prelude::FileExt;

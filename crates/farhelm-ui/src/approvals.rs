@@ -272,9 +272,9 @@ pub(crate) fn ApprovalCards() -> Element {
                     button {
                         r#type: "button",
                         class: "btn btn-neutral approval-late-dismiss",
-                        "data-tooltip": "dismiss: hide this notice",
+                        "data-tooltip": "Dismiss: hide this notice",
                         onclick: move |_| late.set(None),
-                        "dismiss"
+                        "Dismiss"
                     }
                 }
             }
@@ -314,7 +314,7 @@ pub(crate) fn ApprovalCards() -> Element {
                                 && !open_approved_web_url(url)
                             {
                                 answering.write().remove(&id);
-                                errors.write().insert(id, "this link could not be opened safely in this browser".into());
+                                errors.write().insert(id, "This link could not be opened safely in this browser".into());
                                 return;
                             }
                             let base = base.clone();
@@ -375,9 +375,9 @@ pub(crate) fn ApprovalCards() -> Element {
                             expanded.set(Some(id.clone()));
                         }
                     },
-                    span { class: "approval-waiting-action", "{action_summary(&card.action)}" }
+                    span { class: "approval-waiting-action", "{authored_words(action_summary(&card.action))}" }
                     span { class: "approval-waiting-host",
-                        span { class: "approval-waiting-label", "from host" }
+                        span { class: "approval-waiting-label", "From host" }
                         span { class: "peer-value", dir: "ltr", "{display_peer(&card.host_name)}" }
                     }
                 }

@@ -312,7 +312,7 @@ test.describe("session notifications", () => {
     await expect(bell).not.toHaveClass(/\bloud\b/);
     await bell.click();
     await expect(page.locator(".session-bell-entry")).toHaveCount(1);
-    await page.getByRole("button", { name: "clear all", exact: true }).click();
+    await page.getByRole("button", { name: "Clear all", exact: true }).click();
     await expect.poll(() => stub.writes).toEqual([{ session: session.id, route: "cleared", through: 1 }]);
     await expect(page.locator(".session-bell-entry")).toHaveCount(0);
     await expect(bell).toHaveCount(0);
@@ -421,7 +421,7 @@ test.describe("session notifications", () => {
     stub.notifications[0].resolved = true;
     feed.notify(2);
     await expect(bell).not.toHaveClass(/\bloud\b/, { timeout: 20_000 });
-    await expect(bell).toHaveAttribute("aria-label", `notifications for ${session.title}: none unread`);
+    await expect(bell).toHaveAttribute("aria-label", `Notifications for ${session.title}: none unread`);
     expect(stub.readThrough).toBe(0);
     expect(stub.writes).toEqual([]);
     await bell.click();
@@ -430,7 +430,7 @@ test.describe("session notifications", () => {
     await expect(entry).toHaveCount(1);
     await expect(entry).toHaveClass(/\bresolved\b/);
     await expect(entry).not.toHaveClass(/\bnew\b/);
-    await expect(entry.locator(".session-bell-resolved")).toHaveText("resolved");
+    await expect(entry.locator(".session-bell-resolved")).toHaveText("Resolved");
     await expect(entry.locator(".session-bell-new")).toHaveCount(0);
     await list.locator(".session-bell-clear").click();
     await expect.poll(() => stub.clearedThrough).toBe(1);
@@ -442,7 +442,7 @@ test.describe("session notifications", () => {
     await bell.click();
     await expect(entry).toHaveAttribute("data-notification-seq", "2");
     await expect(entry).toHaveClass(/\bnew\b/);
-    await expect(entry.locator(".session-bell-new")).toHaveText("new");
+    await expect(entry.locator(".session-bell-new")).toHaveText("New");
     await expect(entry.locator(".session-bell-resolved")).toHaveCount(0);
   });
 
@@ -478,8 +478,8 @@ test.describe("session notifications", () => {
     await expect(row(page, quiet.id).locator(".session-bell-slot")).toHaveCount(0);
 
     await expect(bell).toHaveClass(/\bloud\b/);
-    await expect(bell).toHaveAttribute("aria-label", `notifications for belled-${stamp}: 2 unread`);
-    await expect(bell).toHaveAttribute("data-tooltip", /^notifications: 2 unread/);
+    await expect(bell).toHaveAttribute("aria-label", `Notifications for belled-${stamp}: 2 unread`);
+    await expect(bell).toHaveAttribute("data-tooltip", /^Notifications: 2 unread/);
 
     for (const compact of [false, true]) {
       const target = row(page, belled.id);
@@ -515,7 +515,7 @@ test.describe("session notifications", () => {
     stub.readThrough = 2;
     feed.notify(2);
     await expect(bell).not.toHaveClass(/\bloud\b/, { timeout: 20_000 });
-    await expect(bell).toHaveAttribute("aria-label", `notifications for belled-${stamp}: none unread`);
+    await expect(bell).toHaveAttribute("aria-label", `Notifications for belled-${stamp}: none unread`);
   });
 
   /**
@@ -574,7 +574,7 @@ test.describe("session notifications", () => {
     await expect(entries).toHaveCount(2);
     await expect(entries.nth(0)).toContainText("just happened");
     await expect(entries.nth(0)).toHaveClass(/\bnew\b/);
-    await expect(entries.nth(0).locator(".session-bell-new")).toHaveText("new");
+    await expect(entries.nth(0).locator(".session-bell-new")).toHaveText("New");
     await expect(entries.nth(1)).toContainText("already seen");
     await expect(entries.nth(1)).not.toHaveClass(/\bnew\b/);
     await expect(entries.nth(0).locator(".session-bell-age")).toHaveText(/ago$/);

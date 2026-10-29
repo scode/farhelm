@@ -52,7 +52,7 @@ test("Goose and Pi permission transitions update the rendered draft", async ({ p
     "true",
   );
   await expect(status).toHaveText(
-    "the selected permission is unavailable for this harness, so it was replaced by YOLO, this harness's default",
+    "The selected permission is unavailable for this harness, so it was replaced by YOLO, this harness's default",
   );
 
   // Search activation uses a separate handler from the harness buttons. Its

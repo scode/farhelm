@@ -767,7 +767,7 @@ test("details copy shows escaped peer text, copies raw bytes, and warns upward",
       .toEqual([invocation]);
     const warning = page.locator(".session-details .copy-warning");
     await expect(warning).toHaveText(
-      "⚠ the copied command contains hidden characters, displayed as <U+…>",
+      "⚠ The copied command contains hidden characters, displayed as <U+…>",
     );
     // The warning opens upward from the bottom bar. Checking both vertical
     // edges catches an otherwise visible warning clipped by the window.
@@ -850,7 +850,7 @@ for (const field of ["folder", "command"] as const) {
       await copy.click();
       await expect.poll(() => page.evaluate(() => (window as any).__headerCopies)).toEqual([unsafeValue]);
       const warning = page.locator(".session-details .copy-warning");
-      const warningText = `⚠ the copied ${field} contains hidden characters, displayed as <U+…>`;
+      const warningText = `⚠ The copied ${field} contains hidden characters, displayed as <U+…>`;
       await expect(copy.locator(".copy-feedback")).toHaveText("✓ Copied");
       await expect(warning).toHaveText(warningText);
 
@@ -1068,7 +1068,7 @@ test("a committed delete shows its progress until the reply lands", async ({ pag
     await expect(overlay).toHaveText("Stopping agent…");
     await expect(page.locator(".restart-primary")).toBeHidden();
     release!("refuse");
-    await expect(target.locator(".action-error")).toContainText("delete: held refusal");
+    await expect(target.locator(".action-error")).toContainText("Delete: held refusal");
     await expect(target).not.toHaveClass(/\bdeleting\b/);
     await expect(rowProgress).toHaveCount(0);
     await expect(headerProgress).toHaveCount(0);

@@ -746,7 +746,7 @@ async function assertManagedMark(page: Page, id: string, repo: string, root: str
   await expect(mark.locator(".visually-hidden").first()).toHaveText("Managed checkout");
   const location = cwd === root ? "" : ` Session folder: ${cwd}.`;
   const description = `at ${root}.${location} Farhelm made the checkout folder for its first session. When the last session using it is deleted, the checkout moves to the trash.`;
-  await expect(mark).toHaveAttribute("data-tooltip", `managed checkout of ${repo} ${description}`);
+  await expect(mark).toHaveAttribute("data-tooltip", `Managed checkout of ${repo} ${description}`);
   await expect(mark.locator(".managed-checkout-description")).toHaveText(description);
   const directory = new RegExp(cwd.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
   await expect(row.locator(".session-row-open")).toHaveAccessibleName(directory);

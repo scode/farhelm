@@ -2101,7 +2101,7 @@ async fn execute_with_receipt(
 /// flatten to display text.
 fn send_error_text(error: SendError) -> String {
     match error {
-        SendError::Unauthenticated => "authentication is required".to_string(),
+        SendError::Unauthenticated => "Authentication is required".to_string(),
         SendError::Request(detail) | SendError::Refused(detail) => detail,
     }
 }
@@ -2174,7 +2174,7 @@ fn send_inner_ordered(
             }
             let detail = body.trim();
             return Err(SendError::Refused(if detail.is_empty() {
-                "the helm refused this request as unauthorized".to_string()
+                "The helm refused this request as unauthorized".to_string()
             } else {
                 detail.to_string()
             }));
@@ -2216,7 +2216,7 @@ pub(crate) async fn exchange_token(base: &str, token: &str) -> Result<String, St
         .map_err(|error| error.to_string())?;
     skew::note_build(&resp);
     if skew::build_skew_detected_now() {
-        return Err("the helm build changed; reload before authenticating".to_string());
+        return Err("The helm build changed; reload before authenticating".to_string());
     }
     if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
         return Err("That token was not accepted".to_string());
@@ -4173,7 +4173,7 @@ pub(crate) async fn fetch_ssh_connection_help(
     }
     resp.json()
         .await
-        .map_err(|error| format!("could not read ssh connection help: {error}"))
+        .map_err(|error| format!("Could not read SSH connection help: {error}"))
 }
 
 /// Fetch the helm build's structured-launch catalog.
@@ -4897,7 +4897,7 @@ pub(crate) async fn fetch_tunnels(base: &str, session: &str) -> Result<SessionTu
     response
         .json()
         .await
-        .map_err(|error| format!("could not read open tunnels: {}", http_error_text(error)))
+        .map_err(|error| format!("Could not read open tunnels: {}", http_error_text(error)))
 }
 
 /// Open through the server's native capability; the response never needs a second opener.
@@ -5668,7 +5668,7 @@ mod tests {
         assert_eq!(action.text, text);
         for (failure, text) in [
             (SendError::Request("transport".into()), "transport"),
-            (SendError::Unauthenticated, "authentication is required"),
+            (SendError::Unauthenticated, "Authentication is required"),
             (SendError::Refused("unauthorized".into()), "unauthorized"),
             (
                 SendError::Refused("unreadable refusal body".into()),

@@ -410,7 +410,7 @@ for (const action of ["setup", "uninstall", "refusal"] as const) {
       await expect(row.locator(".host-row-main")).not.toBeVisible();
       await menu.locator(action === "setup" ? ".provisioning-rerun" : action === "uninstall" ? ".provisioning-uninstall" : ".provisioning-update").click();
       const modal = action === "refusal" ? page.locator(".host-refusal-dialog") : page.getByRole("dialog", {
-        name: action === "setup" ? "host setup" : "uninstall Farhelm from this host", exact: true,
+        name: action === "setup" ? "Host setup" : "Uninstall Farhelm from this host", exact: true,
       });
       await expect(modal).toBeVisible();
       await expect(page.locator(".hosts-heading")).not.toBeVisible();
@@ -1621,13 +1621,13 @@ test("cancel and a setup answer in one burst add nothing and change no preferenc
   await page.goto("/");
   await showHostsPanel(page);
 
-  for (const answer of ["set up", "set up, don't ask again"]) {
+  for (const answer of ["Set up", "Set up, don't ask again"]) {
     await probeRemote(page, remote);
     const form = page.locator(".add-host-form");
     await expect(form.locator(".provisioning-plan")).toBeVisible();
     const answerWasLive = await form.evaluate((node, label) => {
       const buttons = [...node.querySelectorAll<HTMLButtonElement>("button")];
-      const cancel = buttons.find((button) => button.textContent?.trim() === "cancel")!;
+      const cancel = buttons.find((button) => button.textContent?.trim() === "Cancel")!;
       const yes = buttons.find((button) => button.textContent?.trim() === label)!;
       cancel.click();
       const live = yes.isConnected && !yes.disabled;
@@ -1692,8 +1692,8 @@ test("cancel and a permanent answer on a host row's setup question change no pre
 
   const answerWasLive = await question.evaluate((node) => {
     const buttons = [...node.querySelectorAll<HTMLButtonElement>("button")];
-    const cancel = buttons.find((button) => button.textContent?.trim() === "cancel")!;
-    const forever = buttons.find((button) => button.textContent?.trim() === "set up, don't ask again")!;
+    const cancel = buttons.find((button) => button.textContent?.trim() === "Cancel")!;
+    const forever = buttons.find((button) => button.textContent?.trim() === "Set up, don't ask again")!;
     cancel.click();
     const live = forever.isConnected && !forever.disabled;
     forever.click();
@@ -3127,7 +3127,7 @@ test("a retarget and a foreign run each invalidate an unsubmitted update", async
     expect(competingRun.status()).toBe(202);
     await notifyFeed(feed, 3);
     await expect(row.locator(".provisioning-warning")).toContainText(
-      "another provisioning run started on this host first",
+      "Another provisioning run started on this host first",
     );
     await expect(row.locator(".provisioning-run")).toHaveAttribute(
       "data-provisioning-status",
@@ -4586,7 +4586,7 @@ for (const boundary of ["following", "submitting"] as const) {
           await expect(row.locator(".provisioning-warning")).toHaveCount(0);
           acceptance.release();
           await expect(row.locator(".provisioning-warning")).toContainText(
-            `this host's identity changed from ‹${learnedIdentity}› to ‹replacement-identity› while its update was being sent`,
+            `This host's identity changed from ‹${learnedIdentity}› to ‹replacement-identity› while its update was being sent`,
           );
           await expect(row.locator(".host-update-running")).toHaveCount(0);
           await expect(row.locator(".host-detail")).toBeVisible();
@@ -4619,7 +4619,7 @@ for (const boundary of ["following", "submitting"] as const) {
           await expect(row.locator(".host-name")).toHaveText("replaced-identity-marker");
           await expect(row).toHaveAttribute("data-host-phase", "unreachable-reprobing");
           await expect(row.locator(".provisioning-warning")).toContainText(
-            `this host's identity changed from ‹${learnedIdentity}› to ‹replacement-identity› while it was being updated`,
+            `This host's identity changed from ‹${learnedIdentity}› to ‹replacement-identity› while it was being updated`,
           );
           await expect(row.locator(".host-update-running")).toHaveCount(0);
           await expect(row.locator(".host-detail")).toBeVisible();

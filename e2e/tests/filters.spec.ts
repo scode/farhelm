@@ -172,7 +172,7 @@ test.describe("permanent host filtering", () => {
     await waitForFeedReadersSettled(page);
     const chosen = selectedHost(page);
     await expect(chosen).toHaveAttribute("data-rail-host-id", String(remote!.id), { timeout: 20_000 });
-    await expect(chosen).toHaveAttribute("aria-label", /renamed unavailable host.*unreachable, retrying/);
+    await expect(chosen).toHaveAttribute("aria-label", /renamed unavailable host.*Unreachable, retrying/);
     await expect(chosen).toHaveAttribute("aria-pressed", "true");
     await expect(selectedAvatar).toBeFocused();
     await expect(hostChoice(page, local!.id)).toHaveAttribute("aria-label", /^This machine:/);

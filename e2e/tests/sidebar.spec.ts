@@ -4492,7 +4492,7 @@ test("the empty-fleet placeholder appears only when proven and yields to auto-se
   await feed.waitForConnection(1);
   feed.notify(1);
 
-  await expect(page.locator(".main-empty")).toHaveText("no sessions — create one", {
+  await expect(page.locator(".main-empty")).toHaveText("No sessions — create one", {
     timeout: 20_000,
   });
 
@@ -4618,7 +4618,7 @@ test("a bidi override in the invocation basename renders escaped and isolated", 
   // so a peer-controlled direction mark cannot reorder its text.
   await expect(badge).toHaveAttribute(
     "data-tooltip",
-    `command — not YOLO, as asserted when the command was launched, by the user or by an agent — not checked by Farhelm — /opt/bin/<U+202E>evil-agent --some-flag`,
+    `Command — Not YOLO, as asserted when the command was launched, by the user or by an agent — not checked by Farhelm — /opt/bin/<U+202E>evil-agent --some-flag`,
   );
 
   // The session menu repeats both the persisted title and the executable
@@ -8768,7 +8768,7 @@ test("the dot click marks a different row read without moving the selection", as
       await expect(rowB.locator(".status-badge.idle.unseen")).toHaveText("Idle — new output", {
         timeout: 45_000,
       });
-      await expect(rowB.locator(".status-dot")).toHaveAttribute("data-tooltip", "Idle — new output — mark read");
+      await expect(rowB.locator(".status-dot")).toHaveAttribute("data-tooltip", "Idle — new output — Mark read");
 
       await rowB.locator(".status-dot").click();
       await expect(rowA).toHaveAttribute("data-session-selected", "true");
