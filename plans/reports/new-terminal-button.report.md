@@ -86,3 +86,90 @@ The required fresh-context gpt-6.1-sol reviewer at high effort reviewed the comp
 including the full test-authoring checklist, and reported no actionable findings. A separate cold reader checked the
 commit and PR wording. The documentation pass covered every touched file. The source TODO entry was removed, and the PR
 remains a draft for the landing monitor.
+
+### Landing
+
+Landed as delivered, with no fixes at landing. The control for opening a terminal no longer looks like another tab: it
+is a square "+" after a thin divider, named "New terminal", with hover text saying it opens a shell in the session's
+directory. What it does and when it is unavailable are unchanged. The Mac release test's instructions now describe it as
+the new-terminal button (+) after the tabs, which also fits releases cut before this change.
+
+- #2805: the button, its docs and specification text, the release test's wording, a changelog entry, and removal of its
+  TODO entry.
+
+#### What landed since the stack was based, and whether it interacted
+
+The containerized-sessions plan (#2791 to #2794) and terminal-zoom-icons (landing right before this) landed after this
+plan was based. Neither touches the tab strip's add control, and the review found the two top-row changes consistent;
+each removes only its own TODO entry. Two other plans from this round were blocked at landing, answered by the monitor
+and returned to their executors, and this plan was checked again on top of terminal-zoom-icons alone (below). Two
+documentation PRs recording flakes (#2812, #2813) landed during this round; they touch only flake records and merged
+without touching this plan's changes.
+
+#### Things you should know
+
+- The "Work in a session" docs page's tab-strip screenshot still shows the old labelled button; the plan deliberately
+  left recapturing it to a separately requested screenshot refresh.
+- The top row has two "+" glyphs now, the new-terminal button's and the larger-text magnifier's (see
+  terminal-zoom-icons' notes).
+- This plan's executor hit the WebKit timeout of "native tunnel preview keeps ports and actions inside a 650px pane"
+  twice before it passed; terminal-zoom-icons' notes cover that flake record.
+- The release test's coordinator tests (214) passed; no actual Mac VM run was needed or done.
+
+#### Checks
+
+The round first checked four plans stacked on main `229dddb6`: terminal-zoom-icons, new-terminal-button, and two that
+the monitor then blocked at landing, answered on your behalf and returned to their executors (menu-single-highlight,
+host-update-discoverability). On that combined stack:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, the web-target UI lint, the binaries' lint,
+  the desktop-build checks, the check that every test delay states its reason, `dprint check`,
+  `python3 releasing/check-changelog.py format`, the docs website build, the workspace debug build, the UI's release web
+  build and `scripts/check-desktop-assets.sh`: all passed.
+- The UI's Rust tests, run `1aa761f8-fe72-4097-b27a-05d4c474aea8`: all 819 passed; its desktop-build tests, run
+  `1e0d5d05-d40a-44cd-98a6-cc4063efa941`: all 1002 passed. The Mac release test's coordinator tests: 214 passed. The
+  UI's JavaScript tests, run `0a122921-4d83-4168-a49d-7e348510c07a`: 371 passed, 1 failed, caused by
+  menu-single-highlight.
+- `npx playwright test` in `e2e/`, the whole browser suite on Chromium and WebKit, three workers, no retries, run
+  `10af6125-cdc5-4afc-bc9a-369377c00195`: 2792 passed, 14 skipped by design, 6 failed. The hover-text sweep on both
+  engines was caused by host-update-discoverability. The known WebKit flake "restart with keeps gap focus and container
+  Enter uses its enabled action" failed. On WebKit, "launcher gap keeps focus and container Enter explains an incomplete
+  draft" failed once and passed on both engines in the rerun below. On Chromium, "plain Replace keeps a newer row's
+  retry key after an older YOLO cancellation" failed, a recurrence of a flake FLAKES.md recorded as resolved on
+  2026-10-15, and so did "terminal link ownership opens once and preserves program clicks in all mounted terminals",
+  which has no flake record; both are rerun below. The 650px toolbar cases passed on both engines.
+- The whole Rust workspace, run `43959a88-f565-461e-b3dd-760d8725cf4a`: 4546 passed, 41 skipped by design, 4 failed: two
+  helm tests of the checkout configuration store's schema history, caused by host-update-discoverability, and the known
+  flakes "shallow pause resumes without reset or replay" and "a hung save releases waiters at their deadline".
+
+The two landing plans were then restacked directly on main `229dddb6` (terminal-zoom-icons `b29b61d1`,
+new-terminal-button `6e551e29`), and on that stack:
+
+- `dprint check`, `python3 releasing/check-changelog.py format`, the docs website build, `cargo fmt --all -- --check`,
+  the web-target UI lint, the workspace debug build and the UI's release web build: all passed.
+- The UI's Rust tests, run `bd1ce5ba-b6e3-4ff2-bfb1-156853ac63da`: all 813 passed. The UI's JavaScript tests, run
+  `4676b2ac-9aac-4c4d-ba20-06cdcade4fb6`: all 365 passed.
+- `npx playwright test` in `e2e/` with the terminal tabs, buttons, header, hover-text sweep, launcher Enter and Restart
+  with specs, on Chromium and WebKit, run `548efb21-fc35-41ea-b1f2-a2e61fbd2ac5`: 281 passed, 1 failed: the known WebKit
+  flake "restart with keeps gap focus and container Enter uses its enabled action" again.
+
+- The two Chromium failures not covered above, on the same stack and both engines, five times each with no retries:
+  "plain Replace keeps a newer row's retry key after an older YOLO cancellation", run
+  `fc217f8a-e249-4b4b-be2b-59db1e523c90`, 10 of 10 passed; "terminal link ownership opens once and preserves program
+  clicks in all mounted terminals", run `96630687-6ef3-42b3-84d8-6575d286dd44`, 10 of 10 passed. One failure each in the
+  combined run is not recorded as a flake.
+
+Main then moved: two documentation PRs recording flakes (#2812, #2813) landed, adding TODO.md Deflake entries and
+deflake exclusion lines next to the ones terminal-zoom-icons adds. Rebasing onto that main conflicted only there; the
+landing kept both sides (and restored one blank line between TODO entries), and the merged trees differ from the tested
+ones only by main's additions in FLAKES.md, TODO.md, the deflake exclusion list and plan bookkeeping. No checks were
+rerun after that rebase, because none of those files is read by a build or a test.
+
+- Reused from the combined stack, for code the restack did not change: the whole Rust workspace and the whole browser
+  suite (outside the specs rerun above), `cargo clippy --all-targets`, the binaries' lint, the desktop-build checks and
+  their tests, the test-delay check, the Mac release test's coordinator tests and the desktop-asset check. Removing the
+  two returned plans took code away and added none. Skipped: the desktop smoke tests (no desktop-specific code changed)
+  and the native Mac app (not runnable here).
+
+The report's checks were the executor's selected runs; this landing ran the whole browser suite and the whole Rust
+workspace with this plan stacked with the others. Nothing in the executor's report became untrue at landing.
