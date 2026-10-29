@@ -3539,8 +3539,7 @@ pub(crate) fn copy_to_clipboard(value: &str) {
     ));
 }
 
-/// The terminal text-size controls at the right end of the tab strip: A-
-/// and A+, the button form of the Cmd/Ctrl+Shift +/- shortcut.
+/// The top row's joined zoom buttons and current terminal size in points.
 ///
 /// Stateless on purpose. The size lives in terminal.js (remembered per
 /// device in the page's own storage, see its "Terminal text size" section),
@@ -3551,6 +3550,9 @@ pub(crate) fn copy_to_clipboard(value: &str) {
 /// columns. A click hands focus back to the terminal (terminal.js does
 /// that), so typing carries on where it was. Its neutral buttons belong to
 /// the fixed action group, keeping them reachable when the tab strip scrolls.
+/// The empty readout belongs to terminal.js, which paints at script load,
+/// after each step, and when this span mounts. Either load order and a rebuilt
+/// control therefore get the current size without a second state owner.
 #[component]
 fn TerminalTextSize() -> Element {
     let step = |delta: i32| {
@@ -3567,7 +3569,14 @@ fn TerminalTextSize() -> Element {
                 "data-tooltip": "Smaller terminal text (Cmd/Ctrl+Shift+\u{2212})",
                 "aria-label": "Smaller terminal text",
                 onclick: move |_| step(-1),
-                "A\u{2212}"
+                ActionIcon { glyph: ActionGlyph::ZoomOut }
+            }
+            span {
+                class: "terminal-text-size-readout",
+                "data-terminal-font-size": "",
+                onmounted: move |_| {
+                    document::eval("if (window.farhelmTerm) window.farhelmTerm.paintFontSize();");
+                },
             }
             button {
                 r#type: "button",
@@ -3576,7 +3585,7 @@ fn TerminalTextSize() -> Element {
                 "data-tooltip": "Larger terminal text (Cmd/Ctrl+Shift++)",
                 "aria-label": "Larger terminal text",
                 onclick: move |_| step(1),
-                "A+"
+                ActionIcon { glyph: ActionGlyph::ZoomIn }
             }
         }
     }

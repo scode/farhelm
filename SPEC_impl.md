@@ -611,27 +611,27 @@ keyboard focus. Their hidden-characters copy warning opens upward from the botto
 Copy feedback snapshots that warning from the copied value alongside its click id. A metadata refresh leaves the warning
 and its existing expiry unchanged; an older click's timer cannot clear newer feedback.
 
-The action group remains fully visible and in DOM order from a 650px main pane: A−, A+, Restart and its caret, Replace
-and its caret, Clone, Delete. Text size does not scroll with tabs; it retains the tab surface's stale/inert condition.
-The two split menus use the shared menu anatomy, focus queue, keyboard handling and outside-pointer relay, with one open
-family per session view. Their absolute below-caret placement follows toolbar layout without a separate async
-measurement lifecycle. Main halves and repeated plain menu choices call the same lifecycle-admission callbacks; opening
-a menu takes no claim. Restart with keeps its independent availability and accessible explanation. The launcher returns
-to the persistent caret rather than its unmounted menu entry. The native tunnel pill has a bounded width beside the
-tabs, outside their terminal-presence condition and stale/inert subtree; together with the action group it stays visible
-at 650px. The tab strip shrinks into the remaining width and scrolls horizontally. The app's 320px main-pane floor is
-unchanged; between those widths the row may clip its trailing actions rather than wrapping or hiding them. The restart
-confirmation became a popover anchored under the button that opened it, still confirm-in-place with focus on the enabled
-confirming answer (Cancel while disabled); the consequence sentence they lead with is the one line standing between a
-click and a killed process tree, and a header that kept it in flow would have to either wrap or truncate it. Header
-Replace has a separate anchored confirmation state so it cannot accidentally open the interrupted card's confirmation.
-The top row owns their Escape handler alongside the action buttons; keyboard order is top row, terminal, then bottom
-bar. Everything conditional — a refused restart's prose, the last-known-status band and the "helm stopped listing this
-session" line — is still a full-width band, because a band that only appears when it has something to say costs the
-steady state nothing. These notices, the interrupted card, trust hint and tab errors remain between the top row and
-terminal. A classified status renders in at most one place: the bottom bar normally, the stale notice's own metadata
-band for a stale session (where SPEC.md's title/directory/last-known-status triple is assembled), and nowhere at all for
-a session nothing has classified yet.
+The action group remains fully visible and in DOM order from a 650px main pane: zoom out, the display-only point size,
+zoom in, Restart and its caret, Replace and its caret, Clone, Delete. Text size does not scroll with tabs; it retains
+the tab surface's stale/inert condition. The two split menus use the shared menu anatomy, focus queue, keyboard handling
+and outside-pointer relay, with one open family per session view. Their absolute below-caret placement follows toolbar
+layout without a separate async measurement lifecycle. Main halves and repeated plain menu choices call the same
+lifecycle-admission callbacks; opening a menu takes no claim. Restart with keeps its independent availability and
+accessible explanation. The launcher returns to the persistent caret rather than its unmounted menu entry. The native
+tunnel pill has a bounded width beside the tabs, outside their terminal-presence condition and stale/inert subtree;
+together with the action group it stays visible at 650px. The tab strip shrinks into the remaining width and scrolls
+horizontally. The app's 320px main-pane floor is unchanged; between those widths the row may clip its trailing actions
+rather than wrapping or hiding them. The restart confirmation became a popover anchored under the button that opened it,
+still confirm-in-place with focus on the enabled confirming answer (Cancel while disabled); the consequence sentence
+they lead with is the one line standing between a click and a killed process tree, and a header that kept it in flow
+would have to either wrap or truncate it. Header Replace has a separate anchored confirmation state so it cannot
+accidentally open the interrupted card's confirmation. The top row owns their Escape handler alongside the action
+buttons; keyboard order is top row, terminal, then bottom bar. Everything conditional — a refused restart's prose, the
+last-known-status band and the "helm stopped listing this session" line — is still a full-width band, because a band
+that only appears when it has something to say costs the steady state nothing. These notices, the interrupted card,
+trust hint and tab errors remain between the top row and terminal. A classified status renders in at most one place: the
+bottom bar normally, the stale notice's own metadata band for a stale session (where SPEC.md's
+title/directory/last-known-status triple is assembled), and nowhere at all for a session nothing has classified yet.
 
 The desktop tunnel owner stays mounted even with no listeners, preserving its controller generation, feed/backstop
 reader and raw terminal-hover metadata bridge. Only its pill disappears at zero listeners. A dedicated teal role in each
@@ -1290,12 +1290,15 @@ held aside during a reconnect or kept after a takeover keeps its old size: it is
 shortcut is one capture-phase `keydown` listener on `window`, matched on `event.code` (`Equal`, `Minus`, so the
 US-layout key positions) with Shift and Meta on macOS or Ctrl elsewhere, by a platform-string test that agrees with
 xterm.js's own Mac check; capture on `window` runs before xterm's handler, so its custom key handler is untouched, and
-preventDefault keeps the browser out. With no terminal mounted the listener lets the keys through. The top row's A− / A+
+preventDefault keeps the browser out. With no terminal mounted the listener lets the keys through. The top row's zoom
 buttons are stateless Rust buttons that call the same function, which hands focus back to the terminal the view last
 focused when the click left it on a button; nothing about the size flows back to Rust, so they have no disabled state at
-the ends of the range. In the desktop app the size persists as far as the webview keeps its local storage across
-restarts; that was verified on Linux, not on macOS, where a webview that does not keep it would fall back to the default
-rather than earn a native state file.
+the ends of the range. The two magnifier buttons and a fixed-width, non-focusable point-size span share one border.
+`farhelmTerm.paintFontSize` paints every readout at script load and after each step. The Rust span has no text children,
+so Dioxus leaves its text to JS, and its mount asks for another paint: whichever side arrives second supplies the size,
+including after a session switch or a terminal surface returning. In the desktop app the size persists as far as the
+webview keeps its local storage across restarts; that was verified on Linux, not on macOS, where a webview that does not
+keep it would fall back to the default rather than earn a native state file.
 
 The quick switcher installs an idempotent capture-phase window keydown listener through inline `document::eval` in both
 renderers. It matches `KeyK` with Meta alone on macOS or Ctrl+Shift elsewhere, using terminal.js's platform test;

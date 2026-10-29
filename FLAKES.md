@@ -3132,3 +3132,39 @@ private temporary storage and may expire.
 Class: pointer-focus
 
 Cause: unknown
+
+## 2026-10-29 — native tunnel preview WebKit budget (e2e/tests/header.spec.ts)
+
+`native tunnel preview keeps ports and actions inside a 650px pane` timed out in WebKit at its unchanged 60-second case
+deadline during `cleanupSession` in run `1fc8687c-1044-4c63-83f9-dfddf8da2604`; Chromium passed. One exact WebKit-only
+retry passed unchanged in 58.0 seconds, run `9ebdc54c-8229-4787-a96b-19c2836e083e`. The independent new-terminal-button
+report records two timeouts and an unchanged 58.7-second pass in this same existing case. Those separate observations
+establish recurrence beyond this control change; their raw records were not re-audited here. Cause remains unknown;
+little margin under the deadline is a hypothesis. Open in TODO.md and excluded from future sweeps. No test assertion or
+timeout was changed.
+
+```text
+Test timeout of 60000ms exceeded.
+Error: apiRequestContext.post: Target page, context or browser has been closed
+```
+
+Both local attempts used clean revision `a9b99e3932daaaef453418daa85cd849ae5776c8`, fingerprint
+`a69ea2649e5b60c6881c0086b002799a2e7e6fd314d5ed289274b86b94f45d7e`, after the terminal zoom readout's width correction.
+The test and its helpers were unchanged. The first command selected the exact title from `header.spec.ts` on both
+engines, two workers and zero retries; the retry selected `--project=webkit-header` with that title, one worker and zero
+retries. The retry used generic recording, so its one passing case comes from complete console output rather than strict
+browser-count validation. The first run's only unsuccessful case was this timeout, not a geometry assertion. The earlier
+two-engine overflow in run `cf332c82-504a-49b2-a7f6-66e37482045e` was a separate same-session width regression corrected
+before these attempts, not part of this flake.
+
+Linux x86_64, kernel 6.8.0-147-generic, Python 3.15.2, Node 26.12.1, Playwright 1.64.0, locale C.UTF-8. Actual tmux was
+3.7c, executable SHA256 `3590826b41cd0671f16fce6b08d11ef6ac75cc548373c7eb98204273e4f0539f`. Ambient `FARHELM_*` was
+scrubbed; the first run supplied `FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR`, and the generic retry
+supplied only the latter. No owned build or other test overlapped either attempt; other agents' activity and CPU load
+were not recorded. Available memory was about 55 GB with no swap. Compiler and browser build identities are unavailable.
+Both consoles reached EOF without omissions and all three stacks cleaned up. Complete failed UUID evidence, screenshots
+and traces remain private temporary evidence and may expire.
+
+Class: budget
+
+Cause: hypothesis

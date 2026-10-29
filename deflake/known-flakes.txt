@@ -19,3 +19,4 @@ nextest farhelm-ui api::save_order::tests::a_hung_save_releases_waiters_at_their
 playwright restart-with.spec.ts restart with keeps gap focus and container Enter uses its enabled action  # restart-with-dialog-focus
 playwright sidebar.spec.ts composer folder dropdown preserves keyboard launch and grouped history  # folder-reset-viewport
 playwright terminal.spec.ts a failed listing read while confirming does not clear the confirming state  # confirming-status-premise
+playwright header.spec.ts native tunnel preview keeps ports and actions inside a 650px pane  # native-tunnel-preview-webkit-budget
