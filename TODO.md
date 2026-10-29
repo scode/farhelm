@@ -242,6 +242,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   so close to a real tab that it reads as another tab. Visually separate it from tabs, or otherwise make it clear that
   it creates a terminal.
 
+- **Auto-assign a host alias from the left-most hostname label.** When a host is added, derive its alias automatically
+  from the left-most part of the hostname (for example, `my-server.example.com` becomes `my-server`) instead of leaving
+  it unset or requiring a manual pick.
+
+- **Make host aliases/names visible in the new layout.** Consider how the new host list can show each host's alias or
+  name at a glance; today they are easy to miss.
+
 ## Doc todo
 
 - Tell users that a working-copy (checkout) root must be a location only they can write: Farhelm is not designed for
