@@ -131,3 +131,101 @@ gpt-6.1-sol/high adversarial review with no actionable findings. The review chec
 isolates the child rectangle, observes the cover refusal before transfer/open, and admits the same links after
 cancellation. The independent resume check and scope assessment found no unexplained work or unnecessary mechanism.
 Existing commit and PR wording remains unchanged from its accepted cold reads.
+
+### Landing
+
+Landed on its second attempt, with no fixes at landing. Inside a launch sequence you can now type template names as well
+as press number keys: type a name (digits inside a word are part of it), Space to queue it, Tab to complete a uniquely
+matched name and queue it, Backspace to edit the word, and Enter to launch (or, in an open session launcher, apply the
+setup), which also queues an unfinished word. A number key with no word in progress still queues that key's template.
+New template names, renames and Save as template now require a single word, and Duplicate suggests `<name>-copy` instead
+of `<name> copy`; existing names with spaces keep loading, applying, launching and deleting unchanged, with no
+migration.
+
+- #2828: single-word template names in the editor, Save as template and the agent's template create, and the new
+  Duplicate suggestion.
+- #2829: typed names in launch sequences, the suggestion list under the sequence hint, the shortcuts overview's rows and
+  docs table, the specification text, the Launch templates docs page, tests and a changelog entry.
+
+The first landing attempt (2026-10-30) sent this plan back: the keyboard shortcuts overview, which landed after this
+plan was first based, did not list the typed-name keys; a stylesheet test rejected a literal corner radius; the
+docs-screenshot visual review still expected the old hint; and a terminal link under the new suggestion list could still
+be opened through it. The redelivery fixes exactly those: the overview's dialog rows and docs table list the typed keys
+and correct the number-key rows, the radius is a theme value, the visual review expects the new hint (the executor ran
+it on Chromium, the only engine it supports, and the longer hint wraps inside the pill without clipping), and the
+suggestion list now covers links beneath it, with a test that a link under the list but not under the hint is refused.
+The executor's first report had wrongly said the overview had not reached main; its redelivered report supersedes that
+statement.
+
+#### What landed since the stack was based, and whether it interacted
+
+The redelivery was based after podman-local-image (#2825); since then container-host-account (#2832, the supervisor's
+container accounts), the finalized and illustrated v0.32.0 release notes (#2830, #2833; release notes, docs-screenshot
+specs and the changelog) and new TODO entries and plans landed. Rebasing onto that main conflicted only in TODO.md,
+where the plan's removal of its own entry was kept beside main's new entries; none of the new docs-screenshot specs
+expects the old sequence hint, and the screenshot scenario's template names are single words. Neither container plan
+interacts: a template with container settings reached by typing its name goes through the same quick-launch path, and
+the same image and checkout checks, as one reached by its number key. The shortcuts overview (#2827), which landed after
+the first delivery's base, did interact; that was the main reason for the send-back, and the redelivery covers it.
+
+#### Things you should know
+
+- Nobody ran the new link-cover test with the fix removed, so it has not been seen to fail; its own assertions (the link
+  sits under the list and not under the hint) make the logic sound.
+- Characters typed with AltGr or Option cancel a sequence instead of being typed, and neither SPEC.md nor the docs say
+  so.
+- Cmd+/ on a Mac (Ctrl+Shift+/ elsewhere) during a sequence cancels it and opens the shortcuts overview; no test covers
+  that combination.
+- The overview dialog, unlike its docs page, has no in-sequence row for the number shortcut's chord (that gap predates
+  this plan), and its ⚡ row does not say that a word in progress is queued first (new with this plan's words; the docs
+  page's row does say so).
+- Cosmetic: the dialog's key chip for typing is a phrase ("Characters (digits continue a word)"); some new lines on the
+  Launch templates page run past 120 characters (dprint does not format `.mdx`).
+- Four provisioning browser cases fail now and then under heavy machine load, on main as well (below); they are not
+  recorded as flakes because every observation so far was made under that load.
+
+#### Checks
+
+This round landed only this plan, checked on main `73da69e1` and merged onto a main that had since gained only release
+notes, docs-screenshot specs, TODO entries and plans (the rebase conflicted only in TODO.md). The first landing attempt
+ran the full battery on the first delivery, stacked on podman-local-image: there the whole browser suite, run
+`f69ef2f8-60e8-4dd5-9413-5380dc2deb9b`, failed only the WebKit case "expanded setup failure closes the menu below it"
+(see below); the whole Rust workspace, run `c801e422-448d-45a7-8bfe-cda03b3e8874`, only the known flake "shallow pause
+resumes without reset or replay"; the UI's JavaScript tests, run `8c0811c6-00f9-4db5-ac73-f524165f8984`, only the
+stylesheet test this redelivery fixes; and the desktop-build checks, the desktop-build tests (run
+`d12ee8fc-fcf3-4724-b807-362a166bfabd`, 1015 passed) and the desktop-asset check passed. On the redelivered stack:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, the web-target UI lint, the check that
+  every test delay states its reason (`python -B scripts/check-test-sleeps.py`), `dprint check`,
+  `python3 releasing/check-changelog.py format`, the docs website build (`bun run build` in `website/`), the workspace
+  debug build and the UI's release web build: all passed.
+- The UI's Rust tests, `cargo nextest run -p farhelm-ui`, run `c496591b-2cba-4482-b594-ca729e0a4bf1`: all 832 passed.
+  The UI's JavaScript tests (`node --test` in `crates/farhelm-ui/js-tests`), run `03cf81b3-7fd3-4c02-a7c0-f4f90f633d99`:
+  all 374 passed, including the stylesheet test.
+- `npx playwright test` in `e2e/` with the keyboard-shortcuts, quick-launch, launcher-template-shortcuts, templates,
+  terminal-link-clicks, provisioning and hover-text specs, on Chromium and WebKit, three workers, no retries, run
+  `1fab6281-683b-40d7-b3cf-e25d577ea5fc`: 471 passed, 9 failed, while other agents' work kept the machine's load average
+  around 34 (the run took 46 minutes). Each failure was re-run three times on the engine it failed on. The three
+  templates cases (WebKit, run `3b064323-2abc-4782-b781-ea521ce3d4fe`, 9 of 9) and the two quick-launch cases (WebKit,
+  run `7bd9764d-1e13-475c-b1bd-367baea32131`, 6 of 6), which had failed on 60-second timeouts and 5-second waits, passed
+  every time at comparable load (about 29 and 37); they are treated as load and not recorded as flakes. Of the four
+  provisioning cases, three failed again now and then ("expanded setup failure closes the menu below it", "a wrong-host
+  UPDATE acceptance warns on its source row and claims nothing", "two provisioning-busy rows reconcile independently";
+  runs `d673d672-b658-4f1c-aa4b-96d5bf04d834` and `a1386bf4-79df-486c-b908-aa7ae0ecff86`) and "incarnation churn keeps a
+  followed run while a target change detaches it" passed. The plan changes no host or setup code, and on main `73da69e1`
+  without the plan the four cases, three times each on both engines at load about 30, failed 4 of 24 with the same
+  errors (run `bdf6095f-57fd-4494-90c8-f4be6bf90b59`; there "two provisioning-busy rows" passed, while its failure here
+  was the same host-panel measuring wait "expanded setup" hit). They are not this plan's.
+- Reused: the first attempt's whole Rust workspace run for the plan's non-UI Rust (the helm refusing spaced names in the
+  agent's template create, unchanged since), and the whole Rust workspace run of round 161,
+  `4a0d6437-c2bf-43d4-8a19-18b6aada9171` (4581 passed; the known shallow-pause flake failed), for
+  container-host-account, which changes only the supervisor; no single workspace run covered the plan and
+  container-host-account together, whose combined tree got the build and lint above. The first attempt's desktop-build
+  checks, desktop-build tests and desktop-asset check, since the redelivery changes no desktop-specific code. The
+  executor's docs-screenshot visual review with the new hint, on Chromium. Not run: the rest of the browser suite (the
+  first attempt ran it; the redelivery's changes are covered above), the desktop smoke tests, and the native Mac app
+  (not runnable on Linux).
+
+The report's checks were the executor's selected runs; the first landing attempt ran the full battery on the first
+delivery, and this landing ran the affected tests on the redelivery. Nothing in the executor's redelivered report became
+untrue at landing.
