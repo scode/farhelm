@@ -76,17 +76,17 @@ test("destination", async ({ page, request }) => {
   await director.callout(
     destination.locator(".create-session-host"),
     "The host the session runs on. Starts on the host of the session you have open.",
-    { side: "left", dy: 20 },
+    { side: "left", dy: 80 },
   );
   await director.callout(
     destination.getByLabel("Folder", { exact: true }),
     "The directory the agent starts in. ~ is your home on that host, not on the machine in front of you.",
-    { side: "left", dy: 40 },
+    { side: "left", dy: 190 },
   );
   await director.callout(
     folders,
     "Opens on a click or ↓: up to eight recent directories on this host, newest first; typing filters them. home is ~ on that host, local home ~ on the machine in front of you.",
-    { side: "left", dy: 100 },
+    { side: "left", dy: 300 },
   );
   // The folder list hangs below the destination part, so it is cropped in on its own.
   await shot(page, `${PAGE}/destination`, [destination, folders]);
@@ -133,12 +133,12 @@ test("harness and model", async ({ page, request }) => {
   await director.callout(
     harness,
     "Pick the agent first. Nothing is chosen when the launcher opens, and the choices below change to what that agent offers.",
-    { side: "right", dx: 60, dy: -30 },
+    { side: "right", dx: 60, dy: -60 },
   );
   await director.callout(
     model,
     "Which model. harness default leaves it to the agent's own setting; type a name to use one the list doesn't show.",
-    { side: "right", dx: 60, dy: 30 },
+    { side: "right", dx: 60, dy: 80 },
   );
   await shot(page, `${PAGE}/harness-and-model`, [harness, model]);
 });
@@ -226,6 +226,8 @@ test("recent setups", async ({ page, request }) => {
 });
 
 test("yolo confirmation", async ({ page, request }) => {
+  // Leave room below the question for both labels, outside its answer buttons.
+  await page.setViewportSize({ width: 930, height: 1800 });
   const { director } = await open(page, request);
   // Pressing launch really sends the create; the helm answers with the
   // confirmation only because the host still asks before YOLO launches.
@@ -250,12 +252,12 @@ test("yolo confirmation", async ({ page, request }) => {
   await director.callout(
     confirmation.locator(".yolo-confirm"),
     "Starts this launch. The host still asks next time.",
-    { side: "bottom", dx: 240 },
+    { side: "bottom", dx: -60 },
   );
   await director.callout(
     confirmation.locator(".yolo-confirm-stop-asking"),
     "Starts it, and this host stops asking from now on.",
-    { side: "bottom", dx: 140 },
+    { side: "bottom", dx: -300 },
   );
   await shot(page, `${PAGE}/yolo-confirmation`, [confirmation, form.locator(".create-session-submit")], { maxWidth: 930 });
   expect(created, "the YOLO shot must not start a session").toEqual([]);

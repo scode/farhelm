@@ -160,7 +160,7 @@ test("save as template", async ({ page, request }) => {
   // the agent and an effort, on top of the launcher's starting host and
   // directory, which it offers unchecked.
   await form.locator(".launch-composer-harness-choice button", { hasText: /^Codex$/ }).click();
-  await form.locator(".launch-composer-effort-choice button", { hasText: /^high$/ }).click();
+  await form.locator(".launch-composer-effort-choice").getByRole("button", { name: "High", exact: true }).click();
   await form.locator(".launch-composer-save-template").click();
   const panel = form.locator(".save-template-panel");
   await expect(panel).toBeVisible();

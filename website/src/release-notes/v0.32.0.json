@@ -1,0 +1,39 @@
+{
+  "screenshots": [
+    {
+      "entry": 2749,
+      "name": "release-notes/v0-32-0-host-status-filters",
+      "alt": "The new host rail beside the session list and its All, Running, Waiting and Idle filters."
+    },
+    {
+      "entry": 2731,
+      "name": "release-notes/v0-32-0-appearance",
+      "alt": "Light appearance with the System, Dark and Light choices in Settings."
+    },
+    {
+      "entry": 2808,
+      "name": "release-notes/v0-32-0-automatic-host-updates",
+      "alt": "Update remote hosts automatically in Settings, off by default."
+    },
+    {
+      "entry": 2750,
+      "name": "release-notes/v0-32-0-hosts-panel",
+      "alt": "Hosts open in place of the session list beside the host rail."
+    },
+    {
+      "entry": 2753,
+      "name": "release-notes/v0-32-0-session-toolbar",
+      "alt": "The session toolbar with separate Restart and Replace controls and terminal text size in points."
+    },
+    {
+      "entry": 2756,
+      "name": "release-notes/v0-32-0-session-launcher",
+      "alt": "The session launcher with labeled groups of fields and a footer for its actions."
+    },
+    {
+      "entry": 2793,
+      "name": "release-notes/v0-32-0-containerized-launcher",
+      "alt": "Containerized enabled in a managed-checkout launcher, showing image file, API proxy port and optional GitHub token file."
+    }
+  ]
+}

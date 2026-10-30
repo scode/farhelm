@@ -6,7 +6,7 @@
  * renamed, updated, or removed, and no setting changes.
  */
 import { expect, test } from "@playwright/test";
-import { hostRowByName, openHostMenu } from "../tests/helpers/fleet";
+import { hostRowByName, openHostMenu, openHostsPanel } from "../tests/helpers/fleet";
 import { open } from "./open";
 import { shot } from "./shot";
 
@@ -137,10 +137,11 @@ test("app settings", async ({ page, request }) => {
   await shot(page, `${PAGE}/app-settings`, [dialog], { maxWidth: 930 });
 });
 
+/** Reveal Hosts and its details together: the disclosure is hidden in the session-list view. */
 test("details", async ({ page, request }) => {
   const { director } = await open(page, request);
+  await openHostsPanel(page);
   const toggle = page.locator(".host-details-toggle");
-  await toggle.check();
   // The second host is a remote one with an alias, so its details also show
   // the real destination behind the name.
   const remote = page.locator(".host-row").nth(1);

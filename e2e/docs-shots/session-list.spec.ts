@@ -59,6 +59,7 @@ test("statuses", async ({ page, request }) => {
 });
 
 test("list controls", async ({ page, request }) => {
+  await page.setViewportSize({ width: 930, height: 1000 });
   const { director } = await open(page, request);
   const filter = page.locator(".host-rail-avatar").first();
   const sort = page.locator(".sort-title");
@@ -66,13 +67,14 @@ test("list controls", async ({ page, request }) => {
   const menu = page.getByRole("menu", { name: "Sort", exact: true });
   const compact = menu.getByRole("menuitemcheckbox", { name: /^Compact(?:$|\s)/ });
   await expect(compact).toBeVisible();
-  // Pushed right past the list so no callout covers the other controls.
-  await director.callout(compact, "One line per session, for a long list.", { side: "right", dx: 200, dy: -80 });
-  await director.callout(filter, "Show only one host's sessions.", { side: "right", dx: 200, dy: 10 });
+  // Stack the labels over the terminal within the docs-width viewport;
+  // a wide-window offset would put the last label beyond this shot's crop.
+  await director.callout(compact, "One line per session, for a long list.", { side: "right", dy: 260 });
+  await director.callout(filter, "Show only one host's sessions.", { side: "right", dx: 420, dy: 220 });
   await director.callout(sort, "Order: recently active (working and waiting agents first), newest created, or by title.", {
     side: "right",
-    dx: 40,
-    dy: 110,
+    dx: 280,
+    dy: 80,
   });
   await shot(page, `${PAGE}/controls`, [filter, sort, menu], { maxWidth: 930 });
 });

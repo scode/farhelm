@@ -1,80 +1,80 @@
 {
   "_comment": "Written by scripts/publish-docs-shots.sh; never edit by hand. See docs/docs-shots/SPEC.md.",
   "base": "https://raw.githubusercontent.com/scode/farhelm",
-  "captured_at": "2026-10-24T21:59:01Z",
-  "captured_from": "e60070a673f1fb09336e5233acf25e18a8c29d98",
-  "commit": "caf56758375c8d62d7d1290084ab705c30ba05c1",
+  "captured_at": "2026-10-30T06:01:31Z",
+  "captured_from": "3a68d3c57b35a601509fbbb0fcacde2d9069e79d",
+  "commit": "c214fb829d896da7fb78653ea97c8ddfe60af980",
   "shots": {
     "add-a-remote-host/add-button": {
-      "height": 418,
-      "width": 1260
+      "height": 422,
+      "width": 1344
     },
     "add-a-remote-host/add-dialog": {
-      "height": 1256,
+      "height": 1268,
       "width": 1754
     },
     "add-a-remote-host/connected-host": {
       "height": 310,
-      "width": 1332
+      "width": 1364
     },
     "add-a-remote-host/setup-plan": {
       "height": 2488,
-      "width": 1766
+      "width": 1772
     },
     "first-session/running-session": {
-      "height": 830,
-      "width": 1670
+      "height": 522,
+      "width": 1702
     },
     "first-session/statuses": {
-      "height": 516,
-      "width": 1332
+      "height": 608,
+      "width": 1364
     },
     "first-session/this-machine": {
       "height": 378,
-      "width": 1332
+      "width": 1368
     },
     "launch-templates/applied": {
-      "height": 558,
-      "width": 1860
+      "height": 428,
+      "width": 1802
     },
     "launch-templates/apply": {
-      "height": 562,
+      "height": 560,
       "width": 1800
     },
     "launch-templates/edit-form": {
-      "height": 1368,
+      "height": 1350,
       "width": 1796
     },
     "launch-templates/panel": {
-      "height": 1114,
+      "height": 1170,
       "width": 1844
     },
     "launch-templates/save-as-template": {
-      "height": 958,
+      "height": 926,
       "width": 1860
     },
     "launch-templates/templates-button": {
-      "height": 296,
-      "width": 996
+      "height": 240,
+      "width": 812
     },
     "manage-hosts/app-settings": {
-      "height": 1250,
-      "width": 1822
+      "height": 1290,
+      "width": 1802
     },
     "manage-hosts/details": {
-      "height": 684,
-      "width": 1332
+      "height": 688,
+      "width": 1424
     },
     "manage-hosts/host-menu": {
-      "height": 880,
-      "width": 1830
+      "height": 990,
+      "width": 1860
     },
     "manage-hosts/host-settings": {
-      "height": 2156,
+      "height": 2118,
       "width": 1594
     },
     "manage-hosts/remove-dialog": {
-      "height": 1042,
+      "height": 1044,
       "width": 1024
     },
     "release-notes/v0-25-0-feedback-contact": {
@@ -249,97 +249,125 @@
       "height": 1364,
       "width": 1656
     },
+    "release-notes/v0-32-0-appearance": {
+      "height": 524,
+      "width": 1728
+    },
+    "release-notes/v0-32-0-automatic-host-updates": {
+      "height": 492,
+      "width": 1728
+    },
+    "release-notes/v0-32-0-containerized-launcher": {
+      "height": 946,
+      "width": 1704
+    },
+    "release-notes/v0-32-0-host-status-filters": {
+      "height": 748,
+      "width": 1428
+    },
+    "release-notes/v0-32-0-hosts-panel": {
+      "height": 496,
+      "width": 1444
+    },
+    "release-notes/v0-32-0-session-launcher": {
+      "height": 2274,
+      "width": 1844
+    },
+    "release-notes/v0-32-0-session-toolbar": {
+      "height": 820,
+      "width": 1778
+    },
     "session-list/controls": {
-      "height": 696,
-      "width": 1392
+      "height": 1146,
+      "width": 1586
     },
     "session-list/row": {
-      "height": 726,
-      "width": 1360
+      "height": 694,
+      "width": 1472
     },
     "session-list/row-menu": {
-      "height": 800,
-      "width": 1830
+      "height": 1040,
+      "width": 1860
     },
     "session-list/statuses": {
-      "height": 654,
-      "width": 1332
+      "height": 646,
+      "width": 1364
     },
     "session-list/trash-button": {
-      "height": 336,
+      "height": 282,
       "width": 1080
     },
     "session-list/trash-dialog": {
-      "height": 1500,
+      "height": 1576,
       "width": 1424
     },
     "start-a-session/checkout-setup": {
-      "height": 1094,
-      "width": 1562
+      "height": 872,
+      "width": 1860
     },
     "start-a-session/destination": {
-      "height": 1244,
-      "width": 1562
+      "height": 1540,
+      "width": 2272
     },
     "start-a-session/effort-and-permissions": {
-      "height": 792,
-      "width": 1600
+      "height": 752,
+      "width": 2542
     },
     "start-a-session/harness-and-model": {
-      "height": 636,
-      "width": 1600
+      "height": 700,
+      "width": 2542
     },
     "start-a-session/host-menu": {
-      "height": 622,
-      "width": 1830
+      "height": 740,
+      "width": 1862
     },
     "start-a-session/host-yolo-setting": {
-      "height": 830,
+      "height": 768,
       "width": 1544
     },
     "start-a-session/launch-button": {
-      "height": 628,
-      "width": 1740
+      "height": 566,
+      "width": 1832
     },
     "start-a-session/new-button": {
-      "height": 518,
-      "width": 1154
+      "height": 370,
+      "width": 1348
     },
     "start-a-session/recent-setups": {
-      "height": 730,
+      "height": 720,
       "width": 1800
     },
     "start-a-session/search": {
-      "height": 728,
+      "height": 722,
       "width": 1800
     },
     "start-a-session/search-name": {
-      "height": 354,
+      "height": 352,
       "width": 1800
     },
     "start-a-session/yolo-confirmation": {
-      "height": 838,
-      "width": 1860
+      "height": 738,
+      "width": 1744
     },
     "stop-restart-resume/header-actions": {
       "height": 640,
-      "width": 1616
+      "width": 1368
     },
     "stop-restart-resume/row-menu": {
-      "height": 898,
-      "width": 1830
+      "height": 1130,
+      "width": 1860
     },
     "work-in-a-session/download-hover": {
-      "height": 432,
+      "height": 430,
       "width": 1530
     },
     "work-in-a-session/header": {
       "height": 382,
-      "width": 1474
+      "width": 1308
     },
     "work-in-a-session/tabs": {
       "height": 384,
-      "width": 668
+      "width": 614
     }
   }
 }
