@@ -2,6 +2,68 @@
 
 Notable user-facing changes in each stable release of Farhelm. Release candidates and dev builds are not listed; their changes appear under the stable release that follows them. Entries are written for someone running Farhelm, not for someone reading its source, so internal mechanics are left out unless they change what you have to do. cargo-dist copies each release's section into its GitHub release; `releasing/AGENTS.md` describes the format and how a section is written.
 
+## v0.32.0 - 2026-10-29
+**DRAFT release notes - not yet finalized**
+
+### 💥 Breaking
+
+- This release *requires* you to update your remote hosts. (#2786, #2791)
+- Codex sessions now need Codex 0.156.0 or later on every host that runs them, and a custom Codex command that puts `{farhelm_args}` after `exec`, passes `--remote`, or runs `codex agents` or `codex queue` now fails. Farhelm now starts Codex without its shared background server, so with conversation hooks turned off Codex no longer runs one session's commands in another session's environment. (#2820)
+
+### 🚀 Added
+
+- Agent sessions on Linux hosts can now run in a rootless Podman container, using an image you provide and a local API proxy, by turning on **Containerized** in the session launcher for a managed checkout. This is experimental and may change quickly; the [containerized sessions guide](https://farhelm.io/docs/agents/containerized-sessions/) covers setup and limits. (#2791, #2793)
+- A containerized session's terminal tabs run inside its container too, and Stop stops the whole container, tabs included. Restart and agents' `farhelm` commands are unavailable inside the container. (#2791, #2792)
+- A containerized session keeps the agent away from the rest of the host's files, but not from the network or the checkout: anything it writes there, such as Git hooks, can later run with your full access when Git or an agent runs in that checkout outside the container. (#2791, #2793)
+- The Hosts button now marks available remote-host updates, and the session list shows a reminder that can update the hosts it names, as a dismissible card for optional updates or a banner when a required update keeps you from using a host's sessions. (#2807)
+- Settings has **Update remote hosts automatically**, off by default, which updates remote hosts even with no window open. A failed automatic update is not retried until the host reconnects or the helm restarts. (#2808)
+- The session list can now be filtered by host, from a new host rail beside it that shows each host's mark and state, and by status, choosing All, Running, Waiting or Idle below the list's title. Picking a hidden session in the quick switcher sets both back to All. (#2749, #2750)
+- Hosts without an alias now show a short name, the first part of the hostname or the whole IP address, on the host rail and in session rows. Pointing at the rail or moving keyboard focus into it shows the full names. (#2810, #2811)
+- Farhelm now has a light appearance. A new Appearance section in Settings follows your device's appearance with System, or overrides it on that device with Dark or Light. (#2731)
+- Muse sessions can now resume their conversation with Restart and handle `$farhelm` requests; this needs Muse 1.4.14 or later, and existing Muse sessions must be recreated with Clone or Replace with first. Farhelm also shows when Muse is working, idle or waiting on its folder-trust question, but its other questions and approval prompts may show as idle. (#2788, #2789)
+- Templates saved from New, Clone or Restart with can now be used in Restart with when their fixed choices match the session, and Replace with accepts a template that names the session's own host. A template naming a different agent, host, folder or session name is still refused. (#2711)
+
+### 🔄 Changed
+
+- Farhelm has a new look: a blue-gray palette with solid periwinkle selections, Inter for interface text, and the same compact styling for switches, buttons, menus and dialogs. Terminal text, paths, commands, versions and ages keep their monospace font, and the terminal keeps its colors. (#2729, #2730, #2732)
+- Labels, menus and notices throughout the interface now use sentence case. (#2767, #2771, #2772, #2773, #2774, #2775, #2776, #2781)
+- Hosts now opens the host management panel in place of the session list. Host work carries on after you close it, and a failed or uncertain result leaves a warning on that host's icon in the rail. (#2750)
+- The session list's sort order is now its title, with Compact in that menu, and Trash, Templates and New are compact icon buttons. Settings and Help sit at the foot of the host rail. (#2747, #2750)
+- The toolbar at the top of an open session uses icon-and-label controls, separate menus for Restart and Replace, and zoom buttons showing the terminal text size in points, which stay visible when tabs scroll. (#2753, #2806)
+- In the desktop app, tunnels sit beside the tabs in a pill whose list can close one or all of them, even while the host is disconnected. (#2754)
+- The button for opening a terminal is a square **+** after a divider, so it no longer looks like a tab. (#2805)
+- Settings and dialogs share the same headings, buttons and layout, with Cancel before the main action and the actions in a footer that stays visible while the content scrolls, including in the session launcher and Trash. On phones, Trash's stacked footer buttons leave less room for the archive list. (#2761, #2762, #2787)
+- Settings sections have icons, the session launcher groups its fields into labeled rows, and menus of session actions and template number shortcuts describe each choice, with destructive actions set apart in red. (#2756, #2757, #2762)
+- Links in the app are a readable blue and always underlined, including the help link in Settings, which was hard to read on the dark background. Links that open a page outside the app end in ↗. (#2710)
+- Managed checkout trash is now a hidden `.farhelm-trash` folder, and existing trash moves there automatically. Restarting a session that was started inside the old trash location can fail after the move. (#2744)
+- A terminal now appears only once its bundled JetBrains Mono font has loaded, so a slow connection leaves it empty for a moment instead of switching fonts after about three seconds. If the font fails to download, the terminal stays empty until the page is reloaded. (#2700)
+
+### 🔧 Fixes worth highlighting
+
+- Updating Farhelm on the Mac no longer deletes a version that is still in use, which could make new sessions, Restart and agents' `farhelm` commands fail until Farhelm was quit and reopened. A `farhelm` command in a session whose version was removed now runs the installed version instead. (#2058, #2059, #2061, #2065)
+- Emoji in terminal output now take the same two columns agents use when redrawing status lines, so the text after them stays aligned as output arrives and after reconnecting. (#2723)
+- Menus highlight one choice at a time. The pointer and the arrow keys could highlight different choices at once; now arrow keys continue from the choice under the pointer, and Enter runs the highlighted one. (#2803)
+- Permanently deleting from Trash now shows progress for each checkout instead of holding the page with no feedback, and gives each checkout up to fifteen minutes to finish before calling the result uncertain. (#2724)
+
+### 🩹 Misc fixes
+
+*Fixes that would normally be summed up as a single "various bug fixes" line. In the interest of transparency, the complete list is included.*
+
+- On the Mac, an interrupted install no longer leaves behind a lock folder that had to be deleted by hand before the installer would run again; the next run finishes the install. (#2065, #2066, #2739)
+- The Mac app's automatic updater no longer reinstalls Farhelm after you uninstalled it, replaces a newer version you installed from Terminal, or installs over an interrupted install or uninstall. After an interrupted one, it pauses with a warning on the version number in the sidebar that gives the command to finish the job. (#2065, #2067)
+- Uninstalling Farhelm on the Mac refuses while any program still runs a version of it, naming the version and an `lsof` command that shows which program, and running uninstall again finishes an interrupted one. An uninstall started from a session still running an older release refuses; quitting Farhelm and running `~/.local/bin/farhelm uninstall` from a terminal outside it works. (#2068)
+- When uninstalling from a host is refused because its identity changed, the message now points to the host list, where spaces in the identities are visible, instead of quoting values that could look identical. (#2708)
+- Restart with no longer automatically trusts Codex or Pi in a managed checkout whose folder was replaced outside Farhelm. (#2738)
+- After Restart with chose a different Pi or OMP conversation, a later Restart no longer returns to the old conversation when Farhelm could not set up conversation reporting. Restart stays unavailable until the agent reports its conversation. (#2742)
+- Claude sessions started through more than one wrapper program that stays running can now resume their conversation with Restart. Sessions already running when you upgrade need a relaunch before Restart reliably follows the original Claude rather than another one started inside the session. (#2725, #2727)
+- The trust reminder for managed checkouts now also appears when Codex's folder-access question offers Quit. (#2718)
+- Settings and the Templates dialog now report failed saves of terminal frame colors, quick-launch naming, terminal link-click behavior, trust hint visibility and the ⚡ quick-launch mark, instead of showing them as saved. A failed **Don't show again** brings the trust hint back with an error. (#2713, #2714, #2715)
+- Escape in the session launcher's save-as-template panel closes only that panel, keeping your session setup even after a refused save, which now also returns keyboard focus to the template name. (#2709)
+- On Replace's YOLO question, Cancel stays unavailable while **don't ask again** is saving, so a failed save keeps the question open with its reason. (#2707)
+- Terminal-link error messages no longer cover the warning when you confirm deleting, restarting or replacing a session. (#2740)
+- In the desktop app, clicking plain **delete** in Templates keeps its Undo offer even if the list changes before the screen updates, instead of deleting the template permanently. (#2745)
+- If a template deletion's reply is lost, Templates now says the deletion may have happened and refreshes the list, without offering Undo. (#2748)
+
 ## v0.31.0 - 2026-10-23
 
 ### 💥 Breaking
