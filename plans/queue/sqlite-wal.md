@@ -316,49 +316,82 @@ section exists, its latest entry must also be satisfied. Then close the plan per
 "Executing one plan" (steps 11 and 12): deliver its report through the queue script, write a closing entry in its log,
 and stop the watchdog. Never edit `plans/` yourself.
 
-## Blocked
+## Decisions
 
-Blocked while landing on 2026-10-30 (claim 14bd7c).
+### 2026-10-30: answer to a blocked question
 
-### Landing stopped: a power loss after first start can leave lasting damage
+The question, as the executor put it:
 
-The landing monitor did not merge this plan; its PR (#2840) has not merged and main holds nothing of it. The plan
-switches the helm's and the supervisor's SQLite databases to WAL journaling with synchronous NORMAL, so a write no
-longer waits for several disk flushes; an OS crash or power loss can then lose the last few commits, which the plan
-accepted for every write.
+> Blocked while landing on 2026-10-30 (claim 14bd7c).
+>
+> ### Landing stopped: a power loss after first start can leave lasting damage
+>
+> The landing monitor did not merge this plan; its PR (#2840) has not merged and main holds nothing of it. The plan
+> switches the helm's and the supervisor's SQLite databases to WAL journaling with synchronous NORMAL, so a write no
+> longer waits for several disk flushes; an OS crash or power loss can then lose the last few commits, which the plan
+> accepted for every write.
+>
+> A fresh-context review found one consequence that SPEC.md does not allow. The supervisor creates the host's identity
+> once, on its first start, and the helm records it in its own database. Under NORMAL the two databases reach the disk
+> independently, so a power loss soon after a host's very first start can keep the helm's record and lose the
+> supervisor's; the supervisor then creates a new identity. Locally the desktop app refuses to start with its
+> identity-mismatch message, and a new install has no backup to restore; a remote host has to be adopted again, which
+> resets its four permissions. SPEC.md, on crashes and coinciding faults: "Corrupting the supervisor's or the helm's
+> database, bricking an installation, or similar lasting damage is never accepted, however unlikely the trigger." The
+> plan recorded a decision that no write keeps full durability, and listed keeping it for particular writes as a
+> departure; the landing monitor reads SPEC.md's rule as taking precedence for writes like this one. The local case is
+> the lasting one: a desktop app that will not start, with nothing to restore; the remote case costs one adoption of a
+> just-installed host.
+>
+> The review also found that the desktop app's new identity-mismatch message told users to restore "both databases and
+> any accompanying -wal and -shm files from the same backup" (the -wal and -shm files are SQLite's journal and index
+> that WAL keeps beside each database) and that committed changes may still be in the -wal files. A backup taken after a
+> clean stop has no -wal file, and SQLite applies a leftover -wal to the database beside it without checking that it
+> belongs, so that advice could corrupt the restored database.
+>
+> The review also found older SPEC_impl.md text that now overstates durability, and caveats the changelog entry omits.
+> The checks found nothing else. The whole Rust workspace (run `d8d22072-bfba-45a9-b56c-b25a51d513a0`) passed all 4600
+> tests; the UI's, desktop-build and JavaScript tests passed; the whole browser suite (run
+> `7f058f2b-cd53-4243-a0e5-885fe4283358`) failed 20 cases in a run that took 3.8 hours, where about 2.2 is usual; three
+> are recorded open flakes, one is a Chromium failure of a test recorded as a WebKit flake (not re-run), and the other
+> 16 each passed three times when re-run alone. Older builds, v0.32.0 (the current release) included, open WAL databases
+> unaided, so going back to an older version still works.
+>
+> ### What should happen to this plan?
+>
+> - **Send it back to its executor (recommended).** Answer with: make every write whose loss could leave lasting damage
+>   fully durable despite NORMAL, at least the supervisor's creation of the host identity, and check for others (a store
+>   recording another's identity, schema migrations, any one-time setup); correct the desktop message to say to delete
+>   -wal and -shm files the backup lacks; run the whole Rust workspace and the desktop-build tests.
+> - **Accept the window.** Keep NORMAL for every write as the plan decided, and amend SPEC.md's rule to allow this
+>   first-start window.
+> - **Land it now and fix afterwards.** Main would carry a window, short but real, in which a power loss leaves an
+>   installation that will not start without manual repair, which SPEC.md rules out.
 
-A fresh-context review found one consequence that SPEC.md does not allow. The supervisor creates the host's identity
-once, on its first start, and the helm records it in its own database. Under NORMAL the two databases reach the disk
-independently, so a power loss soon after a host's very first start can keep the helm's record and lose the
-supervisor's; the supervisor then creates a new identity. Locally the desktop app refuses to start with its
-identity-mismatch message, and a new install has no backup to restore; a remote host has to be adopted again, which
-resets its four permissions. SPEC.md, on crashes and coinciding faults: "Corrupting the supervisor's or the helm's
-database, bricking an installation, or similar lasting damage is never accepted, however unlikely the trigger." The plan
-recorded a decision that no write keeps full durability, and listed keeping it for particular writes as a departure; the
-landing monitor reads SPEC.md's rule as taking precedence for writes like this one. The local case is the lasting one: a
-desktop app that will not start, with nothing to restore; the remote case costs one adoption of a just-installed host.
+The maintainer's answer:
 
-The review also found that the desktop app's new identity-mismatch message told users to restore "both databases and any
-accompanying -wal and -shm files from the same backup" (the -wal and -shm files are SQLite's journal and index that WAL
-keeps beside each database) and that committed changes may still be in the -wal files. A backup taken after a clean stop
-has no -wal file, and SQLite applies a leftover -wal to the database beside it without checking that it belongs, so that
-advice could corrupt the restored database.
+Answered by the landing monitor on the maintainer's behalf under `plans/.agents/landing.md`, "Answering blocks". The
+deciding rule is SPEC.md's: "Corrupting the supervisor's or the helm's database, bricking an installation, or similar
+lasting damage is never accepted, however unlikely the trigger." The plan recorded a decision that no write keeps full
+durability and listed keeping it for particular writes as a departure; reading the SPEC.md rule as taking precedence for
+writes whose loss leaves lasting damage is a judgment call made here on the maintainer's behalf, recorded as the
+near-term TODO entry "Revisit keeping full durability for the host identity under WAL". If the maintainer later decides
+otherwise, that is a follow-up, not a reason to stop this plan.
 
-The review also found older SPEC_impl.md text that now overstates durability, and caveats the changelog entry omits. The
-checks found nothing else. The whole Rust workspace (run `d8d22072-bfba-45a9-b56c-b25a51d513a0`) passed all 4600 tests;
-the UI's, desktop-build and JavaScript tests passed; the whole browser suite (run
-`7f058f2b-cd53-4243-a0e5-885fe4283358`) failed 20 cases in a run that took 3.8 hours, where about 2.2 is usual; three
-are recorded open flakes, one is a Chromium failure of a test recorded as a WebKit flake (not re-run), and the other 16
-each passed three times when re-run alone. Older builds, v0.32.0 (the current release) included, open WAL databases
-unaided, so going back to an older version still works.
+Decision: send it back to its executor.
 
-### What should happen to this plan?
-
-- **Send it back to its executor (recommended).** Answer with: make every write whose loss could leave lasting damage
-  fully durable despite NORMAL, at least the supervisor's creation of the host identity, and check for others (a store
-  recording another's identity, schema migrations, any one-time setup); correct the desktop message to say to delete
-  -wal and -shm files the backup lacks; run the whole Rust workspace and the desktop-build tests.
-- **Accept the window.** Keep NORMAL for every write as the plan decided, and amend SPEC.md's rule to allow this
-  first-start window.
-- **Land it now and fix afterwards.** Main would carry a window, short but real, in which a power loss leaves an
-  installation that will not start without manual repair, which SPEC.md rules out.
+- Keep WAL with synchronous NORMAL for ordinary writes, but make every write whose loss in an OS crash or power loss
+  could leave lasting damage fully durable before anything else can depend on it. At least: the supervisor's creation of
+  the host identity must reach the disk before it is reported to any helm (for example a FULL-synchronous commit or a
+  checkpoint for that transaction). Check for others with the same property, such as a database recording another's
+  identity, schema migrations and other one-time setup, and say in the report which you made durable and why the rest
+  are safe to lose. Add a test that pins the identity write's durability setting.
+- Correct the desktop app's identity-mismatch message in `crates/farhelm-ui/src/desktop.rs`: tell users to restore both
+  databases from the same backup, together with their -wal and -shm files if the backup has them, and to delete any
+  current `supervisor.db-wal`, `supervisor.db-shm`, `helm.db-wal` or `helm.db-shm` the backup does not include, since a
+  leftover one would be applied to the restored database and corrupt it. Drop the sentence about committed changes still
+  being in the -wal files, and update the test's expected strings and its docstring.
+- Update SPEC_impl.md where it now overstates durability ("commits durably", "durably refuses"), the checkout
+  rename-journal module docs that claim the same, and the changelog entry: mention the new -wal and -shm files beside
+  the databases and that a backup copying only the `.db` files while Farhelm runs misses recent changes.
+- Run the whole Rust workspace and the desktop-build tests (`cargo nextest run -p farhelm-ui --features desktop`).
