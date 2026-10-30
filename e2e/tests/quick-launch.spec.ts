@@ -267,7 +267,7 @@ test("launch sequence stacks a number template and bolt without showing New", as
     await page.keyboard.press("Control+Shift+KeyX");
     const indicator = page.locator(".launch-sequence-indicator");
     await expect(indicator).toHaveAttribute("role", "status");
-    await expect(indicator).toContainText("press number keys");
+    await expect(indicator).toContainText("Type names or number keys");
     await page.keyboard.press("Digit1");
     await chord(page);
     await expect(indicator).toContainText(partial);
@@ -318,7 +318,274 @@ test("launch sequence stacks a number template and bolt without showing New", as
   }
 });
 
-/** Cancelling by ordinary typing must deliver that same key to the old agent.
+/** Enter owns a fresh catalog even while the prefix's completion read is held.
+ * A real composed launch and empty terminal-input capture distinguish that
+ * boundary from a hint-only implementation or text forwarded to the old agent. */
+test("typed launch proceeds before the prefix catalog returns and owns terminal input", async ({ page, request }) => {
+  const stem = `typed-race-${Date.now()}`;
+  const first = `${stem}-project`;
+  const second = `${stem}-command`;
+  const source = await createSession(request, { title: `${stem}-source` });
+  const gate = routeGate();
+  const created: string[] = [];
+  const bodies: any[] = [];
+  const binary: Buffer[] = [];
+  let held = 0;
+  let released = false;
+  let bodyFailed = true;
+  try {
+    expect(source.cwd, "the created source supplies a real destination for the composed launch").toBeTruthy();
+    const fields = [
+      { kind: "command", command: FAKE_AGENT, yolo: false, destination: { folder: source.cwd }, name: "earlier typed name" },
+      { name: `${stem}-composed` },
+    ];
+    for (const [index, name] of [first, second].entries()) {
+      const saved = await request.put(`/api/templates/${encodeURIComponent(name)}`, { data: fields[index] });
+      expect(saved.ok(), await saved.text()).toBe(true);
+    }
+    const listing = await request.get("/api/templates");
+    expect(listing.ok(), await listing.text()).toBe(true);
+    expect((await listing.json()).templates).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: first, fields: fields[0] }),
+      expect.objectContaining({ name: second, fields: fields[1] }),
+    ]));
+    page.on("websocket", (socket) => {
+      if (new URL(socket.url()).pathname.endsWith("/term")) {
+        socket.on("framesent", ({ payload }) => { if (Buffer.isBuffer(payload)) binary.push(payload); });
+      }
+    });
+    await pinAutoSelect(page, source.id);
+    await page.goto("/");
+    await attachSession(page, source.id);
+    await waitForTermText(page, "> ");
+    await expect(page.locator("#terminal .xterm-helper-textarea")).toBeFocused();
+    binary.length = 0;
+    await page.route("**/api/templates", async (route) => {
+      if (route.request().method() === "GET" && held === 0) {
+        held++;
+        await gate.wait();
+      }
+      await route.continue();
+    });
+    await page.route("**/api/sessions", async (route) => {
+      if (route.request().method() !== "POST") return route.continue();
+      bodies.push(route.request().postDataJSON());
+      expect(released, "Enter submits before the advisory catalog is released").toBe(false);
+      const response = await route.fetch();
+      if (response.ok()) created.push((await response.json()).id);
+      await route.fulfill({ response });
+    });
+    await expect(page.locator('.launch-sequence-trigger[data-sequence-action="begin"]')).toBeEnabled();
+    await page.keyboard.press("Control+Shift+KeyX");
+    await page.keyboard.type(`${first} ${second}`);
+    await expect.poll(() => held, { message: "only the prefix completion read is held" }).toBe(1);
+    const indicator = page.locator(".launch-sequence-indicator");
+    await expect(indicator.locator(".launch-sequence-chip")).toHaveText([first]);
+    await expect(indicator.locator(".launch-sequence-word")).toHaveText(second);
+    await expect(indicator.locator(".launch-sequence-candidates")).toHaveCount(0);
+    await page.keyboard.press("Enter");
+    await expect.poll(() => created.length, { message: "fresh Enter lookup launches while hints remain held" }).toBe(1);
+    expect(released).toBe(false);
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0]).toMatchObject({ cwd: source.cwd, title: `${stem}-composed`, command: { command: FAKE_AGENT, yolo: false } });
+    await expect(page.locator(".create-session-form")).toHaveCount(0);
+    const field = await namingField(page, `${stem}-composed`);
+    await agentStartedWhileNaming(page, created[0], field);
+    expect(Buffer.concat(binary).toString(), "all typed sequence input stays away from both terminals").toBe("");
+    released = true;
+    gate.release();
+    await page.keyboard.press("Enter");
+    await echoAfterNaming(page, created[0], `typed-live-${Date.now()}`);
+    expect(bodies).toHaveLength(1);
+    bodyFailed = false;
+  } finally {
+    await cleanupOwnedSteps(bodyFailed, [
+      ["completion gate", () => gate.release()],
+      ["routes", () => page.unrouteAll({ behavior: "wait" })],
+      ["created sessions", () => cleanupOwnedSteps(false, created.map((id) => [id, () => cleanupSession(request, id)]))],
+      ["source", () => cleanupSession(request, source.id)],
+      ...[first, second].map((name): [string, () => Promise<void>] => [name, async () => {
+        const removed = await request.delete(`/api/templates/${encodeURIComponent(name)}`);
+        expect(removed.ok() || removed.status() === 404).toBe(true);
+      }]),
+    ]);
+  }
+});
+
+/** Word refusals outrank an unbound number and cannot partially seed New.
+ * An empty Enter and a refused Enter precede a valid bound press in the same
+ * document, so a stranded press snapshot cannot silently shift later bindings. */
+test("typed page refusals are atomic and empty Enter leaves later bindings paired", async ({ page, request }) => {
+  const stem = `typed-refusal-${Date.now()}`;
+  const good = `${stem}-good`;
+  const ambiguous = `${stem}-amb`;
+  const names = [good, `${ambiguous}-one`, `${ambiguous}-two`];
+  const missing = `${stem}-missing`;
+  const bodies: any[] = [];
+  let bodyFailed = true;
+  try {
+    for (const name of names) await commandTemplate(request, name);
+    const listing = await request.get("/api/templates");
+    expect(listing.ok(), await listing.text()).toBe(true);
+    expect((await listing.json()).templates.map((entry: { name: string }) => entry.name))
+      .toEqual(expect.arrayContaining(names));
+    await patchPreferences(request, { template_shortcuts: {} });
+    expect((await readPreferences(request)).template_shortcuts ?? {}).toEqual({});
+    await page.route("**/api/sessions", async (route) => {
+      if (route.request().method() !== "POST") return route.continue();
+      bodies.push(route.request().postDataJSON());
+      await fulfillQuickFixture(route, request, 409, "typed valid fixture refusal");
+    });
+    await page.goto("/");
+    const begin = page.locator('.launch-sequence-trigger[data-sequence-action="begin"]');
+    const indicator = page.locator(".launch-sequence-indicator");
+    const form = page.locator(".create-session-form");
+    await expect(begin).toBeEnabled();
+    await page.keyboard.press("Control+Shift+KeyX");
+    await expect(indicator).toBeVisible();
+    await page.keyboard.press("Enter");
+    await expect(indicator).toHaveCount(0);
+    await expect(form).toHaveCount(0);
+    for (const word of [missing, ambiguous]) {
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+      await expect.poll(() => page.evaluate(() => document.activeElement === document.body)).toBe(true);
+      await page.keyboard.press("Control+Shift+KeyX");
+      await page.keyboard.press("Digit9");
+      await page.keyboard.type(`${good} ${word}`);
+      await page.keyboard.press("Enter");
+      await expect(form).toBeVisible();
+      const error = form.locator(".create-session-error");
+      await expect(error).toContainText(word);
+      if (word === ambiguous) for (const name of names.slice(1)) await expect(error).toContainText(name);
+      else await expect(error).toContainText("No template matches");
+      await expect(page.locator(".templates-dialog")).toHaveCount(0);
+      await expect(form.getByLabel("Name (optional)")).not.toHaveValue(`${good}-session`);
+      expect(bodies, "a valid prefix must never submit part of a refused batch").toHaveLength(0);
+      await form.getByRole("button", { name: "Cancel", exact: true }).click();
+      await expect(form).toHaveCount(0);
+    }
+    await patchPreferences(request, { template_shortcuts: { "1": good } });
+    expect((await readPreferences(request)).template_shortcuts).toEqual({ "1": good });
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await expect.poll(() => page.evaluate(() => document.activeElement === document.body)).toBe(true);
+    await expect(begin).toBeEnabled();
+    await page.keyboard.press("Control+Shift+KeyX");
+    await page.keyboard.press("Digit1");
+    await expect(indicator.locator(".launch-sequence-chip")).toHaveText([good]);
+    await page.keyboard.press("Enter");
+    await expect(form.locator(".create-session-error")).toContainText("typed valid fixture refusal");
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0].title).toBe(`${good}-session`);
+    bodyFailed = false;
+  } finally {
+    await cleanupOwnedSteps(bodyFailed, [
+      ["routes", () => page.unrouteAll({ behavior: "wait" })],
+      ...names.map((name): [string, () => Promise<void>] => [name, async () => {
+        const removed = await request.delete(`/api/templates/${encodeURIComponent(name)}`);
+        expect(removed.ok() || removed.status() === 404).toBe(true);
+      }]),
+    ]);
+  }
+});
+
+/** Completion is a bounded, escaped hint rather than a second interactive
+ * picker. Its extra box cannot displace the existing centered status pill,
+ * steal terminal focus, or intercept a link beneath it at either width. */
+test("typed candidates stay bounded and pointer-transparent without moving the pill", async ({ page, request }, testInfo) => {
+  const stem = `typed-candidates-${Date.now()}`;
+  const unsafe = `${stem}-a\u200b`;
+  const names = [stem, unsafe, ...["b", "c", "d", "e", "f"].map((suffix) => `${stem}-${suffix}`), `other-${stem}`];
+  const source = await createSession(request, { title: `${stem}-source` });
+  let bodyFailed = true;
+  try {
+    for (const name of names) {
+      const saved = await request.put(`/api/templates/${encodeURIComponent(name)}`, { data: { name: "candidate fixture" } });
+      expect(saved.ok(), await saved.text()).toBe(true);
+    }
+    const listing = await request.get("/api/templates");
+    expect(listing.ok(), await listing.text()).toBe(true);
+    expect((await listing.json()).templates.map((entry: { name: string }) => entry.name))
+      .toEqual(expect.arrayContaining(names));
+    await pinAutoSelect(page, source.id);
+    await page.goto("/");
+    await attachSession(page, source.id);
+    await waitForTermText(page, "> ");
+    await expect(page.locator("#terminal .xterm-helper-textarea")).toBeFocused();
+    const indicator = page.locator(".launch-sequence-indicator");
+    const pill = indicator.locator(".launch-sequence-pill");
+    const candidates = indicator.locator(".launch-sequence-candidates");
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      // Toolbar actions can overflow the main pane, so maximum scroll would
+      // overshoot it. Align the pane itself before judging its overlay.
+      await page.locator(".app-shell").evaluate((node) => {
+        const main = node.querySelector(".app-main");
+        if (!main) throw new Error("the shell has no main pane");
+        node.scrollLeft += main.getBoundingClientRect().left - node.getBoundingClientRect().left;
+      });
+      await expect.poll(async () => {
+        const main = await page.locator(".app-main").boundingBox();
+        return !!main && main.x >= 0 && main.x + main.width <= width + 1;
+      }, { message: "the main pane is exposed before candidate geometry is measured" }).toBe(true);
+      await expect(page.locator(".terminal-panes")).toBeVisible();
+      await page.locator("#terminal .xterm-helper-textarea").focus();
+      await expect(page.locator("#terminal .xterm-helper-textarea")).toBeFocused();
+      await page.keyboard.press("Control+Shift+KeyX");
+      await expect(pill).toBeVisible();
+      await expect(indicator).toHaveCSS("opacity", "1");
+      await expect(pill).not.toContainText("(empty)");
+      const before = await pill.boundingBox();
+      expect(before, "the empty pill establishes its existing center").not.toBeNull();
+      await page.keyboard.type(stem);
+      await expect(candidates.locator("bdi")).toHaveText([
+        stem, `${stem}-a<U+200B>`, `${stem}-b`, `${stem}-c`, `${stem}-d`,
+      ]);
+      await expect(candidates).not.toContainText(`other-${stem}`);
+      await expect(candidates).not.toContainText(`${stem}-f`);
+      // Playwright's text matcher normalizes zero-width characters, including
+      // the expected string. Inspect the raw text to prove the byte is absent.
+      expect(await candidates.textContent()).not.toContain("\u200b");
+      await expect(indicator).toHaveCSS("pointer-events", "none");
+      await expect(candidates).toHaveCSS("pointer-events", "none");
+      expect(await indicator.locator("button, input, a, [tabindex]").count(), "hints contain no focusable controls").toBe(0);
+      await expect(page.locator("#terminal .xterm-helper-textarea")).toBeFocused();
+      await expect.poll(async () => {
+        const current = await pill.boundingBox();
+        const candidateBox = await candidates.boundingBox();
+        const terminal = await page.locator(".terminal-panes").boundingBox();
+        if (!current || !candidateBox || !terminal || !before) return "missing geometry";
+        const centerX = current.x + current.width / 2;
+        const centerY = current.y + current.height / 2;
+        if (Math.abs(centerX - before.x - before.width / 2) > 1 || Math.abs(centerY - before.y - before.height / 2) > 1) return "candidates moved pill";
+        if (Math.abs(centerX - terminal.x - terminal.width / 2) > 1 || Math.abs(centerY - terminal.y - terminal.height / 2) > 1) return "pill not centered on terminal";
+        if (candidateBox.y < current.y + current.height) return "candidates overlap pill";
+        if (current.x < 0 || current.x + current.width > width || candidateBox.x < 0 || candidateBox.x + candidateBox.width > width) return "hint outside viewport";
+        return "ok";
+      }, { message: `candidate-bearing pill retains its center at width ${width}` }).toBe("ok");
+      const hitIsHint = await candidates.evaluate((node) => {
+        const bounds = node.getBoundingClientRect();
+        return !!document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2)?.closest(".launch-sequence-indicator");
+      });
+      expect(hitIsHint, "the candidate box never owns pointer hit-testing").toBe(false);
+      const screenshot = testInfo.outputPath(`typed-candidates-${width}.png`);
+      await page.screenshot({ path: screenshot });
+      await testInfo.attach(`typed-candidates-${width}`, { path: screenshot, contentType: "image/png" });
+      await page.keyboard.press("Escape");
+      await expect(indicator).toHaveCount(0);
+    }
+    bodyFailed = false;
+  } finally {
+    await cleanupOwnedSteps(bodyFailed, [
+      ["source", () => cleanupSession(request, source.id)],
+      ...names.map((name): [string, () => Promise<void>] => [name, async () => {
+        const removed = await request.delete(`/api/templates/${encodeURIComponent(name)}`);
+        expect(removed.ok() || removed.status() === 404).toBe(true);
+      }]),
+    ]);
+  }
+});
+
+/** A non-sequence chord must cancel and reach the old agent's actual input.
  * Escape and programmatic modal focus instead cancel without creating anything.
  * The attention pill is centered on the terminal, including the Mac chrome
  * offset, but moves to the bottom while applying to an editable launcher. */
@@ -329,7 +596,11 @@ test("launch sequence cancellation leaves ordinary terminal input and modals in 
     await page.goto("/");
     await attachSession(page, source.id);
     await waitForTermText(page, "FAKE-AGENT READY");
+    await waitForTermText(page, "> ");
     await expect(page.locator("#terminal .xterm-helper-textarea")).toBeFocused();
+    const discarded = `discard-before-sequence-${Date.now()}`;
+    await page.keyboard.type(discarded);
+    await waitForTermText(page, discarded);
     const indicator = page.locator(".launch-sequence-indicator");
     const details = page.locator(".session-details");
     await expect(details, "the open session shows its details bar below the terminal").toBeVisible();
@@ -359,6 +630,10 @@ test("launch sequence cancellation leaves ordinary terminal input and modals in 
     await page.locator(".app-shell").evaluate(node => node.classList.remove("macos-window"));
     await page.emulateMedia({ reducedMotion: "reduce" });
     await expect(indicator).toHaveCSS("animation-name", "none");
+    // Canonical stdin implements line kill, not Readline cursor motion. If
+    // the cancelling chord were swallowed, the old prefix would join the echo.
+    await page.keyboard.press("Control+KeyU");
+    await expect(indicator).toHaveCount(0);
     const probe = `sequence-pass-${Date.now()}`;
     await page.keyboard.type(probe);
     await page.keyboard.press("Enter");

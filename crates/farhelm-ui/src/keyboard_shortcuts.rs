@@ -110,7 +110,14 @@ fn rows(
     launching.extend([
         ("Begin launch sequence".into(), label(keys.prefix)),
         (
-            "In a sequence: add a numbered template".into(),
+            "In a sequence: type a template name".into(),
+            "Characters (digits continue a word)".into(),
+        ),
+        ("In a sequence: queue the word".into(), "Space".into()),
+        ("In a sequence: complete a unique name".into(), "Tab".into()),
+        ("In a sequence: edit the word".into(), "Backspace".into()),
+        (
+            "In a sequence: add a numbered template (no word in progress)".into(),
             "1–9, 0".into(),
         ),
         (

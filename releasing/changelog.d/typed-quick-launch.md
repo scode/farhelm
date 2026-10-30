@@ -1,6 +1,6 @@
 ---
-kind: changed
+kind: added
 ---
 
-New template names can no longer contain whitespace. Existing names with spaces still work, and duplicate templates
-suggest names ending in `-copy`.
+Quick-launch sequences now accept template names separated by spaces, with Tab completion and matching names shown as
+you type. New template names can no longer contain whitespace; existing names with spaces still work.

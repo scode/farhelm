@@ -698,11 +698,12 @@ test.describe("covered terminal disclosures", () => {
 
   /** Establish both causes independently: the link receives real pointer
    * input, and its otherwise fitting hover intersects the higher cover region.
-   * Reading the rectangles also gives useful fixture state on failure.
+   * Reading the rectangles also gives useful fixture state on failure. A child
+   * cover can use its parent's stacking layer while contributing its own bounds.
    */
-  async function assertDisclosureGeometry(page: Page, selector: string, point: { x: number; y: number }, covered: boolean, coverSelector = ".approval-cards") {
+  async function assertDisclosureGeometry(page: Page, selector: string, point: { x: number; y: number }, covered: boolean, coverSelector = ".approval-cards", layerSelector = coverSelector) {
     await expect(page.locator(selector)).toBeVisible();
-    await expect.poll(() => page.locator(selector).evaluate((hover, { point, coverSelector }) => {
+    await expect.poll(() => page.locator(selector).evaluate((hover, { point, coverSelector, layerSelector }) => {
       const card = document.querySelector(coverSelector)!;
       const h = hover.getBoundingClientRect();
       const c = card.getBoundingClientRect();
@@ -711,9 +712,9 @@ test.describe("covered terminal disclosures", () => {
           hover.scrollWidth <= hover.clientWidth && h.top >= 0 && h.left >= 0 && h.bottom <= innerHeight && h.right <= innerWidth,
         overlaps: h.left < c.right && h.right > c.left && h.top < c.bottom && h.bottom > c.top,
         pointerUncovered: !!document.elementFromPoint(point.x, point.y)?.closest("#terminal"),
-        coverAboveHover: Number(getComputedStyle(card).zIndex) > Number(getComputedStyle(hover).zIndex),
+        coverAboveHover: Number(getComputedStyle(document.querySelector(layerSelector)!).zIndex) > Number(getComputedStyle(hover).zIndex),
       };
-    }, { point, coverSelector }), { message: "live pointer, fitting disclosure and covering-region intersection" }).toEqual({
+    }, { point, coverSelector, layerSelector }), { message: "live pointer, fitting disclosure and covering-region intersection" }).toEqual({
       fits: true, overlaps: covered, pointerUncovered: true, coverAboveHover: true,
     });
   }
@@ -1109,17 +1110,30 @@ test.describe("covered terminal disclosures", () => {
   /** A viewport rectangle measured in the page, carried across evaluate calls. */
   type Box = { top: number; left: number; bottom: number; right: number };
 
-  /** The quick-launch pill exists only while a sequence is armed, so measure
-   * it from a real arming that is then cancelled, both from the keyboard. The
-   * entry animation scales the pill, so it must finish before measuring.
+  /** Real typed input must produce the suggestions; a copied DOM box would
+   * miss the production child whose rectangle extends beyond its parent.
    */
-  async function measureLaunchPill(page: Page): Promise<Box> {
+  async function armLaunchCover(page: Page, word: string) {
     await expect(page.locator('.launch-sequence-trigger[data-sequence-action="begin"]')).toBeEnabled();
     await page.keyboard.press("Control+Shift+KeyX");
+    if (word) {
+      await page.keyboard.type(word);
+      await expect(page.locator(".launch-sequence-candidates bdi")).toHaveText([word]);
+    }
+  }
+
+  /** Measure a genuine arming before painting the link, then cancel it so the
+   * next arming can happen during the press. Await the ancestor's animation:
+   * both pill and suggestions inherit its temporary scale.
+   */
+  async function measureLaunchCover(page: Page, selector: string, word: string): Promise<Box> {
+    await armLaunchCover(page, word);
     const pill = page.locator(".launch-sequence-indicator");
     await expect(pill).toBeVisible();
-    const box = await pill.evaluate(async el => {
+    await pill.evaluate(async el => {
       await Promise.all(el.getAnimations().map(animation => animation.finished.catch(() => undefined)));
+    });
+    const box = await page.locator(selector).evaluate(el => {
       const rect = el.getBoundingClientRect();
       return { top: rect.top, left: rect.left, bottom: rect.bottom, right: rect.right };
     });
@@ -1165,91 +1179,115 @@ test.describe("covered terminal disclosures", () => {
    * and the same link must work once no pill is up, proving the pill was the
    * cause.
    */
-  test("the quick-launch pill armed during a press covers file and web destinations", async ({ page, request }) => {
-    await page.setViewportSize({ width: 1280, height: 800 });
-    const opens = await probeDisclosureOpens(page);
-    let sessionId: string | undefined;
-    let bodyFailed = false;
-    let transfers = 0;
-    try {
-      await patchPreferences(request, { terminal_link_click: null });
-      const session = await createSession(request, { title: `pill-covered-${Date.now()}`, cwd: "/tmp", invocation });
-      sessionId = session.id;
-      page.on("request", request => {
-        if (new URL(request.url()).pathname === `/api/sessions/${encodeURIComponent(session.id)}/files/download`) transfers++;
-      });
-      await page.route(`**/api/sessions/${encodeURIComponent(session.id)}/files/stat`, route => fulfillAsHelm(route, {
-        json: { status: "ready", host: "fixture", path: "/output/report.txt", size: 8, can_open: true },
-      }));
-      await page.route(`**/api/sessions/${encodeURIComponent(session.id)}/files/download`, route => fulfillAsHelm(route, {
-        status: 200, contentType: "application/octet-stream", body: "fixture\n",
-      }));
-      await page.goto("/");
-      await attachSession(page, session.id);
-      await waitForTermText(page, "FAKE-AGENT READY");
-      await cue(page, "links");
-      const pillBox = await measureLaunchPill(page);
-      const pill = page.locator(".launch-sequence-indicator");
-      const refusal = page.locator('#terminal .terminal-file-message[data-outcome="disclosure-refusal"]');
-      const webTarget = "https://example.test/pill-covered";
-      const links = [
-        { label: "/output/report.txt", target: null, disclosure: "#terminal .terminal-file-target", shows: "8 B", operation: "download" as const },
-        { label: "PILL-WEB", target: webTarget, disclosure: "#terminal .terminal-link-target:not(.terminal-file-target)", shows: webTarget, operation: "open" as const },
-      ];
-      for (const link of links) {
-        const transfersBefore = transfers;
-        const opensBefore = await opens();
-        const point = await abovePill(page, link.label, link.target, pillBox);
-        await expect(page.locator(link.disclosure)).toContainText(link.shows);
-        await expectLinkUnderPointer(page, point, link.label);
-        // Press first, then arm: the pill goes up between the press and the
-        // release that activates the link. The release's own click event
-        // cancels the sequence afterwards, which is why this order matters.
-        await page.mouse.down();
-        await page.keyboard.press("Control+Shift+KeyX");
-        await expect(pill).toBeVisible();
-        await assertDisclosureGeometry(page, link.disclosure, point, true, ".launch-sequence-indicator");
-        await expect(refusal).toHaveCount(0);
-        await page.mouse.up();
-        await expect(refusal).toContainText(`cannot ${link.operation}:`);
-        await expect(refusal).toContainText("covered by another Farhelm surface");
-        expect(transfers, "refusal is the completed admission boundary").toBe(transfersBefore);
-        expect(await opens()).toEqual(opensBefore);
-
-        // The pointer still rests on the link, so the explanation stays
-        // raised. At this viewport the pill (centered in the main area) and
-        // the refusal (along the terminal's top) do not overlap, so this
-        // re-arm compares only their layers, not what actually paints.
-        await expect(pill).toHaveCount(0);
-        await page.keyboard.press("Control+Shift+KeyX");
-        await expect(pill).toBeVisible();
-        await assertCoveredRefusal(page, link.operation, ".launch-sequence-indicator");
-        await page.keyboard.press("Escape");
-        await expect(pill).toHaveCount(0);
-
-        // A fresh hover of the same link with no pill up is admitted.
-        const again = await cell(page, link.label);
-        await expect(page.locator(link.disclosure)).toContainText(link.shows);
-        if (link.target === null) {
-          const downloaded = page.waitForEvent("download");
-          await page.mouse.click(again.x, again.y);
-          expect((await downloaded).suggestedFilename()).toBe("report.txt");
-          expect(transfers).toBe(transfersBefore + 1);
-        } else {
-          await page.mouse.click(again.x, again.y);
-          expect(await opens()).toEqual([...opensBefore, link.target]);
+  for (const surface of ["pill", "suggestions"] as const) {
+    test(`the quick-launch ${surface} armed during a press covers file and web destinations`, async ({ page, request }) => {
+      await page.setViewportSize({ width: 1280, height: 800 });
+      const opens = await probeDisclosureOpens(page);
+      const word = surface === "suggestions" ? `link-cover-${Date.now()}` : "";
+      const coverSelector = surface === "suggestions" ? ".launch-sequence-candidates" : ".launch-sequence-indicator";
+      let sessionId: string | undefined;
+      let bodyFailed = false;
+      let transfers = 0;
+      try {
+        await patchPreferences(request, { terminal_link_click: null });
+        if (word) {
+          const saved = await request.put(`/api/templates/${encodeURIComponent(word)}`, { data: { kind: "command", command: "true" } });
+          expect(saved.ok(), await saved.text()).toBe(true);
         }
+        const session = await createSession(request, { title: `pill-covered-${Date.now()}`, cwd: "/tmp", invocation });
+        sessionId = session.id;
+        page.on("request", request => {
+          if (new URL(request.url()).pathname === `/api/sessions/${encodeURIComponent(session.id)}/files/download`) transfers++;
+        });
+        await page.route(`**/api/sessions/${encodeURIComponent(session.id)}/files/stat`, route => fulfillAsHelm(route, {
+          json: { status: "ready", host: "fixture", path: "/output/report.txt", size: 8, can_open: true },
+        }));
+        await page.route(`**/api/sessions/${encodeURIComponent(session.id)}/files/download`, route => fulfillAsHelm(route, {
+          status: 200, contentType: "application/octet-stream", body: "fixture\n",
+        }));
+        await page.goto("/");
+        await attachSession(page, session.id);
+        await waitForTermText(page, "FAKE-AGENT READY");
+        await cue(page, "links");
+        const pillBox = await measureLaunchCover(page, coverSelector, word);
+        const pill = page.locator(".launch-sequence-indicator");
+        const refusal = page.locator('#terminal .terminal-file-message[data-outcome="disclosure-refusal"]');
+        const webTarget = "https://example.test/pill-covered";
+        const links = [
+          { label: "/output/report.txt", target: null, disclosure: "#terminal .terminal-file-target", shows: "8 B", operation: "download" as const },
+          { label: "PILL-WEB", target: webTarget, disclosure: "#terminal .terminal-link-target:not(.terminal-file-target)", shows: webTarget, operation: "open" as const },
+        ];
+        for (const link of links) {
+          const transfersBefore = transfers;
+          const opensBefore = await opens();
+          const point = await abovePill(page, link.label, link.target, pillBox);
+          await expect(page.locator(link.disclosure)).toContainText(link.shows);
+          await expectLinkUnderPointer(page, point, link.label);
+          // Press first, then arm: the pill goes up between the press and the
+          // release that activates the link. The release's own click event
+          // cancels the sequence afterwards, which is why this order matters.
+          await page.mouse.down();
+          await armLaunchCover(page, word);
+          await expect(pill).toBeVisible();
+          await assertDisclosureGeometry(page, link.disclosure, point, true, coverSelector, ".launch-sequence-indicator");
+          if (word) {
+            // The parent marker must not explain this refusal. Suggestions are
+            // outside its rectangle, and the disclosure intersects only the child.
+            await expect.poll(() => page.locator(link.disclosure).evaluate(el => {
+              const h = el.getBoundingClientRect();
+              const p = document.querySelector(".launch-sequence-indicator")!.getBoundingClientRect();
+              return h.left < p.right && h.right > p.left && h.top < p.bottom && h.bottom > p.top;
+            }), { message: "the destination does not intersect the already-covered parent pill" }).toBe(false);
+          }
+          await expect(refusal).toHaveCount(0);
+          await page.mouse.up();
+          await expect(refusal).toContainText(`cannot ${link.operation}:`);
+          await expect(refusal).toContainText("covered by another Farhelm surface");
+          expect(transfers, "refusal is the completed admission boundary").toBe(transfersBefore);
+          expect(await opens()).toEqual(opensBefore);
+
+          // The pointer still rests on the link, so the explanation stays
+          // raised. At this viewport the pill (centered in the main area) and
+          // the refusal (along the terminal's top) do not overlap, so this
+          // re-arm compares only their layers, not what actually paints.
+          await expect(pill).toHaveCount(0);
+          await armLaunchCover(page, word);
+          await expect(pill).toBeVisible();
+          await assertCoveredRefusal(page, link.operation, ".launch-sequence-indicator");
+          await page.keyboard.press("Escape");
+          await expect(pill).toHaveCount(0);
+
+          // A fresh hover of the same link with no pill up is admitted.
+          const again = await cell(page, link.label);
+          await expect(page.locator(link.disclosure)).toContainText(link.shows);
+          if (link.target === null) {
+            const downloaded = page.waitForEvent("download");
+            await page.mouse.click(again.x, again.y);
+            expect((await downloaded).suggestedFilename()).toBe("report.txt");
+            expect(transfers).toBe(transfersBefore + 1);
+          } else {
+            await page.mouse.click(again.x, again.y);
+            expect(await opens()).toEqual([...opensBefore, link.target]);
+          }
+        }
+      } catch (error) {
+        bodyFailed = true;
+        throw error;
+      } finally {
+        await cleanupOwnedSteps(bodyFailed, [
+          ["held mouse button", () => page.mouse.up()],
+          ["owned sequence", () => page.keyboard.press("Escape")],
+          ["session", () => sessionId && cleanupSession(request, sessionId)],
+          ["link preference", () => patchPreferences(request, { terminal_link_click: null })],
+          ["candidate template", async () => {
+            if (!word) return;
+            const deleted = await request.delete(`/api/templates/${encodeURIComponent(word)}`);
+            expect(deleted.ok() || deleted.status() === 404).toBe(true);
+          }],
+        ]);
       }
-    } catch (error) {
-      bodyFailed = true;
-      throw error;
-    } finally {
-      await cleanupOwnedSteps(bodyFailed, [
-        ["session", () => sessionId && cleanupSession(request, sessionId)],
-        ["link preference", () => patchPreferences(request, { terminal_link_click: null })],
-      ]);
-    }
-  });
+    });
+  }
 
   for (const first of ["refusal", "confirmation"] as const) {
     /**

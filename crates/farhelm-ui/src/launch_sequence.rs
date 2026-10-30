@@ -2,7 +2,9 @@
 //!
 //! The physical keys and modifier masks live here so the capture listener
 //! and every Rust hint receive the same definition. The queue is shared by the
-//! sidebar relays and main pane's indicator. Enter captures the bindings shown
+//! sidebar relays and main pane's indicator. Rust also owns typed words and
+//! advisory completion; JavaScript forwards input without keeping a text copy.
+//! Enter captures the bindings shown
 //! by that indicator before the dispatcher reads current template definitions.
 //! A shortcut moved elsewhere cannot substitute a different template unseen.
 
@@ -264,9 +266,9 @@ pub(crate) const TEMPLATE_SHORTCUTS: TemplateShortcutDefinition = TemplateShortc
     },
 };
 
-/// Direct shortcuts resolve fresh bindings; a completed sequence supplies names
-/// from its displayed snapshot. Both use current template definitions, so a
-/// renamed or deleted template cannot launch from a stale captured definition.
+/// Direct shortcuts resolve fresh bindings; a completed sequence captures its
+/// number/bolt names from the displayed snapshot and resolves typed words at
+/// Enter. Neither path launches an advisory catalog's stale definition.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum TemplateReference {
     /// The helm-wide ⚡ mark, read at dispatch time.
@@ -275,6 +277,9 @@ pub(crate) enum TemplateReference {
     Number(String),
     /// A switcher row names a template from its snapshot; resolve it afresh.
     Name(String),
+    /// A word, or a full Tab completion, matched against the Enter-time catalog.
+    /// Unlike `Name`, a typed reference allows the specified case/prefix lookup.
+    Typed(String),
     /// A sequence showed an absent binding. Keep it absent after a fresh read;
     /// `Some` identifies a number key and `None` identifies the bolt mark.
     Unbound(Option<String>),
@@ -335,10 +340,10 @@ pub(crate) enum ShortcutAdmission {
 /// Decide what one relay click enqueues, given whether live state refuses
 /// new work right now.
 ///
-/// An empty batch only comes from a sequence's Enter whose queue the app never
-/// filled: Begin was refused from live state while the page, rendered before
-/// that state, still armed and queued entries. The page captured a snapshot
-/// for that Enter all the same, so it drains like any refused keyboard press.
+/// An empty batch can be an intentionally empty sequence, or an Enter whose
+/// Begin the app refused from live state while the older page still armed.
+/// Both presses captured a JS snapshot, so both must drain it even though
+/// neither has a template to apply. Otherwise the next press takes this one.
 pub(crate) fn shortcut_admission(
     origin: QuickLaunchOrigin,
     references: &[TemplateReference],
@@ -385,13 +390,13 @@ impl PartialTemplateBanner {
 }
 
 impl TemplateReference {
-    /// Read the binding used by the indicator and by sequence capture alike.
+    /// Read a raw binding name or typed spelling for display and lookup.
     /// An explicitly unbound reference cannot gain authority from newer settings.
     /// Return a raw lookup key; the indicator still escapes this borrowed spelling.
     fn name<'a>(&'a self, preferences: &'a crate::api::Preferences) -> Option<&'a str> {
         match self {
-            // References are exact lookup keys, including the DOM snapshot
-            // captured at Enter; display escaping must not change that key.
+            // Even when a typed spelling permits prefix matching later,
+            // display escaping must never replace its raw lookup identity.
             Self::Bolt => preferences
                 .quick_launch_template
                 .as_ref()
@@ -400,7 +405,7 @@ impl TemplateReference {
                 .template_shortcuts
                 .get(key)
                 .map(crate::peer::PeerText::raw),
-            Self::Name(name) => Some(name),
+            Self::Name(name) | Self::Typed(name) => Some(name),
             Self::Unbound(_) => None,
         }
     }
@@ -409,7 +414,8 @@ impl TemplateReference {
 /// Capture the names shown at Enter, before any awaited preference read.
 /// Keep order and duplicates, including absent bindings: a key newly assigned
 /// elsewhere must still refuse if the indicator showed it as unbound. Names
-/// remain subject to the dispatcher's current-catalog lookup.
+/// remain subject to the dispatcher's current-catalog lookup. Typed spellings
+/// retain their variant so capture cannot accidentally make them exact-only.
 pub(crate) fn capture_sequence_bindings(
     references: &[TemplateReference],
     preferences: &crate::api::Preferences,
@@ -417,7 +423,9 @@ pub(crate) fn capture_sequence_bindings(
     references
         .iter()
         .map(|reference| {
-            if let Some(name) = reference.name(preferences) {
+            if matches!(reference, TemplateReference::Typed(_)) {
+                reference.clone()
+            } else if let Some(name) = reference.name(preferences) {
                 TemplateReference::Name(name.to_owned())
             } else {
                 match reference {
@@ -495,6 +503,8 @@ pub(crate) async fn shortcut_context_snapshot() -> Option<ShortcutContextSnapsho
 ///
 /// A missing binding or deleted template refuses the whole sequence. The
 /// returned definitions retain order and duplicates for stacking on a draft.
+/// Resolve typed words first with `resolve_typed_references`, so their refusal
+/// is reported before this exact-name/binding pass can return an unbound hint.
 pub(crate) fn resolve_template_references(
     references: &[TemplateReference],
     preferences: &crate::api::Preferences,
@@ -512,14 +522,176 @@ pub(crate) fn resolve_template_references(
         .collect()
 }
 
-/// `None` is idle; an empty vector is an accepted prefix. Repetition and
+/// Match hints in lookup order without letting a presentation cap decide
+/// whether a word is ambiguous. Preserve catalog order inside each tier.
+fn matching_template_names<'a>(word: &str, names: &'a [String]) -> Vec<&'a str> {
+    if word.is_empty() {
+        return Vec::new();
+    }
+    let folded = word.to_lowercase();
+    let mut matches = Vec::new();
+    for tier in 0..3 {
+        for name in names {
+            let lower = name.to_lowercase();
+            let actual_tier = if name == word {
+                0
+            } else if lower == folded {
+                1
+            } else if lower.starts_with(&folded) {
+                2
+            } else {
+                continue;
+            };
+            if actual_tier == tier && !matches.contains(&name.as_str()) {
+                matches.push(name.as_str());
+            }
+        }
+    }
+    matches
+}
+
+/// Exact spelling wins over folded exact matches, which win over prefixes.
+/// The error retains every candidate in the winning tier, not just the five
+/// names the indicator has room to show. Lookup never escapes raw names.
+fn match_typed_word<'a>(word: &str, names: &'a [String]) -> Result<&'a str, String> {
+    let matches = matching_template_names(word, names);
+    if let Some(exact) = matches.iter().find(|name| **name == word) {
+        return Ok(exact);
+    }
+    let folded = word.to_lowercase();
+    let exact = matches
+        .iter()
+        .copied()
+        .filter(|name| name.to_lowercase() == folded)
+        .collect::<Vec<_>>();
+    let candidates = if exact.is_empty() { matches } else { exact };
+    match candidates.as_slice() {
+        [name] => Ok(name),
+        [] => Err(format!("No template matches \"{}\"", display_peer(word))),
+        _ => Err(format!(
+            "Template word \"{}\" is ambiguous: {}",
+            display_peer(word),
+            candidates
+                .iter()
+                .map(|name| display_peer(name))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )),
+    }
+}
+
+/// Resolve every typed word before considering non-typed binding failures.
+///
+/// Returning only an exact-reference batch prevents a valid prefix of a
+/// refused sequence from being applied. Checking words first also gives their
+/// actionable refusal precedence over an unbound number anywhere in the batch.
+/// Existing `Name` references keep exact-name lookup and its deleted-name error.
+pub(crate) fn resolve_typed_references(
+    references: &[TemplateReference],
+    templates: &[LaunchTemplate],
+) -> Result<Vec<TemplateReference>, String> {
+    let names = templates
+        .iter()
+        .map(|template| template.name.clone())
+        .collect::<Vec<_>>();
+    references
+        .iter()
+        .map(|reference| match reference {
+            TemplateReference::Typed(word) => {
+                match_typed_word(word, &names).map(|name| TemplateReference::Name(name.to_owned()))
+            }
+            _ => Ok(reference.clone()),
+        })
+        .collect()
+}
+
+/// One input event from the synchronous page relay. A bare physical number
+/// carries both identities because only Rust knows whether a word is active.
+#[derive(Debug, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub(crate) enum SequenceInput {
+    /// An ordinary printable scalar, preserving its case and Unicode spelling.
+    Character { text: String },
+    /// A bare physical number: its print extends a word, its key starts a binding.
+    Digit { digit: String, text: String },
+    /// A configured number chord commits any word before queueing its binding.
+    NumberChord { digit: String },
+    /// The configured bolt chord also commits the current word first.
+    Bolt,
+    /// Commit only the unfinished word; an empty separator adds no entry.
+    Space,
+    /// Complete now from the advisory catalog, never when a pending read returns.
+    Tab,
+    /// Remove one scalar from the word, never an already committed entry.
+    Backspace,
+}
+
+/// One accepted prefix's ordered entries, editable word and advisory names.
+/// A missing catalog means pending or failed completion, never a restriction
+/// on Enter, which reads definitions fresh through the ordinary dispatcher.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct SequenceState {
+    pub(crate) references: Vec<TemplateReference>,
+    pub(crate) word: String,
+    pub(crate) catalog: Option<Vec<String>>,
+}
+
+impl SequenceState {
+    /// Preserve the exact spelling the user queued, with no early lookup.
+    /// Tab-completed names containing spaces arrive as one entry as well.
+    pub(crate) fn commit_word(&mut self) {
+        if !self.word.is_empty() {
+            self.references
+                .push(TemplateReference::Typed(std::mem::take(&mut self.word)));
+        }
+    }
+
+    /// Apply one admitted key before any async read can overtake another key.
+    /// Backspace owns only the unfinished word; chords commit it before adding
+    /// their reference. Tab is advisory and does nothing without a unique match.
+    pub(crate) fn input(&mut self, input: SequenceInput) {
+        match input {
+            SequenceInput::Character { text } => self.word.push_str(&text),
+            SequenceInput::Digit { digit, text } => {
+                if self.word.is_empty() {
+                    self.references.push(TemplateReference::Number(digit));
+                } else {
+                    self.word.push_str(&text);
+                }
+            }
+            SequenceInput::NumberChord { digit } => {
+                self.commit_word();
+                self.references.push(TemplateReference::Number(digit));
+            }
+            SequenceInput::Bolt => {
+                self.commit_word();
+                self.references.push(TemplateReference::Bolt);
+            }
+            SequenceInput::Space => self.commit_word(),
+            SequenceInput::Backspace => {
+                self.word.pop();
+            }
+            SequenceInput::Tab => {
+                if let Some(names) = &self.catalog
+                    && let Ok(name) = match_typed_word(&self.word, names)
+                {
+                    self.references
+                        .push(TemplateReference::Typed(name.to_owned()));
+                    self.word.clear();
+                }
+            }
+        }
+    }
+}
+
+/// `None` is idle; an empty state is an accepted prefix. Repetition and
 /// ordering matter: composing the same template twice is two applications.
 #[derive(Clone, Copy)]
-pub(crate) struct LaunchSequence(pub Signal<Option<Vec<TemplateReference>>>);
+pub(crate) struct LaunchSequence(pub Signal<Option<SequenceState>>);
 
 /// The context where the prefix was accepted, for the sequence pill's verb.
 /// A sequence is cancelled when dialog ownership changes, so this remains
-/// stable through the digit presses it describes.
+/// stable through the word and shortcut input it describes.
 #[derive(Clone, Copy)]
 pub(crate) struct LaunchSequenceInLauncher(pub Signal<bool>);
 
@@ -531,7 +703,7 @@ pub(crate) fn LaunchSequenceIndicator() -> Element {
     let sequence = use_context::<LaunchSequence>().0;
     let in_launcher = use_context::<LaunchSequenceInLauncher>().0;
     let preferences = use_context::<SharedPreferences>();
-    let references = sequence();
+    let state = sequence();
     // One render publishes both names and their raw bindings. A separate
     // component could publish newer bindings before these labels arrived.
     let preferences = preferences.0.read();
@@ -540,10 +712,10 @@ pub(crate) fn LaunchSequenceIndicator() -> Element {
         "template_shortcuts": preferences.template_shortcuts,
     })
     .to_string();
-    let names = references
-        .as_deref()
-        .unwrap_or_default()
-        .iter()
+    let names = state
+        .as_ref()
+        .into_iter()
+        .flat_map(|state| state.references.iter())
         .map(|reference| {
             reference
                 .name(&preferences)
@@ -556,11 +728,22 @@ pub(crate) fn LaunchSequenceIndicator() -> Element {
                 })
         })
         .collect::<Vec<_>>();
+    let candidates = state
+        .as_ref()
+        .and_then(|state| state.catalog.as_ref().map(|catalog| (state, catalog)))
+        .map(|(state, catalog)| {
+            matching_template_names(&state.word, catalog)
+                .into_iter()
+                .take(5)
+                .map(display_peer)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
     rsx! {
         // Remain mounted while idle: rapid prefix/digit/Enter can complete
         // before the first pill render, using the last published bindings.
         span { class: "launch-sequence-bindings", hidden: true, "data-bindings": bindings }
-        if let Some(references) = references {
+        if let Some(state) = state {
         // Centered over the terminal above link destination previews
         // (app.css's z-index ladder) and transparent to the pointer, so a link
         // can still be clicked beside or under it: a link cover. A sequence
@@ -568,21 +751,30 @@ pub(crate) fn LaunchSequenceIndicator() -> Element {
         // a link's hover and its release.
         div { class: "launch-sequence-indicator", role: "status", "data-link-cover": "true",
             "data-in-launcher": if in_launcher() { "true" } else { "false" },
-            if references.is_empty() {
-                if in_launcher() {
-                    "Apply sequence: press number keys to queue templates, Enter to apply, Esc to cancel."
-                } else {
-                    "Launch sequence: press number keys to queue templates, Enter to launch, Esc to cancel."
-                }
-            } else {
+            div { class: "launch-sequence-pill",
+                span { if in_launcher() { "Apply sequence: " } else { "Launch sequence: " } }
                 span { class: "launch-sequence-names",
                     for (index, name) in names.into_iter().enumerate() {
-                        if index > 0 { " + " }
-                        bdi { dir: "auto", "{name}" }
+                        bdi { key: "{index}", class: "launch-sequence-chip", dir: "auto", "{name}" }
                     }
                 }
+                // An unfinished word is optional. `display_peer` deliberately
+                // labels empty peer values, which is not a word to show here.
+                if !state.word.is_empty() {
+                    bdi { class: "launch-sequence-word", dir: "auto", "{display_peer(&state.word)}" }
+                }
                 span { class: "launch-sequence-hint",
-                    if in_launcher() { "Enter apply · Esc cancel" } else { "Enter launch · Esc cancel" }
+                    if in_launcher() { "Type names or number keys · Tab complete · Enter apply · Esc cancel" }
+                    else { "Type names or number keys · Tab complete · Enter launch · Esc cancel" }
+                }
+            }
+            if !candidates.is_empty() {
+                // On the page this box extends beyond the indicator's bounds.
+                // Its own rectangle must therefore cover terminal link targets.
+                div { class: "launch-sequence-candidates", "data-link-cover": "true",
+                    for (index, name) in candidates.into_iter().enumerate() {
+                        bdi { key: "{index}", dir: "auto", "{name}" }
+                    }
                 }
             }
         }
@@ -593,6 +785,225 @@ pub(crate) fn LaunchSequenceIndicator() -> Element {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Give lookup tests distinguishable definitions without introducing
+    /// launch eligibility, which remains the ordinary dispatcher's concern.
+    fn catalog(names: &[&str]) -> Vec<LaunchTemplate> {
+        names
+            .iter()
+            .map(|name| LaunchTemplate {
+                name: (*name).into(),
+                fields: farhelm_proto::launcher::TemplateFields {
+                    name: Some(format!("session from {name}")),
+                    ..Default::default()
+                },
+            })
+            .collect()
+    }
+
+    /// Rust owns the word even when typing outruns the first indicator render.
+    /// Bare digits extend a word, but chords commit it before their reference;
+    /// Backspace after a separator must never remove an already queued entry.
+    #[test]
+    fn word_input_keeps_chords_digits_and_duplicates_in_order() {
+        let mut state = SequenceState::default();
+        state.input(SequenceInput::Digit {
+            digit: "1".into(),
+            text: "1".into(),
+        });
+        state.input(SequenceInput::Character {
+            text: "Codex".into(),
+        });
+        state.input(SequenceInput::Digit {
+            digit: "2".into(),
+            text: "2".into(),
+        });
+        state.input(SequenceInput::NumberChord { digit: "3".into() });
+        state.input(SequenceInput::Character {
+            text: "project".into(),
+        });
+        state.input(SequenceInput::Bolt);
+        state.input(SequenceInput::Backspace);
+        state.input(SequenceInput::Space);
+        state.input(SequenceInput::Character {
+            text: "project".into(),
+        });
+        state.commit_word();
+        assert_eq!(
+            state.references,
+            vec![
+                TemplateReference::Number("1".into()),
+                TemplateReference::Typed("Codex2".into()),
+                TemplateReference::Number("3".into()),
+                TemplateReference::Typed("project".into()),
+                TemplateReference::Bolt,
+                TemplateReference::Typed("project".into()),
+            ]
+        );
+        assert!(state.word.is_empty());
+    }
+
+    /// Backspace's scalar contract includes non-BMP characters and leaves the
+    /// committed prefix intact, including when the editable word becomes empty.
+    #[test]
+    fn backspace_edits_only_the_unfinished_unicode_word() {
+        let mut state = SequenceState::default();
+        state.input(SequenceInput::Character {
+            text: "base".into(),
+        });
+        state.input(SequenceInput::Space);
+        state.input(SequenceInput::Character {
+            text: "a🦀".into()
+        });
+        state.input(SequenceInput::Backspace);
+        assert_eq!(state.word, "a");
+        state.input(SequenceInput::Backspace);
+        state.input(SequenceInput::Backspace);
+        assert_eq!(state.references, [TemplateReference::Typed("base".into())]);
+        assert!(state.word.is_empty());
+    }
+
+    /// Completion is advisory: an early Tab is not replayed when names arrive,
+    /// an empty word does nothing, and a spaced name is one queued reference.
+    #[test]
+    fn tab_requires_a_current_unique_word_and_keeps_spaced_names_whole() {
+        let mut state = SequenceState::default();
+        state.input(SequenceInput::Character { text: "old".into() });
+        state.input(SequenceInput::Tab);
+        assert_eq!(state.word, "old");
+        assert!(state.references.is_empty());
+        state.catalog = Some(vec!["old project".into()]);
+        assert_eq!(
+            state.word, "old",
+            "catalog arrival must not replay the earlier Tab"
+        );
+        state.input(SequenceInput::Tab);
+        assert_eq!(
+            state.references,
+            [TemplateReference::Typed("old project".into())]
+        );
+        state.input(SequenceInput::Tab);
+        assert_eq!(
+            state.references.len(),
+            1,
+            "an empty word must not complete a sole name"
+        );
+        assert!(resolve_typed_references(&state.references, &catalog(&["old project"])).is_ok());
+        assert!(
+            resolve_typed_references(&state.references, &catalog(&["replacement"])).is_err(),
+            "Enter cannot launch the advisory catalog's deleted definition"
+        );
+        state.word = "co".into();
+        state.catalog = Some(vec!["codex".into(), "codex-yolo".into()]);
+        state.input(SequenceInput::Tab);
+        assert_eq!(state.word, "co");
+        assert_eq!(state.references.len(), 1);
+    }
+
+    /// Exact spelling beats longer prefixes and case competitors; folded exact
+    /// precedes prefix uniqueness. The specified Unicode operation is lowercase,
+    /// not full case folding or ASCII-only normalization.
+    #[test]
+    fn typed_matching_respects_exact_case_and_unicode_lowercase() {
+        let names = ["codex-yolo", "Codex", "codex", "İstanbul", "Straße"].map(str::to_owned);
+        assert_eq!(match_typed_word("Codex", &names), Ok("Codex"));
+        assert_eq!(match_typed_word("codex", &names), Ok("codex"));
+        let error = match_typed_word("CODEX", &names).unwrap_err();
+        assert!(error.contains("CODEX") && error.contains("Codex") && error.contains("codex"));
+        assert!(
+            !error.contains("codex-yolo"),
+            "the folded exact tier caused this ambiguity"
+        );
+        assert_eq!(match_typed_word("CODEX-Y", &names), Ok("codex-yolo"));
+        assert_eq!(match_typed_word("i\u{307}s", &names), Ok("İstanbul"));
+        assert!(match_typed_word("istan", &names).is_err());
+        assert!(match_typed_word("STRASSE", &names).is_err());
+        assert_eq!(
+            match_typed_word("CODEX", &["codex-yolo".into(), "Codex".into()]),
+            Ok("Codex")
+        );
+    }
+
+    /// A small candidate box must not silently make a broad prefix unique.
+    /// Exact-first ordering remains stable, duplicates are names rather than
+    /// extra competitors, and unrelated names never appear as suggestions.
+    #[test]
+    fn candidates_keep_all_matches_for_ambiguity_and_order_by_match_tier() {
+        let names = [
+            "co-five",
+            "elsewhere",
+            "CO",
+            "co-one",
+            "co",
+            "co-two",
+            "co-three",
+            "co-four",
+            "co",
+        ]
+        .map(str::to_owned);
+        assert_eq!(
+            matching_template_names("co", &names),
+            [
+                "co", "CO", "co-five", "co-one", "co-two", "co-three", "co-four"
+            ]
+        );
+        assert!(matching_template_names("missing", &names).is_empty());
+        assert!(matching_template_names("", &names).is_empty());
+        let broad = catalog(&[
+            "co-one", "co-two", "co-three", "co-four", "co-five", "co-six",
+        ]);
+        let error =
+            resolve_typed_references(&[TemplateReference::Typed("co".into())], &broad).unwrap_err();
+        assert!(
+            error.contains("co-six"),
+            "the sixth match still belongs in the ambiguity"
+        );
+        assert_eq!(
+            match_typed_word("co-one", &["co-one".into(), "co-one".into()]),
+            Ok("co-one")
+        );
+    }
+
+    /// Word errors must win even after an unbound key, and no partially resolved
+    /// batch may escape. Exact picker names remain exact; typed spellings survive
+    /// binding capture so Enter can use fresh definitions and preserve duplicates.
+    #[test]
+    fn typed_errors_precede_unbound_references_without_changing_exact_names() {
+        let templates = catalog(&["project", "codex", "codex-yolo"]);
+        let preferences = crate::api::Preferences::default();
+        for word in ["unknown", "co"] {
+            let references = [
+                TemplateReference::Unbound(Some("9".into())),
+                TemplateReference::Typed("project".into()),
+                TemplateReference::Typed(word.into()),
+            ];
+            let captured = capture_sequence_bindings(&references, &preferences);
+            assert_eq!(captured, references);
+            let error = resolve_typed_references(&captured, &templates).unwrap_err();
+            assert!(error.contains(word));
+            if word == "co" {
+                assert!(error.contains("codex") && error.contains("codex-yolo"));
+            }
+        }
+        let exact = [TemplateReference::Name("Project".into())];
+        let exact = resolve_typed_references(&exact, &templates).unwrap();
+        assert!(resolve_template_references(&exact, &preferences, &templates).is_none());
+        let typed = [
+            TemplateReference::Typed("PROJ".into()),
+            TemplateReference::Typed("codex".into()),
+            TemplateReference::Typed("PROJ".into()),
+        ];
+        let typed = capture_sequence_bindings(&typed, &preferences);
+        let resolved = resolve_typed_references(&typed, &templates).unwrap();
+        assert_eq!(
+            resolve_template_references(&resolved, &preferences, &templates),
+            Some(vec![
+                templates[0].clone(),
+                templates[1].clone(),
+                templates[0].clone()
+            ])
+        );
+    }
 
     /// Physical Enter captures raw template names from the published DOM JSON.
     /// A visible escape in the indicator must not replace that lookup identity,
