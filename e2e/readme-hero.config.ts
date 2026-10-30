@@ -46,6 +46,9 @@ export default defineConfig({
     name: "chromium",
     use: {
       ...devices["Desktop Chrome"],
+      // Dark, like every docs screenshot: the app follows the device's
+      // appearance, and Playwright emulates light unless told otherwise.
+      colorScheme: "dark",
       viewport: { width: scenario.viewport.width, height: scenario.viewport.height },
       deviceScaleFactor: scenario.viewport.scale,
     },
