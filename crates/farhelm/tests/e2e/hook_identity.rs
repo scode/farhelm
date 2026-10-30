@@ -1679,8 +1679,11 @@ async fn hooks_can_be_disabled_by_kind() {
     let (_chan, _rx, seen) = attach_ready(&h, &allowed).await;
     let argv = argv_marker(&seen);
     assert!(
-        argv.contains("--dangerously-bypass-hook-trust"),
-        "codex IS in the allow-list, so its launch must carry the hook flags: {argv}"
+        shell_words::split(&argv)
+            .expect("fixture argv")
+            .windows(2)
+            .any(|pair| pair == ["--no-daemon", "--dangerously-bypass-hook-trust"]),
+        "codex must keep commands in its session and carry the allowed hook flags: {argv}"
     );
     assert_eq!(
         snapshot_of(&h, &allowed.id).await.kind,

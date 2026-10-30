@@ -3324,6 +3324,48 @@ refusal. No global geometry cache or new asset file is introduced.
   requiring an exact-record check was established, so admission and Resume read neither Muse's session files nor its
   live session index. The callback UUID alone fills `resume <uuid>` under the pin contract.
 
+  **Codex without the shared server.** Codex's `{farhelm_args}` always starts with `--no-daemon`, including when its
+  hook is disabled or skipped. Its commands must inherit this Farhelm session's environment and stay under this
+  session's process ownership. A shared server instead keeps the environment of the client that started it; in
+  particular it can retain another session's `FARHELM_SESSION_ID` and `FARHELM_SESSION_TOKEN`. Its commands, hooks, MCP
+  servers and helpers then belong to that server rather than to each attaching terminal client, breaking Farhelm's
+  session attribution and stop boundary. These are consequences of sharing execution, not observations from a live
+  daemon test. The source inspected was OpenAI Codex
+  [`rust-v0.163.0`, commit `83086188`](https://github.com/openai/codex/tree/83086188ae0614bd882818ff1aa23f3194962012):
+  `codex-rs/app-server-daemon/README.md` documents the inherited environment and lack of per-client environment
+  isolation; `codex-rs/app-server-daemon/src/background_command.rs` preserves the starting environment (making
+  process-scoped paths absolute), and `codex-rs/app-server-daemon/src/backend/pid_start.rs` spawns the server with
+  `setsid()` on Unix. That detaches its Unix session and process group; it does not establish a separate Farhelm
+  ownership boundary for each client.
+
+  The hook flags already force embedded mode in that source, but only as a side effect:
+  `codex-rs/tui/src/daemon_startup.rs` excludes both `--dangerously-bypass-hook-trust` and CLI configuration overrides
+  outside a narrow allowlist, which excludes `features.hooks` and `hooks.*`. With hooks off, neither exclusion protects
+  Farhelm; a future Codex could also widen the allowlist. `--no-daemon` is the explicit supported switch, declared in
+  `codex-rs/tui/src/cli.rs`. The inspected version has no equivalent config key or environment variable:
+  `features.daemon_auto_start=false` prevents starting a missing server but still attaches to an existing one
+  (`codex-rs/tui/src/startup_orchestration.rs`). Auto-start defaults to true (`codex-rs/features/src/lib.rs`). The
+  explicit flag disables the auto-start path that constructs the "Running without the shared background server" warning,
+  so that warning disappears and the flag adds no line of its own (`codex-rs/tui/src/startup_orchestration.rs`,
+  `codex-rs/tui/src/app/startup.rs`). The separate hook-trust warning remains when the hook's bypass is passed.
+
+  Every spawn re-expands the stored `{farhelm_args}` ("Launch kinds: one resolved launch"), so an existing agent or
+  declared-Codex command session gains the flag on its next start, restart or resume; an already-running process keeps
+  its old command. The flag precedes the hook tail in `CodexIntegration::farhelm_args`, preserving that tail's hooked
+  verdict and exact log decision. It is absent from `hook_argv` and from the frozen legacy injection: a legacy session
+  can still use the shared server when hooks are off or its hook injection is skipped, including for a bare `--`.
+
+  Farhelm never parses a custom command to make the flag fit. In the inspected Codex, `codex-rs/cli/src/main.rs` tests
+  it before and after `resume` and `fork`, but a command that places `{farhelm_args}` after `exec` fails:
+  `codex-rs/exec/src/cli.rs` and its flattened `codex-rs/utils/cli/src/shared_options.rs` declare no such flag (exec
+  already uses an in-process server, `codex-rs/exec/src/lib.rs`). Commands using `--remote`, `codex agents`, or
+  `codex queue` also refuse it (`codex-rs/cli/src/main.rs`, `codex-rs/tui/src/session_queue_commands.rs`, with rejection
+  tests in `codex-rs/cli/tests/features.rs`). These are documented limitations, not shape checks added to Farhelm. The
+  flag first shipped in stable Codex 0.156.0: `codex-rs/tui/src/cli.rs` has it at
+  [`rust-v0.156.0`](https://github.com/openai/codex/blob/rust-v0.156.0/codex-rs/tui/src/cli.rs) and not at
+  [`rust-v0.155.1`](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/tui/src/cli.rs). Older Codex fails to
+  start; Farhelm always passes the flag without version probing, consistent with SPEC.md, "Supported user environments".
+
   **The per-launch identity hook.** Claude Code's `/clear`, Codex's `/new`, and Muse's `/clear` or `/new` can replace
   the conversation inside a live process. Farhelm needs the agent's explicit report so Resume does not return to the
   discarded conversation. All three vendors fire a `SessionStart` hook whose payload carries that id and accept a hook
@@ -3334,35 +3376,36 @@ refusal. No global geometry cache or new asset file is introduced.
   internally so the persisted declaration keeps invoking the same command, while the Pi/OMP assets pass theirs on the
   spawned command line and keep their JSON `vendor` field purely as a consistency check. Claude takes `SessionStart` and
   `Stop` entries in `--settings <json>`, each with a 60-second timeout; Codex takes
-  `--dangerously-bypass-hook-trust -c features.hooks=true -c hooks.SessionStart=… -c hooks.Stop=…`. Muse takes
-  `-c hooks=<JSON>` with Claude-shaped command arrays for `SessionStart` and `Stop`, each with a 60-second timeout. Muse
-  1.4.14 is the verified minimum; Farhelm does not probe versions or add compatibility code for stale harnesses
-  (SPEC.md, "Supported user environments"). No Muse plugin installation, approval or configuration write is needed.
-  Per-launch is the whole point: nothing is written to `~/.claude` or to Codex's active configuration home
-  (`$CODEX_HOME` when set, `~/.codex` otherwise), no trust state is left behind, and flags cannot outlive the process
-  they were passed to — which is what keeps SPEC.md's no-agent-configuration rule intact rather than merely bent. The
-  costs are accepted deliberately, and both are scoped to the launches that actually carry the injected flags rather
-  than to Codex launches in general: on those, Codex prints a hook-trust warning line above its composer, and with trust
-  bypassed any hook the user has in that same configuration home but has not trusted runs too. The same bypass covers a
-  trusted project's own `.codex/` hooks: Codex loads a project's hooks only once the folder is trusted (Farhelm's
-  managed-checkout Codex trust setting or the user's own answer to Codex's trust prompt), and on an injected launch they
-  then run without Codex's per-hook review. That is accepted because trusting a workspace already hands its Codex
-  configuration, MCP servers included, the ability to run commands, and because skipping injection there would drop
-  conversation identity, and so resume, for trusted checkouts. It is accepted only until hook installation becomes an
-  explicit step surfaced to the user, where the user is told what is being installed and accepts specific hooks; after
-  that, launches no longer pass the per-launch bypass. Codex fires `SessionStart` at the first prompt rather than at
-  process start, so a Codex session's identity arrives only once the user has typed something, where Claude's arrives at
-  startup. Muse also reports at the first prompt. The flags go where the launch's `{farhelm_args}` stands (see "Launch
-  kinds: one resolved launch"); nothing reads the rest of the command. Only a legacy session, from before launch kinds,
-  still gets the previous release's injection, appended after its argv, and for it these invocation shapes disqualify a
-  launch, which is skipped with a logged reason rather than made to work: an argv that already carries `--settings`
-  (Claude honors only the last one, so injecting ours would silently drop the user's), an argv already steering Codex's
-  own hook configuration (a second bypass flag risks a rejected command line, and the `hooks.`/`features.hooks` tables
-  are the user's once they touch them), an argv already configuring Muse's `hooks` or `hooks.*` through `-c` (those
-  settings belong to the user), and — for any of these vendors — an argv containing a bare `--` (our flags would become
-  prompt text). `FARHELM_AGENT_HOOKS` in the supervisor's environment — `all`, `none`, or a comma list of kinds — turns
-  injection off wholesale or per kind, read once at supervisor start and carried as a seam value. Without an accepted
-  report, a new session cannot be restarted; no nearby record can supply a substitute identity.
+  `--dangerously-bypass-hook-trust -c features.hooks=true -c hooks.SessionStart=… -c hooks.Stop=…`, after the
+  independent `--no-daemon` argument described in "Codex without the shared server". Muse takes `-c hooks=<JSON>` with
+  Claude-shaped command arrays for `SessionStart` and `Stop`, each with a 60-second timeout. Muse 1.4.14 is the verified
+  minimum; Farhelm does not probe versions or add compatibility code for stale harnesses (SPEC.md, "Supported user
+  environments"). No Muse plugin installation, approval or configuration write is needed. Per-launch is the whole point:
+  nothing is written to `~/.claude` or to Codex's active configuration home (`$CODEX_HOME` when set, `~/.codex`
+  otherwise), no trust state is left behind, and flags cannot outlive the process they were passed to — which is what
+  keeps SPEC.md's no-agent-configuration rule intact rather than merely bent. The costs are accepted deliberately, and
+  both are scoped to the launches that actually carry the injected flags rather than to Codex launches in general: on
+  those, Codex prints a hook-trust warning line above its composer, and with trust bypassed any hook the user has in
+  that same configuration home but has not trusted runs too. The same bypass covers a trusted project's own `.codex/`
+  hooks: Codex loads a project's hooks only once the folder is trusted (Farhelm's managed-checkout Codex trust setting
+  or the user's own answer to Codex's trust prompt), and on an injected launch they then run without Codex's per-hook
+  review. That is accepted because trusting a workspace already hands its Codex configuration, MCP servers included, the
+  ability to run commands, and because skipping injection there would drop conversation identity, and so resume, for
+  trusted checkouts. It is accepted only until hook installation becomes an explicit step surfaced to the user, where
+  the user is told what is being installed and accepts specific hooks; after that, launches no longer pass the
+  per-launch bypass. Codex fires `SessionStart` at the first prompt rather than at process start, so a Codex session's
+  identity arrives only once the user has typed something, where Claude's arrives at startup. Muse also reports at the
+  first prompt. The flags go where the launch's `{farhelm_args}` stands (see "Launch kinds: one resolved launch");
+  nothing reads the rest of the command. Only a legacy session, from before launch kinds, still gets the previous
+  release's injection, appended after its argv, and for it these invocation shapes disqualify a launch, which is skipped
+  with a logged reason rather than made to work: an argv that already carries `--settings` (Claude honors only the last
+  one, so injecting ours would silently drop the user's), an argv already steering Codex's own hook configuration (a
+  second bypass flag risks a rejected command line, and the `hooks.`/`features.hooks` tables are the user's once they
+  touch them), an argv already configuring Muse's `hooks` or `hooks.*` through `-c` (those settings belong to the user),
+  and — for any of these vendors — an argv containing a bare `--` (our flags would become prompt text).
+  `FARHELM_AGENT_HOOKS` in the supervisor's environment — `all`, `none`, or a comma list of kinds — turns injection off
+  wholesale or per kind, read once at supervisor start and carried as a seam value. Without an accepted report, a new
+  session cannot be restarted; no nearby record can supply a substitute identity.
   `website/src/content/docs/docs/how-it-works/agent-hook-injection.md` is the user-facing account of the same mechanism.
   The injected command line outlives the binary that wrote it, so it is part of what newer binaries keep accepting (see
   "What running sessions hold across versions").

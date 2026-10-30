@@ -490,9 +490,11 @@ pub trait AgentIntegration: Send + Sync {
     fn inject_hooks(&self, argv: Vec<String>, policy: &HookPolicy<'_>) -> HookInjection;
 
     /// What `{farhelm_args}` expands to for a launch of this kind: the
-    /// arguments that turn on its conversation reporting (and the
-    /// instructions pointer), plus the settings its reporter reads from the
-    /// environment once an argument has turned it on.
+    /// launch integration arguments, including conversation reporting and
+    /// the instructions pointer, plus the settings its reporter reads from
+    /// the environment once an argument has turned it on. Codex also gets
+    /// `--no-daemon` when hooks are off: process ownership is independent of
+    /// reporting.
     ///
     /// The launch says where the arguments go, by where it put the
     /// placeholder, and `phase` says which of its commands is starting;
@@ -551,8 +553,8 @@ impl FarhelmArgs {
     }
 }
 
-/// `{farhelm_args}` for the kinds whose integration is one tail of hook
-/// arguments from [`AgentIntegration::hook_argv`] (Claude, Codex, Muse, Grok): the
+/// The hook portion of `{farhelm_args}` for kinds with a tail from
+/// [`AgentIntegration::hook_argv`] (Claude, Codex, Muse, Grok): the
 /// opt-out, then the executable path, then the tail. Unlike
 /// [`inject_hook_argv_tail`] nothing here looks at the user's command; a
 /// command launch puts `{farhelm_args}` where its command can take them.
@@ -629,7 +631,7 @@ pub struct HookPolicy<'a> {
     /// The farhelm executable path, or `None` when there is none as text to
     /// embed in a vendor's configuration. A supervisor refuses to start on a
     /// path that is not valid UTF-8, so it always passes one; `None` is this
-    /// layer's own contract (inject nothing), kept for callers and tests.
+    /// layer's own contract (inject no hook), kept for callers and tests.
     pub exe: Option<&'a str>,
     /// The materialized reporter extension for kinds that load one (Pi,
     /// OMP), or `None` when it is unavailable or the kind has none.
@@ -1319,7 +1321,11 @@ impl AgentIntegration for CodexIntegration {
     }
 
     fn farhelm_args(&self, _phase: LaunchPhase, policy: &HookPolicy<'_>) -> FarhelmArgs {
-        hook_tail_args(self, AgentKind::Codex, policy)
+        let mut expansion = hook_tail_args(self, AgentKind::Codex, policy);
+        // Keep commands in this session's process tree and environment even
+        // without hooks; see SPEC_impl.md, "Codex without the shared server".
+        expansion.args.insert(0, "--no-daemon".to_string());
+        expansion
     }
 
     fn inject_hooks(&self, argv: Vec<String>, policy: &HookPolicy<'_>) -> HookInjection {
@@ -2698,6 +2704,50 @@ mod tests {
         let mut resume = vec![program.to_string()];
         resume.extend(suffix.iter().map(|element| element.to_string()));
         Some(resume)
+    }
+
+    /// Codex's process ownership flag survives every hook decision on start
+    /// and resume, while the hook's success or exact skip reason stays intact.
+    /// Otherwise disabling reporting could also move commands outside their
+    /// Farhelm session. A missing executable models the non-UTF-8 hook seam;
+    /// supervisor startup rejects such paths before a live launch reaches it.
+    #[test]
+    fn codex_no_daemon_preserves_the_hook_decision() {
+        for phase in [LaunchPhase::Start, LaunchPhase::Resume] {
+            for (hooks, exe, skipped) in [
+                (AgentHooks::All, Some("/opt/farhelm"), None),
+                (
+                    AgentHooks::None,
+                    Some("/opt/farhelm"),
+                    Some(HOOKS_DISABLED_REASON),
+                ),
+                (AgentHooks::All, None, Some(EXE_NOT_UTF8_REASON)),
+            ] {
+                let expansion = CodexIntegration.farhelm_args(
+                    phase,
+                    &HookPolicy {
+                        hooks: &hooks,
+                        instructions: AgentInstructions::On,
+                        exe,
+                        vendor_extension: None,
+                    },
+                );
+                assert_eq!(expansion.args[0], "--no-daemon");
+                assert!(expansion.env.is_empty());
+                assert_eq!(expansion.hooked, skipped.is_none());
+                match (skipped, expansion.log) {
+                    (None, HookLog::Injected) => assert_eq!(
+                        &expansion.args[1..],
+                        CodexIntegration.hook_argv("/opt/farhelm", AgentInstructions::On)
+                    ),
+                    (Some(expected), HookLog::Skipped(actual)) => {
+                        assert_eq!(actual, expected);
+                        assert_eq!(expansion.args, ["--no-daemon"]);
+                    }
+                    _ => panic!("the ownership flag must preserve the hook log decision"),
+                }
+            }
+        }
     }
 
     /// Spec: a successful hook injection is logged as "injected" only for

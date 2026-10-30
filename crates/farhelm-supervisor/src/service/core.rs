@@ -32317,8 +32317,9 @@ exit 0
     /// launch's kind's arguments for the phase being spawned, the reporter
     /// settings travel as environment rather than argv, and nothing else in
     /// the command changes. Per kind and setting:
-    /// - Claude and Codex get their hook flags on start and resume alike,
-    ///   and nothing (not hooked) when `FARHELM_AGENT_HOOKS` excludes them;
+    /// - Claude and Codex get their hook flags on start and resume alike;
+    ///   Codex always gets `--no-daemon` first, even when hooks are off or
+    ///   their executable path is unavailable; Claude gets nothing when off;
     /// - Goose gets its reporter extension on start only, and its controls
     ///   in the environment on both; with hooks off, a start gets nothing
     ///   at all while a resume still gets `FARHELM_GOOSE_REPORTER_ENABLED=0`,
@@ -32387,21 +32388,47 @@ exit 0
             ]
         };
 
-        for kind in [AgentKind::Claude, AgentKind::Codex] {
+        for (kind, launch_args) in [
+            (AgentKind::Claude, Vec::new()),
+            (AgentKind::Codex, vec!["--no-daemon".to_string()]),
+        ] {
             for phase in [LaunchPhase::Start, LaunchPhase::Resume] {
                 let name = format!("{kind:?}").to_lowercase();
                 let tail = expected_hook_tail(kind, "/opt/farhelm", AgentInstructions::On);
                 assert_eq!(
                     expand(kind, phase, &AgentHooks::All, AgentInstructions::On),
-                    (around(&name, tail), Vec::new(), true),
+                    (
+                        around(&name, [launch_args.clone(), tail].concat()),
+                        Vec::new(),
+                        true
+                    ),
                     "{kind:?} {phase:?}"
                 );
                 assert_eq!(
                     expand(kind, phase, &AgentHooks::None, AgentInstructions::On),
-                    (around(&name, Vec::new()), Vec::new(), false),
+                    (around(&name, launch_args.clone()), Vec::new(), false),
                     "{kind:?} {phase:?} with hooks off"
                 );
             }
+        }
+
+        // None is the hook layer's non-UTF-8 executable contract. Even
+        // this skip must leave Codex's process ownership argument in place.
+        for phase in [LaunchPhase::Start, LaunchPhase::Resume] {
+            let (expanded, env, hooked, skip) = with_farhelm_args_using(
+                argv("codex"),
+                FarhelmArgsMode::Expand(phase),
+                &hook_snapshot(AgentKind::Codex),
+                &AgentHooks::All,
+                AgentInstructions::On,
+                None,
+                None,
+                "session-1",
+            );
+            assert_eq!(expanded, around("codex", vec!["--no-daemon".to_string()]));
+            assert!(env.is_empty());
+            assert!(!hooked);
+            assert!(skip.is_none(), "the unreachable path skip never notifies");
         }
 
         let extension = [

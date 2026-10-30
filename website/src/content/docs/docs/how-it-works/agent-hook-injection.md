@@ -25,6 +25,12 @@ puts these flags where the launch's `{farhelm_args}` stands and never reads the 
 they fit (see [Which launches get a reporter](#which-launches-get-a-reporter)). Without a report, Farhelm cannot offer
 to resume that new conversation.
 
+Farhelm also passes Codex `--no-daemon` before the hook arguments, even when you turn its hook off. That keeps Codex's
+commands in the session's own environment and processes instead of using Codex's shared background server, and removes
+the "Running without the shared background server" warning. See [Codex](/docs/agents/codex/#gotchas-and-quirks) for the
+minimum version and custom commands that cannot take this flag. Sessions started before Farhelm 0.22 from a typed
+command or profile retain their old launch behavior.
+
 Farhelm does not guess which conversation to resume from files on disk. See the harness notes for
 [Goose's saved reporter and manual-resume dependency](/docs/agents/goose/),
 [Pi's saved-file requirement and permission behavior](/docs/agents/pi/), and
@@ -203,8 +209,8 @@ treated as verified resume targets; no transcript is deleted or automatically se
 
 NOTE: with the bypass flag in place, any hook you have configured in Codex's active configuration home (`$CODEX_HOME`
 when it is set, `~/.codex` otherwise) but have not trusted will also run during farhelm-launched Codex sessions. If that
-is not what you want, turn injection off for Codex (below). Farhelm launches it without the bypass flag, but cannot
-capture new exact resume targets without an attributable report.
+is not what you want, turn injection off for Codex (below). Farhelm launches it without the bypass flag and keeps
+`--no-daemon`, but cannot capture new exact resume targets without an attributable report.
 
 OMP: the resume offer follows the extension's session-event reports. Typing `/new` starts a conversation that OMP 18.2.4
 persists at once, so the fresh conversation can be resumable immediately, not only after a first assistant message.
@@ -336,9 +342,9 @@ timer stops the reporter first.
 
 **3. Confirm the reporter is active.** Use `ps -o args= -p <agent pid>` for injected reporters. Claude's flags are
 `--settings` followed by a JSON blob with `SessionStart` and `Stop` entries naming the farhelm binary; Codex's are
-`--dangerously-bypass-hook-trust` plus three `-c` overrides for `features.hooks=true`, `hooks.SessionStart`, and
-`hooks.Stop`. Muse's are `-c hooks=<JSON>` with `SessionStart` and `Stop` command entries naming the Farhelm binary. For
-Grok, use `/hooks` inside Grok and confirm that the `SessionStart`, `UserPromptSubmit`, and `Stop` entries name the
+`--no-daemon --dangerously-bypass-hook-trust` plus three `-c` overrides for `features.hooks=true`, `hooks.SessionStart`,
+and `hooks.Stop`. Muse's are `-c hooks=<JSON>` with `SessionStart` and `Stop` command entries naming the Farhelm binary.
+For Grok, use `/hooks` inside Grok and confirm that the `SessionStart`, `UserPromptSubmit`, and `Stop` entries name the
 absolute Farhelm binary.
 
 In every one of these failure cases the session keeps working. The only thing at stake is which conversation the restart
