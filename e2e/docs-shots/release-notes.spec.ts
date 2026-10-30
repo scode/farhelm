@@ -23,6 +23,138 @@ import { shot } from "./shot";
 
 const PAGE = "release-notes";
 
+// v0.32.0 captions retain the release-note author's wording. These shots
+// change only local launcher drafts and navigation; no setting is saved and
+// no session starts. Device appearance follows Playwright's media preference.
+
+/** Show the new host rail and status choices beside the real staged list. */
+test("v0.32.0 host and status filters", async ({ page, request }) => {
+  const name = `${PAGE}/v0-32-0-host-status-filters`;
+  skipFrozenReleaseShot(name);
+  await page.setViewportSize({ width: 1300, height: 1000 });
+  const { director } = await open(page, request);
+  const rail = page.locator(".host-rail");
+  const statuses = page.getByRole("radiogroup", { name: "Session status", exact: true });
+  await expect(rail).toBeVisible();
+  await expect(statuses.getByRole("radio")).toHaveCount(4);
+  await director.callout(statuses,
+    "The session list can now be filtered by host, from a new host rail beside it that shows each host's mark and state, and by status, choosing All, Running, Waiting or Idle below the list's title.",
+    { side: "right", dy: 50 });
+  await shot(page, name, [rail.locator(".host-rail-all"), rail.locator(".host-rail-avatar").last(), page.locator(".session-list")], { maxWidth: 930 });
+});
+
+/** Photograph the device's light appearance without persisting an override. */
+test("v0.32.0 appearance", async ({ page, request }) => {
+  const name = `${PAGE}/v0-32-0-appearance`;
+  skipFrozenReleaseShot(name);
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.setViewportSize({ width: 1300, height: 1000 });
+  const { director } = await open(page, request);
+  await page.locator(".app-settings-toggle").click();
+  const dialog = page.locator(".app-settings-dialog");
+  await dialog.getByRole("navigation").getByRole("button", { name: "Appearance", exact: true }).click();
+  const appearance = dialog.locator("#settings-appearance");
+  await expect(appearance.getByRole("radio", { name: "System", exact: true })).toBeChecked();
+  await expect(page.locator("html")).toHaveAttribute("data-appearance", "light");
+  await dialog.focus();
+  await director.callout(appearance,
+    "Farhelm now has a light appearance. A new Appearance section in Settings follows your device's appearance with System, or overrides it on that device with Dark or Light.",
+    { side: "left", dy: 60 });
+  await shot(page, name, [appearance], { maxWidth: 930 });
+});
+
+/** Show the background-update opt-in at its real default, leaving it off. */
+test("v0.32.0 automatic host updates", async ({ page, request }) => {
+  const name = `${PAGE}/v0-32-0-automatic-host-updates`;
+  skipFrozenReleaseShot(name);
+  await page.setViewportSize({ width: 1300, height: 1100 });
+  const { director } = await open(page, request);
+  await page.locator(".app-settings-toggle").click();
+  const dialog = page.locator(".app-settings-dialog");
+  await dialog.getByRole("navigation").getByRole("button", { name: "Hosts", exact: true }).click();
+  const choice = dialog.getByRole("checkbox", { name: "Update remote hosts automatically", exact: true });
+  await expect(choice).toBeEnabled();
+  await expect(choice).not.toBeChecked();
+  await dialog.focus();
+  await director.callout(choice.locator(".."),
+    "Settings has Update remote hosts automatically, off by default, which updates remote hosts even with no window open. A failed automatic update is not retried until the host reconnects or the helm restarts.",
+    { side: "left", dy: 60 });
+  await shot(page, name, [choice.locator("..")], { maxWidth: 930 });
+});
+
+/** Host management now replaces the list, rather than covering the terminal. */
+test("v0.32.0 hosts panel", async ({ page, request }) => {
+  const name = `${PAGE}/v0-32-0-hosts-panel`;
+  skipFrozenReleaseShot(name);
+  await page.setViewportSize({ width: 1300, height: 900 });
+  const { director } = await open(page, request);
+  await page.locator(".hosts-panel-toggle").click();
+  const hosts = page.locator(".host-row");
+  await expect(hosts.first()).toBeVisible();
+  await director.callout(hosts.first(), "Hosts now opens the host management panel in place of the session list.",
+    { side: "right", dy: 30 });
+  await shot(page, name, [page.locator(".host-rail-all"), page.locator(".host-rail-avatar").last(), hosts.first(), hosts.last()], { maxWidth: 930 });
+});
+
+/** The toolbar is shown with the live terminal, so its persistent controls have context. */
+test("v0.32.0 session toolbar", async ({ page, request }) => {
+  const name = `${PAGE}/v0-32-0-session-toolbar`;
+  skipFrozenReleaseShot(name);
+  await page.setViewportSize({ width: 1270, height: 850 });
+  const { director } = await open(page, request);
+  const topbar = page.locator("header.session-topbar");
+  await expect(topbar).toBeVisible();
+  await director.callout(topbar,
+    "The toolbar at the top of an open session uses icon-and-label controls, separate menus for Restart and Replace, and zoom buttons showing the terminal text size in points, which stay visible when tabs scroll.",
+    { side: "bottom", dx: 100, dy: 110 });
+  await shot(page, name, [topbar], { maxWidth: 930 });
+});
+
+/** Show the launcher's grouped fields and sticky footer, without launching. */
+test("v0.32.0 session launcher", async ({ page, request }) => {
+  const name = `${PAGE}/v0-32-0-session-launcher`;
+  skipFrozenReleaseShot(name);
+  await page.setViewportSize({ width: 930, height: 1800 });
+  const { director } = await open(page, request);
+  const form = await openLauncherWithClaude(page);
+  // The scenario's displayed checkout is not a real host directory. A home
+  // draft gives the ordinary layout a valid destination without staging an
+  // invented validation reply or launching anything.
+  const validation = page.waitForResponse((response) => response.url().endsWith("/api/browse-directory")
+    && response.request().method() === "POST" && response.request().postDataJSON().cwd === "~"
+    && response.request().postDataJSON().membership_only === true);
+  await form.getByRole("combobox", { name: "Folder", exact: true }).fill("~");
+  expect((await validation).ok()).toBe(true);
+  await expect(form).toHaveAttribute("data-folder-check-pending", "false");
+  await expect(form.locator(".launch-composer-folder-warning")).toHaveCount(0);
+  await form.focus();
+  await director.callout(form,
+    "the session launcher groups its fields into labeled rows",
+    { side: "bottom", dy: 10 });
+  await shot(page, name, [form], { maxWidth: 930 });
+});
+
+/** Container inputs are launcher drafts; enabling them here starts no container. */
+test("v0.32.0 containerized launcher", async ({ page, request }) => {
+  const name = `${PAGE}/v0-32-0-containerized-launcher`;
+  skipFrozenReleaseShot(name);
+  await page.setViewportSize({ width: 930, height: 1800 });
+  const { director } = await open(page, request);
+  const form = await openLauncherWithClaude(page);
+  await form.locator(".destination-type-control button", { hasText: "Managed checkout" }).click();
+  const choice = form.locator(".launch-composer-container-choice");
+  const toggle = choice.getByRole("checkbox", { name: "Containerized", exact: true });
+  await expect(toggle).toBeEnabled();
+  await toggle.check();
+  await expect(choice.getByRole("textbox", { name: "Image file", exact: true })).toBeVisible();
+  await choice.scrollIntoViewIfNeeded();
+  await form.focus();
+  await director.callout(choice,
+    "Agent sessions on Linux hosts can now run in a rootless Podman container, using an image you provide and a local API proxy, by turning on Containerized in the session launcher for a managed checkout.",
+    { side: "bottom", dy: 20 });
+  await shot(page, name, [choice], { pad: 6, maxWidth: 930 });
+});
+
 /**
  * v0.31.0: the sidebar makes Settings' sections visible without a long scroll.
  * Only navigation changes here; no switch is toggled and no field is saved.

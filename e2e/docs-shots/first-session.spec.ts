@@ -8,14 +8,17 @@
  * setting: the staged fleet already has a working session to show.
  */
 import { expect, test } from "@playwright/test";
+import { showHostsPanel } from "../tests/helpers/fleet";
 import { open } from "./open";
 import { shot } from "./shot";
 import { readFleet } from "./stage-docs";
 
 const PAGE = "first-session";
 
+/** The local host now lives in Hosts, which must be opened before photographing its row. */
 test("this machine", async ({ page, request }) => {
   const { director } = await open(page, request);
+  await showHostsPanel(page);
   const local = page.locator('.host-row[data-host-kind="local"]');
   await expect(local).toBeVisible();
   await director.highlight(local, { pad: 2 });
