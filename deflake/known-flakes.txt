@@ -16,5 +16,4 @@ playwright terminal-reconnect.spec.ts view-changes-do-not-postpone-a-recovery  #
 playwright replace.spec.ts plain Replace keeps a newer same-source key after old header YOLO cancellation  # same-source-replace-menu-after-yolo-cancellation
 playwright terminal-restart.spec.ts don't ask again on a refused YOLO replace marks the host, then replaces with the override  # interrupted-card-replace-click-lost
 playwright sidebar.spec.ts composer folder dropdown preserves keyboard launch and grouped history  # folder-reset-viewport
-playwright terminal.spec.ts a failed listing read while confirming does not clear the confirming state  # confirming-status-premise
 playwright header.spec.ts native tunnel preview keeps ports and actions inside a 650px pane  # native-tunnel-preview-webkit-budget

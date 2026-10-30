@@ -3221,3 +3221,32 @@ selected browser cases three times each. No claim is made that those other exclu
 Class: product
 
 Cause: established
+
+## 2026-10-30 — lifecycle badge oracle rejected unread idle output (e2e/tests/terminal.spec.ts)
+
+The confirming-state test passed three ordinary WebKit repetitions in `2489144b-0b4b-463c-9d6a-9029f0e05375`. Pinning
+its real owned session's successful listings to idle with unseen output then reproduced the recorded failure in
+`0b4a2b05-1a78-4fcc-81c9-e3d4c99eba67`: the shared lifecycle matcher rejected the valid `Idle — new output` badge before
+the confirming prompt was tested. That matcher now accepts the qualifier only on Idle. The fixture keeps that state on
+both successful reads, so the test cannot avoid the boundary by luck. The unchanged confirming-prompt assertions passed
+three times per engine in `1f2848c6-dfdf-4a5d-b957-51d20af4e64b`. The test's exclusion is removed; exact
+badge-vocabulary and protocol-status assertions retain their stricter contracts.
+
+```text
+Expected pattern: /^(Running|Waiting|Idle)$/
+Received string: "Idle — new output"
+Timeout: 10000ms
+```
+
+Evidence: shared x86_64 Linux, three owned browser stacks and up to three workers, zero retries. Before-fix selection
+was one WebKit case; after-fix selection was the same case repeated three times per engine. Base was save-deadline
+commit `b07b920880aa18d1847d1caf258c84c16164af4b` with the dialog focus fix and this fixture dirty before the failure,
+then dialog-focus commit `35f8f3cbdba147afe207dec06d8a85045309bfc4` with this test/helper fix dirty after it. The
+product web build was unchanged between those runs. Recorded tmux 3.7c SHA256
+`d60bcc711383c8282d560926854f2cb8d2d15e9af72641e1396e32f27af9a802`, locale C.UTF-8; child `FARHELM_TEST_TRACE_DIR` only
+after ambient marker scrubbing. Original traces/screenshots were preserved privately before another run. Run UUIDs
+address retained temporary evidence and expire with cleanup.
+
+Class: fixture-premise
+
+Cause: established

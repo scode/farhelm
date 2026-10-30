@@ -304,13 +304,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Deflake
 
-- **Confirming-state test rejects an unseen-output status in WebKit.**
-  `a failed listing read while confirming does not clear the confirming state` in `e2e/tests/terminal.spec.ts` expected
-  `Running`, `Waiting`, or `Idle` but saw `Idle — new output` in browser run `e0526613-832f-4fba-b023-b38cc064e5c2`.
-  Three isolated classification reruns passed: `2d9754a3-cc01-4570-ba93-43cfdaf7d866`,
-  `653a6901-8a15-4d7d-8f6f-737854594ede`, and `f595a1ba-4576-48f8-b391-922163c21513`. Cause unknown; the failure excerpt
-  does not establish a confirming-state regression (FLAKES.md, 2026-10-29).
-
 - **Folder reset stays outside the dropdown viewport in WebKit.**
   `composer folder dropdown preserves keyboard launch and grouped history` in `e2e/tests/sidebar.spec.ts` selected the
   reset option but failed its viewport assertion in sweep run `e0526613-832f-4fba-b023-b38cc064e5c2`. All three isolated
