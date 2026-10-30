@@ -175,3 +175,105 @@ it caught the need to await Name's deferred focus before dismissing its help. Fu
 three current host choices and the local native-hover preparation for ordinary menus. The same required PR2 reviewer
 passed all four visual-test corrections. Commit wording was cold-read independently; the revised PR2 text's claims held
 up.
+
+### Landing
+
+Landed on its second attempt, with one fix at landing for touch screens (below). Every host now has a short name, shown
+as a caption under its avatar on the sidebar's host rail and as the host in session rows. A host's alias always wins;
+otherwise it is the first label of its hostname or SSH destination after dropping any user, `ssh://`, brackets and port
+(`build-box` for `build-box.example.com`), an IP address stays whole, and this machine is `Local` unless aliased.
+Session rows use the short name for hosts in the current host list and the full name otherwise. Resting the pointer on
+the narrow rail, or moving keyboard focus into it, widens it over the session list to show each host's full name and
+destination; that widened part only shows names, takes no clicks and does not keep the rail open. Everywhere else (the
+Hosts panel, the bottom bar, dialogs) keeps the full name.
+
+- #2810: the shared short-name rule and session rows' use of it.
+- #2811: the rail captions and widening, their tests, the docs-screenshot visual review, the specification text and a
+  changelog entry; the touch fix at landing was added to it.
+
+The first landing attempt, earlier on 2026-10-29, sent this plan back: the widened rail stayed open after a mouse click
+and covered the session list's sort control, which broke three browser specs, and the stylesheet's token tests rejected
+the new width value. The monitor decided then, on your behalf, that the widened names are display only; that decision is
+the near-term TODO entry "Revisit the host rail's widened names taking no clicks". The redelivery does what the answer
+asked: the widening follows the pointer over the narrow rail or keyboard focus only, a click leaves nothing widened, the
+width is a theme value, the two SPEC.md sentences are corrected, and a host whose short name would be empty (a host type
+this version does not know, with no destination) shows its full name instead.
+
+#### What landed since the stack was based, and whether it interacted
+
+The executor rebased onto main after two plans landed: menu-single-highlight (menus show one highlighted choice at a
+time) and host-update-discoverability (update prompts and automatic updates for remote hosts). Since then main has
+gained only plan bookkeeping and new TODO entries, so the landing rebased no code. A fresh-context review found no
+interaction: the update arrows sit inside the avatars and the footer's Hosts button, which the rail's widening does not
+cover, and host menus open outside the rail. This plan also repairs main's docs-screenshot visual review, which those
+two plans left expecting the old Settings and menu pictures; until it landed, that review would have failed on main.
+
+#### Fixes made at landing
+
+- Touch screens: the review found, by reading the stylesheet against how touch browsers behave rather than by
+  reproducing it, that a tap leaves the tapped element in the hover state. Tapping a host would then leave the narrow
+  rail "hovered", widen it a moment later and keep it wide, and because the widened names take no taps, the next tap on
+  them would fall through to whatever session row or list control was hidden underneath. The rail now widens on hover
+  only on devices that can hover; on a touch screen it stays narrow (captions only) unless keyboard focus is in it.
+  SPEC.md and SPEC_impl.md say so. No test exercises touch, and every test browser reports that it can hover, so the fix
+  is reasoned, not observed. A laptop with both a touchscreen and a mouse reports that it can hover, so a finger tap
+  there can still leave the rail widened.
+
+#### Things you should know
+
+- While keyboard focus keeps the rail widened, a mouse click on the displayed names lands on the hidden list control
+  underneath. That follows from the display-only decision above.
+- Safari, and possibly the Mac app's web view, may widen the rail after some mouse-only actions (closing a host menu
+  opened with a right-click, or a dialog closed with a click), visually only. This too comes from reading, not a
+  reproduction; the Linux WebKit the tests use cannot show it.
+- The README hero, README video and docs-screenshot scenarios alias the local host as "this machine", so their next
+  refresh will show lowercase `this machine` in rows and captions while the Hosts panel still says
+  `Local (this machine)`. Those designs change only when you ask.
+- Two hosts can share a short name (`build.a.example` and `build.b.example` both show `build`); the plan accepted this.
+  The changelog entry mentions neither that, nor that local rows now read `Local`, nor that touch-only devices do not
+  widen the rail on a tap.
+- Smaller edges: the rail's "?" marker (host list unavailable) is now left-aligned; an avatar's tooltip can overlap the
+  widened names; the widening ignores reduced-motion settings; no docs page describes the captions or the widening yet.
+
+#### Checks
+
+This round landed only this plan, checked on main `25afb5ac` and merged onto a main that had since gained only plan
+bookkeeping and TODO entries. On the stack as redelivered:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, the web-target UI lint, the binaries' lint,
+  the desktop-build checks, the check that every test delay states its reason, `dprint check`,
+  `python3 releasing/check-changelog.py format`, the docs website build, the workspace debug build, the UI's release web
+  build and `scripts/check-desktop-assets.sh`: all passed.
+- The UI's Rust tests, `cargo nextest run -p farhelm-ui`, run `dd8c7f11-b28a-4be8-a77f-e79695bec5c5`: all 822 passed;
+  its desktop-build tests, `cargo nextest run -p farhelm-ui --features desktop`, run
+  `2593ba1c-08cc-4f2e-b92e-701a06cfb3b2`: all 1005 passed. The UI's JavaScript tests (`node --test` in
+  `crates/farhelm-ui/js-tests`), run `685ff5de-5e93-4039-bf02-1920ae99a404`: all 372 passed.
+- The whole browser suite started (run `2b6fb14c-e449-4218-a7dc-d4aa74fd5099`) and was stopped on purpose, after you
+  agreed in conversation to land on narrower evidence, once it had started 811 of 2820 cases, all on Chromium, with no
+  failure. It had covered the filters and sort specs that failed in the first attempt, but not the sidebar spec in full,
+  the hover-text sweep, or WebKit (where the Hosts panel failure had been). A stopped run is not a pass of the suite;
+  the run below covers those specs on both engines.
+
+After the touch fix at landing:
+
+- `dprint check` and the UI's release web build passed. The UI's JavaScript tests, run
+  `485c0de7-46a5-4112-aaba-592cc94de905`: all 372 passed.
+- `npx playwright test` in `e2e/` with the host-short-names, filters, sort, Hosts panel, sidebar, host-rail warning,
+  menu highlight, host updates, hover-text sweep, host picker and settings specs, on Chromium and WebKit, three workers,
+  no retries, run `518141c1-e3c1-4a0d-9a24-e0ed966c5786`: all 456 passed.
+- The runs from before the touch fix still count for everything else: the fix changes behavior only on devices that
+  cannot hover, and every test browser can.
+- Reused: the first attempt's whole Rust workspace run, `ba875ace-da1b-49b4-acda-e1f32d8ba42e` (4538 passed, 41 skipped
+  by design, and the known flake "shallow pause resumes without reset or replay"). Main has since gained the remote-host
+  update work, but this plan's only Rust outside the UI is the standalone short-name function, which nothing in the helm
+  calls, and the combined code's build and lint passed this round; its UI Rust is covered by the UI tests above. Not
+  run: the rest of the browser suite (WebKit, and the Chromium specs after the sidebar), which this plan touches only
+  through the rail markup the specs above exercise; the docs-screenshot visual review (the executor ran it in full
+  before its rebase and its dark-wide case on each engine after); the desktop smoke tests (no desktop-specific code
+  changed); and the native Mac app (not runnable here).
+
+The report's checks were the executor's selected runs, which it lists openly, including that after its rebase only a
+46-case browser selection and the dark-wide visual-review case on each engine ran on the final code. Its statements that
+the widened rail cannot cover list controls and that mouse focus cannot leave it widened hold for mouse and keyboard on
+the tested browsers; on touch they needed the fix above, and the hybrid-laptop and Safari caveats above still qualify
+them. Nothing else in the report became untrue at landing.
