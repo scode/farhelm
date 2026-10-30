@@ -93,7 +93,7 @@ pub(super) async fn remaining(
 ) -> Result<std::time::Duration, super::SendError> {
     let budget = timeout.saturating_sub(started.elapsed());
     let mut waiting = std::pin::pin!(waiting);
-    let mut deadline = std::pin::pin!(crate::reader::sleep_ms(budget.as_millis() as u64));
+    let mut deadline = std::pin::pin!(crate::reader::sleep_ms(deadline_millis(budget)));
     std::future::poll_fn(|cx| {
         if started.elapsed() >= timeout || deadline.as_mut().poll(cx).is_ready() {
             return std::task::Poll::Ready(Err(super::SendError::Request(
@@ -108,10 +108,34 @@ pub(super) async fn remaining(
     .await
 }
 
+/// Translate a request budget to the renderer timer's millisecond resolution.
+/// A timer firing is treated as expiry, so this conversion must never shorten
+/// a fractional millisecond that still belongs to the caller's deadline.
+fn deadline_millis(budget: std::time::Duration) -> u64 {
+    budget.as_nanos().div_ceil(1_000_000) as u64
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::task::{Context, Poll, Waker};
+
+    /// Timer quantization must preserve the entire remaining budget. This
+    /// checks the submillisecond boundary directly instead of relying on a
+    /// platform scheduler to expose an early wake in a wall-clock test.
+    #[farhelm_testtrace::test]
+    fn fractional_deadlines_are_not_shortened() {
+        use std::time::Duration;
+        for nanos in [0, 1, 999_999, 1_000_000, 1_000_001, 29_999_999, 30_000_000] {
+            let budget = Duration::from_nanos(nanos);
+            let timer = Duration::from_millis(deadline_millis(budget));
+            assert!(
+                timer >= budget,
+                "timer {timer:?} shortens budget {budget:?}"
+            );
+            assert!(timer - budget < Duration::from_millis(1));
+        }
+    }
 
     /// Poll directly so pending is an observed scheduler state, not an elapsed
     /// observation window that might pass before the future actually starts.

@@ -3168,3 +3168,27 @@ and traces remain private temporary evidence and may expire.
 Class: budget
 
 Cause: hypothesis
+
+## 2026-10-29 — save deadline timer quantization (crates/farhelm-ui/src/api/save_order.rs)
+
+The historical early-timeout test passed 20 of 20 exact repetitions in batch `d965328c-213e-4c47-a082-91d061f3a7c3`. A
+deterministic boundary regression then failed in `429c5e8b-27ab-4239-8314-cad2671053b9`: converting a positive
+fractional-millisecond budget to the renderer timer rounded it down. Since timer completion itself expires the request,
+that conversion could end the wait early. Rounding up preserves the deadline; all seven save-order tests passed in
+`0b8d7701-11ee-446d-9025-8edba169edda`, including the original wall-clock test and the new boundary test. The fix
+removes the exclusion; the historical timing failure itself was not reproduced in this session.
+
+```text
+timer 0ns shortens budget 1ns
+```
+
+Evidence: base `25afb5ac0c3a44ae1f5dd6790608d4199258741e`, dirty only with this fix's source/test edits during the
+boundary checks; shared x86_64 Linux, one exact test per baseline attempt and the save-order module after the fix,
+four-slot nextest budget, zero retries. Recorded tmux 3.7c SHA256
+`d60bcc711383c8282d560926854f2cb8d2d15e9af72641e1396e32f27af9a802`, locale C.UTF-8, child `FARHELM_TEST_TRACE_DIR`.
+Private evidence lives under the run UUIDs and expires with temporary-file cleanup. Compilation overlapped other owned
+build preparation; the deterministic conversion failure does not depend on elapsed scheduling time.
+
+Class: product
+
+Cause: established
