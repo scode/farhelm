@@ -5,15 +5,21 @@
 //! The chain is: tmux window command → user's shell as an interactive
 //! login shell (`-l -i -c`) → Farhelm's optional scope-waypoint helper →
 //! the scope wrapper → `farhelm internal launch <spec>` → the shim execs
-//! the real agent argv. Unscoped launches go straight to the shim. The
+//! the executable argv: direct agent words, or Bash with original user command
+//! text whose placeholders the supervisor filled safely. Unscoped launches go straight to the shim. The
 //! waypoint proves shell startup completed even when the wrapper refuses
 //! to start the shim. The shim exists because a sentinel
 //! written by the shell after a failed `exec` can never fire under zsh
 //! (zsh terminates on failed exec in every mode — audited in SPEC_impl.md);
 //! the shim always exists, so its exec always succeeds, and it can record
-//! the real exec's errno before exiting. The `-l -i` reproduces the file
+//! the real exec's errno before exiting. When Bash starts successfully, a
+//! command it cannot find instead exits normally with Bash's error; that is
+//! not a shim exec failure. The `-l -i` reproduces the file
 //! sourcing an SSH-and-type session gets, which is SPEC.md's environment
 //! contract; `-i` is load-bearing (bare `-c` skips `.zshrc`/`.bashrc`).
+//! A command's inner noninteractive Bash inherits the shim's final environment;
+//! it still honors explicit `BASH_ENV` and exported Bash functions. Those are
+//! user-configured execution, not another login-shell startup pass.
 //!
 //! `LaunchArtifacts` names the generation's spec and evidence files. The shim
 //! consumes its input through that value; the service supplies the settlement
@@ -147,7 +153,10 @@ pub const PRIVATE_TMUX_ENV_VARS: [&str; 2] = ["TMUX", "TMUX_PANE"];
 /// file (not argv) so the invocation never fights shell quoting twice.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct LaunchSpec {
-    /// The agent argv, already shell-words-split by the supervisor.
+    /// The executable vector prepared by the supervisor: literal agent words,
+    /// or `bash -c` with safely filled command text. The shim neither parses
+    /// shell text nor decides hooks; container exec runs this same vector
+    /// inside the container rather than expanding anything on the host.
     pub argv: Vec<String>,
     /// The directory the agent must enter after login-shell initialization and checkout
     /// preparation. tmux's start directory is only a hint: it can silently fall back to

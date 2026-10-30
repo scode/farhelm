@@ -986,8 +986,8 @@ struct LaunchFlags {
     /// Quoting groups words; no shell evaluates the prefix.
     #[arg(long, value_name = "COMMAND", allow_hyphen_values = true, value_parser = parse_wrapper_prefix)]
     wrapper: Option<WrapperPrefix>,
-    /// Make this a command launch running this command line, as written.
-    /// Needs --yolo or --no-yolo.
+    /// Make this a command launch interpreted by non-interactive Bash.
+    /// Shell expansion and operators apply; needs --yolo or --no-yolo.
     #[arg(long, value_name = "CMD", allow_hyphen_values = true)]
     command: Option<String>,
     /// The command bypasses its approval/classifier/sandbox safety checks. Farhelm believes this

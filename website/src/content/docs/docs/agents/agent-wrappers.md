@@ -39,14 +39,14 @@ On the session launcher's **Command** tab, four fields matter:
 - **Resume command**, which appears once you tick **Resume**:
   `my-wrapper run {cwd} claude --resume {conversation} {farhelm_args}`
 
-`{cwd}` is a whole word or it is nothing. An argument either equals `{cwd}` exactly, in which case it is replaced, or it
-is passed through as literal text: `--dir={cwd}` reaches the wrapper unchanged, and so does a `{cwd}` written inside a
-`sh -c` script string, since that is part of one argument rather than an argument of its own. `{conversation}` and
-`{farhelm_args}` follow the same rule, and both must appear exactly once, as whole arguments, where they are required.
+Placeholders must be separate, unquoted words. Farhelm refuses `--dir={cwd}`, `'{cwd}'`, or a `{cwd}` inside a `sh -c`
+script string when you save the command, and also refuses older saved commands with those forms when they next start.
+`{conversation}` and `{farhelm_args}` follow the same rule, and both must appear exactly once where they are required.
 Beyond that: every occurrence of `{cwd}` is filled, not just the first; it may not be the first word, because
 substituting there would make the working directory the program this session runs, and the launcher refuses that
 outright; and a directory whose name contains spaces arrives as a single argument, because the value goes into the
-argument's own slot with no quoting for you to get right.
+argument's own slot, safely quoted by Farhelm. The rest of the command and resume text runs through Bash with full shell
+meaning, as [Custom commands](/docs/agents/custom-commands/) describes.
 
 The value is the directory the session's terminal starts in, spelled the way you gave it after `~` expansion, symlinks
 intact. On a restart — and on the retry of an interrupted create — Farhelm checks that the spelling still resolves to
@@ -131,6 +131,10 @@ OMP accepts a prefix wrapper only when the wrapper `exec`s OMP, leaving no extra
 own launcher. A resident wrapper can run OMP, but Farhelm will not follow its conversation, so **Restart** stays
 unavailable. The same process rule applies when you write a custom command.
 
+A compound custom command, such as a wrapper followed by `; echo done`, keeps Bash running above the wrapper. That extra
+process can prevent Farhelm from following Grok's or OMP's conversation when the wrapper also stays running, leaving
+**Restart** unavailable. Claude, Muse and Codex tolerate that extra process.
+
 Four variables travel in the environment rather than on the command line: `FARHELM_SESSION_ID` (which session this is —
 no sweep will claim a process that does not carry it), `FARHELM_AGENT_ID` (the same session id again, under a name that
 says this process belongs to the session's AGENT rather than to one of its terminal tabs; that is the marker a stop
@@ -144,12 +148,13 @@ session.
 ## What happens on stop
 
 There are fewer processes involved than the launch chain suggests. tmux starts the pane's login shell, the shell `exec`s
-Farhelm's launch shim, and the shim `exec`s your command — so a resident wrapper is the pane's own process and the agent
-is its child. A wrapper that `exec`s the agent leaves the agent in that place instead. Where farhelm's own probe finds a
-WORKING systemd user manager — it creates a throwaway scope, looks it up, kills it, and confirms it went away, rather
-than trusting a `systemd-run` on `PATH` — the launch also runs inside a per-launch cgroup scope, which is containment
-rather than a level of the tree (`systemd-run --scope` execs in place too). Each launch records what it selected, so a
-session can outlive the manager that scoped it.
+Farhelm's launch shim, and the shim `exec`s your command. For a custom command, Bash interprets the command text and can
+replace itself with a simple command; compound commands can keep Bash running above the wrapper and agent. A wrapper
+that `exec`s the agent replaces itself in that chain. Where farhelm's own probe finds a WORKING systemd user manager —
+it creates a throwaway scope, looks it up, kills it, and confirms it went away, rather than trusting a `systemd-run` on
+`PATH` — the launch also runs inside a per-launch cgroup scope, which is containment rather than a level of the tree
+(`systemd-run --scope` execs in place too). Each launch records what it selected, so a session can outlive the manager
+that scoped it.
 
 Stopping a session and restarting it reap the agent's tree and leave the session's terminal tabs running; deleting it
 takes the tabs too. What a stop claims is the pane process's descendants plus every process carrying the session's

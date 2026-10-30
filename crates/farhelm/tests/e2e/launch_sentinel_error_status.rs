@@ -3,6 +3,31 @@
 
 use crate::harness::*;
 
+/// Keep an exec-failure fixture below the shim's direct-exec boundary.
+///
+/// A custom command now starts Bash successfully even when its inner program
+/// is missing. These tests exercise the shim's failure sentinel instead, so
+/// their deliberately absent program belongs to an unwrapped agent launch.
+fn unexecutable_agent(program: &std::path::Path) -> farhelm_proto::SessionLaunch {
+    farhelm_proto::SessionLaunch::Agent {
+        selection: farhelm_proto::LaunchSelection {
+            harness: farhelm_proto::LaunchHarness::Goose,
+            model: None,
+            effort: None,
+            permissions: None,
+            permission_flags: None,
+            wrapper_prefix: None,
+            container: None,
+            workspace_trust: None,
+        },
+        start: vec![
+            program.to_string_lossy().into_owned(),
+            "{farhelm_args}".to_string(),
+        ],
+        resume: None,
+    }
+}
+
 /// An existing directory without search permission must fail at the final launch
 /// boundary. Metadata still passes admission, and tmux can fall back to HOME, so
 /// only an in-process chdir prevents the executable from touching unrelated work.
@@ -82,12 +107,13 @@ async fn unexecutable_invocation_lists_as_error_and_outranks_a_reboot() {
 
     let session = h
         .client
-        .create_session(
+        .create_session_with_extras(
             &work.path().to_string_lossy(),
-            &missing_binary.to_string_lossy(),
+            unexecutable_agent(&missing_binary),
             None,
             80,
             24,
+            farhelm_helm::CreateExtras::default(),
         )
         .await
         .expect("create a session whose invocation cannot exec");
@@ -161,12 +187,13 @@ async fn a_reboot_never_interrupts_a_row_a_sentinel_already_claims_as_error() {
 
     let session = h
         .client
-        .create_session(
+        .create_session_with_extras(
             &work.path().to_string_lossy(),
-            &missing_binary.to_string_lossy(),
+            unexecutable_agent(&missing_binary),
             None,
             80,
             24,
+            farhelm_helm::CreateExtras::default(),
         )
         .await
         .expect("create a session whose invocation cannot exec");
@@ -299,12 +326,13 @@ async fn a_reload_classified_error_session_keeps_its_terminal_for_attach_and_del
 
     let session = h
         .client
-        .create_session(
+        .create_session_with_extras(
             &work.path().to_string_lossy(),
-            &missing_binary.to_string_lossy(),
+            unexecutable_agent(&missing_binary),
             None,
             80,
             24,
+            farhelm_helm::CreateExtras::default(),
         )
         .await
         .expect("create a session whose invocation cannot exec");
@@ -370,12 +398,13 @@ async fn a_sentinel_survives_an_unreadable_boot_id_undurably_then_commits_once_r
 
     let session = h
         .client
-        .create_session(
+        .create_session_with_extras(
             &work.path().to_string_lossy(),
-            &missing_binary.to_string_lossy(),
+            unexecutable_agent(&missing_binary),
             None,
             80,
             24,
+            farhelm_helm::CreateExtras::default(),
         )
         .await
         .expect("create a session whose invocation cannot exec");
@@ -441,12 +470,13 @@ async fn stop_before_any_list_on_an_exec_failed_session_still_ends_error() {
 
     let session = h
         .client
-        .create_session(
+        .create_session_with_extras(
             &work.path().to_string_lossy(),
-            &missing_binary.to_string_lossy(),
+            unexecutable_agent(&missing_binary),
             None,
             80,
             24,
+            farhelm_helm::CreateExtras::default(),
         )
         .await
         .expect("create a session whose invocation cannot exec");

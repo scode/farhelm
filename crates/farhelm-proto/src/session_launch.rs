@@ -131,14 +131,34 @@ pub enum LaunchRequest {
 }
 
 impl CommandLaunch {
-    /// SPEC.md's command-launch rules, checked by shape alone: the command
-    /// splits and names a program, `{conversation}` is refused in it,
+    /// Refuse a command that cannot be safely started with its stored shell text.
+    /// Native admission checks literal shape and placeholder source positions.
+    /// Browser preflight retains the same shape checks;
+    /// the receiving helm and supervisor own the authoritative shell check.
+    pub fn validate(&self) -> Result<(), String> {
+        self.validate_stored()?;
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            crate::command_shell::validate_command_placeholders("command", &self.command)?;
+            if let Some(resume) = &self.resume {
+                crate::command_shell::validate_command_placeholders("resume command", resume)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Preserve readable old sessions while enforcing their original field shape.
+    /// Loading a row must not try to execute it or apply a new shell-placement
+    /// rule: a previously accepted quoted marker is refused at its next spawn,
+    /// rather than preventing the supervisor from loading every session.
+    ///
+    /// The command splits and names a program, `{conversation}` is refused in it,
     /// `{farhelm_args}` appears exactly once when an agent type is declared
     /// and not at all otherwise, and a resume command needs a declared type
     /// and then holds `{conversation}` and `{farhelm_args}` once each. The
     /// refusal names the field, so a client can show it beside the right
     /// control.
-    pub fn validate(&self) -> Result<(), String> {
+    pub fn validate_stored(&self) -> Result<(), String> {
         let start = split("command", &self.command)?;
         check_argv("command", &start)?;
         refuse_present("command", &start, CONVERSATION_PLACEHOLDER)?;
@@ -421,10 +441,12 @@ impl SessionLaunch {
         refuse_present(field, argv, CONVERSATION_PLACEHOLDER)
     }
 
-    /// The start argv to spawn, still holding its placeholders.
+    /// The literal start arguments, still holding their placeholders.
     ///
     /// An agent launch's composed argv as stored, a command launch's command
-    /// shell-split, or a legacy invocation shell-split. A command that does
+    /// shell-split, or a legacy invocation shell-split. Metadata and integration
+    /// decisions retain this projection; command execution separately preserves
+    /// the original text for Bash. A command that does
     /// not split is an error here only if it slipped past
     /// [`SessionLaunch::validate_new`], which refuses it.
     pub fn start_argv(&self) -> Result<Vec<String>, String> {
@@ -435,7 +457,7 @@ impl SessionLaunch {
         }
     }
 
-    /// The resume argv to spawn, still holding its placeholders, or `None`
+    /// The literal resume arguments, still holding their placeholders, or `None`
     /// when this launch has no resume command.
     pub fn resume_argv(&self) -> Result<Option<Vec<String>>, String> {
         match self {

@@ -141,6 +141,9 @@ pub use launch::{
     split_permission_flags, split_wrapper_prefix,
 };
 pub use version::is_development_build;
+/// Native Bash placeholder admission and original-source rendering.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod command_shell;
 /// The launcher's shared rules: the model catalog, agent-type
 /// reconciliation and launch templates.
 pub mod launcher;

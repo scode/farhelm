@@ -747,32 +747,36 @@ agent choice is independent of that destination:
   messages with invisible formatting are shown escaped and read-only until explicitly cleared; ordinary newlines and
   tabs remain editable. The message travels with the create request, including managed checkouts and named conversations
   where supported, and its exact value is part of retry identity.
-- Command launch: a command launch takes a command line, which may reference the session's working directory as `{cwd}`
-  as a whole argument, and a required YOLO assertion: the user states whether the command bypasses human, classifier,
-  AI-reviewer and sandbox safety checks, and Farhelm believes the statement. Farhelm never reads a command line to
-  decide whether it is YOLO, what agent it runs, or how to resume it. A command launch may optionally declare the agent
-  type it runs. A declared agent type requires `{farhelm_args}` as a whole argument exactly once in the command, which
-  marks where Farhelm places that agent type's own launch integration arguments (including the conversation-reporting
-  hook, instructions pointer and Codex's `--no-daemon`, see Durability); it is replaced by nothing for an agent type
-  that takes no such arguments, so the rule never depends on which agent type was declared. `{farhelm_args}` without a
-  declared agent type is refused. Farhelm passes whatever turns its integration on as arguments, never through the
-  environment: every process the agent starts inherits the environment, including another agent of the same type that it
-  shells out to, so a hook carried there would reach runs that are not the session's. The environment carries only
-  settings that Farhelm's own reporter reads once an argument has turned it on, set on the launched process directly and
-  never written into the command. Declaring an agent type gives the session that agent type's status reading and
-  conversation reporting. It also allows opting into Resume, which requires a resume command containing `{conversation}`
-  and `{farhelm_args}`, each as a whole argument exactly once; Farhelm fills those and `{cwd}` in and otherwise runs the
-  resume command as written. Codex gets `--no-daemon` even with hooks off. A custom Codex command that puts
-  `{farhelm_args}` after `exec`, passes `--remote`, or runs `codex agents` or `codex queue` fails because Codex refuses
-  that flag there; Farhelm does not detect these incompatible commands. `{conversation}` in the start command is
-  refused. The one exception to "as written" in either command: Codex's internal workspace-trust markers,
-  `{codex:trusted-cwd}` and `{codex:untrusted-cwd}`, are filled wherever one stands as a whole argument, exactly as in a
-  composed Codex agent launch (see SPEC_impl.md). A command launch with no declared agent type, or one that does not opt
-  into Resume, can never be restarted (see Lifecycle operations). The YOLO assertion covers the resume command too.
-  Search while the command launch kind is active still offers agent types, models, and recent setups, and accepting one
-  switches to the agent launch kind; accepting a folder, host, or name keeps the current launch kind, and a template
-  keeps it unless the template sets one. The command tab's YOLO assertion, declared agent type and Resume choice are set
-  in that tab's own fields, not through search.
+- Command launch: a command launch takes a command line run through `bash -c`, non-login and non-interactive. The text
+  reaches Bash unchanged except for Farhelm's placeholders, so `~`, variables, globs, newlines, comments, compound
+  commands, pipes and redirection have Bash meaning. Each placeholder must stand as its own unquoted word; a quoted
+  placeholder, or one joined to other text where it cannot be substituted safely, is refused on save and again at spawn
+  for an older stored command. Farhelm inserts each filled value as a single-quoted word, or one such word per argument
+  for `{farhelm_args}`. The command may reference the session's working directory as `{cwd}` and takes a required YOLO
+  assertion: the user states whether the command bypasses human, classifier, AI-reviewer and sandbox safety checks, and
+  Farhelm believes the statement. Farhelm never reads a command line to decide whether it is YOLO, what agent it runs,
+  or how to resume it. A command launch may optionally declare the agent type it runs. A declared agent type requires
+  `{farhelm_args}` as a whole argument exactly once in the command, which marks where Farhelm places that agent type's
+  own launch integration arguments (including the conversation-reporting hook, instructions pointer and Codex's
+  `--no-daemon`, see Durability); it is replaced by nothing for an agent type that takes no such arguments, so the rule
+  never depends on which agent type was declared. `{farhelm_args}` without a declared agent type is refused. Farhelm
+  passes whatever turns its integration on as arguments, never through the environment: every process the agent starts
+  inherits the environment, including another agent of the same type that it shells out to, so a hook carried there
+  would reach runs that are not the session's. The environment carries only settings that Farhelm's own reporter reads
+  once an argument has turned it on, set on the launched process directly and never written into the command. Declaring
+  an agent type gives the session that agent type's status reading and conversation reporting. It also allows opting
+  into Resume, which requires a resume command containing `{conversation}` and `{farhelm_args}`, each as a whole
+  argument exactly once; Farhelm fills those and `{cwd}` in and otherwise runs the resume command as written. Codex gets
+  `--no-daemon` even with hooks off. A custom Codex command that puts `{farhelm_args}` after `exec`, passes `--remote`,
+  or runs `codex agents` or `codex queue` fails because Codex refuses that flag there; Farhelm does not detect these
+  incompatible commands. `{conversation}` in the start command is refused. The one exception to "as written" in either
+  command: Codex's internal workspace-trust markers, `{codex:trusted-cwd}` and `{codex:untrusted-cwd}`, are filled
+  wherever one stands as a whole argument, exactly as in a composed Codex agent launch (see SPEC_impl.md). A command
+  launch with no declared agent type, or one that does not opt into Resume, can never be restarted (see Lifecycle
+  operations). The YOLO assertion covers the resume command too. Search while the command launch kind is active still
+  offers agent types, models, and recent setups, and accepting one switches to the agent launch kind; accepting a
+  folder, host, or name keeps the current launch kind, and a template keeps it unless the template sets one. The command
+  tab's YOLO assertion, declared agent type and Resume choice are set in that tab's own fields, not through search.
 - Launch templates: `tl:name` in the search box offers templates by name, and accepting one applies it. Applying a
   template makes the edits it contains, in the same way and with the same effects as making them by hand, in a fixed
   order: launch kind first, then agent type, then every other field. It can switch the launch kind, and choosing an
@@ -1032,14 +1036,15 @@ launches resume; older releases cannot read launches stored as guarded.
 
 Failures split cleanly in two: precondition failures (nonexistent directory, unknown template, unreachable host) fail
 the create with a visible error and no session; launch failures of a session that was successfully created surface on
-the session itself — **Error** when the agent process could not be started at all (exec failure, command not found),
-**Exited** when it started and then ended, however quickly, with its exit code visible. In the session launcher every
-refused launch (New, Clone, Replace with, quick launch) shows as a bordered alert with a warning icon beside Launch,
-starting "Not launched." before the refusal's own words, and announced to assistive technology. Restart mode uses the
-same alert beside Restart, with "Restart error." before the refusal's words. Errors that are not a refused launch, such
-as "Save as template" refusing a wrapper, keep the plain line. When the refusal says the folder does not exist, is not a
-directory or is not usable, the folder field is also marked and says so under it, naming the host, for as long as the
-form still names that host, its connection and that folder.
+the session itself — **Error** when the program handed to exec could not be started at all. For a command launch that
+program is Bash: a missing command inside the line instead exits with Bash's code 127 and its message in the terminal.
+**Exited** means the program started and then ended, however quickly, with its exit code visible. In the session
+launcher every refused launch (New, Clone, Replace with, quick launch) shows as a bordered alert with a warning icon
+beside Launch, starting "Not launched." before the refusal's own words, and announced to assistive technology. Restart
+mode uses the same alert beside Restart, with "Restart error." before the refusal's words. Errors that are not a refused
+launch, such as "Save as template" refusing a wrapper, keep the plain line. When the refusal says the folder does not
+exist, is not a directory or is not usable, the folder field is also marked and says so under it, naming the host, for
+as long as the form still names that host, its connection and that folder.
 
 ### Managed checkouts
 
@@ -2449,7 +2454,11 @@ session reaches that exact build; in the Mac app's side-by-side version layout t
 instead, so `farhelm` reaches the version of Farhelm now running, which after an update and restart is the newer one.
 Other programs in the same directory take precedence over the user's own `PATH` order as a result. The environment is
 evaluated at each launch: edit your rc files and the next launch or restart sees the change; already-running sessions do
-not.
+not. Command and resume-command text is then parsed by non-login, non-interactive Bash, regardless of the login shell.
+Ordinary aliases and unexported functions from the login shell are not inherited. Bash honors an inherited `BASH_ENV`
+startup file and exported Bash functions, which can change its subsequent environment. The shim still supplies its
+restored PATH, markers and working directory to Bash. An agent launch without a wrapper and a legacy session keep direct
+exec.
 
 When a host reboots, its supervisor starts automatically on hosts with the system-integration layer; on the v1 Mac it
 returns when the app or binary is next started, and interruption is classified at that point — whenever the supervisor
@@ -2612,6 +2621,11 @@ target.
 Farhelm-launched Codex sessions run without Codex's shared background server, so their commands keep the session's own
 environment and process tree. This applies even with conversation hooks off; legacy sessions keep their old injection.
 
+A compound command can keep Bash resident above its agent or wrapper. Claude, Muse and Codex tolerate that additional
+process. Grok and OMP refuse an unclassified intermediary when another resident wrapper sits below it, so such a command
+can run without capturing a conversation and leave Restart unavailable. Farhelm does not infer or repair the command's
+process layout.
+
 OMP (the `omp` program, the `@oh-my-pi/pi-coding-agent` CLI) is another report-only integration beside Pi. An OMP agent
 launch gets Farhelm's private extension, and so does a command launch that declares OMP, where its `{farhelm_args}`
 stands; Farhelm does not inspect the command to decide whether the extension fits, so a command declared as OMP that
@@ -2636,10 +2650,10 @@ Farhelm composes an agent launch's resume command from the same choices as its s
 `session --resume --session-id <conversation-id>`, Pi `--session <verified-absolute-file>`, OMP
 `--resume <verified-absolute-file>`, and Grok `--no-leader --resume <verified-conversation-id>`. A command launch that
 opts into Resume supplies its own resume command, and Farhelm never derives one from its start command: it fills in
-`{conversation}`, `{cwd}`, and `{farhelm_args}` and runs the rest as written. For Pi and OMP, `{conversation}` means the
-verified file path, not Farhelm's internal durable locator; for Codex it means the verified persistent thread ID, not
-the runtime session ID or encoded locator; for Grok it means the verified UUID, not the `grok:` locator or either
-evidence path.
+`{conversation}`, `{cwd}`, and `{farhelm_args}` as single-quoted words and hands the rest unchanged to `bash -c`. For Pi
+and OMP, `{conversation}` means the verified file path, not Farhelm's internal durable locator; for Codex it means the
+verified persistent thread ID, not the runtime session ID or encoded locator; for Grok it means the verified UUID, not
+the `grok:` locator or either evidence path.
 
 Anything farhelm attaches to a launch — an agent launch, or a command launch that declares an agent type — must be
 invisible from inside the session when it works AND when it fails: no output on the agent's terminal, no non-zero exit,
@@ -3969,7 +3983,8 @@ Goose sub-agent, a nested Goose run, or a child Pi that loads Farhelm's reporter
 ### Supported user environments
 
 Confirmed 2026-09-28: bash and zsh are the supported login shells, for agent launches and terminal tabs alike. Other
-login shells are unsupported: Farhelm need not make them work, detect them, or refuse them with a tailored message.
+login shells are unsupported: Farhelm need not make them work, detect them, or refuse them with a tailored message. Bash
+must also be available for command launches and their resume commands even when the login shell is zsh.
 
 An agent harness version is supported until a newer release of that harness has been out for two weeks. Things move fast
 in this space; Farhelm adds no code or complexity to support older versions.
