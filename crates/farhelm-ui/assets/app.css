@@ -3480,11 +3480,20 @@ a:any-link,
 .templates-quick-mark {
   flex: 0 0 28px;
   align-self: stretch;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 10px 5px;
   border: 1px solid transparent;
   background: transparent;
   color: var(--fg-2);
 }
 .templates-quick-mark[aria-pressed="true"] { color: var(--warn); }
+/* Anchor to the row's first line: centering in the stretched button would move
+   the bolt when the marked row gains a shortcut label.
+   Unlike a color emoji, its outline and fill follow the control's state color. */
+.templates-quick-icon { flex: none; fill: none; stroke: currentColor; stroke-width: 1.3; stroke-linejoin: round; }
+.templates-quick-mark[aria-pressed="true"] .templates-quick-icon { fill: currentColor; }
 .templates-quick-mark:hover { border-color: var(--border); }
 .templates-quick-mark:disabled { opacity: .4; }
 .templates-number-control { flex: 0 0 auto; }

@@ -303,11 +303,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   leading `~` to the home directory of the user the session runs as, at least in the program, and consider arguments
   too. Plan: `plans/queue/command-shell-meaning.md`.
 
-- **Make the template list's ⚡ show clearly whether it is lit.** In the Templates list, the quick-launch bolt looks
-  almost the same whether or not that template is the marked one: it always shows as filled, and only its size wiggles
-  slightly. The unmarked state needs to be clearly different (an outline, say), so the list shows at a glance which
-  template ⚡ launches. Plan: `plans/queue/template-bolt-and-save.md`.
-
 - **Show in the template editor whether there is anything to save.** The editor always shows "Fields not shown are left
   as is. Another template can supply choices this one leaves out." just above the footer, so after clicking Save the
   dialog looks unchanged and it feels like nothing happened. Grey out Save when the draft has no unsaved changes, so its

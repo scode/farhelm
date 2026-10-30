@@ -2401,7 +2401,11 @@ pub(super) fn TemplatesDialog(
                                                 aria_pressed: row.anchor.marked,
                                                 "data-tooltip": if row.anchor.marked { format!("{quick_launch_chord} starts a session from this template right away, without opening New. Only one template can hold ⚡. Click to turn off.") } else if !quick_launch_eligible(&row.template.fields) { format!("{quick_launch_chord} starts a session from the ⚡ template right away, without opening New. Only one template can hold ⚡. Can't mark this one: an agent launch needs an agent; a command launch needs a nonblank command.") } else { format!("{quick_launch_chord} starts a session from the ⚡ template right away, without opening New. Only one template can hold ⚡. Click to mark this one.") },
                                                 onclick: { let name = row.template.name.clone(); move |_| { let lit = preferences.0.read().quick_launch_template.as_ref().map(PeerText::raw) == Some(name.as_str()); edit_binding.call(BindingEdit::Bolt(name.clone(), !lit)) } },
-                                                "⚡"
+                                                // A color emoji ignores the mark's foreground color. Keep one
+                                                // fixed drawing so CSS can distinguish outline from filled state.
+                                                svg { class: "templates-quick-icon", width: "16", height: "16", view_box: "0 0 16 16", "aria-hidden": "true", "focusable": "false",
+                                                    path { d: "M9 1 3 9h4l-1 6 7-9H9z" }
+                                                }
                                             }
                                             NumberShortcutMenu {
                                                 key: "number-{row.template.name}", name: row.template.name.clone(),
