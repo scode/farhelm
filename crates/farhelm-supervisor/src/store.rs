@@ -9137,6 +9137,42 @@ mod tests {
         assert_columns(rows.iter().find(|row| row.id == "s1").expect("present"));
     }
 
+    /// Archive-era launches must not prevent an upgraded supervisor from loading
+    /// its sessions. Both row readers retain isolation with a missing image.
+    #[farhelm_testtrace::test]
+    async fn container_archive_session_loads_with_an_empty_image() {
+        let (dir, store) = fresh_store().await;
+        insert_running(&store, "s1").await;
+        let old = serde_json::json!({
+            "kind": "agent", "selection": {
+                "harness": "codex", "model": null, "effort": null, "permissions": null,
+                "container": {"engine": "podman", "image_file": "/images/old.oci", "api_proxy_port": 42000}
+            }, "start": ["codex", "{farhelm_args}"], "resume": null
+        });
+        {
+            let conn = Connection::open(dir.path().join("supervisor.db")).unwrap();
+            conn.execute(
+                "UPDATE sessions SET session_launch = ?1 WHERE id = 's1'",
+                rusqlite::params![old.to_string()],
+            )
+            .unwrap();
+        }
+        let single = store.session("s1").await.unwrap().unwrap();
+        let rows = store.load_all().await.unwrap();
+        let bulk = rows.iter().find(|row| row.id == "s1").unwrap();
+        for row in [&single, bulk] {
+            let container = row
+                .launch
+                .agent_selection()
+                .unwrap()
+                .container
+                .as_ref()
+                .unwrap();
+            assert!(container.image.is_empty());
+            assert_eq!(container.api_proxy_port, 42000);
+        }
+    }
+
     /// Structured launches retain their integration kind across storage. OMP
     /// needs its resume template; Muse has its own kind without a resume
     /// template, and Cursor must remain Generic without one.

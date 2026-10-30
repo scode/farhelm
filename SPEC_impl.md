@@ -5681,22 +5681,29 @@ shared by web wording and the helm's native release decisions, so their classifi
 
 ### Rootless Podman sessions
 
-The optional launch selection `container` carries a strict Podman engine choice, absolute OCI-archive path, selected
-proxy port and optional token-file path. Matching template edits use absent/set/null semantics. Both strict wire
-surfaces land under protocol 66; absent launch settings are omitted so existing fingerprints do not change.
+The optional launch selection `container` carries a strict Podman engine choice, local image name or ID, selected proxy
+port and optional token-file path. Matching template edits use absent/set/null semantics. Both strict wire surfaces use
+protocol 67; absent launch settings are omitted so existing fingerprints do not change. A private strict decoder accepts
+and discards the retired `image_file` field, defaulting `image` to empty; an explicit current image wins if both occur.
+This covers stored sessions, templates, recent setups and creation tickets without a migration. Portable validation
+permits empty images so stored loads and template application succeed; UI launch projection and supervisor preflight
+require one. Whitespace, controls, leading dashes and explicit image transport prefixes refuse.
 
 The supervisor resolves Podman by absolute executable path before login-shell startup and checks Linux, managed
-membership, a regular image file and a readable nonempty token file. The container's working directory is canonical; its
-only explicit bind is the whole deepest allocated containing checkout, selected before verifying its identity. Missing
-or replaced inner checkouts refuse rather than falling back to a broader outer checkout. Existing registry membership
-and allocation admission keep that root stable; file admission reuses the same bounded lookup. The private creation
-ticket carries the bind root, while control reconstruction needs no checkout filesystem observation. Host checkout
-preparation remains unchanged except that the container launch suppresses its Claude trust edit. After preparation, the
-terminal shim runs a short-lived creator through the existing scope prefix in `farhelm-<session>-container.scope`,
-disjoint from agent and tab patterns. Every Podman control command scrubs all inherited `FARHELM_*` and private tmux
-variables before it could initialize Podman's shared pause process. With no usable user manager the helper runs
-unscoped. The helpers keep the container alive outside agent containment; the agent's marked `podman exec -it` client
-remains in ordinary agent containment.
+membership, an existing local image and a readable nonempty token file. The image check runs `podman image exists`
+asynchronously through the same scrubbed control runner as lifecycle operations, with its 30-second deadline and 64 KiB
+output caps. Exit 1 means the named image is absent; other failures refuse with stderr. This observation does not
+reserve the name or pin an image ID. The container's working directory is canonical; its only explicit bind is the whole
+deepest allocated containing checkout, selected before verifying its identity. Missing or replaced inner checkouts
+refuse rather than falling back to a broader outer checkout. Existing registry membership and allocation admission keep
+that root stable; file admission reuses the same bounded lookup. The private creation ticket carries the bind root,
+while control reconstruction needs no checkout filesystem observation. Host checkout preparation remains unchanged
+except that the container launch suppresses its Claude trust edit. After preparation, the terminal shim runs a
+short-lived creator through the existing scope prefix in `farhelm-<session>-container.scope`, disjoint from agent and
+tab patterns. Every Podman control command scrubs all inherited `FARHELM_*` and private tmux variables before it could
+initialize Podman's shared pause process. With no usable user manager the helper runs unscoped. The helpers keep the
+container alive outside agent containment; the agent's marked `podman exec -it` client remains in ordinary agent
+containment.
 
 A permanent per-session flock inode and a credential-free positive ticket serialize creation with teardown across
 processes. The ticket carries its generation; an older delayed helper cannot spend a retry's newer permit. The creator
@@ -5712,12 +5719,15 @@ confirmation. The lock inode is never unlinked, since an already-open waiter cou
 from a future opener. Ambiguous Create unwind must also revoke and confirm removal before discarding a row; unconfirmed
 cleanup retains its ownership record.
 
-Creation uses an OCI archive directly, keep-id mapped to uid/gid 1000, the checkout as its only explicit read-write
-bind, `pasta:-T,<port>`, Podman's init and an idle Bash/sleep keeper, overriding any image entrypoint. No image manager
-or registry step is added. Exec forwards only TERM, COLORTERM and optional name-only GH_TOKEN; the helper reads the
-latter afresh and never serializes its contents. Podman's own transient exec metadata can contain it. Container launches
-select the existing hooks-off policy, which prevents reporter materialization, command injection, capture notifications
-and BROWSER forwarding for this one launch without changing other sessions.
+Creation resolves the local image name again with `--pull=never`, keep-id mapped to uid/gid 1000, the checkout as its
+only explicit read-write bind, `pasta:-T,<port>`, Podman's init and an idle Bash/sleep keeper, overriding any image
+entrypoint. No image manager or registry step is added: users load or build images into Podman's storage themselves, and
+Farhelm never imports, pulls, tags or removes them. Creation also refuses an empty image from an old ticket;
+existing-container control does not recheck image availability. Exec forwards only TERM, COLORTERM and optional
+name-only GH_TOKEN; the helper reads the latter afresh and never serializes its contents. Podman's own transient exec
+metadata can contain it. Container launches select the existing hooks-off policy, which prevents reporter
+materialization, command injection, capture notifications and BROWSER forwarding for this one launch without changing
+other sessions.
 
 Podman's command status is not a lifecycle oracle. After an exec scope was killed, Podman 4.9.3 can stop the container
 yet fail waiting for an exec exit file. Stop accepts only inspected exited/stopped state or confirmed absence; Delete

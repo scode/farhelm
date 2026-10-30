@@ -721,14 +721,15 @@ agent choice is independent of that destination:
   launches as before. A held Enter never launches.
 - Containerized launches: the Agent tab shows an experimental **Containerized** switch directly after the wrapper
   prefix. It is available only for a managed checkout; a plain folder destination shows the reason. An unchanged managed
-  directory copied from a session remains eligible on that same confirmed host. Turning it on reveals **Image file**, a
-  required absolute OCI-archive path on the session's host; **API proxy port**, required from 1–65535; and **GitHub
-  token file**, an optional absolute host path. Each explains its purpose. Invalid enabled settings block launch with
-  the reason beside the actions, and the footer adds `container`. New starts off with empty fields; nothing is
-  remembered. Recent setups, Clone, Replace with and templates carry the complete choice. Command launches offer no
-  switch. Templates and Save as template include the choice as one field: absent leaves it alone, present settings
-  replace it, and null turns it off. Restart with holds container settings fixed and cannot introduce containerization
-  into an ordinary session. See [Containerized sessions](#containerized-sessions) for the isolation and lifecycle rules.
+  directory copied from a session remains eligible on that same confirmed host. Turning it on reveals **Image**, a
+  required image name or ID already in Podman's local storage on the session's host; **API proxy port**, required from
+  1–65535; and **GitHub token file**, an optional absolute host path. Each explains its purpose. Invalid enabled
+  settings block launch with the reason beside the actions, and the footer adds `container`. New starts off with empty
+  fields; nothing is remembered. Recent setups, Clone, Replace with and templates carry the complete choice. Command
+  launches offer no switch. Templates and Save as template include the choice as one field: absent leaves it alone,
+  present settings replace it, and null turns it off. Restart with holds container settings fixed and cannot introduce
+  containerization into an ordinary session. See [Containerized sessions](#containerized-sessions) for the isolation and
+  lifecycle rules.
 - Conversation selector: New, Clone and Replace with offer an optional one-time selector for every agent launch. Claude,
   Codex, Grok and Muse label it conversation id; Goose and OpenCode session id; Cursor chat id; Pi and OMP session file.
   Empty preserves an ordinary fresh start. The selector is not saved in templates, history, defaults or the session's
@@ -3534,10 +3535,17 @@ either removing agent parent/child relationships or making them useful; neither 
 ### Containerized sessions
 
 Containerized agent sessions are experimental, Linux-only, and subject to rapid change. A session has one rootless
-Podman container, created from the user-supplied absolute path to an OCI archive on its host and removed when the
-session is deleted. Farhelm builds and downloads no image. The image supplies a uid-1000 user with its harness and
-configuration already installed, using a local API proxy or load balancer on the host; subscription login is
-unsupported. Managed checkouts only: command launches and plain-folder launches cannot select this isolation.
+Podman container, created from a user-supplied local image name or ID on its host and removed when the session is
+deleted. The user loads or builds the image into that host's Podman storage; Farhelm never imports, pulls, tags or
+removes images. The image supplies a uid-1000 user with its harness and configuration already installed, using a local
+API proxy or load balancer on the host; subscription login is unsupported. Managed checkouts only: command launches and
+plain-folder launches cannot select this isolation.
+
+Each container creation resolves the name afresh, so rebuilding an image under the same name affects the next New,
+Replace or Replace with. Existing containers keep their original image. A missing image refuses before launch with its
+name and the explanation that it is not in Podman's local storage on this host. Empty images refuse as required input.
+Stored archive-era sessions, templates and recent setups remain containerized but read with an empty image; templates
+still apply, and the user must fill in an image before launch, or use Replace with for an old session.
 
 The container receives the whole managed checkout, read-write at its same canonical absolute path, even when launched
 through an alias or from a subdirectory; one selected host loopback TCP port, reachable as `127.0.0.1:<port>` inside;
@@ -3553,20 +3561,21 @@ but no conversation is captured and no missing-hook notification fires. Farhelm 
 configuration for it. Restart and Restart with are unavailable; the latter explicitly overrides its ordinary
 named-conversation offer. Replace and Replace with create a fresh session and container before deleting the source.
 
-Container creation and image-copy progress appear in the session terminal after checkout preparation. The container's
-idle keeper runs under Podman's own init, independently of the agent exec. It stays running when the agent exits on its
-own. Stop first stops the ordinary agent process tree, then the whole container, including any terminal or detached
-process in it. The stopped container and its files remain. Delete removes it only after the ordinary read-only
-preflights and upload cancellation; a refused preflight leaves it intact. Stop and Delete require Podman's actual state
-to confirm completion: a command's successful exit alone proves neither, and a command's failed exit does not override a
-confirmed stopped or absent container. Unconfirmed cleanup fails visibly and keeps the session for retry. Delete's
-existing confirmation follows the agent and terminal-tab state; after they end, Delete can still remove work that
-detached inside the container, just as ordinary Delete reaps leftover descendants after their agent exits.
+Container creation diagnostics appear in the session terminal after checkout preparation. The container's idle keeper
+runs under Podman's own init, independently of the agent exec. It stays running when the agent exits on its own. Stop
+first stops the ordinary agent process tree, then the whole container, including any terminal or detached process in it.
+The stopped container and its files remain. Delete removes it only after the ordinary read-only preflights and upload
+cancellation; a refused preflight leaves it intact. Stop and Delete require Podman's actual state to confirm completion:
+a command's successful exit alone proves neither, and a command's failed exit does not override a confirmed stopped or
+absent container. Unconfirmed cleanup fails visibly and keeps the session for retry. Delete's existing confirmation
+follows the agent and terminal-tab state; after they end, Delete can still remove work that detached inside the
+container, just as ordinary Delete reaps leftover descendants after their agent exits.
 
-An image import already holding the creation fence can delay cleanup. After 30 seconds waiting for that fence, the
-operation refuses without cancelling creation or signalling processes and asks the user to retry after preparation
-finishes. Once Stop or Delete revokes creation, an earlier delayed creator cannot recreate the container. After a host
-reboot the session terminal is gone and Restart remains unavailable, so the session can only be replaced or deleted.
+Container creation already holding the creation fence can delay cleanup, including while Podman waits on storage. After
+30 seconds waiting for that fence, the operation refuses without cancelling creation or signalling processes and asks
+the user to retry after preparation finishes. Once Stop or Delete revokes creation, an earlier delayed creator cannot
+recreate the container. After a host reboot the session terminal is gone and Restart remains unavailable, so the session
+can only be replaced or deleted.
 
 This isolates host filesystem capabilities, not memory or CPU use, and it does not protect the checkout itself: the
 agent can write anything there, including Git hooks and Git configuration under `.git` and an agent's own project
@@ -3577,8 +3586,8 @@ the selected host's port, not an in-container port. The host's `containers.conf`
 privileges, including working sudo inside an appropriately prepared image, remain available. Files written as the
 uid-1000 image user belong to the host user through keep-id mapping; container-root files belong to a subordinate host
 uid. The user may need `podman unshare` to edit or remove them. A container-root-owned folder can likewise prevent Empty
-Trash until removed with `podman unshare rm -rf`. Delete removes the container but leaves the imported image in the
-user's Podman storage until they prune it.
+Trash until removed with `podman unshare rm -rf`. Delete removes the container and leaves images in the user's Podman
+storage alone.
 
 ### Local authority and trust between hosts
 

@@ -232,7 +232,7 @@ impl LaunchDraft {
         if !managed_destination {
             return Some("Containerized sessions require a managed checkout".into());
         }
-        self.container.config().err()
+        self.container.launch_config().err()
     }
 
     /// The active launch kind; each group's dormant values remain intact.
@@ -704,7 +704,7 @@ impl LaunchDraft {
     /// Reuse structured normalization after the post-mint missing-agent and
     /// wrapper guards, before that caller refuses a changed active mode.
     pub(super) fn structured_selection(&self) -> Option<LaunchSelection> {
-        self.container.config().ok()?;
+        self.container.launch_config().ok()?;
         let mut selection = self.editing_selection(self.harness?);
         if !self.is_restart() {
             selection.permissions = crate::launch_composer::normalized_permissions(
@@ -2983,7 +2983,7 @@ mod tests {
         assert_eq!(structured(&draft).container, None);
         let mut container = ContainerDraft {
             enabled: true,
-            image_file: "/images/agent.oci".into(),
+            image: "localhost/agent:latest".into(),
             api_proxy_port: "43210".into(),
             github_token_file: "/tokens/github".into(),
         };
@@ -3013,6 +3013,18 @@ mod tests {
         );
         copied.choose_tab(LaunchTab::Agent);
         assert!(copied.container_refusal(false).is_some());
+        let mut old = selection;
+        old.container.as_mut().unwrap().image.clear();
+        copied.restore_launch(&old, Some(LaunchHarness::Codex));
+        assert!(copied.container().enabled);
+        assert!(copied.container().image.is_empty());
+        assert!(
+            copied
+                .container_refusal(true)
+                .unwrap()
+                .contains("image is required")
+        );
+        assert!(copied.structured_selection().is_none());
     }
 
     /// Exercise the stored-command comparison without mounting catalog readers.
@@ -3162,7 +3174,7 @@ mod tests {
         };
         let config = farhelm_proto::ContainerConfig {
             engine: farhelm_proto::ContainerEngine::Podman,
-            image_file: "/images/agent.oci".into(),
+            image: "localhost/agent:latest".into(),
             api_proxy_port: 43210,
             github_token_file: None,
         };

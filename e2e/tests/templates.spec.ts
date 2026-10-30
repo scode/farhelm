@@ -868,7 +868,7 @@ async function storedTemplate(request: APIRequestContext, name: string) {
 test("container templates edit, apply, save and explicitly clear the complete choice", async ({ page, request }, testInfo) => {
   const source = `container-source-${Date.now()}`;
   const saved = `${source}-saved`;
-  const config = { engine: "podman", image_file: "/images/agent archive.oci", api_proxy_port: 43210, github_token_file: "/tokens/github" };
+  const config = { engine: "podman", image: "localhost/agent:latest", api_proxy_port: 43210, github_token_file: "/tokens/github" };
   try {
     await putTemplate(request, source, { kind: "agent", agent: "codex", container: config });
     const dialog = await openTemplates(page);
@@ -879,7 +879,7 @@ test("container templates edit, apply, save and explicitly clear the complete ch
     const viewport = page.viewportSize()!;
     for (const width of [1100, 390]) {
       await page.setViewportSize({ width, height: viewport.height });
-      for (const label of ["Image file", "API proxy port", "GitHub token file"]) {
+      for (const label of ["Image", "API proxy port", "GitHub token file"]) {
         await expect.poll(() => dialog.getByLabel(label, { exact: true }).evaluate(input =>
           input.getBoundingClientRect().right - input.closest(".templates-field-controls")!.getBoundingClientRect().right,
         )).toBeLessThanOrEqual(1);
@@ -901,7 +901,7 @@ test("container templates edit, apply, save and explicitly clear the complete ch
     await dialog.getByRole("button", { name: "Close templates", exact: true }).click();
     const form = await openNew(page);
     await applyTemplate(form, source);
-    await expect(form.getByLabel("Image file", { exact: true })).toHaveValue(config.image_file);
+    await expect(form.getByLabel("Image", { exact: true })).toHaveValue(config.image);
     await expect(form.getByLabel("API proxy port", { exact: true })).toHaveValue("43211");
     await expect(form.getByLabel("GitHub token file", { exact: true })).toHaveValue(config.github_token_file);
     await form.locator(".launch-composer-save-template").click();

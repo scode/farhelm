@@ -3817,7 +3817,7 @@ mod tests {
         if let Some(crate::SessionLaunch::Agent { selection, .. }) = &mut session.launch {
             selection.container = Some(farhelm_proto::ContainerConfig {
                 engine: farhelm_proto::ContainerEngine::Podman,
-                image_file: "/images/agent.oci".into(),
+                image: "localhost/agent:latest".into(),
                 api_proxy_port: 43210,
                 github_token_file: None,
             });
