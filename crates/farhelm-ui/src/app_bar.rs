@@ -69,6 +69,7 @@ const WORDMARK_LIGHT_SVG: &str =
 enum BarMenuItem {
     SendFeedback,
     Documentation,
+    KeyboardShortcuts,
     /// Always available help, even when no installed update waits for restart.
     ReleaseNotes,
     /// Manual commands for hosts whose SSH authentication needs interaction.
@@ -91,7 +92,7 @@ impl BarMenuItem {
         match self {
             Self::SendFeedback => ActionGlyph::Feedback,
             Self::Documentation | Self::ReleaseNotes | Self::WhatsNew => ActionGlyph::Document,
-            Self::SshHelp => ActionGlyph::Terminal,
+            Self::SshHelp | Self::KeyboardShortcuts => ActionGlyph::Terminal,
             Self::Welcome => ActionGlyph::Info,
             Self::CheckForUpdates => ActionGlyph::Update,
             Self::RestartToUpdate => ActionGlyph::Restart,
@@ -103,6 +104,7 @@ impl BarMenuItem {
         match self {
             BarMenuItem::SendFeedback => "Send feedback",
             BarMenuItem::Documentation => "Documentation",
+            BarMenuItem::KeyboardShortcuts => "Keyboard shortcuts",
             BarMenuItem::ReleaseNotes => "Release notes",
             BarMenuItem::SshHelp => "SSH needs 2FA?",
             BarMenuItem::Welcome => "Welcome",
@@ -123,6 +125,9 @@ impl BarMenuItem {
             }
             BarMenuItem::Documentation => {
                 "Documentation: open the Farhelm documentation at farhelm.io/docs in your browser"
+            }
+            BarMenuItem::KeyboardShortcuts => {
+                "Keyboard shortcuts: show this client's keys and current template bindings"
             }
             BarMenuItem::ReleaseNotes => {
                 "Release notes: open Farhelm's release notes at farhelm.io/docs in your browser, each release with what changed"
@@ -150,6 +155,7 @@ impl BarMenuItem {
         match self {
             BarMenuItem::SendFeedback => "Privately, to Farhelm's maintainer",
             BarMenuItem::Documentation => "Opens farhelm.io/docs in your browser",
+            BarMenuItem::KeyboardShortcuts => "Shows keys and your template bindings",
             BarMenuItem::ReleaseNotes => "Opens the release notes in your browser",
             BarMenuItem::SshHelp => "Start a host's SSH connections yourself",
             BarMenuItem::Welcome => "Shows the welcome card again",
@@ -160,9 +166,10 @@ impl BarMenuItem {
     }
 }
 
-const BAR_MENU_ITEMS: [BarMenuItem; 8] = [
+const BAR_MENU_ITEMS: [BarMenuItem; 9] = [
     BarMenuItem::SendFeedback,
     BarMenuItem::Documentation,
+    BarMenuItem::KeyboardShortcuts,
     BarMenuItem::ReleaseNotes,
     BarMenuItem::SshHelp,
     BarMenuItem::Welcome,
@@ -179,6 +186,7 @@ fn help_menu_items(has_updater: bool) -> Vec<BarMenuItem> {
     let mut items = vec![
         BarMenuItem::SendFeedback,
         BarMenuItem::Documentation,
+        BarMenuItem::KeyboardShortcuts,
         BarMenuItem::ReleaseNotes,
         BarMenuItem::SshHelp,
         BarMenuItem::Welcome,
@@ -657,6 +665,23 @@ pub(crate) fn AppBar(
     let mut settings_open = use_signal(|| false);
     let mut ssh_help_open = use_signal(|| false);
     let mut feedback_open = use_signal(|| false);
+    let mut shortcuts_open = use_signal(|| false);
+    let mut shortcuts_closing = use_signal(|| false);
+    // The surviving bar owns removal and return. Waiting for the exact modal
+    // root to leave lets xterm accept focus after its modal veto is gone.
+    let close_shortcuts = use_callback(move |()| {
+        if *shortcuts_closing.peek() {
+            return;
+        }
+        shortcuts_closing.set(true);
+        crate::keyboard_shortcuts::DIALOG.release();
+        shortcuts_open.set(false);
+        spawn(async move {
+            crate::keyboard_shortcuts::DIALOG.close_and_wait().await;
+            crate::keyboard_shortcuts::OPENER.restore(true);
+            shortcuts_closing.set(false);
+        });
+    });
     let base = use_context::<crate::ApiBase>().0;
     let mut preferences = use_context::<crate::list::SharedPreferences>();
     let initial_welcome = use_context::<crate::welcome::WelcomeOnLoad>();
@@ -874,6 +899,17 @@ pub(crate) fn AppBar(
                 crate::icons::HelpIcon {}
             }
         }
+        // Mounted only beneath the authenticated preference gate, like Cmd+K's
+        // relay. Capture-phase JS records terminal focus before clicking it.
+        button {
+            r#type: "button", hidden: true, tabindex: "-1",
+            class: "keyboard-shortcuts-trigger", disabled: shortcuts_open() || shortcuts_closing(),
+            onclick: move |_| {
+                if !*shortcuts_open.peek() && !*shortcuts_closing.peek() {
+                    shortcuts_open.set(true);
+                }
+            },
+        }
         BarMenuFlyout {
             menu: help_menu,
             items: help_items,
@@ -883,6 +919,12 @@ pub(crate) fn AppBar(
                     feedback_open.set(true);
                 }
                 BarMenuItem::Documentation => open_external_page(DOCS_URL),
+                BarMenuItem::KeyboardShortcuts => {
+                    if !*shortcuts_closing.peek() {
+                        document::eval("window.__farhelmKeyboardShortcutsFocus = document.querySelector('.app-help-toggle');");
+                        shortcuts_open.set(true);
+                    }
+                }
                 BarMenuItem::ReleaseNotes => open_external_page(RELEASE_NOTES_URL),
                 BarMenuItem::SshHelp => ssh_help_open.set(true),
                 BarMenuItem::Welcome => {
@@ -915,6 +957,7 @@ pub(crate) fn AppBar(
                     // The help menu's items; never in this menu's list.
                     BarMenuItem::SendFeedback
                     | BarMenuItem::Documentation
+                    | BarMenuItem::KeyboardShortcuts
                     | BarMenuItem::ReleaseNotes
                     | BarMenuItem::SshHelp
                     | BarMenuItem::Welcome
@@ -924,6 +967,9 @@ pub(crate) fn AppBar(
         }
         if settings_open() {
             crate::settings::SettingsDialog { on_close: close_settings }
+        }
+        if shortcuts_open() {
+            crate::keyboard_shortcuts::KeyboardShortcuts { on_close: close_shortcuts }
         }
         if ssh_help_open() {
             crate::ssh_help::SshHelpDialog {
@@ -1094,9 +1140,9 @@ mod tests {
         assert_eq!(displayed_version(Some(&skew)), "0.9.0-rc.1");
     }
 
-    /// Spec (Feedback): the `?` menu lists send feedback, documentation and
-    /// release notes, SSH help and welcome in that order. Only a desktop app whose updater
-    /// runs adds check for updates as the sixth item. The browser suite
+    /// Spec (Feedback): the `?` menu lists send feedback, documentation,
+    /// keyboard shortcuts, release notes, SSH help and welcome in that order.
+    /// Only a desktop app whose updater runs adds check for updates as the seventh item. The browser suite
     /// never has an updater, so this is the one place the desktop order is
     /// pinned.
     #[farhelm_testtrace::test]
@@ -1104,6 +1150,7 @@ mod tests {
         let common = [
             BarMenuItem::SendFeedback,
             BarMenuItem::Documentation,
+            BarMenuItem::KeyboardShortcuts,
             BarMenuItem::ReleaseNotes,
             BarMenuItem::SshHelp,
             BarMenuItem::Welcome,

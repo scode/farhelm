@@ -57,7 +57,7 @@ fn bind_number(bindings: &mut BTreeMap<String, PeerText>, name: &str, key: Optio
 /// Mirror fresh bindings without replacing unrelated cached preferences.
 /// Callers apply the shared binding overlay first so unconfirmed local writes
 /// retain their ownership; this refresh must never become a whole seed read.
-pub(super) fn apply_template_bindings(current: &mut Preferences, fresh: Preferences) {
+pub(crate) fn apply_template_bindings(current: &mut Preferences, fresh: Preferences) {
     current.quick_launch_template = fresh.quick_launch_template;
     current.template_shortcuts = fresh.template_shortcuts;
 }

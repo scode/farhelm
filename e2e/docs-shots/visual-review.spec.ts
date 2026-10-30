@@ -1985,14 +1985,14 @@ async function phoneSettingsShots(page: Page, settings: Locator, name: string) {
   }
 }
 
-/** Open only the actual web Help menu, whose five items need no updater seam.
+/** Open only the actual web Help menu, whose six items need no updater seam.
  * The count is the real web-build premise: update checks are native-only and
  * must not appear here through a capture provider or fabricated update state.
  */
 async function openHelp(page: Page) {
   await page.locator(".app-help-toggle").click();
   const panel = page.locator('.bar-menu-flyout[data-bar-menu="help"] .bar-menu-panel');
-  await expect(panel.getByRole("menu", { name: "Help", exact: true }).getByRole("menuitem")).toHaveCount(5);
+  await expect(panel.getByRole("menu", { name: "Help", exact: true }).getByRole("menuitem")).toHaveCount(6);
   await inspectMenu(page, panel);
   return panel;
 }

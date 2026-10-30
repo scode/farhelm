@@ -158,6 +158,7 @@ mod feedback;
 mod github_checkout;
 mod hosts;
 mod icons;
+mod keyboard_shortcuts;
 mod launch_composer;
 mod launch_controls;
 mod launch_sequence;
@@ -1738,6 +1739,7 @@ fn AppBody() -> Element {
     // listeners and before xterm can pass a key to the terminal program.
     use_hook(install_template_shortcuts);
     use_hook(install_quick_switcher_shortcut);
+    use_hook(keyboard_shortcuts::install_shortcut);
     use_hook(install_session_action_shortcuts);
     #[cfg(native_desktop)]
     use_hook(|| {

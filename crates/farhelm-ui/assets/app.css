@@ -8499,6 +8499,26 @@ a:any-link,
 .quick-switcher-templates-hint { border-top: 1px solid var(--border-dialog); padding-top: 10px; }
 .quick-switcher-templates-hint p { margin: 4px 0 0; }
 
+/* Shortcut rows share the existing key chips. Only the body scrolls, leaving
+   Close reachable when template names wrap or the viewport is short. */
+.keyboard-shortcuts-dialog { width: min(640px, 100%); font-size: 13px; }
+.keyboard-shortcuts-body { gap: 20px; }
+.keyboard-shortcuts-section h3 {
+  margin: 0 0 10px;
+  color: var(--fg-1);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.keyboard-shortcuts-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px 16px;
+  padding: 5px 0;
+}
+.keyboard-shortcuts-row > .peer-value { overflow-wrap: anywhere; }
+
 /* Appearance is an explicit click-to-save choice, not a radio group whose
    arrow navigation would save and disable itself at each intermediate icon. */
 .host-appearance-icons { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 6px; }
