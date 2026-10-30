@@ -248,6 +248,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Emacs-style quick launch by typed template names.** Add a quick launch that also supports typing template names
   separated by spaces, so `cmd+x myproject codex Enter` launches my project in Codex. Faster than `tl:...` in the
   launcher.
+- **Fix the Settings gear icon's squished shape.** The gear glyph in `crates/farhelm-ui/src/icons.rs` (`SettingsIcon`)
+  is drawn wider than tall — its outline spans x 0..14 but only y 2.2..13.5 inside the 16×16 viewBox — so it renders as
+  an ellipse rather than a circle. Redraw the path so the silhouette is circular with evenly spaced teeth (equal
+  horizontal and vertical extent).
 
 ## Doc todo
 
