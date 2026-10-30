@@ -858,4 +858,9 @@ are not.
 - **Trust zones.** A trust zone is scoped to a project and carries certain credentials; a session in a trust zone may
   spawn other sessions in the same zone, on hosts that allow that zone.
 
+- **Consider a "project" concept that is not a session or a repo.** A project would be an object that lives across
+  sessions and can span repositories, owning things that belong to the work rather than to any one session or checkout:
+  its own identity, context, skills, a favicon, memory, and similar. Whether Farhelm has such a concept, what it owns,
+  and how it is created and selected are all TBD.
+
 ## Unbucketized
