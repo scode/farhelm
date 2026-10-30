@@ -3250,3 +3250,39 @@ address retained temporary evidence and expire with cleanup.
 Class: fixture-premise
 
 Cause: established
+
+## 2026-10-30 — feedback dialog's disabled Send color (e2e/tests/feedback.spec.ts)
+
+`the dialog refuses blank and over-long messages without sending` failed on WebKit in two full browser runs of the plans
+landing monitor, on different stacks: `0a494db0-73b5-462c-8e8d-33510baf9df6` (2026-10-29, host-short-names' first
+delivery on main `0f3d4bcd`) and `8f80714f-9f10-46f5-af67-be60e573be31` (2026-10-30, shortcuts-overview and
+settings-gear-shape on main `cb426c6a`). Both failed on the same assertion with the same value: the disabled Send
+button's color was `rgb(155, 165, 184)` where the test expected `rgb(90, 101, 121)`, for the whole 5-second wait, so it
+settled on the wrong color rather than racing. It passed on Chromium in both runs, and five of five alone on WebKit in
+`756ea4b1-29d9-4954-b8a0-31d9cae25dee`. In `0a494db0` it failed beside expanded-host-rail click timeouts that
+host-short-names caused and two other unrelated WebKit failures; in `8f80714f` beside the recorded folder-dropdown flake
+only. Neither stack changed the feedback dialog, its styles or the theme; shortcuts-overview edited only this spec's
+Help-menu test. A review of the first failure saw it follow a color-scheme switch in the test, so a disabled-button
+color sampled before the switched theme's values apply is a hypothesis, not a diagnosis. Older retained runs on
+2026-10-20, 2026-10-27 and 2026-10-28 also show this test failing, but those runs were wrecked or failed a different
+assertion and are not counted. Open, and excluded from deflake sweeps; no fix was attempted.
+
+```text
+Error: expect(locator).toHaveCSS(expected) failed
+Locator:  getByRole('dialog', { name: 'Send feedback', exact: true }).getByRole('button', { name: 'Send', exact: true })
+Expected: "rgb(90, 101, 121)"
+Received: "rgb(155, 165, 184)"
+Timeout:  5000ms
+```
+
+Evidence: shared x86_64 Linux under other agents' builds (load average about 15 to 20 during the second run). Both full
+runs: Playwright through `scripts/record-test-run.py`, the whole browser suite on Chromium and WebKit, three workers
+with one owned stack each, zero retries, the jj working copy empty on the tested stack (`099aa64b` and `ed001c8e`
+respectively). Recorded tmux 3.7c executable SHA256 `1f51ad46eb731a90b75e74afc35719666405e8231fa73ab58ff35a5e9e6f92cd`,
+locale C.UTF-8; child `FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR` after the recorder scrubbed ambient
+`FARHELM_*`. The individual test's duration in the failing attempts was not extracted. Run UUIDs address retained
+temporary evidence, which expires with cleanup.
+
+Class: unknown
+
+Cause: hypothesis

@@ -352,6 +352,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   Git URL mapping cascade. The original timeout's cause remains unproved; keep its existing deadline and sweep exclusion
   until focused evidence supports removing them.
 
+- **Feedback dialog's disabled Send color on WebKit.** `the dialog refuses blank and over-long messages without sending`
+  in `e2e/tests/feedback.spec.ts` saw the disabled Send button settle on `rgb(155, 165, 184)` instead of
+  `rgb(90, 101, 121)` in full browser runs `0a494db0-73b5-462c-8e8d-33510baf9df6` and
+  `8f80714f-9f10-46f5-af67-be60e573be31`, on stacks that did not touch the dialog, and passed five of five alone in
+  `756ea4b1-29d9-4954-b8a0-31d9cae25dee`. Hypothesis: the color is sampled before a color-scheme switch's values apply
+  (FLAKES.md, 2026-10-30).
+
 ### Difficult deflake
 
 - Restore the release integration gate and remove the remaining ignored binary-output test when the named Rust flakes

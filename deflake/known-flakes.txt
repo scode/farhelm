@@ -17,3 +17,4 @@ playwright replace.spec.ts plain Replace keeps a newer same-source key after old
 playwright terminal-restart.spec.ts don't ask again on a refused YOLO replace marks the host, then replaces with the override  # interrupted-card-replace-click-lost
 playwright sidebar.spec.ts composer folder dropdown preserves keyboard launch and grouped history  # folder-reset-viewport
 playwright header.spec.ts native tunnel preview keeps ports and actions inside a 650px pane  # native-tunnel-preview-webkit-budget
+playwright feedback.spec.ts the dialog refuses blank and over-long messages without sending  # feedback-disabled-send-color
