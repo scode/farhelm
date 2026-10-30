@@ -24,6 +24,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Speed up Podman session launches.** Starting each new container from an OCI archive makes Podman unpack the image
+  even when its layers are already in local storage. Investigate selecting an existing local image, using an OCI layout
+  directory or reusing an imported image, including how changes to the supplied image, concurrent launches and cleanup
+  work. The [measurements and investigation](https://snippets.scode.org/s/farhelm-podman-startup-performance/) compare
+  archive, layout-directory and local-image starts; measure full Farhelm launches too.
+
 - **Revisit the host rail's widened names taking no clicks.** Decided on the maintainer's behalf on 2026-10-29 when the
   host-short-names landing failed: the rail's widened part, which shows full host names over the session list, is
   display only. It takes no clicks and does not keep the rail open, so the rail widens only while the pointer is over
