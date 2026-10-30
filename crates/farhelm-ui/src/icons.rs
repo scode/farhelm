@@ -830,18 +830,29 @@ pub(crate) fn HelpIcon() -> Element {
     }
 }
 
-/// The app-wide settings affordance; its button supplies the accessible name.
-/// Inline geometry keeps the browser and desktop bundle on the same asset path.
+/// The original eight-tooth outline, kept separate so its proportions can be checked.
+///
+/// Absolute M/L vertices make the silhouette's bounds explicit. Keep its centre
+/// at (8, 8) and its horizontal and vertical extents equal when redrawing it.
+const SETTINGS_GEAR_PATH: &str = "M7.24 2.96 L7.41 1.23 L8.59 1.23 L8.76 2.96 L11.03 3.9 L12.38 2.79 L13.21 3.62 L12.1 4.97 L13.04 7.24 L14.77 7.41 L14.77 8.59 L13.04 8.76 L12.1 11.03 L13.21 12.38 L12.38 13.21 L11.03 12.1 L8.76 13.04 L8.59 14.77 L7.41 14.77 L7.24 13.04 L4.97 12.1 L3.62 13.21 L2.79 12.38 L3.9 11.03 L2.96 8.76 L1.23 8.59 L1.23 7.41 L2.96 7.24 L3.9 4.97 L2.79 3.62 L3.62 2.79 L4.97 3.9 Z";
+
+/// Share HelpIcon's box and centre so the rail-foot controls read as a pair.
+const SETTINGS_GEAR_VIEW_BOX: &str = "0 0 16 16";
+
+/// The app-wide settings affordance, centred beside HelpIcon in the same 16-unit box.
+///
+/// Its button supplies the accessible name. Callers also render it at 14px in
+/// menus; the square silhouette keeps the gear round at either size.
 #[component]
 pub(crate) fn SettingsIcon() -> Element {
     rsx! {
         svg {
-            width: "16", height: "16", view_box: "-1 0 16 16",
+            width: "16", height: "16", view_box: SETTINGS_GEAR_VIEW_BOX,
             fill: "none", stroke: "currentColor", stroke_width: "1.2",
             stroke_linecap: "round", stroke_linejoin: "round",
             "aria-hidden": "true",
-            path { d: "M5.2 2.2 H8.8 L9.3 4.1 L11 5.1 L12.7 4.2 L14 6.5 L12.5 7.8 V9.8 L14 11.1 L12.7 13.4 L11 12.5 L9.3 13.5 H5.2 L4.7 11.6 L3 10.6 L1.3 11.5 L0 9.2 L1.5 7.9 V5.9 L0 4.6 L1.3 2.3 L3 3.2 L4.7 2.2 Z" }
-            circle { cx: "7", cy: "7.9", r: "1.7" }
+            path { d: SETTINGS_GEAR_PATH }
+            circle { cx: "8", cy: "8", r: "2.2" }
         }
     }
 }
@@ -866,5 +877,54 @@ pub(crate) fn TrashIcon(full: bool) -> Element {
                 path { d: "M5 5.2v3.8M7 5.2v3.8" }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SETTINGS_GEAR_PATH, SETTINGS_GEAR_VIEW_BOX};
+
+    /// A redraw must not bring back the flattened, off-centre Settings gear.
+    ///
+    /// Measure the rendered outline's vertices rather than duplicating its
+    /// coordinates. Straight segments attain their bounds at those vertices;
+    /// a curved redraw needs a different measurement, not a silently partial one.
+    #[test]
+    fn settings_gear_is_square_and_centred() {
+        let view_box: Vec<f64> = SETTINGS_GEAR_VIEW_BOX
+            .split_whitespace()
+            .map(|value| value.parse().expect("numeric viewBox coordinate"))
+            .collect();
+        assert_eq!(view_box, [0.0, 0.0, 16.0, 16.0]);
+
+        let outline = SETTINGS_GEAR_PATH
+            .strip_suffix(" Z")
+            .expect("gear outline must close");
+        let coordinates: Vec<_> = outline.split_whitespace().collect();
+        assert!(
+            !coordinates.is_empty(),
+            "gear outline must contain vertices"
+        );
+        let (pairs, remainder) = coordinates.as_chunks::<2>();
+        assert!(remainder.is_empty(), "incomplete gear vertex");
+        let (mut min_x, mut min_y) = (f64::INFINITY, f64::INFINITY);
+        let (mut max_x, mut max_y) = (f64::NEG_INFINITY, f64::NEG_INFINITY);
+        for (index, pair) in pairs.iter().enumerate() {
+            let command = if index == 0 { 'M' } else { 'L' };
+            let x: f64 = pair[0]
+                .strip_prefix(command)
+                .expect("only absolute M/L vertices are measured")
+                .parse()
+                .expect("numeric x coordinate");
+            let y: f64 = pair[1].parse().expect("numeric y coordinate");
+            assert!(x.is_finite() && y.is_finite(), "finite gear vertex");
+            min_x = min_x.min(x);
+            min_y = min_y.min(y);
+            max_x = max_x.max(x);
+            max_y = max_y.max(y);
+        }
+        assert!(((max_x - min_x) - (max_y - min_y)).abs() <= 0.05);
+        assert!(((min_x + max_x) / 2.0 - 8.0).abs() <= 0.05);
+        assert!(((min_y + max_y) / 2.0 - 8.0).abs() <= 0.05);
     }
 }
