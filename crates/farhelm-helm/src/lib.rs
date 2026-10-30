@@ -2761,9 +2761,21 @@ mod tests {
              PRAGMA user_version = 29;",
         )
         .unwrap();
+        // Closing the last connection checkpoints the rewound schema into the
+        // main file. Copying it while those writes remain in WAL would test an
+        // already-current database instead of the intended upgrade fixture.
+        drop(conn);
         let premise = tempfile::tempdir().unwrap();
         let unowned_copy = premise.path().join("helm.db");
         std::fs::copy(&path, &unowned_copy).unwrap();
+        let copied_version: i64 = rusqlite::Connection::open(&unowned_copy)
+            .unwrap()
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            copied_version, 29,
+            "fixture premise: the copy needs migration"
+        );
         drop(crate::store::HelmStore::open(&unowned_copy).await.unwrap());
         let upgraded: i64 = rusqlite::Connection::open(&unowned_copy)
             .unwrap()
@@ -2801,7 +2813,8 @@ mod tests {
             format!("{error:#}").contains("another process owns token control"),
             "the refusal names the owner lock: {error:#}"
         );
-        let after: i64 = conn
+        let after: i64 = rusqlite::Connection::open(&path)
+            .unwrap()
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
         assert_eq!(after, 29, "the refused helm must not migrate helm.db");
