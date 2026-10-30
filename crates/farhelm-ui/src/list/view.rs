@@ -4203,6 +4203,7 @@ pub(crate) fn ListView(
                         FocusTarget::new(".hosts-panel-toggle", None, false).focus();
                     }
                 },
+                span { class: "host-rail-icon", "aria-hidden": "true",
                 crate::icons::ActionIcon { glyph: crate::icons::ActionGlyph::Hosts }
                 if host_updates.read().len() > 0 {
                     span { class: "hosts-toggle-update", aria_hidden: "true",
@@ -4210,6 +4211,8 @@ pub(crate) fn ListView(
                         "↑"
                     }
                 }
+                }
+                span { class: "host-rail-label", "aria-hidden": "true", "Hosts" }
             }
         },
         // The rail and footer remain reachable while this content scrolls.

@@ -1,7 +1,7 @@
 // Browser evidence for the permanent, server-backed sidebar host rail.
 // Rendering fewer rows alone cannot distinguish a real helm query from a
 // client-side pass over a previously fetched page.
-import { chooseSort } from "./helpers/list-header";
+import { chooseSort, chooseStatus } from "./helpers/list-header";
 import { chooseHost, hostChoice, selectedHost } from "./helpers/host-rail";
 import { expect, test } from "./helpers/evidence";
 import { Page, Route } from "@playwright/test";
@@ -203,7 +203,7 @@ test.describe("permanent host filtering", () => {
     feed.notify(5);
     await waitForFeedReadersSettled(page);
     await expect(chosen).toHaveAttribute("data-rail-host-id", String(remote!.id), { timeout: 20_000 });
-    await expect(chosen).toHaveAttribute("aria-label", /^restored host:/);
+    await expect(chosen).toHaveAttribute("aria-label", /^restored host \(.+\):/);
     await expect(chosen).toHaveJSProperty("disabled", false);
     await expect(chosen).toHaveAttribute("aria-pressed", "true");
     await expect(all).toBeFocused();
@@ -296,7 +296,11 @@ test.describe("permanent host filtering", () => {
     }
   });
 
-  /** Native buttons expose selection through keyboard activation in the narrow rail. */
+  /**
+   * Native host buttons fit a narrow screen. Explicit expansion consumes only
+   * the width available above the main-pane floor, without enabling another
+   * narrow-window mode or changing the resize handle's stored-width meaning.
+   */
   test("the rail keeps keyboard focus and fits a narrow window", async ({ page, request }) => {
     const local = await localHostId(request); await page.setViewportSize({ width: 360, height: 720 }); await openList(page);
     const all = hostChoice(page); await all.focus(); await expect(all).toBeFocused();
@@ -307,6 +311,136 @@ test.describe("permanent host filtering", () => {
     await hostChoice(page, local).focus(); await expect(hostChoice(page, local)).toBeFocused();
     const box = await page.locator(".host-rail").boundingBox(); expect(box).not.toBeNull();
     expect(box!.x).toBeGreaterThanOrEqual(0); expect(box!.x + box!.width).toBeLessThanOrEqual(360);
+
+    const toggle = page.locator("#host-rail-toggle");
+    /** The script's total excludes the sidebar border; list width is its actual usable box. */
+    const geometry = () => page.evaluate(() => {
+      const sidebar = document.querySelector(".app-sidebar")!;
+      const content = document.querySelector(".sidebar-content")!;
+      const root = document.documentElement;
+      return {
+        sidebar: parseFloat(getComputedStyle(sidebar).width),
+        content: content.getBoundingClientRect().width,
+        narrow: root.classList.contains("sidebar-narrow-window"),
+        overlaps: root.classList.contains("sidebar-menu-overlaps"),
+      };
+    });
+    const handle = page.getByRole("separator", { name: "Sidebar width" });
+    const status = page.getByRole("radiogroup", { name: "Session status" });
+    /** Width arithmetic alone misses text painted over another choice. Measure
+     * both the painted targets and their text, including the selected font weight. */
+    const expectStatusFits = async () => {
+      await expect(status).toBeVisible();
+      await expect(status.locator("label")).toHaveCount(4);
+      // Inter swaps in after first paint; fallback metrics cannot prove that
+      // the shipped regular and selected text will fit the same targets.
+      await page.evaluate(() => document.fonts.ready);
+      await expect.poll(() => status.evaluate((group) => {
+        const well = group.getBoundingClientRect();
+        const targets = Array.from(group.querySelectorAll("label > span"));
+        const errors: string[] = [];
+        const boxes = targets.map((target) => {
+          const box = target.getBoundingClientRect();
+          const text = document.createRange();
+          text.selectNodeContents(target);
+          const words = text.getBoundingClientRect();
+          const name = target.textContent;
+          if (box.left < well.left - 0.5 || box.right > well.right + 0.5) {
+            errors.push(`${name}: target x=${box.left - well.left}, width=${box.width} outside well width=${well.width}`);
+          }
+          if (words.left < box.left - 0.5 || words.right > box.right + 0.5) errors.push(`${name}: text outside target`);
+          return box;
+        });
+        for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
+          const a = boxes[i], b = boxes[j];
+          if (Math.min(a.right, b.right) - Math.max(a.left, b.left) > 0.5
+            && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 0.5) errors.push(`choices ${i}/${j} overlap`);
+        }
+        return errors;
+      })).toEqual([]);
+    };
+    /** The two longer labels grow when selected; both must remain readable. */
+    const expectSelectedStatusFits = async () => {
+      for (const choice of ["Running", "Waiting", "All"] as const) {
+        await chooseStatus(page, choice);
+        await expectStatusFits();
+      }
+    };
+    try {
+      // At 800px only 82 of the extra 164px fit. The list supplies the
+      // other 82px; checking both dimensions distinguishes a cap from an overlay.
+      await page.setViewportSize({ width: 800, height: 720 });
+      await expect(handle).toHaveAttribute("aria-valuenow", "396");
+      await expect(page.locator("html")).not.toHaveClass(/sidebar-narrow-window/);
+      await expect.poll(async () => (await geometry()).sidebar).toBe(396);
+      const before = await geometry();
+      expect(before.narrow).toBe(false);
+      expect(before.overlaps).toBe(false);
+      await toggle.click();
+      await expect(toggle).toHaveAttribute("aria-expanded", "true");
+      await expect(page.locator(".host-rail")).toHaveCSS("width", "220px");
+      await expect(page.locator(".host-rail-footer")).toHaveCSS("width", "220px");
+      await expect.poll(async () => (await geometry()).sidebar).toBe(478);
+      const expanded = await geometry();
+      expect(before.content - expanded.content).toBe(82);
+      expect(expanded.narrow).toBe(before.narrow);
+      expect(expanded.overlaps).toBe(before.overlaps);
+      await expect(handle).toHaveAttribute("aria-valuenow", "396");
+      await expectSelectedStatusFits();
+      await test.info().attach("expanded-host-rail-800px", {
+        body: await page.locator(".app-sidebar").screenshot(), contentType: "image/png",
+      });
+
+      // The content can need wrapping while the terminal still fits. A rule
+      // gated on the root narrow-window class would miss these capped widths.
+      for (const [viewport, shown] of [[750, 428], [718, 396]]) {
+        await page.setViewportSize({ width: viewport, height: 720 });
+        await expect.poll(async () => (await geometry()).sidebar).toBe(shown);
+        await expect(page.locator("html")).not.toHaveClass(/sidebar-narrow-window/);
+        await expect(handle).toHaveAttribute("aria-valuenow", "396");
+        await expectSelectedStatusFits();
+      }
+      await page.setViewportSize({ width: 800, height: 720 });
+      await toggle.click();
+      await expect(toggle).toHaveAttribute("aria-expanded", "false");
+      await expect.poll(geometry).toEqual(before);
+
+      // Once the original sidebar already exceeds the available allowance,
+      // expansion must not shrink it below the user's stored total.
+      await page.setViewportSize({ width: 360, height: 720 });
+      await expect(page.locator("html")).toHaveClass(/sidebar-narrow-window/);
+      const tight = await geometry();
+      expect(tight.sidebar).toBe(396);
+      await toggle.click();
+      await expect(toggle).toHaveAttribute("aria-expanded", "true");
+      await expect.poll(async () => (await geometry()).sidebar).toBe(tight.sidebar);
+      const tightExpanded = await geometry();
+      expect(tight.content - tightExpanded.content).toBe(164);
+      expect(tightExpanded.narrow).toBe(tight.narrow);
+      expect(tightExpanded.overlaps).toBe(tight.overlaps);
+      await expect(handle).toHaveAttribute("aria-valuenow", "396");
+      await expectSelectedStatusFits();
+      await test.info().attach("expanded-host-rail-360px", {
+        body: await page.screenshot(), contentType: "image/png",
+      });
+
+      // Stored width retains its original keyboard meaning while expanded.
+      // At its supported minimum the rail leaves only 76px for the list.
+      await handle.focus();
+      await expect(handle).toBeFocused();
+      for (let step = 0; step < 10; step++) await handle.press("ArrowLeft");
+      await expect(handle).toHaveAttribute("aria-valuenow", "296");
+      await expect.poll(async () => (await geometry()).content).toBe(76);
+      await expectSelectedStatusFits();
+      await test.info().attach("expanded-host-rail-minimum-width", {
+        body: await page.screenshot(), contentType: "image/png",
+      });
+    } finally {
+      await page.evaluate(() => {
+        localStorage.removeItem("farhelm.host-rail-open");
+        localStorage.removeItem("farhelm.sidebar-width");
+      });
+    }
   });
 
   /** Both context gestures use the row's existing action set and return to

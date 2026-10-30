@@ -1070,16 +1070,14 @@ expanded label, while preserving aliases and the registry's own `this machine` n
 session row use `Local` through the short-name rule. A session row without a registry match retains the name supplied by
 the helm; the GUI does not infer locality from its text.
 
-The rail keeps 40px avatar triggers at fixed coordinates and clips short-name captions to their width. Its absolute
-navigation body expands over session content through CSS dwell on a 56px content child (only under `(hover: hover)`,
-because touch browsers keep a tapped element hovered) or descendant `:focus-visible`, leaving the content margin and
-footer unchanged. The widened scroller and expanded names take no pointer events; the narrow child restores hit testing
-across its controls, padding and gaps. Names and background beyond that child therefore neither intercept list clicks
-nor retain hover, and mouse focus cannot latch expansion. The child lives inside the scroller so wheel and touch
-gestures retain native scrolling; the nav still owns scroll-driven menu-anchor updates. Captions keep their height while
-hidden during expansion, preserving vertical icon positions. Caption and expanded text copies are aria-hidden; the
-trigger's full display name and state remain its one accessible name. Raw peer values still use ordinary escaping and
-direction isolation in both forms.
+The rail uses 40px inner icon boxes for corner badges, progress rings and menu measurements; expanding a row never moves
+these anchors horizontally. Captions are clipped below collapsed avatars and leave layout while expanded, when the whole
+row becomes one labeled click target. The page script's `host-rail-open` root class redefines `--host-rail-width` from
+56px to 220px, so the navigation, four-control foot and session-content margin move together without overlaying the
+list. Neither hover nor focus changes rail width. The content child stays inside the scroller so padding and gap
+wheel/touch gestures retain native scrolling; the nav still owns scroll-driven menu-anchor updates. Caption and expanded
+text copies are aria-hidden; the button's display name, distinct remote destination and state remain its one accessible
+name and tooltip. Raw peer values use ordinary escaping and direction isolation.
 
 The `perms:` scope offers guarded, YOLO, custom, own-setting and approval-mode choices only where the active harness
 supports them. Bare `yolo` and `guarded` join the ordinary combined search and get exact-word preselection; own setting,
@@ -1303,11 +1301,16 @@ bundled scripts, with no fallback font. Inter is not a terminal-mount prerequisi
 Sidebar width lives in `sidebar-width.js`, shared by web and desktop. It reads localStorage once at script load
 (`farhelm.sidebar-width`): plain content-width digits only, clamped to 240–600px, with 340px for absent, malformed or
 unreadable storage. Adding the 56px rail gives a 296–656px total width and 396px default without migrating the existing
-key. The root's `--sidebar-width` stores that total and survives authenticated-tree remounts. A shell-level separator
-owns pointer capture, double-click reset and 10px arrow steps; completed gestures store total minus the rail.
-Width-derived root classes replace the fixed narrow-window and row-menu-pointer media cutoffs. The existing terminal
-ResizeObserver sends each resulting grid change without debounce. A focused separator prevents terminal reveal from
-taking keyboard focus. Desktop persistence has the same webview-localStorage assumptions as terminal text size below.
+key. The same script reads `farhelm.host-rail-open` as a per-device boolean, defaulting to collapsed, and binds the
+footer's expansion toggle separately from the separator. Its root class and shown `--sidebar-width` survive
+authenticated-tree remounts. Expanded shown width adds 164px to the stored total, capped at window width minus 322px but
+never below that total. Expansion alone cannot cross the existing narrow-window class thresholds. The extra width and
+the stylesheet's 220px rail are kept in sync explicitly; there is no width animation or extra terminal debounce. A
+shell-level separator owns pointer capture, double-click reset and 10px arrow steps; completed gestures store total
+minus the rail. Width-derived root classes replace the fixed narrow-window and row-menu-pointer media cutoffs. The
+existing terminal ResizeObserver sends each resulting grid change without debounce. A focused separator prevents
+terminal reveal from taking keyboard focus. Desktop persistence has the same webview-localStorage assumptions as
+terminal text size below.
 
 Terminal reveal also yields keyboard focus to an open menu, including its expanded toggle while the menu is mounting.
 Those controls remain the destination for menu keys even if the selected terminal finishes its initial replay at the

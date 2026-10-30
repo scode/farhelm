@@ -659,14 +659,26 @@ fn rail_presentation(
 /// the row's existing measurement generation owns repeated openings.
 type RailMenuOpener = Callback<(Rc<MountedData>, MenuOpenIntent)>;
 
+/// Keep the full destination available when a collapsed avatar only shows a caption.
+/// Inputs are raw peer values; display escaping happens here before the string
+/// becomes both the tooltip and the button's accessible name. Local hosts have
+/// no SSH destination, and an unaliased remote must not repeat its own name.
+fn rail_identity(name: &str, destination: Option<&str>, local: bool) -> String {
+    let shown = gui_host_name(name, local);
+    match destination.filter(|destination| !local && *destination != name) {
+        Some(destination) => format!("{shown} ({})", display_peer(destination)),
+        None => shown,
+    }
+}
+
 /// One native rail button owns its mounted trigger; actions stay in HostRow.
 /// Selection and context activation are separate gestures, so opening host
 /// actions never changes which sessions the list is showing.
 /// Unseen provisioning outcomes add an independent mark and explanation;
 /// they never replace the connection phase or the current operation's ring.
 /// Captions and expanded names are visual alternatives to the button's one
-/// accessible label. The fixed-size trigger also keeps its menu anchor and
-/// corner badges in place when the surrounding rail expands.
+/// accessible label. The whole row selects the host, while a fixed-size inner
+/// icon box keeps its menu anchor and corner badges beside the avatar.
 #[component]
 fn HostRailAvatar(
     host: Host,
@@ -689,8 +701,13 @@ fn HostRailAvatar(
         .as_ref()
         .filter(|destination| destination.raw() != host.name.raw());
     let explanation = too_new_title(&host.state).unwrap_or_default();
+    let identity = rail_identity(
+        host.name.raw(),
+        host.destination.as_ref().map(|value| value.raw()),
+        host.kind.is_this_machine(),
+    );
     let tooltip = format!(
-        "{name}: {}{}{}{}",
+        "{identity}: {}{}{}{}",
         presentation.words,
         if explanation.is_empty() {
             String::new()
@@ -724,7 +741,6 @@ fn HostRailAvatar(
                 "data-host-attention": attention,
                 aria_label: tooltip.clone(), "data-tooltip": tooltip.clone(),
                 aria_pressed: selected, aria_haspopup: "menu", aria_expanded: menu_open,
-                onmounted: move |event| handle.set(Some(event.data())),
                 onclick: move |_| on_choose.call(Some(id)),
                 oncontextmenu: move |event| { event.prevent_default(); request(); },
                 onkeydown: move |event| {
@@ -735,6 +751,8 @@ fn HostRailAvatar(
                         request();
                     }
                 },
+                span { class: "host-rail-icon",
+                onmounted: move |event| handle.set(Some(event.data())),
                 HostMark { icon: host.icon, color: host.color, local: host.kind.is_this_machine(), tooltip: tooltip.clone() }
                 span { class: "host-rail-state {presentation.phase}", "aria-hidden": "true",
                     span { class: "status-dot" }
@@ -746,6 +764,7 @@ fn HostRailAvatar(
                     span { class: "host-rail-attention", "aria-hidden": "true",
                         span { class: "status-dot" }
                     }
+                }
                 }
                 span { class: "host-rail-expanded", "aria-hidden": "true",
                     span { class: "host-rail-expanded-name peer-value", dir: "ltr", "{name}" }
@@ -2565,14 +2584,14 @@ pub(crate) fn HostsPanel(
     rsx! {
         nav { class: "host-rail", aria_label: "Hosts",
             onscroll: move |_| on_resize.call(()),
-        // Every narrow hit target, including padding and gaps, lives inside
+        // Every hit target, including padding and gaps, lives inside
         // the scroller so wheel and touch gestures keep their native owner.
         div { class: "host-rail-hover",
             button { r#type: "button", class: "btn host-rail-all",
                 aria_label: "All hosts", aria_pressed: selected_host.is_none(),
                 "data-tooltip": "All hosts: show sessions from every host",
                 onclick: move |_| choose_host.call(None),
-                span { "aria-hidden": "true", "All" }
+                span { class: "host-rail-icon", "aria-hidden": "true", "All" }
                 span { class: "host-rail-expanded", "aria-hidden": "true",
                     span { class: "host-rail-expanded-name", "All hosts" }
                 }
@@ -2615,7 +2634,9 @@ pub(crate) fn HostsPanel(
             button { r#type: "button", class: "btn host-rail-add",
                 aria_label: "Add host", "data-tooltip": "Add host: connect a machine over SSH",
                 disabled: busy, onclick: move |_| open_add.call(true),
-                crate::icons::ActionIcon { glyph: crate::icons::ActionGlyph::Add }
+                span { class: "host-rail-icon", "aria-hidden": "true",
+                    crate::icons::ActionIcon { glyph: crate::icons::ActionGlyph::Add }
+                }
                 span { class: "host-rail-expanded", "aria-hidden": "true",
                     span { class: "host-rail-expanded-name", "Add host" }
                 }
@@ -6560,6 +6581,30 @@ mod tests {
             },
             HostPhase::Unrecognized,
         ]
+    }
+
+    /// A caption must not hide the SSH destination or misidentify the local host.
+    /// Equal remote names stay concise, while escaped peer values cannot spoof
+    /// the tooltip's punctuation through invisible directional controls.
+    #[farhelm_testtrace::test]
+    fn rail_identity_keeps_distinct_destinations() {
+        assert_eq!(
+            rail_identity("build", Some("ops@build.example"), false),
+            "build (ops@build.example)"
+        );
+        assert_eq!(
+            rail_identity("ops@build.example", Some("ops@build.example"), false),
+            "ops@build.example"
+        );
+        assert_eq!(
+            rail_identity("this machine", Some("ignored"), true),
+            "Local (this machine)"
+        );
+        assert_eq!(rail_identity("my laptop", None, true), "my laptop");
+        assert_eq!(
+            rail_identity("build", Some("ops@\u{202e}box"), false),
+            "build (ops@<U+202E>box)"
+        );
     }
 
     /// Avatars retain every refusal's meaning and keep progress separate

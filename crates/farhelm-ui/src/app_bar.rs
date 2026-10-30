@@ -477,6 +477,9 @@ fn BarMenuToggle(
     toggle_class: &'static str,
     toggle_label: String,
     toggle_tooltip: String,
+    /// Rail rows grow as a whole, but the flyout stays anchored to the icon.
+    #[props(default)]
+    rail: bool,
     /// Hide the toggle (and so the whole menu) while it has nothing to
     /// offer. Hidden rather than unmounted: focus moves into a menu through
     /// tasks spawned by its toggle and flyout components, and unmounting
@@ -513,6 +516,7 @@ fn BarMenuToggle(
                 },
                 onfocusin: move |_| forget_menu_focus(wiring),
                 onmounted: move |element| {
+                    if rail { return; }
                     toggle_handle.set(Some(element.data()));
                     if should_measure_on_mount(open(), *menu.placement.peek()) {
                         menu.spawn_measurement();
@@ -525,7 +529,18 @@ fn BarMenuToggle(
                         menu.begin_open(MenuOpenIntent::First, layout_epoch);
                     }
                 },
-                {children}
+                if rail {
+                    span { class: "host-rail-icon", "aria-hidden": "true",
+                        onmounted: move |element| {
+                            toggle_handle.set(Some(element.data()));
+                            if should_measure_on_mount(open(), *menu.placement.peek()) {
+                                menu.spawn_measurement();
+                            }
+                        },
+                        {children}
+                    }
+                    span { class: "host-rail-label", "aria-hidden": "true", "{toggle_label}" }
+                } else { {children} }
             }
             button {
                 r#type: "button",
@@ -887,7 +902,8 @@ pub(crate) fn AppBar(
                 },
                 aria_haspopup: "dialog",
                 onclick: move |_| settings_open.set(true),
-                crate::icons::SettingsIcon {}
+                span { class: "host-rail-icon", "aria-hidden": "true", crate::icons::SettingsIcon {} }
+                span { class: "host-rail-label", "aria-hidden": "true", "Settings" }
             }
             BarMenuToggle {
                 layout_epoch,
@@ -896,7 +912,28 @@ pub(crate) fn AppBar(
                 toggle_class: "btn btn-neutral app-help-toggle",
                 toggle_label: "Help",
                 toggle_tooltip: help_tooltip,
+                rail: true,
                 crate::icons::HelpIcon {}
+            }
+            button {
+                id: "host-rail-toggle", r#type: "button", class: "btn host-rail-toggle",
+                aria_expanded: "false", aria_label: "Expand navigation rail",
+                "data-tooltip": "Expand navigation rail",
+                // Assets load asynchronously in the desktop webview. Like the
+                // separator, wait for the shared owner before binding this mount.
+                onmounted: move |_| {
+                    document::eval(r#"(async () => {
+                        while (!window.farhelmSidebarWidth) {
+                            await new Promise(resolve => setTimeout(resolve, 25));
+                        }
+                        window.farhelmSidebarWidth.mountRailToggle();
+                    })();"#);
+                },
+                span { class: "host-rail-icon", "aria-hidden": "true",
+                    span { class: "host-rail-expand-icon", "»" }
+                    span { class: "host-rail-collapse-icon", "«" }
+                }
+                span { class: "host-rail-label", "aria-hidden": "true", "Collapse" }
             }
         }
         // Mounted only beneath the authenticated preference gate, like Cmd+K's

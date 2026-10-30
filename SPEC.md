@@ -1579,14 +1579,17 @@ changes neither that selection nor its open terminal; a filter with no matches s
 
 One flat list across all registered hosts, with an always-visible host rail. **All** starts selected, followed by each
 registered host in registry order and **Add host**. Each avatar uses that host's chosen icon and color, with its short
-name in a small caption underneath, truncated to the 56px rail. The local caption is `Local` unless it has an alias.
-After the pointer rests on the narrow rail for a moment (on devices that can hover; a tap on a touch screen does not
-widen it), or while keyboard focus is inside it, the rail widens over the session list without moving the list or its
-icons. The widened part is display only: it takes no pointer events and does not keep the rail open. A mouse click
-leaves no focus-driven expansion; moving from the narrow rail to the list collapses it. Names appear to the right: each
-host's display name, with its full destination underneath when different. The local display name is
-`Local (this machine)` unless aliased. All and Add host also show their labels. The Hosts, Settings and Help controls at
-the foot of the rail stay 56px wide; badges, menus and actions keep their existing behavior.
+name in a small caption underneath, truncated to the 56px rail. The local caption is `Local` unless it has an alias. The
+collapsed rail is 56px wide and never widens on hover or keyboard focus. Each avatar's tooltip and accessible name carry
+its display name, its destination when different, and its state, including any existing last-read or attention
+explanation. The local display name is `Local (this machine)` unless aliased, with no destination suffix. An ordinary
+keyboard-reachable button below Hosts, Settings and Help shows » and "Expand navigation rail" while collapsed, or «
+Collapse and "Collapse navigation rail" while expanded, and exposes its expanded state. It expands the whole rail, its
+foot included, to 220px beside the session list. Expanded host rows show the display name and a smaller destination
+underneath when different; long names truncate and remain available in full in the tooltip. Captions disappear, All
+hosts, Add host and the foot controls show labels, and each whole row highlights and selects as one click target.
+Picking a host keeps the rail expanded. Badges, menus and actions retain their behavior. Each device remembers expansion
+in local storage, independently of the helm; a fresh device starts collapsed. Touch screens follow the same rules.
 
 Choosing a host sends a server-side query immediately and is not persisted, while All widens it again. Status, sort and
 the selected session remain unchanged. Unavailable hosts retain their last-known sessions; a removed selected host
@@ -1663,17 +1666,21 @@ with a natural place in the main UI stay there. No client keeps its own copy: ev
 once after authenticating and writes it on change, so a browser tab and the desktop app open in the same order and on
 the same session. Per-client persistence — browser storage, a desktop state file, anything that lets two clients
 remember different answers — is not wanted for these shared preferences, including welcome-card dismissal (appearance,
-sidebar width, terminal text size and sound switches, by contrast, are deliberately per device; see Session list,
-Terminal experience and Status). A client that asks the helm for no particular order gets creation time. No mandatory
-hierarchy. Sessions may carry an optional parent reference usable by the API, but parentage does not nest the list and
-implies nothing about VCS state. Parent tracking is not comprehensive: `farhelm spawn --parent` can record it, while
-`farhelm agent create` and `clone` need not record the asking session.
+sidebar width, host rail expansion, terminal text size and sound switches, by contrast, are deliberately per device; see
+Session list, Terminal experience and Status). A client that asks the helm for no particular order gets creation time.
+No mandatory hierarchy. Sessions may carry an optional parent reference usable by the API, but parentage does not nest
+the list and implies nothing about VCS state. Parent tracking is not comprehensive: `farhelm spawn --parent` can record
+it, while `farhelm agent create` and `clone` need not record the asking session.
 
 The sidebar can be resized by dragging its right edge, between 296px and 656px, with 396px as the default. Its 56px host
 rail leaves the session column between 240px and 600px, with 340px as the default. Double-click the edge to reset it, or
 focus the separator and use Left and Right to step by 10px. Its width is remembered per device, like terminal text size:
 it is about the screen in front of the user, rather than a preference all clients should share. The main pane keeps its
-320px floor; a narrower window scrolls horizontally.
+320px floor; a narrower window scrolls horizontally. Expanding the rail adds 164px to the sidebar's shown width and
+takes that space from the main pane, preserving the session column's width when there is room. In narrower windows the
+sidebar grows only as far as the window allows while leaving the main pane its minimum width; the session column gives
+up the remainder. Collapsing gives the width back. The stored resize width and its range keep their meaning, independent
+of rail expansion.
 
 Host setup, removal, uninstall and refusal dialogs normally pin their header and answers. A window too short to fit them
 scrolls the whole card, so every explanation and control stays reachable. A shortened heading retains the full

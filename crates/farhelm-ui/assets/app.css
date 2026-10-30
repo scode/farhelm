@@ -122,7 +122,6 @@
   /* A fresh profile keeps the old geometry before the width asset loads. */
   --sidebar-width: 396px;
   --host-rail-width: 56px;
-  --host-rail-expanded-width: min(280px, var(--sidebar-width), 100vw);
   --sidebar-title-height: 40px;
   /* Modal backdrops and cards share this vertical budget. Dynamic viewport
      units follow browser chrome; the minimum keeps short windows visibly
@@ -569,8 +568,8 @@ samp {
 }
 
 /* The two-pane shell holds the session list and selected session.
- * sidebar-width.js owns the total per-device width, bounded to 296–656px
- * with a 396px default; its 56px rail preserves the old content widths.
+ * sidebar-width.js owns the shown per-device width. Expanding the rail adds
+ * 164px where the window has room, preserving the session column's width.
  * A shell-level separator survives sidebar scrolling.
  * Rows carry aligned status/locality,
  * title, agent, and activity columns above a host/directory line. Every ancestor of
@@ -628,11 +627,14 @@ samp {
   overflow: hidden auto;
   scrollbar-width: none;
 }
+/* Keep the 164px expansion in sync with sidebar-width.js. The whole rail
+   stays beside the list; neither hover nor focus changes its geometry. */
+html.host-rail-open { --host-rail-width: 220px; }
 .host-rail {
   position: absolute;
   top: var(--sidebar-title-height);
   left: 0;
-  bottom: 128px;
+  bottom: 168px;
   width: var(--host-rail-width);
   z-index: 4;
   box-sizing: border-box;
@@ -640,13 +642,9 @@ samp {
   scrollbar-width: none;
   border-right: 1px solid var(--border-row);
   background: var(--bg-1);
-  pointer-events: none;
-  transition: width 160ms ease;
 }
-/* The narrow content child owns hover and native scroll gestures, including
-   padding and gaps. It must stay INSIDE the scroller so a wheel or touch pan
-   there can scroll it. Its minimum height covers a short list's empty space;
-   the wider background and labels never become pointer targets. */
+/* Padding and gaps stay inside the scroller so wheel and touch gestures
+   retain their native owner even when the pointer is outside a button. */
 .host-rail-hover {
   width: var(--host-rail-width);
   min-height: 100%;
@@ -656,25 +654,8 @@ samp {
   flex-direction: column;
   align-items: flex-start;
   gap: 8px;
-  pointer-events: auto;
 }
-/* The content keeps its 56px left margin while this independent scroller
-   grows over it. Fixed-size triggers preserve icon positions, badges and
-   menu measurement; only their visual labels occupy the extra width. Keyboard
-   focus expands immediately; mouse focus alone must never cover list controls
-   after a host pick. Hover waits briefly when the narrow rail is crossed.
-   Hover widening is limited to devices that can hover: touch browsers keep
-   the last tapped element hovered, which would widen the rail after a tap
-   and let the next tap fall through the display-only names onto a hidden
-   list control. */
-@media (hover: hover) {
-  .host-rail:hover {
-    width: var(--host-rail-expanded-width);
-    transition-delay: 250ms;
-  }
-}
-.host-rail:has(:focus-visible) { width: var(--host-rail-expanded-width); transition-delay: 0ms; }
-.host-rail-entry { position: relative; flex: 0 0 auto; width: 40px; pointer-events: auto; }
+.host-rail-entry { position: relative; flex: 0 0 auto; width: 40px; }
 .host-rail-caption {
   display: block;
   width: 40px;
@@ -686,24 +667,19 @@ samp {
   font-size: 10px;
   line-height: 14px;
   color: var(--fg-1);
-  transition: opacity 120ms ease;
 }
 .host-rail-expanded {
-  pointer-events: none;
   position: absolute;
   top: 0;
   left: 48px;
-  width: calc(var(--host-rail-expanded-width) - 72px);
+  width: calc(var(--host-rail-width) - 72px);
   height: 40px;
-  display: flex;
+  display: none;
   flex-direction: column;
   justify-content: center;
   gap: 2px;
   text-align: left;
   color: var(--fg-0);
-  opacity: 0;
-  visibility: hidden;
-  transition: opacity 120ms ease, visibility 0ms linear 120ms;
 }
 .host-rail-expanded-name, .host-rail-destination {
   display: block;
@@ -714,15 +690,16 @@ samp {
   line-height: 16px;
 }
 .host-rail-destination { font-size: 10px; line-height: 12px; color: var(--fg-1); }
-/* Invisible captions retain their height so expansion never shifts an icon
-   vertically. All three visual name copies are aria-hidden in the markup;
-   the trigger's existing full-name label remains its accessible identity. */
-@media (hover: hover) {
-  .host-rail:hover .host-rail-caption { opacity: 0; transition-delay: 250ms; }
-  .host-rail:hover .host-rail-expanded { opacity: 1; visibility: visible; transition-delay: 250ms; }
-}
-.host-rail:has(:focus-visible) .host-rail-caption { opacity: 0; transition-delay: 0ms; }
-.host-rail:has(:focus-visible) .host-rail-expanded { opacity: 1; visibility: visible; transition-delay: 0ms; }
+/* Expanded rows trade captions for labels and remain single native buttons.
+   Only the inner icon box anchors corner marks and host menus. */
+.host-rail-label, .host-rail-collapse-icon { display: none; }
+.host-rail-icon { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; flex: 0 0 40px; margin: -1px; }
+html.host-rail-open .host-rail-entry { width: 100%; }
+html.host-rail-open .host-rail-caption { display: none; }
+html.host-rail-open .host-rail-expanded { display: flex; }
+html.host-rail-open .host-rail-label { display: inline; margin-left: 8px; }
+html.host-rail-open .host-rail-expand-icon { display: none; }
+html.host-rail-open .host-rail-collapse-icon { display: inline; }
 .host-rail .btn, .host-rail-footer .btn {
   pointer-events: auto;
   width: 40px;
@@ -743,9 +720,16 @@ samp {
   background: var(--accent-fill);
   color: var(--on-fill);
 }
+/* Selected labels follow the row's foreground in both the filled filter
+   state and the quieter selection shown while Hosts management is open. */
+.host-rail .btn[aria-pressed="true"] .host-rail-expanded,
+.host-rail .btn[aria-pressed="true"] .host-rail-destination { color: inherit; }
 .host-rail .btn[aria-pressed="true"]:focus-visible { outline-color: var(--on-fill); outline-offset: -4px; }
 .host-rail-avatar .host-kind-icon { width: 24px; height: 24px; flex: 0 0 24px; }
 .host-rail .btn.host-rail-avatar { padding: 0; margin: 0; }
+html.host-rail-open .host-rail .btn, html.host-rail-open .host-rail-footer .btn { width: 100%; justify-content: flex-start; }
+html.host-rail-open .host-rail-footer .app-bar-menu { width: 100%; }
+html.host-rail-open .host-rail-footer .app-bar-menu > .btn { flex: 1 1 auto; }
 .host-rail-avatar[data-host-dimmed="true"] .host-kind-icon { opacity: 0.45; }
 /* The progress pseudo-element paints after the avatar's contents. Lift the
    corner marks so their backing circles interrupt the ring, keeping each
@@ -780,7 +764,7 @@ samp {
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
-  min-height: 116px;
+  min-height: 156px;
   max-height: min(280px, 45%);
   margin: 8px 8px 8px calc(var(--host-rail-width) + 8px);
   border: 1px solid var(--warn-border);
@@ -792,9 +776,9 @@ samp {
   content: "";
   position: absolute;
   left: -7px;
-  /* The footer's first 40px control is centered 108px above its bottom.
+  /* The footer's first 40px control is centered 148px above its bottom.
      Keep the point there even when host names wrap and the card grows. */
-  bottom: 94px;
+  bottom: 134px;
   width: 11px;
   height: 11px;
   background: var(--warn-bg-dim);
@@ -820,19 +804,21 @@ samp {
 .host-update-actions .btn { font-size: 12px; }
 .host-update-card .host-update-dismiss { position: absolute; top: 4px; right: 4px; padding: 2px 5px; font-size: 12px; }
 /* A dashed operation ring remains distinct from the solid keyboard outline. */
-.host-rail-avatar[data-host-progress="true"]::after { content: ""; position: absolute; inset: 1px; border: 2px dashed var(--accent); border-radius: 50%; pointer-events: none; }
-.host-rail-avatar[aria-pressed="true"][data-host-progress="true"]::after { border-color: var(--on-fill); }
+.host-rail-avatar[data-host-progress="true"] .host-rail-icon::after { content: ""; position: absolute; inset: 1px; border: 2px dashed var(--accent); border-radius: 50%; pointer-events: none; }
+.host-rail-avatar[aria-pressed="true"][data-host-progress="true"] .host-rail-icon::after { border-color: var(--on-fill); }
 .host-rail-footer {
   position: absolute;
   bottom: 0;
   left: 0;
   width: var(--host-rail-width);
-  height: 128px;
+  height: 168px;
   box-sizing: border-box;
-  padding: 0 6px 8px;
+  /* Preserve the old centered 40px controls inside the bordered 56px rail.
+     Explicit left alignment keeps that same icon/menu x when rows widen. */
+  padding: 0 7.5px 8px;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: flex-start;
   background: var(--bg-1);
   border-right: 1px solid var(--border-row);
   z-index: 5;
@@ -848,7 +834,7 @@ samp {
 .app-sidebar:has(.hosts-panel-toggle[aria-pressed="true"]) .host-rail .btn[aria-pressed="true"]:focus-visible {
   outline-color: var(--accent);
 }
-.app-sidebar:has(.hosts-panel-toggle[aria-pressed="true"]) .host-rail-avatar[data-host-progress="true"]::after { border-color: var(--accent); }
+.app-sidebar:has(.hosts-panel-toggle[aria-pressed="true"]) .host-rail-avatar[data-host-progress="true"] .host-rail-icon::after { border-color: var(--accent); }
 .host-rail-footer .app-help-toggle[aria-expanded="true"] {
   background: var(--accent-fill-hover);
   color: var(--on-fill);
@@ -1209,8 +1195,8 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   color: var(--danger);
 }
 
-/* Footer controls retain fixed icon-sized targets independently of version
-   length. They remain outside the macOS title band's drag surface. */
+/* Footer rows may widen, but their inner icon boxes own fixed geometry.
+   They remain outside the macOS title band's drag surface. */
 .host-rail-footer .app-settings-toggle,
 .host-rail-footer .app-help-toggle {
   display: inline-flex;
@@ -1218,7 +1204,7 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   justify-content: center;
   flex: 0 0 auto;
   margin-left: 0;
-  padding: 2px;
+  padding: 0;
 }
 /* A bar menu's wrapper (the help menu's, the update menu's) holds its
    toggle and a hidden relay button; its flyout is the bar's next sibling,
@@ -1499,18 +1485,25 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 }
 
 /* Status is a single server query. Keep the shared native radio anatomy
-   and fit all four words inside the existing 240px content-column floor. */
+   and fit all four words inside the collapsed rail's 240px column floor. */
 .session-status-filter {
   padding: 6px 8px;
 }
 .session-status-filter .segmented-control { display: flex; }
 .session-status-filter .segment-radio { min-width: 0; flex: 1 1 0; }
+/* An expanded rail can borrow list width even before the terminal's
+   narrow-window mode applies. Let the existing control wrap from its
+   labels' intrinsic widths instead of forcing overlapping equal cells. */
+html.host-rail-open .session-status-filter .segment-radio { flex: 1 0 auto; }
 .session-status-filter .segmented-control > .segment-radio > span {
   width: 100%;
   min-height: 28px;
   padding-inline: 5px;
   font-size: 12px;
 }
+/* At the stored sidebar minimum, expansion can leave a 76px column. Even
+   one selected word must fit the well's inner width in both font engines. */
+html.host-rail-open .session-status-filter .segment-radio > span { padding-inline: 3px; }
 
 /* The host choice stays visible even for a failed list read. Its registry
    label can be long, so it must not impose its
