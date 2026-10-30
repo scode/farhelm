@@ -5,4 +5,4 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `typed-quick-launch.md` — Template names can be typed inside the Cmd+X quick-launch sequence (unique prefix, Tab completion, a candidate list under the pill); new template names can no longer contain spaces.
 - [in-flight b68b32] `host-rail-list-visible.md` — The host rail no longer widens on hover; each host's tooltip carries its full name and destination, and a new button at the rail's foot expands the whole rail into a labeled host list beside the session list, remembered per device.
 - [in-flight 1522e9] `log-trash-deletions.md` — The supervisor logs each permanent trash deletion and each spare-checkout removal at info, with the path, per-step timings and files removed.
-- [pending] `sqlite-wal.md` — The supervisor's and the helm's SQLite databases switch to WAL with synchronous NORMAL, converted in place by the process that owns them.
+- [in-flight a118c5] `sqlite-wal.md` — The supervisor's and the helm's SQLite databases switch to WAL with synchronous NORMAL, converted in place by the process that owns them.
