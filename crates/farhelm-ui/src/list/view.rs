@@ -3748,11 +3748,21 @@ pub(crate) fn ListView(
                     }
                     match result {
                         Ok((fresh, templates)) => {
-                            let resolved = crate::launch_sequence::resolve_template_references(
+                            // Typed errors win even when an earlier reference was
+                            // unbound. Resolve the whole word batch before choosing
+                            // the existing binding or missing-name fallback.
+                            let typed = crate::launch_sequence::resolve_typed_references(
                                 &references,
-                                &fresh,
                                 &templates,
                             );
+                            let typed_refusal = typed.as_ref().err().cloned();
+                            let resolved = typed.ok().and_then(|references| {
+                                crate::launch_sequence::resolve_template_references(
+                                    &references,
+                                    &fresh,
+                                    &templates,
+                                )
+                            });
                             preferences.0.write().quick_launch_template =
                                 fresh.quick_launch_template;
                             preferences.0.write().template_shortcuts = fresh.template_shortcuts;
@@ -3760,7 +3770,9 @@ pub(crate) fn ListView(
                                 if !*show_create.peek() {
                                     continue;
                                 }
-                                let refusal = if resolved.is_none() {
+                                let refusal = if typed_refusal.is_some() {
+                                    typed_refusal
+                                } else if resolved.is_none() {
                                     Some(match references.as_slice() {
                                         [
                                             crate::launch_sequence::TemplateReference::Bolt
@@ -3803,6 +3815,10 @@ pub(crate) fn ListView(
                                                 .set(Some(origin.incomplete_banner(&templates)));
                                         }
                                         initial_quick_templates.set(templates);
+                                    }
+                                } else if let Some(message) = typed_refusal {
+                                    if open_new.call(None) {
+                                        initial_create_error.set(Some(message));
                                     }
                                 } else if let Some(name) =
                                     references.iter().find_map(|reference| match reference {
@@ -3969,10 +3985,11 @@ pub(crate) fn ListView(
                 if (!*quick_launch_pending.peek() || *show_create.peek())
                     && !*templates_open.peek() && !ops.busy_now() {
                     launch_sequence_in_launcher.set(*show_create.peek());
-                    launch_sequence.set(Some(Vec::new()));
+                    launch_sequence.set(Some(crate::launch_sequence::SequenceState::default()));
                     sequence_generation += 1;
                     let generation = *sequence_generation.peek();
                     let base = sequence_base.clone();
+                    let catalog_base = base.clone();
                     spawn(async move {
                         // Refresh on the prefix, never at Enter: a binding that
                         // the pill showed as unbound must not acquire authority
@@ -3986,26 +4003,32 @@ pub(crate) fn ListView(
                             preferences.0.write().template_shortcuts = fresh.template_shortcuts;
                         }
                     });
+                    // Hints never hold back bindings or Enter. A completion
+                    // catalog belongs only to this accepted prefix; an answer
+                    // after Cancel/Enter cannot populate a later sequence.
+                    spawn(async move {
+                        if let Ok(templates) = crate::api::fetch_templates(&catalog_base).await
+                            && *sequence_generation.peek() == generation
+                            && let Some(state) = launch_sequence.write().as_mut()
+                        {
+                            state.catalog = Some(templates.into_iter().map(|template| template.name).collect());
+                        }
+                    });
                 }
             },
         }
-        for key in crate::launch_sequence::TEMPLATE_SHORTCUTS.number.keys.iter().map(|key| key.value) {
-            button {
-                key: "sequence-{key}", class: "launch-sequence-trigger",
-                "data-sequence-action": "digit", "data-number-key": "{key}",
-                r#type: "button", hidden: true, tabindex: "-1",
-                onclick: move |_| {
-                    if let Some(queue) = launch_sequence.write().as_mut() {
-                        queue.push(crate::launch_sequence::TemplateReference::Number(key.into()));
-                    }
-                },
-            }
-        }
-        button {
-            class: "launch-sequence-trigger", "data-sequence-action": "bolt",
-            r#type: "button", hidden: true, tabindex: "-1",
-            onclick: move |_| {
-                if let Some(queue) = launch_sequence.write().as_mut() { queue.push(crate::launch_sequence::TemplateReference::Bolt); }
+        // The input bridge carries an action, never a second copy of the
+        // word. Synchronous mutation keeps rapid text/chord/Enter order even
+        // before the indicator has rendered the accepted prefix.
+        input {
+            class: "launch-sequence-trigger", "data-sequence-action": "input",
+            r#type: "hidden",
+            oninput: move |event| {
+                if let Ok(input) = serde_json::from_str::<crate::launch_sequence::SequenceInput>(&event.value())
+                    && let Some(state) = launch_sequence.write().as_mut()
+                {
+                    state.input(input);
+                }
             },
         }
         button {
@@ -4019,8 +4042,11 @@ pub(crate) fn ListView(
                 // refused at Begin still goes through, empty, so the worker
                 // discards this Enter's copy instead of handing it to the next
                 // press (`shortcut_admission`).
-                let queued = launch_sequence.write().take();
-                quick_launch.call((queued.unwrap_or_default(), crate::launch_sequence::QuickLaunchOrigin::Sequence));
+                let queued = launch_sequence.write().take().map(|mut state| {
+                    state.commit_word();
+                    state.references
+                }).unwrap_or_default();
+                quick_launch.call((queued, crate::launch_sequence::QuickLaunchOrigin::Sequence));
             },
         }
         button {

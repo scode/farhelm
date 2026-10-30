@@ -901,22 +901,39 @@ agent choice is independent of that destination:
   normal meaning. In the launcher's own text fields it starts a sequence only when no text is selected; with a selection
   it keeps Cut or the browser's normal action. The terminal's input textarea counts as the terminal. Bare physical
   number keys or their usual template chord queue templates in order; the ordinary ⚡ chord queues the marked template.
-  Enter applies them in that order, later edits winning, and directly launches through the same defaults, validation and
-  admission as quick launch on the page. In the session launcher, Enter instead applies the queued templates to the
-  current draft without launching; each completed sequence is one refusal unit, and the pill says "apply" instead of
-  "launch". An unbound key opens Templates at Enter with the binding hint on the page; inside the launcher it shows a
-  refusal beneath the search box without changing the draft. A refusal names its template and reveals New with the draft
-  on the page; an incomplete result opens New with a prominent banner saying "This sequence doesn't make a complete
-  setup; complete it below", whether one or several templates were queued. A YOLO question uses the same fallback. The
-  banner follows the number-key banner's expiry and dismissal rules. Bindings refresh when the prefix starts; Enter
-  captures the names currently shown in the pill. Enter with nothing queued cancels without opening anything. A
-  non-modal amber status pill is centered over the terminal area, or the main area with no session open, naming queued
-  templates and saying "Enter launch · Esc cancel". Before any key it says "Launch sequence: press number keys to queue
-  templates, Enter to launch, Esc to cancel." While the launcher is open, the pill stays at the bottom of the main area
-  so it does not cover the launcher. It is larger, with a soft amber halo and a short fade/scale entrance that is
-  disabled for reduced motion; it never loops or takes pointer input. There is no timeout. Escape cancels and is
-  consumed; a click, switching windows or opening a dialog cancels. Any other key cancels and reaches its normal target;
-  Meta, Control and Shift on their own do not cancel. Repeated held keys add nothing and never launch again.
+  Printable characters, including Shift for capitals, build a word. Space (with or without Shift) queues that word; an
+  empty Space does nothing. A bare digit extends a word already in progress, but with no word queues its number key, so
+  a name beginning with a digit is reachable only by its number key or the launcher. A number or ⚡ chord first queues
+  any unfinished word, then its bound template. Backspace removes the last character of the unfinished word, never a
+  queued entry. Tab queues the full name when the word uniquely identifies a template; an exact match wins over longer
+  prefixes. It does nothing while the advisory catalog is loading or unavailable, or when the word is empty, unknown or
+  ambiguous. Tab can queue an existing name containing spaces as one entry. With both `my project` and `myproject`
+  stored, `my project` is reachable only by its number key or the launcher; no quoting or candidate cycling is offered.
+  Enter first queues any unfinished word. Typed words resolve against current templates: a case-sensitive exact name,
+  then a unique case-insensitive exact name, then a unique case-insensitive prefix, using Rust's Unicode lowercase.
+  Unknown or ambiguous words refuse the whole sequence, naming the word and, for ambiguity, the competing candidates; a
+  word's refusal wins over an unbound number key in the same sequence. On the page it opens New with that error; in the
+  launcher it appears beneath search without changing the draft. While armed, typed characters never reach the
+  terminal's program. Enter applies the templates in that order, later edits winning, and directly launches through the
+  same defaults, validation and admission as quick launch on the page. In the session launcher, Enter instead applies
+  the queued templates to the current draft without launching; each completed sequence is one refusal unit, and the pill
+  says "apply" instead of "launch". An unbound key opens Templates at Enter with the binding hint on the page; inside
+  the launcher it shows a refusal beneath the search box without changing the draft. A refusal names its template and
+  reveals New with the draft on the page; an incomplete result opens New with a prominent banner saying "This sequence
+  doesn't make a complete setup; complete it below", whether one or several templates were queued. A YOLO question uses
+  the same fallback. The banner follows the number-key banner's expiry and dismissal rules. Bindings refresh when the
+  prefix starts; Enter captures the bound names currently shown in the pill. Enter with nothing queued cancels without
+  opening anything. A non-modal amber status pill is centered over the terminal area, or the main area with no session
+  open, showing queued entries as chips and the word in progress. Its hint names typing, Tab, Enter and Escape. While a
+  word is in progress, a list below the pill shows at most five matching template names, exact matches before prefixes
+  and catalog order within each tier; non-matches are absent. Candidates and Tab use an independent catalog read when
+  the prefix starts, which never gates Enter or decides what Enter launches. Neither the pill nor the list takes focus
+  or pointer input. While the launcher is open, the pill stays at the bottom of the main area so it does not cover the
+  launcher. It is larger, with a soft amber halo and a short fade/scale entrance that is disabled for reduced motion; it
+  never loops or takes pointer input. There is no timeout. Escape cancels and is consumed; a click, switching windows or
+  opening a dialog cancels. Non-sequence keys, including arrows, other chords and Shift+Enter, cancel and reach their
+  normal target; Meta, Control and Shift on their own do not cancel. Repeated held keys add nothing and never launch
+  again.
 - Recent setups: the helm remembers bounded successful agent-launch combinations and used folders per target-install
   identity. A recent row fills every saved choice and destination; clicking it never launches, and pressing Enter on a
   focused row launches the filled setup through the ordinary Launch path. A retargeted registry row cannot expose the

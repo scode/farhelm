@@ -50,10 +50,10 @@ for (const client of clients) {
     assert.deepEqual(classify(client, { ...client.number }, false), { action: "begin", consume: true });
     assert.deepEqual(classify(client, { ...client.number }, false, true), { action: "pass", consume: false });
     for (const digit of "1234567890") {
-      for (const modifiers of [{}, client.number]) {
-        assert.deepEqual(classify(client, { code: `Digit${digit}`, key: "layout-specific", ...modifiers }),
-          { action: "digit", consume: true, digit });
-      }
+      assert.deepEqual(classify(client, { code: `Digit${digit}`, key: "é" }),
+        { action: "digit", consume: true, digit, text: "é" });
+      assert.deepEqual(classify(client, { code: `Digit${digit}`, key: "layout-specific", ...client.number }),
+        { action: "number_chord", consume: true, digit });
     }
     assert.deepEqual(classify(client, { code: "KeyP", key: "p", ...client.bolt }),
       { action: "bolt", consume: true });
@@ -65,7 +65,8 @@ for (const client of clients) {
       { action: "template-list", consume: true }, "the template list follows the shared key definition");
     assert.deepEqual(classify(client, { code: "KeyY", key: "x", ...client.number }, false),
       { action: "pass", consume: false }, "prefix identity is physical, not the printed character");
-    assert.deepEqual(classify(client, { code: "KeyP", key: "p" }), { action: "cancel", consume: false });
+    assert.deepEqual(classify(client, { code: "KeyP", key: "p" }),
+      { action: "character", text: "p", consume: true });
     // Holding the prefix cannot erase the queue; a fresh prefix is unrelated.
     assert.deepEqual(classify(client, { ...client.number, repeat: true }), { action: "none", consume: true });
     assert.deepEqual(classify(client, { ...client.number }), { action: "cancel", consume: false });
@@ -73,10 +74,10 @@ for (const client of clients) {
       { action: "none", consume: true, source: "begin" });
   });
 
-  test(`${client.name}: extra modifiers, keypad digits and IME never queue`, () => {
+  test(`${client.name}: unrelated chords, keypad digits and IME never queue`, () => {
     const extraModifiers = client.mac_desktop
       ? [{ shiftKey: true }, { ctrlKey: true }, { altKey: true }]
-      : [{ metaKey: true }, { altKey: true }, { shiftKey: false }, { ctrlKey: false }];
+      : [{ metaKey: true }, { altKey: true }, { shiftKey: false }];
     for (const extra of extraModifiers) {
       assert.deepEqual(classify(client, { ...client.number, ...extra }, false), { action: "pass", consume: false });
       assert.deepEqual(classify(client, { code: "Digit3", ...client.number, ...extra }),
@@ -85,6 +86,8 @@ for (const client of clients) {
     for (const code of ["Numpad3", "Digit", "Digit10", "digit3", ""]) {
       assert.deepEqual(classify(client, { code, ...client.number }), { action: "cancel", consume: false });
     }
+    assert.deepEqual(classify(client, { code: "Numpad3", key: "3" }),
+      { action: "cancel", consume: false }, "keypad digits never open a digit-leading word");
     for (const modifiers of [{ altKey: true }, client.mac_platform ? { ctrlKey: true } : { metaKey: true },
       client.mac_platform ? { shiftKey: true } : { shiftKey: false }]) {
       assert.deepEqual(classify(client, { code: "KeyP", ...client.bolt, ...modifiers }),
@@ -118,6 +121,39 @@ test("only plain Enter launches; Escape consumes and three modifier keys preserv
   }
   assert.deepEqual(classify(client, { code: "AltLeft", key: "Alt", altKey: true }),
     { action: "cancel", consume: false });
+});
+
+/** Text belongs to Rust after admission, including Shift capitals and astral
+ * characters. Editing keys have exact modifier rules; dead keys and control
+ * characters still leave the sequence through the ordinary cancellation path.
+ */
+test("armed text and editing keys preserve printed characters without admitting other chords", () => {
+  for (const client of clients) {
+    for (const [code, printed, shiftKey] of [["KeyA", "a", false], ["KeyA", "A", true],
+      ["Digit1", "!", true], ["KeyE", "é", false], ["KeyU", "🦀", false]]) {
+      assert.deepEqual(classify(client, { code, key: printed, shiftKey }),
+        { action: "character", text: printed, consume: true });
+      assert.deepEqual(classify(client, { code, key: printed, shiftKey, repeat: true }),
+        { action: "none", consume: true });
+      assert.deepEqual(classify(client, { code, key: printed, shiftKey }, false),
+        { action: "pass", consume: false });
+    }
+    for (const shiftKey of [false, true]) {
+      assert.deepEqual(classify(client, { code: "Space", key: " ", shiftKey }),
+        { action: "space", consume: true });
+    }
+    for (const name of ["Tab", "Backspace"]) {
+      assert.deepEqual(classify(client, { code: name, key: name }),
+        { action: name.toLowerCase(), consume: true });
+      assert.deepEqual(classify(client, { code: name, key: name, shiftKey: true }),
+        { action: "cancel", consume: false });
+    }
+    for (const event of [{ code: "KeyA", key: "a", ctrlKey: true },
+      { code: "KeyA", key: "a", altKey: true }, { code: "KeyE", key: "Dead" },
+      { code: "KeyU", key: "\u0001" }, { code: "KeyU", key: "\u0085" }]) {
+      assert.deepEqual(classify(client, event), { action: "cancel", consume: false });
+    }
+  }
 });
 
 /** Model only DOM contracts the installer uses, retaining ancestor/editability
@@ -185,8 +221,12 @@ function eventTarget() {
  */
 function page(client = clients[2], definition = defaultDefinition) {
   const window = eventTarget();
+  window.Event = class {
+    constructor(type, options) { this.type = type; Object.assign(this, options); }
+  };
   const document = eventTarget();
   const clicks = [];
+  const inputs = [];
   const relays = new Map();
   const direct = new Map();
   const templateList = new Element();
@@ -222,13 +262,21 @@ function page(client = clients[2], definition = defaultDefinition) {
     return relays.get(action === "digit" ? `digit${digit}` : action) || null;
   };
   document.templateList = templateList;
-  for (const action of ["begin", "bolt", "launch", "cancel", ...Array.from("1234567890", d => `digit${d}`)]) {
-    const relay = new Element({ action: action.startsWith("digit") ? "digit" : action,
-      digit: action.startsWith("digit") ? action.slice(-1) : undefined });
+  for (const action of ["begin", "input", "launch", "cancel"]) {
+    const relay = new Element({ action });
     relay.click = () => {
       // The real .click() enters window's click capture before Rust's handler.
       window.dispatch("click", { target: relay });
       clicks.push(action);
+    };
+    if (action === "input") relay.dispatchEvent = event => {
+      assert.equal(event.type, "input");
+      assert.equal(event.bubbles, true);
+      const input = JSON.parse(relay.value);
+      inputs.push(input);
+      // Preserve the click summaries used by old number/bolt scenarios, but
+      // keep the actual payloads separately so text/chord identity is tested.
+      clicks.push(["digit", "number_chord"].includes(input.action) ? `digit${input.digit}` : input.action);
     };
     relays.set(action, relay);
   }
@@ -245,8 +293,44 @@ function page(client = clients[2], definition = defaultDefinition) {
   window.installTemplateShortcuts({ ...definition, mac_desktop: client.mac_desktop });
   const press = event => window.dispatch("keydown", key(event));
   const prefix = overrides => press({ ...client.number, ...overrides });
-  return { window, document, clicks, relays, direct, templateList, modals, press, prefix };
+  return { window, document, clicks, inputs, relays, direct, templateList, modals, press, prefix };
 }
+
+/** A rapid sequence is an ordered input stream even before any Rust render.
+ * The page neither buffers words nor resolves number-versus-text itself, and
+ * every consumed character must stop before terminal listeners on this window.
+ */
+test("typed words, editing and mixed chords reach one payload relay in physical order", () => {
+  const p = page();
+  let escaped = 0;
+  p.window.addEventListener("keydown", () => escaped++);
+  assert.equal(p.prefix().immediateStopped, true);
+  const events = [
+    { code: "KeyC", key: "C", shiftKey: true }, { code: "KeyO", key: "o" },
+    { code: "Digit2", key: "2" }, { code: "Backspace", key: "Backspace" },
+    { code: "Tab", key: "Tab" }, { code: "Space", key: " ", shiftKey: true },
+    { code: "Digit3", key: "#", ctrlKey: true, shiftKey: true },
+    { code: "KeyP", key: "P", ctrlKey: true, shiftKey: true },
+    { code: "KeyU", key: "🦀" },
+  ];
+  for (const event of events) {
+    assert.equal(p.press(event).immediateStopped, true);
+    assert.equal(p.press({ ...event, repeat: true }).immediateStopped, true);
+  }
+  assert.equal(p.press({ code: "Enter", key: "Enter" }).immediateStopped, true);
+  assert.equal(escaped, 0, "typed keys and recognized repeats cannot reach terminal listeners");
+  assert.deepEqual(p.inputs, [
+    { action: "character", text: "C" }, { action: "character", text: "o" },
+    { action: "digit", digit: "2", text: "2" }, { action: "backspace" },
+    { action: "tab" }, { action: "space" }, { action: "number_chord", digit: "3" },
+    { action: "bolt" }, { action: "character", text: "🦀" },
+  ]);
+  assert.equal(p.clicks.at(-1), "launch");
+  assert.ok(p.window.farhelmTakeTemplateShortcutPress());
+  assert.equal(p.window.farhelmTakeTemplateShortcutPress(), undefined);
+  assert.equal(p.press({ code: "KeyA", key: "a" }).defaultPrevented, false,
+    "Enter must retire armed ownership without waiting for Rust");
+});
 
 for (const client of clients) {
   test(`${client.name}: fast relay dispatch is exclusive and does not cancel itself`, () => {
@@ -316,7 +400,7 @@ test("held recognized keys are consumed without a second action or premature lau
 });
 
 test("unrelated input cancels before passing through to later listeners", () => {
-  for (const event of [{ code: "KeyA", key: "a" }, { code: "KeyP", key: "p" },
+  for (const event of [{ code: "ArrowUp", key: "ArrowUp" }, { code: "KeyA", key: "a", ctrlKey: true },
     { code: "Enter", key: "Enter", shiftKey: true }, { code: "Digit1", isComposing: true }]) {
     const p = page();
     p.prefix();
@@ -486,16 +570,18 @@ test("installer is idempotent and empty Enter spends ownership synchronously", (
   assert.equal(p.document.listeners.get("visibilitychange").length, 1);
   p.prefix();
   p.press({ code: "Enter", key: "Enter" });
-  // Nothing to launch: the cancel relay retires it, so no snapshot is owed.
-  assert.deepEqual(p.clicks, ["begin", "cancel"]);
+  // Rust owns whether input exists; empty Enter still owes a paired worker
+  // entry and snapshot, then synchronously retires keyboard ownership.
+  assert.deepEqual(p.clicks, ["begin", "launch"]);
   assert.equal(p.press({ code: "Enter", key: "Enter" }).defaultPrevented, false);
+  assert.ok(p.window.farhelmTakeTemplateShortcutPress());
   assert.equal(p.window.farhelmTakeTemplateShortcutPress(), undefined);
 });
 
 /** Rust's worker takes one snapshot per keyboard relay click, in order, and
  * nothing else pairs them. So the page must queue a snapshot exactly when it
  * clicks the launch or a direct relay: an Enter that clicks no launch relay
- * (empty sequence, missing relay) must queue none, or every later batch takes
+ * (missing relay) must queue none, or every later batch takes
  * the one before it and can launch with names an earlier Enter displayed.
  * This pins only the page's half. The app's half, an Enter it refused still
  * taking its own snapshot, is the browser test "a sequence refused at its
@@ -521,12 +607,12 @@ test("snapshots pair one to one with keyboard relay clicks", () => {
   p.press({ code: "KeyP", ctrlKey: true, shiftKey: true });
 
   assert.deepEqual(p.clicks.filter(click => click === "launch" || click.startsWith("quick-")),
-    ["launch", "quick-bolt"]);
+    ["launch", "launch", "quick-bolt"]);
   const taken = [];
   for (let press; (press = p.window.farhelmTakeTemplateShortcutPress()) !== undefined;) {
     taken.push(press.sequence_bindings === null ? null : JSON.parse(press.sequence_bindings));
   }
-  assert.deepEqual(taken, [shown("launched"), null],
+  assert.deepEqual(taken, [shown("empty-enter"), shown("launched"), null],
     "the launched sequence takes the bindings its own Enter showed");
 });
 
@@ -746,7 +832,7 @@ test("a non-default definition moves all shortcuts in page and launcher contexts
       assert.deepEqual(classify(client, { code, ...client.number }, false, false, changed),
         { action: "pass", consume: false });
       assert.deepEqual(classify(client, { code }, true, false, changed),
-        { action: "digit", consume: true, digit: value });
+        { action: "digit", consume: true, digit: value, text: "x" });
     }
     assert.deepEqual(classify(client, prefix, false, false, changed),
       { action: "begin", consume: true });
@@ -774,7 +860,7 @@ test("a non-default definition moves all shortcuts in page and launcher contexts
     p.press({ code: "KeyZ" });
     p.press(prefix);
     assert.deepEqual(classify(client, { code: "KeyC" }, true, false, changed),
-      { action: "digit", consume: true, digit: "1" });
+      { action: "digit", consume: true, digit: "1", text: "x" });
     assert.equal(p.press({ code: "KeyC" }).defaultPrevented, true);
     assert.equal(p.press(bolt).defaultPrevented, true);
     assert.equal(p.press({ code: "Enter", key: "Enter" }).defaultPrevented, true);

@@ -104,6 +104,11 @@ for (const mac of [false, true]) {
       await expect(row(dialog, "Smaller terminal text").locator("kbd")).toHaveText(mac ? "⌘+Shift+−" : "Ctrl+Shift+−");
       await expect(row(dialog, "Larger terminal text").locator("kbd")).toHaveText(mac ? "⌘+Shift++" : "Ctrl+Shift++");
       await expect(row(dialog, "In a sequence: add a numbered template").locator("kbd")).toHaveText("1–9, 0");
+      await expect(row(dialog, "In a sequence: add a numbered template")).toContainText("no word in progress");
+      await expect(row(dialog, "In a sequence: type a template name").locator("kbd")).toHaveText("Characters (digits continue a word)");
+      await expect(row(dialog, "In a sequence: queue the word").locator("kbd")).toHaveText("Space");
+      await expect(row(dialog, "In a sequence: complete a unique name").locator("kbd")).toHaveText("Tab");
+      await expect(row(dialog, "In a sequence: edit the word").locator("kbd")).toHaveText("Backspace");
       await expect(row(dialog, "In a sequence: add the ⚡ template").locator("kbd")).toHaveText(mac ? "⌘P" : "Ctrl+Shift+P");
       await expect(row(dialog, "In a sequence: launch").locator("kbd")).toHaveText("Enter");
       await expect(row(dialog, "In a sequence: cancel").locator("kbd")).toHaveText("Escape");

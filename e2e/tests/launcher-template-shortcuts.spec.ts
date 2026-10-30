@@ -202,6 +202,243 @@ test("launcher sequences apply from buttons and unselected search text", async (
   }
 });
 
+/** Matching tiers must select distinguishable stored rows, while a failed
+ * later word leaves the whole current draft intact. Keeping the query and
+ * focus checks here also proves consumed typing never edits the search box. */
+test("typed launcher matching prefers exact names and refuses whole ambiguous batches", async ({ page, request }) => {
+  const stamp = Date.now();
+  const upper = `Codex${stamp}`;
+  const lower = upper.toLowerCase();
+  const folded = `MiXeD${stamp}`;
+  const prefix = `Unique${stamp}`;
+  const unique = `${prefix}-project`;
+  const names = [upper, lower, folded, `${folded}-longer`, unique];
+  let creates = 0;
+  let bodyFailed = true;
+  try {
+    for (const [index, name] of names.entries()) await template(request, name, { name: `selected row ${index}` });
+    const form = await openNew(page);
+    const search = form.locator('.launch-composer-search input[role="combobox"]');
+    const nameField = form.getByLabel("Name (optional)");
+    await search.fill("keep query while composing");
+    await expect(search).toBeFocused();
+    page.on("request", (sent) => {
+      if (sent.method() === "POST" && new URL(sent.url()).pathname === "/api/sessions") creates++;
+    });
+    for (const [word, selected] of [[upper, 0], [lower, 1], [folded.toLowerCase(), 2], [prefix.toLowerCase(), 4]] as const) {
+      await page.keyboard.press("Control+Shift+KeyX");
+      await page.keyboard.type(word);
+      await page.keyboard.press("Enter");
+      await expect(nameField).toHaveValue(`selected row ${selected}`);
+      await expect(search).toHaveValue("keep query while composing");
+      await expect(search).toBeFocused();
+    }
+    const before = await nameField.inputValue();
+    for (const word of [upper.toUpperCase(), `unknown${stamp}`]) {
+      await page.keyboard.press("Control+Shift+KeyX");
+      await page.keyboard.type(`${folded} ${word}`);
+      await page.keyboard.press("Enter");
+      const error = form.locator(".launch-composer-template-error");
+      await expect(error).toContainText(word);
+      if (word === upper.toUpperCase()) {
+        await expect(error).toContainText("ambiguous");
+        await expect(error).toContainText(upper);
+        await expect(error).toContainText(lower);
+      } else await expect(error).toContainText("No template matches");
+      await expect(nameField, "a refused later word must not apply its valid predecessor").toHaveValue(before);
+      await expect(search).toHaveValue("keep query while composing");
+      await expect(search).toBeFocused();
+    }
+    // A new valid press after both refusals must consume its own batch.
+    await page.keyboard.press("Control+Shift+KeyX");
+    await page.keyboard.type(lower);
+    await page.keyboard.press("Enter");
+    await expect(nameField).toHaveValue("selected row 1");
+    await expect(form.locator(".launch-composer-template-error")).toHaveCount(0);
+    expect(creates, "typed sequences only edit the revealed launcher").toBe(0);
+    bodyFailed = false;
+  } finally {
+    await cleanupOwnedSteps(bodyFailed, names.map((name): [string, () => Promise<void>] => [name, () => removeTemplate(request, name)]));
+  }
+});
+
+/** Words and physical bindings are one ordered batch. Separate fields expose
+ * a dropped early entry; the final overlapping name exposes a reordered one.
+ * Backspace after a separator must not undo a committed template. */
+test("typed launcher words mix with digits and chords in input order", async ({ page, request }) => {
+  const stem = `typed-order-${Date.now()}`;
+  const [bare, word, numberName, beforeBolt, boltName] = ["bare", "word2", "number", "before-bolt", "bolt"]
+    .map((suffix) => `${stem}-${suffix}`);
+  const names = [bare, word, numberName, beforeBolt, boltName];
+  let bodyFailed = true;
+  try {
+    await template(request, bare, { kind: "agent", agent: "codex", effort: "high", prompt: "from bare digit", name: "bare applied" });
+    await template(request, word, { model: "typed-model", name: "typed digit applied" });
+    await template(request, numberName, { effort: "low", name: "number chord applied" });
+    await template(request, beforeBolt, { permissions: "guarded", wrapper_prefix: ["env", "TYPED_SEQUENCE=1", "--"], name: "word before bolt" });
+    await template(request, boltName, { kind: "agent", agent: "codex", name: "bolt applied last" });
+    await patchPreferences(request, { quick_launch_template: boltName, template_shortcuts: { "1": bare, "3": numberName } });
+    const preferences = await readPreferences(request);
+    expect(preferences.quick_launch_template).toBe(boltName);
+    expect(preferences.template_shortcuts).toEqual({ "1": bare, "3": numberName });
+    const form = await openNew(page);
+    const search = form.locator('.launch-composer-search input[role="combobox"]');
+    await search.fill("leave search alone");
+    await expect(search).toBeFocused();
+    await page.keyboard.press("Control+Shift+KeyX");
+    await page.keyboard.press("Digit1");
+    await page.keyboard.type(`${word}x`);
+    await page.keyboard.press("Backspace");
+    await number(page, "3");
+    await page.keyboard.type(beforeBolt);
+    await page.keyboard.press("Control+Shift+KeyP");
+    await page.keyboard.press("Backspace");
+    const indicator = page.locator(".launch-sequence-indicator");
+    await expect(indicator.locator(".launch-sequence-chip")).toHaveText(names);
+    await expect(indicator.locator(".launch-sequence-word")).toHaveCount(0);
+    await expect(indicator.locator(".launch-sequence-pill")).not.toContainText("(empty)");
+    await page.keyboard.press("Enter");
+    await expect(form.getByLabel("Name (optional)")).toHaveValue("bolt applied last");
+    await expect(form.getByRole("combobox", { name: "Model", exact: true })).toHaveValue("typed-model");
+    await expect(form.getByLabel("Initial prompt", { exact: true })).toHaveValue("from bare digit");
+    await expect(form.locator(".launch-composer-wrapper")).toHaveValue("env 'TYPED_SEQUENCE=1' --");
+    await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: "Low", exact: true }))
+      .toHaveAttribute("aria-pressed", "true");
+    await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "Guarded", exact: true }))
+      .toHaveAttribute("aria-pressed", "true");
+    await expect(search).toHaveValue("leave search alone");
+    await expect(search).toBeFocused();
+    bodyFailed = false;
+  } finally {
+    await cleanupOwnedSteps(bodyFailed, names.map((name): [string, () => Promise<void>] => [name, () => removeTemplate(request, name)]));
+  }
+});
+
+/** Tab uses only the prefix catalog available at that keypress. Exact names
+ * beat their longer prefixes, and a legacy spaced name must remain one entry.
+ * A held read exposes an early no-op without depending on network timing. */
+test("typed launcher Tab completion is immediate and preserves spaced names", async ({ page, request }, testInfo) => {
+  const stem = `typed-tab-${Date.now()}`;
+  const exact = `${stem}-exact`;
+  const oldPrefix = `${stem}-old`;
+  const spaced = `${oldPrefix} project`;
+  const ambiguous = `${stem}-amb`;
+  const names = [exact, `${exact}-longer`, spaced, `${ambiguous}-one`, `${ambiguous}-two`];
+  const gate = routeGate();
+  let held = 0;
+  let bodyFailed = true;
+  try {
+    for (const [index, name] of names.entries()) await template(request, name, { name: `Tab selected ${index}` });
+    const form = await openNew(page);
+    const search = form.locator('.launch-composer-search input[role="combobox"]');
+    await search.fill("keep tab query");
+    await expect(search).toBeFocused();
+    // Hold the prefix's read, not a late request from New's initial catalog.
+    await expect(form).toHaveAttribute("data-initial-templates-ready", "true");
+    await page.route("**/api/templates", async (route) => {
+      if (route.request().method() === "GET" && held === 0) {
+        held++;
+        await gate.wait();
+      }
+      await route.continue();
+    });
+    await page.keyboard.press("Control+Shift+KeyX");
+    await page.keyboard.type(oldPrefix);
+    await expect.poll(() => held).toBe(1);
+    await page.keyboard.press("Tab");
+    const indicator = page.locator(".launch-sequence-indicator");
+    const chips = indicator.locator(".launch-sequence-chip");
+    const word = indicator.locator(".launch-sequence-word");
+    await expect(chips).toHaveCount(0);
+    await expect(word).toHaveText(oldPrefix);
+    gate.release();
+    await expect(indicator.locator(".launch-sequence-candidates bdi")).toHaveText([spaced]);
+    await expect(chips, "catalog arrival cannot replay an earlier Tab").toHaveCount(0);
+    await expect(word).toHaveText(oldPrefix);
+    await page.keyboard.press("Tab");
+    await expect(chips).toHaveText([spaced]);
+    await expect(word).toHaveCount(0);
+    await expect(indicator.locator(".launch-sequence-pill")).not.toContainText("(empty)");
+    await page.keyboard.press("Backspace");
+    await expect(chips, "empty-word Backspace preserves the completed entry").toHaveText([spaced]);
+    await page.keyboard.type(exact);
+    await expect(indicator.locator(".launch-sequence-candidates bdi")).toHaveText([exact, `${exact}-longer`]);
+    await page.keyboard.press("Tab");
+    await expect(chips).toHaveText([spaced, exact]);
+    await page.keyboard.type(ambiguous);
+    await expect(indicator.locator(".launch-sequence-candidates bdi")).toHaveText(names.slice(3));
+    await page.keyboard.press("Tab");
+    await expect(chips).toHaveText([spaced, exact]);
+    await expect(word).toHaveText(ambiguous);
+    for (const _ of ambiguous) await page.keyboard.press("Backspace");
+    await page.keyboard.type(`${stem}-missing`);
+    await page.keyboard.press("Tab");
+    await expect(word).toHaveText(`${stem}-missing`);
+    await expect(chips).toHaveText([spaced, exact]);
+    for (const _ of `${stem}-missing`) await page.keyboard.press("Backspace");
+    await page.keyboard.type(oldPrefix);
+    const pill = indicator.locator(".launch-sequence-pill");
+    const candidates = indicator.locator(".launch-sequence-candidates");
+    await expect(candidates).toBeVisible();
+    await expect(indicator).toHaveAttribute("data-in-launcher", "true");
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      // Launcher focus does not expose the main pane. Align the pane itself:
+      // maximum scroll can overshoot it when toolbar actions overflow.
+      await page.locator(".app-shell").evaluate((node) => {
+        const main = node.querySelector(".app-main");
+        if (!main) throw new Error("the shell has no main pane");
+        node.scrollLeft += main.getBoundingClientRect().left - node.getBoundingClientRect().left;
+      });
+      await expect.poll(async () => {
+        const main = await page.locator(".app-main").boundingBox();
+        if (main && main.x >= 0 && main.x + main.width <= width + 1) return "ok";
+        const shell = await page.locator(".app-shell").evaluate((node) => ({
+          scrollLeft: node.scrollLeft, scrollWidth: node.scrollWidth, clientWidth: node.clientWidth,
+        }));
+        return JSON.stringify({ main, shell, width });
+      }, { message: "the main pane is exposed before launcher candidate geometry is measured" }).toBe("ok");
+      // New need not have a selected session behind it. Reserve the details
+      // bar only when this fixture actually has one, as the CSS does.
+      const details = page.locator(".layout .session-details");
+      const detailsCount = await details.count();
+      expect(detailsCount, "at most one selected session owns a details bar").toBeLessThanOrEqual(1);
+      if (detailsCount) await expect(details).toBeVisible();
+      else await expect(details).toHaveCount(0);
+      const bottomReservation = detailsCount ? 44 : 14;
+      await expect.poll(async () => {
+        const group = await indicator.boundingBox();
+        const pillBox = await pill.boundingBox();
+        const candidateBox = await candidates.boundingBox();
+        const main = await page.locator(".app-main").boundingBox();
+        const viewport = page.viewportSize();
+        if (!group || !pillBox || !candidateBox || !main || !viewport) return "missing geometry";
+        const actualReservation = main.y + main.height - group.y - group.height;
+        if (Math.abs(actualReservation - bottomReservation) > 1) return `bottom reservation ${actualReservation}, expected ${bottomReservation}`;
+        if (candidateBox.y < pillBox.y + pillBox.height) return "candidates overlap pill";
+        if (candidateBox.x < 0 || candidateBox.x + candidateBox.width > width || candidateBox.y + candidateBox.height > viewport.height) return "candidates outside viewport";
+        return "ok";
+      }, { message: `launcher candidates stay below the pill inside the old bottom reservation at width ${width}` }).toBe("ok");
+      await expect(search).toBeFocused();
+      const screenshot = testInfo.outputPath(`typed-launcher-candidates-${width}.png`);
+      await page.screenshot({ path: screenshot });
+      await testInfo.attach(`typed-launcher-candidates-${width}`, { path: screenshot, contentType: "image/png" });
+    }
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Enter");
+    await expect(form.getByLabel("Name (optional)")).toHaveValue("Tab selected 2");
+    await expect(search).toHaveValue("keep tab query");
+    await expect(search).toBeFocused();
+    bodyFailed = false;
+  } finally {
+    await cleanupOwnedSteps(bodyFailed, [
+      ["catalog gate", () => gate.release()],
+      ["catalog route", () => page.unroute("**/api/templates")],
+      ...names.map((name): [string, () => Promise<void>] => [name, () => removeTemplate(request, name)]),
+    ]);
+  }
+});
+
 /** Clone owns a draft too; the number key must edit it without starting a
  * second session or reopening New. */
 test("a number shortcut applies to Clone's draft", async ({ page, request }) => {

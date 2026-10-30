@@ -6025,15 +6025,21 @@ reader's skip-and-log policy.
 
 Direct quick-launch shortcuts resolve their digit/bolt references from fresh preferences. A completed sequence first
 captures the names in its indicator's preference snapshot at Enter; an unbound reference stays unbound even if a later
-read finds a binding. Both resolve current template definitions as one all-or-none request, so a renamed or deleted name
-refuses the sequence. Dispatch takes a shared keyboard-context and modal-opening-epoch snapshot before and after that
-read check, so a dialog that appears during the read cannot receive its result after closing. It hands the captured
-definitions to ordinary New, replaying one through the existing template/search acceptance path per effect pass. A
-refusal stops the remaining replay. Automatic submission waits for a render after the final replay, so its captured
-readiness and refusal describe the resulting draft. A coarse fold over launch kind, agent and command decides whether to
-attempt direct launch; the mounted form retains full validation, catalog, host and admission authority. That fold lives
-in the protocol crate and also judges a single template for ⚡ marking, its hints, and agent writes. Only the active
-kind counts: Agent needs an agent, Command a nonblank command, and omitted kind starts on Agent.
+read finds a binding. Typed references retain the entered word, or Tab's full name, separately from exact-name
+references. The dispatcher resolves every typed reference against its fresh template read before resolving captured
+bindings, so an unknown or ambiguous word wins over an unbound key. Matching prefers case-sensitive exact, then unique
+Unicode-lowercase exact, then unique lowercase prefix; ambiguity reports every competitor in the winning tier. Existing
+exact-name references keep their missing-template refusal: a renamed or deleted captured binding cannot select a
+different template. Typed references, including Tab's completed spelling, still use the matching rules at Enter. Both
+paths resolve current template definitions as one all-or-none request. Dispatch takes a shared keyboard-context and
+modal-opening-epoch snapshot before and after that read check, so a dialog that appears during the read cannot receive
+its result after closing. It hands the captured definitions to ordinary New, replaying one through the existing
+template/search acceptance path per effect pass. A refusal stops the remaining replay. Automatic submission waits for a
+render after the final replay, so its captured readiness and refusal describe the resulting draft. A coarse fold over
+launch kind, agent and command decides whether to attempt direct launch; the mounted form retains full validation,
+catalog, host and admission authority. That fold lives in the protocol crate and also judges a single template for ⚡
+marking, its hints, and agent writes. Only the active kind counts: Agent needs an agent, Command a nonblank command, and
+omitted kind starts on Agent.
 
 The same dispatch serializes fresh reads when shortcuts arrive in the visible session launcher, including restart mode.
 Each press or completed sequence becomes its own captured batch in a form-owned FIFO, fenced by the opening generation
@@ -6045,23 +6051,34 @@ template unmounts the focused control, a deferred check restores the launcher's 
 same launcher is still the sole visible modal. Busy launch and template-save states consume and drop a press.
 
 The shared template-shortcut asset owns the synchronous armed flag, a pure key classifier and the context rule. Rust
-holds the ordered references in app-owned transient context; the sidebar's hidden relays mutate that signal
-synchronously, and the main area renders its non-modal status pill, using "apply" while the launcher is open. No storage
-or general keymap is involved. CSS centers the amber pill in the main area, using a fixed 9px downward correction for an
-open Mac session's taller top bar. Its launcher context keeps the old bottom placement. Existing warning tokens provide
-text, border, fill and a soft halo; a single 200ms fade/scale entrance is disabled for reduced motion. Prefix and number
-modifiers follow the build's Mac-desktop choice; the bolt keeps its existing operating-system chord, including Cmd+P in
-a Mac browser. The shared listener installs after the composition guard and before other command listeners, consuming
-with stopImmediatePropagation because same-window capture listeners otherwise still run. Pointer/click, blur,
-visibility, modal focus and the existing modal-opening hook cancel both state owners. A launcher-owned text field admits
-the prefix only without selected text; other editors keep their usual key action. Hidden quick-launch preparation
-consumes recognized keys without enqueuing a relay. The relays stay mounted and enabled across render-delayed armed
-state. The indicator publishes its raw binding projection beside the visible names in the same render, retaining a
-hidden projection while idle for rapid input before the first pill render. Physical Enter copies that DOM projection
-into the existing press snapshot; the worker pairs it with the raw reference queue before starting the existing
-generation-fenced quick-launch read. Starting the prefix refreshes shared bindings once; a cancelled or superseded
-sequence cannot publish its late preference read. Enter never refreshes the captured bindings. Missing captured names
-reveal New with its existing named-template refusal, including within multi-template sequences.
+holds the ordered references, unfinished word and optional advisory catalog in app-owned transient context. One hidden
+input carries tagged action JSON from JS through synchronous `oninput`, preserving keystroke order without a second word
+buffer in JS. Printable text, bare digit plus its printed character, number/bolt chords, Space, Tab and Backspace all
+mutate that Rust state. A bare digit extends a nonempty word; otherwise it queues its binding. Chords commit the word
+first, Space commits it alone, and Backspace removes one Unicode scalar only from the unfinished word. Numeric keypad
+digits retain cancellation and pass-through. Tab uses the same match precedence against advisory names and queues a
+unique full name as one typed reference, including a historical spaced name. No catalog or no unique match is a no-op.
+The sidebar's hidden relays mutate that signal synchronously, and the main area renders its non-modal status pill, using
+"apply" while the launcher is open. No storage or general keymap is involved. CSS centers the amber pill in the main
+area, using a fixed 9px downward correction for an open Mac session's taller top bar. Its launcher context keeps the old
+bottom placement. Existing warning tokens provide text, border, fill and a soft halo; a single 200ms fade/scale entrance
+is disabled for reduced motion. Prefix and number modifiers follow the build's Mac-desktop choice; the bolt keeps its
+existing operating-system chord, including Cmd+P in a Mac browser. The shared listener installs after the composition
+guard and before other command listeners, consuming with stopImmediatePropagation because same-window capture listeners
+otherwise still run. Pointer/click, blur, visibility, modal focus and the existing modal-opening hook cancel both state
+owners. A launcher-owned text field admits the prefix only without selected text; other editors keep their usual key
+action. Hidden quick-launch preparation consumes recognized keys without enqueuing a relay. The relays stay mounted and
+enabled across render-delayed armed state. Enter always pairs one press snapshot with one captured batch, including an
+empty batch that drains without opening anything. Starting the prefix independently reads template names alongside
+bindings, with the same sequence generation fence; failed or late advisory reads cannot gate Enter or provide its launch
+definitions. The indicator renders queued chips, the unfinished word and at most five matching candidates below the
+pill. The display cap never limits ambiguity detection, and all visible peer names and refusal text are escaped without
+changing lookup spellings. The indicator publishes its raw binding projection beside the visible names in the same
+render, retaining a hidden projection while idle for rapid input before the first pill render. Physical Enter copies
+that DOM projection into the existing press snapshot; the worker pairs it with the raw reference queue before starting
+the existing generation-fenced quick-launch read. Starting the prefix refreshes shared bindings once; a cancelled or
+superseded sequence cannot publish its late preference read. Enter never refreshes the captured bindings. Missing
+captured names reveal New with its existing named-template refusal, including within multi-template sequences.
 
 Number bindings accept partial templates; the bolt keeps its runnable-template affordance. A single partial-template key
 passes a number-key banner to New for a prominent alert explaining the prefix. Dispatch carries an explicit origin:

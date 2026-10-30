@@ -69,6 +69,7 @@ const PALETTE_SELECTORS = [":root", ':root[data-appearance="light"]'];
 // other root role belongs to a palette, including opacity and elevation.
 const SHARED_TOKENS = new Set([
   "--sidebar-width", "--dialog-vertical-margin", "--radius-sm", "--radius-md", "--radius-lg", "--radius-pill",
+  "--radius-launch-sequence",
   "--host-rail-width", "--host-rail-expanded-width", "--sidebar-title-height",
   "--row-slot", "--row-slot-gap", "--font-ui", "--font-mono",
 ]);

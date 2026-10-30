@@ -596,7 +596,7 @@ async function unboundShortcutShots(page: Page, request: APIRequestContext, name
       await expect(indicator).toHaveAttribute("data-in-launcher", "false");
       await page.keyboard.press(key);
       await expect(indicator.locator(".launch-sequence-names")).toHaveText(label);
-      await expect(indicator.locator(".launch-sequence-hint")).toHaveText("Enter launch · Esc cancel");
+      await expect(indicator.locator(".launch-sequence-hint")).toHaveText("Type names or number keys · Tab complete · Enter launch · Esc cancel");
       await insideViewport(page, indicator);
       expect(await indicator.evaluate(element => element.scrollWidth <= element.clientWidth + 1),
         "the actual unbound sequence fits the measured main pane").toBe(true);

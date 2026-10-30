@@ -23,7 +23,7 @@ directory of a project, and applying both sets up the whole launch.
   alt="The Templates list: choose a template to edit it, or use + new template to start another."
 />
 
-Choose **+ New template**, give it a unique name, then choose **Switches launcher to**: **Agent**, **Command**, or
+Choose **+ New template**, give it a unique name without spaces or other whitespace, then choose **Switches launcher to**: **Agent**, **Command**, or
 **Don't switch**. An agent or command template opens that tab when you apply it. **Don't switch** keeps the current tab
 and offers only the host, destination, and session name.
 
@@ -122,16 +122,28 @@ just as marking it with **⚡** does.
 
 ## Combine templates from the keyboard
 
-Press Cmd+X in the Mac app, or Ctrl+Shift+X everywhere else, then the number keys for the templates you want, then Enter.
-For example, Cmd+X, Cmd+1, Cmd+5, Enter starts key 1's setup with key 5's choices applied on top. Inside the sequence,
-bare number keys work too, and the usual quick-launch chord adds your **⚡** template. Later templates win where their
+Press Cmd+X in the Mac app, or Ctrl+Shift+X everywhere else, type template names separated by spaces, then press Enter.
+For example, Cmd+X, `myproject codex`, Enter starts `myproject`'s setup with `codex`'s choices applied on top. You can
+mix names with number keys: Cmd+X, Cmd+1, Cmd+5, Enter still combines keys 1 and 5, and bare number keys work too. The
+usual quick-launch chord adds your **⚡** template. Later templates win where their
 choices overlap, just as when you [apply templates in the launcher](#apply-templates-in-the-launcher).
 
-A larger amber pill in the middle of the terminal shows what you have queued, with a brief entrance and a soft glow.
+A full name with the same capitalization wins first, then a full name ignoring capitalization, then a unique name
+starting with what you typed. If several names match, or none do, Enter shows an explanation and leaves the whole
+sequence unapplied. Matching names appear beneath the amber pill as you type. Tab completes and queues a unique match;
+an exact name wins over longer names that start the same way. Backspace edits only the unfinished word, leaving queued
+templates alone. A number typed inside a word belongs to that word; with no word in progress it selects its number key.
+Names beginning with a digit therefore need their number key or the launcher.
+
+New or renamed templates cannot contain whitespace. Older names with spaces keep working, including editing and delete
+Undo. Tab can queue one of them when the text before its first space identifies it uniquely. With both `my project` and
+`myproject` saved, reach `my project` by its number key or the launcher instead.
+
+A larger amber pill in the middle of the terminal shows your queued templates and the word you are typing, with a brief entrance and a soft glow.
 With no session open it sits in the middle of the main area; while the launcher is open it stays at the bottom so you
 can keep editing. There is no timeout. Escape cancels; clicking,
-switching windows or opening a dialog cancels too. Any other key cancels and goes to its usual target, so you can go
-straight back to typing in the terminal. Enter with no templates queued cancels. Outside the session launcher, text
+switching windows or opening a dialog cancels too. Arrows and other shortcuts cancel and go to their usual target.
+While the sequence is active, typing stays out of the terminal. Enter with no templates queued cancels. Outside the session launcher, text
 fields keep Cmd+X for Cut, or the browser's usual Ctrl+Shift+X behavior. In the launcher's own fields, a selection keeps
 that normal action; without selected text, the prefix starts a sequence.
 

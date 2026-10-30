@@ -37,11 +37,13 @@
 
   /** Classify an input without consulting the DOM or changing sequence state.
    * `ordinaryTextEditor` bars only an idle prefix. A bare number is meaningful
-   * only while armed; keypad keys are never accepted. `none` consumes a held
+   * only while armed; keypad digits are never accepted. `none` consumes a held
    * recognized key without admitting it twice. When idle, `source` retains
    * the relay identity so a missing trigger cannot claim a repeated chord.
    * Cmd-J's key identity and modifier rule come from the same definition as
    * the template chords, even though it opens a list instead of a launch.
+   * Armed text and editing results are payloads for Rust, not a JS word model;
+   * the bare-number payload retains both printed text and physical identity.
    */
   function classifyTemplateShortcutKey(event, armed, definition, ordinaryTextEditor) {
     const pass = { action: "pass", consume: false };
@@ -75,21 +77,28 @@
       return pass;
     }
 
-    let action;
-    let digit;
-    if (number && (bare || numberChord)) {
-      action = "digit";
-      digit = number.value;
-    } else if (bolt) action = "bolt";
-    else if (event.key === "Enter" && bare) action = "launch";
-    else if (event.key === "Escape") action = "cancel";
+    let result;
+    const textModifiers = !event.metaKey && !event.ctrlKey && !event.altKey;
+    if (number && numberChord) result = { action: "number_chord", digit: number.value };
+    else if (number && bare) result = { action: "digit", digit: number.value, text: event.key };
+    else if (bolt) result = { action: "bolt" };
+    else if (event.key === "Enter" && bare) result = { action: "launch" };
+    else if (event.key === "Escape") result = { action: "cancel" };
     // Holding the prefix must not clear the queue that its first event began.
-    else if (prefix && event.repeat) action = "none";
+    else if (prefix && event.repeat) result = { action: "none" };
     else if (partialModifierChord(event, definition)) return pass;
+    else if (/^Numpad[0-9]$/.test(event.code)) return cancelPass;
+    else if (event.key === " " && textModifiers) result = { action: "space" };
+    else if (event.key === "Tab" && bare) result = { action: "tab" };
+    else if (event.key === "Backspace" && bare) result = { action: "backspace" };
+    // Count code points, not UTF-16 units, so an astral character is text.
+    // Chord identity stays physical; only ordinary typing uses the printed key.
+    else if (textModifiers && Array.from(event.key).length === 1 &&
+      !/[\u0000-\u001f\u007f-\u009f]/.test(event.key)) result = { action: "character", text: event.key };
     else return cancelPass;
 
     if (event.repeat) return { action: "none", consume: true };
-    return digit === undefined ? { action, consume: true } : { action, consume: true, digit };
+    return { ...result, consume: true };
   }
 
   /** Name the context shared by keyboard admission and Rust dispatch.
@@ -155,7 +164,6 @@
      * cancel relay must remain usable when new launch admission is disabled.
      */
     let armed = false;
-    let armedHasEntry = false;
     const presses = [];
     // One snapshot per keyboard relay click: a direct shortcut, or the launch
     // relay at a sequence's Enter. Rust enqueues exactly one worker entry per
@@ -181,7 +189,6 @@
     function cancel() {
       if (!armed) return;
       armed = false;
-      armedHasEntry = false;
       sequenceRelay("cancel")?.click();
     }
     root.cancelFarhelmLaunchSequence = cancel;
@@ -241,7 +248,6 @@
       if (result.action === "begin") {
         if (begin.disabled) return;
         armed = true;
-        armedHasEntry = false;
         begin.click();
       } else if (direct) {
         if (!direct.disabled) {
@@ -250,25 +256,26 @@
         }
       } else if (result.action === "cancel") {
         cancel();
-      } else if (result.action === "launch" && !armedHasEntry) {
-        // Nothing queued means nothing to launch: retire the sequence like
-        // Escape, so every launch relay click carries a snapshot.
-        cancel();
-      } else {
-        const action = result.action;
-        if (action === "launch") {
-          armed = false;
-          armedHasEntry = false;
-        } else if (action === "digit" || action === "bolt") {
-          armedHasEntry = true;
-        }
-        const relay = sequenceRelay(action, result.digit);
+      } else if (result.action === "launch") {
+        // Rust owns whether a word or any references exist. Even empty Enter
+        // owes one worker entry and one snapshot, drained together there.
+        armed = false;
+        const relay = sequenceRelay("launch");
         // Capture only for a click that happens: a snapshot with no relay
         // click would be taken by the next press's worker entry instead. A
         // disabled button's .click() dispatches nothing, as on the direct path.
-        const launches = action === "launch" && relay && !relay.disabled;
-        if (launches) capturePress(context, true);
+        if (relay && !relay.disabled) capturePress(context, true);
         relay?.click();
+      } else {
+        // Keep only keyboard ownership in JS. The ordinary input bridge sends
+        // each action synchronously, including repeated equal payloads; Rust
+        // decides whether a bare digit extends its word or queues a binding.
+        const relay = sequenceRelay("input");
+        if (relay && !relay.disabled) {
+          const { consume, ...input } = result;
+          relay.value = JSON.stringify(input);
+          relay.dispatchEvent(new root.Event("input", { bubbles: true }));
+        }
       }
     }, true);
 
