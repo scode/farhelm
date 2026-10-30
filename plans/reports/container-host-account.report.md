@@ -88,3 +88,77 @@ and incorrectly suppress seeding and ownership repair. The fix carries the home'
 preparation, with two regression tests and a real-Podman probe. The corrective review found no remaining concrete
 findings. Creation-scope reassessments found no unnecessary complexity. Commit and PR wording passed the independent
 cold read.
+
+### Landing
+
+Landed with a landing fix that marks it as a breaking change (below). New containers for containerized sessions now use
+an account matching your host user name, user ID and home where the image permits it, instead of the image's user-1000
+account. If neither your name nor your user ID exists in the image, Farhelm creates your account and seeds its home from
+`/etc/skel`; if one of them exists and your host home path is a directory owned by a non-root account there, that
+account is used with your home; otherwise the existing account with your user ID is used, and when only your user name
+exists there, creation is refused. A created account gets your host group ID, reusing a group that already has it.
+Existing containers keep their account until replaced.
+
+- #2832: the account choice and setup in the supervisor's container creation, end-to-end container tests, the
+  specification text, the Containerized sessions docs page and the changelog entry.
+
+#### What landed since the stack was based, and whether it interacted
+
+Only plan bookkeeping landed since; the plan was based after podman-local-image and a record of a browser test flake
+(#2831), and nothing interacted.
+
+#### Fixes made at landing
+
+- The plan treated containerized sessions as having shipped only in a release candidate, so it described the account
+  change as a context paragraph inside podman-local-image's changelog entry. But the stable v0.32.0 release shipped
+  containerized sessions (marked experimental) with docs asking for images prepared for user and group 1000, so for
+  users whose host user ID is not 1000 the next new or replaced container may get an account without that image's
+  agents, configuration or `sudo` (when neither their name nor their user ID is in the image). The plan explicitly asked
+  for a `feat:` title without `!` and an edit to the existing entry; the landing overrode that, a judgment call you can
+  reverse: the change now has its own changelog entry with `kind: breaking`, and the PR and commit are titled `feat!:`.
+  The docs page's first account rule (only that one) now says "Farhelm creates your account there" instead of reading as
+  an instruction to you.
+
+#### Things you should know
+
+- A security review found nothing that widens what a container can reach: the checkout is still the only mount, the host
+  home is not mounted, no privileges are added, account setup runs as the container's root only while the container is
+  created, and the user name, user ID and home are passed as separate arguments, never spliced into shell code.
+- Host accounts with very large user IDs, common with directory services (LDAP, FreeIPA, Active Directory), cannot be
+  mapped by rootless Podman, so creating a container fails for them (large group IDs too) unless the image already has
+  their name or user ID and their home path owned by an ordinary account; before this change the fixed user ID 1000
+  always worked. The error is Podman's own plus a hint; the docs do not mention it.
+- Preparing only a home directory in the image is not enough: the home rule applies only when your name or user ID
+  already exists there, and otherwise Farhelm creates a new account and re-owns only the top of that home.
+- When an existing account is used with your host home, `HOME` is your host home but the account's own record keeps the
+  image's original home, so tools that read the record (ssh, for one) see the other path.
+- When the checkout root sits under your host home (`~/src`, say), the directories between the home and the checkout are
+  created owned by the container's root, so they are not writable by your account inside it.
+- Not covered by end-to-end tests with real Podman: the refusals (only your name existing, a name Ubuntu's account tools
+  reject, an unmappable user ID, missing account tools), the image lacking the home of the account with your user ID,
+  reuse of an existing group, the home rule when the image's recorded home differs, and cleanup after a failure partway
+  through creation.
+
+#### Checks
+
+This round landed only this plan, stacked on main `f8e7a06a`. On the stack as delivered:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, the check that every test delay states its reason
+  (`python -B scripts/check-test-sleeps.py`), `dprint check`, `python3 releasing/check-changelog.py format`, the docs
+  website build (`bun run build` in `website/`) and the workspace debug build: all passed.
+- The whole Rust workspace, `cargo nextest run --workspace --exclude farhelm-desktop`, with the pinned test runner and
+  tmux, no retries, on a machine with rootless Podman and the Ubuntu 24.04 image, run
+  `4a0d6437-c2bf-43d4-8a19-18b6aada9171`: 4581 passed, 41 skipped by design, 1 failed: the known flake "shallow pause
+  resumes without reset or replay", in terminal code this plan does not touch.
+
+After the landing fix (a new changelog entry, one paragraph moved out of another, and one docs sentence):
+`dprint check`, `python3 releasing/check-changelog.py format` and the docs website build passed.
+
+Reused: nothing from the executor's runs. Not run: the browser suite and the UI's tests (the plan changes no UI code),
+the desktop smoke tests, and the native Mac app (not runnable on Linux; containers are Linux only).
+
+The report's checks were the executor's selected runs; this landing ran the whole Rust workspace, including the plan's
+end-to-end container tests against real Podman. Two statements in the executor's report became untrue at landing: that
+the existing changelog entry was updated, and that the agreed `feat:` title without a breaking-change marker is used.
+Nothing else in it did.
