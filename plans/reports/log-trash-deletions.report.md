@@ -53,3 +53,56 @@ benchmark result or performance improvement is claimed here.
 A fresh-context gpt-6.1-sol reviewer at high effort reviewed the single-PR diff against the plan and test-authoring
 checklist, with no actionable findings. The commit and PR wording passed a separate cold read. The separate
 documentation pass is complete.
+
+### Landing
+
+Landed as delivered, with no fixes at landing. The supervisor now writes one log line for each checkout it is asked to
+delete permanently from the trash, whatever the outcome (removed; refused; failed; or record dropped, when the folder
+was already gone or left untouched and only the trash entry was removed), and one for each spare checkout it removes,
+with how long it took and how many files and directories it removed. Deletion itself behaves exactly as before; a
+fresh-context review read the reworked trash code step by step and found the same checks, order, locking and replies.
+
+- #2839: the deletion and spare-removal log lines, their tests, the SPEC_impl.md text, a changelog entry and removal of
+  its TODO entry.
+
+#### What landed since the stack was based, and whether it interacted
+
+Only typed-quick-launch (launch sequences: UI, specification text and one helm file) and plan bookkeeping landed since;
+nothing interacted.
+
+#### Things you should know
+
+- The lines include the checkout's path at info level, as the plan decided. The supervisor's directory-browse log keeps
+  paths at debug level because directory names can be private, so the two differ.
+- Two cases log nothing: a request refused for naming too many checkouts, and one cancelled while waiting behind the
+  host's other checkout operations (launches, restarts, session deletes); nothing is deleted in either.
+- Outcome labels are a little uneven: an error while opening or verifying the archive, before anything is removed, is
+  logged as refused, while an error reading which sessions reference the checkout, or updating its record, is logged as
+  failed.
+- SPEC_impl.md says a line's path is empty only when the database cannot be read; it is also empty for an id with no
+  record at all.
+- The new tests cover a successful deletion with counts (a request naming the same checkout twice logs it once), a
+  refusal, and a spare removal; not the failed or record-dropped outcomes, partial counts after a removal fails partway,
+  or a failed database read. The plan allowed at most one failure or refusal test.
+- Checkout ids sent by the helm are logged at full length, and an unknown id now produces an info line; that matters
+  only if a helm misbehaves.
+- Cosmetic: one block in the trash code is misindented; the formatter skips it because of its long strings.
+
+#### Checks
+
+This round landed only this plan, stacked on main `cac2d3bb`. On the stack as delivered:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, the check that every test delay states its reason
+  (`python -B scripts/check-test-sleeps.py`), `dprint check`, `python3 releasing/check-changelog.py format`, the docs
+  website build (`bun run build` in `website/`) and the workspace debug build: all passed.
+- The whole Rust workspace, `cargo nextest run --workspace --exclude farhelm-desktop`, with the pinned test runner and
+  tmux, no retries, run `230e52e1-7535-4f9c-969e-42a79effad69`: 4593 passed, 41 left out by the test runner (ignored or
+  filtered), 1 failed: "shallow pause resumes without reset or replay", an open, recorded flake in terminal code this
+  plan does not touch; not re-run.
+
+Reused: nothing from the executor's runs. Not run: the browser suite and the UI's tests (the plan changes no UI code),
+the desktop smoke tests, and the native Mac app (not runnable on Linux).
+
+The report's checks were the executor's selected runs; this landing ran the whole Rust workspace. Nothing in the
+executor's report became untrue at landing.
