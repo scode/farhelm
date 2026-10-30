@@ -849,4 +849,7 @@ are not.
   Farhelm could do with them: surface them as client notifications, use them as a status signal, or nothing. Related to
   the ntfy.sh entry under Near term.
 
+- **"Phone home" supervisors.** Allow supervisors to come up and register themselves with the helm, instead of being set
+  up or pushed from the helm, so hosts show up dynamically as they come and go.
+
 ## Unbucketized
