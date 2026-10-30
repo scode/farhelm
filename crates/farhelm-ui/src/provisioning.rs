@@ -1464,7 +1464,7 @@ pub(crate) fn SetupPlanConfirmation(
         }
         crate::modal_dialog::DialogFooter { class: "host-dialog-footer",
             p { id: "host-setup-permanent-hint", class: "dialog-footer-hint host-dialog-permanent-hint",
-                "Undo \"don't ask again\" with the gear at the foot of the host rail"
+                "Undo \"don't ask again\" with the gear at the foot of the navigation rail"
             }
             crate::modal_dialog::DialogActions { class: "add-host-confirm-actions",
             button {
