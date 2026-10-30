@@ -852,4 +852,10 @@ are not.
 - **"Phone home" supervisors.** Allow supervisors to come up and register themselves with the helm, instead of being set
   up or pushed from the helm, so hosts show up dynamically as they come and go.
 
+- **Tagging/capabilities for hosts and sessions.** Add tagging/capabilities so an agent can say "do X on a session on a
+  host with capabilities Y" rather than naming specific hosts or sessions.
+
+- **Trust zones.** A trust zone is scoped to a project and carries certain credentials; a session in a trust zone may
+  spawn other sessions in the same zone, on hosts that allow that zone.
+
 ## Unbucketized
