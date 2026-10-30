@@ -248,6 +248,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Emacs-style quick launch by typed template names.** Add a quick launch that also supports typing template names
   separated by spaces, so `cmd+x myproject codex Enter` launches my project in Codex. Faster than `tl:...` in the
   launcher. Plan: `plans/queue/typed-quick-launch.md`.
+- **Investigate how terminal content reaches the helm/UI.** Switching sessions often takes a visible delay. Consider
+  having the helm/UI receive terminal output from all sessions, or the recently used ones, so switching becomes instant
+  rather than reliant on remote round trips.
 
 ## Doc todo
 
