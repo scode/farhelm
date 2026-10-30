@@ -315,3 +315,50 @@ passed its review gate, and the last code PR removes this plan's TODO.md entry. 
 section exists, its latest entry must also be satisfied. Then close the plan per `plans/.agents/executing.md`,
 "Executing one plan" (steps 11 and 12): deliver its report through the queue script, write a closing entry in its log,
 and stop the watchdog. Never edit `plans/` yourself.
+
+## Blocked
+
+Blocked while landing on 2026-10-30 (claim 14bd7c).
+
+### Landing stopped: a power loss after first start can leave lasting damage
+
+The landing monitor did not merge this plan; its PR (#2840) has not merged and main holds nothing of it. The plan
+switches the helm's and the supervisor's SQLite databases to WAL journaling with synchronous NORMAL, so a write no
+longer waits for several disk flushes; an OS crash or power loss can then lose the last few commits, which the plan
+accepted for every write.
+
+A fresh-context review found one consequence that SPEC.md does not allow. The supervisor creates the host's identity
+once, on its first start, and the helm records it in its own database. Under NORMAL the two databases reach the disk
+independently, so a power loss soon after a host's very first start can keep the helm's record and lose the
+supervisor's; the supervisor then creates a new identity. Locally the desktop app refuses to start with its
+identity-mismatch message, and a new install has no backup to restore; a remote host has to be adopted again, which
+resets its four permissions. SPEC.md, on crashes and coinciding faults: "Corrupting the supervisor's or the helm's
+database, bricking an installation, or similar lasting damage is never accepted, however unlikely the trigger." The plan
+recorded a decision that no write keeps full durability, and listed keeping it for particular writes as a departure; the
+landing monitor reads SPEC.md's rule as taking precedence for writes like this one. The local case is the lasting one: a
+desktop app that will not start, with nothing to restore; the remote case costs one adoption of a just-installed host.
+
+The review also found that the desktop app's new identity-mismatch message told users to restore "both databases and any
+accompanying -wal and -shm files from the same backup" (the -wal and -shm files are SQLite's journal and index that WAL
+keeps beside each database) and that committed changes may still be in the -wal files. A backup taken after a clean stop
+has no -wal file, and SQLite applies a leftover -wal to the database beside it without checking that it belongs, so that
+advice could corrupt the restored database.
+
+The review also found older SPEC_impl.md text that now overstates durability, and caveats the changelog entry omits. The
+checks found nothing else. The whole Rust workspace (run `d8d22072-bfba-45a9-b56c-b25a51d513a0`) passed all 4600 tests;
+the UI's, desktop-build and JavaScript tests passed; the whole browser suite (run
+`7f058f2b-cd53-4243-a0e5-885fe4283358`) failed 20 cases in a run that took 3.8 hours, where about 2.2 is usual; three
+are recorded open flakes, one is a Chromium failure of a test recorded as a WebKit flake (not re-run), and the other 16
+each passed three times when re-run alone. Older builds, v0.32.0 (the current release) included, open WAL databases
+unaided, so going back to an older version still works.
+
+### What should happen to this plan?
+
+- **Send it back to its executor (recommended).** Answer with: make every write whose loss could leave lasting damage
+  fully durable despite NORMAL, at least the supervisor's creation of the host identity, and check for others (a store
+  recording another's identity, schema migrations, any one-time setup); correct the desktop message to say to delete
+  -wal and -shm files the backup lacks; run the whole Rust workspace and the desktop-build tests.
+- **Accept the window.** Keep NORMAL for every write as the plan decided, and amend SPEC.md's rule to allow this
+  first-start window.
+- **Land it now and fix afterwards.** Main would carry a window, short but real, in which a power loss leaves an
+  installation that will not start without manual repair, which SPEC.md rules out.
