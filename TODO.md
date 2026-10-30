@@ -332,16 +332,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `143efecd-81a2-4e44-8ba1-8275f8fdb7ed` passed unchanged. The Muse landing Decision records earlier occurrences too.
   Cause unknown; preserve the focus assertion (FLAKES.md, 2026-10-29).
 
-- **Hung-save waiter times out just before its deadline.** The unit test
-  `api::save_order::tests::a_hung_save_releases_waiters_at_their_deadline` in `crates/farhelm-ui/src/api/save_order.rs`
-  failed its assertion that at least 30 ms had passed, fast and through the timeout path, in full `farhelm-ui` library
-  runs `b58752ff-a0ec-4ef7-8e37-703505a27267` and `8c2c8de7-66df-42ba-a20d-a63beb7451e0`, once in 20 exact repetitions
-  (`d0add185-5ac7-4a46-91c6-a43af09cd9d8`), and in three runs by another agent on clean commits
-  (`d8ff6545-9b27-45f8-aa33-7dfac8f07108`, `68a7a44f-3142-4013-aaef-7d0dc5350e0c`,
-  `825930bd-9b5b-47a2-9d1d-a9b8e3163821`): 6 failures in 128 retained executions. Hypothesis: `remaining` arms its timer
-  with the budget rounded down to whole milliseconds, so the timer can fire up to a millisecond before 30 ms have passed
-  (FLAKES.md, 2026-10-22).
-
 - **Interrupted-card Replace clicks lost under load.** The WebKit test
   `don't ask again on a refused YOLO replace marks the host, then replaces with the override` in
   `e2e/tests/terminal-restart.spec.ts` failed in full browser run `49c74525-36ad-44e1-825b-878edadfd71c`: the Replace
