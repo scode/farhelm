@@ -370,3 +370,56 @@ passed its code review gate, and the last PR removes the TODO.md entry. Open, no
 exists, its latest entry must also be satisfied. Then close the plan per `plans/.agents/executing.md`, "Executing one
 plan" (steps 11 and 12): deliver its report through the queue script, write a closing entry in its log, and stop the
 watchdog. Never edit `plans/` yourself.
+
+## Blocked
+
+Blocked while landing on 2026-10-30 (claim c68723).
+
+### Landing stopped: the shortcuts overview, a stylesheet test and two other gaps
+
+The landing monitor did not merge this plan; its PRs (#2828, #2829) have not merged and main holds nothing of it. The
+plan makes template names single words and lets a launch sequence take typed template names (type a name, Space or Tab
+to complete, Backspace to edit), alongside the number keys.
+
+The checks ran on this plan stacked on podman-local-image (#2825, containerized sessions from local Podman images, in
+the same landing round) on current main. A fresh-context review and the checks found:
+
+- The keyboard shortcuts overview (#2827: the dialog Cmd+/ opens, and the docs page Keyboard shortcuts) landed after
+  this plan was based, so neither lists the typed-name keys. The plan asked for exactly that if the overview was on
+  main, and it now is. The dialog's launch-sequence rows lack typing, Space, Tab and Backspace, and its number-key row
+  (and the docs page's) says a number key queues that key's template, which is wrong while a word is being typed. The
+  overview's browser test (`e2e/tests/keyboard-shortcuts.spec.ts`) still checks the old rows; it passed, so it does not
+  notice the missing ones.
+- The UI's stylesheet test "the shipped app.css holds no bare literals and every var() resolves" (`node --test` in
+  `crates/farhelm-ui/js-tests`, run `8c0811c6-00f9-4db5-ac73-f524165f8984`) fails on the plan's new
+  `border-radius: min(var(--radius-pill), 24px)`: apart from `0`, percentages and the theme definitions themselves, a
+  corner radius must be a named theme value.
+- The docs-screenshot visual review (`e2e/docs-shots/visual-review.spec.ts`, outside the browser suite) still expects
+  the launch-sequence hint "Enter launch · Esc cancel"; the plan changed it, and the much longer hint must still fit the
+  main pane, which the same test checks.
+- Farhelm refuses to open a terminal link hidden under an overlay. The launch-sequence hint counts as an overlay, but
+  the new suggestion list under it, drawn outside the hint's box, does not, so a link under the suggestions can still be
+  opened through them.
+
+These are plan work rather than landing fixes: the overview needs new rows and test expectations, the radius needs a
+theme value that keeps the hint's shape, the visual review needs a run through the screenshot harness, and the link
+cover needs a test.
+
+The rest held. The whole browser suite (run `f69ef2f8-60e8-4dd5-9413-5380dc2deb9b`, both engines) passed 2835 cases with
+one failure on WebKit, "expanded setup failure closes the menu below it", which is not a recorded flake: rerun five
+times alone with both plans present it failed once (run `045bd6bb-48df-4561-b9a4-b5ca5daa702e`); with podman-local-image
+alone, without this plan, it passed five of five (run `3f758104-5642-4651-b4f8-2bada4250513`), which does not establish
+whether this plan is involved. The whole Rust workspace (run `c801e422-448d-45a7-8bfe-cda03b3e8874`) failed only the
+known flake "shallow pause resumes without reset or replay"; the UI's Rust and desktop-build tests passed. Existing
+template names with spaces keep working, as the plan decided. The review found by reading the code, not by a test, that
+Cmd+/ still opens the overview during a sequence (cancelling the sequence).
+
+### What should happen to this plan?
+
+- **Send it back to its executor (recommended).** Answer with: add the typed-name keys to the overview dialog's
+  launch-sequence rows and the docs page's table, correct both number-key rows, and make the overview's browser test
+  check the new rows; give the hint's corner radius a theme value that keeps its current shape; update the visual
+  review's expected hint and run it; mark the suggestion list as an overlay that covers links, with a test; and correct
+  the report.
+- **Land it now and fix afterwards.** Main would carry a failing stylesheet test, a visual review that fails on the
+  hint, an overview that omits the new keys, and terminal links that can be opened under the suggestions.
