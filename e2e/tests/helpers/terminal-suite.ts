@@ -51,7 +51,10 @@ export {
 // word, because an exit code and a stop annotation are facts a dot cannot
 // carry. A change that dropped the hidden word would take this whole family
 // of oracles with it.
-export const LIVE_BADGE = /^(Running|Waiting|Idle)$/;
+// Unseen output qualifies an idle session without changing its lifecycle.
+// Lifecycle checks must admit that accessible text too; vocabulary tests
+// continue to assert the complete spelling for their controlled listing.
+export const LIVE_BADGE = /^(Running|Waiting|Idle(?: — new output)?)$/;
 
 // API state words keep their canonical spelling even when badges change.
 // Separate strict patterns keep display assertions from weakening wire checks.

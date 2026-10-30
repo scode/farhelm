@@ -2690,6 +2690,11 @@ test("an alive-to-exited status change under an open confirm prompt keeps confir
 // says so — a one-shot failure would be repaired by the reader's own retry
 // at a moment nothing here chose, which is exactly the sort of race that
 // makes a transient assertion flake.
+/**
+ * A transient listing error must not discard an open deletion confirmation.
+ * Keep a valid unread-idle badge present across both successful reads: that
+ * qualifier must not prevent the test from reaching its confirmation contract.
+ */
 test("a failed listing read while confirming does not clear the confirming state", async ({
   page,
   request,
@@ -2718,7 +2723,16 @@ test("a failed listing read while confirming does not clear the confirming state
       });
       return;
     }
-    await route.continue();
+    const response = await route.fetch();
+    const listing = await response.json();
+    const session = listing.sessions.find((session: { id: string }) => session.id === id);
+    expect(session, "the confirming fixture must retain its live session").toBeDefined();
+    // Unread output is independent of lifecycle. Keep that valid idle variant
+    // present on both successful reads so setup cannot pass only when the
+    // classifier happens to produce a badge without its new-output qualifier.
+    session.status = { state: "idle" };
+    session.seen_activity_at = null;
+    await route.fulfill({ response, json: listing });
   });
 
   const feed = await stubFeed(page);
