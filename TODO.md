@@ -32,7 +32,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   display only. It takes no clicks and does not keep the rail open, so the rail widens only while the pointer is over
   the narrow rail or keyboard focus is inside it, and picking a host with a click no longer leaves the list's sort
   control covered. The other option was to let the widened names be clicked to pick a host, which needs the rail to stay
-  open while the pointer is over them and some other way to reach the controls underneath.
+  open while the pointer is over them and some other way to reach the controls underneath. Plan:
+  `plans/queue/host-rail-list-visible.md`.
 
 - **Revisit containerized sessions writing the checkout's Git hooks.** Decided on the maintainer's behalf on 2026-10-29
   when landing the Podman sandbox plan: it landed with the gap documented (SPEC.md and the docs page's caution) instead
