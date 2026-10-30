@@ -253,6 +253,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   having the helm/UI receive terminal output from all sessions, or the recently used ones, so switching becomes instant
   rather than reliant on remote round trips.
 
+- **Release stable from the approved RC without rebuilding.** When an RC has been built and declared correct, releasing
+  stable should default to promoting that RC's artifacts, not rebuilding everything for the stable tag. Today a stable
+  is cut from main and the tag-triggered workflow builds every target afresh, so stable binaries differ from the
+  approved RC's even when nothing changed. First find out what prevents reusing the RC builds: whether cargo-dist (the
+  generated `release.yml`, driven by `dist-workspace.toml`) can publish the RC's artifacts under the stable version, and
+  what the release commit, version settlement, curated notes and the maintainer's signing of the six payloads demand of
+  the build.
+
 ## Doc todo
 
 - Tell users that a working-copy (checkout) root must be a location only they can write: Farhelm is not designed for
