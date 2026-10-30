@@ -5175,6 +5175,8 @@ impl Supervisor {
     /// Hold directory admission through the actual OS mutation, even if the
     /// client disconnects or times out. A new session must not enter an archive
     /// after its live-session guard has been checked.
+    /// Request timing begins before admission, so completion logs expose time
+    /// waiting behind other directory operations as well as filesystem removal.
     pub(crate) async fn delete_checkout_trash(
         &self,
         ids: Vec<String>,
@@ -5182,14 +5184,20 @@ impl Supervisor {
         if ids.len() > crate::checkout_trash::DELETE_ID_CAP {
             anyhow::bail!("too many archived checkouts selected");
         }
+        let mut timing = crate::checkout_trash::DeleteTiming::default();
         let admission = Arc::clone(&self.working_copy_operations).lock_owned().await;
+        timing.admission = timing.started.elapsed();
         let db = self.store.conn.clone();
         // Admission already serializes deletion. Waiting for browse slots here
         // would let two wedged passive reads freeze every session operation.
         tokio::task::spawn_blocking(move || {
             let _admission = admission;
-            let live = crate::store::session_directory_paths(&db.lock())?;
-            crate::checkout_trash::delete(&db, &ids, &live)
+            let reading = std::time::Instant::now();
+            let live = crate::store::session_directory_paths(&db.lock());
+            timing.session_paths = reading.elapsed();
+            let live = live
+                .inspect_err(|_| crate::checkout_trash::log_delete_read_failure(&ids, &timing))?;
+            crate::checkout_trash::delete_timed(&db, &ids, &live, timing)
         })
         .await
         .context("checkout trash worker panicked")?
