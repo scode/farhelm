@@ -247,15 +247,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   what the release commit, version settlement, curated notes and the maintainer's signing of the six payloads demand of
   the build.
 
-- **Fix commands in terminal tabs getting terminated during heavy output.** On 2026-10-30, a long-running command run
-  directly in bash in a terminal tab of an ordinary (not containerized) session, printing one line per file (tens of
-  thousands of lines), was killed repeatedly two to three minutes in: it printed "Terminated", and the tab and its shell
-  kept working afterwards. Other tabs were being opened and closed in the meantime, partly to debug this, so the
-  tab-close lines in Farhelm's log from those moments may concern other tabs. Find out what terminated the command and
-  fix it if it is Farhelm. A tab may be closed, or its processes signalled, only when its shell really exited or the
-  user closed or deleted it; remove any path that decides otherwise (a timeout, slowness, anything else). Plan:
-  `plans/queue/tab-output-hangup.md`.
-
 - **Custom agents, starting with conversation tracking.** Let users run an agent harness Farhelm has no built-in support
   for (an internal or unreleased tool, say) and still get conversation tracking, so Restart resumes the conversation.
   Farhelm cannot know such a tool's details, so the user brings the integration and Farhelm defines the contract. A

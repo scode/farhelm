@@ -36,6 +36,7 @@ use control_codec::{
     PANE_FACT_FORMAT, PANE_MARKER_FORMAT, any_session_has_several_windows, join_pane_markers,
     parse_pane_facts_flagged,
 };
+use farhelm_proto::text::shell_quote;
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -293,8 +294,11 @@ fn launch_excerpt_identity(session: &str, pane: &str) -> String {
     )
 }
 
-/// Serialize only the small option writes, never a respawn's credential-bearing
-/// `-e` argv. The latter must stay separate for the driver's diagnostic redaction.
+/// Serialize the small option writes shared by fresh and respawned panes.
+/// Tmux parses these words again inside an `if-shell` branch. Always quote
+/// them: shell-safe bare braces are still tmux command syntax. The respawn
+/// builder separately supplies redacted diagnostic argv for its credential-
+/// bearing nested command; the generic runner does not parse it.
 fn launch_excerpt_stamp(target: &str, token: &str) -> String {
     [
         "set-option",
@@ -316,7 +320,7 @@ fn launch_excerpt_stamp(target: &str, token: &str) -> String {
         if *arg == ";" {
             ";".into()
         } else {
-            shell_words::quote(arg)
+            shell_quote(arg)
         }
     })
     .collect::<Vec<_>>()
@@ -2032,9 +2036,9 @@ impl std::error::Error for TmuxCommandFailure {}
 /// '=fh:.%1'` after `%1`'s window was killed reported `%0`, exit 0.)
 ///
 /// So this form answers "never another session's terminal", not "exactly
-/// this pane or nothing". Every caller must therefore address a pane it
-/// has just resolved and holds still — which is what the session lifecycle
-/// claim buys the tab operations — and the one query whose whole job is
+/// this pane or nothing". Destructive window kills and respawns additionally
+/// guard the exact pane and session inside their synchronous tmux command
+/// group. The one query whose whole job is
 /// to DETECT a vanished or recycled pane ([`TmuxDriver::pane_process`])
 /// deliberately uses the bare pane id instead: it expands empty for a pane
 /// that is gone, which is the signal it is built to read, and it
@@ -2104,12 +2108,12 @@ fn resize_window_args(session: &str, pane: &str, cols: u16, rows: u16) -> Vec<St
         "#{?pane_dead,,#{@farhelm-launch-generation}}",
     ]
     .iter()
-    .map(|arg| shell_words::quote(arg))
+    .map(|arg| shell_quote(arg))
     .collect::<Vec<_>>()
     .join(" ");
     let clear_validity = ["set-option", "-w", "-t", &target, LAUNCH_FENCE_OPTION, ""]
         .iter()
-        .map(|arg| shell_words::quote(arg))
+        .map(|arg| shell_quote(arg))
         .collect::<Vec<_>>()
         .join(" ");
     let clear = format!("{clear_generation} ; {clear_validity}");
@@ -2674,6 +2678,19 @@ impl TmuxDriver {
         args: &[&str],
         deadline: Option<std::time::Duration>,
     ) -> anyhow::Result<Vec<u8>> {
+        self.run_bytes_within_redacted(args, deadline, None).await
+    }
+
+    /// A guarded command can carry `-e` inside tmux's nested command text.
+    /// Its builder supplies the already-redacted diagnostic argv and secret
+    /// spellings instead of asking the generic runner to parse that text.
+    async fn run_bytes_within_redacted(
+        &self,
+        args: &[&str],
+        deadline: Option<std::time::Duration>,
+        redaction: Option<(String, Vec<String>)>,
+    ) -> anyhow::Result<Vec<u8>> {
+        let (rendered_args, secrets) = redaction.unwrap_or_else(|| redacted_tmux_args(args));
         // `stdin` is null so tmux can never inherit the supervisor's own
         // stdin — under `farhelm internal stdio` that stdin is the
         // protocol stream.
@@ -2686,7 +2703,6 @@ impl TmuxDriver {
                 tokio::time::timeout(deadline, command.output())
                     .await
                     .with_context(|| {
-                        let (rendered_args, _) = redacted_tmux_args(args);
                         format!("tmux {rendered_args} did not answer within {deadline:?}")
                     })?
                     .context("spawning tmux")?
@@ -2702,7 +2718,6 @@ impl TmuxDriver {
             // displays only the outermost context by default, which is
             // exactly this formatted string, so every existing caller that
             // pattern-matches `e.to_string()` sees the same text as before.
-            let (rendered_args, secrets) = redacted_tmux_args(args);
             let stderr = scrub_secrets(&String::from_utf8_lossy(&out.stderr), &secrets);
             let context = format!(
                 "tmux {rendered_args} failed ({}): {}",
@@ -3254,41 +3269,55 @@ impl TmuxDriver {
         let start_dir = tmux_start_directory(cwd);
         let identity = launch_excerpt_identity(session, pane);
         let stamp = launch_excerpt_stamp(&target, token.unwrap_or(""));
-        let mut args: Vec<&str> = Vec::new();
-        if token.is_some() {
-            args.extend([
-                "display-message",
-                "-p",
-                "-t",
-                &target,
-                "#{history_size}",
-                ";",
-            ]);
-        }
-        args.extend([
-            "if-shell",
-            "-F",
-            "-t",
-            pane,
-            &identity,
-            &stamp,
-            ";",
-            "respawn-pane",
-            "-k",
-            "-t",
-            &target,
-            "-c",
-            &start_dir,
-        ]);
+        let mut respawn_args: Vec<&str> =
+            vec!["respawn-pane", "-k", "-t", &target, "-c", &start_dir];
         for assignment in &env_args {
-            args.push("-e");
-            args.push(assignment);
+            respawn_args.push("-e");
+            respawn_args.push(assignment);
         }
-        args.push("--");
-        args.extend(window_cmd.iter().map(String::as_str));
-        self.run(&args)
+        respawn_args.push("--");
+        respawn_args.extend(window_cmd.iter().map(String::as_str));
+        let respawn = respawn_args
+            .iter()
+            .map(|arg| shell_quote(arg))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let sample = ["display-message", "-p", "-t", &target, "#{history_size}"]
+            .iter()
+            .map(|arg| shell_quote(arg))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let commands = if token.is_some() {
+            format!("{sample} ; {stamp} ; {respawn}")
+        } else {
+            format!("{stamp} ; {respawn}")
+        };
+        // Respawn is destructive too: a stamp-only guard would still let
+        // its following respawn fall back onto a surviving tab after the
+        // recorded agent pane vanished. Keep every mutation in the branch.
+        let (safe_args, mut secrets) = redacted_tmux_args(&respawn_args);
+        secrets.extend(env_args.iter().map(|assignment| shell_quote(assignment)));
+        let out = self
+            .run_bytes_within_redacted(
+                &[
+                    "if-shell",
+                    "-F",
+                    "-t",
+                    pane,
+                    &identity,
+                    &commands,
+                    "display-message -p FARHELM_RESPAWN_TARGET_MISMATCH",
+                ],
+                None,
+                Some((format!("guarded respawn {safe_args}"), secrets)),
+            )
             .await
-            .context("respawning the session's pane for a relaunch")
+            .context("respawning the session's pane for a relaunch")?;
+        let out = String::from_utf8_lossy(&out).into_owned();
+        if out.contains("FARHELM_RESPAWN_TARGET_MISMATCH") {
+            bail!("refusing to respawn a pane whose session or identity changed");
+        }
+        Ok(out)
     }
 
     /// A newly created pane has no prior generation to exclude. Stamping after
@@ -3464,11 +3493,44 @@ impl TmuxDriver {
     /// anchors on and leave the weaker marker scan as the only mechanism
     /// (PLAN_M4.md item 2).
     pub async fn kill_window(&self, session: &str, pane: &str) -> anyhow::Result<()> {
+        // The qualified target alone falls back to the current window when
+        // its pane vanished. Run the identity check and kill in tmux's same
+        // synchronous queue group, as capture_launch_excerpt does, so a stale
+        // cleanup cannot kill another tab or a newly started agent window.
+        let target = pane_in_session(session, pane);
+        let kill = ["kill-window", "-t", &target]
+            .iter()
+            .map(|arg| shell_quote(arg))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let rejected = [
+            "display-message",
+            "-p",
+            "-t",
+            pane,
+            "#{pane_id} #{session_name}",
+        ]
+        .iter()
+        .map(|arg| shell_quote(arg))
+        .collect::<Vec<_>>()
+        .join(" ");
         match self
-            .run(&["kill-window", "-t", &pane_in_session(session, pane)])
+            .run(&[
+                "if-shell",
+                "-F",
+                "-t",
+                pane,
+                &launch_excerpt_identity(session, pane),
+                &kill,
+                &rejected,
+            ])
             .await
         {
-            Ok(_) => Ok(()),
+            Ok(out) if out.trim().is_empty() => Ok(()),
+            Ok(out) => anyhow::bail!(
+                "refusing to kill a window whose pane identity changed: {:?}",
+                out.trim()
+            ),
             // Classified against tmux's OWN raw stderr, anchored at its
             // start, rather than by searching the rendered error — the
             // rendered form embeds this driver's formatting AND the
@@ -3479,6 +3541,40 @@ impl TmuxDriver {
             // which is why this anchors rather than compares whole.
             Err(e) if self.refusal(&e).is_some_and(TmuxRefusal::means_window_gone) => Ok(()),
             Err(e) => Err(e).context("killing a terminal tab's window"),
+        }
+    }
+
+    /// Read only this exact pane's death report for an automatic-close log.
+    /// Empty means it vanished or became live; no fallback pane supplies an
+    /// exit status. The format is tmux-owned numeric status/signal metadata.
+    pub(crate) async fn pane_death_detail(
+        &self,
+        session: &str,
+        pane: &str,
+    ) -> anyhow::Result<Option<String>> {
+        let target = pane_in_session(session, pane);
+        let condition = format!(
+            "#{{&&:{},#{{==:#{{pane_dead}},1}}}}",
+            launch_excerpt_identity(session, pane)
+        );
+        let display = [
+            "display-message",
+            "-p",
+            "-t",
+            &target,
+            "status=#{pane_dead_status} signal=#{pane_dead_signal}",
+        ]
+        .iter()
+        .map(|arg| shell_quote(arg))
+        .collect::<Vec<_>>()
+        .join(" ");
+        match self
+            .run(&["if-shell", "-F", "-t", pane, &condition, &display])
+            .await
+        {
+            Ok(out) => Ok((!out.trim().is_empty()).then(|| out.trim().to_string())),
+            Err(e) if self.refusal(&e).is_some_and(TmuxRefusal::means_window_gone) => Ok(None),
+            Err(e) => Err(e).context("reading a terminal tab's death report"),
         }
     }
 
@@ -3787,7 +3883,7 @@ impl TmuxDriver {
         let end = "#{e|-:#{pane_height},2}";
         let capture = ["capture-pane", "-p", "-t", &target, "-S", &start, "-E", end]
             .iter()
-            .map(|arg| shell_words::quote(arg))
+            .map(|arg| shell_quote(arg))
             .collect::<Vec<_>>()
             .join(" ");
         let reducer = self
@@ -4730,6 +4826,40 @@ mod tests {
         assert!(
             message.contains("can't find session") || message.contains("no current target"),
             "tmux's diagnostic must remain useful: {message}"
+        );
+    }
+
+    /// Wrapping respawn in a tmux guard must not hide its sensitive `-e`
+    /// arguments from error redaction. The stand-in echoes actual nested
+    /// argv, including shell-quoted credentials, before reporting failure.
+    #[cfg(unix)]
+    #[farhelm_testtrace::test]
+    async fn guarded_respawn_failure_redacts_nested_environment_assignments() {
+        let root = tempfile::tempdir().unwrap();
+        let fake = root.path().join("pretend-tmux");
+        write_executable(&fake, "#!/bin/sh\nprintf '%s\\n' \"$@\" >&2\nexit 1\n");
+        let driver = TmuxDriver::new_with_program(root.path(), TmuxBudgets::default(), fake);
+        let token = "SENTINEL's token with spaces";
+        let assignment = format!("FARHELM_SESSION_TOKEN={token}");
+        let error = driver
+            .relaunch_in_pane(
+                "owner",
+                "%7",
+                "/",
+                &[("FARHELM_SESSION_TOKEN".into(), token.into())],
+                &["true".into()],
+            )
+            .await
+            .expect_err("the fixture tmux always refuses");
+        let message = format!("{error:#}");
+        assert!(!message.contains(token), "raw credential leaked: {message}");
+        assert!(
+            !message.contains(&shell_quote(&assignment)),
+            "nested quoted assignment leaked: {message}"
+        );
+        assert!(
+            message.contains("FARHELM_SESSION_TOKEN=<redacted>"),
+            "{message}"
         );
     }
 
@@ -6952,6 +7082,111 @@ mod tests {
         );
     }
 
+    /// A stale window cleanup must not fall back to the current live sibling.
+    /// The same atomic identity guard refuses a pane in another session, while
+    /// an exact live target still closes normally and can be retried absent.
+    #[farhelm_testtrace::test]
+    async fn window_kill_guards_vanished_and_foreign_pane_targets() {
+        let server = ScratchServer::start().await;
+        let pane = old_excerpt_pane(&server, "window-owner").await;
+        let (_, sibling) = server
+            .driver
+            .new_window(
+                "window-owner",
+                "/",
+                &[],
+                &["sh".into(), "-c".into(), "sleep 600".into()],
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            server
+                .driver
+                .pane_process("window-owner", &sibling)
+                .await
+                .unwrap(),
+            PaneProbe::Owned(PaneProcess { dead: false, .. })
+        ));
+        assert!(
+            server
+                .driver
+                .kill_window("wrong-owner", &sibling)
+                .await
+                .is_err()
+        );
+        server.driver.kill_pane_for_test(&pane).await.unwrap();
+        assert_eq!(
+            server
+                .driver
+                .pane_process("window-owner", &pane)
+                .await
+                .unwrap(),
+            PaneProbe::Gone
+        );
+        let before = server
+            .driver
+            .pane_process("window-owner", &sibling)
+            .await
+            .unwrap();
+        assert!(
+            server
+                .driver
+                .relaunch_in_pane(
+                    "window-owner",
+                    &pane,
+                    "/",
+                    &[],
+                    &["sh".into(), "-c".into(), "sleep 600".into()]
+                )
+                .await
+                .is_err(),
+            "a missing agent pane must refuse respawn, not replace a surviving tab"
+        );
+        assert_eq!(
+            server
+                .driver
+                .pane_process("window-owner", &sibling)
+                .await
+                .unwrap(),
+            before,
+            "the sibling must retain its original live process, not merely remain alive after respawn"
+        );
+        server
+            .driver
+            .kill_window("window-owner", &pane)
+            .await
+            .unwrap();
+        assert!(
+            matches!(
+                server
+                    .driver
+                    .pane_process("window-owner", &sibling)
+                    .await
+                    .unwrap(),
+                PaneProbe::Owned(PaneProcess { dead: false, .. })
+            ),
+            "a vanished target must not kill its session's current window"
+        );
+        server
+            .driver
+            .kill_window("window-owner", &sibling)
+            .await
+            .unwrap();
+        assert_eq!(
+            server
+                .driver
+                .pane_process("window-owner", &sibling)
+                .await
+                .unwrap(),
+            PaneProbe::Gone
+        );
+        server
+            .driver
+            .kill_window("window-owner", &sibling)
+            .await
+            .unwrap();
+    }
+
     /// A wrong session, a vanished pane and a later run through the legacy
     /// respawn API all fail closed. In particular, a vanished pane must never
     /// quote its session's current sibling, whose window target can resolve.
@@ -7208,6 +7443,7 @@ mod tests {
             "style #[x] kept".to_string(),
             "doubled style ##[y] kept".to_string(),
             "open brace #{z".to_string(),
+            "left}right".to_string(),
         ];
         let sleep = ["sleep".to_string(), "60".to_string()];
         let pane = server

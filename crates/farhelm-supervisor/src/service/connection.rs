@@ -1604,7 +1604,7 @@ impl Forwarder {
                     }
                 }
                 Ok(Some(OutputEvent::Paused)) => {
-                    if let Err(end) = self.catch_up_after_tmux_pause().await {
+                    if let Err(end) = self.catch_up_after_tmux_pause(death_requested).await {
                         return end;
                     }
                 }
@@ -1631,6 +1631,8 @@ impl Forwarder {
     /// pause gives that recovery the same ordered `%pause` boundary. Death
     /// during an earlier capture remains latched and gets another capture,
     /// since the earlier one may predate the final output.
+    /// The diagnostic records whether this pump requested a death pause;
+    /// natural flow control can already have queued a pause at that boundary.
     ///
     /// The client's terminal is reset first because the replay assumes an
     /// empty one — see [`Self::send_replay`]. Within `HISTORY_LIMIT`
@@ -1651,10 +1653,15 @@ impl Forwarder {
     /// attachment that already finished one, so history reappearing on
     /// the channel after the marker is a documented possibility rather
     /// than a contradiction — see [`Self::send_replay_complete`].
-    async fn catch_up_after_tmux_pause(&mut self) -> Result<(), ForwarderEnd> {
+    async fn catch_up_after_tmux_pause(
+        &mut self,
+        death_requested: bool,
+    ) -> Result<(), ForwarderEnd> {
         info!(
             channel = self.channel,
             session = %self.session_id,
+            terminal = ?self.terminal,
+            reason = if death_requested { "pane_death_requested" } else { "tmux_flow_control" },
             "tmux paused the pane for this client; catching up by reset and replay"
         );
         let (modes, content) = match self.stream.resume_paused_with_replay().await {

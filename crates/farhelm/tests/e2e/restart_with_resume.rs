@@ -830,6 +830,92 @@ async fn restarting_a_live_session_stops_its_tree_and_reuses_the_terminal() {
     h.client.detach(chan).await;
 }
 
+/// Ordinary Restart must preserve a folder containing tmux's closing-brace syntax.
+///
+/// The existing terminal forces the guarded respawn path, which parses a nested
+/// tmux command. A brace without spaces used to remain bare under shell quoting
+/// and break that parser after the old agent had already stopped. Check the old
+/// pane and live agent first, then require the same pane with a new process and
+/// a working input roundtrip in the exact directory after Restart.
+#[farhelm_testtrace::test]
+async fn restarting_in_a_directory_with_a_closing_brace_reuses_the_terminal() {
+    let h = harness().await;
+    let sock = h.state.path().join("tmux.sock");
+    let work = farhelm_teststate::tempdir().unwrap();
+    let directory = work.path().join("left}right");
+    std::fs::create_dir(&directory).unwrap();
+    let session = create_resumable_session(
+        &h,
+        directory.to_str().unwrap(),
+        &fixture_cmd("fake-agent --script basic"),
+        80,
+        24,
+    )
+    .await;
+    let _cleanup = MarkerCleanupGuard::new(session.id.clone());
+    wait_for_agent_ready(&sock, &session.id).await;
+    let tmux_name = format!("fh-{}", session.id);
+    let pane = pane_id_of(&sock, &tmux_name).await;
+    let before = tmux_query(
+        &sock,
+        &["display-message", "-p", "-t", &pane, "#{pane_pid}"],
+    )
+    .await;
+    assert!(before.status.success());
+    let old_pid = String::from_utf8(before.stdout)
+        .unwrap()
+        .trim()
+        .parse::<u32>()
+        .unwrap();
+    assert!(old_pid > 0);
+
+    h.client
+        .restart_session(&session.id, true)
+        .await
+        .expect("restart in the literal brace directory");
+    assert_eq!(pane_id_of(&sock, &tmux_name).await, pane);
+    let after = tmux_query(
+        &sock,
+        &["display-message", "-p", "-t", &pane, "#{pane_pid}"],
+    )
+    .await;
+    assert!(after.status.success());
+    let new_pid = String::from_utf8(after.stdout)
+        .unwrap()
+        .trim()
+        .parse::<u32>()
+        .unwrap();
+    assert!(new_pid > 0);
+    assert_ne!(
+        new_pid, old_pid,
+        "Restart must replace the old process in the surviving pane"
+    );
+    let cwd = tmux_query(
+        &sock,
+        &["display-message", "-p", "-t", &pane, "#{pane_current_path}"],
+    )
+    .await;
+    assert!(cwd.status.success());
+    assert_eq!(
+        std::path::Path::new(String::from_utf8_lossy(&cwd.stdout).trim()),
+        directory.canonicalize().unwrap()
+    );
+
+    // Restart retains the old readiness banner in scrollback. Only a new
+    // response to this attachment's input proves the replacement agent is live.
+    let (channel, replay, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach to restarted agent");
+    let mut seen = replay;
+    h.client
+        .send_input(channel, b"BRACE-RESTART-ROUNDTRIP\r".to_vec())
+        .await;
+    wait_for_after(&mut rx, &mut seen, "echo:", "BRACE-RESTART-ROUNDTRIP", 20).await;
+    h.client.detach(channel).await;
+}
+
 /// The other half of the confirm contract: without `stop_if_running`, a
 /// restart against an agent the supervisor finds WORKING is refused with
 /// `Conflict` and kills nothing at all. This harness runs no activity
