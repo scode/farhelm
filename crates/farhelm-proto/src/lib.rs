@@ -108,6 +108,8 @@ pub(crate) use enum_with_all;
 pub mod approvals;
 /// Stable remote-host identity choices shared with the browser UI.
 pub mod host_appearance;
+/// The display-only short-name rule; callers retain raw text until rendering.
+pub mod host_name;
 /// Tokens the UI branches on in the helm's HTTP replies (see the module's own
 /// docs).
 pub mod http;
