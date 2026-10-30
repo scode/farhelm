@@ -1,45 +1,59 @@
+## Since the last review
+
+PR #2840 remains the single draft PR. Its earlier delivery was stopped before merging because losing a newly created
+supervisor identity after the helm remembered it could leave a fresh installation unable to start. The latest decision
+requires stronger durability for writes whose loss causes lasting damage, and corrected backup instructions. This round
+adds that protection for host identity creation and browser-token revocation, audits the other initialization paths, and
+corrects the recovery advice and documentation. The original blanket acceptance of losing every write no longer applies.
+
 ## What this was about
 
-Small supervisor state writes had been observed waiting 0.2–0.6 seconds for disk flushes on a loaded host, holding the
-shared database connection throughout. This plan switches both the supervisor and helm databases to WAL with NORMAL
-sync, as the maintainer requested. No new performance benchmark was run.
+Small supervisor state writes had been observed waiting 0.2–0.6 seconds for disk flushes while holding the shared
+database connection. The plan switches the supervisor and helm databases to WAL with NORMAL sync for ordinary writes. No
+new performance benchmark was run.
 
 ## Things you should know
 
-Only a process holding state-directory ownership attempts the in-place conversion, before schema work. A failed
-conversion or a result other than WAL produces a warning and keeps the current mode; a busy conversion can add the
-existing busy timeout to startup. The next owning open tries again. Every ordinary read-write connection confirms the
-actual mode before selecting NORMAL; a rollback journal retains FULL. Non-owning opens never convert. The separate
-checkout-config CLI opener remains unchanged at FULL.
+Only a process holding state-directory ownership attempts conversion, before schema work. A failed conversion or a
+result other than WAL warns and continues in the current mode; a busy conversion can add the existing busy timeout to
+startup. The next owning open tries again. Each ordinary read-write connection confirms WAL before selecting NORMAL;
+rollback journaling retains FULL. Non-owning opens never convert, and the separate checkout-config CLI opener stays
+unchanged.
 
-The accepted tradeoff applies to every write: an OS crash or power loss can lose recent commits while preserving
-database consistency. Process crashes retain committed changes. Recovery guidance now says to restore both databases and
-accompanying WAL/SHM files from the same backup, because committed state may remain in a WAL file after an unclean stop.
+Creating a supervisor's host identity now commits at FULL before that identity can reach a helm. The helm records it
+independently, so its source must survive once reported. Token rotation likewise commits replacement of the sign-in
+token and deletion of browser credentials at FULL before acknowledging revocation. Otherwise a power loss could make
+revoked credentials valid again. If WAL conversion fell back to rollback journaling, these protected writes use EXTRA,
+which also synchronizes journal removal. Both paths restore the connection's previous setting afterward; ordinary writes
+retain NORMAL. No checkpoint worker, retry task or extra transaction protocol was added.
 
-Source inspection found these concrete ways that losing recent commits can disagree with files already changed or
-success already reported. This is a list of observations, not an exhaustive audit; none of these operations was
-redesigned:
+The audit found no further installation-bricking dependency in the examined initialization paths. A helm that forgets
+its first-contact record learns the same durable supervisor identity again. Schema migrations are atomic database-only
+changes: losing one leaves a complete earlier schema to migrate again. Local-row setup can repeat. Losing a registry
+namespace or entry identifier can invalidate a remembered reference or repeat an approval or launch; it does not make
+the databases unusable. Initial token creation and browser enrollment can be lost, requiring sign-in again. Those
+ordinary lost-tail consequences remain accepted.
 
-- A checkout directory can remain after its allocation or session-membership record is lost. An archived directory can
-  already be in Trash while the restored database still names its old location.
-- A deleted session can return in the database after its launch files and attachments were removed. A permanently
-  deleted trash directory can regain a stale database entry; existing listing code can prune a missing directory.
-- An acknowledged session rename or host add/edit/removal can revert. A host removed after uninstall can reappear in the
-  list despite the remote installation being gone.
-- A successful browser-token rotation and credential revocation can revert, restoring the old token and browser
-  credentials. Initial token creation or browser sign-in can return a secret whose saved record is subsequently lost.
-  These credential writes are included in the maintainer's explicit acceptance; no special durability exception was
-  added.
+The recovery message now says to restore both databases from one backup with the sidecars that backup includes, and to
+remove current sidecars absent from the backup before restoring. A leftover journal must not be applied to an unrelated
+restored database. The changelog also warns that copying only `.db` files while Farhelm runs can miss recent changes
+held in the accompanying `-wal` and `-shm` files.
 
-No transaction-style change, background retry, shutdown checkpoint or ownership-lock change was needed. Both stores use
-the same setup. The TODO entry is removed and the implementation specification and changelog record the tradeoff.
+Other concrete consequences remain: an allocated checkout can outlive its database record; a moved directory can be in
+Trash while the restored record names its old path; a deleted session or permanently deleted trash directory can regain
+stale bookkeeping; and an acknowledged rename or host registration change can revert. Managed checkouts are not required
+to survive power loss, and their identity checks still refuse unrelated replacements. Installation records and prepared
+checkout receipts use separate existing file-write mechanisms, which this change leaves alone. Ordinary SQL commits
+remain consistent and survive process crashes; the accepted loss concerns OS crashes and power loss.
+
+The original SQLite TODO entry is removed. The separate entry asking the maintainer to revisit the durability judgment
+remains, as requested when the landing monitor answered the block.
 
 ## Open questions and possible follow-ups
 
-No maintainer decision is needed to land this work. These filesystem and acknowledged-success examples are consequences
-of the accepted power-loss tradeoff. This work makes no measured latency claim beyond avoiding the normal per-commit
-flush in WAL/NORMAL. An existing desktop approval-test helper needs a type alias to satisfy the current all-targets
-Clippy check; this unrelated cleanup is left for a separate change.
+No additional maintainer decision is needed for this implementation. The remaining filesystem and reported-success
+losses above are consequences of the accepted NORMAL policy. This is a source audit and a test of the selected SQLite
+settings and call boundaries, with no simulated power-loss or measured latency claim.
 
 ## The PRs
 
@@ -47,46 +61,39 @@ Clippy check; this unrelated cleanup is left for a separate change.
 
 ## Checks run, reused and skipped
 
-- Database and caller unit modules:
-  `cargo nextest run -p farhelm-supervisor -p farhelm-helm --lib -E 'test(/^(db|store|checkout_config|token_control)::/)'`,
-  recorder `e36e28af-11e7-4eef-865c-f4379263b7e8`: 361 passed, 2,355 outside the selection. This covers both stores,
-  fresh/existing conversion, retained rows, non-owner opens, warnings and FULL fallback on actual SQLITE_BUSY,
-  per-connection sync, migrations, token-control callers and the WAL snapshot's successful competing commit.
-- Ownership and desktop recovery:
-  `cargo nextest run -p farhelm-helm -p farhelm-ui --features farhelm-ui/desktop --lib -E 'test(=tests::a_second_helm_refuses_before_migrating_an_owned_state_dir) | test(=desktop::tests::a_refusing_local_supervisor_ends_startup_with_its_state_and_remedy)'`,
-  recorder `927da9ae-1e88-4b7c-917d-61ebc69966ce`: both passed, 2,342 outside the selection. This validates the
-  corrected upgradeable fixture and the sidecar-aware recovery message in the desktop build.
-- CLI and handoff:
-  `cargo nextest run -p farhelm --test checkout_config_cli --test e2e -E 'binary(checkout_config_cli) | test(=create_idempotency::a_retried_create_returns_the_same_session_across_a_supervisor_restart)'`,
-  recorder `255f0e96-67aa-483f-8bd0-b579de0a404b`: all four CLI cases and the one handoff case passed, 408 outside the
-  selection. The handoff uses a real supervisor and pinned tmux, and confirms that a retried create keeps its session
-  identity across replacement. The ordinary fixture-build setup also passed; JUnit counts that setup as a sixth pass.
-- All three recorded runs used pinned nextest/tmux, four slots, zero retries, complete source and runner records,
-  observed output EOF, zero omitted output and no forced cleanup. Retained output contains no runtime SKIPPED notices.
-  There were 368 passing test cases plus the one passing setup. Build and Cargo-lock waiting accounted for most wall
-  time; the tests themselves were short.
-- `cargo clippy -p farhelm-supervisor -p farhelm-helm -p farhelm-ui --all-targets --features farhelm-ui/desktop -- -D warnings`
-  failed on the unchanged desktop-only approval-test helper's `clippy::type_complexity` warning. Direct comparison with
-  main confirms that the flagged type is identical and this PR does not touch that file. No suppression or unrelated fix
-  was added.
-- `cargo clippy -p farhelm-supervisor -p farhelm-helm -p farhelm-ui --lib --features farhelm-ui/desktop -- -D warnings`
-  passed, covering the changed production code in all three crates, including the desktop build.
-- `cargo fmt --all -- --check`, dprint on changed Markdown, changelog format validation and the isolated test-delay
-  checker passed. The checker inspected 327 delays with zero unannotated calls. The fixture assertion needed formatting
-  once after review; it was formatted before the successful final check.
-- Reused: the database-unit run tested the uncommitted implementation on base `97270039`. Later edits corrected module
-  prose and an ownership-test fixture outside that selection; its tested behavior is unchanged. Main's intervening
-  typed-launch work changes template validation, keyboard/UI behavior, docs and bookkeeping, with no store-opening or
-  journal-policy changes. The clean rebase preserves both plans' separate TODO removals; remaining checks run on that
-  combined tree. No older session's runtime evidence is reused.
-- Browser/appshot, desktop smoke, installer and whole-workspace suites were skipped: this changes database setup and a
-  native recovery string, covered by database/caller tests and the exact desktop text test. No layout or input behavior
-  changes, and no new performance benchmark or power-loss simulation is claimed.
+- Focused library tests:
+  `cargo nextest run -p farhelm-supervisor -p farhelm-helm -p farhelm-ui --features farhelm-ui/desktop --lib -E 'test(db::tests::) | test(host_identity) | test(concurrent_first_mint) | test(rotation) | test(durability) | test(checkout_config_snapshot_reads_one_consistent_view) | test(a_refusing_local_supervisor_ends_startup_with_its_state_and_remedy)'`,
+  recorder `feb7bd49-2826-4e3e-a22c-02b4603a7b59`: 38 passed, 3,702 outside the selection. These cover the actual
+  identity and token write settings, stronger-setting preservation, rollback-journal EXTRA, successful and failed
+  restoration paths, identity stability and races, credential-revocation serialization, both store openers, busy WAL
+  fallback, the WAL snapshot and the exact desktop recovery text. Pinned nextest and tmux, four slots and zero retries;
+  complete source and runner records, output EOF, no omitted output, no forced cleanup and no runtime SKIPPED notices.
+  Execution took 1.169 seconds after the build was ready.
+- The first identical selection, recorder `669228dd-4633-4a25-a28c-ee66e6a9711e`, also passed all 38 cases, but was
+  mistakenly recorded with tmux marked unused. The selection included real terminal fixtures. It was repeated once to
+  correct that substrate evidence; the run above is the controlled result. These are 38 unique cases, not 76. Initial
+  compilation took 6 minutes 38 seconds; its test execution took 3.022 seconds. No test failure triggered a retry.
+- `cargo clippy -p farhelm-supervisor -p farhelm-helm -p farhelm-ui --features farhelm-ui/desktop --lib -- -D warnings`
+  passed, covering the changed production libraries and desktop build. `cargo fmt --all -- --check`, dprint on changed
+  Markdown, changelog format validation and the isolated test-delay checker passed; 327 delays had zero missing reasons.
+- Reused unchanged checkout-config CLI and supervisor-replacement coverage from recorder
+  `255f0e96-67aa-483f-8bd0-b579de0a404b`:
+  `cargo nextest run -p farhelm --test checkout_config_cli --test e2e -E 'binary(checkout_config_cli) | test(=create_idempotency::a_retried_create_returns_the_same_session_across_a_supervisor_restart)'`.
+  Four CLI cases, one replacement case and the fixture build passed on the original PR implementation over `cac2d3bb`,
+  fingerprint `e7353f7f5e70ad41890d55e4dc643ffbe3ef8de6b36f3e8eaac48e2ea5b7d39b`. Its retained source, report and output
+  are complete, with pinned tmux and no runtime SKIPPED notices. This round leaves the separate CLI opener and
+  retry/replacement behavior unchanged; the new identity-write boundary is tested directly in the current run rather
+  than inferred from that old result. Upstream changes were inspected before the rebase and introduce no interacting
+  store-opening or identity changes. The tested tree equals the pushed PR tree at
+  `281554d4194f345c36fc3dd35b69a0bae8dd3f43`.
+- The whole Rust workspace, whole desktop suite, browser suite, native smoke, installer and performance benchmarks were
+  skipped. The user explicitly required small relevant selections. The affected durability and recovery contracts are
+  covered above, with no UI layout or input change. All-targets Clippy was not repeated: the original report retains its
+  unrelated desktop approval-test type-complexity warning, while the current production-library check passed. No
+  power-loss simulation or proof of absence of every possible lost-tail consequence is claimed.
 
 ## The review gate's outcome
 
-A single fresh-context gpt-6.1-sol reviewer at high effort reviewed correctness, design, language idioms and the
-test-authoring checklist. Its P2 finding was an existing ownership test copying only the main database while
-schema-rewind writes could still be in WAL. The fixture now closes its final connection before copying and asserts that
-the copied schema actually needs migration. The reviewer verified that fix and a stale module-documentation correction;
-both findings are resolved. The separate documentation pass and commit/PR wording cold read are complete.
+A single fresh-context gpt-6.1-sol reviewer at high effort read the full combined PR and latest Decisions, including the
+test-authoring checklist. It found no issues in the durability boundaries, fallback, recovery text or changed tests. The
+separate documentation pass is complete. Commit and PR wording received a fresh-context cold read.
