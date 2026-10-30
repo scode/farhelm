@@ -24,6 +24,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Revisit keeping full durability for the host identity under WAL.** Decided on the maintainer's behalf on 2026-10-30
+  when the sqlite-wal landing was blocked: SPEC.md's rule that lasting damage is never accepted, however unlikely the
+  trigger, was read as taking precedence over the plan's decision that no write keeps full durability. The plan went
+  back to make writes whose loss could leave lasting damage fully durable, at least the supervisor's first creation of
+  the host identity: under synchronous NORMAL a power loss right after a host's first start could keep the helm's record
+  of that identity and lose the supervisor's, leaving the desktop app refusing to start with nothing to restore. The
+  other option was to keep NORMAL for every write and amend SPEC.md to allow that window.
+
 - **Bootstrap a Podman image on a remote host.** Automatically bootstrap a Podman image on a remote host, with some
   reasonable defaults, as a supported flow.
 
