@@ -7,6 +7,7 @@ use crate::harness::*;
 use farhelm_proto::{
     ContainerConfig, ContainerEngine, LaunchHarness, LaunchSelection, SessionLaunch,
 };
+use farhelm_supervisor::container::HostAccount;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -38,6 +39,22 @@ fn available() -> bool {
         "offline docker.io/library/ubuntu:24.04 is required; no test pulls an image"
     );
     true
+}
+
+/// Check the account through the container's user database, not a particular UID.
+/// A real write also catches a plausible HOME string whose directory is unusable;
+/// the temporary file stays inside the disposable container's chosen home.
+fn account_checks() -> &'static str {
+    r#"account=$(getent passwd "$(id -u)") && test -n "$(id -un)" && test "$HOME" = "$(printf '%s\n' "$account" | cut -d: -f6)" && test -d "$HOME" && home_probe=$(mktemp "$HOME/.farhelm-home-XXXXXX") && rm -- "$home_probe""#
+}
+
+/// A host write must survive the keep-id mapping as the actual host account.
+/// Injected account numbers describe the image-selection input, not host owners.
+fn assert_host_owned(path: &Path) {
+    use std::os::unix::fs::MetadataExt;
+    assert_eq!(std::fs::metadata(path).unwrap().uid(), unsafe {
+        libc::geteuid()
+    });
 }
 
 /// Build a real managed-checkout registry fixture through its allocation primitives.
@@ -140,6 +157,289 @@ async fn listener() -> (u16, tokio::task::JoinHandle<()>) {
     (port, task)
 }
 
+/// Select competing facts from the unmodified offline Ubuntu image. HomeOwner
+/// supplies daemon's UID so selecting Ubuntu proves rule 2 beat rule 3.
+#[derive(Clone, Copy)]
+enum AccountRule {
+    Create,
+    HomeOwner,
+    Uid,
+}
+
+/// Establish the image-side premise before any checkout mount can create a home.
+/// The inspection owns its UUID container and uses no volume, keep-id or workdir;
+/// no derived image or host-account configuration is needed for these cases.
+fn assert_image_account_premise(image: &str, host: &HostAccount, rule: AccountRule) {
+    let name = format!("farhelm-account-premise-{}", uuid::Uuid::new_v4());
+    let _cleanup = ContainerCleanup(name.clone());
+    let boundary = match rule {
+        AccountRule::Create => {
+            r#"if getent passwd "$2"; then exit 1; else test "$?" = 2; fi
+if getent group "$2"; then exit 1; else test "$?" = 2; fi
+test ! -e "$3""#
+        }
+        AccountRule::HomeOwner => {
+            r#"test "$(getent passwd "$2" | cut -d: -f1)" = daemon; test -d "$3"; test "$(stat -c %u "$3")" = 1000"#
+        }
+        AccountRule::Uid => {
+            r#"test "$(getent passwd "$2" | cut -d: -f1)" = ubuntu; test ! -e "$3""#
+        }
+    };
+    let script = format!(
+        r#"
+command -v getent >/dev/null
+test "$(getent passwd ubuntu | cut -d: -f3-4)" = 1000:1000
+test "$(getent passwd ubuntu | cut -d: -f6)" = /home/ubuntu
+test -d /home/ubuntu
+test "$(stat -c %u /home/ubuntu)" = 1000
+test -f /etc/skel/.bashrc
+test -f /etc/skel/.profile
+if getent passwd "$1"; then exit 1; else test "$?" = 2; fi
+{boundary}
+printf 'IMAGE PREMISE READY\n'
+"#
+    );
+    let output = Command::new("podman")
+        .args([
+            "run",
+            "--rm",
+            "--name",
+            &name,
+            "--pull=never",
+            "--network",
+            "none",
+            "--user",
+            "0:0",
+            "--entrypoint",
+            "/bin/sh",
+            image,
+            "-ec",
+            &script,
+            "image-premise",
+            &host.name,
+            &host.uid.to_string(),
+        ])
+        .arg(&host.home)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "offline image account premise failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"IMAGE PREMISE READY\n");
+    assert_eq!(
+        Command::new("podman")
+            .args(["container", "exists", &name])
+            .status()
+            .unwrap()
+            .code(),
+        Some(1),
+        "the image-premise container must have been removed"
+    );
+}
+
+/// Exercise selection through production Create, agent exec and a later tab.
+/// For a created account the home is the checkout's parent: Podman's bind setup
+/// creates that directory, but it must still receive skel without altering files
+/// inside the bind. Each identity is injected, never installed on the host.
+async fn exercise_account_rule(rule: AccountRule) {
+    use crate::terminal_tabs::run_in_shell;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    if !available() {
+        return;
+    }
+    let root = farhelm_teststate::tempdir().unwrap();
+    let image = "docker.io/library/ubuntu:24.04";
+    let host = HostAccount {
+        name: format!("fh{}", &uuid::Uuid::new_v4().simple().to_string()[..20]),
+        uid: match rule {
+            AccountRule::Create => 23456,
+            AccountRule::HomeOwner => 1,
+            AccountRule::Uid => 1000,
+        },
+        gid: match rule {
+            AccountRule::Create => 23456,
+            AccountRule::HomeOwner => 1,
+            AccountRule::Uid => 1000,
+        },
+        home: match rule {
+            AccountRule::HomeOwner => PathBuf::from("/home/ubuntu"),
+            AccountRule::Create | AccountRule::Uid => root.path().to_path_buf(),
+        },
+    };
+    assert_image_account_premise(image, &host, rule);
+    let (expected_name, expected_uid, expected_gid, expected_home) = match rule {
+        AccountRule::Create => (host.name.as_str(), host.uid, host.gid, host.home.as_path()),
+        AccountRule::HomeOwner | AccountRule::Uid => {
+            ("ubuntu", 1000, 1000, Path::new("/home/ubuntu"))
+        }
+    };
+    let h = harness_with_seams(
+        SupervisorTimeouts::default(),
+        SupervisorSeams {
+            container_host_account: Some(host.clone()),
+            scopes: Arc::new(farhelm_supervisor::scope::ScopeManager::disabled()),
+            ..Default::default()
+        },
+    )
+    .await;
+    let checkout = managed_checkout(&h, root.path());
+    assert!(checkout.starts_with(root.path()));
+    let protected = checkout.join(".bashrc");
+    std::fs::write(
+        &protected,
+        "checkout content must not be seeded or chowned\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&protected, std::fs::Permissions::from_mode(0o640)).unwrap();
+    let before = std::fs::metadata(&protected).unwrap();
+    let token = root.path().join("account-token");
+    std::fs::write(&token, "account-fixture-token\n").unwrap();
+    let (port, server) = listener().await;
+    let checks = format!(
+        "{} && test \"$(id -un)\" = {} && test \"$(id -u)\" = {expected_uid} && test \"$(id -g)\" = {expected_gid} && test \"$HOME\" = {}",
+        account_checks(),
+        shell_words::quote(expected_name),
+        shell_words::quote(expected_home.to_str().unwrap()),
+    );
+    let seed_check = if matches!(rule, AccountRule::Create) {
+        "cmp /etc/skel/.bashrc \"$HOME/.bashrc\" && cmp /etc/skel/.profile \"$HOME/.profile\" && test \"$(stat -c %u \"$HOME\")\" = \"$(id -u)\" && test \"$(stat -c %u \"$HOME/.bashrc\")\" = \"$(id -u)\" &&"
+    } else {
+        ""
+    };
+    let session = h
+        .client
+        .create_session_with_extras(
+            checkout.to_str().unwrap(),
+            launch(
+                ContainerConfig {
+                    engine: ContainerEngine::Podman,
+                    image: image.into(),
+                    api_proxy_port: port,
+                    github_token_file: Some(token.to_str().unwrap().into()),
+                },
+                format!(
+                    "set -eu\n{checks} && {seed_check} printf agent-owned > account-agent && printf 'ACCOUNT READY\\n'; read -r finish"
+                ),
+            ),
+            None,
+            120,
+            30,
+            Default::default(),
+        )
+        .await
+        .unwrap();
+    let name = format!("farhelm-{}", session.id);
+    let _cleanup = ContainerCleanup(name.clone());
+    let (_, mut seen, mut rx) = h
+        .client
+        .attach_terminal_live(
+            &session.id,
+            120,
+            30,
+            TerminalSelector::Agent,
+            "container-tab",
+        )
+        .await
+        .unwrap();
+    wait_for(&mut rx, &mut seen, "ACCOUNT READY", 60).await;
+    assert_eq!(state(&name), "running");
+    assert_eq!(
+        std::fs::read_to_string(checkout.join("account-agent")).unwrap(),
+        "agent-owned"
+    );
+    assert_host_owned(&checkout.join("account-agent"));
+    // This exec has no user, HOME or workdir overrides. It distinguishes container
+    // defaults from fixes confined to Farhelm's agent or terminal-tab command.
+    let direct = Command::new("podman")
+        .args([
+            "exec",
+            &name,
+            "bash",
+            "-ec",
+            &format!(
+                "{checks} && printf exec-owned > account-exec && printf 'DIRECT EXEC READY\\n'"
+            ),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        direct.status.success(),
+        "default exec account failed: {}",
+        String::from_utf8_lossy(&direct.stderr)
+    );
+    assert_eq!(direct.stdout, b"DIRECT EXEC READY\n");
+    assert_eq!(
+        std::fs::read_to_string(checkout.join("account-exec")).unwrap(),
+        "exec-owned"
+    );
+    assert_host_owned(&checkout.join("account-exec"));
+    let mut tab = open_checked_container_tab(&h, &session.id, &checkout).await;
+    run_in_shell(
+        &h.client,
+        tab.channel,
+        &mut tab.rx,
+        &mut tab.seen,
+        &format!("{checks} && printf tab-owned > account-tab && printf 'ACCOUNT%s\\n' TAB"),
+        "ACCOUNTTAB",
+        20,
+    )
+    .await;
+    assert_eq!(
+        std::fs::read_to_string(checkout.join("account-tab")).unwrap(),
+        "tab-owned"
+    );
+    assert_host_owned(&checkout.join("account-tab"));
+    assert_eq!(
+        std::fs::read_to_string(&protected).unwrap(),
+        "checkout content must not be seeded or chowned\n"
+    );
+    let after = std::fs::metadata(&protected).unwrap();
+    assert_eq!(
+        (after.uid(), after.gid(), after.mode()),
+        (before.uid(), before.gid(), before.mode())
+    );
+    assert!(
+        !checkout.join(".profile").exists(),
+        "skel must stay outside the checkout bind"
+    );
+    h.client.stop_session(&session.id).await.unwrap();
+    assert_eq!(state(&name), "exited");
+    h.client.delete_session(&session.id).await.unwrap();
+    assert_eq!(
+        Command::new("podman")
+            .args(["container", "exists", &name])
+            .status()
+            .unwrap()
+            .code(),
+        Some(1),
+    );
+    server.abort();
+}
+
+/// A missing name and UID create a skel-seeded account even when mounting the
+/// checkout first creates its parent home; existing checkout files stay intact.
+#[farhelm_testtrace::test]
+async fn podman_creates_host_account_with_home_above_checkout() {
+    exercise_account_rule(AccountRule::Create).await;
+}
+
+/// An existing home owner wins over another existing UID. Daemon's UID competes
+/// with Ubuntu's home here, so a UID-first implementation cannot pass.
+#[farhelm_testtrace::test]
+async fn podman_existing_home_owner_precedes_existing_host_uid() {
+    exercise_account_rule(AccountRule::HomeOwner).await;
+}
+
+/// Without the requested home, an existing UID keeps its image account and home.
+/// Both agent and later tab must inherit that selection without per-exec state.
+#[farhelm_testtrace::test]
+async fn podman_existing_host_uid_uses_its_image_home() {
+    exercise_account_rule(AccountRule::Uid).await;
+}
+
 /// Exercise the supported production lifecycle with and without a user-manager
 /// scope. Actual in-container reads and writes distinguish isolation from an argv
 /// snapshot, and a naturally exited agent still leaves a container Stop must end.
@@ -232,8 +532,7 @@ async fn podman_isolation_and_stop_delete_cover_scoped_and_unscoped_launches() {
         let script = format!(
             r#"
 set -eu
-test "$(id -u)" = 1000
-test "$(id -g)" = 1000
+{account_checks}
 test "$PWD" = {cwd}
 test "$1" = {cwd}
 test "$(cat ../parent-witness)" = checkout-parent
@@ -266,7 +565,8 @@ read -r finish
             cwd = quote(&cwd),
             home = quote(home.path()),
             state = quote(h.state.path()),
-            socket = quote(&h.state.path().join("supervisor.sock"))
+            socket = quote(&h.state.path().join("supervisor.sock")),
+            account_checks = account_checks()
         );
         let session = h
             .client
@@ -343,11 +643,7 @@ read -r finish
             std::fs::read_to_string(cwd.join("witness")).unwrap(),
             "inside-owned\n"
         );
-        use std::os::unix::fs::MetadataExt;
-        assert_eq!(
-            std::fs::metadata(cwd.join("witness")).unwrap().uid(),
-            unsafe { libc::geteuid() }
-        );
+        assert_host_owned(&cwd.join("witness"));
         let guard = h
             .client
             .delete_session_with(&session.id, farhelm_proto::DeleteGuard::NothingAlive)
@@ -665,9 +961,9 @@ struct ContainerTab {
     pid: u32,
 }
 
-/// Assert Bash login, canonical cwd, UID and the absence of Farhelm authority
+/// Assert Bash login, canonical cwd, a usable account and no Farhelm authority
 /// before returning a usable tab. The token crosses only the real exec boundary;
-/// the test reads its synthetic witness from the shared checkout afterwards.
+/// host-side ownership of its witnesses proves the tab kept the keep-id mapping.
 async fn open_checked_container_tab(h: &Harness, id: &str, cwd: &Path) -> ContainerTab {
     use crate::terminal_tabs::{run_in_shell, wait_for_shell};
     let tab = h.client.open_tab(id).await.unwrap();
@@ -684,8 +980,10 @@ async fn open_checked_container_tab(h: &Harness, id: &str, cwd: &Path) -> Contai
         .unwrap();
     wait_for_shell(&h.client, channel, &mut rx, &mut seen, "CONTAINER-TAB").await;
     run_in_shell(&h.client, channel, &mut rx, &mut seen, &format!(
-        "shopt -q login_shell && test \"$(id -u)\" = 1000 && test \"$PWD\" = {} && test -z \"${{FARHELM_SESSION_ID+x}}${{FARHELM_SESSION_TOKEN+x}}${{FARHELM_SUPERVISOR_SOCK+x}}${{FARHELM_AGENT_ID+x}}${{FARHELM_TAB_ID+x}}\" && printf %s \"$GH_TOKEN\" > tab-token && printf %s \"$$\" > tab-shell.pid && printf 'TAB%s\\n' CHECKED",
-        shell_words::quote(cwd.to_str().unwrap())), "TABCHECKED", 20).await;
+        "shopt -q login_shell && {} && test \"$PWD\" = {} && test -z \"${{FARHELM_SESSION_ID+x}}${{FARHELM_SESSION_TOKEN+x}}${{FARHELM_SUPERVISOR_SOCK+x}}${{FARHELM_AGENT_ID+x}}${{FARHELM_TAB_ID+x}}\" && printf %s \"$GH_TOKEN\" > tab-token && printf %s \"$$\" > tab-shell.pid && printf 'TAB%s\\n' CHECKED",
+        account_checks(), shell_words::quote(cwd.to_str().unwrap())), "TABCHECKED", 20).await;
+    assert_host_owned(&cwd.join("tab-token"));
+    assert_host_owned(&cwd.join("tab-shell.pid"));
     let pid = std::fs::read_to_string(cwd.join("tab-shell.pid"))
         .unwrap()
         .parse()
@@ -863,6 +1161,7 @@ async fn failed_spec_retry_removes_its_predecessor_container(image: &str, token:
         .args([
             "run",
             "-d",
+            "--pull=never",
             "--init",
             "--name",
             &name,

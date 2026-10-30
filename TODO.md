@@ -169,10 +169,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   no `farhelm agent` commands or spawning, no attachments from inside. Add the full integration, restricted so a
   containerized agent cannot ask for a session outside its container.
 
-- **Containerized sessions: match the host account inside the container.** Consider running the agent with the same uid,
-  user name and paths as the user's host account, so files, paths and tools look the same inside and out, instead of the
-  image's uid-1000 user. Plan: `plans/queue/container-host-account.md`.
-
 - **Containerized sessions: Restart.** Containerized sessions cannot be restarted, because Farhelm captures no
   conversation inside the container; Replace starts over in a new container instead. Support Restart (and Restart with)
   by resuming the conversation the agent recorded in the session's container. Needs the conversation capture from the

@@ -3537,9 +3537,34 @@ either removing agent parent/child relationships or making them useful; neither 
 Containerized agent sessions are experimental, Linux-only, and subject to rapid change. A session has one rootless
 Podman container, created from a user-supplied local image name or ID on its host and removed when the session is
 deleted. The user loads or builds the image into that host's Podman storage; Farhelm never imports, pulls, tags or
-removes images. The image supplies a uid-1000 user with its harness and configuration already installed, using a local
-API proxy or load balancer on the host; subscription login is unsupported. Managed checkouts only: command launches and
-plain-folder launches cannot select this isolation.
+removes images. The image supplies the harness and its configuration, using a local API proxy or load balancer on the
+host; subscription login is unsupported. Managed checkouts only: command launches and plain-folder launches cannot
+select this isolation.
+
+Farhelm chooses the container account to match the host account where the image permits it. The host user name, uid, gid
+and home path come from the host's user database for the supervisor's uid, not environment variables. Before any
+checkout mount, Farhelm reads the image's user and group databases and checks the host home path inside the image. It
+chooses in this order:
+
+1. If neither the host user name nor the host uid exists in the image, create an account with that name, uid, gid and
+   home path, using Ubuntu's account tools and seeding the home from `/etc/skel`.
+2. Otherwise, if the host home path is a directory in the image owned by a non-root account, use that account and that
+   directory as its home. A root-owned directory or an owner with no account does not select an account.
+3. Otherwise, if the host uid exists in the image, use that account and its home directory.
+
+If these rules select no account, creation refuses rather than falling back to uid 1000. A selected account whose home
+is missing gets a home seeded from `/etc/skel`. Home preparation never seeds into or changes ownership inside the
+checkout bind; the host home is never mounted. Farhelm refuses identities its account tools or rootless uid mapping
+cannot support, unreadable image account facts, and missing tools needed to create an account. Choosing and preparing
+the account are part of container creation under the creation fence; a failure after starting the container removes it,
+with absence confirmed under the same lock, before creation can be retried.
+
+A host account at uid 1000 with a stock Ubuntu image still uses the image's `ubuntu` account and `/home/ubuntu` when the
+host home path is absent. A host account at another uid, when neither its name nor uid exists in the image, gets a new
+account seeded from `/etc/skel`. An image prepared only for its uid-1000 account may then give the new account no
+harness, configuration or `sudo` access. Images can instead install harnesses system-wide, seed configuration through
+`/etc/skel`, or prepare an account and home for the host user. Existing containers retain their account until replaced;
+there is no per-launch account setting.
 
 Each container creation resolves the name afresh, so rebuilding an image under the same name affects the next New,
 Replace or Replace with. Existing containers keep their original image. A missing image refuses before launch with its
@@ -3554,12 +3579,14 @@ again immediately before agent exec, trims surrounding whitespace, and neither s
 command line. Changing or removing it after the check can fail the later launch in its terminal. The user's own Podman
 tools can inspect the token while the receiving exec session lives.
 
-The agent runs inside the container with the image's environment, terminal type and colour capability, and that optional
-token. No Farhelm program, state, socket, session credential, reporter or browser fallback is supplied inside. A
-containerized launch has conversation integration turned off for that launch: status still follows the terminal screen,
-but no conversation is captured and no missing-hook notification fires. Farhelm does not edit the host's Claude trust
-configuration for it. Restart and Restart with are unavailable; the latter explicitly overrides its ordinary
-named-conversation offer. Replace and Replace with create a fresh session and container before deleting the source.
+The agent runs inside the container with the image's environment, `HOME` set to the chosen home, terminal type and
+colour capability, and that optional token. The agent, all terminal tabs and other execs inherit the chosen account and
+home from container creation. No Farhelm program, state, socket, session credential, reporter or browser fallback is
+supplied inside. A containerized launch has conversation integration turned off for that launch: status still follows
+the terminal screen, but no conversation is captured and no missing-hook notification fires. Farhelm does not edit the
+host's Claude trust configuration for it. Restart and Restart with are unavailable; the latter explicitly overrides its
+ordinary named-conversation offer. Replace and Replace with create a fresh session and container before deleting the
+source.
 
 Container creation diagnostics appear in the session terminal after checkout preparation. The container's idle keeper
 runs under Podman's own init, independently of the agent exec. It stays running when the agent exits on its own. Stop
@@ -3583,11 +3610,11 @@ settings, which can run with the host account's full access when Git or an agent
 container (from a terminal or a shell prompt that shows Git status, an editor, or a later ordinary session reusing the
 checkout). Internet access, LAN and tailnet addresses, and cloud metadata remain reachable. A localhost tunnel reaches
 the selected host's port, not an in-container port. The host's `containers.conf` still applies. Podman's ordinary
-privileges, including working sudo inside an appropriately prepared image, remain available. Files written as the
-uid-1000 image user belong to the host user through keep-id mapping; container-root files belong to a subordinate host
-uid. The user may need `podman unshare` to edit or remove them. A container-root-owned folder can likewise prevent Empty
-Trash until removed with `podman unshare rm -rf`. Delete removes the container and leaves images in the user's Podman
-storage alone.
+privileges, including working sudo inside an appropriately prepared image, remain available. Keep-id maps the host
+account onto the chosen container account's uid and gid, so files it writes in the checkout belong to the host user;
+container-root files belong to a subordinate host uid. The user may need `podman unshare` to edit or remove them. A
+container-root-owned folder can likewise prevent Empty Trash until removed with `podman unshare rm -rf`. Delete removes
+the container and leaves images in the user's Podman storage alone.
 
 ### Local authority and trust between hosts
 

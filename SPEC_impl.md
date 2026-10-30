@@ -5719,15 +5719,43 @@ confirmation. The lock inode is never unlinked, since an already-open waiter cou
 from a future opener. Ambiguous Create unwind must also revoke and confirm removal before discarding a row; unconfirmed
 cleanup retains its ownership record.
 
-Creation resolves the local image name again with `--pull=never`, keep-id mapped to uid/gid 1000, the checkout as its
-only explicit read-write bind, `pasta:-T,<port>`, Podman's init and an idle Bash/sleep keeper, overriding any image
-entrypoint. No image manager or registry step is added: users load or build images into Podman's storage themselves, and
-Farhelm never imports, pulls, tags or removes them. Creation also refuses an empty image from an old ticket;
-existing-container control does not recheck image availability. Exec forwards only TERM, COLORTERM and optional
-name-only GH_TOKEN; the helper reads the latter afresh and never serializes its contents. Podman's own transient exec
-metadata can contain it. Container launches select the existing hooks-off policy, which prevents reporter
-materialization, command injection, capture notifications and BROWSER forwarding for this one launch without changing
-other sessions.
+The creation ticket carries the host account's name, uid, gid and home, resolved from the supervisor's uid with
+`getpwuid_r`; environment variables are not identity evidence. Under the creation fence, the synchronous creator
+resolves the configured local image name once with `podman image inspect` to its full image ID. That creator-local ID is
+used for both the short-lived inspection container and the session container, so a concurrent retag cannot make the
+account choice describe a different image. The ID is never persisted; each new container resolves the configured name
+afresh. The inspection container runs as root with no network, mounts, keep-id or working-directory override. Its user
+and group databases and the host home path's type and owner feed a pure account choice. This must happen before the
+checkout bind: Podman can create its parent directories as root, including the host home path, and those are not facts
+about the image. The ordered choice in SPEC.md is authoritative; no existing image user is renamed and no existing home
+moved.
+
+Creation uses that image ID with `--pull=never`, keep-id mapped to the chosen uid/gid, the checkout as its only explicit
+read-write bind, `pasta:-T,<port>`, Podman's init and an idle Bash/sleep keeper, overriding any image entrypoint.
+Podman's automatic passwd injection is disabled so it cannot occupy the name or uid before Ubuntu's own tools create the
+account. A new account reuses the chosen gid's group when one exists, otherwise creates that group. Its home is prepared
+from `/etc/skel` without overwriting existing entries or recursively changing home ownership: the checkout can already
+be mounted below that home. Seeding is skipped when the home is inside the checkout bind, and preparation never modifies
+anything inside the bind. Missing homes for existing chosen accounts get the same preparation. A root-owned host home,
+or an owner absent from the image's account database, falls through to the uid rule; an unsupported rootless uid mapping
+refuses clearly.
+
+The chosen account and `HOME` are set at container creation, so the keeper, agent and every later exec inherit them.
+Terminal tabs reconstruct execs from the launch settings and need no separately persisted account or per-exec user or
+home override. Before starting the session container, the creator writes a private initialization-pending marker beside
+the lock and ticket while holding the lock. It clears the marker only after account preparation and confirmed running
+state, or confirmed container absence. Failure after `podman run -d` attempts removal and confirms absence under the
+same lock; unconfirmed cleanup retains the marker and container ownership for Delete or Replace. Every
+existing-container prepare path and terminal-tab start refuses while the marker exists, so a crash or failed cleanup
+cannot restart a partially prepared container. The marker records incomplete creation only; it stores no account or
+image ID for later execs.
+
+No image manager or registry step is added: users load or build images into Podman's storage themselves, and Farhelm
+never imports, pulls, tags or removes them. Creation also refuses an empty image from an old ticket; existing-container
+control does not recheck image availability. Exec forwards only TERM, COLORTERM and optional name-only GH_TOKEN; the
+helper reads the latter afresh and never serializes its contents. Podman's own transient exec metadata can contain it.
+Container launches select the existing hooks-off policy, which prevents reporter materialization, command injection,
+capture notifications and BROWSER forwarding for this one launch without changing other sessions.
 
 Podman's command status is not a lifecycle oracle. After an exec scope was killed, Podman 4.9.3 can stop the container
 yet fail waiting for an exec exit file. Stop accepts only inspected exited/stopped state or confirmed absence; Delete
