@@ -303,11 +303,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   leading `~` to the home directory of the user the session runs as, at least in the program, and consider arguments
   too. Plan: `plans/queue/command-shell-meaning.md`.
 
-- **Show in the template editor whether there is anything to save.** The editor always shows "Fields not shown are left
-  as is. Another template can supply choices this one leaves out." just above the footer, so after clicking Save the
-  dialog looks unchanged and it feels like nothing happened. Grey out Save when the draft has no unsaved changes, so its
-  state shows whether a save is needed and that one went through. Plan: `plans/queue/template-bolt-and-save.md`.
-
 - **An in-app signal for serious breaking changes.** Release notes alone are easy to miss. Give Farhelm a way to tell
   users inside the app about a serious breaking change in a release they just updated to, rather than relying on the
   release notes. Commands and wrappers starting to run through bash with full shell meaning
