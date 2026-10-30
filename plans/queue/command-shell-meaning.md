@@ -343,3 +343,41 @@ passed its review gate, and the last code PR removes this plan's TODO.md entry. 
 section exists, its latest entry must also be satisfied. Then close the plan per `plans/.agents/executing.md`,
 "Executing one plan" (steps 11 and 12): deliver its report through the queue script, write a closing entry in its log,
 and stop the watchdog. Never edit `plans/` yourself.
+
+## Blocked
+
+Blocked while landing on 2026-10-30 (claim adbcba).
+
+### Landing stopped: two supervisor tests still expect the old command shape
+
+The landing monitor did not merge this plan; its PRs (#2847, #2848) have not merged and main holds nothing of it. The
+plan runs agent commands through Bash, so a command written as `~/bin/agent` or with shell syntax means what it would in
+a terminal, and hands saved wrapper words to Bash exactly as they were typed.
+
+The whole Rust workspace (`cargo nextest run --workspace --exclude farhelm-desktop`, run
+`7ec0376d-1c10-4848-877a-ec3ea8d4c44c`) failed two supervisor unit tests that still expect the old direct launch: "a
+confirmed absent create cleans every artifact before replaying failure" expects the launch to run `agent` where it now
+runs `bash -c agent`, and "a claude create carries the hook flags into its launch spec" expects `claude` followed by the
+hook arguments directly. The executor's test filters did not select them.
+
+A fresh-context review found no unsafe quoting, but things users must be told. Saved wrappers lost their quoting when
+they were saved, so after this change `--profile 'work space'` runs as two words, a saved word containing `$`, `*` or
+quotes now has shell meaning, and a word starting with `#` turns the rest of the agent command into a comment; this
+reaches templates (including ones already approved for agents), remembered setups and plain Restart of existing wrapped
+sessions. Containerized sessions with a wrapper now need `bash` in the image (an Alpine image fails); SPEC.md says so,
+but the changelog entry and the Containerized sessions docs page do not. On a Mac host, `bash` is usually the system's
+old Bash 3.2, which nothing here was tried on. And the plan adds a compiled Bash parser library (`tree-sitter`), which
+the release builds (static Linux, macOS) have not tried.
+
+The whole browser suite (run `afafdf3a-2c2c-4d7f-8ef0-28e9e3706ad0`) ran under heavy machine load and failed 11 cases,
+some in specs this plan's launches go through (two quick-launch cases, one launcher case and one Replace case on
+WebKit).
+
+### What should happen to this plan?
+
+- **Send it back to its executor (recommended).** Answer with: update the two tests to the Bash launch shape; tell users
+  in the changelog what changes for saved wrappers and that wrapped container launches need `bash`, and say the latter
+  on the Containerized sessions page; try the parser library in a static Linux build; run the whole supervisor package,
+  the launch, Restart and container end-to-end tests, and the browser specs that failed here.
+- **Land it now and fix afterwards.** Main would carry two failing supervisor tests, and users would meet changed
+  wrappers without being told.
