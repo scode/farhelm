@@ -24,13 +24,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- **Speed up Podman session launches.** Starting each new container from an OCI archive makes Podman unpack the image
-  even when its layers are already in local storage. Investigate selecting an existing local image, using an OCI layout
-  directory or reusing an imported image, including how changes to the supplied image, concurrent launches and cleanup
-  work. The [measurements and investigation](https://snippets.scode.org/s/farhelm-podman-startup-performance/) compare
-  archive, layout-directory and local-image starts; measure full Farhelm launches too. Plan:
-  `plans/queue/podman-local-image.md`.
-
 - **Bootstrap a Podman image on a remote host.** Automatically bootstrap a Podman image on a remote host, with some
   reasonable defaults, as a supported flow.
 

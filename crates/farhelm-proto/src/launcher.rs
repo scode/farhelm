@@ -1357,7 +1357,7 @@ mod tests {
     fn container_template_preserves_sets_clears_and_refuses_command_edits() {
         let config = crate::ContainerConfig {
             engine: crate::ContainerEngine::Podman,
-            image_file: "/images/agent.oci".into(),
+            image: "localhost/agent:latest".into(),
             api_proxy_port: 42000,
             github_token_file: None,
         };
@@ -1390,6 +1390,25 @@ mod tests {
                 assert!(apply_template(&command, &template, &context(&[], &[], false)).is_err());
             }
         }
+    }
+
+    /// An archive-era template must still apply as containerized, leaving the
+    /// launcher's ordinary required-field gate to ask for a local image.
+    #[test]
+    fn container_archive_template_applies_with_an_empty_image() {
+        let fields: TemplateFields = serde_json::from_value(serde_json::json!({
+            "container": {"engine": "podman", "image_file": "/images/old.oci", "api_proxy_port": 42000}
+        })).unwrap();
+        let state = LauncherState {
+            kind: Some(LauncherKind::Agent),
+            harness: Some(LaunchHarness::Codex),
+            ..Default::default()
+        };
+        let applied =
+            apply_template(&state, &template("old", fields), &context(&[], &[], false)).unwrap();
+        let container = applied.container.expect("old template preserves isolation");
+        assert!(container.image.is_empty());
+        assert_eq!(container.api_proxy_port, 42000);
     }
 
     /// A missing wrapper edit must preserve New's remembered prefix, while a

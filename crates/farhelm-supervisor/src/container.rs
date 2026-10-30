@@ -50,21 +50,48 @@ pub(crate) fn unit_name(id: &str) -> anyhow::Result<String> {
     Ok(format!("farhelm-{id}-container.scope"))
 }
 
-/// The image and token are paths on this host, never on the helm's machine.
-/// Keep checks cheap and certain; Podman reports capability failures in the pane.
-pub(crate) fn preflight(config: &ContainerConfig) -> anyhow::Result<PathBuf> {
+/// Refuse missing local images before allocating a session. Podman can wait on
+/// its storage lock, so this admission check shares the bounded async control path.
+pub(crate) async fn preflight(config: &ContainerConfig) -> anyhow::Result<PathBuf> {
     config.validate().map_err(anyhow::Error::msg)?;
     anyhow::ensure!(
         cfg!(target_os = "linux"),
         "containerized sessions require Linux"
     );
     let podman = executable()?;
+    preflight_with_podman(config, &podman).await?;
+    Ok(podman)
+}
+
+/// Inject the executable for tests without changing the process environment.
+/// Existence is only an observation: creation resolves the name again and never pulls.
+async fn preflight_with_podman(config: &ContainerConfig, podman: &Path) -> anyhow::Result<()> {
+    config.validate().map_err(anyhow::Error::msg)?;
+    require_image(config)?;
+    let output = run_control(podman, &["image", "exists", &config.image]).await?;
     anyhow::ensure!(
-        std::fs::metadata(&config.image_file).is_ok_and(|metadata| metadata.is_file()),
-        "container image file must be an existing regular file"
+        output.status.code() != Some(1),
+        "container image '{}' is not in Podman's local storage on this host",
+        config.image
+    );
+    anyhow::ensure!(
+        output.status.success(),
+        "could not check container image '{}': {}",
+        config.image,
+        String::from_utf8_lossy(&output.stderr)
     );
     drop(read_token(config)?);
-    Ok(podman)
+    Ok(())
+}
+
+/// Old stored choices remain loadable, but cannot authorize a new empty-image
+/// create, including one attempted by a creation ticket from before the upgrade.
+fn require_image(config: &ContainerConfig) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        !config.image.is_empty(),
+        "container image is required; use Replace with to choose a local image for an old session"
+    );
+    Ok(())
 }
 
 /// Resolve once before shell startup so that a shell cannot substitute Podman.
@@ -111,9 +138,32 @@ pub(crate) fn control_command(program: &Path) -> Command {
     command
 }
 
+/// Bound Podman storage/control waits and captured diagnostics for both admission
+/// and lifecycle work. A timeout or excess output never establishes usable state.
+async fn run_control(podman: &Path, args: &[&str]) -> anyhow::Result<std::process::Output> {
+    use crate::bounded_command::{Ended, GroupChild, OutputCaps};
+    let mut command = tokio::process::Command::from(control_command(podman));
+    command.args(args);
+    let caps = OutputCaps {
+        stdout: 65536,
+        stderr: Some(65536),
+    };
+    let mut child = GroupChild::spawn(&mut command, caps)?;
+    match child
+        .finish(tokio::time::Instant::now() + Duration::from_secs(30), caps)
+        .await?
+    {
+        Ended::Exited(output) => Ok(output),
+        Ended::TimedOut => bail!("container control command timed out; state is unconfirmed"),
+        Ended::OutputOverCap => {
+            bail!("container control output exceeded its bound; state is unconfirmed")
+        }
+    }
+}
+
 impl ContainerRuntime {
     /// Reconstruct control authority from the stored launch without rechecking inputs
-    /// that may legitimately disappear before Stop/Delete, such as the image archive.
+    /// that may legitimately disappear before Stop/Delete, such as the local image.
     pub(crate) fn for_session(
         state_dir: &Path,
         id: &str,
@@ -177,7 +227,7 @@ impl ContainerRuntime {
             }
             anyhow::ensure!(
                 tokio::time::Instant::now() < deadline,
-                "container image preparation is still running; retry the operation after it finishes"
+                "container creation is still running; retry the operation after it finishes"
             );
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
@@ -221,25 +271,7 @@ impl ContainerRuntime {
     /// Control operations are bounded and their output capped. A timeout is a
     /// failed confirmation; the retained session remains available for retry.
     async fn run(&self, args: &[&str]) -> anyhow::Result<std::process::Output> {
-        use crate::bounded_command::{Ended, GroupChild, OutputCaps};
-        let command = control_command(&self.podman);
-        let mut command = tokio::process::Command::from(command);
-        command.args(args);
-        let caps = OutputCaps {
-            stdout: 65536,
-            stderr: Some(65536),
-        };
-        let mut child = GroupChild::spawn(&mut command, caps)?;
-        match child
-            .finish(tokio::time::Instant::now() + Duration::from_secs(30), caps)
-            .await?
-        {
-            Ended::Exited(output) => Ok(output),
-            Ended::TimedOut => bail!("container control command timed out; state is unconfirmed"),
-            Ended::OutputOverCap => {
-                bail!("container control output exceeded its bound; state is unconfirmed")
-            }
-        }
+        run_control(&self.podman, args).await
     }
 
     /// Build only the host-side exec client. Podman forwards exactly these named
@@ -259,11 +291,14 @@ impl ContainerRuntime {
     /// Select the keeper independently of the image's ENTRYPOINT/CMD. Only the
     /// fenced creator may execute this command; constructing it acquires no permit.
     fn create_command(&self, checkout_root: &Path) -> anyhow::Result<Command> {
+        self.config.validate().map_err(anyhow::Error::msg)?;
+        require_image(&self.config)?;
         let mut command = control_command(&self.podman);
         command
             .args([
                 "run",
                 "-d",
+                "--pull=never",
                 "--init",
                 "--name",
                 &self.name()?,
@@ -287,7 +322,7 @@ impl ContainerRuntime {
             ))
             .arg("--workdir")
             .arg(&self.cwd)
-            .arg(format!("oci-archive:{}", self.config.image_file))
+            .arg(&self.config.image)
             .args(["-c", "while :; do sleep 3600; done"])
             .stdin(Stdio::null());
         Ok(command)
@@ -433,7 +468,7 @@ impl ContainerLaunch {
         Ok(Self { runtime, creator })
     }
 
-    /// Keep image-copy progress in the pane. The actual helper, not this shim,
+    /// Keep container creation diagnostics in the pane. The actual helper, not this shim,
     /// holds the lock and ignores terminal hangup while its Podman child completes.
     pub(crate) fn prepare(&self) -> anyhow::Result<()> {
         // A live container already owns this dedicated scope. Reusing its name
@@ -463,7 +498,7 @@ impl ContainerLaunch {
 }
 
 /// Short-lived CLI helper run inside the container's own scope. Ignore normal
-/// terminal hangup before spawning anything: the pane can disappear during import,
+/// terminal hangup before spawning anything: the pane can disappear during creation,
 /// but the helper must retain its fence until its create child has finished.
 pub fn prepare(ticket: &Path, generation: i64) -> anyhow::Result<()> {
     // SAFETY: this is a disposable synchronous CLI process, before its child spawn.
@@ -530,7 +565,7 @@ mod tests {
         let runtime = ContainerRuntime {
             config: ContainerConfig {
                 engine: farhelm_proto::ContainerEngine::Podman,
-                image_file: "/images/fixture.oci".into(),
+                image: "localhost/fixture:latest".into(),
                 api_proxy_port: 43000,
                 github_token_file: Some(root.path().join("token").to_str().unwrap().into()),
             },
@@ -542,6 +577,84 @@ mod tests {
         };
         std::fs::create_dir(root.path().join("container-launch")).unwrap();
         (root, runtime)
+    }
+
+    /// Admission distinguishes a missing local image from a storage failure and
+    /// passes the literal image without invoking an import or pull command.
+    #[farhelm_testtrace::test]
+    async fn preflight_checks_local_image_existence_and_reports_failures() {
+        let (root, mut runtime) = fixture();
+        runtime.config.github_token_file = None;
+        let args = root.path().join("args");
+        for (code, expected) in [
+            (0, None),
+            (1, Some("not in Podman's local storage on this host")),
+            (125, Some("storage unavailable")),
+        ] {
+            std::fs::write(&runtime.podman, format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > {}\nprintf 'storage unavailable' >&2\nexit {code}\n",
+                shell_words::quote(args.to_str().unwrap())
+            )).unwrap();
+            std::fs::set_permissions(&runtime.podman, std::fs::Permissions::from_mode(0o700))
+                .unwrap();
+            let result = preflight_with_podman(&runtime.config, &runtime.podman).await;
+            match expected {
+                None => result.unwrap(),
+                Some(expected) => {
+                    let detail = result.unwrap_err().to_string();
+                    assert!(
+                        detail.contains(expected) && detail.contains(&runtime.config.image),
+                        "{detail}"
+                    );
+                }
+            }
+            assert_eq!(
+                std::fs::read_to_string(&args).unwrap(),
+                "image\nexists\nlocalhost/fixture:latest\n"
+            );
+        }
+        std::fs::remove_file(&args).unwrap();
+        runtime.config.image.clear();
+        assert!(
+            preflight_with_podman(&runtime.config, &runtime.podman)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("image is required")
+        );
+        assert!(!args.exists(), "empty images refuse before Podman runs");
+        assert!(
+            runtime
+                .create_command(&runtime.cwd)
+                .unwrap_err()
+                .to_string()
+                .contains("image is required")
+        );
+    }
+
+    /// Creation tickets use the shared compatibility decoder but must never
+    /// reuse a retired archive path as a new container's image source.
+    #[test]
+    fn container_archive_ticket_loads_but_cannot_create_an_empty_image() {
+        let (_root, runtime) = fixture();
+        let mut ticket = serde_json::to_value(CreationTicket {
+            checkout_root: runtime.cwd.clone(),
+            runtime,
+        })
+        .unwrap();
+        ticket["runtime"]["config"]
+            .as_object_mut()
+            .unwrap()
+            .remove("image");
+        ticket["runtime"]["config"]["image_file"] = serde_json::json!("/images/old.oci");
+        let ticket: CreationTicket = serde_json::from_value(ticket).unwrap();
+        assert!(ticket.runtime.config.image.is_empty());
+        assert!(
+            ticket
+                .runtime
+                .create_command(&ticket.checkout_root)
+                .is_err()
+        );
     }
 
     /// A file edit between preflight and exec must deliver the new token, and
@@ -592,10 +705,11 @@ mod tests {
             .collect();
         assert!(args.windows(2).any(|args| args == ["--entrypoint", "bash"]));
         assert!(args.contains(&"--userns=keep-id:uid=1000,gid=1000"));
+        assert!(args.contains(&"--pull=never"));
         assert_eq!(
             &args[args.len() - 3..],
             [
-                "oci-archive:/images/fixture.oci",
+                "localhost/fixture:latest",
                 "-c",
                 "while :; do sleep 3600; done"
             ]

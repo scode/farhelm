@@ -14,7 +14,7 @@ use crate::peer::editable_peer;
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct ContainerDraft {
     pub enabled: bool,
-    pub image_file: String,
+    pub image: String,
     pub api_proxy_port: String,
     pub github_token_file: String,
 }
@@ -24,7 +24,7 @@ pub(crate) struct ContainerDraft {
 #[derive(Clone, Debug)]
 pub(crate) enum ContainerEdit {
     Enabled(bool),
-    ImageFile(String),
+    Image(String),
     ApiProxyPort(String),
     GithubTokenFile(String),
 }
@@ -34,7 +34,7 @@ impl ContainerDraft {
     pub(crate) fn apply(&mut self, edit: ContainerEdit) {
         match edit {
             ContainerEdit::Enabled(value) => self.enabled = value,
-            ContainerEdit::ImageFile(value) => self.image_file = value,
+            ContainerEdit::Image(value) => self.image = value,
             ContainerEdit::ApiProxyPort(value) => self.api_proxy_port = value,
             ContainerEdit::GithubTokenFile(value) => self.github_token_file = value,
         }
@@ -42,12 +42,12 @@ impl ContainerDraft {
 }
 
 impl ContainerDraft {
-    /// Restore copied launch bytes without rewriting unusual but valid paths.
+    /// Restore copied launch bytes, including an old choice's empty image.
     pub(crate) fn from_config(config: Option<&ContainerConfig>) -> Self {
         match config {
             Some(config) => Self {
                 enabled: true,
-                image_file: config.image_file.clone(),
+                image: config.image.clone(),
                 api_proxy_port: config.api_proxy_port.to_string(),
                 github_token_file: config.github_token_file.clone().unwrap_or_default(),
             },
@@ -55,8 +55,9 @@ impl ContainerDraft {
         }
     }
 
-    /// Validate portable intent only; filesystem checks belong to the host.
-    /// Paths are literal: trimming them would change which image or token is used.
+    /// Validate portable editor input; local image existence belongs to the host.
+    /// Values are literal: trimming them would change which image or token is used.
+    /// Empty images remain editable and saveable for archive-era templates.
     pub(crate) fn config(&self) -> Result<Option<ContainerConfig>, String> {
         if !self.enabled {
             return Ok(None);
@@ -69,7 +70,7 @@ impl ContainerDraft {
             .ok_or_else(|| "Container API proxy port must be between 1 and 65535".to_string())?;
         let config = ContainerConfig {
             engine: ContainerEngine::Podman,
-            image_file: self.image_file.clone(),
+            image: self.image.clone(),
             api_proxy_port,
             github_token_file: (!self.github_token_file.is_empty())
                 .then(|| self.github_token_file.clone()),
@@ -77,9 +78,22 @@ impl ContainerDraft {
         config.validate()?;
         Ok(Some(config))
     }
+
+    /// Require an image only when projecting a new launch. Template editing and
+    /// copying must preserve an old empty-image choice without dropping isolation.
+    pub(crate) fn launch_config(&self) -> Result<Option<ContainerConfig>, String> {
+        let config = self.config()?;
+        if config
+            .as_ref()
+            .is_some_and(|config| config.image.is_empty())
+        {
+            return Err("Container image is required".into());
+        }
+        Ok(config)
+    }
 }
 
-/// Share the same literal-path editors between launch and template editing.
+/// Share the same image and host-path editors between launch and template editing.
 /// The owner admits changes and retires retries; this component holds no state.
 #[component]
 pub(crate) fn ContainerControls(
@@ -112,7 +126,7 @@ pub(crate) fn ContainerControls(
             }
             if value.enabled {
                 for (field, label, text, help) in [
-                    (0, "Image file", value.image_file.clone(), "Absolute path to an OCI archive on the session's host."),
+                    (0, "Image", value.image.clone(), "Required image name or ID already in Podman's local storage on the session's host."),
                     (1, "API proxy port", value.api_proxy_port.clone(), "Host loopback port for your local API proxy; 1–65535."),
                     (2, "GitHub token file", value.github_token_file.clone(), "Optional absolute host path; read again each time an agent or tab starts."),
                 ] {
@@ -126,7 +140,7 @@ pub(crate) fn ContainerControls(
                             oninput: move |event: FormEvent| {
                                 if busy || !available { return; }
                                 on_change.call(match field {
-                                    0 => ContainerEdit::ImageFile(event.value()),
+                                    0 => ContainerEdit::Image(event.value()),
                                     1 => ContainerEdit::ApiProxyPort(event.value()),
                                     _ => ContainerEdit::GithubTokenFile(event.value()),
                                 });
@@ -138,7 +152,7 @@ pub(crate) fn ContainerControls(
                         button { r#type: "button", class: "btn btn-neutral", disabled: busy || !available,
                             onclick: move |_| {
                                 on_change.call(match field {
-                                    0 => ContainerEdit::ImageFile(String::new()),
+                                    0 => ContainerEdit::Image(String::new()),
                                     1 => ContainerEdit::ApiProxyPort(String::new()),
                                     _ => ContainerEdit::GithubTokenFile(String::new()),
                                 });
@@ -165,7 +179,13 @@ mod tests {
             ..Default::default()
         };
         assert!(draft.config().is_err());
-        draft.apply(ContainerEdit::ImageFile("/images/agent archive.oci".into()));
+        draft.apply(ContainerEdit::ApiProxyPort("43210".into()));
+        assert!(draft.config().unwrap().unwrap().image.is_empty());
+        assert_eq!(
+            draft.launch_config().unwrap_err(),
+            "Container image is required"
+        );
+        draft.apply(ContainerEdit::Image("localhost/agent:latest".into()));
         for invalid in ["", "0", "65536", "-1", "1.5", "port"] {
             draft.apply(ContainerEdit::ApiProxyPort(invalid.into()));
             assert!(draft.config().is_err(), "{invalid:?} must refuse");
@@ -173,7 +193,7 @@ mod tests {
         }
         draft.apply(ContainerEdit::ApiProxyPort("65535".into()));
         let config = draft.config().unwrap().unwrap();
-        assert_eq!(config.image_file, "/images/agent archive.oci");
+        assert_eq!(config.image, "localhost/agent:latest");
         assert_eq!(config.api_proxy_port, 65535);
         assert_eq!(config.github_token_file, None);
         draft.apply(ContainerEdit::GithubTokenFile("relative-token".into()));
@@ -192,14 +212,14 @@ mod tests {
         );
     }
 
-    /// Copied setups retain literal path bytes, and consecutive field events
+    /// Copied setups retain literal image/path bytes, and consecutive field events
     /// compose without relying on a render between them. Fresh drafts stay off.
     #[test]
     fn copied_choices_and_consecutive_edits_preserve_their_values() {
         let mut draft = ContainerDraft::default();
         assert_eq!(draft.config().unwrap(), None);
         draft.apply(ContainerEdit::Enabled(true));
-        draft.apply(ContainerEdit::ImageFile("/images/agent".into()));
+        draft.apply(ContainerEdit::Image("localhost/agent:latest".into()));
         draft.apply(ContainerEdit::ApiProxyPort("43210".into()));
         draft.apply(ContainerEdit::GithubTokenFile("/tokens/github".into()));
         let config = draft.config().unwrap().unwrap();

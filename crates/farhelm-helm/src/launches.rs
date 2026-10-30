@@ -1184,7 +1184,7 @@ mod tests {
         let baseline = super::compile(input.clone()).unwrap();
         let config = farhelm_proto::ContainerConfig {
             engine: farhelm_proto::ContainerEngine::Podman,
-            image_file: "/images/agent.oci".into(),
+            image: "localhost/agent:latest".into(),
             api_proxy_port: 42000,
             github_token_file: Some("/credentials/token".into()),
         };

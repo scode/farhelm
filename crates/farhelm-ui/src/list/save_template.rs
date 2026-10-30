@@ -163,10 +163,9 @@ fn choice_text(field: Field, fields: &TemplateFields, host_label: &str) -> Strin
         ),
         Field::Command => fields.command.clone(),
         Field::Container => Some(match &fields.container {
-            Some(Some(config)) => format!(
-                "Podman · {} · port {}",
-                config.image_file, config.api_proxy_port
-            ),
+            Some(Some(config)) => {
+                format!("Podman · {} · port {}", config.image, config.api_proxy_port)
+            }
             _ => "Off".into(),
         }),
         Field::Yolo => fields
@@ -398,7 +397,7 @@ mod tests {
     fn container_save_keeps_the_whole_choice_only_on_the_agent_tab() {
         let config = farhelm_proto::ContainerConfig {
             engine: farhelm_proto::ContainerEngine::Podman,
-            image_file: "/images/agent.oci".into(),
+            image: "localhost/agent:latest".into(),
             api_proxy_port: 43210,
             github_token_file: Some("/tokens/github".into()),
         };

@@ -36,8 +36,9 @@ cannot run the container.
 
 ## Prepare an image
 
-Start with a Linux image saved as an OCI archive using `podman save --format oci-archive`. This feature has been tested
-with Ubuntu 24.04 and Podman 4.9.3. The archive must already be a regular file on the session's host.
+Load an image with `podman load` or build one with `podman build` on the Linux host where the session will run. It must
+already be in that account's local Podman storage. This feature has been tested with Ubuntu 24.04 and Podman 4.9.3.
+Farhelm never imports, pulls, tags or removes images.
 
 The image needs:
 
@@ -59,9 +60,9 @@ must already be ready in the image, rather than set up by that command.
 ## Start a session
 
 In the [session launcher](/docs/using/start-a-session/), choose a managed checkout and turn on **Containerized** on the
-**Agent** tab. Supply **Image file**, the archive's absolute path on that host, and **API proxy port**, a number from 1
-to 65535. **GitHub token file** is optional: an absolute path to a host file containing the token. Leave it blank to
-pass no token.
+**Agent** tab. Supply **Image**, its local name or ID (for example `localhost/agent:latest`), and **API proxy port**, a
+number from 1 to 65535. **GitHub token file** is optional: an absolute path to a host file containing the token. Leave
+it blank to pass no token.
 
 The host file is read afresh when the agent starts and whenever you open a terminal tab. Surrounding whitespace is
 trimmed. Farhelm passes its contents as `GH_TOKEN`, without saving the token in the session or putting it on a command
@@ -71,8 +72,12 @@ The summary shows `container`. New sessions start with the switch off and the in
 Replace with and [launch templates](/docs/using/launch-templates/) carry the settings when you choose them. Existing
 directory launches outside a managed checkout and the **Command** tab do not offer containerization.
 
-Image preparation and startup progress appear in the session's terminal. Podman copies the archive into its own local
-storage and reuses layers already there; the original archive is kept.
+Farhelm refuses an image that is missing from that host's local Podman storage. Rebuilding an image under the same name
+affects the next new container, including Replace and Replace with; an existing container keeps its original image.
+Container startup diagnostics appear in the session's terminal.
+
+Settings saved by earlier versions that used an archive path now have an empty **Image** field. Fill it in before
+launching, edit the template, or use **Replace with** to choose an image for an old session.
 
 ## Working inside the container
 
@@ -103,9 +108,9 @@ stops. The container also stays running after the agent exits on its own. Openin
 container again.
 
 Delete removes the session's container, including detached work still running after the agent and its tabs have ended.
-Its confirmation follows the agent and tabs shown in Farhelm; it does not inspect those detached processes. Images
-copied into Podman's storage remain until you prune them yourself. After a host reboot, the session's terminal is gone
-and the session can only be replaced or deleted.
+Its confirmation follows the agent and tabs shown in Farhelm; it does not inspect those detached processes. Images in
+Podman's storage remain until you remove them yourself. After a host reboot, the session's terminal is gone and the
+session can only be replaced or deleted.
 
 Programs running as root inside the container create checkout files owned by a subordinate host UID. You may be unable
 to edit or remove them normally. Use `podman unshare` on the host to fix or remove them. The same issue can prevent

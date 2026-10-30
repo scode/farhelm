@@ -3280,7 +3280,7 @@ mod container_restart_validation_tests {
                 workspace_trust: None,
                 container: Some(farhelm_proto::ContainerConfig {
                     engine: farhelm_proto::ContainerEngine::Podman,
-                    image_file: "/images/agent.oci".into(),
+                    image: "localhost/agent:latest".into(),
                     api_proxy_port: 42000,
                     github_token_file: None,
                 }),
@@ -8245,7 +8245,7 @@ impl Supervisor {
             .agent_selection()
             .and_then(|selection| selection.container.as_ref())
         {
-            crate::container::preflight(container)?;
+            crate::container::preflight(container).await?;
             if !destination.is_fresh() {
                 let listing = self.inspect_directory(&cwd, true).await?;
                 anyhow::ensure!(

@@ -126,7 +126,7 @@ async function unaccepted(route: Route) {
 /** Container intent must survive the mounted launcher's validation and request
  * projection. A bad port cannot fall back to host execution; changing to a
  * folder cannot discard the selected isolation. Only the final create is
- * intercepted, so no image import or network clone belongs to this UI proof. */
+ * intercepted, so no container creation or network clone belongs to this UI proof. */
 test("container choices require a managed checkout and reach the create intact", async ({ page, request }, testInfo) => {
   const host = await localHost(request);
   await unavailableDiscovery(page, host);
@@ -148,7 +148,7 @@ test("container choices require a managed checkout and reach the create intact",
   await expect(form.locator(".launch-composer-checkout-preview")).toHaveAttribute("data-preview-state", "ready");
   await expect(enabled).toBeEnabled();
   await enabled.check();
-  const image = form.getByLabel("Image file", { exact: true });
+  const image = form.getByLabel("Image", { exact: true });
   const port = form.getByLabel("API proxy port", { exact: true });
   const token = form.getByLabel("GitHub token file", { exact: true });
   await expect(image).toHaveValue("");
@@ -172,10 +172,15 @@ test("container choices require a managed checkout and reach the create intact",
     await page.screenshot({ path: testInfo.outputPath(`container-launcher-${width}.png`), animations: "disabled" });
   }
   await page.setViewportSize(viewport);
-  await image.fill("/images/agent archive.oci");
+  const launch = form.locator(".create-session-submit");
+  await port.fill("43210");
+  await expect(launch).toHaveAttribute("aria-disabled", "true");
+  await launch.click({ force: true });
+  await expect(form.locator(".launch-composer-refusal")).toContainText("image is required");
+  expect(creates).toHaveLength(0);
+  await image.fill("localhost/agent:latest");
   await port.fill("65536");
   await token.fill("/tokens/github");
-  const launch = form.locator(".create-session-submit");
   await expect(launch).toHaveAttribute("aria-disabled", "true");
   await launch.click({ force: true });
   await expect(form.locator(".launch-composer-refusal")).toContainText("between 1 and 65535");
@@ -192,7 +197,7 @@ test("container choices require a managed checkout and reach the create intact",
   await launch.click();
   await expect.poll(() => creates.length).toBe(1);
   expect(creates[0].launch.container).toEqual({
-    engine: "podman", image_file: "/images/agent archive.oci", api_proxy_port: 43210, github_token_file: "/tokens/github",
+    engine: "podman", image: "localhost/agent:latest", api_proxy_port: 43210, github_token_file: "/tokens/github",
   });
   await expect(form.locator(".create-session-error")).toContainText("fixture preview conflict");
   await form.getByRole("button", { name: "Cancel", exact: true }).click();

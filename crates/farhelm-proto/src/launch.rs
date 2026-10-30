@@ -620,30 +620,82 @@ pub enum ContainerEngine {
     Podman,
 }
 
-/// Host paths and one intentionally exposed loopback port for an isolated agent.
+/// A local image and one intentionally exposed loopback port for an isolated agent.
 /// The token's contents never belong here: each exec reads the named file afresh.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(from = "ContainerConfigWire")]
 pub struct ContainerConfig {
     pub engine: ContainerEngine,
-    pub image_file: String,
+    pub image: String,
     pub api_proxy_port: u16,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub github_token_file: Option<String>,
 }
 
+/// Read retired archive choices without interpreting or retaining their paths.
+/// All stored surfaces use this decoder. An explicit current image wins if both
+/// keys occur; old-only data keeps containerization enabled but needs an image
+/// before another container can be created. Other unknown fields still refuse.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ContainerConfigWire {
+    engine: ContainerEngine,
+    #[serde(default)]
+    image: String,
+    #[serde(default, rename = "image_file")]
+    _retired_image_file: Option<serde::de::IgnoredAny>,
+    api_proxy_port: u16,
+    #[serde(default)]
+    github_token_file: Option<String>,
+}
+
+impl From<ContainerConfigWire> for ContainerConfig {
+    fn from(wire: ContainerConfigWire) -> Self {
+        Self {
+            engine: wire.engine,
+            image: wire.image,
+            api_proxy_port: wire.api_proxy_port,
+            github_token_file: wire.github_token_file,
+        }
+    }
+}
+
 impl ContainerConfig {
     /// Check portable intent without looking at the helm's filesystem. Existence,
     /// executable discovery and token readability belong to the session's host.
+    /// Empty images remain valid stored intent so old sessions and templates load;
+    /// the launcher and host preflight require one before creating a container.
     pub fn validate(&self) -> Result<(), String> {
-        for (label, path) in std::iter::once(("image file", self.image_file.as_str())).chain(
-            self.github_token_file
-                .as_deref()
-                .map(|path| ("GitHub token file", path)),
-        ) {
-            if !path.starts_with('/') || path.contains('\0') {
-                return Err(format!("container {label} must be an absolute host path"));
-            }
+        if self.image.starts_with('-')
+            || self
+                .image
+                .chars()
+                .any(|c| c.is_whitespace() || c.is_control())
+        {
+            return Err("container image must have no whitespace or control characters and cannot start with '-'".into());
+        }
+        // Podman also accepts sources outside its local storage. Refuse those
+        // explicitly, including transports whose details look like a valid tag.
+        if [
+            "containers-storage:",
+            "dir:",
+            "docker-archive:",
+            "docker-daemon:",
+            "oci:",
+            "oci-archive:",
+            "ostree:",
+            "sif:",
+        ]
+        .iter()
+        .any(|prefix| self.image.starts_with(prefix))
+            || self.image.contains("://")
+        {
+            return Err("container image must name an image in Podman's local storage, without a transport prefix".into());
+        }
+        if let Some(path) = self.github_token_file.as_deref()
+            && (!path.starts_with('/') || path.contains('\0'))
+        {
+            return Err("container GitHub token file must be an absolute host path".into());
         }
         if self.api_proxy_port == 0 {
             return Err("container API proxy port must be between 1 and 65535".into());
@@ -1025,12 +1077,12 @@ mod tests {
     }
 
     /// Container intent must fail closed before it reaches a host: engine and
-    /// field typos cannot silently remove isolation, and paths/ports must retain
+    /// field typos cannot silently remove isolation, and images/ports must retain
     /// their host-local meaning without consulting the helm's filesystem.
     #[test]
     fn container_configuration_rejects_unknown_authority_and_invalid_inputs() {
         let valid = serde_json::json!({
-            "engine": "podman", "image_file": "/images/agent.oci", "api_proxy_port": 65535
+            "engine": "podman", "image": "localhost/agent:latest", "api_proxy_port": 65535
         });
         let config: super::ContainerConfig = serde_json::from_value(valid.clone()).unwrap();
         config.validate().unwrap();
@@ -1045,8 +1097,11 @@ mod tests {
             assert!(serde_json::from_value::<super::ContainerConfig>(input).is_err());
         }
         for (field, value) in [
-            ("image_file", serde_json::json!("relative.oci")),
-            ("image_file", serde_json::json!("/images/bad\0.oci")),
+            ("image", serde_json::json!("agent with spaces")),
+            ("image", serde_json::json!("agent\0")),
+            ("image", serde_json::json!("-option")),
+            ("image", serde_json::json!("docker://example.invalid/agent")),
+            ("image", serde_json::json!("oci-archive:agent.tar")),
             ("github_token_file", serde_json::json!("relative-token")),
             ("github_token_file", serde_json::json!("")),
             ("api_proxy_port", serde_json::json!(0)),
@@ -1055,6 +1110,35 @@ mod tests {
             input[field] = value;
             let config: super::ContainerConfig = serde_json::from_value(input).unwrap();
             assert!(config.validate().is_err());
+        }
+    }
+
+    /// Retired archive data stays readable on every shared stored surface without
+    /// silently turning isolation off or preserving a path as an image name.
+    #[test]
+    fn container_archive_settings_decode_as_an_empty_local_image() {
+        let mut old = serde_json::json!({
+            "engine": "podman", "image_file": "/images/old.oci", "api_proxy_port": 42000
+        });
+        let config: super::ContainerConfig = serde_json::from_value(old.clone()).unwrap();
+        config.validate().unwrap();
+        assert!(config.image.is_empty());
+        let encoded = serde_json::to_value(&config).unwrap();
+        assert_eq!(encoded["image"], "");
+        assert!(encoded.get("image_file").is_none());
+        old["image"] = serde_json::json!("localhost/agent:latest");
+        let config: super::ContainerConfig = serde_json::from_value(old).unwrap();
+        assert_eq!(config.image, "localhost/agent:latest");
+        for image in [
+            "",
+            "agent",
+            "docker:latest",
+            "localhost:5000/team/agent:latest",
+            "sha256:abc123",
+        ] {
+            let mut config = config.clone();
+            config.image = image.into();
+            config.validate().unwrap();
         }
     }
 

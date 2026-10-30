@@ -149,14 +149,7 @@ async fn podman_isolation_and_stop_delete_cover_scoped_and_unscoped_launches() {
         return;
     }
     let root = farhelm_teststate::tempdir().unwrap();
-    let image = root.path().join("agent.oci");
-    let saved = Command::new("podman")
-        .args(["save", "--format", "oci-archive", "--output"])
-        .arg(&image)
-        .arg("docker.io/library/ubuntu:24.04")
-        .output()
-        .unwrap();
-    assert!(saved.status.success(), "save offline fixture image");
+    let image = "docker.io/library/ubuntu:24.04";
     let token = root.path().join("token");
     std::fs::write(&token, " synthetic-container-token\n").unwrap();
     let home =
@@ -186,7 +179,7 @@ async fn podman_isolation_and_stop_delete_cover_scoped_and_unscoped_launches() {
         std::fs::write(&outside, "host-only sentinel").unwrap();
         let config = ContainerConfig {
             engine: ContainerEngine::Podman,
-            image_file: image.to_str().unwrap().into(),
+            image: image.into(),
             api_proxy_port: port,
             github_token_file: Some(token.to_str().unwrap().into()),
         };
@@ -202,6 +195,38 @@ async fn podman_isolation_and_stop_delete_cover_scoped_and_unscoped_launches() {
             )
             .await;
         assert!(format!("{:#}", refused.unwrap_err()).contains("managed checkout"));
+        assert!(h.client.list_sessions().await.unwrap().sessions.is_empty());
+        // A UUID name establishes absence without touching any existing image.
+        // Admission must refuse it before publishing a session or creator ticket.
+        let missing_image = format!("localhost/missing-{}:latest", uuid::Uuid::new_v4());
+        assert_eq!(
+            Command::new("podman")
+                .args(["image", "exists", &missing_image])
+                .status()
+                .unwrap()
+                .code(),
+            Some(1)
+        );
+        let mut missing = config.clone();
+        missing.image = missing_image.clone();
+        let refused = h
+            .client
+            .create_session_with_extras(
+                cwd.to_str().unwrap(),
+                launch(missing, "exit 0".into()),
+                None,
+                80,
+                24,
+                Default::default(),
+            )
+            .await
+            .unwrap_err();
+        let detail = format!("{refused:#}");
+        assert!(
+            detail.contains(&missing_image)
+                && detail.contains("not in Podman's local storage on this host"),
+            "{detail}"
+        );
         assert!(h.client.list_sessions().await.unwrap().sessions.is_empty());
         let quote = |path: &Path| shell_words::quote(path.to_str().unwrap()).into_owned();
         let script = format!(
@@ -352,7 +377,7 @@ read -r finish
             .unwrap();
         assert_eq!(exists.code(), Some(1));
     }
-    failed_spec_retry_removes_its_predecessor_container(&image, &token, port).await;
+    failed_spec_retry_removes_its_predecessor_container(image, &token, port).await;
     server.abort();
     other_server.abort();
 }
@@ -369,14 +394,7 @@ async fn podman_tabs_and_downloads_share_the_existing_container() {
         return;
     }
     let root = farhelm_teststate::tempdir().unwrap();
-    let image = root.path().join("tabs.oci");
-    let saved = Command::new("podman")
-        .args(["save", "--format", "oci-archive", "--output"])
-        .arg(&image)
-        .arg("docker.io/library/ubuntu:24.04")
-        .output()
-        .unwrap();
-    assert!(saved.status.success(), "save offline tab fixture image");
+    let image = "docker.io/library/ubuntu:24.04";
     let token = root.path().join("tab-token");
     let (port, server) = listener().await;
     for scoped in [false, true] {
@@ -418,7 +436,7 @@ async fn podman_tabs_and_downloads_share_the_existing_container() {
                 launch(
                     ContainerConfig {
                         engine: ContainerEngine::Podman,
-                        image_file: image.to_str().unwrap().into(),
+                        image: image.into(),
                         api_proxy_port: port,
                         github_token_file: Some(token.to_str().unwrap().into()),
                     },
@@ -778,11 +796,7 @@ async fn check_container_download_routes(
 /// Seed a real predecessor container behind a pending Create, then refuse the new
 /// spec through actual directory permissions. Dropping the row before removing
 /// that predecessor would leave an untracked running container.
-async fn failed_spec_retry_removes_its_predecessor_container(
-    image: &Path,
-    token: &Path,
-    port: u16,
-) {
+async fn failed_spec_retry_removes_its_predecessor_container(image: &str, token: &Path, port: u16) {
     use std::os::unix::fs::PermissionsExt;
     let fired = AtomicBool::new(false);
     let h = harness_with_seams(
@@ -806,7 +820,7 @@ async fn failed_spec_retry_removes_its_predecessor_container(
     let cwd = managed_checkout(&h, root.path());
     let config = ContainerConfig {
         engine: ContainerEngine::Podman,
-        image_file: image.to_str().unwrap().into(),
+        image: image.into(),
         api_proxy_port: port,
         github_token_file: Some(token.to_str().unwrap().into()),
     };

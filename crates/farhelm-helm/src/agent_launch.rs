@@ -405,7 +405,7 @@ mod tests {
     fn flags_edit_the_templates_result_and_win_over_it() {
         let container = farhelm_proto::ContainerConfig {
             engine: farhelm_proto::ContainerEngine::Podman,
-            image_file: "/images/template-agent.oci".into(),
+            image: "localhost/template-agent:latest".into(),
             api_proxy_port: 42000,
             github_token_file: Some("/credentials/github-token".into()),
         };
