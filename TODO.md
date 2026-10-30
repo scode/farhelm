@@ -326,6 +326,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   release notes. Commands and wrappers starting to run through bash with full shell meaning
   (`plans/queue/command-shell-meaning.md`) is the kind of change that would have used it.
 
+- **Replace harness icons with colored versions.** Replace the harness icons with colored versions so they are more
+  easily identified.
+
 ## Doc todo
 
 - Tell users that a working-copy (checkout) root must be a location only they can write: Farhelm is not designed for
