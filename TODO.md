@@ -48,6 +48,17 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - Initial version of agent2agent comms.
 
+- **Log trash deletions.** The supervisor logs nothing when it permanently deletes a checkout from the trash. Log each
+  deletion, including how long it took. Deleting small checkouts was seen taking many seconds each, and these logs are
+  what would show where that time goes.
+
+- **Switch SQLite to WAL with synchronous NORMAL.** The supervisor's database uses SQLite's defaults (rollback journal,
+  synchronous FULL), so every commit waits for several disk flushes; on a loaded host that was 0.2–0.6 s per small
+  write, with the one shared connection held throughout. WAL with NORMAL keeps crash consistency and gives up only the
+  last commits before an OS crash or power loss, which is acceptable here. The switch converts the existing database in
+  place on open; the pragma can return the old mode instead of failing while another connection holds the database (the
+  upgrade handoff), and synchronous must be set on every open. Consider the helm's database too.
+
 - **Crappy model warning.** Let the user pick a list of models they never want to run. Warn when an agent's TUI
   indicates that one of those models is being used anyway.
 
