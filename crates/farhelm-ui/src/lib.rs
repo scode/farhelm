@@ -744,9 +744,9 @@ pub struct Host {
     /// to submit to, so showing it would be a dead end.
     #[serde(default, deserialize_with = "double_option")]
     pub alias: Option<Option<peer::PeerText>>,
-    /// The helm's own rendering of the host's name — the same string
-    /// session rows carry in `host_name`, so a row and its chip never
-    /// disagree about what a host is called.
+    /// The helm's full display name, also carried by session `host_name`.
+    /// Management, details and tooltips retain it; compact surfaces ask
+    /// [`Host::short_name`] explicitly rather than replacing this value.
     pub name: peer::PeerText,
     /// The identity the REGISTRY holds, not what the host is reporting. The
     /// two differ exactly while an identity decision is pending, and the

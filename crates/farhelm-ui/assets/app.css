@@ -122,6 +122,7 @@
   /* A fresh profile keeps the old geometry before the width asset loads. */
   --sidebar-width: 396px;
   --host-rail-width: 56px;
+  --host-rail-expanded-width: min(280px, var(--sidebar-width), 100vw);
   --sidebar-title-height: 40px;
   /* Modal backdrops and cards share this vertical budget. Dynamic viewport
      units follow browser chrome; the minimum keeps short windows visibly
@@ -632,18 +633,97 @@ samp {
   left: 0;
   bottom: 128px;
   width: var(--host-rail-width);
+  z-index: 4;
   box-sizing: border-box;
-  padding: 8px 6px;
   overflow: hidden auto;
   scrollbar-width: none;
   border-right: 1px solid var(--border-row);
+  background: var(--bg-1);
+  pointer-events: none;
+  transition: width 160ms ease;
+}
+/* The narrow content child owns hover and native scroll gestures, including
+   padding and gaps. It must stay INSIDE the scroller so a wheel or touch pan
+   there can scroll it. Its minimum height covers a short list's empty space;
+   the wider background and labels never become pointer targets. */
+.host-rail-hover {
+  width: var(--host-rail-width);
+  min-height: 100%;
+  box-sizing: border-box;
+  padding: 8px 7px;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
+  pointer-events: auto;
 }
-.host-rail-entry { position: relative; flex: 0 0 auto; }
+/* The content keeps its 56px left margin while this independent scroller
+   grows over it. Fixed-size triggers preserve icon positions, badges and
+   menu measurement; only their visual labels occupy the extra width. Keyboard
+   focus expands immediately; mouse focus alone must never cover list controls
+   after a host pick. Hover waits briefly when the narrow rail is crossed.
+   Hover widening is limited to devices that can hover: touch browsers keep
+   the last tapped element hovered, which would widen the rail after a tap
+   and let the next tap fall through the display-only names onto a hidden
+   list control. */
+@media (hover: hover) {
+  .host-rail:hover {
+    width: var(--host-rail-expanded-width);
+    transition-delay: 250ms;
+  }
+}
+.host-rail:has(:focus-visible) { width: var(--host-rail-expanded-width); transition-delay: 0ms; }
+.host-rail-entry { position: relative; flex: 0 0 auto; width: 40px; pointer-events: auto; }
+.host-rail-caption {
+  display: block;
+  width: 40px;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+  font-size: 10px;
+  line-height: 14px;
+  color: var(--fg-1);
+  transition: opacity 120ms ease;
+}
+.host-rail-expanded {
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  left: 48px;
+  width: calc(var(--host-rail-expanded-width) - 72px);
+  height: 40px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  text-align: left;
+  color: var(--fg-0);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 120ms ease, visibility 0ms linear 120ms;
+}
+.host-rail-expanded-name, .host-rail-destination {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  line-height: 16px;
+}
+.host-rail-destination { font-size: 10px; line-height: 12px; color: var(--fg-1); }
+/* Invisible captions retain their height so expansion never shifts an icon
+   vertically. All three visual name copies are aria-hidden in the markup;
+   the trigger's existing full-name label remains its accessible identity. */
+@media (hover: hover) {
+  .host-rail:hover .host-rail-caption { opacity: 0; transition-delay: 250ms; }
+  .host-rail:hover .host-rail-expanded { opacity: 1; visibility: visible; transition-delay: 250ms; }
+}
+.host-rail:has(:focus-visible) .host-rail-caption { opacity: 0; transition-delay: 0ms; }
+.host-rail:has(:focus-visible) .host-rail-expanded { opacity: 1; visibility: visible; transition-delay: 0ms; }
 .host-rail .btn, .host-rail-footer .btn {
+  pointer-events: auto;
   width: 40px;
   height: 40px;
   flex: 0 0 40px;

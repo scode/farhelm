@@ -130,7 +130,7 @@ test.describe("permanent host filtering", () => {
     expect(remote, "the fixture needs a configured remote host").toBeTruthy();
 
     const other = { ...remote!, id: remote!.id + 90_000, name: "other configured host" };
-    let registry = [{ ...local!, name: "a local alias that must not relabel this machine" }, remote!, other];
+    let registry = [{ ...local!, alias: "First local alias", name: "First local alias" }, remote!, other];
     await page.route((url) => url.pathname === "/api/hosts", async (route: Route) => {
       if (route.request().method() !== "GET") return route.continue();
       await route.fulfill({
@@ -148,7 +148,7 @@ test.describe("permanent host filtering", () => {
     await feed.waitForConnection(1);
     feed.notify(1);
     const all = hostChoice(page);
-    await expect(hostChoice(page, local!.id)).toHaveAttribute("aria-label", /^This machine:/, { timeout: 20_000 });
+    await expect(hostChoice(page, local!.id)).toHaveAttribute("aria-label", /^First local alias:/, { timeout: 20_000 });
     await waitForFeedReadersSettled(page);
     await chooseHost(page, remote!.id);
     const selectedAvatar = hostChoice(page, remote!.id);
@@ -156,7 +156,7 @@ test.describe("permanent host filtering", () => {
     await expect(selectedAvatar).toBeFocused();
 
     registry = [
-      { ...local!, name: "another local alias" },
+      { ...local!, alias: "Second local alias", name: "Second local alias" },
       {
         ...remote!,
         name: "renamed unavailable host",
@@ -175,7 +175,7 @@ test.describe("permanent host filtering", () => {
     await expect(chosen).toHaveAttribute("aria-label", /renamed unavailable host.*Unreachable, retrying/);
     await expect(chosen).toHaveAttribute("aria-pressed", "true");
     await expect(selectedAvatar).toBeFocused();
-    await expect(hostChoice(page, local!.id)).toHaveAttribute("aria-label", /^This machine:/);
+    await expect(hostChoice(page, local!.id)).toHaveAttribute("aria-label", /^Second local alias:/);
 
     // Moving a keyed avatar may retire its DOM focus. Establish a persistent
     // focus owner before structural transitions, without activating All or

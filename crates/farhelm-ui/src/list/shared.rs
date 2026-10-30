@@ -2,7 +2,8 @@
 //!
 //! These types keep the view, row, and create form on one representation of
 //! row state and host identity. The open session reuses the host presentation
-//! components so its host name and locality mark follow the sidebar's rules.
+//! components so its full host name and locality mark keep the same escaping
+//! and local wording. Only the sidebar row opts into the registry's short form.
 
 use crate::activity::ActivityStamp;
 use crate::hosts::{gui_host_name, host_incarnation, is_connected, phase_display_label};
@@ -165,6 +166,10 @@ pub(super) struct RowState {
     pub(super) host_icon: farhelm_proto::host_appearance::HostIcon,
     /// Compared alongside the silhouette so color-only saves redraw the row.
     pub(super) host_color: farhelm_proto::host_appearance::HostColor,
+    /// The registered host's short form, derived from the existing hosts read.
+    /// Keeping this in compared row state makes alias/destination edits redraw
+    /// the label without changing the session's helm-supplied full name.
+    pub(super) host_short_name: Option<crate::peer::PeerText>,
     /// Outage cause from the list's existing host read, shared with the
     /// session card. No row performs its own registry request.
     pub(super) unavailable_cause: &'static str,
@@ -289,22 +294,30 @@ pub(crate) fn SessionHostIcon(locality: HostLocality, icon: HostIcon, color: Hos
 
 /// Show a session's own host name with the GUI's local wording and peer isolation.
 ///
-/// Pass the session's peer-text name, not the registry's current name.
+/// Normally pass the session's peer-text name, not the registry's current name.
 /// Only confirmed local sessions earn the local wording; unknown locality
-/// still shows an available name. Callers omit this component when the legacy
-/// session has no host name at all rather than inventing one. A row or card
-/// that already offers the full name in its summary turns off this element's
+/// still shows an available name. Callers without a name omit this component
+/// rather than inventing one. A row or card that already offers the full name
+/// in its summary turns off this element's
 /// redundant hover text; other surfaces keep the existing tooltip.
+/// Only sidebar rows request `short_form`, passing `Host::short_name()` when
+/// the registry knows the host. That result is already the intended wording:
+/// an explicit alias such as `this machine` must not become the local sentinel.
 #[component]
 pub(crate) fn SessionHostName(
     name: crate::peer::PeerText,
     locality: HostLocality,
     #[props(default = true)] tooltip: bool,
+    #[props(default = false)] short_form: bool,
 ) -> Element {
     // gui_host_name compares the raw local-name sentinel before escaping;
     // only its fixed local label bypasses that escape path. Passing escaped
     // input would change its comparison. The tooltip uses the same final value.
-    let shown_name = gui_host_name(name.raw(), locality == HostLocality::Local);
+    let shown_name = if short_form {
+        name.escaped()
+    } else {
+        gui_host_name(name.raw(), locality == HostLocality::Local)
+    };
     rsx! {
         span {
             class: "session-host peer-value",
@@ -324,8 +337,8 @@ pub(crate) fn SessionHostName(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct HostOption {
     pub(super) id: HostId,
-    /// The helm's own display name, so the selector and the session rows
-    /// call a host the same thing.
+    /// The helm's own display name; selectors keep the full form even though
+    /// sidebar rows use the registered host's separately derived short form.
     pub(super) name: String,
     /// Whether this is the helm's own machine — the reserved local row,
     /// which is SPEC.md's fallback default.
@@ -650,6 +663,37 @@ pub(super) mod tests {
     use super::super::row::row_specimen;
     use super::*;
     use crate::HostKind;
+
+    /// A short name is already the intended wording, while other surfaces
+    /// still translate the helm's local sentinel. Keeping the two render
+    /// paths distinct preserves an explicit `this machine` alias, and both
+    /// paths must escape peer controls before drawing them.
+    #[farhelm_testtrace::test]
+    fn session_host_short_form_preserves_alias_and_peer_escaping() {
+        /// Exercise the shared default beside the sidebar-only opt-in so a
+        /// presentation change cannot silently rename the other surfaces.
+        fn app() -> Element {
+            rsx! {
+                SessionHostName { name: "this machine".into(), locality: HostLocality::Local }
+                SessionHostName { name: "this machine".into(), locality: HostLocality::Local, short_form: true }
+                SessionHostName { name: "build\u{202e}box".into(), locality: HostLocality::Remote, short_form: true }
+            }
+        }
+        let mut dom = VirtualDom::new(app);
+        let names: Vec<_> = dom
+            .rebuild_to_vec()
+            .edits
+            .into_iter()
+            .filter_map(|edit| match edit {
+                dioxus::core::Mutation::CreateTextNode { value, .. } => Some(value),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            names,
+            ["Local (this machine)", "this machine", "build<U+202E>box"]
+        );
+    }
 
     /// Skipping asks less, but authorizes only the liveness the clicked row
     /// showed. In particular an ended agent with tabs must retain AgentEnded:
