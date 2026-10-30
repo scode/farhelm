@@ -50,3 +50,58 @@ None.
 
 The required single fresh-context gpt-6.1-sol reviewer at high effort found no issues and reaffirmed that conclusion
 after the lint correction. The commit/PR wording also passed its fresh cold read. No findings were rejected.
+
+### Landing
+
+Landed as delivered, with no fixes at landing. The Settings gear is round again: centred in its 16-unit box with equal
+width and height and eight evenly spaced teeth, where it used to be drawn wider than tall. A unit test measures the
+outline so a redraw cannot bring the squashed shape back.
+
+- #2826: the gear's new outline, its test, a changelog entry and removal of its TODO entry.
+
+#### What landed since the stack was based, and whether it interacted
+
+Only plan bookkeeping and shortcuts-overview (the keyboard shortcuts overview, landing right before this in the same
+round, with its own test fix at landing) landed since; they share nothing but bookkeeping.
+
+#### Things you should know
+
+- The gear in the Settings dialog's header is drawn at 28px, not the 16px the plan assumed; the executor kept that size
+  and looked at the gear at all three sizes it appears in.
+
+#### Checks
+
+This round landed shortcuts-overview and settings-gear-shape, stacked in that order on main `cb426c6a`. On that stack:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, the web-target UI lint, the binaries' lint,
+  the desktop-build checks, `dprint check`, `python3 releasing/check-changelog.py format`,
+  `python3 scripts/check-agents-md.py` (three warnings, all about citations already on main), the docs website build
+  (`bun run build` in `website/`), the workspace debug build, the UI's release web build and
+  `scripts/check-desktop-assets.sh`: all passed. The check that every test delay states its reason
+  (`python -B scripts/check-test-sleeps.py`) first stopped on its own time budget while the machine was heavily loaded,
+  then passed when rerun alone.
+- The UI's Rust tests, `cargo nextest run -p farhelm-ui`, run `32aa6a58-e03d-48bc-bdc9-9f9d045c3e6b`: all 825 passed;
+  its desktop-build tests, `cargo nextest run -p farhelm-ui --features desktop`, run
+  `fb44ab43-fa4d-4466-a39a-9ca2b6a8e263`: all 1008 passed. The UI's JavaScript tests (`node --test` in
+  `crates/farhelm-ui/js-tests`), run `db8e29b7-e456-4fee-bd94-756914f90cbd`: all 372 passed.
+- `npx playwright test` in `e2e/`, the whole browser suite on Chromium and WebKit, three workers each with its own helm
+  and supervisors, no retries, run `8f80714f-9f10-46f5-af67-be60e573be31`: 2818 passed, 14 skipped by design, 2 failed,
+  both on WebKit and both in parts these plans do not change. "composer folder dropdown preserves keyboard launch and
+  grouped history" is a recorded open flake. In the Send feedback dialog's test, "the dialog refuses blank and over-long
+  messages without sending" failed on the disabled Send button's color, exactly as it did in an earlier full run on a
+  stack without these plans (run `0a494db0-73b5-462c-8e8d-33510baf9df6`, 2026-10-29); the shortcuts overview edits the
+  same spec file but only its Help menu test. Repeated five times alone on WebKit, runs
+  `756ea4b1-29d9-4954-b8a0-31d9cae25dee` and `06d4ac29-871d-480f-9f75-6e1b2364758f`, each passed every time. Recording
+  the Send feedback case as a latent flake is a follow-up to this landing.
+- The shortcuts overview's visual-review count fix at landing went in after the browser suite had run. Nothing was rerun
+  for it: the file is outside the suite, and the visual review needs passwordless SSH to the screenshot scenario's
+  remote hosts.
+- Reused: the whole Rust workspace run of 2026-10-30, `f0b300d3-7298-4a62-acbe-29bcb28a82ac`, on revision `b5cbad6f`
+  (4555 passed, 41 skipped by design, and the known flakes "shallow pause resumes without reset or replay" and "a hung
+  save releases waiters at their deadline" failed), for everything outside the UI crate. Since that revision main gained
+  only UI-crate changes (#2816, #2817), browser tests (#2818), docs and bookkeeping, and both plans change Rust only in
+  the UI crate, all covered above. Skipped: the desktop smoke tests (no desktop-specific code changed) and the native
+  Mac app (not runnable on Linux).
+
+The report's checks were the executor's selected runs; this landing ran the UI's tests and the whole browser suite with
+both plans stacked. Nothing in the executor's report became untrue at landing.
