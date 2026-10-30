@@ -439,6 +439,17 @@ pub struct LaunchTemplate {
     pub fields: TemplateFields,
 }
 
+/// Keep new template names usable as one word in a quick-launch sequence.
+/// Call this only when creating or renaming: historical names with whitespace
+/// must still save unchanged, apply and survive delete undo. Shape validation
+/// deliberately remains separate so those operations retain their old contract.
+pub fn check_new_template_name(name: &str) -> Result<(), String> {
+    if name.chars().any(char::is_whitespace) {
+        return Err("a new template name cannot contain whitespace".into());
+    }
+    Ok(())
+}
+
 /// Refuse templates whose names, commands or size cannot be safely edited.
 /// Session names and commands cannot contain controls or invisible formatting
 /// characters: the single-line editor cannot show or preserve them. Every save path shares
@@ -1950,6 +1961,23 @@ mod tests {
             },
         );
         assert!(check_template_shape(&huge).is_err());
+    }
+
+    /// New names form individual quick-launch words, including Unicode spaces.
+    /// The stored-shape rule must remain separate: old spaced names still need
+    /// to save unchanged and be recreated by delete undo.
+    #[test]
+    fn new_template_names_are_words_without_rejecting_stored_names() {
+        for name in [
+            "my project",
+            "my\u{a0}project",
+            "my\u{2003}project",
+            "tab\tname",
+        ] {
+            assert!(super::check_new_template_name(name).is_err(), "{name:?}");
+        }
+        assert!(super::check_new_template_name("my-project").is_ok());
+        assert!(check_template_shape(&template("my project", TemplateFields::default())).is_ok());
     }
 
     /// Dot path segments cannot survive template request URL normalization.

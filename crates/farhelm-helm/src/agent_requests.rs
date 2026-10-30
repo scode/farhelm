@@ -2775,6 +2775,12 @@ async fn write_template_for_agent(
         shortcuts,
         create,
     } = write;
+    // Edits cannot rename, so historical spaced names remain editable. The
+    // store's shape check also stays permissive for the GUI's delete undo.
+    if create {
+        farhelm_proto::launcher::check_new_template_name(&name)
+            .map_err(crate::sessions::invalid_request)?;
+    }
     if fields.host.is_some() {
         return Err(crate::sessions::invalid_request(
             "name the template's host with --host, by the name farhelm agent hosts shows"
@@ -11997,6 +12003,88 @@ mod tests {
                 Some(trust.as_bool()),
                 "the raw old value is still suitable for the conditional write"
             );
+        }
+    }
+
+    /// Agent creates require a single-word template name, but editing a stored
+    /// spaced name must stay possible. Keeping this at the verb boundary also
+    /// leaves the store available for legacy saves and GUI delete undo.
+    #[farhelm_testtrace::test]
+    async fn agent_template_create_refuses_whitespace_but_edit_preserves_legacy_names() {
+        use farhelm_proto::launcher::{LaunchTemplate, TemplateFields};
+        let (h, local, _remote) = two_host_fleet().await;
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let origin = origin_of(&h, local);
+        for name in ["new name", "new\u{a0}name"] {
+            let outcome = handler
+                .handle(
+                    origin,
+                    "local-live",
+                    AgentVerb::TemplateCreate {
+                        shortcuts: Default::default(),
+                        name: name.into(),
+                        fields: TemplateFields::default(),
+                        host: None,
+                    },
+                )
+                .await;
+            match outcome {
+                AgentOutcome::Err {
+                    kind: ErrorKind::InvalidRequest,
+                    message,
+                } => {
+                    assert!(message.contains("cannot contain whitespace"), "{message}");
+                }
+                other => panic!("expected a name refusal, got {other:?}"),
+            }
+            assert!(
+                h.store
+                    .launch_templates()
+                    .await
+                    .unwrap()
+                    .iter()
+                    .all(|t| t.name != name)
+            );
+        }
+        let name = "old name";
+        h.store
+            .put_launch_template(LaunchTemplate {
+                name: name.into(),
+                fields: TemplateFields::default(),
+            })
+            .await
+            .unwrap();
+        assert!(
+            h.store
+                .launch_templates()
+                .await
+                .unwrap()
+                .iter()
+                .any(|t| t.name == name)
+        );
+        let edited = handler
+            .handle(
+                origin,
+                "local-live",
+                AgentVerb::TemplateEdit {
+                    shortcuts: Default::default(),
+                    name: name.into(),
+                    host: None,
+                    fields: TemplateFields {
+                        name: Some("review".into()),
+                        ..Default::default()
+                    },
+                },
+            )
+            .await;
+        match edited {
+            AgentOutcome::Ok {
+                reply: AgentReply::TemplateWritten { template },
+            } => {
+                assert_eq!(template.name, name);
+                assert_eq!(template.fields.name.as_deref(), Some("review"));
+            }
+            other => panic!("legacy edit refused: {other:?}"),
         }
     }
 

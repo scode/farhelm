@@ -235,7 +235,8 @@ pub(super) fn SaveTemplatePanel(
             name: name(),
             fields,
         };
-        let refusal = check_template_shape(&template)
+        let refusal = farhelm_proto::launcher::check_new_template_name(&template.name)
+            .and_then(|()| check_template_shape(&template))
             .err()
             .map(crate::local_validation_notice)
             .or_else(|| saved_fields_refusal(&template, catalog.as_deref()));

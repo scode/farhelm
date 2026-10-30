@@ -6093,7 +6093,11 @@ without letting their trust choices bypass the agent trust section in Settings. 
 the GUI writes (a non-empty name of at most 128 bytes with no surrounding spaces or control characters, and fields
 within the 64 KiB a create is held to); whether its fields apply is decided only when it is applied. An agent's template
 writes share the same store path but carry a precondition and a few refusals of their own (see "Permission prompts for
-agent actions").
+agent actions"). New-name whitespace validation is separate from stored shape: the Templates editor checks only when the
+name changes, Save as template always checks, and the agent template-create branch checks before approval. The shared
+store and collision checks remain permissive so historical spaced names still save unchanged and delete undo can
+recreate them. Duplicate normalizes whitespace to hyphens in its suggested name and uses `-copy` / `-copy-N` suffixes,
+retaining the byte cap and collision search.
 
 An agent's quick-launch and number-key edits travel separately from template fields in protocol 60: those bindings
 belong to fleet preferences, not to a template's composable choices. The helm and Templates editor share the ⚡

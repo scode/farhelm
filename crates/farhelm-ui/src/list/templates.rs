@@ -1489,11 +1489,17 @@ enum Departure {
 /// A free copy name is only a draft suggestion; the save still checks the
 /// loaded list. Truncate at UTF-8 boundaries to respect the API's byte limit.
 fn duplicate_name(name: &str, names: &[String]) -> String {
+    // A stored name can predate the no-whitespace rule. The suggestion is a
+    // new name, so normalize its whitespace without renaming the source.
+    let name: String = name
+        .chars()
+        .map(|c| if c.is_whitespace() { '-' } else { c })
+        .collect();
     for number in 1.. {
         let suffix = if number == 1 {
-            " copy".to_string()
+            "-copy".to_string()
         } else {
-            format!(" copy {number}")
+            format!("-copy-{number}")
         };
         let mut end = name.len().min(TEMPLATE_NAME_CAP - suffix.len());
         while !name.is_char_boundary(end) {
@@ -1990,6 +1996,14 @@ pub(super) fn TemplatesDialog(
             },
         };
         let value = draft();
+        // Keep legacy names editable; only a newly chosen name must be a
+        // single sequence word. Undo intentionally never passes this gate.
+        if previous().as_deref() != Some(value.name.as_str())
+            && let Err(message) = farhelm_proto::launcher::check_new_template_name(&value.name)
+        {
+            error.set(Some(crate::local_validation_notice(message)));
+            return;
+        }
         let catalog_value = catalog.peek();
         let catalog_rows = catalog_value
             .as_ref()
@@ -3484,12 +3498,16 @@ mod tests {
     #[test]
     fn duplicate_names_are_free_and_fit_the_name_limit() {
         assert_eq!(
-            duplicate_name("build", &["build copy".into(), "build copy 2".into()]),
-            "build copy 3"
+            duplicate_name("build", &["build-copy".into(), "build-copy-2".into()]),
+            "build-copy-3"
         );
         let copy = duplicate_name(&"界".repeat(42), &[]);
         assert!(copy.len() <= 128);
-        assert!(copy.ends_with(" copy"));
+        assert!(copy.ends_with("-copy"));
+        assert_eq!(
+            duplicate_name("my\u{a0}project name", &[]),
+            "my-project-name-copy"
+        );
     }
 
     /// Spec: the delete kind a render computes for the label ("delete" offers
@@ -3969,6 +3987,33 @@ mod tests {
             assert!(answer_keep_editing(&mut slot, &staying, false));
             assert!(!slot.is_open(), "keep editing closed the prompt");
         });
+    }
+
+    /// Historical names with whitespace retain ordinary save and Undo
+    /// admission. New-name restrictions must never migrate into these shared
+    /// helpers, or deleting an old template would silently lose restoration.
+    #[test]
+    fn historical_spaced_names_keep_save_and_delete_undo() {
+        for name in ["old template", "old\u{a0}template"] {
+            let template = LaunchTemplate {
+                name: name.into(),
+                fields: TemplateFields::default(),
+            };
+            assert!(check_template_shape(&template).is_ok(), "legacy premise");
+            assert_eq!(
+                save_name_refusal(Some(name), name, &ListedNames::Failed),
+                None
+            );
+            let kind = DeleteKind::of(Some(std::slice::from_ref(&template)), Some(name));
+            assert_eq!(kind, DeleteKind::Restorable);
+            let undo =
+                undo_after_delete(kind, template.clone(), 1).expect("ordinary delete offers Undo");
+            assert_eq!(undo.template, template);
+            assert_eq!(
+                save_name_refusal(None, &undo.template.name, &ListedNames::Loaded(vec![])),
+                None
+            );
+        }
     }
 
     /// Spec: a new template, or a rename, is saved only once the template
