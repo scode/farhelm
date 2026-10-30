@@ -245,9 +245,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   which only managed checkouts get today. Git breaks inside the container for a folder that is a git worktree or a
   subfolder of a repository, since only the folder itself is mounted.
 
-- **Show all keybindings with command-/.** Add a keybinding that shows every keyboard shortcut at a glance, so users can
-  discover them instead of having to remember them. Plan: `plans/queue/shortcuts-overview.md`.
-
 - **Emacs-style quick launch by typed template names.** Add a quick launch that also supports typing template names
   separated by spaces, so `cmd+x myproject codex Enter` launches my project in Codex. Faster than `tl:...` in the
   launcher. Plan: `plans/queue/typed-quick-launch.md`.

@@ -1,0 +1,84 @@
+---
+title: Keyboard shortcuts
+description: Find session, launch, and terminal shortcuts for the desktop app and browser.
+sidebar:
+  order: 10
+---
+
+Press **Cmd+/** on a Mac, or **Ctrl+Shift+/** elsewhere, to see your shortcuts in Farhelm. You can also choose
+**Keyboard shortcuts** from the **?** menu below Settings. The dialog shows the keys your window uses, with the names
+of your current **⚡** and number-key templates. Escape, **Close**, or a click outside returns you to where you were.
+
+The shortcut works while you are typing in a terminal and does nothing while another dialog is open. It uses the
+physical slash key; outside macOS, keep Shift held even if that key types `?`. If your browser keeps a shortcut for
+itself, use the **?** menu or the desktop app.
+
+## Sessions
+
+Some shortcuts differ between the Mac desktop app and a browser on the same Mac. Cmd+N belongs to the desktop app;
+browsers use that key for a new window. Delete and Rename use Ctrl+Shift in browsers, including on a Mac.
+
+| Action | Mac desktop app | Browser on a Mac | Other clients |
+| --- | --- | --- | --- |
+| [New session](/docs/using/start-a-session/) | Cmd+N | Use **New** | Use **New** |
+| [Delete the open session](/docs/using/stop-restart-resume/#stop-or-delete) | Cmd+W | Ctrl+Shift+Backspace | Ctrl+Shift+Backspace |
+| [Rename the open session](/docs/using/session-list/#rename-it-or-mark-it-read) | Cmd+L | Ctrl+Shift+L | Ctrl+Shift+L |
+| [Quick switcher](/docs/using/session-list/#jump-with-the-keyboard) | Cmd+K | Cmd+K | Ctrl+Shift+K |
+| Keyboard shortcuts | Cmd+/ | Cmd+/ | Ctrl+Shift+/ |
+
+Delete uses the same confirmation as the session's Delete button. In the Mac app, Cmd+W deletes the session; the
+window's close button or Cmd+Q closes the app.
+
+## Launching
+
+[Launch templates](/docs/using/launch-templates/) save choices you can reuse or combine. The **⚡** shortcut follows
+your operating system, but number shortcuts and the sequence prefix use Ctrl+Shift in every client except the Mac
+desktop app.
+
+| Action | Mac desktop app | Browser on a Mac | Other clients |
+| --- | --- | --- | --- |
+| Search templates by name | Cmd+J | Cmd+J | Ctrl+Shift+J |
+| Start the **⚡** template | Cmd+P | Cmd+P | Ctrl+Shift+P |
+| Start a number-key template | Cmd+0–9 | Ctrl+Shift+0–9 | Ctrl+Shift+0–9 |
+| Begin a launch sequence | Cmd+X | Ctrl+Shift+X | Ctrl+Shift+X |
+
+Number shortcuts use the number row, not the numeric keypad. Open **Keyboard shortcuts** in Farhelm to see which
+templates you have assigned. The dialog reads those assignments each time you open it.
+
+The **⚡** and number shortcuts start a session directly when the template has enough choices. With the session
+launcher open, they apply the template to your draft instead, leaving **Launch** to you. Other dialogs keep the
+keyboard. See [Quick launch](/docs/using/launch-templates/#quick-launch) for browser shortcuts that can take precedence
+and what happens when a template needs more choices.
+
+### Inside a launch sequence
+
+After the sequence prefix, queue templates in the order you want to apply them:
+
+| Key | Action |
+| --- | --- |
+| 0–9, alone or with the usual number shortcut's modifiers | Queue that key's template |
+| The **⚡** chord from the table above | Queue the marked template |
+| Enter | Launch the combined setup, or apply it to an open session launcher |
+| Escape | Cancel the sequence |
+
+Later templates override earlier choices. Enter with nothing queued cancels. Outside the session launcher, text fields
+keep the sequence prefix's normal action; inside the launcher, selected text keeps Cut or the browser's usual action.
+See [Combine templates from the keyboard](/docs/using/launch-templates/#combine-templates-from-the-keyboard) for an
+example and what cancels a sequence.
+
+## Terminal
+
+These shortcuts change the text size of [your session terminals](/docs/using/work-in-a-session/#open-a-shell-beside-the-agent),
+as the magnifier buttons do. They work while a terminal is open, including when focus is elsewhere in Farhelm.
+
+| Action | Mac desktop app or browser on a Mac | Other clients |
+| --- | --- | --- |
+| Larger terminal text | Cmd+Shift+Equal | Ctrl+Shift+Equal |
+| Smaller terminal text | Cmd+Shift+Minus | Ctrl+Shift+Minus |
+
+Equal and Minus mean those physical keys (the `+` and `−` positions on a US keyboard). Browser page zoom without Shift
+keeps its usual action.
+
+## Next
+
+[Launch templates](/docs/using/launch-templates/) covers assigning your favorite setups to **⚡** and number keys.

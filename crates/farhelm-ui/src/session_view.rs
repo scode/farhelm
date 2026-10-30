@@ -3570,7 +3570,7 @@ fn TerminalTextSize() -> Element {
                 r#type: "button",
                 class: "btn btn-neutral tab-text-size",
                 "data-text-size": "smaller",
-                "data-tooltip": "Smaller terminal text (Cmd/Ctrl+Shift+\u{2212})",
+                "data-tooltip": format!("Smaller terminal text (Cmd/{})", crate::keyboard_shortcuts::SMALLER_TEXT.label_for_client(false, false)),
                 "aria-label": "Smaller terminal text",
                 onclick: move |_| step(-1),
                 ActionIcon { glyph: ActionGlyph::ZoomOut }
@@ -3586,7 +3586,7 @@ fn TerminalTextSize() -> Element {
                 r#type: "button",
                 class: "btn btn-neutral tab-text-size",
                 "data-text-size": "larger",
-                "data-tooltip": "Larger terminal text (Cmd/Ctrl+Shift++)",
+                "data-tooltip": format!("Larger terminal text (Cmd/{})", crate::keyboard_shortcuts::LARGER_TEXT.label_for_client(false, false)),
                 "aria-label": "Larger terminal text",
                 onclick: move |_| step(1),
                 ActionIcon { glyph: ActionGlyph::ZoomIn }

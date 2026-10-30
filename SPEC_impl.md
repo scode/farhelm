@@ -1387,6 +1387,22 @@ removal handoff. The shared shortcut worker reads preferences and templates afre
 the existing quick-launch admission, fallback and naming behavior. A name missing from the fresh catalog opens New with
 a preparation error rather than launching a stale captured definition.
 
+The keyboard-shortcuts overview installs its own idempotent capture-phase window listener in `AppBody`, immediately
+after the quick switcher's listener and before the session-action listener. The composition guard and shared template
+listener still run first, and all these command listeners precede xterm. Physical `Slash` uses Meta alone on macOS or
+Ctrl+Shift elsewhere, with the same `/Mac/` platform test as the quick switcher. A modal or an absent authenticated,
+preferences-ready trigger yields the chord; otherwise the listener consumes it before xterm, ignores repeat and
+composition, and opens the AppBar-owned dialog through a hidden trigger. The help menu opens that same ordinary
+`ModalDialog`, with focus restored to the help toggle rather than to a removed menu item.
+
+The overview's Rust row definitions reuse `SESSION_DELETE_SHORTCUT`, `SESSION_RENAME_SHORTCUT` and `TEMPLATE_SHORTCUTS`,
+plus shared quick-switcher and text-size label definitions. One platform evaluation per opening feeds one-form labels
+for OS-following chords; build-following chords retain their Mac-desktop predicate, including in a Mac browser. The
+dialog refreshes only the shared template-binding fields once per open with `fetch_preferences`,
+`template_bindings_after_read` and `apply_template_bindings`, overlaying pending local saves as the templates-only
+switcher does. Failed reads leave cached bindings intact. No listener is rebound or derived from this display table;
+browser tests keep the separately written JS matchers and Rust labels in agreement.
+
 Session-action shortcuts use an idempotent capture listener and a pure key matcher from `session-action-shortcuts.js`.
 The build's Mac-desktop condition selects Cmd+W for Delete; browsers use Ctrl+Shift+Backspace. A visible modal yields,
 and browser Delete leaves ordinary editors alone while consuming xterm's input proxy. Matching keys stop before xterm;

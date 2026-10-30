@@ -64,6 +64,7 @@ pub(crate) use row::{PeerTitle, abbreviate_home, permission_description, session
 pub(crate) use shared::{
     OpenDestination, SessionHostIcon, SessionHostName, session_locality, with_source_host,
 };
+pub(crate) use templates::apply_template_bindings;
 pub(crate) use view::{
     DeleteNotice, HeaderDeleteRequest, HeaderPrefillRequest, ListView, ReplaceIntent,
     ReplaceYoloQuestions, RestartBridge, SharedPreferences, remember_selection,

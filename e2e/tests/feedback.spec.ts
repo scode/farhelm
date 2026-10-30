@@ -153,7 +153,7 @@ async function interceptFeedback(page: Page, answer: (route: Route) => Promise<v
  * The help menu lives below the gear in the host rail and behaves like
  * the other sidebar menus. A pointer opens and closes it from its toggle.
  * From the keyboard, ArrowDown on the toggle opens it with focus on its
- * first item, arrow keys and Home/End reach all five items, and Escape closes it
+ * first item, arrow keys and Home/End reach all six items, and Escape closes it
  * and gives focus back to the toggle (focus is asserted on the keyboard
  * path, as the row menus' own tests do, because a pointer open does not
  * move focus the same way in every engine). A pointer press outside closes
@@ -169,12 +169,13 @@ test("the help menu sits below the gear and follows the menu conventions", async
   expect(Math.abs(toggleBox!.x - gearBox!.x)).toBeLessThanOrEqual(1);
   await expect(toggle).toHaveAttribute("aria-expanded", "true");
   const items = menu.getByRole("menuitem");
-  await expect(items).toHaveCount(5);
+  await expect(items).toHaveCount(6);
   await expect(items.nth(0)).toContainText("Send feedback");
   await expect(items.nth(1)).toContainText("Documentation");
-  await expect(items.nth(2)).toContainText("Release notes");
-  await expect(items.nth(3)).toContainText("SSH needs 2FA?");
-  await expect(items.nth(4)).toContainText("Welcome");
+  await expect(items.nth(2)).toContainText("Keyboard shortcuts");
+  await expect(items.nth(3)).toContainText("Release notes");
+  await expect(items.nth(4)).toContainText("SSH needs 2FA?");
+  await expect(items.nth(5)).toContainText("Welcome");
   await toggle.click();
   await expect(menu).toHaveCount(0);
 
@@ -191,10 +192,12 @@ test("the help menu sits below the gear and follows the menu conventions", async
   await expect(items.nth(3)).toBeFocused();
   await page.keyboard.press("ArrowDown");
   await expect(items.nth(4)).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(items.nth(5)).toBeFocused();
   await page.keyboard.press("Home");
   await expect(items.nth(0)).toBeFocused();
   await page.keyboard.press("End");
-  await expect(items.nth(4)).toBeFocused();
+  await expect(items.nth(5)).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(menu).toHaveCount(0);
   await expect(toggle).toBeFocused();

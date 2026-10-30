@@ -64,18 +64,56 @@ pub(crate) struct ShortcutChord {
 }
 
 impl ShortcutChord {
+    /// Describe an OS-following chord without changing any listener's matcher.
+    pub(crate) const fn platform(code: &'static str) -> Self {
+        Self {
+            code,
+            modifiers: ShortcutModifiers {
+                source: ModifierScheme::Platform,
+                mac: COMMAND,
+                other: CONTROL_SHIFT,
+            },
+        }
+    }
+
     /// Show both platform alternatives when the web client's OS is unknown.
     pub(crate) fn label(self, mac_desktop: bool) -> String {
         chord_label(self.code, self.modifiers, mac_desktop)
+    }
+
+    /// Show only this client's alternative, keeping OS and build decisions distinct.
+    /// A Mac browser uses Command for platform chords but browser-safe modifiers
+    /// for build-following ones. Callers read the platform once per opening.
+    pub(crate) fn label_for_client(self, mac_desktop: bool, mac_platform: bool) -> String {
+        let mac = match self.modifiers.source {
+            ModifierScheme::Platform => mac_platform,
+            ModifierScheme::MacDesktopBuild => mac_desktop,
+        };
+        let mask = if mac {
+            self.modifiers.mac
+        } else {
+            self.modifiers.other
+        };
+        format!("{}{}", modifier_label(mask), key_label(self.code))
+    }
+}
+
+/// Physical punctuation codes need their printed symbol in a key hint.
+fn key_label(code: &str) -> &str {
+    match code {
+        "Slash" => "/",
+        "Equal" => "+",
+        "Minus" => "−",
+        _ => code
+            .strip_prefix("Key")
+            .or_else(|| code.strip_prefix("Digit"))
+            .unwrap_or(code),
     }
 }
 
 /// Render a physical code or a generic number placeholder by the same rule.
 fn chord_label(code: &str, modifiers: ShortcutModifiers, mac_desktop: bool) -> String {
-    let key = code
-        .strip_prefix("Key")
-        .or_else(|| code.strip_prefix("Digit"))
-        .unwrap_or(code);
+    let key = key_label(code);
     let render = |mask| format!("{}{key}", modifier_label(mask));
     match modifiers.source {
         ModifierScheme::Platform => {
@@ -765,6 +803,33 @@ mod tests {
             );
             assert_eq!(definition.number_chord("1"), format!("{number_modifier}A"));
         }
+    }
+
+    /// Mac browsers must keep browser-safe number keys while OS-following keys
+    /// use Command. Test both independent facts rather than the test host's OS.
+    #[test]
+    fn client_labels_distinguish_platform_from_desktop_build() {
+        for mac_desktop in [false, true] {
+            for mac_platform in [false, true] {
+                let keys = TEMPLATE_SHORTCUTS;
+                assert_eq!(
+                    keys.bolt.label_for_client(mac_desktop, mac_platform),
+                    if mac_platform { "⌘P" } else { "Ctrl+Shift+P" }
+                );
+                assert_eq!(
+                    keys.prefix.label_for_client(mac_desktop, mac_platform),
+                    if mac_desktop { "⌘X" } else { "Ctrl+Shift+X" }
+                );
+            }
+        }
+        assert_eq!(
+            crate::keyboard_shortcuts::SMALLER_TEXT.label_for_client(false, true),
+            "⌘+Shift+−"
+        );
+        assert_eq!(
+            crate::keyboard_shortcuts::LARGER_TEXT.label_for_client(false, true),
+            "⌘+Shift++"
+        );
     }
 
     /// A sequence is one request: a stale middle binding must not launch the

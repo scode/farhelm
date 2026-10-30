@@ -2355,6 +2355,19 @@ browser console shortcut on Windows and Linux; Firefox documents Cmd+J as Downlo
 their own action. Browser shortcut lists do not establish whether the page receives the key; the desktop app is the
 guaranteed target.
 
+Cmd+/ on macOS, Ctrl+Shift+/ elsewhere, opens **Keyboard shortcuts** in the web UI and desktop app, including from a
+focused terminal. Matching uses the physical Slash key, with no extra modifiers; repeat and composition do not open it.
+The chord never reaches the terminal's program, and does nothing while another modal is open or before sign-in and
+preferences loading finish. The same dialog is available from the **?** menu when a browser keeps the chord for itself.
+Its Sessions, Launching and Terminal groups show every app-wide shortcut and the keys inside a quick-launch sequence,
+with action names beside key chips. New appears only in the Mac desktop app. Each shortcut shows only the form this
+client handles: quick switcher, template list, ⚡, terminal text size and this dialog follow the operating system, while
+New, Delete, Rename, number keys and the sequence prefix use Command only in the Mac desktop app. The dialog names the
+current ⚡ template, or says none is marked, and lists assigned number keys with their template names. It refreshes
+those shared bindings once each time it opens; a failed read keeps cached names. Keys used only inside other dialogs are
+omitted. Escape, Close or a click outside closes the ordinary modal and restores the opener's focus, including the
+terminal or the **?** button. The documentation's Keyboard shortcuts page lists both platform forms.
+
 The native desktop remembers its last ordinary window rectangle and whether it was maximized when it closed. On the next
 launch it restores that rectangle only when it fits on a currently connected display; otherwise it opens at a safe size
 centered on a current display. On Wayland, which does not expose reliable global window positions, Farhelm keeps a
@@ -3143,12 +3156,13 @@ the agent creates it.
 ## Feedback
 
 The host rail's foot has a **?** button below the settings gear, in the desktop app and the web UI alike. It opens a
-small menu with five items, in order: **Send feedback**, **Documentation**, **Release notes**, **SSH needs 2FA?** and
-**Welcome**. Documentation opens the docs site (`https://farhelm.io/docs/`) in the user's browser: a new tab from the
-web UI, the system browser from the desktop app. Release notes opens the general release notes page
+small menu with six items, in order: **Send feedback**, **Documentation**, **Keyboard shortcuts**, **Release notes**,
+**SSH needs 2FA?** and **Welcome**. Documentation opens the docs site (`https://farhelm.io/docs/`) in the user's
+browser: a new tab from the web UI, the system browser from the desktop app. Keyboard shortcuts opens the dialog
+described in [Desktop window chrome](#desktop-window-chrome). Release notes opens the general release notes page
 (`https://farhelm.io/docs/release-notes/`) the same way, whether or not an update is waiting. The installed desktop
-app's menu has a sixth item, **Check for updates** (see [Installation and updates](#installation-and-updates)). Welcome
-shows the welcome card again.
+app's menu has a seventh item, **Check for updates** (see [Installation and updates](#installation-and-updates)).
+Welcome shows the welcome card again.
 
 **SSH needs 2FA?** shows the two shell commands for each registered SSH host: **Sessions connection** and **Setup and
 updates connection**, each with a copy button. Run them on the helm's machine, as its user (on this Mac in the Mac app);
