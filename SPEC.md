@@ -831,13 +831,16 @@ agent choice is independent of that destination:
   Incompatible fields stay visible and prevent saving until corrected or removed. Saving is explicit; leaving an unsaved
   draft asks Keep editing, Discard, or Save in that reading order, with initial focus still on Save. Its shared header
   supplies Close; the complete editor keeps scrolling within the dialog, including its editor-local action footer.
-  Template names are unique; duplicate opens an unsaved copy with a free name. A workspace-trust field in an older
-  template remains readable but is ignored when applied and omitted on every save, including duplicate and delete undo.
-  Delete takes effect immediately and offers undo inside the dialog for about ten seconds; undo refuses if its old name
-  has been taken. For a stored template that fails current save rules, the control says "Delete permanently" before
-  deletion and no undo is offered. The label the user saw decides: a click on "Delete permanently" never offers undo,
-  and a click on plain "Delete" always does, even if the template list changed in between. Closing the dialog ends its
-  undo notice.
+  Template names are unique. Creating a template or renaming one refuses any whitespace in its name, including Unicode
+  whitespace; existing names with whitespace remain usable, save unchanged and retain delete undo. The agent's template
+  create command follows the same new-name rule. Duplicate opens an unsaved copy named `<name>-copy`, then
+  `<name>-copy-2` and so on until free, replacing whitespace in the source name with `-` in that suggestion. A
+  workspace-trust field in an older template remains readable but is ignored when applied and omitted on every save,
+  including duplicate and delete undo. Delete takes effect immediately and offers undo inside the dialog for about ten
+  seconds; undo refuses if its old name has been taken. For a stored template that fails current save rules, the control
+  says "Delete permanently" before deletion and no undo is offered. The label the user saw decides: a click on "Delete
+  permanently" never offers undo, and a click on plain "Delete" always does, even if the template list changed in
+  between. Closing the dialog ends its undo notice.
 - Quick launch: at most one saved template is marked with ⚡ in Templates. Cmd+P on macOS or Ctrl+Shift+P elsewhere
   starts it directly in the browser and desktop app when no dialog is open, without showing the launcher on success.
   While the session launcher is the only visible dialog, the same chord applies its template to that draft and leaves

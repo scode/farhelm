@@ -25,6 +25,71 @@ async function deleteTemplate(request: APIRequestContext, name: string) {
   expect(response.ok() || response.status() === 404, `deleting template ${name}`).toBe(true);
 }
 
+/** Names created now must be sequence words, while a historical spaced name
+ * remains saveable and undoable. The API seed represents stored legacy data;
+ * refusing it in the shared store would break that compatibility boundary. */
+test("template name whitespace is refused only for a new name", async ({ page, request }) => {
+  const stem = `name-words-${Date.now()}`;
+  const legacy = `${stem} old`;
+  const copy = `${stem}-old-copy`;
+  try {
+    await putTemplate(request, legacy, { kind: "agent", name: "before" });
+    expect((await storedTemplate(request, legacy)).name).toBe(legacy);
+    const dialog = await openTemplates(page);
+    await dialog.locator(".templates-row-name").getByText(legacy, { exact: true }).click();
+    await expect(dialog.locator(".templates-name")).toHaveValue(legacy);
+    await dialog.locator(".templates-session-name").fill("after");
+    await dialog.locator(".templates-save").click();
+    await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
+    expect((await storedTemplate(request, legacy)).fields.name).toBe("after");
+    await dialog.locator(".templates-name").fill(`${stem}\u00a0renamed`);
+    await dialog.locator(".templates-save").click();
+    await expect(dialog.locator(".templates-error").last()).toContainText("cannot contain whitespace");
+    expect(await storedTemplate(request, `${stem}\u00a0renamed`)).toBeUndefined();
+    await dialog.locator(".templates-name").fill(legacy);
+    await dialog.locator(".templates-delete:visible").click();
+    await expect(dialog.locator(".templates-undo")).toBeVisible();
+    expect(await storedTemplate(request, legacy)).toBeUndefined();
+    await dialog.locator(".templates-undo").click();
+    await expect(dialog.locator(".templates-row-name").getByText(legacy, { exact: true })).toBeVisible();
+    expect((await storedTemplate(request, legacy)).fields.name).toBe("after");
+    await dialog.locator(".templates-row-name").getByText(legacy, { exact: true }).click();
+    await dialog.locator(".templates-duplicate").click();
+    await expect(dialog.locator(".templates-name")).toHaveValue(copy);
+    await dialog.locator(".templates-name").fill(`${stem} new`);
+    await dialog.locator(".templates-save").click();
+    await expect(dialog.locator(".templates-error").last()).toContainText("cannot contain whitespace");
+    expect(await storedTemplate(request, `${stem} new`)).toBeUndefined();
+  } finally {
+    for (const name of [legacy, copy, `${stem}\u00a0renamed`, `${stem} new`]) await deleteTemplate(request, name);
+  }
+});
+
+/** Save as template is a distinct entry point: it must reject a spaced name
+ * before writing, preserve the launch draft, then accept a single-word name. */
+test("save as template requires a name without whitespace", async ({ page, request }) => {
+  const name = `save-word-${Date.now()}`;
+  try {
+    const form = await openNew(page);
+    await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
+    await form.locator(".launch-composer-save-template").click();
+    const panel = form.locator(".save-template-panel");
+    await expect(panel).toBeVisible();
+    await panel.locator(".save-template-name").fill(`${name}\u00a0bad`);
+    await panel.locator(".save-template-name").press("Enter");
+    await expect(panel.locator(".save-template-error")).toContainText("cannot contain whitespace");
+    expect(await storedTemplate(request, `${name}\u00a0bad`)).toBeUndefined();
+    await expect(form).toBeVisible();
+    await panel.locator(".save-template-name").fill(name);
+    await panel.locator(".save-template-name").press("Enter");
+    await expect(page.locator(".templates-dialog")).toBeVisible();
+    expect((await storedTemplate(request, name)).fields.agent).toBe("codex");
+  } finally {
+    await deleteTemplate(request, name);
+    await deleteTemplate(request, `${name}\u00a0bad`);
+  }
+});
+
 /** Older stored commands and session names must reach save validation unchanged. The current
  * API deliberately refuses these values, so the existing list interception
  * supplies an old-rules row; any attempted PUT is counted and refused.
@@ -1011,7 +1076,7 @@ for (const [trust, write] of [[true, "edit"], [false, "duplicate"], [null, "undo
   test(`old template trust ${trust} is ignored on launch and dropped on ${write}`, async ({ page, request }) => {
     const source = `legacy-trust-${write}-${Date.now()}`;
     const saved = `${source}-saved`;
-    const copy = `${source} copy`;
+    const copy = `${source}-copy`;
     const fields = { kind: "agent", agent: "codex", permissions: "guarded", destination: { folder: "/tmp" }, name: "legacy-template" };
     let legacyReads = 0;
     const writes: { name: string; fields: Record<string, unknown> }[] = [];
@@ -1641,7 +1706,7 @@ test("long summaries stay reachable and taken names refuse save and undo", async
  * successful save cannot immediately look dirty again. */
 test("session name kind survives duplicate and undo and base saves stay clean", async ({ page, request }, info) => {
   const name = `name-kind-${Date.now()}`;
-  const copy = `${name} copy`;
+  const copy = `${name}-copy`;
   try {
     await putTemplate(request, name, { kind: "agent", name: "review", name_kind: "fixed" });
     const dialog = await openTemplates(page);
@@ -1695,7 +1760,7 @@ test("session name kind survives duplicate and undo and base saves stay clean", 
 test("unsaved departures support keep editing, discard and save before leaving", async ({ page, request }) => {
   const name = `e2e-departure-${Date.now()}`;
   const other = `${name}-other`;
-  const copy = `${name} copy`;
+  const copy = `${name}-copy`;
   try {
     await putTemplate(request, name, { kind: "agent", name: "stored" });
     await putTemplate(request, other, { kind: "command", yolo: false });
