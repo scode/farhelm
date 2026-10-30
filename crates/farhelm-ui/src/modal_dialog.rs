@@ -492,6 +492,8 @@ pub(crate) fn ScrollRegion(
 /// Bind one scroll owner to one captured modal, retaining native root semantics.
 /// Body mode owns region attributes; root mode changes only tabindex, restoring
 /// -1 when ordinary controls return. No delayed operation queries a replacement.
+/// Deliberately focusing the root from a usable control ends recovery ownership;
+/// a root reached after a control is lost still serves as recovery's fallback.
 fn install_scroll_region(
     handle: DialogHandle,
     selector: Option<&str>,
@@ -576,7 +578,16 @@ fn install_scroll_region(
             }};
             state.schedule = schedule;
             const focus = event => {{
-                if (region.contains(event.target)) state.owned = true;
+                // The root is also an intentional container-Enter target. A
+                // move from a still-usable control to it is a fresh choice,
+                // unlike isolation parking focus after a control was lost.
+                if (event.target === dialog && chosenFocus(event.relatedTarget, dialog)) {{
+                    state.owned = false;
+                    if (state.recoveryFrame !== null) {{
+                        cancelAnimationFrame(state.recoveryFrame);
+                        state.recoveryFrame = null;
+                    }}
+                }} else if (region.contains(event.target)) state.owned = true;
                 // Isolation can park focus on the root after a loss; it is
                 // not an independent control that retires this body's claim.
                 else if (event.target !== dialog && event.target !== document.body
