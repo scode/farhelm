@@ -3192,3 +3192,32 @@ build preparation; the deterministic conversion failure does not depend on elaps
 Class: product
 
 Cause: established
+
+## 2026-10-30 — restart dialog root focus reclaimed by scroll recovery (e2e/tests/restart-with.spec.ts)
+
+`restart with keeps gap focus and container Enter uses its enabled action` failed all three WebKit attempts in
+`2489144b-0b4b-463c-9d6a-9029f0e05375`. Its passive browser timeline showed the form gaining focus after the YOLO
+choice, then Cancel gaining focus 27 ms later without another input action. The scroll region retained its recovery
+claim when focus deliberately moved from a usable control to the root, so later layout reconciliation mistook that
+choice for lost focus. Retiring that claim on the explicit transition preserves container Enter while retaining recovery
+after a disabled or removed control. The unchanged regression passed three times on each engine in
+`3cc496e5-536a-49fc-be5d-01afff8ff781`; its exclusion is removed with the fix.
+
+```text
+Locator: locator('.create-session-form[data-launcher-mode=restart]')
+Expected: focused
+Received: inactive
+Timeout: 5000ms
+```
+
+Evidence: shared x86_64 Linux, base `25afb5ac0c3a44ae1f5dd6790608d4199258741e` before the fix and save-deadline commit
+`b07b920880aa18d1847d1caf258c84c16164af4b` plus the modal change after it. Unrelated confirming-state fixture edits were
+dirty during validation. Three browser workers, one stack each, zero retries. Recorded tmux 3.7c SHA256
+`d60bcc711383c8282d560926854f2cb8d2d15e9af72641e1396e32f27af9a802`, locale C.UTF-8. The recorder scrubbed ambient
+`FARHELM_*`; child input was `FARHELM_TEST_TRACE_DIR`. Original traces and screenshots were preserved privately before
+another run; run UUIDs address temporary evidence which expires with cleanup. The same baseline passed the other seven
+selected browser cases three times each. No claim is made that those other exclusions are resolved.
+
+Class: product
+
+Cause: established

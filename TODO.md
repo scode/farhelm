@@ -325,13 +325,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   out twice and passing unchanged in 58.7 seconds. Cause unknown; the narrow timing margin is a hypothesis, not a
   diagnosed fix.
 
-- **Restart-with dialog loses focus in WebKit.**
-  `restart with keeps gap focus and container Enter uses its enabled action` in `e2e/tests/restart-with.spec.ts` failed
-  after the YOLO choice when `dialog.focus()` did not leave the dialog focused. The two-spec browser run
-  `ca41e45d-2ea0-486b-a8b1-7f1defad7146` passed the other 111 cases; the exact WebKit retry
-  `143efecd-81a2-4e44-8ba1-8275f8fdb7ed` passed unchanged. The Muse landing Decision records earlier occurrences too.
-  Cause unknown; preserve the focus assertion (FLAKES.md, 2026-10-29).
-
 - **Interrupted-card Replace clicks lost under load.** The WebKit test
   `don't ask again on a refused YOLO replace marks the host, then replaces with the override` in
   `e2e/tests/terminal-restart.spec.ts` failed in full browser run `49c74525-36ad-44e1-825b-878edadfd71c`: the Replace
