@@ -331,34 +331,58 @@ section exists, its latest entry must also be satisfied. Then close the plan per
 "Executing one plan" (steps 11 and 12): deliver its report through the queue script, write a closing entry in its log,
 and stop the watchdog. Never edit `plans/` yourself.
 
-## Blocked
+## Decisions
 
-Blocked while landing on 2026-10-30 (claim ed6af6).
+### 2026-10-30: answer to a blocked question
 
-### Landing stopped: Restart breaks for a session folder whose path contains `}`
+The question, as the executor put it:
 
-The landing monitor did not merge this plan; its PR (#2846) has not merged and main holds nothing of it. The plan could
-not find what terminated the command in the reported incident. It delivers the agreed fallback: terminal-tab cleanup now
-checks a pane's identity before it kills or relaunches anything, so a cleanup can no longer hit the wrong terminal, and
-the log now records enough to identify the cause if it happens again.
+> Blocked while landing on 2026-10-30 (claim ed6af6).
+>
+> ### Landing stopped: Restart breaks for a session folder whose path contains `}`
+>
+> The landing monitor did not merge this plan; its PR (#2846) has not merged and main holds nothing of it. The plan
+> could not find what terminated the command in the reported incident. It delivers the agreed fallback: terminal-tab
+> cleanup now checks a pane's identity before it kills or relaunches anything, so a cleanup can no longer hit the wrong
+> terminal, and the log now records enough to identify the cause if it happens again.
+>
+> A fresh-context review found one defect. To relaunch a session's terminal on an ordinary Restart, the supervisor now
+> hands tmux one command line inside another (an `if-shell`), and tmux parses that inner line itself. Its words are
+> quoted with a shell quoting function that leaves `{` and `}` unquoted, and the session's folder is one of those words;
+> tmux ends a word at an unquoted `}` and reports a syntax error. The reviewer confirmed that tmux rejects such a path
+> in exactly this position (a folder like `/x/a}b` gives "syntax error", while the single-quoted form works); nobody ran
+> a Restart against one. This is the path every plain Restart takes when the old terminal survives, for every agent.
+>
+> The checks found nothing else of this plan's. The whole Rust workspace (run `7ec0376d-1c10-4848-877a-ec3ea8d4c44c`)
+> failed only two tests that belong to another plan in the same round (command-shell-meaning); the UI's tests, its tests
+> with the desktop app's build options, and the JavaScript tests passed. The whole browser suite (run
+> `afafdf3a-2c2c-4d7f-8ef0-28e9e3706ad0`, both engines, 2839 passed, 11 failed) ran while the machine was heavily
+> loaded; none of its failures is in terminal-tab cleanup.
+>
+> ### What should happen to this plan?
+>
+> - **Send it back to its executor (recommended).** Answer with: quote every word of the nested relaunch command with an
+>   encoder that always single-quotes, add a regression test that restarts a session whose folder contains `}` against a
+>   real tmux, and run the supervisor's tests and the end-to-end Restart and terminal-tab tests.
+> - **Land it now and fix afterwards.** Main would carry a Restart that fails with a tmux syntax error for any session
+>   whose folder path contains `}`.
 
-A fresh-context review found one defect. To relaunch a session's terminal on an ordinary Restart, the supervisor now
-hands tmux one command line inside another (an `if-shell`), and tmux parses that inner line itself. Its words are quoted
-with a shell quoting function that leaves `{` and `}` unquoted, and the session's folder is one of those words; tmux
-ends a word at an unquoted `}` and reports a syntax error. The reviewer confirmed that tmux rejects such a path in
-exactly this position (a folder like `/x/a}b` gives "syntax error", while the single-quoted form works); nobody ran a
-Restart against one. This is the path every plain Restart takes when the old terminal survives, for every agent.
+The maintainer's answer:
 
-The checks found nothing else of this plan's. The whole Rust workspace (run `7ec0376d-1c10-4848-877a-ec3ea8d4c44c`)
-failed only two tests that belong to another plan in the same round (command-shell-meaning); the UI's tests, its tests
-with the desktop app's build options, and the JavaScript tests passed. The whole browser suite (run
-`afafdf3a-2c2c-4d7f-8ef0-28e9e3706ad0`, both engines, 2839 passed, 11 failed) ran while the machine was heavily loaded;
-none of its failures is in terminal-tab cleanup.
+Answered by the landing monitor on the maintainer's behalf under `plans/.agents/landing.md`, "Answering blocks", taking
+the block's recommendation: the defect has a clear fix within the plan. If the maintainer later decides otherwise, that
+is a follow-up, not a reason to stop this plan.
 
-### What should happen to this plan?
+Decision: send it back to its executor.
 
-- **Send it back to its executor (recommended).** Answer with: quote every word of the nested relaunch command with an
-  encoder that always single-quotes, add a regression test that restarts a session whose folder contains `}` against a
-  real tmux, and run the supervisor's tests and the end-to-end Restart and terminal-tab tests.
-- **Land it now and fix afterwards.** Main would carry a Restart that fails with a tmux syntax error for any session
-  whose folder path contains `}`.
+- Quote every word of the commands this plan nests inside tmux's `if-shell` (`crates/farhelm-supervisor/src/tmux.rs`)
+  with an encoder that always single-quotes, such as `farhelm_proto::text::shell_quote`: the relaunch command's
+  environment assignments (which can carry credentials), its working folder and its window command, and the window kill,
+  pane-death read and history-size read built into the same command string. Keep the credential scrubbing in logs
+  matching whatever the new quoting produces.
+- Add a regression test that restarts a session whose folder path contains `}` through the ordinary Restart relaunch
+  path, against a real tmux.
+- Run `cargo nextest run -p farhelm-supervisor` and the end-to-end Restart and terminal-tab modules of the `farhelm`
+  crate's `e2e` test binary, with the pinned tmux.
+
+No judgment call is made here, so no TODO entry is recorded.
