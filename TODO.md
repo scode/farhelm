@@ -28,7 +28,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   even when its layers are already in local storage. Investigate selecting an existing local image, using an OCI layout
   directory or reusing an imported image, including how changes to the supplied image, concurrent launches and cleanup
   work. The [measurements and investigation](https://snippets.scode.org/s/farhelm-podman-startup-performance/) compare
-  archive, layout-directory and local-image starts; measure full Farhelm launches too.
+  archive, layout-directory and local-image starts; measure full Farhelm launches too. Plan:
+  `plans/queue/podman-local-image.md`.
+
+- **Bootstrap a Podman image on a remote host.** Automatically bootstrap a Podman image on a remote host, with some
+  reasonable defaults, as a supported flow.
 
 - **Revisit the host rail's widened names taking no clicks.** Decided on the maintainer's behalf on 2026-10-29 when the
   host-short-names landing failed: the rail's widened part, which shows full host names over the session list, is
@@ -174,7 +178,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Containerized sessions: match the host account inside the container.** Consider running the agent with the same uid,
   user name and paths as the user's host account, so files, paths and tools look the same inside and out, instead of the
-  image's uid-1000 user.
+  image's uid-1000 user. Plan: `plans/queue/container-host-account.md`.
 
 - **Containerized sessions: Restart.** Containerized sessions cannot be restarted, because Farhelm captures no
   conversation inside the container; Replace starts over in a new container instead. Support Restart (and Restart with)
@@ -242,15 +246,15 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   subfolder of a repository, since only the folder itself is mounted.
 
 - **Show all keybindings with command-/.** Add a keybinding that shows every keyboard shortcut at a glance, so users can
-  discover them instead of having to remember them.
+  discover them instead of having to remember them. Plan: `plans/queue/shortcuts-overview.md`.
 
 - **Emacs-style quick launch by typed template names.** Add a quick launch that also supports typing template names
   separated by spaces, so `cmd+x myproject codex Enter` launches my project in Codex. Faster than `tl:...` in the
-  launcher.
+  launcher. Plan: `plans/queue/typed-quick-launch.md`.
 - **Fix the Settings gear icon's squished shape.** The gear glyph in `crates/farhelm-ui/src/icons.rs` (`SettingsIcon`)
   is drawn wider than tall — its outline spans x 0..14 but only y 2.2..13.5 inside the 16×16 viewBox — so it renders as
   an ellipse rather than a circle. Redraw the path so the silhouette is circular with evenly spaced teeth (equal
-  horizontal and vertical extent).
+  horizontal and vertical extent). Plan: `plans/queue/settings-gear-shape.md`.
 
 ## Doc todo
 
