@@ -751,24 +751,27 @@ agent choice is independent of that destination:
   AI-reviewer and sandbox safety checks, and Farhelm believes the statement. Farhelm never reads a command line to
   decide whether it is YOLO, what agent it runs, or how to resume it. A command launch may optionally declare the agent
   type it runs. A declared agent type requires `{farhelm_args}` as a whole argument exactly once in the command, which
-  marks where Farhelm places that agent type's own launch arguments (the conversation-reporting hook and the
-  instructions pointer, see Durability); it is replaced by nothing for an agent type that takes no such arguments, so
-  the rule never depends on which agent type was declared. `{farhelm_args}` without a declared agent type is refused.
-  Farhelm passes whatever turns its integration on as arguments, never through the environment: every process the agent
-  starts inherits the environment, including another agent of the same type that it shells out to, so a hook carried
-  there would reach runs that are not the session's. The environment carries only settings that Farhelm's own reporter
-  reads once an argument has turned it on, set on the launched process directly and never written into the command.
-  Declaring an agent type gives the session that agent type's status reading and conversation reporting. It also allows
-  opting into Resume, which requires a resume command containing `{conversation}` and `{farhelm_args}`, each as a whole
-  argument exactly once; Farhelm fills those and `{cwd}` in and otherwise runs the resume command as written.
-  `{conversation}` in the start command is refused. The one exception to "as written" in either command: Codex's
-  internal workspace-trust markers, `{codex:trusted-cwd}` and `{codex:untrusted-cwd}`, are filled wherever one stands as
-  a whole argument, exactly as in a composed Codex agent launch (see SPEC_impl.md). A command launch with no declared
-  agent type, or one that does not opt into Resume, can never be restarted (see Lifecycle operations). The YOLO
-  assertion covers the resume command too. Search while the command launch kind is active still offers agent types,
-  models, and recent setups, and accepting one switches to the agent launch kind; accepting a folder, host, or name
-  keeps the current launch kind, and a template keeps it unless the template sets one. The command tab's YOLO assertion,
-  declared agent type and Resume choice are set in that tab's own fields, not through search.
+  marks where Farhelm places that agent type's own launch integration arguments (including the conversation-reporting
+  hook, instructions pointer and Codex's `--no-daemon`, see Durability); it is replaced by nothing for an agent type
+  that takes no such arguments, so the rule never depends on which agent type was declared. `{farhelm_args}` without a
+  declared agent type is refused. Farhelm passes whatever turns its integration on as arguments, never through the
+  environment: every process the agent starts inherits the environment, including another agent of the same type that it
+  shells out to, so a hook carried there would reach runs that are not the session's. The environment carries only
+  settings that Farhelm's own reporter reads once an argument has turned it on, set on the launched process directly and
+  never written into the command. Declaring an agent type gives the session that agent type's status reading and
+  conversation reporting. It also allows opting into Resume, which requires a resume command containing `{conversation}`
+  and `{farhelm_args}`, each as a whole argument exactly once; Farhelm fills those and `{cwd}` in and otherwise runs the
+  resume command as written. Codex gets `--no-daemon` even with hooks off. A custom Codex command that puts
+  `{farhelm_args}` after `exec`, passes `--remote`, or runs `codex agents` or `codex queue` fails because Codex refuses
+  that flag there; Farhelm does not detect these incompatible commands. `{conversation}` in the start command is
+  refused. The one exception to "as written" in either command: Codex's internal workspace-trust markers,
+  `{codex:trusted-cwd}` and `{codex:untrusted-cwd}`, are filled wherever one stands as a whole argument, exactly as in a
+  composed Codex agent launch (see SPEC_impl.md). A command launch with no declared agent type, or one that does not opt
+  into Resume, can never be restarted (see Lifecycle operations). The YOLO assertion covers the resume command too.
+  Search while the command launch kind is active still offers agent types, models, and recent setups, and accepting one
+  switches to the agent launch kind; accepting a folder, host, or name keeps the current launch kind, and a template
+  keeps it unless the template sets one. The command tab's YOLO assertion, declared agent type and Resume choice are set
+  in that tab's own fields, not through search.
 - Launch templates: `tl:name` in the search box offers templates by name, and accepting one applies it. Applying a
   template makes the edits it contains, in the same way and with the same effects as making them by hand, in a fixed
   order: launch kind first, then agent type, then every other field. It can switch the launch kind, and choosing an
@@ -2563,6 +2566,9 @@ foreground conversation, so such a run can replace the session's Resume target. 
 Farhelm's reporter (passed on to it by a third-party extension, say) can replace or withdraw the session's Resume
 target.
 
+Farhelm-launched Codex sessions run without Codex's shared background server, so their commands keep the session's own
+environment and process tree. This applies even with conversation hooks off; legacy sessions keep their old injection.
+
 OMP (the `omp` program, the `@oh-my-pi/pi-coding-agent` CLI) is another report-only integration beside Pi. An OMP agent
 launch gets Farhelm's private extension, and so does a command launch that declares OMP, where its `{farhelm_args}`
 stands; Farhelm does not inspect the command to decide whether the extension fits, so a command declared as OMP that
@@ -2599,7 +2605,9 @@ its diagnostics in farhelm's own state directory, never in the user's session. T
 for — reading the vendor's payload and reporting the result — because that is the whole of what can hold the agent up;
 writing the diagnostic happens afterwards, is best-effort, and is not itself bounded. One accepted exception to the
 invisibility rule is a line the vendor itself prints because of a flag we pass (Codex's hook-trust warning), which must
-be documented.
+be documented. Another accepted limitation is a custom Codex command that cannot accept `--no-daemon` where it placed
+`{farhelm_args}` (see command launches): it fails visibly. Codex before 0.156.0 also refuses the flag; older harnesses
+follow the support window under "Supported user environments" rather than getting compatibility code.
 
 The other exception is farhelm's own, and it is deliberate rather than tolerated: on a launch that gets the hook, the
 hook prints exactly one line for the AGENT to read — that `$farhelm <request>` in the user's message means "use the

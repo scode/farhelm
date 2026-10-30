@@ -784,16 +784,3 @@ are not.
   the ntfy.sh entry under Near term.
 
 ## Unbucketized
-
-- **Check whether Codex sessions run their commands outside the session.** An unverified finding from planning
-  `prompt-running-agent` (2026-10-17). Since Codex 0.157, Codex's terminal app starts or attaches to one shared
-  background server per machine and runs its conversation there, unless it is launched with `--no-daemon`; Farhelm does
-  not pass that flag. Other tools that run Codex report that its tool commands then execute in that shared server's
-  environment rather than in the terminal they launched Codex from, which broke their per-session identity
-  (automatis-tools/agents-can-communicate#224, mvschwarz/openrig#69). If that holds for Farhelm, commands a Codex
-  session runs may not see the environment Farhelm sets up for the session (such as what the `farhelm` command inside a
-  session relies on to know which session is asking) and may run outside the session's processes, which Farhelm uses to
-  tell which session a process belongs to. Start by checking, on the installed Codex, whether a command run by a Codex
-  session that Farhelm launched sees the session's environment and runs under the session's processes, with and without
-  `--no-daemon`; then decide whether Farhelm should pass `--no-daemon` or otherwise adapt. Plan:
-  `plans/queue/codex-no-daemon.md`.

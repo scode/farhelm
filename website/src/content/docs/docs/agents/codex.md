@@ -10,6 +10,12 @@ specific to Codex.
 
 ## Gotchas and quirks
 
+- Farhelm passes `--no-daemon` so Codex runs its commands with your session's own environment and processes, even when
+  its conversation hook is off. It no longer shows Codex's "Running without the shared background server" warning. This
+  needs Codex 0.156.0 or later. A custom Codex command that puts `{farhelm_args}` after `exec`, passes `--remote`, or
+  runs `codex agents` or `codex queue` fails because those commands cannot take this flag. Sessions started before
+  Farhelm 0.22 from a typed command or profile retain their old behavior; recreating one through **Replace with** gives
+  it the current launch arguments.
 - Guarded passes `-a on-request -s workspace-write`, so Codex works within its workspace sandbox and requests approval
   to step outside it. Your configured reviewer can decide those requests, and your sandbox settings or later mode
   switches can loosen the mode. See [Permission modes](/docs/agents/#permission-modes).
