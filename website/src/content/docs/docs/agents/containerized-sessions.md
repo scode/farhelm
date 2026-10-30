@@ -42,17 +42,33 @@ Farhelm never imports, pulls, tags or removes images.
 
 The image needs:
 
-- A user with UID and GID 1000, with a usable home directory. Farhelm maps that user to your host account, so files it
-  writes in the checkout belong to you.
-- The agent programs and any [wrapper](/docs/agents/agent-wrappers/) you use on that user's `PATH`, with their
-  configuration in that user's home. Configure the agent to use your API proxy at `127.0.0.1:<port>` inside the
-  container.
+- The agent programs and any [wrapper](/docs/agents/agent-wrappers/) you use available to the account Farhelm chooses
+  below, with their configuration ready for that account. Configure the agent to use your API proxy at
+  `127.0.0.1:<port>` inside the container.
+- Ubuntu's normal account tools (`useradd` and `groupadd`) and `/etc/skel` for creating a home when the image does not
+  already have a suitable account.
 - `bash` for terminal tabs and `sleep` for keeping the container running between commands.
 - `git` and, if you want GitHub access, `gh`. Configure Git to use `GH_TOKEN`, for example with `gh auth setup-git` in
   the image.
 
-You may include `sudo`; Podman's default privileges inside the container are retained. Keep host credentials out of the
-image unless you intend every agent using it to have them.
+Farhelm tries to match your host account's name, numeric user and group IDs, and home path. It checks the image before
+mounting the checkout and chooses the account in this order:
+
+1. If neither your user name nor your user ID exists in the image, Farhelm creates your account there and seeds its home
+   from `/etc/skel`.
+2. Otherwise, if your host home path already exists in the image as a directory owned by a non-root account, use that
+   account with that directory as its home.
+3. Otherwise, if your user ID exists in the image, use that account and its home.
+
+For example, a host account with user ID 1000 and a stock Ubuntu image still uses `ubuntu` and `/home/ubuntu` if the
+host home path is absent from the image. A different host user ID gets a new account when neither its name nor ID
+exists. An image prepared only for its user-1000 account may then lack the agent, its configuration or `sudo` access for
+the new account. Install agents system-wide and put default home configuration in `/etc/skel`, or prepare your own
+account and home in the image. Farhelm maps whichever account it chooses to your host account, so checkout files it
+writes still belong to you. Existing containers keep their account until you replace them.
+
+You may include `sudo` and configure access for the account the session uses; Podman's default privileges inside the
+container are retained. Keep host credentials out of the image unless you intend every agent using it to have them.
 
 Farhelm does not run the image's usual startup command (`ENTRYPOINT` or `CMD`). Agent configuration and executable paths
 must already be ready in the image, rather than set up by that command.
@@ -82,8 +98,9 @@ launching, edit the template, or use **Replace with** to choose an image for an 
 ## Working inside the container
 
 The managed checkout is the only host directory Farhelm mounts, read-write, at the same absolute path on both sides. The
-agent and terminal tabs work there. Programs and configuration elsewhere come from the image. A terminal file link is
-offered only when its destination stays inside the checkout, including after following symlinks.
+agent and terminal tabs work there, using the same container account and `HOME`. Your host home directory is not
+mounted; programs and configuration elsewhere come from the image. A terminal file link is offered only when its
+destination stays inside the checkout, including after following symlinks.
 
 Printed paths and file hyperlinks supplied by terminal programs follow the same checkout boundary, including filenames
 containing spaces in an explicit hyperlink. Web hyperlinks remain available.

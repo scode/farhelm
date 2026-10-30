@@ -14,6 +14,9 @@ use std::time::Duration;
 
 use crate::launch::PreparationLock;
 
+mod account;
+pub use account::HostAccount;
+
 /// Everything the terminal shim needs, excluding the optional token's contents.
 /// The creator argv uses absolute host executables and a separately scoped helper;
 /// the agent itself is always an exec inside the resulting container.
@@ -42,6 +45,10 @@ pub struct ContainerRuntime {
 struct CreationTicket {
     runtime: ContainerRuntime,
     checkout_root: PathBuf,
+    /// Older tickets predate account selection. Their delayed helpers still use
+    /// the current host database, never ambient shell identity.
+    #[serde(default)]
+    host_account: Option<HostAccount>,
 }
 
 /// Reuse the session UUID without matching the numeric agent or tab scope globs.
@@ -208,6 +215,36 @@ impl ContainerRuntime {
             .join(format!("{}.json", self.session_id))
     }
 
+    /// A negative fence survives a creator crash or unconfirmed rollback. It
+    /// stores no account choice; its presence only denies starting partial state.
+    fn initialization_path(&self) -> PathBuf {
+        self.state_dir
+            .join("container-launch")
+            .join(format!("{}.initializing", self.session_id))
+    }
+
+    /// Every readiness ingress checks this while holding the creation flock.
+    /// Unknown filesystem state denies readiness just as a present marker does.
+    fn require_initialized(&self) -> anyhow::Result<()> {
+        match std::fs::symlink_metadata(self.initialization_path()) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error).context("could not check container initialization"),
+            Ok(_) => bail!(
+                "container initialization did not complete; delete or replace this session before trying again"
+            ),
+        }
+    }
+
+    /// Only confirmed readiness or confirmed absence releases the negative fence.
+    /// A failed unlink leaves the session unusable rather than guessing it ready.
+    fn clear_initialization(&self) -> anyhow::Result<()> {
+        match std::fs::remove_file(self.initialization_path()) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error).context("could not clear the container initialization fence"),
+        }
+    }
+
     /// Acquire without an abandoned blocking waiter. The caller already owns the
     /// ordinary lifecycle claim; expiry changes no permit and sends no signals.
     pub(crate) async fn acquire(&self) -> anyhow::Result<ContainerGuard<'_>> {
@@ -290,7 +327,12 @@ impl ContainerRuntime {
 
     /// Select the keeper independently of the image's ENTRYPOINT/CMD. Only the
     /// fenced creator may execute this command; constructing it acquires no permit.
-    fn create_command(&self, checkout_root: &Path) -> anyhow::Result<Command> {
+    fn create_command(
+        &self,
+        checkout_root: &Path,
+        account: &HostAccount,
+        image: &str,
+    ) -> anyhow::Result<Command> {
         self.config.validate().map_err(anyhow::Error::msg)?;
         require_image(&self.config)?;
         let mut command = control_command(&self.podman);
@@ -302,7 +344,18 @@ impl ContainerRuntime {
                 "--init",
                 "--name",
                 &self.name()?,
-                "--userns=keep-id:uid=1000,gid=1000",
+                &format!("--userns=keep-id:uid={},gid={}", account.uid, account.gid),
+                "--passwd=false",
+                "--user",
+                &format!("{}:{}", account.uid, account.gid),
+                "--env",
+                &format!(
+                    "HOME={}",
+                    account
+                        .home
+                        .to_str()
+                        .context("container home is not UTF-8")?
+                ),
                 "--network",
                 &format!("pasta:-T,{}", self.config.api_proxy_port),
                 "--entrypoint",
@@ -322,7 +375,7 @@ impl ContainerRuntime {
             ))
             .arg("--workdir")
             .arg(&self.cwd)
-            .arg(&self.config.image)
+            .arg(image)
             .args(["-c", "while :; do sleep 3600; done"])
             .stdin(Stdio::null());
         Ok(command)
@@ -365,7 +418,7 @@ impl ContainerGuard<'_> {
         let name = self.runtime.name()?;
         let _ = self.runtime.run(&["rm", "-f", "--ignore", &name]).await;
         match self.runtime.state().await? {
-            None => Ok(()),
+            None => self.runtime.clear_initialization(),
             Some(state) => {
                 bail!("container removal could not be confirmed: podman reports {state}")
             }
@@ -379,6 +432,7 @@ impl ContainerGuard<'_> {
         scopes: &crate::scope::ScopeManager,
     ) -> anyhow::Result<()> {
         use crate::bounded_command::{Ended, GroupChild, OutputCaps};
+        self.runtime.require_initialized()?;
         match self.runtime.state().await? {
             Some(state) if state == "running" => return Ok(()),
             None => bail!("this session's container does not exist; replace or delete the session"),
@@ -436,10 +490,12 @@ impl ContainerLaunch {
     pub(crate) async fn publish(
         runtime: ContainerRuntime,
         checkout_root: PathBuf,
+        host_account: HostAccount,
         helper: &Path,
         scopes: &crate::scope::ScopeManager,
     ) -> anyhow::Result<Self> {
         use std::os::unix::fs::DirBuilderExt;
+        host_account.validate()?;
         std::fs::DirBuilder::new()
             .recursive(true)
             .mode(0o700)
@@ -450,6 +506,7 @@ impl ContainerLaunch {
             &serde_json::to_vec(&CreationTicket {
                 runtime: runtime.clone(),
                 checkout_root,
+                host_account: Some(host_account),
             })?,
             &crate::files::RealFs,
         )?;
@@ -471,6 +528,12 @@ impl ContainerLaunch {
     /// Keep container creation diagnostics in the pane. The actual helper, not this shim,
     /// holds the lock and ignores terminal hangup while its Podman child completes.
     pub(crate) fn prepare(&self) -> anyhow::Result<()> {
+        // A running keeper is not ready while account setup is unfinished. This
+        // fast path shares the helper's flock so it cannot bypass the negative
+        // fence between the readiness check and the helper's success publication.
+        let lock = PreparationLock::open(&self.runtime.lock_path())?;
+        lock.acquire()?;
+        self.runtime.require_initialized()?;
         // A live container already owns this dedicated scope. Reusing its name
         // would make systemd-run refuse before Podman could report its no-op start.
         let running = control_command(&self.runtime.podman)
@@ -480,6 +543,7 @@ impl ContainerLaunch {
         if running.status.success() && running.stdout == b"running\n" {
             return Ok(());
         }
+        drop(lock);
         let creator = self
             .creator
             .first()
@@ -516,6 +580,7 @@ pub fn prepare(ticket: &Path, generation: i64) -> anyhow::Result<()> {
         "this container creation was superseded"
     );
     let name = runtime.name()?;
+    runtime.require_initialized()?;
     // Only this initial helper may create. Later tab opens may start an existing
     // container but never turn missing state into a fresh session silently.
     let exists = control_command(&runtime.podman)
@@ -534,16 +599,56 @@ pub fn prepare(ticket: &Path, generation: i64) -> anyhow::Result<()> {
             exists.code() == Some(1),
             "could not inspect container existence"
         );
-        let status = runtime.create_command(&ticket.checkout_root)?.status()?;
-        anyhow::ensure!(status.success(), "podman could not create the container");
+        runtime.config.validate().map_err(anyhow::Error::msg)?;
+        require_image(&runtime.config)?;
+        let host = match ticket.host_account {
+            Some(host) => host,
+            None => HostAccount::current()?,
+        };
+        let image = runtime.image_id()?;
+        let choice = runtime.choose_account(&host, &image)?;
+        crate::files::write_durable_sync(
+            &runtime.initialization_path(),
+            b"pending\n",
+            &crate::files::RealFs,
+        )
+        .context("could not fence container account initialization")?;
+        // Once run may have allocated state, every failure must prove removal
+        // before returning. Keeping the flock through that confirmation prevents
+        // a retry from starting a half-initialized account configuration.
+        let created = (|| -> anyhow::Result<()> {
+            let status = runtime
+                .create_command(&ticket.checkout_root, &choice.account, &image)?
+                .status()?;
+            anyhow::ensure!(
+                status.success(),
+                "podman could not create the container (the selected uid/gid may be outside the available keep-id mapping)"
+            );
+            runtime.initialize_account(&choice, &ticket.checkout_root)?;
+            confirm_running(&runtime, &name)?;
+            runtime.clear_initialization()
+        })();
+        if let Err(error) = created {
+            remove_failed_creation(&runtime, &name).with_context(|| {
+                format!("container creation failed ({error:#}); cleanup is unconfirmed")
+            })?;
+            return Err(error);
+        }
+        return Ok(());
     }
+    confirm_running(&runtime, &name)
+}
+
+/// A successful create/start exit is not evidence that the keeper survived.
+/// New-container callers route this failure through fenced removal as well.
+fn confirm_running(runtime: &ContainerRuntime, name: &str) -> anyhow::Result<()> {
     let output = control_command(&runtime.podman)
         .args([
             "container",
             "inspect",
             "--format",
             "{{.State.Status}}",
-            &name,
+            name,
         ])
         .output()?;
     anyhow::ensure!(
@@ -551,6 +656,28 @@ pub fn prepare(ticket: &Path, generation: i64) -> anyhow::Result<()> {
         "container preparation did not confirm a running container"
     );
     Ok(())
+}
+
+/// Removal's exit status is advisory; only exists=1 establishes that a failed
+/// creation left no state which the next ticket could accidentally start.
+fn remove_failed_creation(runtime: &ContainerRuntime, name: &str) -> anyhow::Result<()> {
+    let removal = control_command(&runtime.podman)
+        .args(["rm", "-f", "--ignore", name])
+        .output();
+    let absent = control_command(&runtime.podman)
+        .args(["container", "exists", name])
+        .output()
+        .context("could not confirm removal after failed container creation")?;
+    anyhow::ensure!(
+        absent.status.code() == Some(1),
+        "failed container removal was not confirmed (remove: {}; inspect: {})",
+        match removal {
+            Ok(output) => String::from_utf8_lossy(&output.stderr).into_owned(),
+            Err(error) => error.to_string(),
+        },
+        String::from_utf8_lossy(&absent.stderr)
+    );
+    runtime.clear_initialization()
 }
 
 #[cfg(test)]
@@ -577,6 +704,17 @@ mod tests {
         };
         std::fs::create_dir(root.path().join("container-launch")).unwrap();
         (root, runtime)
+    }
+
+    /// Command and creator-fence tests need a stable account, not the real
+    /// runner's name, uid or home. The fake image deliberately contains this uid.
+    fn host_account() -> HostAccount {
+        HostAccount {
+            name: "fixture".into(),
+            uid: 1000,
+            gid: 1000,
+            home: "/home/fixture".into(),
+        }
     }
 
     /// Admission distinguishes a missing local image from a storage failure and
@@ -625,7 +763,7 @@ mod tests {
         assert!(!args.exists(), "empty images refuse before Podman runs");
         assert!(
             runtime
-                .create_command(&runtime.cwd)
+                .create_command(&runtime.cwd, &host_account(), &runtime.config.image)
                 .unwrap_err()
                 .to_string()
                 .contains("image is required")
@@ -639,6 +777,7 @@ mod tests {
         let (_root, runtime) = fixture();
         let mut ticket = serde_json::to_value(CreationTicket {
             checkout_root: runtime.cwd.clone(),
+            host_account: Some(host_account()),
             runtime,
         })
         .unwrap();
@@ -652,7 +791,11 @@ mod tests {
         assert!(
             ticket
                 .runtime
-                .create_command(&ticket.checkout_root)
+                .create_command(
+                    &ticket.checkout_root,
+                    &host_account(),
+                    &ticket.runtime.config.image
+                )
                 .is_err()
         );
     }
@@ -692,19 +835,28 @@ mod tests {
         assert!(runtime.exec_command(&["bash".into()]).is_err());
     }
 
-    /// Bash words after an image only replace CMD; an image ENTRYPOINT would
-    /// still intercept them. Explicit entrypoint selection keeps the container's
-    /// lifetime independent of whatever program the user normally starts there.
+    /// The keeper ignores image ENTRYPOINT/CMD, while its configured identity and
+    /// HOME become every exec's defaults. Other image environment remains intact.
     #[test]
-    fn keeper_overrides_the_image_entrypoint_without_replacing_its_environment() {
+    fn keeper_sets_account_and_home_without_replacing_the_image_environment() {
         let (_root, runtime) = fixture();
-        let command = runtime.create_command(&runtime.cwd).unwrap();
+        let account = HostAccount {
+            name: "prepared".into(),
+            uid: 2345,
+            gid: 3456,
+            home: "/home/prepared account".into(),
+        };
+        let command = runtime
+            .create_command(&runtime.cwd, &account, &runtime.config.image)
+            .unwrap();
         let args: Vec<_> = command
             .get_args()
             .map(|arg| arg.to_str().unwrap())
             .collect();
         assert!(args.windows(2).any(|args| args == ["--entrypoint", "bash"]));
-        assert!(args.contains(&"--userns=keep-id:uid=1000,gid=1000"));
+        assert!(args.contains(&"--userns=keep-id:uid=2345,gid=3456"));
+        assert!(args.contains(&"--passwd=false"));
+        assert!(args.windows(2).any(|args| args == ["--user", "2345:3456"]));
         assert!(args.contains(&"--pull=never"));
         assert_eq!(
             &args[args.len() - 3..],
@@ -715,9 +867,110 @@ mod tests {
             ]
         );
         assert!(
-            !args.contains(&"--env"),
-            "the keeper uses the image's environment"
+            args.windows(2)
+                .any(|args| args == ["--env", "HOME=/home/prepared account"])
         );
+        assert_eq!(args.iter().filter(|arg| **arg == "--env").count(), 1);
+    }
+
+    /// Account inspection must precede all checkout mounts: otherwise Podman's
+    /// newly created home parents can make the home-owner rule select the wrong
+    /// account. The fake records actual child argv, including a literal home.
+    #[test]
+    fn account_inspection_has_no_mount_workdir_or_keep_id_mapping() {
+        let (root, runtime) = fixture();
+        let args_path = root.path().join("args");
+        std::fs::write(&runtime.podman, format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > {}\nprintf 'ubuntu:x:1000:1000::/home/ubuntu:/bin/bash\\n\\000ubuntu:x:1000:\\n\\000missing\\n\\000yes\\n'\n",
+            shell_words::quote(args_path.to_str().unwrap())
+        )).unwrap();
+        std::fs::set_permissions(&runtime.podman, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let choice = runtime
+            .choose_account(&host_account(), &runtime.config.image)
+            .unwrap();
+        assert_eq!(choice.account.name, "ubuntu");
+        let text = std::fs::read_to_string(args_path).unwrap();
+        let args: Vec<_> = text.lines().collect();
+        assert!(args.windows(2).any(|args| args == ["--network", "none"]));
+        assert!(args.windows(2).any(|args| args == ["--user", "0:0"]));
+        assert!(args.contains(&"--pull=never"));
+        assert!(!args.iter().any(|arg| arg.starts_with("--mount")
+            || arg.starts_with("--workdir")
+            || arg.starts_with("--userns")));
+        assert_eq!(args.last(), Some(&"/home/fixture"));
+    }
+
+    /// An image name can be retagged after inspection. Both runs must retain the
+    /// first resolved ID; a second resolution or a keeper using the name would
+    /// select different contents and invalidate the account decision.
+    #[farhelm_testtrace::test]
+    async fn creator_uses_one_resolved_image_across_a_retag() {
+        let (_root, runtime) = fixture();
+        let quote = |name: &str| {
+            shell_words::quote(runtime.state_dir.join(name).to_str().unwrap()).into_owned()
+        };
+        let first = "1".repeat(64);
+        let second = "2".repeat(64);
+        let script = format!(
+            r#"#!/bin/sh
+case "$1 $2" in
+'container exists') test -f {state};;
+'image inspect') echo resolve >> {calls}; if test -f {retag}; then echo {second}; else echo {first}; fi;;
+'run --rm')
+    for arg do test "$arg" != {first} || echo "$arg" >> {images}; done
+    touch {retag}
+    printf 'ubuntu:x:1000:1000::/home/ubuntu:/bin/bash\n\000ubuntu:x:1000:\n\000missing\n\000yes\n';;
+'run -d')
+    matched=no
+    for arg do if test "$arg" = {first}; then matched=yes; echo "$arg" >> {images}; fi; done
+    test "$matched" = yes || exit 42
+    touch {state};;
+'container inspect') echo running;;
+'rm -f') rm -f {state};;
+esac
+"#,
+            state = quote("state"),
+            calls = quote("calls"),
+            retag = quote("retag"),
+            images = quote("images")
+        );
+        std::fs::write(&runtime.podman, script).unwrap();
+        std::fs::set_permissions(&runtime.podman, std::fs::Permissions::from_mode(0o700)).unwrap();
+        write_ticket(&runtime);
+        let mut creator = child(&runtime);
+        assert!(wait_child(&mut creator).await);
+        assert!(runtime.state_dir.join("retag").exists());
+        assert_eq!(
+            std::fs::read_to_string(runtime.state_dir.join("calls")).unwrap(),
+            "resolve\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(runtime.state_dir.join("images")).unwrap(),
+            format!("{first}\n{first}\n")
+        );
+    }
+
+    /// Accept only Podman's complete content ID, never an empty, truncated or
+    /// multi-line value which could silently act as another mutable image name.
+    #[test]
+    fn image_resolution_requires_a_full_content_id() {
+        let (_root, runtime) = fixture();
+        for (id, valid) in [
+            ("1".repeat(64), true),
+            (format!("sha256:{}", "a".repeat(64)), true),
+            ("short".into(), false),
+            ("".into(), false),
+            (format!("{}\nextra", "1".repeat(64)), false),
+        ] {
+            std::fs::write(
+                &runtime.podman,
+                format!("#!/bin/sh\nprintf '%s\\n' {}\n", shell_words::quote(&id)),
+            )
+            .unwrap();
+            std::fs::set_permissions(&runtime.podman, std::fs::Permissions::from_mode(0o700))
+                .unwrap();
+            assert_eq!(runtime.image_id().is_ok(), valid, "{id:?}");
+        }
     }
 
     /// Timing out on a creator's lock must not revoke its permit or leave a
@@ -861,11 +1114,12 @@ mod tests {
         assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0);
         let quote = |name: &str| shell_words::quote(root.join(name).to_str().unwrap()).into_owned();
         let script = format!(
-            "#!/bin/sh\ncase \"$1 $2\" in\n'container exists') test -f {};;\n'container inspect') cat {};;\n'run -d') touch {}; read -r ready < {}; echo running > {};;\nesac\n",
+            "#!/bin/sh\ncase \"$1 $2\" in\n'image inspect') printf '%064d\\n' 1;;\n'container exists') test -f {};;\n'container inspect') cat {};;\n'run --rm') printf 'ubuntu:x:1000:1000::/home/ubuntu:/bin/bash\\n\\000ubuntu:x:1000:\\n\\000missing\\n\\000yes\\n';;\n'run -d') touch {}; read -r ready < {}; echo running > {};;\n'rm -f') rm -f {};;\nesac\n",
             quote("state"),
             quote("state"),
             quote("entered"),
             quote("gate"),
+            quote("state"),
             quote("state")
         );
         std::fs::write(&runtime.podman, script).unwrap();
@@ -882,6 +1136,7 @@ mod tests {
             serde_json::to_vec(&CreationTicket {
                 runtime: runtime.clone(),
                 checkout_root: runtime.cwd.clone(),
+                host_account: Some(host_account()),
             })
             .unwrap(),
         )
@@ -958,5 +1213,138 @@ mod tests {
         assert!(!wait_child(&mut child).await);
         assert!(!runtime.state_dir.join("entered").exists());
         assert!(!runtime.state_dir.join("state").exists());
+    }
+
+    /// Every failure after run may have allocated a container, including run's
+    /// own nonzero exit. Removal is confirmed under the same fence before retry
+    /// can observe existing state; rm's exit alone is deliberately insufficient.
+    #[farhelm_testtrace::test]
+    async fn failed_creation_removes_partial_state_and_confirms_absence() {
+        for failure in ["run", "initialize", "inspect"] {
+            let (_root, runtime) = fixture();
+            let quote = |name: &str| {
+                shell_words::quote(runtime.state_dir.join(name).to_str().unwrap()).into_owned()
+            };
+            let script = format!(
+                r#"#!/bin/sh
+case "$1 $2" in
+'image inspect') printf '%064d\n' 1;;
+'container exists') echo exists >> {calls}; test -f {state};;
+'run --rm') echo image >> {calls}; printf 'ubuntu:x:1000:1000::/home/ubuntu:/bin/bash\n\000ubuntu:x:1000:\n\000missing\n\000yes\n';;
+'run -d') echo run >> {calls}; touch {state}; test '{failure}' != run;;
+'exec --user') echo initialize >> {calls}; test '{failure}' != initialize;;
+'container inspect') echo inspect >> {calls}; test '{failure}' != inspect && echo running;;
+'rm -f') echo remove >> {calls}; rm -f {state}; exit 125;;
+esac
+"#,
+                calls = quote("calls"),
+                state = quote("state")
+            );
+            std::fs::write(&runtime.podman, script).unwrap();
+            std::fs::set_permissions(&runtime.podman, std::fs::Permissions::from_mode(0o700))
+                .unwrap();
+            write_ticket(&runtime);
+            let mut creator = child(&runtime);
+            assert!(
+                !wait_child(&mut creator).await,
+                "{failure} must refuse preparation"
+            );
+            assert!(
+                !runtime.state_dir.join("state").exists(),
+                "{failure} retained a partial container"
+            );
+            assert!(
+                !runtime.initialization_path().exists(),
+                "confirmed absence must clear the negative fence"
+            );
+            let calls = std::fs::read_to_string(runtime.state_dir.join("calls")).unwrap();
+            assert!(calls.ends_with("remove\nexists\n"), "{calls}");
+            let guard = runtime.acquire().await.unwrap();
+            guard.revoke().unwrap();
+        }
+    }
+
+    /// A successful rm that leaves state behind is still a failed rollback.
+    /// Retaining that ownership is what lets Stop/Delete retry rather than treating
+    /// the creation as safely absent and forgetting the container.
+    #[test]
+    fn failed_creation_cleanup_rejects_unconfirmed_absence() {
+        let (_root, runtime) = fixture();
+        std::fs::write(runtime.initialization_path(), b"pending\n").unwrap();
+        std::fs::write(&runtime.podman, "#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::set_permissions(&runtime.podman, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(
+            remove_failed_creation(&runtime, &runtime.name().unwrap())
+                .unwrap_err()
+                .to_string()
+                .contains("not confirmed")
+        );
+        assert!(
+            runtime.initialization_path().exists(),
+            "unconfirmed absence must retain the negative fence"
+        );
+    }
+
+    /// A retained pending marker denies every path that might otherwise treat a
+    /// running keeper as ready: delayed helper, launch fast path and tab restart.
+    /// These checks happen before any Podman command can start partial state.
+    #[farhelm_testtrace::test]
+    async fn incomplete_initialization_blocks_all_readiness_ingresses() {
+        let (_root, runtime) = fixture();
+        let entered = runtime.state_dir.join("entered");
+        std::fs::write(
+            &runtime.podman,
+            format!(
+                "#!/bin/sh\ntouch {}\necho running\n",
+                shell_words::quote(entered.to_str().unwrap())
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&runtime.podman, std::fs::Permissions::from_mode(0o700)).unwrap();
+        write_ticket(&runtime);
+        std::fs::write(runtime.initialization_path(), b"pending\n").unwrap();
+        let mut creator = child(&runtime);
+        assert!(!wait_child(&mut creator).await);
+        let launch = ContainerLaunch {
+            runtime: runtime.clone(),
+            creator: vec!["unused".into()],
+        };
+        assert!(
+            launch
+                .prepare()
+                .unwrap_err()
+                .to_string()
+                .contains("initialization did not complete")
+        );
+        let guard = runtime.acquire().await.unwrap();
+        assert!(
+            guard
+                .start_existing(&crate::scope::ScopeManager::disabled())
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("initialization did not complete")
+        );
+        assert!(
+            !entered.exists(),
+            "a pending account must never reach Podman readiness/start"
+        );
+    }
+
+    /// Delete can retire a crashed creator's negative fence only after Podman
+    /// confirms absence. An existing container keeps both fence and ownership.
+    #[farhelm_testtrace::test]
+    async fn guard_removal_clears_initialization_only_after_confirmed_absence() {
+        for absent in [false, true] {
+            let (_root, runtime) = fixture();
+            std::fs::write(runtime.initialization_path(), b"pending\n").unwrap();
+            let code = if absent { 1 } else { 0 };
+            std::fs::write(&runtime.podman, format!("#!/bin/sh\ncase \"$1 $2\" in\n'container exists') exit {code};;\n'container inspect') echo running;;\nesac\n")).unwrap();
+            std::fs::set_permissions(&runtime.podman, std::fs::Permissions::from_mode(0o700))
+                .unwrap();
+            let guard = runtime.acquire().await.unwrap();
+            assert_eq!(guard.remove().await.is_ok(), absent);
+            assert_eq!(runtime.initialization_path().exists(), !absent);
+        }
     }
 }

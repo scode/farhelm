@@ -883,6 +883,11 @@ pub struct SupervisorSeams {
     /// supervisor that resolves to nothing refuses `~` creates with a
     /// clear error rather than guessing.
     pub user_home: Option<PathBuf>,
+    /// Image-account tests supply a host identity without changing process-wide
+    /// USER/HOME or needing custom images. Production always reads getpwuid_r;
+    /// only the creation ticket carries this value, never stored exec state.
+    #[cfg(any(test, feature = "test-seams"))]
+    pub container_host_account: Option<crate::container::HostAccount>,
     /// How often the supervisor's own periodic task fires — see
     /// [`crate::service::ticker`] for what rides that cadence and
     /// [`TICKER_INTERVAL`] for why production picks the value it does.
@@ -1059,6 +1064,8 @@ impl Default for SupervisorSeams {
             agent_instructions: crate::agent_kind::AgentInstructions::default(),
             faults: FaultHooks::default(),
             user_home: None,
+            #[cfg(any(test, feature = "test-seams"))]
+            container_host_account: None,
             ticker_interval: TICKER_INTERVAL,
             activity_quantum: ACTIVITY_STAMP_QUANTUM,
             work_start_clock: Arc::new(work_start_now),
@@ -14964,10 +14971,24 @@ impl Supervisor {
                     cwd: cwd.into(),
                     state_dir: self.state_dir.clone(),
                 };
+                #[cfg(any(test, feature = "test-seams"))]
+                let host_account = self.seams.container_host_account.clone();
+                #[cfg(not(any(test, feature = "test-seams")))]
+                let host_account: Option<crate::container::HostAccount> = None;
+                // NSS may consult a remote database. Keep that synchronous C
+                // lookup off the runtime worker that drives session lifecycle.
+                let host_account = match host_account {
+                    Some(account) => account,
+                    None => tokio::task::spawn_blocking(crate::container::HostAccount::current)
+                        .await
+                        .map_err(|error| SpawnFailure::Spec(anyhow::anyhow!(error)))?
+                        .map_err(SpawnFailure::Spec)?,
+                };
                 Some(
                     crate::container::ContainerLaunch::publish(
                         runtime,
                         checkout_root,
+                        host_account,
                         &self.session_farhelm_exe,
                         &self.seams.scopes,
                     )
