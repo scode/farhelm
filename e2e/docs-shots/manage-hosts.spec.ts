@@ -6,7 +6,7 @@
  * renamed, updated, or removed, and no setting changes.
  */
 import { expect, test } from "@playwright/test";
-import { hostRowByName, openHostMenu, openHostsPanel } from "../tests/helpers/fleet";
+import { hostRowByName, openHostMenu, showHostsPanel } from "../tests/helpers/fleet";
 import { open } from "./open";
 import { shot } from "./shot";
 
@@ -20,23 +20,21 @@ test("host menu", async ({ page, request }) => {
   await openHostMenu(row);
   const panel = page.locator(".host-row-menu-panel");
   await expect(panel).toBeVisible();
-  // Four callouts stacked down the right; the offsets keep each box clear of
-  // the next, since the menu items sit closer together than the boxes are tall.
-  await director.callout(panel.locator(".host-retry"), "Try the connection again now, instead of waiting.", {
-    side: "right",
-    dy: -40,
-  });
+  // Retry and Update explain themselves in the menu's own descriptions.
+  // The menu's items are shorter than the boxes are tall, so two boxes stack
+  // down the right and Remove's sits in the empty space left of the menu,
+  // each level with its item so its arrow lands on it.
   await director.callout(panel.locator(".host-settings"), "Its destination, its name, and what Farhelm asks you before doing there.", {
     side: "right",
     dy: 0,
   });
   await director.callout(panel.locator(".provisioning-uninstall"), "Remove Farhelm from the host, keeping its data.", {
     side: "right",
-    dy: 40,
+    dy: 20,
   });
   await director.callout(panel.locator(".host-remove"), "Forget the host. Its sessions keep running there.", {
-    side: "right",
-    dy: 110,
+    side: "left",
+    dy: 0,
   });
   await shot(page, `${PAGE}/host-menu`, [row, panel], { maxWidth: 930 });
 });
@@ -67,7 +65,7 @@ test("host settings", async ({ page, request }) => {
   });
   await director.callout(
     dialog.locator(".host-appearance-icons"),
-    "The mark this host's sessions carry in the session list, the host list, and the launcher's host menu.",
+    "The mark this host carries on the navigation rail, beside its sessions, and in the launcher's host menu.",
     { side: "right" },
   );
   await director.callout(
@@ -137,11 +135,13 @@ test("app settings", async ({ page, request }) => {
   await shot(page, `${PAGE}/app-settings`, [dialog], { maxWidth: 930 });
 });
 
-/** Reveal Hosts and its details together: the disclosure is hidden in the session-list view. */
 test("details", async ({ page, request }) => {
   const { director } = await open(page, request);
-  await openHostsPanel(page);
+  // The details switch sits in the host list's heading, hidden until Hosts
+  // opens the list.
+  await showHostsPanel(page);
   const toggle = page.locator(".host-details-toggle");
+  await toggle.check();
   // The second host is a remote one with an alias, so its details also show
   // the real destination behind the name.
   const remote = page.locator(".host-row").nth(1);

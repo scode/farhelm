@@ -50,12 +50,12 @@ you can close every browser window. See [The pieces](/docs/how-it-works/the-piec
 
 ## Managed checkout trash
 
-The trash can immediately left of **New** holds [managed
+The trash can beside the list's title, left of the templates and new session buttons, holds [managed
 checkouts](/docs/using/start-a-session/#start-from-a-managed-checkout) whose last session was deleted.
 
 <Screenshot
   name="session-list/trash-button"
-  alt="The trash button beside new, its lid open and a count of 3, explained."
+  alt="The trash button at the top of the session list, its lid open and a count of 3, explained."
 />
 
 Open it to see the checkouts grouped by host, newest first, with their repository, archive time and disk usage.
@@ -74,8 +74,9 @@ moved since Farhelm archived it, it stays untouched and the dialog explains what
 inside it does not protect it: copy anything you want to keep out of the archive first. Cleanup can partially remove a
 directory before failing; the dialog tells you when that happened.
 
-While it deletes, the dialog says how many hosts are still working, and each host shows **Deleting…** until its
-result, success or failure, replaces it.
+While it deletes, the dialog stays open. Each host counts how many of its checkouts are deleted, the checkout being
+deleted shows how many seconds it has taken, and the rest say **Waiting**. The bottom of the dialog says how many
+checkouts are left.
 
 Nothing empties the trash automatically. A deletion in another window updates the count when its managed session
 disappears; emptying the trash in another window can leave this count high until you open the dialog.
@@ -108,7 +109,7 @@ starting either kind again.
 
 ## Terminal links
 
-Open **Settings** from the gear beside the sidebar version and choose **Terminal**. By default, Farhelm opens
+Open **Settings** from the gear at the foot of the [navigation rail](/docs/using/manage-hosts/) and choose **Terminal**. By default, Farhelm opens
 a web link and keeps the click from reaching the program, so agents such as Codex do not open it a second time.
 
 Choose **Open in Farhelm and also pass the click on** if your program needs link clicks; it may open a second browser
@@ -123,11 +124,11 @@ Save an empty field to download without opening. A warning appears beside each t
 ## Sounds when an agent needs you
 
 Farhelm plays a bell when a session starts waiting and a ding-dong when an agent asks for your approval. You can also
-turn on a soft pluck when an agent finishes its turn and becomes idle. Open **Settings** from the gear beside the sidebar
-version and choose **Notifications** to turn each sound on or off under **Sounds**; your choices stay on this device.
+turn on a soft pluck when an agent finishes its turn and becomes idle. Open **Settings** from the gear at the foot of the
+navigation rail and choose **Notifications** to turn each sound on or off under **Sounds**; your choices stay on this device.
 
 The session you have open stays quiet while you are looking at its window. Waiting and finished-turn sounds follow the
-sessions in your current list; changing its host selector or filters does not beep for a session already waiting. New
+sessions in your current list; changing the host or status it shows does not beep for a session already waiting. New
 approval requests can sound whatever the filter is. Opening or reloading Farhelm does not sound for requests already waiting. In a browser, interact
 with the page once to allow sound. Sounds your browser blocks are skipped, rather than played later.
 
@@ -135,11 +136,12 @@ with the page once to allow sound. Sounds your browser blocks are skipped, rathe
 
 <Screenshot
   name="session-list/controls"
-  alt="The compact checkbox, the host filter, and the sort order above the session list, each explained."
+  alt="The list's title, which sets its order, the status filter under it, and a host on the navigation rail, each explained."
 />
 
-The number beside **SESSIONS** counts every session; with a host filter on, it says how many of them match. There is no
-search box in the sidebar; with many sessions, filter by host and sort by title.
+The number beside the list's title counts every session; when a host or status narrows the list, it says how many
+match, as in `3 of 12`. There is no search box in the sidebar; with many sessions, narrow the list by host or status,
+or sort by title.
 
 ### Jump with the keyboard
 
@@ -148,10 +150,10 @@ For the full list, including the differences between the Mac app and a browser, 
 
 Press Cmd+K on a Mac, or Ctrl+Shift+K elsewhere, to open the quick switcher, even while typing in a terminal. Type a few
 letters from a session's name, host or directory. Matches in the name come first; within each group, the most recently
-active sessions come first. The search covers every host, whatever the sidebar's host filter shows.
+active sessions come first. The search covers every host and status, whatever the sidebar shows.
 
 Use ↑ and ↓ to choose, then Enter to open the session. With nothing typed, Enter opens the most recently active one.
-If the host filter hid it, Farhelm changes the filter to ALL. Escape or a click outside closes the switcher and returns
+If the sidebar's host or status choice hid it, Farhelm sets both back to **All**. Escape or a click outside closes the switcher and returns
 focus to where you were. The shortcut does nothing while another dialog is open. If you have more sessions than Farhelm can
 list at once, the switcher tells you it searched only the most recently active ones.
 
@@ -192,7 +194,7 @@ row. Saving or cancelling returns you to its terminal.
 ## Pin a session to the top
 
 The same menu offers **Pin to top** / **Unpin**. Pinned sessions show a pin before their name and stay above the rest,
-with both groups keeping your chosen sort order and host filter. Rows wait to move until you leave the list or keep the
+with both groups keeping your chosen sort order, host and status. Rows wait to move until you leave the list or keep the
 pointer still for five seconds with the menu closed. Pins are kept by the [helm](/docs/how-it-works/the-pieces/), so
 every browser and the desktop app connected to it see the same pins, and they work on unreachable hosts.
 [Replacing](/docs/using/stop-restart-resume/) a session carries its pin over. The

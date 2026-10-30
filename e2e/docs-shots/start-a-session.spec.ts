@@ -47,7 +47,7 @@ test("launch button", async ({ page, request }) => {
   // Beside the first callout, clear of the target and action hit areas.
   await director.callout(
     form.locator(".launch-composer-summary"),
-    "The choices the launch will use. Check it before launching: yolo shows in red.",
+    "The choices the launch will use. Check it before launching: YOLO shows in red.",
     { side: "top", dx: 350 },
   );
   // Keep the complete target, choices and compact action together. This
@@ -70,23 +70,23 @@ test("destination", async ({ page, request }) => {
   // boxes clear one another while the arrows stay level with their controls.
   await director.callout(
     destination.locator(".destination-type-control"),
-    "folder starts in a directory that already exists; managed checkout clones a GitHub repository into a new one.",
+    "Folder starts in a directory that already exists; Managed checkout clones a GitHub repository into a new one.",
     { side: "left", dy: -70 },
   );
   await director.callout(
     destination.locator(".create-session-host"),
     "The host the session runs on. Starts on the host of the session you have open.",
-    { side: "left", dy: 80 },
+    { side: "left", dy: 10 },
   );
   await director.callout(
     destination.getByLabel("Folder", { exact: true }),
     "The directory the agent starts in. ~ is your home on that host, not on the machine in front of you.",
-    { side: "left", dy: 190 },
+    { side: "left", dy: 75 },
   );
   await director.callout(
     folders,
-    "Opens on a click or ↓: up to eight recent directories on this host, newest first; typing filters them. home is ~ on that host, local home ~ on the machine in front of you.",
-    { side: "left", dy: 300 },
+    "Opens on a click or ↓: up to eight recent directories on this host, newest first; typing filters them. Home is ~ on that host, Local home ~ on the machine in front of you.",
+    { side: "left", dy: 100 },
   );
   // The folder list hangs below the destination part, so it is cropped in on its own.
   await shot(page, `${PAGE}/destination`, [destination, folders]);
@@ -113,7 +113,7 @@ test("checkout setup", async ({ page, request }) => {
   );
   await director.callout(
     field.getByRole("button", { name: "Save" }),
-    "Saves it for every host. Change it later in settings.",
+    "Saves it for every host. Change it later in Settings.",
     { side: "left", dy: 40 },
   );
   await shot(page, `${PAGE}/checkout-setup`, [destination], { maxWidth: 930 });
@@ -137,8 +137,8 @@ test("harness and model", async ({ page, request }) => {
   );
   await director.callout(
     model,
-    "Which model. harness default leaves it to the agent's own setting; type a name to use one the list doesn't show.",
-    { side: "right", dx: 60, dy: 80 },
+    "Which model. Harness default leaves it to the agent's own setting; type a name to use one the list doesn't show.",
+    { side: "right", dx: 60, dy: 50 },
   );
   await shot(page, `${PAGE}/harness-and-model`, [harness, model]);
 });
@@ -155,15 +155,15 @@ test("effort and permissions", async ({ page, request }) => {
   // shared column beside the widest control and nudged up or down (dy) so
   // the boxes stack without overlapping. Trust is not here: it moved to
   // Settings, which the page links to.
-  await director.callout(effort, "How much effort the model puts in. default leaves it to the agent.", {
+  await director.callout(effort, "How much effort the model puts in. Default leaves it to the agent.", {
     side: "right",
     dx: 160,
     dy: -40,
   });
   await director.callout(
     permissions,
-    "guarded lets the agent approve its own actions through a safety check, which can still refuse or ask you. yolo skips those checks: the agent runs commands and changes files without asking. custom passes your own flags and counts as yolo.",
-    { side: "right", dx: 290, dy: 95 },
+    "Guarded lets the agent approve its own actions through a safety check, which can still refuse or ask you. YOLO skips those checks: the agent runs commands and changes files without asking. Custom passes your own flags and counts as YOLO.",
+    { side: "right", dx: 290, dy: 70 },
   );
   await shot(page, `${PAGE}/effort-and-permissions`, [effort, permissions]);
 });
@@ -226,8 +226,9 @@ test("recent setups", async ({ page, request }) => {
 });
 
 test("yolo confirmation", async ({ page, request }) => {
-  // Leave room below the question for both labels, outside its answer buttons.
-  await page.setViewportSize({ width: 930, height: 1800 });
+  // Tall enough that the launcher ends above the window's bottom edge,
+  // leaving room under its question for the callouts about its answers.
+  await page.setViewportSize({ width: 1600, height: 1700 });
   const { director } = await open(page, request);
   // Pressing launch really sends the create; the helm answers with the
   // confirmation only because the host still asks before YOLO launches.
@@ -246,18 +247,16 @@ test("yolo confirmation", async ({ page, request }) => {
   await form.locator(".create-session-submit").click();
   const confirmation = form.locator(".yolo-confirmation");
   await expect(confirmation).toBeVisible();
-  // The guarded alternative takes the first slot, so separate the callouts
-  // horizontally below the YOLO answers. They cover the launcher beneath
-  // the question rather than its text or another annotation.
+  // Side by side below the answers, clear of the question's text.
   await director.callout(
     confirmation.locator(".yolo-confirm"),
     "Starts this launch. The host still asks next time.",
-    { side: "bottom", dx: -60 },
+    { side: "bottom", dx: -40, dy: 40 },
   );
   await director.callout(
     confirmation.locator(".yolo-confirm-stop-asking"),
     "Starts it, and this host stops asking from now on.",
-    { side: "bottom", dx: -300 },
+    { side: "bottom", dx: -110, dy: 40 },
   );
   await shot(page, `${PAGE}/yolo-confirmation`, [confirmation, form.locator(".create-session-submit")], { maxWidth: 930 });
   expect(created, "the YOLO shot must not start a session").toEqual([]);

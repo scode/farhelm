@@ -93,6 +93,12 @@ on while reviewing a draft are recorded the same way, per [Learning from feedbac
 - **directory**: a file system directory, in prose, callouts, and alt text alike; never "folder". An exact UI label that
   says folder (**browse folders on**, **use existing folder**, the `folder:` search prefix) is still quoted the way the
   UI shows it. (Stated by the maintainer, 2026-10-04.)
+- **navigation rail**: the column of icons down the left edge of the sidebar: your hosts' marks, then **Add host**,
+  **Hosts**, the gear for Settings and **?** at its foot. Introduce it as "the navigation rail, the column of icons down
+  the left edge of the sidebar" where a page first uses it. Not "host rail", the spec's name: the rail is not specific
+  to hosts and may hold more later. (Stated by the maintainer, 2026-10-30.)
+- **+ (New session)**: the button that opens the session launcher, now an icon. Quote it as **+** (New session), not
+  **New**. (Chosen by the maintainer, 2026-10-30.)
 
 ### Jargon
 

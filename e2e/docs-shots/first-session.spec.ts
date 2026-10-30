@@ -8,24 +8,33 @@
  * setting: the staged fleet already has a working session to show.
  */
 import { expect, test } from "@playwright/test";
-import { showHostsPanel } from "../tests/helpers/fleet";
 import { open } from "./open";
 import { shot } from "./shot";
 import { readFleet } from "./stage-docs";
 
 const PAGE = "first-session";
 
-/** The local host now lives in Hosts, which must be opened before photographing its row. */
 test("this machine", async ({ page, request }) => {
-  const { director } = await open(page, request);
-  await showHostsPanel(page);
-  const local = page.locator('.host-row[data-host-kind="local"]');
+  const { scenario, director } = await open(page, request);
+  // Found by the scenario's own alias for this Mac, which the rail shows as
+  // its caption instead of the default "Local".
+  const caption = scenario.hosts.find((host) => host.kind === "local")?.alias;
+  if (!caption) throw new Error("the docs scenario needs a local host with an alias");
+  // The navigation rail, what a first run actually shows: the host list sits
+  // behind Hosts and is hidden until opened, so its rows have no size.
+  const local = page
+    .locator(".host-rail-entry")
+    .filter({ has: page.locator(".host-rail-caption", { hasText: caption }) });
   await expect(local).toBeVisible();
   await director.highlight(local, { pad: 2 });
-  await director.callout(local, "The Mac you are on is already a host, so sessions can start here straight away.", {
-    side: "right",
-  });
-  await shot(page, `${PAGE}/this-machine`, [page.locator(".host-list")], { maxWidth: 900 });
+  await director.callout(
+    local,
+    "The Mac you are on is already a host, so sessions can start here straight away.",
+    { side: "right" },
+  );
+  // Cropped to the rail's top and the callout: the whole rail runs the
+  // window's full height.
+  await shot(page, `${PAGE}/this-machine`, [local, page.locator(".host-rail-entry").last()], { maxWidth: 900 });
 });
 
 test("a running session", async ({ page, request }) => {
@@ -36,7 +45,7 @@ test("a running session", async ({ page, request }) => {
   await expect(row).toBeVisible();
   await director.callout(
     row,
-    "Your session in the session list. The dot shows what its agent is doing: green and pulsing while it works.",
+    "Your session in the session list. The dot shows what its agent is doing: filled and pulsing while it works.",
     { side: "right", dy: 90 },
   );
   // The terminal fills the window's height; anchoring on a line of it keeps

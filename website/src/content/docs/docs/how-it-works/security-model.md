@@ -21,10 +21,10 @@ sessions on others through Farhelm, with your approval or a host's **Run farhelm
 changes (adding, editing or removing a host) that always need your approval
 ([Approve what agents do](/docs/using/approve-agent-requests/)). The SSH prerequisite for adding a host is in
 [Add a remote host](/docs/get-started/add-a-remote-host/). It will also cover the connections that leave your machines:
-setting up or updating a host downloads Farhelm's release files from get.farhelm.io, which hands them over from GitHub,
-feedback you choose to send goes over HTTPS to a feedback service the project runs
-([Send feedback](/docs/using/send-feedback/)), and the Farhelm app on your Mac checks get.farhelm.io for new releases
-and downloads them, checking each one's signature, by itself unless you turn that off
+setting up or updating a host, including the automatic updates you can turn on, downloads Farhelm's release files from
+get.farhelm.io, which hands them over from GitHub, feedback you choose to send goes over HTTPS to a feedback service the
+project runs ([Send feedback](/docs/using/send-feedback/)), and the Farhelm app on your Mac checks get.farhelm.io for
+new releases and downloads them, checking each one's signature, by itself unless you turn that off
 ([Update or uninstall Farhelm](/docs/using/update-and-uninstall/)). If you set up
 [ntfy alerts](/docs/using/session-list/#ntfy-alerts), your helm sends a waiting session's name and its host's name to
 the ntfy server you chose, where anyone who knows the topic can read them. And downloading a file from a session's
@@ -39,4 +39,7 @@ host's link permission, an agent on that host can make your browser open a web a
 lets it reach addresses on your own machine and network without asking. The Mac app's optional localhost tunnels also
 let you open a remote development server as a local page, after accepting a separate warning about cookies,
 local-network access and other programs using the tunnel
-([Open a remote localhost link](/docs/using/work-in-a-session/#open-a-remote-localhost-link)).
+([Open a remote localhost link](/docs/using/work-in-a-session/#open-a-remote-localhost-link)). And what a
+[containerized session](/docs/agents/containerized-sessions/) keeps from an agent and what it does not: other host files
+and Farhelm's own credentials stay outside the container, but the network stays open, and Git hooks or settings it
+writes in the checkout can later run with your full access outside the container.

@@ -48,10 +48,11 @@ async function applyTemplate(form: Locator, query: string, name: string): Promis
 test("templates button", async ({ page, request }) => {
   const { director } = await open(page, request);
   const button = page.locator(".templates-button");
+  // Below the button: from the right, the arrow would land on the + (New
+  // session) button beside it.
   await director.callout(button, "Opens the templates panel, where you create, edit, and delete templates.", {
-    side: "right",
-    dx: 40,
-    dy: -60,
+    side: "bottom",
+    dy: 60,
   });
   await shot(page, `${PAGE}/templates-button`, [button, page.locator(".new-session-button")], { maxWidth: 930 });
 });
@@ -160,7 +161,7 @@ test("save as template", async ({ page, request }) => {
   // the agent and an effort, on top of the launcher's starting host and
   // directory, which it offers unchecked.
   await form.locator(".launch-composer-harness-choice button", { hasText: /^Codex$/ }).click();
-  await form.locator(".launch-composer-effort-choice").getByRole("button", { name: "High", exact: true }).click();
+  await form.locator(".launch-composer-effort-choice button", { hasText: /^High$/ }).click();
   await form.locator(".launch-composer-save-template").click();
   const panel = form.locator(".save-template-panel");
   await expect(panel).toBeVisible();

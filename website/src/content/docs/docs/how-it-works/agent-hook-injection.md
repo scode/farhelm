@@ -105,9 +105,10 @@ Codex must run as a native executable named `codex`, even when its flags are in 
 requirements in [the Grok guide](/docs/agents/grok/#setup).
 
 - **Claude, Codex, Muse, Goose, Pi or OMP picked in the session launcher** always gets its reporter, unless
-  [you turned it off](#turning-it-off): Farhelm builds that command itself and knows where the reporter goes. With a
-  [wrapper prefix](/docs/agents/agent-wrappers/), the reporter's arguments follow the prefix, and the wrapper must pass
-  them and its environment through to the agent. Cursor and OpenCode have none.
+  [you turned it off](#turning-it-off) or the session is [containerized](/docs/agents/containerized-sessions/): Farhelm
+  builds that command itself and knows where the reporter goes. With a [wrapper prefix](/docs/agents/agent-wrappers/),
+  the reporter's arguments follow the prefix, and the wrapper must pass them and its environment through to the agent.
+  Cursor and OpenCode have none.
 - **A [custom command](/docs/agents/custom-commands/) that declares its agent** gets the declared agent's reporter where
   `{farhelm_args}` stands, which the command must contain exactly once. Farhelm does not read the rest of the command,
   so it does not notice a `--settings` of your own for Claude (Claude honors only the last one), Codex hook

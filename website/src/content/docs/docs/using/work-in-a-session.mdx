@@ -24,7 +24,8 @@ match its host.
 Click the directory or command to copy it; your home directory appears as `~`.
 
 The terminal tabs and action buttons share the row above the terminal. The buttons at its right end restart, replace,
-clone, and delete the session; [Stop, restart, and resume](/docs/using/stop-restart-resume/) covers them. **Cmd+W** in the
+clone, and delete the session; the arrows beside **Restart** and **Replace** open menus that also offer **Restart
+with…** and **Replace with…**. [Stop, restart, and resume](/docs/using/stop-restart-resume/) covers them. **Cmd+W** in the
 Mac app, or **Ctrl+Shift+Backspace** in a browser, does the same as the open session's Delete button. In the Mac app, Cmd+W does not close the window; use its close
 button or Cmd+Q.
 
@@ -36,7 +37,8 @@ button or Cmd+Q.
 />
 
 Click **+** after the tabs to open a shell. Each shell tab is named **Terminal 1**, **Terminal 2**, and so on, and runs on the same host as the agent, in the
-session's directory. It belongs to the session: it keeps running when you switch to another session, and deleting the
+session's directory. In a [containerized session](/docs/agents/containerized-sessions/), it opens inside the session's
+container. It belongs to the session: it keeps running when you switch to another session, and deleting the
 session closes it. Closing a tab yourself asks you to confirm first, since it ends whatever is running in it; press Enter
 to confirm, or **Cancel** to keep it open. You can skip that question with
 [Skip session confirmations](/docs/using/stop-restart-resume/#stop-or-delete) under **Sessions** in settings.
@@ -104,8 +106,8 @@ your browser's private-network checks. Any program on your Mac can connect to th
 `127.0.0.1` page into the browser helm are also refused; opening the helm from the address bar or a bookmark still works.
 You can turn tunnels off under **Terminal** in settings, which closes the ones already open.
 
-Open tunnels appear below the row of tabs and action buttons, with the port on your Mac, the host's port, and a close
-button. The port on your Mac is one your Mac picks, never the host's port number, so an app that puts its own
+Open tunnels appear as a pill beside the terminal tabs, showing the port on your Mac and the host's port, or how many
+tunnels are open. Click it to list them and close one, or **Close all**; this works even while the host is disconnected. The port on your Mac is one your Mac picks, never the host's port number, so an app that puts its own
 `localhost` address and port into links or redirects does not reach the tunnel that way; open it through the tunnel's
 link instead. Opening another link to the same service reuses its tunnel. Deleting the session or quitting Farhelm
 closes it; stopping or restarting the agent leaves it open. A disconnected host makes new connections fail until it

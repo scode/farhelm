@@ -9,7 +9,7 @@ import Screenshot from '../../../../components/Screenshot.astro';
 
 <Screenshot
   name="start-a-session/new-button"
-  alt="The new button above the session list, which opens the session launcher."
+  alt="The + (New session) button above the session list, which opens the session launcher."
 />
 
 In the Farhelm app on your Mac, Cmd+N opens the launcher too, even while you are typing in a terminal. See
@@ -22,7 +22,7 @@ terminal opens. You can type your first prompt there, or supply it in the launch
 
 <Screenshot
   name="start-a-session/launch-button"
-  alt="The launch button reading launch Codex, local (this machine), and the directory, with the summary under it."
+  alt="The launcher's footer: what Launch will start (Codex, Local (this machine), and the directory), the summary of choices, and the Launch button."
 />
 
 **Cancel**, Escape, or a click outside the launcher closes it and forgets your choices. **Reset choices** clears the
@@ -47,7 +47,7 @@ unless you typed or picked one yourself. With **Folder** chosen, the launcher al
 host: if it does not exist there, or is not a directory, a warning under the field names the host. You can still launch;
 the host checks the directory again when you do.
 
-**Browse folders on** the host lists its directories one level at a time, for when you would rather find a directory
+**Browse**, beside the host, lists the directories under the path in the directory field one level at a time, for when you would rather find a directory
 than type it. Clicking the directory field, or pressing ↓ in it, lists recent directories and the two home choices;
 typing filters them, and choosing one fills the field without launching. **Local home** also switches the host to
 **Local (this machine)**. With the list open, Escape closes the list first. **Name (optional)** names the session in the
@@ -78,6 +78,9 @@ To start a known agent through another command, enter a **Wrapper prefix** on th
 before the command it builds for that agent; [Agent wrappers](/docs/agents/agent-wrappers/) explains what the wrapper
 must pass through and when to use a custom command instead.
 
+The **Agent** tab also has an experimental **Containerized** switch for running a session in a managed checkout inside a
+Podman container on a Linux host; [Containerized sessions](/docs/agents/containerized-sessions/) covers what it needs.
+
 NOTE: The launcher remembers the permissions of your last launch from its **Agent** tab and the last wrapper prefix
 used with each agent, in any Farhelm window. After one YOLO launch, the next launcher opens on **YOLO** too;
 **Custom** flags are never remembered this way. Launches
@@ -90,7 +93,7 @@ fresh. This works in New, Clone and Replace with, for an agent in an existing di
 file instead; use its absolute path or a path relative to the session directory, without spaces or `~`.
 
 The choice applies to this start only. Templates and recent setups do not save it, and a later Clone starts fresh.
-Farhelm does not check whether the conversation exists; a mistyped id is handled by the agent. Goose, Muse, Cursor and
+Farhelm does not check whether the conversation exists; a mistyped id is handled by the agent. Goose, Cursor and
 OpenCode can open a conversation this way, but Farhelm cannot continue it with a later Restart. For restarting a session
 whose id Farhelm never learned, see [Restart with](/docs/using/stop-restart-resume/#the-headers-actions).
 
@@ -124,7 +127,8 @@ session an older version of Farhelm started without choosing a permission mode. 
 host that asks, an agent cannot start a YOLO session or a custom command at all ([Approve what agents
 do](/docs/using/approve-agent-requests/#yolo-sessions-and-custom-commands)).
 
-To change your mind about a host later, use its settings. [Manage hosts](/docs/using/manage-hosts/) covers the rest of
+To change your mind about a host later, open **Hosts** at the foot of the navigation rail and choose **Settings** from
+that host's menu. [Manage hosts](/docs/using/manage-hosts/) covers the rest of
 them.
 
 <Screenshot
@@ -144,7 +148,7 @@ them.
   alt="The recent setups list under the launcher's search box, showing three setups for the chosen directory."
 />
 
-A setup is the agent, model, effort, permissions, wrapper prefix, and directory of a launch you made on the launcher's **Agent**
+A setup is the agent, model, effort, permissions, wrapper prefix, container settings, and directory of a launch you made on the launcher's **Agent**
 tab, however you filled it in.
 Farhelm keeps them separately for each host, and shows up to three; type `recent:` in the search box to find older ones.
 
@@ -200,7 +204,7 @@ You can also [combine templates from the keyboard](/docs/using/launch-templates/
 Cmd+X in the Mac app, or Ctrl+Shift+X everywhere else, then their number keys and Enter. Later templates override earlier
 choices, so a project setup can be combined with a different agent.
 
-While New, Clone or Replace with is open, those same shortcuts apply templates to the current draft instead of starting
+While New, Clone, Replace with or Restart with is open, those same shortcuts apply templates to the current draft instead of starting
 a session. You can stack several presses, then review the choices before pressing **Launch**. The sequence prefix works
 in the launcher's text fields when no text is selected; selected text keeps Cut or the browser's usual action.
 
@@ -209,7 +213,7 @@ in the launcher's text fields when no text is selected; selected text keeps Cut 
 A session can also start in a new clone of a GitHub repository instead of an existing directory. Farhelm calls this a
 managed checkout: it makes the directory for the session and moves it into the trash when its last session is deleted
 (see [Stop or delete](/docs/using/stop-restart-resume/#stop-or-delete)). The
-[trash](/docs/using/session-list/#managed-checkout-trash) beside **New** shows where those directories are and lets you
+[trash](/docs/using/session-list/#managed-checkout-trash) at the top of the session list shows where those directories are and lets you
 clean them up. Choose **Managed checkout** under destination, enter the repository as `owner/repo`, and select its
 suggestion. You can also type `gh:owner/repo` in the search box and choose **Managed checkout: owner/repo**. Farhelm
 suggests repositories you have launched or cloned before, but it does not search GitHub, so type a new one in full.
@@ -253,7 +257,8 @@ choosing **Managed checkout** asks for it.
 />
 
 To change the directory later, or save an empty field to clear it, use the same field under **Checkouts** in **Settings**,
-opened from the gear beside the version number at the top of the sidebar.
+opened from the gear at the foot of the [navigation rail](/docs/using/manage-hosts/), the column of icons down the left
+edge of the sidebar.
 
 The same section has a **Post-clone command** field for a shell command to run in each new clone, on its host, before the
 agent starts (installing dependencies, say). Save it explicitly; empty the field and save to remove it. Changes affect

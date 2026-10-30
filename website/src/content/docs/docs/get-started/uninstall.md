@@ -36,7 +36,8 @@ To remove your data as well, delete `~/.local/state/farhelm` once the uninstall 
 ## From a remote host
 
 Uninstalling on your Mac does not touch your remote hosts, and their sessions keep running. To remove Farhelm from a
-remote host, select **Uninstall** in that host's `⋯` menu in the host list; see
+remote host, select **Uninstall** in that host's `⋯` menu in the host list, which **Hosts** at the foot of the
+[navigation rail](/docs/using/manage-hosts/) opens; see
 [Manage hosts](/docs/using/manage-hosts/#uninstall-farhelm-from-a-remote-host).
 
 Farhelm needs to reach the host to do this, so it can check that no session is still running there. If the host shows as
