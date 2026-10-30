@@ -2738,6 +2738,10 @@ checkout pathname or crosses links or mounts. The verified namespace is fsynced 
 ready identity or retire its location. A failed cleanup or namespace barrier retains the original identity and location,
 including when removal completed; an absence-only retry still needs that namespace barrier before retiring the evidence.
 
+Each selected spare removal emits one info completion event with its repository, original name, namespace path, outcome,
+total and removal times in milliseconds, and counts of files and directories actually removed, including partial counts
+after a failure.
+
 Startup collects exact launch-generation, preparation-state and owned-pane evidence before the blocking cache sweep. A
 still-live clone claim is retained, including a live NotStarted preparation that can begin cloning after the sample;
 failed or uncertain liveness observations retain possible claims rather than inferring abandonment. Spare cleanup runs
@@ -2906,6 +2910,12 @@ after caller cancellation; large deletes can therefore delay launches, restarts 
 Stopped session rows also protect their folders because they can restart there. The guard compares raw and
 admission-time canonical session paths against the archive's recorded and current canonical path; it does not resolve
 unrelated session cwds under admission.
+
+Each selected trash deletion emits one info completion event with its checkout id, archive path, outcome, total and
+per-step times in milliseconds, and counts of files and directories actually removed, including partial counts on
+failure. Steps separate directory admission, the session-path and working-copy database reads, record checks, opening
+and verification, removal and record update. Request-wide admission and read times repeat on each checkout's event; an
+archive path unavailable because the shared reads failed is empty.
 
 Passive lists share the two-slot browse worker pool, including a syscall that outlives the caller's reply wait, and
 never hold directory admission. Permanent deletion runs on a separate blocking worker serialized by directory admission,

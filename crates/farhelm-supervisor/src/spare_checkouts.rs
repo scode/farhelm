@@ -16,12 +16,13 @@ use std::io::Read;
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Component, Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, bail};
 use farhelm_proto::github_checkout::GithubRepo;
 use serde::{Deserialize, Serialize};
 
-use crate::checkout_trash::{open_child_dir, remove_opened_tree};
+use crate::checkout_trash::{RemovalCounts, open_child_dir, remove_opened_tree};
 use crate::working_copies::{DirectoryEvidence, SPARE_DIR_NAME, rename_at_noreplace};
 
 /// A corrupt private record must not allocate without bound. Exhaustion is a
@@ -534,7 +535,7 @@ fn sweep_namespace(
                 .verify(&directory)
                 .context("ready spare was replaced")?;
             if evict {
-                discard_child(&namespace, &name, expected, &repo.name)?;
+                discard_child(&namespace, &name, expected, repo, &location.path)?;
                 location.ready = None;
             }
         } else if let Some(kind) = private_name(&repo.name, text) {
@@ -551,7 +552,7 @@ fn sweep_namespace(
             // first, then capture the actual child before parking and removing.
             let directory = open_child_dir(&namespace, &name, true)?;
             let expected = DirectoryEvidence::capture(&directory)?;
-            discard_child(&namespace, &name, expected, &repo.name)?;
+            discard_child(&namespace, &name, expected, repo, &location.path)?;
         }
     }
     // Re-read after removal: directory iteration during mutation can skip an
@@ -593,25 +594,86 @@ fn namespace_names(namespace: &fs::File, cap: usize) -> anyhow::Result<Vec<CStri
 /// Rename before recursively removing, then verify the opened moved object.
 /// An ordinary replacement never inherits a previous object's authority. A
 /// failure leaves a strict trash name that the next sweep can safely retry.
+/// The completion event uses the selected name and namespace, even after the
+/// object has moved; it retains partial traversal counts on removal failure.
 fn discard_child(
     namespace: &fs::File,
     name: &CStr,
     expected: DirectoryEvidence,
-    repo: &str,
+    repo: &GithubRepo,
+    location: &Path,
 ) -> anyhow::Result<()> {
-    let selected = open_child_dir(namespace, name, true)?;
-    expected.verify(&selected)?;
-    let trash = CString::new(format!(".{repo}:trash-{}", uuid::Uuid::new_v4()))?;
-    rename_at_noreplace(namespace.as_raw_fd(), name, namespace.as_raw_fd(), &trash)?;
-    let moved = open_child_dir(namespace, &trash, true)?;
-    expected.verify(&moved)?;
-    remove_opened_tree(namespace, &moved, &trash)
+    let started = Instant::now();
+    let mut counts = RemovalCounts::default();
+    let mut removal = Duration::ZERO;
+    let result = (|| {
+        let selected = open_child_dir(namespace, name, true)?;
+        expected.verify(&selected)?;
+        let trash = CString::new(format!(".{}:trash-{}", repo.name, uuid::Uuid::new_v4()))?;
+        rename_at_noreplace(namespace.as_raw_fd(), name, namespace.as_raw_fd(), &trash)?;
+        let moved = open_child_dir(namespace, &trash, true)?;
+        expected.verify(&moved)?;
+        let removing = Instant::now();
+        let result = remove_opened_tree(namespace, &moved, &trash, &mut counts);
+        removal = removing.elapsed();
+        result
+    })();
+    tracing::info!(
+        repository = ?format!("{}/{}", repo.owner, repo.name),
+        spare_name = ?name, path = ?location,
+        outcome = if result.is_ok() { "removed" } else { "failed" },
+        total_ms = started.elapsed().as_millis() as u64,
+        removal_ms = removal.as_millis() as u64,
+        files_removed = counts.files, directories_removed = counts.directories,
+        "spare checkout removal finished"
+    );
+    result
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::time::{Duration, SystemTime};
+
+    /// A parked spare retains its original name in diagnostics, so an operator
+    /// can identify the selected object rather than a newly minted trash UUID.
+    #[farhelm_testtrace::test]
+    fn discard_logs_original_spare_name_and_counts() {
+        let mut fixture = Fixture::new(31);
+        let ready = fixture.ready();
+        assert_eq!(fs::read(ready.join("marker")).unwrap(), b"ready spare");
+        let namespace = fs::File::open(&fixture.location.path).unwrap();
+        discard_child(
+            &namespace,
+            c"repo",
+            fixture.location.ready.unwrap(),
+            &fixture.repo,
+            &fixture.location.path,
+        )
+        .unwrap();
+        assert!(!ready.exists());
+        let lines = farhelm_testtrace::current_capture()
+            .unwrap()
+            .matching("spare checkout removal finished")
+            .unwrap();
+        assert_eq!(lines.len(), 1);
+        let fields = &lines[0].fields;
+        assert_eq!(
+            fields.get("repository"),
+            Some(&format!("{:?}", "example/repo"))
+        );
+        assert_eq!(fields.get("spare_name"), Some(&format!("{:?}", c"repo")));
+        assert_eq!(
+            fields.get("path"),
+            Some(&format!("{:?}", fixture.location.path))
+        );
+        assert_eq!(fields.get("outcome").map(String::as_str), Some("removed"));
+        assert_eq!(fields.get("files_removed").map(String::as_str), Some("1"));
+        assert_eq!(
+            fields.get("directories_removed").map(String::as_str),
+            Some("1")
+        );
+    }
 
     /// Producer publication must leave either private building content or an
     /// identity-recorded ready slot, never an unrecorded partially built slot.
@@ -1105,6 +1167,7 @@ mod tests {
             &parent,
             &directory,
             &name,
+            &mut RemovalCounts::default(),
             &mut |parent, name| {
                 if name.to_bytes() == b"mounted" {
                     refused = true;

@@ -162,11 +162,20 @@ struct RemovalFrame {
     rescans: usize,
 }
 
+/// Successful unlink operations, retained even when a later operation fails.
+/// Files include symlinks and other non-directory entries; directories include
+/// the selected tree's root. Retried directory scans never add to these counts.
+#[derive(Default)]
+pub(crate) struct RemovalCounts {
+    pub(crate) files: u64,
+    pub(crate) directories: u64,
+}
+
 /// Remove entries reachable from the verified handle, without following links
 /// or mounts. POSIX names can change during removal: a final rmdir can only
 /// remove an empty directory, and recursive work always stays on opened objects.
-fn remove_archive(archive: &OpenArchive) -> anyhow::Result<()> {
-    remove_archive_with(archive, &mut |parent, name| {
+fn remove_archive(archive: &OpenArchive, counts: &mut RemovalCounts) -> anyhow::Result<()> {
+    remove_archive_with(archive, counts, &mut |parent, name| {
         open_child_dir(parent, name, true)
     })
 }
@@ -175,30 +184,42 @@ fn remove_archive(archive: &OpenArchive) -> anyhow::Result<()> {
 /// without requiring mount privileges or replacing the deletion algorithm.
 fn remove_archive_with(
     archive: &OpenArchive,
+    counts: &mut RemovalCounts,
     open: &mut impl FnMut(std::os::fd::BorrowedFd<'_>, &CStr) -> std::io::Result<fs::File>,
 ) -> anyhow::Result<()> {
-    remove_opened_tree_with(&archive.parent, &archive.directory, &archive.name, open)
+    remove_opened_tree_with(
+        &archive.parent,
+        &archive.directory,
+        &archive.name,
+        counts,
+        open,
+    )
 }
 
 /// Remove a tree whose caller already established ownership on these handles.
 /// Names alone grant no authority: the caller must verify the selected object
 /// and park it under a private trash name before entering this shared traversal.
+/// Counts describe successful unlinks even when the traversal later fails.
 pub(crate) fn remove_opened_tree(
     parent: &fs::File,
     directory: &fs::File,
     name: &CStr,
+    counts: &mut RemovalCounts,
 ) -> anyhow::Result<()> {
-    remove_opened_tree_with(parent, directory, name, &mut |parent, name| {
+    remove_opened_tree_with(parent, directory, name, counts, &mut |parent, name| {
         open_child_dir(parent, name, true)
     })
 }
 
 /// Keep mount-refusal injection on the same traversal used by archives and
 /// spares. No error permits an unconfined or pathname-recursive fallback.
+/// Counting follows successful mutations, so rescans add no filesystem work
+/// and cannot count the same directory more than once.
 pub(crate) fn remove_opened_tree_with(
     parent_directory: &fs::File,
     directory: &fs::File,
     name: &CStr,
+    counts: &mut RemovalCounts,
     open: &mut impl FnMut(std::os::fd::BorrowedFd<'_>, &CStr) -> std::io::Result<fs::File>,
 ) -> anyhow::Result<()> {
     let metadata = rustix::fs::fstat(directory)?;
@@ -234,6 +255,7 @@ pub(crate) fn remove_opened_tree_with(
                 }
                 Err(error) if matches!(error.raw_os_error(), Some(libc::ELOOP | libc::ENOTDIR)) => {
                     rustix::fs::unlinkat(parent, name, AtFlags::empty())?;
+                    counts.files += 1;
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                 Err(error) if error.raw_os_error() == Some(libc::EXDEV) => {
@@ -271,7 +293,10 @@ pub(crate) fn remove_opened_tree_with(
                     completed.rescans += 1;
                     stack.push(completed);
                 }
-                result => result?,
+                result => {
+                    result?;
+                    counts.directories += 1;
+                }
             }
         }
     }
@@ -375,7 +400,8 @@ pub(crate) fn list(db: &Db, measure_sizes: bool) -> anyhow::Result<CheckoutTrash
 /// Permanently delete exactly the selected terminal records that still match.
 /// `session_directories` is captured under directory admission and includes
 /// retained stopped sessions, since those can restart in their recorded cwd.
-pub(crate) fn delete(
+#[cfg(test)]
+fn delete(
     db: &Db,
     ids: &[String],
     session_directories: &[PathBuf],
@@ -383,109 +409,268 @@ pub(crate) fn delete(
     delete_with(db, ids, session_directories, &mut remove_archive)
 }
 
+/// Request-wide measurements are repeated on every selected checkout's line.
+/// The GUI sends one checkout per request. Database timings include waiting for
+/// the shared connection, and total time starts before directory admission.
+pub(crate) struct DeleteTiming {
+    pub(crate) started: Instant,
+    pub(crate) admission: Duration,
+    pub(crate) session_paths: Duration,
+    rows: Duration,
+}
+
+impl Default for DeleteTiming {
+    fn default() -> Self {
+        Self {
+            started: Instant::now(),
+            admission: Duration::ZERO,
+            session_paths: Duration::ZERO,
+            rows: Duration::ZERO,
+        }
+    }
+}
+
+/// Report shared-read failures without converting them into per-record replies.
+/// No archive path can be trusted before the registry read succeeds.
+pub(crate) fn log_delete_read_failure(ids: &[String], timing: &DeleteTiming) {
+    let mut seen = HashSet::new();
+    for id in ids.iter().filter(|id| seen.insert(id.as_str())) {
+        log_deletion(
+            id,
+            "",
+            "failed",
+            timing,
+            Duration::ZERO,
+            Duration::ZERO,
+            Duration::ZERO,
+            Duration::ZERO,
+            &RemovalCounts::default(),
+        );
+    }
+}
+
+/// Emit the one completion event shared by success, refusal and partial failure.
+/// Peer-controlled strings use Debug formatting so control characters stay data.
+#[allow(clippy::too_many_arguments)]
+fn log_deletion(
+    id: &str,
+    path: &str,
+    outcome: &str,
+    timing: &DeleteTiming,
+    checks: Duration,
+    opening: Duration,
+    removal: Duration,
+    update: Duration,
+    counts: &RemovalCounts,
+) {
+    tracing::info!(
+        checkout_id = ?id, path = ?path, outcome,
+        total_ms = timing.started.elapsed().as_millis() as u64,
+        admission_ms = timing.admission.as_millis() as u64,
+        session_paths_ms = timing.session_paths.as_millis() as u64,
+        working_copies_ms = timing.rows.as_millis() as u64,
+        record_checks_ms = checks.as_millis() as u64,
+        open_verify_ms = opening.as_millis() as u64,
+        removal_ms = removal.as_millis() as u64,
+        record_update_ms = update.as_millis() as u64,
+        files_removed = counts.files, directories_removed = counts.directories,
+        "permanent checkout trash deletion finished"
+    );
+}
+
+/// Delete selected archives while preserving timings captured under admission.
+/// Total time is measured from the request's start through each completion;
+/// later entries in a batch therefore include time spent on earlier entries.
+pub(crate) fn delete_timed(
+    db: &Db,
+    ids: &[String],
+    session_directories: &[PathBuf],
+    timing: DeleteTiming,
+) -> anyhow::Result<CheckoutTrashDeleted> {
+    delete_with_timing(db, ids, session_directories, timing, &mut remove_archive)
+}
+
 /// Keep result bookkeeping on the real delete path while tests inject only
 /// the removal boundary. Per-record failures must not hide earlier outcomes.
+#[cfg(test)]
 fn delete_with(
     db: &Db,
     ids: &[String],
     session_directories: &[PathBuf],
-    remove: &mut impl FnMut(&OpenArchive) -> anyhow::Result<()>,
+    remove: &mut impl FnMut(&OpenArchive, &mut RemovalCounts) -> anyhow::Result<()>,
 ) -> anyhow::Result<CheckoutTrashDeleted> {
-    let rows = working_copies::all_working_copies(&db.lock())?;
+    delete_with_timing(
+        db,
+        ids,
+        session_directories,
+        DeleteTiming::default(),
+        remove,
+    )
+}
+
+/// Keep every early per-record exit inside the completion-log boundary.
+/// A shared registry failure still returns the original request error, after
+/// emitting one failure event per distinct id with an unavailable (empty) path.
+fn delete_with_timing(
+    db: &Db,
+    ids: &[String],
+    session_directories: &[PathBuf],
+    mut timing: DeleteTiming,
+    remove: &mut impl FnMut(&OpenArchive, &mut RemovalCounts) -> anyhow::Result<()>,
+) -> anyhow::Result<CheckoutTrashDeleted> {
+    let read = Instant::now();
+    let rows = working_copies::all_working_copies(&db.lock());
+    timing.rows = read.elapsed();
+    let rows = rows.inspect_err(|_| log_delete_read_failure(ids, &timing))?;
     let rows: std::collections::HashMap<_, _> =
         rows.iter().map(|row| (row.id.as_str(), row)).collect();
     let mut reply = CheckoutTrashDeleted::default();
     let mut seen = HashSet::new();
     for id in ids.iter().filter(|id| seen.insert(id.as_str())) {
-        let Some(row) = rows.get(id.as_str()).copied().filter(|row| {
-            row.allocation_state == AllocationState::Retired && row.archive_destination.is_some()
-        }) else {
-            reply.issues.push(CheckoutTrashIssue {
-                id: id.clone(),
-                path: String::new(),
-                message: "no recorded archive with this id; nothing was touched".into(),
-            });
-            continue;
-        };
-        let membership = working_copies::member_count(&db.lock(), id);
-        if !matches!(membership, Ok(0)) {
-            let message = match membership {
-                Ok(_) => "left untouched: a session still references this retired checkout".into(),
-                Err(error) => {
-                    format!("folder left untouched: could not check session references: {error:#}")
-                }
+        let mut counts = RemovalCounts::default();
+        let mut checks = Duration::ZERO;
+        let mut opening = Duration::ZERO;
+        let mut removal = Duration::ZERO;
+        let mut update = Duration::ZERO;
+        let mut status = "refused";
+        let path = rows
+            .get(id.as_str())
+            .map(|row| diagnostic_path(row))
+            .unwrap_or_default();
+        let checked = Instant::now();
+        (|| {
+            let Some(row) = rows.get(id.as_str()).copied().filter(|row| {
+                row.allocation_state == AllocationState::Retired
+                    && row.archive_destination.is_some()
+            }) else {
+                reply.issues.push(CheckoutTrashIssue {
+                    id: id.clone(),
+                    path: String::new(),
+                    message: "no recorded archive with this id; nothing was touched".into(),
+                });
+                checks = checked.elapsed();
+                return;
             };
-            reply.issues.push(CheckoutTrashIssue {
-                id: id.clone(),
-                path: diagnostic_path(row),
-                message,
-            });
-            continue;
-        }
-        let mut removal_started = false;
-        let opened = open_archive(db, row, true);
-        let outcome = opened.and_then(|archive| {
-            let Some(archive) = archive else {
-                return Ok(());
-            };
-            let current_path = fs::canonicalize(&archive.path).ok();
-            let legacy_path = Path::new(&row.canonical_root)
-                .join(working_copies::LEGACY_ARCHIVE_DIR_NAME)
-                .join(archive_name(row)?);
-            // Migration moves the trash without rewriting sessions' recorded
-            // working directories. Their old spelling still protects this tree.
-            if session_directories.iter().any(|cwd| {
-                cwd.starts_with(&archive.path)
-                    || cwd.starts_with(&legacy_path)
-                    || current_path
-                        .as_ref()
-                        .is_some_and(|current| cwd.starts_with(current))
-            }) {
-                bail!("a session uses this archive or a folder inside it");
-            }
-            removal_started = true;
-            remove(&archive)
-        });
-        match outcome {
-            Ok(()) => {
-                match working_copies::forget_retired(&db.lock(), id) {
-                    Ok(()) => reply.removed.push(id.clone()),
-                    Err(error) => reply.issues.push(CheckoutTrashIssue {
-                        id: id.clone(), path: diagnostic_path(row),
-                        message: format!("folder removed or already absent, but its trash record could not be dropped: {error:#}"),
-                    }),
-                }
-            }
-            Err(error) => {
-                let forgotten = if should_forget(&error) {
-                    match working_copies::forget_retired(&db.lock(), id) {
-                        Ok(()) => { reply.removed.push(id.clone()); true }
-                        Err(bookkeeping) => {
-                            reply.issues.push(CheckoutTrashIssue {
-                                id: id.clone(), path: diagnostic_path(row),
-                                message: format!("folder left untouched; its trash record could not be dropped: {bookkeeping:#}"),
-                            });
-                            false
-                        }
-                    }
-                } else { false };
-                let message = if removal_started {
-                    format!(
-                        "permanent deletion did not complete; some contents may already be gone; what remains is at {}: {error:#}",
-                        diagnostic_path(row)
-                    )
-                } else if forgotten {
-                    format!("folder left untouched; Farhelm no longer tracks it: {error:#}")
+            let membership = working_copies::member_count(&db.lock(), id);
+            checks = checked.elapsed();
+            if !matches!(membership, Ok(0)) {
+                status = if membership.is_err() {
+                    "failed"
                 } else {
-                    format!("folder left untouched: {error:#}")
+                    "refused"
+                };
+                let message = match membership {
+                    Ok(_) => {
+                        "left untouched: a session still references this retired checkout".into()
+                    }
+                    Err(error) => {
+                        format!(
+                            "folder left untouched: could not check session references: {error:#}"
+                        )
+                    }
                 };
                 reply.issues.push(CheckoutTrashIssue {
                     id: id.clone(),
                     path: diagnostic_path(row),
                     message,
                 });
+                return;
             }
-        }
+            let mut removal_started = false;
+            let opened_at = Instant::now();
+            let opened = open_archive(db, row, true);
+            let outcome = opened.and_then(|archive| {
+                let Some(archive) = archive else {
+                    opening = opened_at.elapsed();
+                    return Ok(());
+                };
+                let current_path = fs::canonicalize(&archive.path).ok();
+                let legacy_path = Path::new(&row.canonical_root)
+                    .join(working_copies::LEGACY_ARCHIVE_DIR_NAME)
+                    .join(archive_name(row)?);
+                // Migration moves the trash without rewriting sessions' recorded
+                // working directories. Their old spelling still protects this tree.
+                if session_directories.iter().any(|cwd| {
+                    cwd.starts_with(&archive.path)
+                        || cwd.starts_with(&legacy_path)
+                        || current_path
+                            .as_ref()
+                            .is_some_and(|current| cwd.starts_with(current))
+                }) {
+                    bail!("a session uses this archive or a folder inside it");
+                }
+                removal_started = true;
+                opening = opened_at.elapsed();
+                let removing = Instant::now();
+                let result = remove(&archive, &mut counts);
+                removal = removing.elapsed();
+                result
+            });
+            if !removal_started {
+                opening = opened_at.elapsed();
+            }
+            match outcome {
+                Ok(()) => {
+                    let updating = Instant::now();
+                    let forgotten = working_copies::forget_retired(&db.lock(), id);
+                    update = updating.elapsed();
+                    status = "failed";
+                    match forgotten {
+                    Ok(()) => {
+                        status = if removal_started { "removed" } else { "record_dropped" };
+                        reply.removed.push(id.clone());
+                    },
+                    Err(error) => reply.issues.push(CheckoutTrashIssue {
+                        id: id.clone(), path: diagnostic_path(row),
+                        message: format!("folder removed or already absent, but its trash record could not be dropped: {error:#}"),
+                    }),
+                }
+                }
+                Err(error) => {
+                    status = if removal_started { "failed" } else { "refused" };
+                    let forgotten = if should_forget(&error) {
+                        let updating = Instant::now();
+                        let result = working_copies::forget_retired(&db.lock(), id);
+                        update = updating.elapsed();
+                        match result {
+                            Ok(()) => {
+                                status = "record_dropped";
+                                reply.removed.push(id.clone());
+                                true
+                            }
+                            Err(bookkeeping) => {
+                                status = "failed";
+                                reply.issues.push(CheckoutTrashIssue {
+                                id: id.clone(), path: diagnostic_path(row),
+                                message: format!("folder left untouched; its trash record could not be dropped: {bookkeeping:#}"),
+                            });
+                                false
+                            }
+                        }
+                    } else {
+                        false
+                    };
+                    let message = if removal_started {
+                        format!(
+                            "permanent deletion did not complete; some contents may already be gone; what remains is at {}: {error:#}",
+                            diagnostic_path(row)
+                        )
+                    } else if forgotten {
+                        format!("folder left untouched; Farhelm no longer tracks it: {error:#}")
+                    } else {
+                        format!("folder left untouched: {error:#}")
+                    };
+                    reply.issues.push(CheckoutTrashIssue {
+                        id: id.clone(),
+                        path: diagnostic_path(row),
+                        message,
+                    });
+                }
+            }
+        })();
+        log_deletion(
+            id, &path, status, &timing, checks, opening, removal, update, &counts,
+        );
     }
     Ok(reply)
 }
@@ -730,6 +915,80 @@ mod tests {
             assert!(!fixture.root.join(working_copies::ARCHIVE_DIR_NAME).exists());
             fixture
         }
+    }
+
+    /// Completion logs expose the actual traversal's counts without changing
+    /// deletion authority. A nested directory and symlink distinguish files
+    /// from directories and prove that links are counted, not followed.
+    #[farhelm_testtrace::test]
+    async fn deletion_logs_one_completion_with_counts() {
+        let fixture = Fixture::new().await;
+        fs::create_dir(fixture.archive.join("nested")).unwrap();
+        fs::write(fixture.archive.join("nested/file"), b"data").unwrap();
+        std::os::unix::fs::symlink("work", fixture.archive.join("link")).unwrap();
+        assert!(fixture.archive.join("nested/file").is_file());
+        let reply = delete(&fixture.db, &[fixture.id.clone(), fixture.id.clone()], &[]).unwrap();
+        assert_eq!(reply.removed, vec![fixture.id.clone()]);
+        assert!(reply.issues.is_empty());
+        assert!(!fixture.archive.exists());
+        let lines = farhelm_testtrace::current_capture()
+            .unwrap()
+            .matching("permanent checkout trash deletion finished")
+            .unwrap();
+        assert_eq!(lines.len(), 1);
+        let fields = &lines[0].fields;
+        assert_eq!(
+            fields.get("checkout_id"),
+            Some(&format!("{:?}", fixture.id))
+        );
+        assert_eq!(
+            fields.get("path"),
+            Some(&format!("{:?}", fixture.archive.display().to_string()))
+        );
+        assert_eq!(fields.get("outcome").map(String::as_str), Some("removed"));
+        assert_eq!(fields.get("files_removed").map(String::as_str), Some("3"));
+        assert_eq!(
+            fields.get("directories_removed").map(String::as_str),
+            Some("2")
+        );
+        for field in [
+            "total_ms",
+            "admission_ms",
+            "session_paths_ms",
+            "working_copies_ms",
+            "record_checks_ms",
+            "open_verify_ms",
+            "removal_ms",
+            "record_update_ms",
+        ] {
+            assert!(fields.get(field).unwrap().parse::<u64>().is_ok(), "{field}");
+        }
+    }
+
+    /// Refusals need the same completion trail as successful deletion, and
+    /// peer-controlled ids must not inject physical lines into plain-text logs.
+    #[farhelm_testtrace::test]
+    async fn deletion_logs_refused_unknown_id_with_escaped_text() {
+        let fixture = Fixture::new().await;
+        let id = "unknown\ncheckout".to_string();
+        let reply = delete(&fixture.db, std::slice::from_ref(&id), &[]).unwrap();
+        assert!(reply.removed.is_empty());
+        assert_eq!(reply.issues.len(), 1);
+        assert!(fixture.archive.join("work").is_file());
+        let lines = farhelm_testtrace::current_capture()
+            .unwrap()
+            .matching("permanent checkout trash deletion finished")
+            .unwrap();
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].fields.get("checkout_id"), Some(&format!("{id:?}")));
+        assert_eq!(
+            lines[0].fields.get("outcome").map(String::as_str),
+            Some("refused")
+        );
+        assert_eq!(
+            lines[0].fields.get("files_removed").map(String::as_str),
+            Some("0")
+        );
     }
 
     /// A root unavailable at startup must not lose legacy trash to a later
@@ -1038,8 +1297,8 @@ mod tests {
             &fixture.db,
             std::slice::from_ref(&fixture.id),
             &[],
-            &mut |archive| {
-                remove_archive_with(archive, &mut |parent, name| {
+            &mut |archive, counts| {
+                remove_archive_with(archive, counts, &mut |parent, name| {
                     if name == c"mounted" {
                         boundary_observed = true;
                         Err(std::io::Error::from_raw_os_error(libc::EXDEV))
@@ -1106,8 +1365,8 @@ mod tests {
             &fixture.db,
             &[fixture.id.clone(), "unknown-id".into()],
             &[],
-            &mut |archive| {
-                remove_archive(archive)?;
+            &mut |archive, counts| {
+                remove_archive(archive, counts)?;
                 working_copies::add_member(&fixture.db.lock(), "corrupt", &fixture.id)?;
                 Ok(())
             },
@@ -1153,7 +1412,7 @@ mod tests {
             fs::read(fixture.archive.join("foreign")).unwrap(),
             b"keep this replacement"
         );
-        remove_archive(&archive).unwrap();
+        remove_archive(&archive, &mut RemovalCounts::default()).unwrap();
         assert_eq!(
             fs::read(fixture.archive.join("foreign")).unwrap(),
             b"keep this replacement"
