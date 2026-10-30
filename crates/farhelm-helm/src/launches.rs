@@ -323,8 +323,10 @@ pub(crate) fn normalize_selection(mut selection: LaunchSelection) -> LaunchSelec
 /// composes an agent launch's resume command from the same choices as its
 /// start command").
 ///
-/// The commands are argv vectors with no user-provided shell syntax: a
-/// custom model is one argv element after validation. An absent model adds
+/// The composed agent words are literal argv: a custom model is one element
+/// after validation. An optional wrapper retains raw shell words at the front;
+/// the supervisor interprets only that prefix and quotes the composed suffix.
+/// An absent model adds
 /// no provider or model flags, leaving the installed harness's configured
 /// default in charge. `{farhelm_args}` goes last in both commands, where the
 /// previous release appended Farhelm's arguments, which is also where the
@@ -335,8 +337,9 @@ pub(crate) fn compile(selection: LaunchSelection) -> Result<SessionLaunch, Strin
     let selection = normalize_selection(selection);
     validate_selection(&selection)?;
 
-    // The wrapper is a literal prefix around the complete command, including
-    // Goose's `env` launcher. Both fresh and resume argv reuse this sequence.
+    // Preserve the raw prefix separately from the literal command it wraps,
+    // including Goose's `env` launcher. Its word count is the supervisor's
+    // execution boundary on both fresh and resume paths.
     let mut argv = selection.wrapper_prefix.clone().unwrap_or_default();
     if selection.harness == LaunchHarness::Goose
         && (selection.effort.is_some() || selection.permissions.is_some())
@@ -1145,12 +1148,17 @@ mod tests {
     }
 
     /// A wrapper belongs to the stored launch, so every way to start that
-    /// launch must put the same literal words ahead of the agent command.
+    /// launch must preserve the same raw spelling ahead of the literal agent words.
     /// Goose is the sensitive case: its environment-setting `env` executable
     /// is part of the command being wrapped, not a replacement for the prefix.
     #[farhelm_testtrace::test]
     fn wrapper_prefix_surrounds_every_agent_start_and_resume() {
-        let prefix = vec!["with-endpoint".to_string(), "--".to_string()];
+        let prefix = vec![
+            "with-endpoint".to_string(),
+            "\"$PROFILE\"".to_string(),
+            "'two words'".to_string(),
+            "--".to_string(),
+        ];
         for harness in LaunchHarness::ALL {
             let bare = super::compile(selection(*harness)).expect("bare agent compiles");
             let wrapped = super::compile(LaunchSelection {

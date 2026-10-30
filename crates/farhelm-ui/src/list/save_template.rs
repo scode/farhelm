@@ -158,7 +158,7 @@ fn choice_text(field: Field, fields: &TemplateFields, host_label: &str) -> Strin
                 .wrapper_prefix
                 .as_ref()
                 .and_then(|prefix| prefix.as_ref())
-                .map(shell_words::join)
+                .map(|words| words.join(" "))
                 .unwrap_or_else(|| "None".into()),
         ),
         Field::Command => fields.command.clone(),
@@ -436,7 +436,7 @@ mod tests {
         let state = LauncherState {
             kind: Some(LauncherKind::Agent),
             harness: Some(LaunchHarness::Codex),
-            wrapper_prefix: Some(vec!["wrapper".into(), "--".into()]),
+            wrapper_prefix: Some(vec!["wrapper".into(), "\"$PROFILE\"".into(), "--".into()]),
             container: None,
             ..Default::default()
         };
@@ -447,6 +447,10 @@ mod tests {
         );
         assert!(!passive.checked.contains(&Field::Wrapper));
         assert_eq!(passive.selected(&passive.checked).wrapper_prefix, None);
+        assert_eq!(
+            choice_text(Field::Wrapper, &passive.fields, "host"),
+            "wrapper \"$PROFILE\" --"
+        );
 
         let explicit = Candidate::from_state(
             &LauncherState {

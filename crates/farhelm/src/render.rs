@@ -221,7 +221,9 @@ pub(crate) fn template_sets_cell(template: &farhelm_proto::AgentTemplate) -> Str
     if let Some(wrapper) = &fields.wrapper_prefix {
         parts.push(format!(
             "wrapper {}",
-            reset(wrapper, |words| quoted(&shell_words::join(words)))
+            // Wrapper words already carry shell quotes; only escape the
+            // resulting display string for this one-line CLI listing.
+            reset(wrapper, |words| quoted(&words.join(" ")))
         ));
     }
     if template.sets_command {
@@ -536,6 +538,8 @@ mod tests {
     /// and free text quoted; session names carry their effective base/fixed
     /// policy, and a template setting nothing says so. Custom permission words
     /// must expose argument boundaries rather than just advertising the mode.
+    /// Wrapper words already contain shell spelling; the listing must retain
+    /// it inside the CLI's ordinary escaped display field.
     ///
     /// Why: this cell is the only place an agent reads what a template will
     /// do, including its YOLO answer, so a title like `x, yolo` must not
@@ -581,6 +585,20 @@ mod tests {
                 None,
             ),
             "permissions custom \"--allow 'two words'\""
+        );
+        assert_eq!(
+            cell(
+                TemplateFields {
+                    wrapper_prefix: Some(Some(vec![
+                        "wrap".into(),
+                        "\"$PROFILE\"".into(),
+                        "'two words'".into()
+                    ])),
+                    ..Default::default()
+                },
+                None,
+            ),
+            "wrapper \"wrap \\\"$PROFILE\\\" 'two words'\""
         );
         assert_eq!(
             cell(

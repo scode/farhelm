@@ -46,15 +46,15 @@ absolutely catastrophically major mistake with huge user impact."
 - **Launch**: what a session runs, as the user chose it in the launcher. Every launch has one of two launch kinds. An
   **agent launch** names an agent type Farhelm knows (Claude Code, Codex, and the other harnesses under Topology) plus
   that agent type's own choices, such as model and permissions. Custom permission flags replace Farhelm's permission
-  flags and always count as YOLO. An optional wrapper prefix places literal words before the agent command Farhelm
-  composes, without changing its agent type or other choices. Farhelm composes the command, and the command it uses to
-  resume a conversation, from those choices when the session is created (and again on Restart with), and stores them;
-  Replace and agent clone copy the stored commands rather than composing them anew, while Clone and Replace with compose
-  from the choices. A **command launch** is a command line the user writes, with the user's own assertion of whether it
-  bypasses safety checks (YOLO). A command launch may also declare that it runs a given agent type, which buys that
-  agent type's status reading and conversation reporting, and, with a resume command the user writes, Resume (see
-  Creation and Durability). The agent type is the field the two kinds share: required for an agent launch, optional for
-  a command launch. This spec also calls an agent type a harness, after the vendor program behind it.
+  flags and always count as YOLO. An optional wrapper prefix places user-written Bash text before the agent command
+  Farhelm composes, without changing its agent type or other choices. Farhelm composes the command, and the command it
+  uses to resume a conversation, from those choices when the session is created (and again on Restart with), and stores
+  them; Replace and agent clone copy the stored commands rather than composing them anew, while Clone and Replace with
+  compose from the choices. A **command launch** is a command line the user writes, with the user's own assertion of
+  whether it bypasses safety checks (YOLO). A command launch may also declare that it runs a given agent type, which
+  buys that agent type's status reading and conversation reporting, and, with a resume command the user writes, Resume
+  (see Creation and Durability). The agent type is the field the two kinds share: required for an agent launch, optional
+  for a command launch. This spec also calls an agent type a harness, after the vendor program behind it.
 - **Launch template**: a named, partial set of launcher edits. Applying a template is exactly the same as making its
   edits by hand in the launcher, and nothing more: a template sets only the fields it contains, the result can be edited
   further before launching, and several templates can be applied one after another. A session records the launch that
@@ -647,22 +647,26 @@ agent choice is independent of that destination:
   shown as two tabs, Agent and Command, each showing only its own fields; switching tabs keeps each tab's draft. Codex,
   Claude, Muse, Cursor, Grok, Goose, Pi, OpenCode, and OMP agent launches carry an agent type plus model, effort, and
   permission choices where that agent type supports them, and an optional wrapper prefix. The prefix is a shell-style
-  word list placed before both start and resume commands, including before Goose's `env` words. Quotes and escapes only
-  group words; there is no shell expansion or placeholder substitution, and an empty prefix, NUL, or a Farhelm
-  placeholder word is refused. Farhelm does not inspect the wrapper's behavior: the user asserts that it runs the
-  selected agent with Farhelm's arguments and environment passed through. A launch that needs custom agent arguments, a
-  directory placeholder in the wrapper, or a separately written resume command is a command launch; visible permission
-  vocabulary is `Guarded`, `Agent's own setting`, `Custom`, `Approve`, `Smart approve`, `Chat`, and `YOLO`. Custom is
-  offered for Claude, Codex, Grok, Muse, Cursor and OMP: the user supplies permission flags instead of Farhelm's own.
-  The launcher splits quotes and escapes into literal words and previews those words; it evaluates no expansions. Empty
-  words lists and incomplete quotes are refused. The user is responsible for keeping these flags limited to permissions;
-  Farhelm neither checks their effect nor infers a safety mode, and every custom session counts as YOLO. Templates and
-  recent setups retain the words, Clone, Replace with and Restart with allow editing them, and plain Restart or Replace
-  reuses the stored command. Changing agent type clears custom and its words; a later template setting another
-  permission clears them. Custom never becomes the remembered default permission. Guarded means an agent can approve
-  actions through a safety mechanism that can still refuse or escalate (a classifier, AI reviewer, sandbox or asking the
-  user), not that it asks about everything. YOLO means no such check. For every agent type that supports Guarded,
-  Guarded is the default permission when none is chosen. This does not change when defaults apply or override a
+  word list placed before both start and resume commands, including before Goose's `env` words. Each word retains its
+  quotes and escapes exactly as typed. At execution the words are joined with spaces, followed by Farhelm's composed
+  agent arguments as single-quoted literal words, and interpreted by non-login, non-interactive `bash -c` on the host or
+  inside the container. This gives the prefix full Bash expansion and operator meaning. Stored wrappers use the same
+  interpretation without migration. The editor refuses empty prefixes, NUL and Farhelm placeholder words; placeholders
+  are not substituted in a wrapper. Templates, remembered prefixes, approvals and fingerprints retain the raw words, and
+  editors display them joined with spaces. Farhelm does not inspect the wrapper's behavior: the user asserts that it
+  runs the selected agent with Farhelm's arguments and environment passed through. A launch that needs custom agent
+  arguments, a directory placeholder in the wrapper, or a separately written resume command is a command launch; visible
+  permission vocabulary is `Guarded`, `Agent's own setting`, `Custom`, `Approve`, `Smart approve`, `Chat`, and `YOLO`.
+  Custom is offered for Claude, Codex, Grok, Muse, Cursor and OMP: the user supplies permission flags instead of
+  Farhelm's own. The launcher splits quotes and escapes into literal words and previews those words; it evaluates no
+  expansions. Empty words lists and incomplete quotes are refused. The user is responsible for keeping these flags
+  limited to permissions; Farhelm neither checks their effect nor infers a safety mode, and every custom session counts
+  as YOLO. Templates and recent setups retain the words, Clone, Replace with and Restart with allow editing them, and
+  plain Restart or Replace reuses the stored command. Changing agent type clears custom and its words; a later template
+  setting another permission clears them. Custom never becomes the remembered default permission. Guarded means an agent
+  can approve actions through a safety mechanism that can still refuse or escalate (a classifier, AI reviewer, sandbox
+  or asking the user), not that it asks about everything. YOLO means no such check. For every agent type that supports
+  Guarded, Guarded is the default permission when none is chosen. This does not change when defaults apply or override a
   remembered choice. Claude and Grok use `--permission-mode auto`, Codex uses `-a on-request -s workspace-write`, Muse
   uses `--permission-profile :auto-review`, and OMP uses `--approval-mode write`. Every supported resume retains those
   flags. Cursor's omission stays under its own setting; Pi, OpenCode and Goose omissions remain YOLO. Model and effort
@@ -1036,15 +1040,15 @@ launches resume; older releases cannot read launches stored as guarded.
 
 Failures split cleanly in two: precondition failures (nonexistent directory, unknown template, unreachable host) fail
 the create with a visible error and no session; launch failures of a session that was successfully created surface on
-the session itself — **Error** when the program handed to exec could not be started at all. For a command launch that
-program is Bash: a missing command inside the line instead exits with Bash's code 127 and its message in the terminal.
-**Exited** means the program started and then ended, however quickly, with its exit code visible. In the session
-launcher every refused launch (New, Clone, Replace with, quick launch) shows as a bordered alert with a warning icon
-beside Launch, starting "Not launched." before the refusal's own words, and announced to assistive technology. Restart
-mode uses the same alert beside Restart, with "Restart error." before the refusal's words. Errors that are not a refused
-launch, such as "Save as template" refusing a wrapper, keep the plain line. When the refusal says the folder does not
-exist, is not a directory or is not usable, the folder field is also marked and says so under it, naming the host, for
-as long as the form still names that host, its connection and that folder.
+the session itself — **Error** when the program handed to exec could not be started at all. For a command launch or a
+wrapped agent that program is Bash: a missing command inside the line instead exits with Bash's code 127 and its message
+in the terminal. **Exited** means the program started and then ended, however quickly, with its exit code visible. In
+the session launcher every refused launch (New, Clone, Replace with, quick launch) shows as a bordered alert with a
+warning icon beside Launch, starting "Not launched." before the refusal's own words, and announced to assistive
+technology. Restart mode uses the same alert beside Restart, with "Restart error." before the refusal's words. Errors
+that are not a refused launch, such as "Save as template" refusing a wrapper, keep the plain line. When the refusal says
+the folder does not exist, is not a directory or is not usable, the folder field is also marked and says so under it,
+naming the host, for as long as the form still names that host, its connection and that folder.
 
 ### Managed checkouts
 
@@ -2454,11 +2458,11 @@ session reaches that exact build; in the Mac app's side-by-side version layout t
 instead, so `farhelm` reaches the version of Farhelm now running, which after an update and restart is the newer one.
 Other programs in the same directory take precedence over the user's own `PATH` order as a result. The environment is
 evaluated at each launch: edit your rc files and the next launch or restart sees the change; already-running sessions do
-not. Command and resume-command text is then parsed by non-login, non-interactive Bash, regardless of the login shell.
-Ordinary aliases and unexported functions from the login shell are not inherited. Bash honors an inherited `BASH_ENV`
-startup file and exported Bash functions, which can change its subsequent environment. The shim still supplies its
-restored PATH, markers and working directory to Bash. An agent launch without a wrapper and a legacy session keep direct
-exec.
+not. Command and resume-command text, and an agent launch's wrapper prefix followed by safely quoted composed arguments,
+are then parsed by non-login, non-interactive Bash, regardless of the login shell. Ordinary aliases and unexported
+functions from the login shell are not inherited. Bash honors an inherited `BASH_ENV` startup file and exported Bash
+functions, which can change its subsequent environment. The shim still supplies its restored PATH, markers and working
+directory to Bash. An agent launch without a wrapper and a legacy session keep direct exec.
 
 When a host reboots, its supervisor starts automatically on hosts with the system-integration layer; on the v1 Mac it
 returns when the app or binary is next started, and interruption is classified at that point — whenever the supervisor
@@ -2621,10 +2625,10 @@ target.
 Farhelm-launched Codex sessions run without Codex's shared background server, so their commands keep the session's own
 environment and process tree. This applies even with conversation hooks off; legacy sessions keep their old injection.
 
-A compound command can keep Bash resident above its agent or wrapper. Claude, Muse and Codex tolerate that additional
-process. Grok and OMP refuse an unclassified intermediary when another resident wrapper sits below it, so such a command
-can run without capturing a conversation and leave Restart unavailable. Farhelm does not infer or repair the command's
-process layout.
+A compound command or wrapper prefix can keep Bash resident above its agent or wrapper. Claude, Muse and Codex tolerate
+that additional process. Grok and OMP refuse an unclassified intermediary when another resident wrapper sits below it,
+so such a command can run without capturing a conversation and leave Restart unavailable. Farhelm does not infer or
+repair the command's process layout.
 
 OMP (the `omp` program, the `@oh-my-pi/pi-coding-agent` CLI) is another report-only integration beside Pi. An OMP agent
 launch gets Farhelm's private extension, and so does a command launch that declares OMP, where its `{farhelm_args}`
@@ -3002,26 +3006,26 @@ no such Allow to reuse. A completed attempt returns its recorded result without 
 `farhelm agent create` and `farhelm spawn` take the launcher's fields as flags. `--template <name>` applies a template
 by its exact name, and may be repeated to apply several in order. `--agent <type>` sets the agent type; `--model`,
 `--effort`, `--permissions` and `--wrapper` set an agent launch's choices; `--wrapper` is one shell-style command line
-split into prefix words with no placeholders. `--command` makes it a command launch, which needs `--yolo` or `--no-yolo`
-as its assertion and may add `--agent <type>` as its declared agent type and `--resume-command` to opt into Resume.
-Templates are applied first, in order, and the other flags then act as further edits, so
-`--template my-codex --model gpt-6-luna` is `my-codex` with a different model. The result is validated exactly like a
-GUI launch, with the same refusals naming the field, and the remembered GUI defaults never fill a gap, so the same
-templates can launch differently from the CLI than from a GUI that preselected a remembered permission. A flag required
-by the verb, such as `--cwd` or the target host, may be omitted when an applied template sets that field, and an
-explicit flag wins over a template. `farhelm spawn` targets its own host, so a template that sets a host is refused
-there. `farhelm agent create` accepts `--gh <owner/repo>` (`--github` is an alias), mutually exclusive with `--cwd`, or
-a template whose destination is a managed checkout. It uses the launcher's checkout root, post-clone command, repository
-spellings, naming and refusals: `--gh acme/web --title "Fix parser"` creates `web-fix-parser`; without a title it
-chooses the next free `web-N`. A template's base name uses the literal title when free, otherwise `-2` through `-50`,
-the same series as the launcher; the approval card shows that resolved title and directory. Fixed template names and an
-agent's own `--title` stay exact, with a taken or over-long title-derived name refused without a suffix. A base name's
-invalid or over-long candidate is also refused. Only previews search: a create that loses its approved directory reports
-the conflict and never submits another create automatically. Keyed recovery precedes any new name preview.
-`farhelm spawn` and `farhelm agent clone` do not request fresh checkouts; spawn refuses a checkout template.
-`--inherit-agent` is exclusive with every launch flag. `--trust` is no longer accepted for create, spawn, or template
-writes; managed-checkout trust follows Settings. A command flag repeated or contradicted (`--yolo` with `--no-yolo`) is
-refused rather than resolved by order. The removed selectors `--profile` and `--profile-id`, and
+split into raw prefix words with quotes and escapes retained, interpreted by Bash and with no placeholders. `--command`
+makes it a command launch, which needs `--yolo` or `--no-yolo` as its assertion and may add `--agent <type>` as its
+declared agent type and `--resume-command` to opt into Resume. Templates are applied first, in order, and the other
+flags then act as further edits, so `--template my-codex --model gpt-6-luna` is `my-codex` with a different model. The
+result is validated exactly like a GUI launch, with the same refusals naming the field, and the remembered GUI defaults
+never fill a gap, so the same templates can launch differently from the CLI than from a GUI that preselected a
+remembered permission. A flag required by the verb, such as `--cwd` or the target host, may be omitted when an applied
+template sets that field, and an explicit flag wins over a template. `farhelm spawn` targets its own host, so a template
+that sets a host is refused there. `farhelm agent create` accepts `--gh <owner/repo>` (`--github` is an alias), mutually
+exclusive with `--cwd`, or a template whose destination is a managed checkout. It uses the launcher's checkout root,
+post-clone command, repository spellings, naming and refusals: `--gh acme/web --title "Fix parser"` creates
+`web-fix-parser`; without a title it chooses the next free `web-N`. A template's base name uses the literal title when
+free, otherwise `-2` through `-50`, the same series as the launcher; the approval card shows that resolved title and
+directory. Fixed template names and an agent's own `--title` stay exact, with a taken or over-long title-derived name
+refused without a suffix. A base name's invalid or over-long candidate is also refused. Only previews search: a create
+that loses its approved directory reports the conflict and never submits another create automatically. Keyed recovery
+precedes any new name preview. `farhelm spawn` and `farhelm agent clone` do not request fresh checkouts; spawn refuses a
+checkout template. `--inherit-agent` is exclusive with every launch flag. `--trust` is no longer accepted for create,
+spawn, or template writes; managed-checkout trust follows Settings. A command flag repeated or contradicted (`--yolo`
+with `--no-yolo`) is refused rather than resolved by order. The removed selectors `--profile` and `--profile-id`, and
 `farhelm agent restart --mode`, are refused with a message naming what replaced them, and `--agent` given something that
 is not an agent type is refused with the list of agent types. While its retry record is retained, a retry under an
 idempotency key is matched by the request as the agent sent it, not by what that request resolved to. Retrying
@@ -3984,7 +3988,8 @@ Goose sub-agent, a nested Goose run, or a child Pi that loads Farhelm's reporter
 
 Confirmed 2026-09-28: bash and zsh are the supported login shells, for agent launches and terminal tabs alike. Other
 login shells are unsupported: Farhelm need not make them work, detect them, or refuse them with a tailored message. Bash
-must also be available for command launches and their resume commands even when the login shell is zsh.
+must also be available for command launches, their resume commands and agent wrapper prefixes even when the login shell
+is zsh, and inside containers that run wrapped agents.
 
 An agent harness version is supported until a newer release of that harness has been out for two weeks. Things move fast
 in this space; Farhelm adds no code or complexity to support older versions.

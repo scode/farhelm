@@ -47,7 +47,9 @@ The image needs:
   `127.0.0.1:<port>` inside the container.
 - Ubuntu's normal account tools (`useradd` and `groupadd`) and `/etc/skel` for creating a home when the image does not
   already have a suitable account.
-- `bash` for terminal tabs and `sleep` for keeping the container running between commands.
+- `bash` for terminal tabs and for running an agent with a [wrapper](/docs/agents/agent-wrappers/), and `sleep` for
+  keeping the container running between commands. A wrapped agent needs Bash in the image even if you never open a
+  terminal tab.
 - `git` and, if you want GitHub access, `gh`. Configure Git to use `GH_TOKEN`, for example with `gh auth setup-git` in
   the image.
 

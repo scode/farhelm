@@ -75,11 +75,14 @@ pub enum SessionLaunch {
     /// `selection`.
     Agent {
         selection: LaunchSelection,
-        /// The start argv, with [`FARHELM_ARGS_PLACEHOLDER`] exactly once.
+        /// The start projection, with [`FARHELM_ARGS_PLACEHOLDER`] exactly once.
+        /// An optional wrapper occupies the first selection-prefix-count words
+        /// with raw shell spelling; every word after that boundary is literal argv.
         start: Vec<String>,
         /// The resume argv, with [`CONVERSATION_PLACEHOLDER`] and
         /// [`FARHELM_ARGS_PLACEHOLDER`] exactly once each, or `None` for an
-        /// agent type without conversation reporting.
+        /// agent type without conversation reporting. It has the same raw-prefix
+        /// boundary as `start`, so Restart never re-splits stored wrapper text.
         resume: Option<Vec<String>>,
     },
     /// A command line the user wrote, with their own YOLO assertion.
@@ -353,16 +356,31 @@ impl SessionLaunch {
         }
     }
 
-    /// The start command as text, for display: an agent launch's composed
-    /// argv shell-joined with the [`FARHELM_ARGS_PLACEHOLDER`] left out, a
-    /// command launch's command as written, a legacy session's invocation.
+    /// Show user-authored shell spelling while quoting the composed agent words.
+    ///
+    /// A wrapper prefix already contains its quotes and escapes. Quoting it
+    /// again would display a different program from the one Bash executes.
+    /// Farhelm's internal hook marker is omitted from the composed suffix.
+    /// Malformed peer data can have a shorter vector than its recorded prefix;
+    /// display remains bounded rather than treating that data as executable.
     pub fn display_command(&self) -> String {
         match self {
-            SessionLaunch::Agent { start, .. } => shell_words::join(
-                start
-                    .iter()
-                    .filter(|element| element.as_str() != FARHELM_ARGS_PLACEHOLDER),
-            ),
+            SessionLaunch::Agent {
+                selection, start, ..
+            } => {
+                let prefix_words = selection.wrapper_prefix.as_ref().map_or(0, Vec::len);
+                let (prefix, suffix) = start.split_at(prefix_words.min(start.len()));
+                let suffix = shell_words::join(
+                    suffix
+                        .iter()
+                        .filter(|element| element.as_str() != FARHELM_ARGS_PLACEHOLDER),
+                );
+                [prefix.join(" "), suffix]
+                    .into_iter()
+                    .filter(|part| !part.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            }
             SessionLaunch::Command(command) => command.command.clone(),
             SessionLaunch::Legacy { invocation, .. } => invocation.clone(),
         }

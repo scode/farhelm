@@ -607,7 +607,7 @@ impl Field {
     fn escaped_read_only_value(self, f: &TemplateFields) -> Option<String> {
         if self == Self::Wrapper {
             let words = f.wrapper_prefix.as_ref()?.as_ref()?;
-            let joined = shell_words::join(words);
+            let joined = words.join(" ");
             return joined
                 .chars()
                 .any(farhelm_proto::text::is_presentation_unsafe)
@@ -1043,7 +1043,7 @@ fn template_summary_parts(fields: &TemplateFields) -> Vec<DetailPart> {
         push(match prefix {
             Some(words) => vec![
                 DetailPart::text("Wrapper prefix "),
-                DetailPart::mono_peer(shell_words::join(words)),
+                DetailPart::mono_peer(words.join(" ")),
             ],
             None => vec![DetailPart::text("Wrapper prefix none")],
         });
@@ -1249,7 +1249,7 @@ fn FieldEditor(
                         .wrapper_prefix
                         .clone()
                         .flatten()
-                        .map(|words| shell_words::join(&words))
+                        .map(|words| words.join(" "))
                         .unwrap_or_default()
                 })
             });
@@ -1259,7 +1259,7 @@ fn FieldEditor(
                     input { class: "templates-wrapper templates-code", r#type: "text", value,
                         disabled, readonly: text_read_only, autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
                         placeholder: "with-endpoint --profile work --",
-                        "data-tooltip": "Wrapper prefix: words placed before Farhelm's agent command; no placeholders",
+                        "data-tooltip": "Wrapper prefix: Bash text before Farhelm's agent command; quotes and expansions keep their shell meaning; no placeholders",
                         oninput: move |event| {
                             let text = event.value();
                             if !text_read_only { draft.with_mut(|d| {
@@ -1279,7 +1279,7 @@ fn FieldEditor(
                         },
                     }
                 }
-                span { class: "templates-hint", "An empty input removes the wrapper. The prefix runs before Farhelm's agent command." }
+                span { class: "templates-hint", "An empty input removes the wrapper. The prefix runs through Bash before Farhelm's agent command." }
             }
         }
         Field::Prompt => rsx! {
@@ -2905,8 +2905,12 @@ mod tests {
         Field::Wrapper.add(&mut fields);
         assert_eq!(fields.wrapper_prefix, Some(None));
         assert!(template_summary(&fields).contains("Wrapper prefix none"));
-        fields.wrapper_prefix = Some(Some(vec!["wrapper".into(), "--".into()]));
-        assert!(template_summary(&fields).contains("Wrapper prefix wrapper --"));
+        fields.wrapper_prefix = Some(Some(vec![
+            "wrapper".into(),
+            "\"$PROFILE\"".into(),
+            "--".into(),
+        ]));
+        assert!(template_summary(&fields).contains("Wrapper prefix wrapper \"$PROFILE\" --"));
         fields.wrapper_prefix = Some(Some(vec!["wrapper\u{202e}".into()]));
         assert!(
             Field::Wrapper

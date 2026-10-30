@@ -982,8 +982,8 @@ struct LaunchFlags {
     /// and OpenCode default to YOLO.
     #[arg(long, value_name = "MODE", value_parser = parse_permissions)]
     permissions: Option<Choice<farhelm_proto::LaunchPermission>>,
-    /// Command words placed before Farhelm's composed agent command.
-    /// Quoting groups words; no shell evaluates the prefix.
+    /// Bash text placed before Farhelm's composed agent command.
+    /// Quotes and escapes keep their shell meaning; no Farhelm placeholders.
     #[arg(long, value_name = "COMMAND", allow_hyphen_values = true, value_parser = parse_wrapper_prefix)]
     wrapper: Option<WrapperPrefix>,
     /// Make this a command launch interpreted by non-interactive Bash.
@@ -2703,14 +2703,15 @@ mod tests {
         assert!(super::parse_permissions("yolo").is_ok());
     }
 
-    /// The same parsed words must reach create, spawn and template writes.
+    /// The same raw shell words must reach create, spawn and template writes;
+    /// stripping quotes here would change later Bash expansion.
     /// Inheritance remains exclusive because it copies the source launch.
     #[test]
     fn wrapper_flag_is_a_shared_launch_edit() {
         let words = vec![
             "with-endpoint".to_string(),
             "--profile".into(),
-            "work space".into(),
+            "'work space'".into(),
             "--".into(),
         ];
         let command = "with-endpoint --profile 'work space' --";

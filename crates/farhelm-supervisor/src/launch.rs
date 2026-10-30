@@ -6,7 +6,8 @@
 //! login shell (`-l -i -c`) → Farhelm's optional scope-waypoint helper →
 //! the scope wrapper → `farhelm internal launch <spec>` → the shim execs
 //! the executable argv: direct agent words, or Bash with original user command
-//! text whose placeholders the supervisor filled safely. Unscoped launches go straight to the shim. The
+//! text whose placeholders the supervisor filled safely, or raw wrapper text
+//! followed by quoted composed agent words. Unscoped launches go straight to the shim. The
 //! waypoint proves shell startup completed even when the wrapper refuses
 //! to start the shim. The shim exists because a sentinel
 //! written by the shell after a failed `exec` can never fire under zsh
@@ -17,7 +18,7 @@
 //! not a shim exec failure. The `-l -i` reproduces the file
 //! sourcing an SSH-and-type session gets, which is SPEC.md's environment
 //! contract; `-i` is load-bearing (bare `-c` skips `.zshrc`/`.bashrc`).
-//! A command's inner noninteractive Bash inherits the shim's final environment;
+//! A command or wrapper's inner noninteractive Bash inherits the shim's final environment;
 //! it still honors explicit `BASH_ENV` and exported Bash functions. Those are
 //! user-configured execution, not another login-shell startup pass.
 //!
@@ -154,7 +155,8 @@ pub const PRIVATE_TMUX_ENV_VARS: [&str; 2] = ["TMUX", "TMUX_PANE"];
 #[derive(Clone, Serialize, Deserialize)]
 pub struct LaunchSpec {
     /// The executable vector prepared by the supervisor: literal agent words,
-    /// or `bash -c` with safely filled command text. The shim neither parses
+    /// or `bash -c` with safely filled command text or a raw wrapper followed
+    /// by quoted composed agent words. The shim neither parses
     /// shell text nor decides hooks; container exec runs this same vector
     /// inside the container rather than expanding anything on the host.
     pub argv: Vec<String>,

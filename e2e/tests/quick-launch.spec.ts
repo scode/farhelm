@@ -88,7 +88,7 @@ test("quick launch submits the wrapper prefix saved in its agent template", asyn
     const form = page.locator(".create-session-form");
     await expect(form).toBeVisible();
     await expect(form.locator(".create-session-error")).toContainText("wrapper quick-launch fixture refusal");
-    await expect(form.locator(".launch-composer-wrapper")).toHaveValue("env 'WRAPPER_CASE=quick' --");
+    await expect(form.locator(".launch-composer-wrapper")).toHaveValue("env WRAPPER_CASE=quick --");
     expect(bodies, "quick launch must submit once before revealing its refused draft").toHaveLength(1);
     expect(bodies[0]).toMatchObject({ launch: { harness: "codex", wrapper_prefix: prefix } });
   } finally {

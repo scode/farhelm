@@ -440,6 +440,155 @@ async fn podman_existing_host_uid_uses_its_image_home() {
     exercise_account_rule(AccountRule::Uid).await;
 }
 
+/// Wrapper source is evaluated inside the container, after its HOME and token
+/// have replaced the host environment. The real compiler's model and one-time
+/// prompt remain literal argv even though both contain executable shell syntax.
+/// An owned fake Claude in the shared checkout avoids a vendor dependency.
+#[farhelm_testtrace::test]
+async fn podman_wrapper_expands_inside_the_container_and_quotes_the_agent_suffix() {
+    use std::os::unix::fs::PermissionsExt;
+    if !available() {
+        return;
+    }
+    let root = farhelm_teststate::tempdir().unwrap();
+    let image = "docker.io/library/ubuntu:24.04";
+    let host = HostAccount {
+        name: format!("fh{}", &uuid::Uuid::new_v4().simple().to_string()[..20]),
+        uid: 1000,
+        gid: 1000,
+        home: root.path().to_path_buf(),
+    };
+    assert_image_account_premise(image, &host, AccountRule::Uid);
+    let h = harness_with_seams(
+        SupervisorTimeouts::default(),
+        SupervisorSeams {
+            // Podman resolves its rootless image store from the host HOME.
+            // Keep it intact; the distinct host token is the positive oracle
+            // that expansion happened after entering the container.
+            launch_env: vec![("GH_TOKEN".into(), "host-wrapper-token".into())],
+            container_host_account: Some(host),
+            scopes: Arc::new(farhelm_supervisor::scope::ScopeManager::disabled()),
+            ..Default::default()
+        },
+    )
+    .await;
+    let checkout = managed_checkout(&h, root.path());
+    let executable = checkout.join("claude");
+    std::fs::write(
+        &executable,
+        format!(
+            r#"#!/bin/bash
+set -eu
+{}
+test "$WRAPPER_HOME" = "$HOME"
+test "$WRAPPER_TOKEN" = "$GH_TOKEN"
+test -z "${{FARHELM_SESSION_ID+x}}${{FARHELM_SESSION_TOKEN+x}}${{FARHELM_SUPERVISOR_SOCK+x}}"
+printf '%s\0' "$@" > wrapper-argv
+printf '%s' "$WRAPPER_HOME" > wrapper-home
+printf '%s' "$WRAPPER_TOKEN" > wrapper-token
+printf 'CONTAINER WRAPPER READY\n'
+read -r finish
+"#,
+            account_checks()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let token = root.path().join("wrapper-token");
+    std::fs::write(&token, "container-wrapper-token\n").unwrap();
+    let (port, server) = listener().await;
+    let model = "candidate'42;$GH_TOKEN*";
+    let prompt = "one ' \"$HOME\" *; $(touch wrapper-injected)\n{cwd}";
+    let selection = LaunchSelection {
+        harness: LaunchHarness::Claude,
+        model: Some(model.into()),
+        effort: None,
+        permissions: Some(farhelm_proto::LaunchPermission::Guarded),
+        permission_flags: None,
+        wrapper_prefix: Some(vec![
+            "env".into(),
+            "PATH=\"$PWD:$PATH\"".into(),
+            "WRAPPER_HOME=\"$HOME\"".into(),
+            "WRAPPER_TOKEN=\"$GH_TOKEN\"".into(),
+        ]),
+        container: Some(ContainerConfig {
+            engine: ContainerEngine::Podman,
+            image: image.into(),
+            api_proxy_port: port,
+            github_token_file: Some(token.to_str().unwrap().into()),
+        }),
+        workspace_trust: None,
+    };
+    let launch = farhelm_helm::compile_agent_launch(selection.clone()).unwrap();
+    let session = h
+        .client
+        .create_session_with_extras(
+            checkout.to_str().unwrap(),
+            launch,
+            None,
+            120,
+            30,
+            farhelm_helm::CreateExtras {
+                prompt: Some(prompt.into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(session.launch.agent_selection(), Some(&selection));
+    let name = format!("farhelm-{}", session.id);
+    let _cleanup = ContainerCleanup(name.clone());
+    let (_, mut seen, mut rx) = h
+        .client
+        .attach_terminal_live(
+            &session.id,
+            120,
+            30,
+            TerminalSelector::Agent,
+            "container-wrapper",
+        )
+        .await
+        .unwrap();
+    wait_for(&mut rx, &mut seen, "CONTAINER WRAPPER READY", 60).await;
+    assert_eq!(state(&name), "running");
+    let raw = std::fs::read(checkout.join("wrapper-argv")).unwrap();
+    let argv = raw
+        .strip_suffix(&[0])
+        .expect("the fake agent terminates every argument")
+        .split(|byte| *byte == 0)
+        .map(|word| std::str::from_utf8(word).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        argv,
+        ["--model", model, "--permission-mode", "auto", "--", prompt],
+        "container policy must remove hook arguments and preserve the compiled permission/model/prompt words"
+    );
+    assert_eq!(
+        std::fs::read_to_string(checkout.join("wrapper-home")).unwrap(),
+        "/home/ubuntu",
+        "the raw HOME expression must see the image account"
+    );
+    assert_eq!(
+        std::fs::read_to_string(checkout.join("wrapper-token")).unwrap(),
+        "container-wrapper-token",
+        "the raw token expression must run after container credentials are installed"
+    );
+    assert!(!checkout.join("wrapper-injected").exists());
+    assert_host_owned(&checkout.join("wrapper-argv"));
+    h.client.stop_session(&session.id).await.unwrap();
+    assert_eq!(state(&name), "exited");
+    h.client.delete_session(&session.id).await.unwrap();
+    assert_eq!(
+        Command::new("podman")
+            .args(["container", "exists", &name])
+            .status()
+            .unwrap()
+            .code(),
+        Some(1)
+    );
+    server.abort();
+}
+
 /// Exercise the supported production lifecycle with and without a user-manager
 /// scope. Actual in-container reads and writes distinguish isolation from an argv
 /// snapshot, and a naturally exited agent still leaves a container Stop must end.

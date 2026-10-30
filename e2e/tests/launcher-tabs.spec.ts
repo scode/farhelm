@@ -68,13 +68,13 @@ test("New opens on the agent tab, and each tab keeps its own fields and draft", 
 });
 
 /**
- * Spec: a prefix is parsed into literal words in the submitted agent selection;
+ * Spec: a prefix retains each word's shell spelling in the submitted selection;
  * an unfinished quote remains visible and prevents a create request.
  *
  * Why: dropping invalid text would silently run the agent without the wrapper
  * the user thought they had chosen.
  */
-test("agent wrapper input refuses unfinished text and submits parsed words", async ({ page, request }) => {
+test("agent wrapper input refuses unfinished text and submits raw shell words", async ({ page, request }) => {
   const build = (await request.get("/api/sessions")).headers()["x-farhelm-build"];
   expect(build, "the controlled refusal must retain the live helm's build identity").toBeTruthy();
   const bodies: Record<string, any>[] = [];
@@ -107,7 +107,7 @@ test("agent wrapper input refuses unfinished text and submits parsed words", asy
   await expect(form.locator(".create-session-error")).toContainText("wrapper fixture refused create");
   expect(bodies).toHaveLength(1);
   expect(bodies[0]).toMatchObject({
-    launch: { harness: "codex", wrapper_prefix: ["with-endpoint", "--profile", "work profile", "--"] },
+    launch: { harness: "codex", wrapper_prefix: ["with-endpoint", "--profile", "'work profile'", "--"] },
   });
 });
 
@@ -148,7 +148,7 @@ test("agent switch loads that agent's remembered wrapper prefix", async ({ page 
     expect(response.ok(), "the fixture needs a real preference row").toBe(true);
     const preferences = await response.json();
     const remembered_wrapper_prefixes = {
-      codex: ["with-endpoint", "--profile", "codex", "--"],
+      codex: ["with-endpoint", "--profile", "'codex profile'", "--"],
       claude: ["env", "CLAUDE_PROFILE=work\u202e"],
     };
     expect(remembered_wrapper_prefixes.codex).not.toEqual(remembered_wrapper_prefixes.claude);
@@ -161,16 +161,16 @@ test("agent switch loads that agent's remembered wrapper prefix", async ({ page 
   const wrapper = form.locator(".launch-composer-wrapper");
   const harness = form.locator(".launch-composer-harness-choice");
   await harness.getByRole("button", { name: "Codex", exact: true }).click();
-  await expect(wrapper).toHaveValue("with-endpoint --profile codex --");
+  await expect(wrapper).toHaveValue("with-endpoint --profile 'codex profile' --");
   await wrapper.fill("temporary --");
   await harness.getByRole("button", { name: "Claude", exact: true }).click();
-  await expect(wrapper).toHaveValue("env 'CLAUDE_PROFILE=work<U+202E>'");
+  await expect(wrapper).toHaveValue("env CLAUDE_PROFILE=work<U+202E>");
   await expect(wrapper).toHaveJSProperty("readOnly", true);
   await form.getByRole("button", { name: "Clear wrapper prefix" }).click();
   await expect(wrapper).toHaveValue("");
   await expect(wrapper).toHaveJSProperty("readOnly", false);
   await harness.getByRole("button", { name: "Codex", exact: true }).click();
-  await expect(wrapper).toHaveValue("with-endpoint --profile codex --");
+  await expect(wrapper).toHaveValue("with-endpoint --profile 'codex profile' --");
 });
 
 /**

@@ -91,12 +91,18 @@ fn wrapper_words(text: &str) -> Result<Option<Vec<String>>, String> {
 /// Recover this agent's last successful user choice from the shared helm row.
 /// Switching agent type discards the prior type's draft rather than carrying
 /// its command prefix into a different agent invocation.
-/// Join original argument words: the draft's inherited-value guard owns
+/// Join the stored shell spelling: the draft's inherited-value guard owns
 /// escaped read-only presentation, separately from the executable bytes.
 fn remembered_wrapper(preferences: &api::Preferences, harness: Option<LaunchHarness>) -> String {
     harness
         .and_then(|harness| preferences.remembered_wrapper_prefixes.get(&harness))
-        .map(|words| shell_words::join(words.iter().map(crate::peer::PeerText::raw)))
+        .map(|words| {
+            words
+                .iter()
+                .map(crate::peer::PeerText::raw)
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
         .unwrap_or_default()
 }
 
@@ -8365,15 +8371,12 @@ mod tests {
     /// unsafe characters. Keep the raw draft available for the control's existing
     /// inherited-value guard, separately from its visible escape spelling.
     #[test]
-    fn remembered_wrapper_joins_original_decoded_words() {
+    fn remembered_wrapper_joins_original_shell_words() {
         let preferences: super::api::Preferences = serde_json::from_value(serde_json::json!({
-            "remembered_wrapper_prefixes": {"codex": ["wrapper\u{202e}", "argument with spaces", ""]}
+            "remembered_wrapper_prefixes": {"codex": ["wrapper\u{202e}", "'argument with spaces'", "''"]}
         })).unwrap();
         let draft = super::remembered_wrapper(&preferences, Some(super::LaunchHarness::Codex));
-        assert_eq!(
-            shell_words::split(&draft).unwrap(),
-            ["wrapper\u{202e}", "argument with spaces", ""]
-        );
+        assert_eq!(draft, "wrapper\u{202e} 'argument with spaces' ''");
         assert!(crate::peer::editable_peer(&draft).contains("wrapper<U+202E>"));
     }
 
