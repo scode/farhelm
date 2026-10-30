@@ -255,14 +255,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   what the release commit, version settlement, curated notes and the maintainer's signing of the six payloads demand of
   the build.
 
-- **Fix terminal tabs dying when their output is consumed too slowly.** On 2026-10-30, a long-running command in a
-  terminal tab that printed one line per file (tens of thousands of lines) was killed repeatedly, two to three minutes
-  in. A signal trace showed a hangup (SIGHUP) from the tab's own login shell, which passes it on to everything it runs
-  when its terminal goes away; nothing else killed it. Farhelm's log showed the same sequence each time: "tmux paused
-  the pane for this client" (the tab was printing faster than Farhelm could keep up), then under a second later
-  "terminal tab closed" and "reaped a terminal tab whose shell exited". Find out why falling behind on a tab's output
-  ends up closing the tab, and fix it: a fast-printing program must never lose its terminal because Farhelm cannot keep
-  up.
+- **Fix commands in terminal tabs getting terminated during heavy output.** On 2026-10-30, a long-running command run
+  directly in bash in a terminal tab of an ordinary (not containerized) session, printing one line per file (tens of
+  thousands of lines), was killed repeatedly two to three minutes in: it printed "Terminated", and the tab and its shell
+  kept working afterwards. Other tabs were being opened and closed in the meantime, partly to debug this, so the
+  tab-close lines in Farhelm's log from those moments may concern other tabs. Find out what terminated the command and
+  fix it if it is Farhelm. A tab may be closed, or its processes signalled, only when its shell really exited or the
+  user closed or deleted it; remove any path that decides otherwise (a timeout, slowness, anything else). Plan:
+  `plans/queue/tab-output-hangup.md`.
 
 - **Custom agents, starting with conversation tracking.** Let users run an agent harness Farhelm has no built-in support
   for (an internal or unreleased tool, say) and still get conversation tracking, so Restart resumes the conversation.
@@ -301,17 +301,22 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Expand `~` in the agent command.** A command launch whose program is written as `~/...` fails with `exec_failed` and
   "No such file or directory", because the command is executed without a shell and nothing expands the tilde. Expand a
   leading `~` to the home directory of the user the session runs as, at least in the program, and consider arguments
-  too.
+  too. Plan: `plans/queue/command-shell-meaning.md`.
 
 - **Make the template list's ⚡ show clearly whether it is lit.** In the Templates list, the quick-launch bolt looks
   almost the same whether or not that template is the marked one: it always shows as filled, and only its size wiggles
   slightly. The unmarked state needs to be clearly different (an outline, say), so the list shows at a glance which
-  template ⚡ launches.
+  template ⚡ launches. Plan: `plans/queue/template-bolt-and-save.md`.
 
 - **Show in the template editor whether there is anything to save.** The editor always shows "Fields not shown are left
   as is. Another template can supply choices this one leaves out." just above the footer, so after clicking Save the
   dialog looks unchanged and it feels like nothing happened. Grey out Save when the draft has no unsaved changes, so its
-  state shows whether a save is needed and that one went through.
+  state shows whether a save is needed and that one went through. Plan: `plans/queue/template-bolt-and-save.md`.
+
+- **An in-app signal for serious breaking changes.** Release notes alone are easy to miss. Give Farhelm a way to tell
+  users inside the app about a serious breaking change in a release they just updated to, rather than relying on the
+  release notes. Commands and wrappers starting to run through bash with full shell meaning
+  (`plans/queue/command-shell-meaning.md`) is the kind of change that would have used it.
 
 ## Doc todo
 
