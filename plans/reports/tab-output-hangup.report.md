@@ -1,3 +1,15 @@
+## Since the last review
+
+Only draft #2846 changed; no PR was added or dropped. Landing review caught a regression in the new terminal-identity
+guard: ordinary Restart failed when the session's folder contained `}`, because tmux parsed that unquoted character as
+command syntax. Every word in the nested relaunch and related guarded commands now uses the existing always-single-quote
+encoder, and credential redaction matches the resulting text.
+
+A new real-tmux regression restarts an ordinary session in a folder named `left}right`. It requires the same terminal, a
+different process, the exact working folder, and a unique response to input through a fresh attachment. Retained
+scrollback cannot supply that response. The original incident remains unattributed; the agreed audit-and-diagnostics
+fallback is unchanged.
+
 ## What this was about
 
 A command run directly in Bash in an ordinary terminal tab repeatedly printed "Terminated" after two to three minutes of
@@ -32,9 +44,10 @@ signal syscall recipients, their total and truncation. Scope signals instead log
 cgroup members, with unavailable/truncated flags. That snapshot can race delivery and omit nested members; it cannot
 identify exact systemd signal recipients by itself.
 
-Both main validation selections had a failure in an existing test, described below. All new regression tests passed; the
-failed commands are retained and are not reported as passing gates. The independent reviewer found no concrete
-patch-related cause or supported correction for those failures.
+The earlier execution's two main validation selections each had a failure in an existing test, described below. Those
+failed commands remain retained and are not reported as passing gates. The original independent reviewer found no
+concrete patch-related cause or supported correction for those failures. This round's required package and module checks
+are reported separately below.
 
 ## Open questions and possible follow-ups
 
@@ -55,13 +68,40 @@ or weakening either assertion.
 ## The PRs
 
 - [#2846: keep tab cleanup on its own terminal](https://github.com/scode/farhelm/pull/2846/changes), draft head
-  `c01ba197ed4971444da3035ff1be689d05313a10`.
+  `c518c5da1acbf2db43683a2b38359c609cd14e89`.
 
 ## Checks run, reused and skipped
 
 All runtime checks below used the recorder, nextest 0.9.148, pinned tmux 3.7c, four global slots and zero retries.
 Selections outside the filters are not passes. Retained output was complete and contained no literal runtime `SKIPPED`
 notices. Successful individual cases inside failed commands are observations, not a successful selection verdict.
+
+This round:
+
+- `cargo nextest run -p farhelm-supervisor`: recorder `90238937-400b-40f8-b431-f5285237a7e6` passed all 1,386 executed
+  tests; five helper tests were intentionally ignored.
+- `cargo nextest run -p farhelm --test e2e -E 'test(restart_with_resume::) or test(restart_under_concurrency::) or test(terminal_tabs::)'`:
+  recorder `df945619-d3f3-490b-88d7-58fdacfc4524` passed all 60 selected tests plus fixture setup; 350 were outside the
+  selection. This includes the final ordinary Restart regression in the closing-brace directory.
+- Earlier focused recorder `395a7948-32c1-45a7-94be-f08209e2b09d` passed the new Restart case and the real-driver
+  directory and credential-redaction tests. The redundant post-Restart readiness wait was subsequently removed; the
+  complete module run above covers that final version.
+- Both required runs captured complete source identity over `49cdcb148b33c791b99de0d051d6d7dbd6a9ebc3` with tracked
+  follow-up edits, fingerprint `f04cfb49fbd635489d017df5c974ee583cb8e399e22c2e8f781239508cf57fc6`. Reports and output
+  were complete, without runtime skips or forced cleanup.
+- Passed `cargo clippy -p farhelm-supervisor --all-targets -- -D warnings`, `cargo fmt --all -- --check`, Markdown
+  formatting on the PR's documents, `python3 releasing/check-changelog.py format`, and `git diff --check`. The isolated
+  interpreter's `python -B scripts/check-test-sleeps.py` passed with 327 inspected delays and zero unannotated delays.
+- Rebased onto `1c9734e37f8444ec6160abfc2a50362adb8ae0b5` after inspecting the complete intervening diff. It only
+  changed documentation, screenshot fixtures and queue bookkeeping. The complete PR diff before and after rebase
+  compared byte-for-byte equal, so the runtime, lint and review coverage still applies. The new documentation does not
+  change the session cleanup or Restart contracts.
+- Did not repeat the several-minute investigation: the decision requested the quoting correction, real Restart
+  regression and package/module checks, while retaining the original no-reproduction fallback. Browser, desktop,
+  installer and whole-workspace runs add no uncovered integration risk to this backend correction. The earlier
+  backpressure failures below remain disclosed; no assertion or flow-control behavior was weakened.
+
+Earlier execution retained and reused for the original investigation and validation limits:
 
 - Original-baseline investigation at `9ad2a17f`: recorder `2ef679c7-5d3a-4610-9d13-b497c5464bb5` passed a quiet
   194-second run with 175,424 lines and about 22.6 MB delivered. Recorder `da07a64e-d83f-4567-add3-4e653d754397` passed
@@ -91,9 +131,10 @@ notices. Successful individual cases inside failed commands are observations, no
   Markdown formatting on changed documents, and `python3 releasing/check-changelog.py format`.
   `python -B scripts/check-test-sleeps.py` passed with 327 inspected delays and none lacking a rationale, after two
   earlier attempts exceeded its 60-second source-check budget.
-- Source coverage: supervisor checks used the implementation diff over `9ad2a17f`; integration used the same code over
-  `3abda2d9`. Final head rebased onto `d3d67f52`. The intervening main diffs only changed plan bookkeeping and another
-  plan's report; the tested product and test code is unchanged. No runtime result from an earlier plan was reused.
+- Earlier source coverage: supervisor checks used the implementation diff over `9ad2a17f`; integration used the same
+  code over `3abda2d9`. That execution's final head rebased onto `d3d67f52`. The intervening main diffs only changed
+  plan bookkeeping and another plan's report; the tested product and test code is unchanged. No runtime result from an
+  earlier plan was reused.
 - Skipped the RSS measurement because no buffering, allocation or flow-control policy changed and shared-host memory
   noise would not test the cleanup guards. Skipped browser, desktop, installer and full-workspace suites because the
   changed behavior is in supervisor cleanup and diagnostics, covered by the targeted backend checks. No live
@@ -101,10 +142,16 @@ notices. Successful individual cases inside failed commands are observations, no
 
 ## Review gate outcome
 
-The required fresh gpt-6.1-sol/high adversarial reviewer reviewed correctness, design, idioms and the complete
-test-authoring checklist. It found one diagnostic bug: a byte cap could split a PID and invent a different member in the
-scope snapshot. The parser now discards that partial record, and the reviewer accepted the focused regression and
-correction. No finding was rejected. Scope reassessment found the existing guards and bounded diagnostics sufficient,
-without a new lifecycle subsystem. Separate review of both validation failures found no concrete patch defect and
-recommended retaining the observations without assertion weakening or broader hunting. The commit/PR wording passed an
-independent cold read.
+This round's required fresh gpt-6.1-sol/high adversarial reviewer passed the combined PR, including every nested command
+builder, matching credential redaction and the real Restart regression. Its only clarity note was accepted: the test now
+explains that retained readiness banners cannot establish the replacement agent's liveness; its new process and unique
+input response do. The corrected test was re-read and passed with no findings. The existing commit and PR wording also
+passed a new independent cold read.
+
+In the earlier execution, the required fresh gpt-6.1-sol/high adversarial reviewer reviewed correctness, design, idioms
+and the complete test-authoring checklist. It found one diagnostic bug: a byte cap could split a PID and invent a
+different member in the scope snapshot. The parser now discards that partial record, and the reviewer accepted the
+focused regression and correction. No finding was rejected. Scope reassessment found the existing guards and bounded
+diagnostics sufficient, without a new lifecycle subsystem. Separate review of both validation failures found no concrete
+patch defect and recommended retaining the observations without assertion weakening or broader hunting. The commit/PR
+wording passed an independent cold read.
