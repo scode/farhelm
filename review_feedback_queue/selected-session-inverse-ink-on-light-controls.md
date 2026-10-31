@@ -27,3 +27,19 @@ folder focus-outline finding has a different cause. Proposed drop: none.
 
 Provenance: trailing-review run `47edc805-f43c-4ef2-abb1-0bba27a41c2f/review-98bb1585`, `g023/f3`; neighboring `g024`
 and `g031` corroborated the child-surface problem.
+
+## Additional review at d6645f77
+
+Additional reviewed commit: d6645f771bee8ed03a66486ef8755834937d759d
+
+The same inverse-ink inheritance also makes a disabled selected-session menu command's keyboard focus outline white on
+its white Light menu surface. CSS cascade and a supported reopen/navigation path are source-established; no native
+pixels were observed. This extends the selected-session child-surface cause. The selected expanded-host hover defect
+concerns a different surface and is recorded separately. Suggested bucket remains other.
+
+Source and provenance, run `1e4abedb-1946-4bfb-93a4-fd2f4e241acd`:
+
+- `g133/f3`: `crates/farhelm-ui/assets/app.css:9093`.
+- `g134/f1`: `crates/farhelm-ui/assets/app.css:9093`.
+
+Proposed drop: none for the retained remainder. No runtime reproduction, fix or triage decision was performed.

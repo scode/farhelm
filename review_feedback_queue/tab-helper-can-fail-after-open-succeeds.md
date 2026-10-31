@@ -40,3 +40,22 @@ historical caveat.
 
 Provenance: `g156/f2`. These are reviewer-local identities, not additional findings. Proposed drop: none for the
 retained remainder.
+
+## Additional review at d6645f77
+
+Additional reviewed commit: d6645f771bee8ed03a66486ef8755834937d759d
+
+Container tab preparation reaches the same helper-liveness versus actual-shell-readiness boundary. The reviewed
+token-to-FIFO producer is deliberate external file reshaping, explicitly accepted by SPEC.md:3624–3627,3676–3689. That
+exact producer is not claimed as a new accidental defect, while coverage of the separate false-success shell contract
+remains ambiguous. No ordinary regular-token Podman delay/failure producer was established after source checks. Preserve
+the original g117 withdrawal and this qualified extension question; do not infer a generic security or work-loss route
+or discard the existing directory-entry cause.
+
+Source and provenance, run `1e4abedb-1946-4bfb-93a4-fd2f4e241acd`:
+
+- `a004/x6`:
+  `crates/farhelm-supervisor/src/service/core.rs:14081-14137; crates/farhelm-supervisor/src/container.rs:112-127; SPEC.md:3624-3627,3676-3689`.
+- `a021/x-g117-f4`: `crates/farhelm-supervisor/src/service/core.rs:14055-14137`.
+
+Proposed drop: none for the retained remainder. No runtime reproduction, fix or triage decision was performed.

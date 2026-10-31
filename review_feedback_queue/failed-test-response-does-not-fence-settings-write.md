@@ -85,3 +85,25 @@ the original ledger-authorized response-wait repair while adding sites that neve
 Possible cover remains the existing item and its explicit scope, rather than a second queue item or accepted
 contamination. Provenance: `g067/f1`, `g069/f1`, `g068/f2`; earlier blanket cleanup refutations and overconfident
 missing matcher claims were corrected under those same identities.
+
+## Additional review at d6645f77
+
+Additional reviewed commit: d6645f771bee8ed03a66486ef8755834937d759d
+
+The checkout-composer cleanup at e2e/tests/github-checkout-composer.spec.ts:447–459 adds another response-failure
+instance. The automatic-policy test adds a narrower conditional instance: an older valid request must be delayed before
+its FIFO policy-lock admission to overtake restoration. A database delay after that lock cannot supply the ordering.
+Matching transport/server source was checked, but that concrete pre-lock producer remains unestablished. Preserve this
+qualification rather than treating the test as a reproduction of the generic delayed-database example. Suggested bucket
+remains other. The existing observed-flake/trivial-fix disposition remains possible coverage, with its precise scope
+unresolved; no runtime failure was observed.
+
+Source and provenance, run `1e4abedb-1946-4bfb-93a4-fd2f4e241acd`:
+
+- `g029/c2`: `e2e/tests/github-checkout-composer.spec.ts:447-459`.
+- `g141/f2`: `e2e/tests/settings.spec.ts:103-117,223-229,1088-1121; crates/farhelm-helm/src/preferences.rs:255-264`.
+- `a011/f2`: `e2e/tests/settings.spec.ts:103-117,182-229,1051-1122; crates/farhelm-helm/src/preferences.rs:255-267`.
+- `a039/x-f2`:
+  `review_feedback_queue/failed-test-response-does-not-fence-settings-write.md:55-87; TRIAGE_OUTCOMES.md:20265-20277`.
+
+Proposed drop: none for the retained remainder. No runtime reproduction, fix or triage decision was performed.

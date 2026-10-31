@@ -39,3 +39,22 @@ Existing orphan-FIFO repair verdict and pending-successful-opening-label OTHER r
 
 Provenance: `a031/f5`. These are reviewer-local identities, not additional findings. Proposed drop: none for the
 retained remainder.
+
+## Additional review at d6645f77
+
+Additional reviewed commit: d6645f771bee8ed03a66486ef8755834937d759d
+
+Fresh source review preserves the earlier retained raw-state/remount mechanism but still finds no compatible ordinary
+credential/input sequence admitting a harmful launch. Pointer, blur and unrelated-key cancellation remain relevant;
+accepted shared credentials are not a blanket refutation. This is additional independent provenance for the existing
+other-priority investigated uncertainty. No claim of a new runtime observation, highest consequence or blanket
+upgrade-filter coverage is added.
+
+Source and provenance, run `1e4abedb-1946-4bfb-93a4-fd2f4e241acd`:
+
+- `g157/f8`: `crates/farhelm-ui/src/lib.rs:1758-1759,1863-1872; crates/farhelm-ui/src/list/view.rs:1138-1162`.
+- `a031/g157-f8`: `crates/farhelm-ui/src/lib.rs:1758-1759,1863-1872`.
+- `a049/f5`:
+  `crates/farhelm-ui/src/lib.rs:1758-1759,1863-1872; crates/farhelm-ui/assets/template-shortcuts.js:166-194,259-268`.
+
+Proposed drop: none for the retained remainder. No runtime reproduction, fix or triage decision was performed.

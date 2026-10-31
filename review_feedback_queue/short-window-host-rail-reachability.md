@@ -29,3 +29,18 @@ Planned, unlanded-plan, BUGS, queue or ledger coverage was found. Possible cover
 geometry is reproduced, a shared scrolling fallback is one possible repair.
 
 Provenance: trailing-review run `bfd30ff4-8bd3-46a2-9101-56314a921992`, `g003/g003-f002`.
+
+## Additional review at d6645f77
+
+Additional reviewed commit: d6645f771bee8ed03a66486ef8755834937d759d
+
+The expanded navigation change grows the footer reservation from 128px to 168px, narrowing the same short-height
+reachability budget by another 40px. This is an extension of the existing footer/rail cause, not a new queue item.
+Engine hit testing, focus-driven scrolling and keyboard recovery remain unverified after source inspection. The separate
+horizontal minimum-width conflict is recorded independently. Suggested bucket remains other.
+
+Source and provenance, run `1e4abedb-1946-4bfb-93a4-fd2f4e241acd`:
+
+- `g176/f1`: `crates/farhelm-ui/assets/app.css:633-644,809-825`.
+
+Proposed drop: none for the retained remainder. No runtime reproduction, fix or triage decision was performed.
