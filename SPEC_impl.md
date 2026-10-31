@@ -165,9 +165,10 @@ retained-attempt state; `launch_composer` owns pure scope parsing and history gr
 for the same destination generation, host/incarnation/install claim, repository, title, agent choice and observed
 configuration epoch. Key minting snapshots and rechecks that authority. A transport-ambiguous attempt retains its entire
 body and key across configuration changes and ordinary conflicts. Authenticated reconciliation on the original
-installation either returns the recorded result or durably refuses that same key before any allocation. Only that
-refusal permits retiring a dispatched binding, including after a lost reply; the composer then refreshes its preview and
-waits for another explicit submission. It never automatically substitutes a new key.
+installation either returns the recorded result or commits a refusal of that same key before any allocation. The refusal
+survives process crashes; like ordinary WAL/NORMAL state, it can be lost on an OS crash or power loss. Only that refusal
+permits retiring a dispatched binding, including after a lost reply; the composer then refreshes its preview and waits
+for another explicit submission. It never automatically substitutes a new key.
 
 Motivation: the project's standing constraints — recorded here, because SPEC.md deliberately stays
 implementation-neutral and does not contain them: as much Rust as possible, one implementation for web and native, and a
@@ -2968,8 +2969,19 @@ refusal. No global geometry cache or new asset file is introduced.
   supervisor-authoritative list), spawn idempotency keys, captured conversation identities, host identity, and the boot
   id last seen. Comparing the stored boot id against the current one (`/proc/sys/kernel/random/boot_id`;
   `kern.bootsessionuuid` on macOS — a per-boot UUID, chosen over `kern.boottime` because the kernel rewrites boottime on
-  clock steps and a boot id must never change mid-boot) is how "interrupted" is classified per SPEC.md.
-- Host identity: generated once at first run, stored in the db.
+  clock steps and a boot id must never change mid-boot) is how "interrupted" is classified per SPEC.md. Before schema
+  work, an open holding the state-directory claim attempts to convert the file to WAL. A failed conversion, or a result
+  other than `wal`, warns and continues in the current mode; the next owning open tries again. Every ordinary read-write
+  connection reads the actual mode and sets `synchronous=NORMAL` only for WAL, otherwise retaining FULL. WAL/NORMAL
+  preserves database consistency and committed state across process crashes, but an OS crash or power loss can lose the
+  last commits. Host-identity creation temporarily uses FULL and commits before the identity can be reported to a helm;
+  losing that source identity after a helm recorded it would leave an installation refusing to start. The connection
+  returns to its previous sync setting before the identity is returned. If conversion left a rollback journal, this
+  critical write uses EXTRA instead, which also synchronizes journal removal. Schema migrations are atomic database-only
+  operations: a lost migration leaves a complete earlier schema to migrate again. Older builds' SQLite versions can
+  still open a WAL database. The `-wal` journal and `-shm` index live beside each database; copying only the `.db` file
+  while Farhelm is running can omit committed changes.
+- Host identity: generated once at first run and committed with FULL sync before publication, stored in the db.
 - The interrupted-session surface is a centered neutral card in the empty terminal area: it explains that a host restart
   paused the session and keeps the terminal absent until the user intentionally chooses Restart or confirms Replace.
   Restart is an unconfirmed normal action because no process remains; Replace starts as a normal trigger and keeps its
@@ -3946,7 +3958,18 @@ beside its installation snapshot from AppBody, independently of the filtered sid
 - State in SQLite at `~/.local/state/farhelm/helm.db`: host registry (SSH destinations, host identities, and optional
   aliases), last-known session cache (survives helm restarts per SPEC.md), recoverable web token, hashed browser device
   sessions, and the one client preference (list order, last-selected session, compact rows, and host setup/removal
-  confirmation choices) every client shares.
+  confirmation choices) every client shares. Its ordinary store opens share the supervisor's journal setup: owning opens
+  attempt WAL before migrations, warning and continuing in the current mode if conversion fails or does not return
+  `wal`. Non-owning opens never convert; every ordinary read-write connection selects `synchronous=NORMAL` only after
+  reading an actual WAL mode and otherwise retains FULL. This accepts losing the last commits on an OS crash or power
+  loss without weakening database consistency; process crashes preserve commits. Web-token rotation temporarily uses
+  FULL for its token replacement and device-credential deletion transaction, so a power loss cannot restore credentials
+  whose revocation was acknowledged (EXTRA if the file still uses a rollback journal). It restores the connection's
+  prior sync setting afterwards. First-contact identity recording can remain NORMAL: a forgotten consumer copy is
+  learned again from the supervisor's durable source identity. Schema and local-row setup are atomic or repeatable
+  database-only work. The separate checkout-config CLI opener is unchanged and keeps FULL. Backup and restore must keep
+  each database with the `-wal` and `-shm` files its backup includes and remove current sidecars absent from that backup
+  before restoring, so unrelated journal data is not replayed.
 - Helm schema 36 drops the `profiles` catalog and its remembered default with no conversion (SPEC.md, the launch-kinds
   upgrade paragraph). Cached session rows may still carry the removed `source_profile` member; serde ignores it, so they
   keep listing without a rewrite. Helm schema 37 converts every cached session for launch kinds (see "Launch kinds: one
@@ -4298,16 +4321,16 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   endpoint's own, and the one `with` carries because it is built from the identical create-body function) must agree, a
   caller sending two different keys for what claims to be one intended create being refused as a 400 rather than
   silently resolved by picking one.
-- Host management commits durably first and converges the live actors after, so each verb states how it fails closed:
-  add rolls its row back if no actor could be started (a registered host with no actor is invisible and un-dialed, while
-  its destination is taken); retarget converges instead of rolling back, because the durable write is what the user
-  asked for and the actor can be told to reconnect (not guaranteed: with an unreadable registry, reviving a dead actor
-  fails and is reported, and a live actor keeps its old row); remove tears the actor down by the id it just committed,
-  needing no registry read that could fail. Retry reports whether it found a host, and a RETIRED host's retry respawns
-  its actor from the current row — nothing else ever restarts one, so without that an actor that panicked left its host
-  permanently dark. Adopting names the identity the user was shown and is refused if the host has since started
-  reporting a different one, because a re-probe between the decision and the request would otherwise adopt something
-  nobody approved.
+- Host management commits first and converges the live actors after; ordinary WAL/NORMAL commits survive process crashes
+  but may be lost on an OS crash or power loss. Each verb states how it fails closed: add rolls its row back if no actor
+  could be started (a registered host with no actor is invisible and un-dialed, while its destination is taken);
+  retarget converges instead of rolling back, because the durable write is what the user asked for and the actor can be
+  told to reconnect (not guaranteed: with an unreadable registry, reviving a dead actor fails and is reported, and a
+  live actor keeps its old row); remove tears the actor down by the id it just committed, needing no registry read that
+  could fail. Retry reports whether it found a host, and a RETIRED host's retry respawns its actor from the current row
+  — nothing else ever restarts one, so without that an actor that panicked left its host permanently dark. Adopting
+  names the identity the user was shown and is refused if the host has since started reporting a different one, because
+  a re-probe between the decision and the request would otherwise adopt something nobody approved.
 - `--ensure-hosts <file>` is a JSON5 floor under the registry, applied through the same registration path as a REST add
   before serving begins and never consulted again. It adds what is missing and touches nothing else: an already
   registered destination keeps its fields and its learned identity, because helm.db is the durable authority and a

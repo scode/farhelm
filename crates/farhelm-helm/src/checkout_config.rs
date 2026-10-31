@@ -2763,11 +2763,9 @@ mod tests {
     /// SELECT has fully completed, before the override read runs — and
     /// commits a root change on a second connection at that instant.
     ///
-    /// - With the snapshot transaction (`unchecked_transaction`): the
-    ///   reader has held a shared read lock since the global SELECT, so
-    ///   the racing commit blocks and fails (short busy timeout keeps the
-    ///   test fast); the reader returns the OLD override with the OLD
-    ///   revision.
+    /// - With the snapshot transaction (`unchecked_transaction`): WAL lets
+    ///   the racing commit land while the reader retains its earlier view,
+    ///   returning the OLD override with the OLD revision.
     /// - Without the transaction (the original defect): the commit lands
     ///   in the gap and the reader returns the NEW override tagged with
     ///   the OLD revision — the mixture this test fails on.
@@ -2790,24 +2788,17 @@ mod tests {
         // The racing writer: a second, independently opened connection.
         let writer = HelmStore::open(&path).await.unwrap();
         let writer_conn = writer.conn();
-        // A short busy timeout so a commit blocked by the reader's lock
-        // fails fast instead of stalling the test. Its setup is asserted:
-        // the oracle below depends on the blocked COMMIT failing FAST.
-        writer_conn
-            .lock()
-            .busy_timeout(std::time::Duration::from_millis(200))
-            .expect("set the racing writer's busy timeout");
-        // The oracle depends on readers BLOCKING commits, which holds in
-        // SQLite's rollback-journal mode, not under WAL: a WAL reader
-        // snapshots while the writer commits. Pin that premise.
+        // WAL permits the interposed commit to finish without waiting for
+        // the reader. The old-value assertion then proves snapshot isolation,
+        // rather than merely observing a write that could not commit.
         let journal_mode: String = writer_conn
             .lock()
             .query_row("PRAGMA journal_mode", [], |row| row.get(0))
             .expect("read journal mode");
         assert_eq!(
             journal_mode.to_ascii_lowercase(),
-            "delete",
-            "fixture premise: rollback-journal mode, where a read lock blocks commits"
+            "wal",
+            "fixture premise: WAL allows a writer to commit during the read snapshot"
         );
 
         // Shared evidence, written inside the closure and asserted after
@@ -2837,9 +2828,8 @@ mod tests {
                 ) && !registered.swap(true, Ordering::SeqCst)
                 {
                     interposed.store(true, Ordering::SeqCst);
-                    // Per-stage outcome: `commit_attempted` is set ONLY
-                    // after both UPDATEs succeeded, so a later DatabaseBusy
-                    // is attributable to the COMMIT itself.
+                    // Record each boundary so an early write failure cannot
+                    // masquerade as isolation of a successfully racing commit.
                     (|| {
                         let mut conn = writer_conn.lock();
                         let tx = match conn.transaction() {
@@ -2879,35 +2869,24 @@ mod tests {
 
         let snapshot = reader.checkout_config_snapshot(Some(host)).await.unwrap();
 
-        // The interposer MUST have run (otherwise the oracle proves
-        // nothing), both UPDATEs inside it must have SUCCEEDED (else the
-        // commit was never attempted), and the COMMIT itself must have
-        // failed specifically with SQLite's busy code — the reader's
-        // snapshot transaction blocking it.
+        // A successful racing commit is the premise: without it, old values
+        // would say nothing about the reader retaining one consistent view.
         assert!(
             interposed.load(Ordering::SeqCst),
             "the authorizer interposition must have fired at the override SELECT"
         );
         assert!(
             commit_attempted.load(Ordering::SeqCst),
-            "both UPDATEs must have succeeded and COMMIT been attempted, or the \
-             DatabaseBusy assertion below is attributable to the wrong stage"
+            "both UPDATEs must have succeeded and COMMIT been attempted"
         );
         let commit_error = *commit_error.lock().unwrap();
-        let commit_error = commit_error
-            .expect("the racing write must reach COMMIT and be refused, not fail earlier");
         assert_eq!(
-            commit_error,
-            rusqlite::ErrorCode::DatabaseBusy,
-            "the racing commit must fail with SQLITE_BUSY (readers block commits in \
-             rollback-journal mode), not another error ({commit_error:?})"
+            commit_error, None,
+            "the racing write must succeed while the snapshot transaction remains open"
         );
-        // The racing commit was BLOCKED by the reader's snapshot
-        // transaction, so the reader returns the pre-write override and
-        // the pre-write revision — a state that actually coexisted.
         assert!(
-            !commit_landed.load(Ordering::SeqCst),
-            "the racing commit must be blocked while the snapshot transaction is open"
+            commit_landed.load(Ordering::SeqCst),
+            "WAL must admit the racing commit while the snapshot transaction is open"
         );
         assert_eq!(
             snapshot.host_override.as_ref().and_then(|o| o.root.clone()),
@@ -2916,20 +2895,13 @@ mod tests {
         );
         assert_eq!(snapshot.revision, revision_before);
 
-        // The racing write is not silently lost: with the reader's
-        // transaction finished (lock released) the SAME write now lands,
-        // and the next read sees the new override with the incremented
-        // revision. (The authorizer remains registered; its one-shot flag
-        // keeps it from re-interposing.)
-        writer
-            .set_checkout_root(Some(host), "/host-two")
-            .await
-            .expect("the racing write succeeds once the snapshot is closed");
+        // A new transaction sees the already committed change. The one-shot
+        // authorizer stays registered but cannot manufacture another write.
         let after = reader.checkout_config_snapshot(Some(host)).await.unwrap();
         assert_eq!(
             after.host_override.as_ref().and_then(|o| o.root.clone()),
             Some("/host-two".to_string()),
-            "the retried write lands once the snapshot transaction is done"
+            "the next snapshot sees the write that already committed"
         );
         assert_eq!(after.revision, revision_before + 1);
     }

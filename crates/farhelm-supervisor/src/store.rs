@@ -5,6 +5,10 @@
 //! is, which must survive the supervisor process even though tmux (or
 //! the whole host) might not have restarted alongside it.
 //!
+//! WAL with NORMAL sync preserves consistency and process-crash durability,
+//! but an OS crash or power loss may lose the last commits. Journal conversion
+//! belongs to an owning open; a claimless handoff opener cannot change it.
+//!
 //! Schema versioning uses SQLite's `PRAGMA user_version` rather than a
 //! separate version-tracking table. A version table was considered and
 //! rejected: until a migration needs its own per-step metadata (applied
@@ -65,13 +69,10 @@
 //! whose previous value carries no authority, which is what makes
 //! concurrent renames last-write-wins rather than write-once.
 //!
-//! Journal mode and synchronous pragmas are left at SQLite's defaults.
-//! The recorded crash-safety/atomicity policy (PLAN_M3.md item 5,
-//! implemented in `crate::files`) governs the directly written state
-//! FILES; the database's durability settings stay stock (the one
-//! deliberate knob is `db::BUSY_TIMEOUT`, which is about handoff overlap,
-//! not durability), and this module does not invent a stricter policy
-//! than the plan records.
+//! The crash-safety/atomicity policy for directly written state files
+//! (PLAN_M3.md item 5, implemented in `crate::files`) is separate from
+//! SQLite's commit policy. Shared [`crate::db::configure_durability`]
+//! selects WAL/NORMAL when available and retains FULL if conversion fails.
 
 use anyhow::Context;
 use base64::Engine as _;
@@ -2834,12 +2835,15 @@ impl SessionStore {
     /// The same exclusive authority runs the one-way reservation retention
     /// cleanup: convert legacy live keys, drop deleted-session records and
     /// expire session-free refusals. Nonexclusive opens leave those rows alone.
+    /// Owning opens also attempt WAL conversion before schema work; every
+    /// connection selects its sync policy from the journal mode actually in use.
     pub async fn open(path: &Path, may_migrate: bool) -> anyhow::Result<SessionStore> {
         let path = path.to_path_buf();
         let conn = tokio::task::spawn_blocking(move || -> anyhow::Result<Connection> {
             // Flags, 0600 permissions, and the busy timeout: see
             // `db::open_private`.
             let conn = crate::db::open_private(&path, "session database")?;
+            crate::db::configure_durability(&conn, "session database", may_migrate)?;
             apply_schema(&conn, may_migrate)?;
             if may_migrate {
                 apply_reservation_retention(&conn, now_unix())?;
@@ -5368,6 +5372,12 @@ impl SessionStore {
     /// exactly SPEC.md's reinstall semantics — a fresh install gets a fresh
     /// identity because nothing durable says otherwise.
     ///
+    /// Minting commits at least at FULL synchronous durability before returning,
+    /// though ordinary WAL writes use NORMAL. A helm can persist the reported
+    /// identity independently; losing only this database's copy after that
+    /// would make an intact install look replaced and can brick desktop startup.
+    /// An already stored identity needs no write or durability change.
+    ///
     /// The identity is an OPAQUE token: every consumer compares it for
     /// equality only, and nothing anywhere parses it as a UUID even though
     /// minting happens to use one. A row hand-edited to some other non-NULL
@@ -5414,23 +5424,28 @@ impl SessionStore {
                     if let Some(Some(id)) = existing {
                         return Ok(id);
                     }
-                    let candidate = uuid::Uuid::new_v4().to_string();
-                    conn.execute(
-                        "INSERT INTO supervisor_meta (id, host_identity) VALUES (?1, ?2) \
-                 ON CONFLICT(id) DO UPDATE SET host_identity = excluded.host_identity \
-                 WHERE supervisor_meta.host_identity IS NULL",
-                        rusqlite::params![META_ROW_ID, candidate],
-                    )
-                    .context("minting host identity")?;
-                    // Re-read rather than trust `candidate`: see the doc comment
-                    // above on why a concurrent winner's value, not this call's own
-                    // proposal, must be what gets returned.
-                    conn.query_row(
-                        "SELECT host_identity FROM supervisor_meta WHERE id = ?1",
-                        rusqlite::params![META_ROW_ID],
-                        |r| r.get(0),
-                    )
-                    .context("reading back host identity after minting")
+                    // The helm may persist this value independently. Losing the
+                    // supervisor's copy afterwards would change the host's identity
+                    // and can prevent the desktop app from starting. Only minting
+                    // needs this barrier; an existing identity remains a read.
+                    crate::db::with_full_sync(conn, |conn| {
+                        let candidate = uuid::Uuid::new_v4().to_string();
+                        conn.execute(
+                            "INSERT INTO supervisor_meta (id, host_identity) VALUES (?1, ?2) \
+                     ON CONFLICT(id) DO UPDATE SET host_identity = excluded.host_identity \
+                     WHERE supervisor_meta.host_identity IS NULL",
+                            rusqlite::params![META_ROW_ID, candidate],
+                        )
+                        .context("minting host identity")?;
+                        // The conditional write may have lost to another connection.
+                        // Return its winner, never this call's proposed identity.
+                        conn.query_row(
+                            "SELECT host_identity FROM supervisor_meta WHERE id = ?1",
+                            rusqlite::params![META_ROW_ID],
+                            |r| r.get(0),
+                        )
+                        .context("reading back host identity after minting")
+                    })
                 },
             )
             .await
@@ -9372,6 +9387,45 @@ mod tests {
         }
     }
 
+    /// Store entry points must pass their ownership into shared journal setup.
+    /// A handoff beside an old rollback-mode store keeps FULL, while both fresh
+    /// and existing owning opens use WAL/NORMAL and later readers set NORMAL too.
+    #[farhelm_testtrace::test]
+    async fn open_selects_durability_without_converting_for_a_non_owner() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("supervisor.db");
+        let settings = |store: &SessionStore| {
+            let conn = store.conn.lock();
+            let mode: String = conn
+                .query_row("PRAGMA journal_mode", [], |r| r.get(0))
+                .unwrap();
+            let sync: i64 = conn
+                .query_row("PRAGMA synchronous", [], |r| r.get(0))
+                .unwrap();
+            (mode, sync)
+        };
+        let owner = SessionStore::open(&path, true).await.unwrap();
+        assert_eq!(settings(&owner), ("wal".into(), 1));
+        drop(owner);
+        {
+            let legacy = Connection::open(&path).unwrap();
+            let mode: String = legacy
+                .query_row("PRAGMA journal_mode=DELETE", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(
+                mode, "delete",
+                "the existing-schema file must model an old store"
+            );
+        }
+        let non_owner = SessionStore::open(&path, false).await.unwrap();
+        assert_eq!(settings(&non_owner), ("delete".into(), 2));
+        drop(non_owner);
+        let owner = SessionStore::open(&path, true).await.unwrap();
+        assert_eq!(settings(&owner), ("wal".into(), 1));
+        let non_owner = SessionStore::open(&path, false).await.unwrap();
+        assert_eq!(settings(&non_owner), ("wal".into(), 1));
+    }
+
     /// A fresh database (`user_version` 0) must come up on `user_version`
     /// [`SCHEMA_VERSION`] after `open` — the invariant every other
     /// `SessionStore` method assumes without re-checking on each call.
@@ -9560,6 +9614,146 @@ mod tests {
             "a database nobody has minted an identity for must report no row, or a NULL \
              column — never a value this test never asked for"
         );
+    }
+
+    /// Observe the actual mint statement at FULL, before the value can escape
+    /// to a helm that remembers it independently. A final NORMAL assertion
+    /// alone would also pass if minting had never raised durability at all.
+    /// The repeat call must read the same value without another write.
+    #[farhelm_testtrace::test]
+    async fn host_identity_mint_is_full_sync_and_restores_normal() {
+        let (_dir, store) = fresh_store().await;
+        {
+            let conn = store.conn.lock();
+            let mode: String = conn
+                .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(mode, "wal", "the fixture must exercise the WAL/NORMAL path");
+            let sync: i64 = conn
+                .query_row("PRAGMA synchronous", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(sync, 1);
+            conn.execute_batch(
+                "CREATE TEMP TABLE mint_sync_observations(value INTEGER NOT NULL);
+                 CREATE TEMP TRIGGER observe_identity_mint BEFORE INSERT ON main.supervisor_meta
+                 WHEN NEW.host_identity IS NOT NULL
+                 BEGIN
+                     INSERT INTO mint_sync_observations SELECT synchronous FROM pragma_synchronous;
+                 END;",
+            )
+            .unwrap();
+        }
+        assert_eq!(store.read_host_identity().await.unwrap(), None);
+        let minted = store.ensure_host_identity().await.unwrap();
+        assert_eq!(store.ensure_host_identity().await.unwrap(), minted);
+        let conn = store.conn.lock();
+        let observed: Vec<i64> = conn
+            .prepare("SELECT value FROM mint_sync_observations")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            observed,
+            vec![2],
+            "exactly one production mint must run at FULL"
+        );
+        let sync: i64 = conn
+            .query_row("PRAGMA synchronous", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(sync, 1, "ordinary writes must return to NORMAL");
+    }
+
+    /// A failed mint must not publish a candidate or leave the connection at
+    /// FULL. The refusal trigger checks the setting inside the production
+    /// statement before it deliberately fails, pinning both error behavior
+    /// and the durability boundary without pretending to simulate power loss.
+    #[farhelm_testtrace::test]
+    async fn host_identity_failed_mint_restores_normal_without_publishing() {
+        let (_dir, store) = fresh_store().await;
+        assert_eq!(store.read_host_identity().await.unwrap(), None);
+        {
+            let conn = store.conn.lock();
+            let sync: i64 = conn
+                .query_row("PRAGMA synchronous", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(sync, 1, "the fixture must start at NORMAL");
+            conn.execute_batch(
+                "CREATE TEMP TRIGGER refuse_identity_mint BEFORE INSERT ON main.supervisor_meta
+                 WHEN NEW.host_identity IS NOT NULL
+                 BEGIN
+                     SELECT CASE WHEN (SELECT synchronous FROM pragma_synchronous) != 2
+                         THEN RAISE(ABORT, 'identity mint did not select FULL') END;
+                     SELECT RAISE(ABORT, 'scripted identity mint refusal');
+                 END;",
+            )
+            .unwrap();
+        }
+        let error = store
+            .ensure_host_identity()
+            .await
+            .expect_err("the mint must be refused");
+        assert!(
+            format!("{error:#}").contains("scripted identity mint refusal"),
+            "{error:#}"
+        );
+        assert_eq!(store.read_host_identity().await.unwrap(), None);
+        let conn = store.conn.lock();
+        let sync: i64 = conn
+            .query_row("PRAGMA synchronous", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(sync, 1, "a failed write must also restore NORMAL");
+    }
+
+    /// Failing to select FULL must stop minting before there is an identity
+    /// for another database to depend on. The authorizer refuses that actual
+    /// pragma, rather than faking a later SQL failure or relying on timing.
+    #[farhelm_testtrace::test]
+    async fn host_identity_refuses_mint_when_full_sync_is_unavailable() {
+        use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+        let (_dir, store) = fresh_store().await;
+        assert_eq!(store.read_host_identity().await.unwrap(), None);
+        {
+            let conn = store.conn.lock();
+            let sync: i64 = conn
+                .query_row("PRAGMA synchronous", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(sync, 1);
+            conn.authorizer(Some(|ctx: AuthContext<'_>| match ctx.action {
+                AuthAction::Pragma {
+                    pragma_name: "synchronous",
+                    pragma_value: Some(_),
+                } => Authorization::Deny,
+                _ => Authorization::Allow,
+            }))
+            .unwrap();
+        }
+        let error = store
+            .ensure_host_identity()
+            .await
+            .expect_err("FULL selection must fail closed");
+        assert!(
+            format!("{error:#}").contains("selecting sqlite synchronous mode"),
+            "{error:#}"
+        );
+        let conn = store.conn.lock();
+        conn.authorizer(None::<fn(AuthContext<'_>) -> Authorization>)
+            .unwrap();
+        let stored: Option<String> = conn
+            .query_row(
+                "SELECT host_identity FROM supervisor_meta WHERE id = ?1",
+                rusqlite::params![META_ROW_ID],
+                |row| row.get(0),
+            )
+            .optional()
+            .unwrap()
+            .flatten();
+        assert_eq!(stored, None);
+        let sync: i64 = conn
+            .query_row("PRAGMA synchronous", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(sync, 1);
     }
 
     /// SPEC.md's core promise for this identity: minted once, and stable

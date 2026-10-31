@@ -1150,7 +1150,11 @@ fn local_supervisor_refusal(
              them is restored from a backup or replaced without the other, or when \
              supervisor.db is deleted. Restarting this app alone will not change it. To fix \
              it, quit Farhelm, make sure no supervisor is still running for {dir}, and restore \
-             both files from the same backup."
+             both databases from the same backup, together with their -wal and -shm files \
+             if the backup includes them. Before restoring, delete any current \
+             supervisor.db-wal, supervisor.db-shm, helm.db-wal or helm.db-shm that the backup \
+             does not include: a leftover journal could be applied to the restored database \
+             and corrupt it."
             )
         }
         crate::HostPhase::IdentityUnverified { recorded } => {
@@ -1636,9 +1640,11 @@ mod tests {
     /// a message carrying its details; when the app spawned nothing a version
     /// skew's message is not "managed" and tells the user to stop the
     /// supervisor they started; an identity mismatch names the two databases
-    /// that disagree and says to restore both from the same backup with no
-    /// supervisor running; any other state of the local host, and a refusing
-    /// state on another host, leave startup waiting.
+    /// that disagree and says to restore both from one backup with no supervisor
+    /// running. Backup sidecars must accompany them, and current sidecars absent
+    /// from that backup must be removed so unrelated journal data cannot be replayed
+    /// into the restored pair. Other local-host states, and refusing states on
+    /// another host, leave startup waiting.
     #[farhelm_testtrace::test]
     fn a_refusing_local_supervisor_ends_startup_with_its_state_and_remedy() {
         let dir = Path::new("/home/someone/.local/state/farhelm");
@@ -1708,7 +1714,15 @@ mod tests {
             "supervisor.db",
             "helm.db",
             "no supervisor is still running",
-            "restore both files from the same backup",
+            "both databases from the same backup",
+            "their -wal and -shm files",
+            "if the backup includes them",
+            "Before restoring, delete any current",
+            "supervisor.db-wal",
+            "supervisor.db-shm",
+            "helm.db-wal",
+            "helm.db-shm",
+            "that the backup does not include",
         ] {
             assert!(
                 mismatch.contains(expected),

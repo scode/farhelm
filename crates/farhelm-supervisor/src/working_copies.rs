@@ -22,13 +22,17 @@
 //!   `stat` results against the captured `(dev, ino)` and fail closed on
 //!   any mismatch. A path that merely looks right (a recreated directory,
 //!   a swapped name) is a different object and is never operated on.
-//! - **Durability before journal retirement.** The archive move persists
+//! - **Journal ordering before retirement.** The archive move commits
 //!   its destination (the rename journal) BEFORE renaming, and
 //!   [`reconcile_archive`] refuses to let the journal retire until the
 //!   moved directory's identity has been re-verified and both parent
 //!   directories re-fsynced. The teardown slice retires the journal only
 //!   after its final SQLite commit; this module provides the [`retire`]
-//!   primitive.
+//!   primitive. These SQLite commits survive process crashes. Under WAL/NORMAL,
+//!   a power loss can still retain a filesystem rename while losing its journal
+//!   or retirement record; managed checkouts are not required to survive that
+//!   fault (SPEC.md, "Power-loss durability of terminal file downloads and
+//!   checkouts"). Identity checks still refuse an unrelated replacement.
 //! - **Explicit, transactional membership.** Lifetime association between
 //!   sessions and a working copy lives in `working_copy_members` rows,
 //!   never a counter and never a column: inserts and removals go through
