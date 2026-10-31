@@ -49,6 +49,8 @@ mod terminal_backpressure;
 #[cfg(target_os = "linux")]
 mod boot_id_durable_outcome;
 #[cfg(target_os = "linux")]
+mod command_shell;
+#[cfg(target_os = "linux")]
 mod launch_sentinel_error_status;
 
 #[cfg(target_os = "linux")]

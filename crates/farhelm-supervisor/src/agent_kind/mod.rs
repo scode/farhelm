@@ -1940,7 +1940,7 @@ impl IntegrationSnapshot {
         }
     }
 
-    /// The resume argv with `{conversation}` replaced by `conversation`, or
+    /// The literal resume argv with `{conversation}` replaced by `conversation`, or
     /// `None` when this session has no template to fill.
     ///
     /// Substitutes into the element's own slot rather than into a command
@@ -1949,6 +1949,9 @@ impl IntegrationSnapshot {
     /// command by an id that happens to contain shell metacharacters (and
     /// why [`is_plausible_conversation_id`] can afford to be a shape check
     /// rather than a sanitizer).
+    /// Command execution separately quotes this decoded slot into the stored
+    /// shell source at spawn. This method remains the literal projection used
+    /// by Restart and attribution, never a renderer for Bash syntax.
     ///
     /// The substitution LOOP itself now lives in [`fill_slots`], shared
     /// with [`fill_cwd`]'s `{cwd}` handling, so both placeholders have
@@ -2307,9 +2310,13 @@ pub fn template_has_placeholder(template: Option<&[String]>) -> bool {
     template.is_some_and(|template| template.iter().any(|e| e == CONVERSATION_PLACEHOLDER))
 }
 
-/// Whether `argv` is a vector this supervisor could actually hand to
-/// `execvp` — the ONE rule, applied everywhere an executable vector is
-/// accepted, built, or read back.
+/// Enforce the common empty-program and NUL rules on literal launch arguments.
+///
+/// Commands retain this literal projection for validation, classification and
+/// stored resume even though execution later receives `bash -c` plus the
+/// original source with safely quoted fills. This check does not interpret
+/// shell syntax or establish that a named program exists. Unwrapped agent and
+/// legacy launches hand their filled vector directly to exec.
 ///
 /// `subject` names the thing being checked in the returned message ("agent
 /// invocation", "resume template", ...); the `Err` is

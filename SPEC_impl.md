@@ -1901,6 +1901,19 @@ sentinel written by the shell after a failed `exec` was audited and rejected —
 but zsh terminates on it in every mode, so shell-side code after `exec` never runs for zsh users; the shim works
 identically under any `$SHELL`.
 
+Command launches keep two transient representations at spawn. The existing `shell_words` projection supplies validation,
+hook policy, launch classification, conversation capture and the stored resume arguments. The original command or resume
+text supplies execution. A native Bash syntax tree certifies the source spans of unquoted placeholder words; those spans
+must also match the existing literal placeholder slots. Only those spans are replaced, using single-quoted literal
+values. Backtick substitutions are decoded and reparsed with the same grammar before their marker spans are certified,
+because escaped nested backticks introduce another shell parsing stage. All other source bytes survive. Stored-row
+decoding keeps the original shape checks so a previously accepted quoted placeholder cannot prevent the supervisor from
+loading; native save/admission and spawn apply the placement check. Restart checks it before stopping the previous
+agent. Conversation decoding and working-directory/trust filling retain their existing boundaries, and hook arguments
+are computed once for both representations. Only `LaunchSpec.argv` receives `["bash", "-c", line]`. A missing Bash still
+produces the shim's exec sentinel; a missing program inside the line is an ordinary Bash exit, usually 127, with no
+exit-code classification. Unwrapped agent launches and legacy snapshots keep direct exec.
+
 Never-started errors may retain the failed terminal's last five nonblank physical lines, at most 500 UTF-8 bytes after
 presentation-unsafe characters are escaped. The excerpt follows Farhelm's diagnosis in the existing durable error
 detail, with `|` between lines so the existing peer-text escaping in the badge and tooltip does not turn framing
@@ -2999,7 +3012,12 @@ refusal. No global geometry cache or new asset file is introduced.
   `.bashrc` themselves under any flags — only the profile chain — and `-i` matters because it puts `i` in `$-`, so the
   stock Debian/Ubuntu `.bashrc` interactivity guard doesn't bail out when the profile chains it. Either way the sourced
   file set matches an SSH-and-type session, which is the contract. When `$SHELL` is unset (user-manager services on
-  systemd older than 255 don't set it), the supervisor falls back to the passwd database, then `/bin/sh`.
+  systemd older than 255 don't set it), the supervisor falls back to the passwd database, then `/bin/sh`. Command and
+  resume text is then interpreted by non-login, non-interactive `bash -c` after the shim restores PATH, markers and the
+  working directory. Bash inherits that environment; the command text is not reconstructed from the literal argument
+  projection. Ordinary login/interactive rc files are not read again, and ordinary aliases and unexported functions are
+  not inherited. Plain Bash still honors inherited `BASH_ENV` and exported Bash functions; these are user-configured
+  behavior after the shim supplies its restored environment, just as a wrapper can change the environment it receives.
 - The supervisor's shared agent-launch builder also writes the intended working directory into the launch spec. After
   checkout preparation, the shim enters it before exec and supplies matching `PWD`; a failed chdir prevents the agent
   from executing and writes the ordinary launch-failure sentinel naming the directory. Entry is separate from exec so an

@@ -19,10 +19,16 @@ only needs to run Farhelm's agent command, use the [agent tab's wrapper prefix](
 What Farhelm can then do for a custom-command session depends on what you tell it, and the **Command** column of the
 [support matrix](/docs/agents/) sums that up.
 
+The command and resume command run through Bash, with the environment your login shell provides. You can use
+`~/bin/tool`, `$VARIABLE`, globs, pipes, redirection and compound commands as you would in a Bash script. Bash runs
+without rereading ordinary login or interactive startup files. Ordinary aliases and unexported functions from your login
+shell are not inherited. If your setup exports `BASH_ENV`, Bash reads that file; exported Bash functions are available
+too. A missing command prints Bash's error in the session's terminal and leaves the session **Exited**, with code 127.
+
 ## The fields
 
-- **Agent command**: the command line to run. Write `{cwd}` as a whole argument where the command wants the session's
-  directory, and Farhelm fills it in at every launch and restart.
+- **Agent command**: the command line to run. Write `{cwd}` as a whole unquoted argument where the command wants the
+  session's directory, and Farhelm fills it in at every launch and restart.
 - **Runs in YOLO mode**: **Yes (YOLO)** or **No**, and you have to pick one. Guarded can approve actions automatically
   through a classifier, AI reviewer or sandbox, so no prompt by itself does not mean YOLO
   ([Permission modes](/docs/agents/#permission-modes)). Farhelm never reads the command to work out which; it takes your
@@ -45,6 +51,10 @@ A declared agent needs `{farhelm_args}` in the command, once, as a whole argumen
 Farhelm puts there whatever it needs to follow the conversation; for an agent that takes nothing, it becomes nothing.
 Your command has to pass those arguments on to the agent: a wrapper that drops them loses tracking.
 [Agent wrappers](/docs/agents/agent-wrappers/) shows how to write one that keeps them.
+
+Leave the placeholders unquoted and separate from other text: `{cwd}`, rather than `"{cwd}"` or `--dir={cwd}`. Farhelm
+quotes the value for you, so a directory or conversation containing spaces stays one argument and cannot turn into
+another shell command.
 
 ## Making it restartable
 

@@ -1933,6 +1933,8 @@ async fn an_rc_file_change_between_launches_reaches_the_relaunched_agent() {
 /// sentinel lifecycle: the failed launch's sentinel sits at the very path
 /// this relaunch's own would use, and a build that left it there would
 /// classify a perfectly good agent as `error` forever.
+/// The unwrapped agent launch is deliberate: a custom command's missing
+/// inner program is Bash's ordinary exit 127, rather than a shim failure.
 #[farhelm_testtrace::test]
 async fn a_restart_clears_a_previous_launch_error() {
     let h = harness().await;
@@ -1943,18 +1945,30 @@ async fn a_restart_clears_a_previous_launch_error() {
         .client
         .create_session_with_extras(
             &work.path().to_string_lossy(),
-            // Goose, for the reasons `create_resumable_session` gives.
-            declared_command(
-                &format!(
-                    "{} {{farhelm_args}}",
-                    shell_words::quote(&missing_binary.to_string_lossy())
-                ),
-                farhelm_proto::LaunchHarness::Goose,
-                Some(
-                    "sh -c 'echo RELAUNCHED-OK; sleep 300' farhelm-test-resume {conversation} \
+            farhelm_proto::SessionLaunch::Agent {
+                // Goose, for the reasons `create_resumable_session` gives.
+                selection: farhelm_proto::LaunchSelection {
+                    harness: farhelm_proto::LaunchHarness::Goose,
+                    model: None,
+                    effort: None,
+                    permissions: None,
+                    permission_flags: None,
+                    wrapper_prefix: None,
+                    container: None,
+                    workspace_trust: None,
+                },
+                start: vec![
+                    missing_binary.to_string_lossy().into_owned(),
+                    "{farhelm_args}".to_string(),
+                ],
+                resume: Some(
+                    shell_words::split(
+                        "sh -c 'echo RELAUNCHED-OK; sleep 300' farhelm-test-resume {conversation} \
                      {farhelm_args}",
+                    )
+                    .expect("literal resume argv"),
                 ),
-            ),
+            },
             None,
             80,
             24,

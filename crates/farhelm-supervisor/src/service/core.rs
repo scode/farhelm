@@ -2664,11 +2664,14 @@ impl FarhelmArgsMode {
 /// What [`with_farhelm_args_using`] decides for one spawn: the argv, the
 /// agent's extra environment, whether the launch is hooked, and the hook skip
 /// to tell the user about, if any (see [`super::notifications::HookSkip`]).
+/// The final vector is the exact placeholder expansion, retained separately
+/// so literal provenance and shell execution share one hook-policy decision.
 type FarhelmArgsExpansion = (
     Vec<String>,
     Vec<(String, String)>,
     bool,
     Option<super::notifications::HookSkip>,
+    Vec<String>,
 );
 
 /// The decision half of [`Supervisor::with_farhelm_args`]: the argv to
@@ -2713,7 +2716,7 @@ fn with_farhelm_args_using(
             .filter(|reason| crate::agent_kind::hook_skip_notifies(reason))
             .filter(|_| hooks.allows(snapshot.kind))
             .map(super::notifications::HookSkip::Legacy);
-        return (argv, Vec::new(), hooked, skip);
+        return (argv, Vec::new(), hooked, skip, Vec::new());
     };
     let expansion = match snapshot.integration() {
         Some(integration) => integration.farhelm_args(
@@ -2752,6 +2755,7 @@ fn with_farhelm_args_using(
         ),
     }
     let mut expanded = Vec::with_capacity(argv.len() + expansion.args.len());
+    let shell_arguments = expansion.args.clone();
     let mut args = Some(expansion.args);
     for element in argv {
         if element == crate::agent_kind::FARHELM_ARGS_PLACEHOLDER {
@@ -2760,7 +2764,36 @@ fn with_farhelm_args_using(
             expanded.push(element);
         }
     }
-    (expanded, expansion.env, expansion.hooked, skip)
+    (
+        expanded,
+        expansion.env,
+        expansion.hooked,
+        skip,
+        shell_arguments,
+    )
+}
+
+/// Pair original marker slots with their literal values before hooks change argv length.
+/// Restart has already decoded the captured conversation into exactly its old
+/// slot. Working-directory filling also replaces elements without changing
+/// their positions. Reading those slots preserves the per-kind decoding and
+/// Codex trust encoding; comparing fully expanded vectors would lose that
+/// provenance when a hook contributes zero or many arguments.
+fn command_shell_values(
+    source: &str,
+    filled: &[String],
+) -> anyhow::Result<HashMap<String, Vec<String>>> {
+    let original = shell_words::split(source).context("reading the command's literal arguments")?;
+    anyhow::ensure!(
+        original.len() == filled.len(),
+        "the command's literal argument slots no longer match its stored text"
+    );
+    Ok(original
+        .into_iter()
+        .zip(filled)
+        .filter(|(word, _)| farhelm_proto::session_launch::is_reserved_placeholder(word))
+        .map(|(word, value)| (word, vec![value.clone()]))
+        .collect())
 }
 
 /// The two-value form of [`legacy_hook_injection`] that the injection tests
@@ -10499,6 +10532,10 @@ impl Supervisor {
                 generation,
                 &tmux_name,
                 argv,
+                match &info.launch {
+                    SessionLaunch::Command(command) => Some(command.command.as_str()),
+                    SessionLaunch::Agent { .. } | SessionLaunch::Legacy { .. } => None,
+                },
                 // The very snapshot the entry published below carries, so
                 // the kind that chose this launch's hook flags is the kind
                 // the session is durably recorded as. Re-deriving it here
@@ -11573,6 +11610,18 @@ impl Supervisor {
         } else {
             (relaunch_argv(&snapshot)?, None)
         };
+        // An old row remains readable, but its resume text must be safe before
+        // this request stops the live agent. Spawn repeats the check as a
+        // boundary backstop; discovering it only there would be too late.
+        let executable_launch = restart_with
+            .as_ref()
+            .map_or(&entry.info.launch, |replacement| &replacement.launch);
+        if let SessionLaunch::Command(command) = executable_launch
+            && let Some(source) = &command.resume
+        {
+            farhelm_proto::command_shell::validate_command_placeholders("resume command", source)
+                .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
+        }
         if named_start.is_none() && crate::agent_kind::verifies_resume_target(snapshot.kind) {
             self.verify_report_only_resume(session_id, &snapshot)
                 .await?;
@@ -11969,6 +12018,12 @@ impl Supervisor {
             Ok(()) => {
                 self.relaunch_into_terminal(
                     entry,
+                    restart_with
+                        .as_ref()
+                        .map_or(&entry.info.launch, |bundle| &bundle.launch),
+                    restart_with
+                        .as_ref()
+                        .map_or(&entry.snapshot, |bundle| &bundle.snapshot),
                     claim.generation,
                     launch_scope_unit(&id, claim.generation, claim.scoped),
                     argv,
@@ -12183,6 +12238,12 @@ impl Supervisor {
     /// surviving pane, or a fresh session), confirm it durably, and
     /// republish the entry.
     ///
+    /// `launch` and `snapshot` describe the selected execution, including
+    /// Restart with's replacement before it is durably published. Reading
+    /// them from `entry` here would run the old shell source with the new
+    /// literal arguments; the entry deliberately remains the prior run until
+    /// publication succeeds.
+    ///
     /// `launch_cwd` is the directory the caller VERIFIED against this
     /// session's recorded identity ([`ensure_cwd_identity`]), which is what
     /// tmux is given — never `entry.info.cwd`, whose symlinks could be
@@ -12203,6 +12264,8 @@ impl Supervisor {
     async fn relaunch_into_terminal(
         &self,
         entry: &SessionEntry,
+        launch: &SessionLaunch,
+        snapshot: &IntegrationSnapshot,
         generation: i64,
         scope: Option<String>,
         argv: Vec<String>,
@@ -12314,17 +12377,21 @@ impl Supervisor {
                 generation,
                 &tmux_name,
                 argv,
+                match launch {
+                    SessionLaunch::Command(command) => command.resume.as_deref(),
+                    SessionLaunch::Agent { .. } | SessionLaunch::Legacy { .. } => None,
+                },
                 // The session's own immutable snapshot: a restart is a new
                 // generation of the SAME session, so the kind that decides
                 // the hook flags is the one the session was created with,
                 // never re-derived from this relaunch's argv (which for a
                 // resume is `claude --resume <id>`, not the original
                 // invocation at all).
-                &entry.snapshot,
+                snapshot,
                 // A relaunch always runs the resume command. Restart with
                 // keeps the launch kind, so the stored launch answers
                 // whether this session is legacy.
-                FarhelmArgsMode::of(&entry.info.launch, crate::agent_kind::LaunchPhase::Resume),
+                FarhelmArgsMode::of(launch, crate::agent_kind::LaunchPhase::Resume),
                 // The path `restart_session` VERIFIED against this
                 // session's recorded identity, not `entry.info.cwd` — see
                 // `ensure_cwd_identity` for the check-then-repoint window
@@ -14876,6 +14943,11 @@ impl Supervisor {
     /// `container_config` changes this launch's hook policy before reporter assets
     /// or argv are composed. The resulting spec retains only token-file paths;
     /// the shim reads the credential immediately before its Podman exec.
+    ///
+    /// `shell_source` is present only for a command launch's selected phase.
+    /// Its literal `argv` has already decoded the resume identity but still
+    /// carries cwd and hook slots. Keep those representations paired until
+    /// execution is built; metadata must never classify the inserted Bash.
     #[allow(clippy::too_many_arguments)]
     #[allow(
         clippy::result_large_err,
@@ -14889,6 +14961,7 @@ impl Supervisor {
         generation: i64,
         tmux_name: &str,
         argv: Vec<String>,
+        shell_source: Option<&str>,
         snapshot: &IntegrationSnapshot,
         args_mode: FarhelmArgsMode,
         cwd: &str,
@@ -14900,6 +14973,17 @@ impl Supervisor {
         initial_prompt: Option<(farhelm_proto::LaunchHarness, &str)>,
         container_config: Option<&farhelm_proto::ContainerConfig>,
     ) -> Result<Spawned, SpawnFailure> {
+        // Start and Restart share this boundary, but a refusal must name the
+        // field the user can correct, including when an old row reaches spawn.
+        let command_field = match args_mode {
+            FarhelmArgsMode::Expand(crate::agent_kind::LaunchPhase::Resume) => "resume command",
+            FarhelmArgsMode::Expand(crate::agent_kind::LaunchPhase::Start)
+            | FarhelmArgsMode::Legacy => "command",
+        };
+        if let Some(source) = shell_source {
+            farhelm_proto::command_shell::validate_command_placeholders(command_field, source)
+                .map_err(|message| SpawnFailure::Spec(anyhow::anyhow!(message)))?;
+        }
         // An alias is not a second bind inside the container. Resolve before
         // filling argv so its cwd placeholders and actual workdir name the same
         // canonical directory within the shared checkout.
@@ -14929,6 +15013,10 @@ impl Supervisor {
         } else {
             argv
         };
+        let mut shell_values = shell_source
+            .map(|source| command_shell_values(source, &argv))
+            .transpose()
+            .map_err(SpawnFailure::Spec)?;
         // Hook arguments follow placeholder substitution; the one-time
         // literal prompt follows both. The spec is what the shim execs,
         // so composing everything here keeps the shim ignorant of hooks
@@ -14960,7 +15048,7 @@ impl Supervisor {
             }
             None => None,
         };
-        let (argv, env, hooked, hook_skip) = if container_config.is_some() {
+        let (argv, env, hooked, hook_skip, shell_arguments) = if container_config.is_some() {
             with_farhelm_args_using(
                 argv,
                 args_mode,
@@ -14985,6 +15073,30 @@ impl Supervisor {
                     .expect("initial prompt capability validated before launch"),
             );
         }
+        // Metadata continues to read literal argv. Only the shim's executable
+        // vector receives Bash, so OMP attribution and exact Restart keep their
+        // original words and all bytes outside marker spans remain user-owned.
+        let (executable_argv, literal_argv) = if let Some(source) = shell_source {
+            let values = shell_values
+                .as_mut()
+                .expect("shell source has literal slots");
+            values.insert(
+                farhelm_proto::session_launch::FARHELM_ARGS_PLACEHOLDER.to_string(),
+                shell_arguments,
+            );
+            let line =
+                farhelm_proto::command_shell::render_command(command_field, source, |marker| {
+                    values.get(marker).cloned().ok_or_else(|| {
+                        format!(
+                            "{command_field}: {marker} has no corresponding literal argument slot"
+                        )
+                    })
+                })
+                .map_err(|message| SpawnFailure::Spec(anyhow::anyhow!(message)))?;
+            (vec!["bash".into(), "-c".into(), line], Some(argv))
+        } else {
+            (argv, None)
+        };
         // Resolve the actual wrapper before publishing the spec: its compatibility
         // bit must describe this command, including a selected scope whose manager
         // became unavailable before launch. The durable scope selection still owns
@@ -15053,7 +15165,7 @@ impl Supervisor {
         };
         let spec = LaunchSpec {
             container,
-            argv,
+            argv: executable_argv,
             working_directory: Some(PathBuf::from(cwd)),
             status_file: artifacts.status().to_path_buf(),
             // The kill machinery's environment-marker sweep (see
@@ -15126,8 +15238,14 @@ impl Supervisor {
         // reporter exists to read any marker. A tmux failure below
         // keeps the decided values: the argv was fixed, so an
         // ambiguous survivor runs exactly what the row describes.
-        self.record_launch_provenance(snapshot, id, generation, hooked, &spec.argv)
-            .await;
+        self.record_launch_provenance(
+            snapshot,
+            id,
+            generation,
+            hooked,
+            literal_argv.as_deref().unwrap_or(&spec.argv),
+        )
+        .await;
         // The same argv decision must survive supervisor restart for every
         // agent, independently of OMP's admission provenance. Best effort:
         // a failed write leaves this launch runnable, with reload diagnostics
@@ -16684,6 +16802,166 @@ pub async fn connect(state_dir: &Path) -> anyhow::Result<UnixStream> {
 #[cfg(test)]
 pub(crate) mod tests {
     mod claude_pin;
+
+    /// Resume has already decoded the conversation and cwd filling preserves
+    /// argument positions. Shell rendering must reuse those values, including
+    /// marker-looking text inside them, without guessing from expanded argv.
+    #[farhelm_testtrace::test]
+    fn command_shell_values_reuse_filled_literal_slots() {
+        let source = "wrapper {cwd} agent {conversation} {farhelm_args} {codex:trusted-cwd}";
+        let filled = vec![
+            "wrapper".into(),
+            "path '{conversation}'".into(),
+            "agent".into(),
+            "decoded $value; {cwd}".into(),
+            "{farhelm_args}".into(),
+            "trusted=\"path\"".into(),
+        ];
+        let values = command_shell_values(source, &filled).unwrap();
+        assert_eq!(values["{cwd}"], ["path '{conversation}'"]);
+        assert_eq!(values["{conversation}"], ["decoded $value; {cwd}"]);
+        assert_eq!(values["{codex:trusted-cwd}"], ["trusted=\"path\""]);
+        assert!(command_shell_values(source, &filled[..filled.len() - 1]).is_err());
+    }
+
+    /// The shim spec must execute original source while the earlier launch
+    /// phases keep literal argv. Check start and already-decoded resume at the
+    /// existing pre-tmux seam, so quoting cannot be accidentally replaced by
+    /// joining the projection or by rescanning a hostile conversation value.
+    /// Old quoted markers must refuse before spec publication and identify
+    /// whether the invalid source is the start command or the resume command.
+    #[farhelm_testtrace::test]
+    async fn command_shell_spec_preserves_source_and_quotes_filled_values() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                agent_hooks: crate::agent_kind::AgentHooks::None,
+                faults: FaultHooks {
+                    replacement_fault: Some(Arc::new(|stage| {
+                        assert_eq!(stage, ReplacementStage::BeforeCreation);
+                        Err(anyhow::anyhow!("stop before tmux"))
+                    })),
+                    ..FaultHooks::default()
+                },
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .unwrap();
+        let conversation = "decoded '$HOME; {cwd}";
+        for (generation, source, phase) in [
+            (
+                0,
+                "agent $USER {cwd} {farhelm_args}\n# kept",
+                crate::agent_kind::LaunchPhase::Start,
+            ),
+            (
+                1,
+                "agent --resume {conversation} {cwd} {farhelm_args}\n# kept",
+                crate::agent_kind::LaunchPhase::Resume,
+            ),
+        ] {
+            let launch = SessionLaunch::Command(farhelm_proto::session_launch::CommandLaunch {
+                command: "agent {farhelm_args}".into(),
+                yolo: false,
+                agent: Some(LaunchHarness::Claude),
+                resume: Some(source.into()),
+            });
+            let snapshot = IntegrationSnapshot::of(&launch);
+            let argv = shell_words::split(source)
+                .unwrap()
+                .into_iter()
+                .map(|word| {
+                    if word == "{conversation}" {
+                        conversation.into()
+                    } else {
+                        word
+                    }
+                })
+                .collect();
+            let result = sup
+                .spawn_agent(
+                    "command-shell-spec",
+                    "credential",
+                    generation,
+                    "unused",
+                    argv,
+                    Some(source),
+                    &snapshot,
+                    FarhelmArgsMode::Expand(phase),
+                    state.path().to_str().unwrap(),
+                    80,
+                    24,
+                    SpawnTarget::ExistingSession("unused"),
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .await;
+            let Err(SpawnFailure::Tmux {
+                artifacts,
+                tmux_attempted: false,
+                ..
+            }) = result
+            else {
+                panic!("the fixture must reach spec publication and stop before tmux");
+            };
+            let spec: crate::launch::LaunchSpec =
+                serde_json::from_slice(&std::fs::read(artifacts.spec()).unwrap()).unwrap();
+            let expected = if generation == 1 {
+                format!(
+                    "agent --resume {} {} \n# kept",
+                    farhelm_proto::text::shell_quote(conversation),
+                    farhelm_proto::text::shell_quote(state.path().to_str().unwrap())
+                )
+            } else {
+                format!(
+                    "agent $USER {} \n# kept",
+                    farhelm_proto::text::shell_quote(state.path().to_str().unwrap())
+                )
+            };
+            assert_eq!(spec.argv, ["bash", "-c", &expected]);
+            assert_eq!(spec.working_directory.as_deref(), Some(state.path()));
+        }
+        for (phase, field) in [
+            (crate::agent_kind::LaunchPhase::Start, "command"),
+            (crate::agent_kind::LaunchPhase::Resume, "resume command"),
+        ] {
+            let invalid = sup
+                .spawn_agent(
+                    "old-command",
+                    "credential",
+                    0,
+                    "unused",
+                    vec!["agent".into(), "{cwd}".into()],
+                    Some("agent '{cwd}'"),
+                    &IntegrationSnapshot::of(&named_test_launch()),
+                    FarhelmArgsMode::Expand(phase),
+                    state.path().to_str().unwrap(),
+                    80,
+                    24,
+                    SpawnTarget::ExistingSession("unused"),
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .await;
+            let Err(SpawnFailure::Spec(error)) = invalid else {
+                panic!("an old quoted marker must refuse before publishing a spec");
+            };
+            assert!(
+                error.to_string().starts_with(&format!("{field}:")),
+                "{error:#}"
+            );
+            assert!(error.to_string().contains("unquoted"));
+            assert!(!crate::launch::spec_path_for_launch(state.path(), "old-command", 0).exists());
+        }
+    }
     /// Cancelling startup does not cancel an already scheduled blocking edit.
     /// A successor must still be refused the OS lock until that edit finishes,
     /// even after the constructor and its async cleanup waiter have disappeared.
@@ -16905,6 +17183,7 @@ pub(crate) mod tests {
                     generation as i64,
                     "unused",
                     vec!["agent".into(), "{cwd}".into(), "{farhelm_args}".into()],
+                    None,
                     &snapshot,
                     FarhelmArgsMode::of(&launch, crate::agent_kind::LaunchPhase::Start),
                     state.path().to_str().unwrap(),
@@ -26158,6 +26437,7 @@ exit 0
                 0,
                 &tmux_name,
                 vec!["omp".to_string()],
+                None,
                 &snapshot,
                 FarhelmArgsMode::Legacy,
                 state.path().to_str().unwrap(),
@@ -30618,6 +30898,8 @@ exit 0
     /// files, so a missing waypoint cannot pass merely because none was made.
     /// It never executes the window command: no shim can consume the evidence
     /// or turn this preterminal refusal into an accepted session.
+    /// The witnessed executable spec must contain Bash and the unchanged
+    /// command source; literal agent words belong to launch metadata instead.
     /// A blocked sentinel unlink must not skip the waypoint, and its exact
     /// removal context must become part of the same durable replayed refusal.
     #[farhelm_testtrace::test(flavor = "multi_thread")]
@@ -30733,7 +31015,7 @@ exit 0
             .unwrap();
             assert_eq!(published.session_id, reservation.session_id);
             assert_eq!(published.status_file, sentinel);
-            assert_eq!(published.argv, ["agent"]);
+            assert_eq!(published.argv, ["bash", "-c", "agent"]);
             assert!(
                 published.preparation.is_none(),
                 "this is an ordinary create"
@@ -32433,7 +32715,7 @@ exit 0
                       hooks: &AgentHooks,
                       instructions: AgentInstructions| {
             let name = format!("{kind:?}").to_lowercase();
-            let (argv, env, hooked, _skip) = with_farhelm_args_using(
+            let (argv, env, hooked, _skip, _shell_arguments) = with_farhelm_args_using(
                 argv(&name),
                 FarhelmArgsMode::Expand(phase),
                 &hook_snapshot(kind),
@@ -32489,7 +32771,7 @@ exit 0
         // None is the hook layer's non-UTF-8 executable contract. Even
         // this skip must leave Codex's process ownership argument in place.
         for phase in [LaunchPhase::Start, LaunchPhase::Resume] {
-            let (expanded, env, hooked, skip) = with_farhelm_args_using(
+            let (expanded, env, hooked, skip, shell_arguments) = with_farhelm_args_using(
                 argv("codex"),
                 FarhelmArgsMode::Expand(phase),
                 &hook_snapshot(AgentKind::Codex),
@@ -32500,6 +32782,7 @@ exit 0
                 "session-1",
             );
             assert_eq!(expanded, around("codex", vec!["--no-daemon".to_string()]));
+            assert_eq!(shell_arguments, ["--no-daemon"]);
             assert!(env.is_empty());
             assert!(!hooked);
             assert!(skip.is_none(), "the unreachable path skip never notifies");
@@ -33918,6 +34201,8 @@ exit 0
     /// End to end through a real create: a Claude session's launch spec on
     /// disk carries the hook flags, and its entry records the launch as
     /// hooked, including its durable flag for a later supervisor reload.
+    /// A declared command executes through Bash, so the serialized source
+    /// must carry those flags as quoted literal words rather than direct argv.
     ///
     /// The pure tests above prove the DECISION; this one proves the
     /// WIRING, which is the part with somewhere to go wrong — the snapshot
@@ -33967,10 +34252,18 @@ exit 0
             dummy_exe().to_str().expect("a UTF-8 dummy exe"),
             crate::agent_kind::AgentInstructions::default(),
         );
+        let expected = format!(
+            "claude {}",
+            expected
+                .iter()
+                .map(|argument| farhelm_proto::text::shell_quote(argument))
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
         assert_eq!(
             spec.argv,
-            [vec!["claude".to_string()], expected].concat(),
-            "the spec the shim execs must be the command with the hook flags at {{farhelm_args}}"
+            ["bash", "-c", &expected],
+            "the spec must execute Bash with literal hook flags filled at {{farhelm_args}}"
         );
 
         assert!(

@@ -2643,8 +2643,11 @@ fn read_session_columns(r: &rusqlite::Row<'_>) -> rusqlite::Result<SessionColumn
 /// the last process to write it left behind, plus whatever a crash, a
 /// downgrade, or a hand-edit did to it. So the stored launch is held to the
 /// rules a create enforces before anything can relaunch from it: an agent
-/// or command launch must still pass
-/// [`farhelm_proto::SessionLaunch::validate_new`], and a legacy launch the
+/// launch must still pass [`farhelm_proto::SessionLaunch::validate_new`]; a
+/// command retains its original stored-shape checks, with shell placement
+/// checked only when saving or spawning it. An old quoted placeholder must
+/// refuse that launch, not prevent the supervisor from loading its sessions.
+/// A legacy launch retains the
 /// checks this module has always applied to its stored fields — a resume
 /// command a restart could exec, no `{cwd}` as a program, and an
 /// integrated kind's resume command carrying `{conversation}` (without it a
@@ -2662,8 +2665,13 @@ fn decode_session_row(columns: SessionColumns) -> anyhow::Result<StoredSession> 
     row.launch = serde_json::from_str(&launch)
         .with_context(|| format!("session {} has an unreadable launch", row.id))?;
     match &row.launch {
-        farhelm_proto::SessionLaunch::Agent { .. } | farhelm_proto::SessionLaunch::Command(_) => {
+        farhelm_proto::SessionLaunch::Agent { .. } => {
             if let Err(message) = row.launch.validate_new() {
+                anyhow::bail!("session {}: {message}", row.id);
+            }
+        }
+        farhelm_proto::SessionLaunch::Command(command) => {
+            if let Err(message) = command.validate_stored() {
                 anyhow::bail!("session {}: {message}", row.id);
             }
         }
@@ -12669,6 +12677,40 @@ mod tests {
         // this row is tolerated, the same way the corruption matrix above
         // asserts both readers agree on what is REFUSED.
         assert!(store.load_all().await.is_ok());
+    }
+
+    /// New shell-placement refusals belong at save and spawn, rather than at
+    /// database load. An older accepted quoted marker must leave all sessions
+    /// listable while still refusing this command's next execution.
+    #[farhelm_testtrace::test]
+    async fn an_old_quoted_command_placeholder_remains_readable() {
+        let (dir, store) = fresh_store().await;
+        insert_running(&store, "s1").await;
+        let command = farhelm_proto::session_launch::CommandLaunch {
+            command: "agent '{cwd}'".into(),
+            yolo: false,
+            agent: None,
+            resume: None,
+        };
+        assert!(
+            command.validate_stored().is_ok(),
+            "the fixture has the old shape"
+        );
+        assert!(command.validate().unwrap_err().contains("unquoted"));
+        let launch = farhelm_proto::SessionLaunch::Command(command);
+        let conn = Connection::open(dir.path().join("supervisor.db")).unwrap();
+        conn.execute(
+            "UPDATE sessions SET session_launch = ?1 WHERE id = 's1'",
+            rusqlite::params![serde_json::to_string(&launch).unwrap()],
+        )
+        .unwrap();
+        drop(conn);
+        assert_eq!(store.session("s1").await.unwrap().unwrap().launch, launch);
+        let rows = store.load_all().await.unwrap();
+        assert!(
+            rows.iter()
+                .any(|row| row.id == "s1" && row.launch == launch)
+        );
     }
 
     /// A `{cwd}` element in an ARGUMENT slot — never `argv[0]` — is exactly

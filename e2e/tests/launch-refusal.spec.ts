@@ -48,6 +48,27 @@ async function openNew(page: Page) {
 }
 
 /**
+ * Native admission owns the full Bash placement check. The browser's literal
+ * preflight can accept a quoted cwd slot, but the real save must refuse it
+ * visibly before any session starts. Otherwise an older-looking command could
+ * run with a literal marker or treat the filled directory as shell syntax.
+ */
+test("a quoted command placeholder is refused by native admission", async ({ page, request }, testInfo) => {
+  const title = `quoted-placeholder-${testInfo.project.name}-${Date.now()}`;
+  await page.goto("/");
+  const form = await fillCreateForm(page, { cwd: "/tmp", invocation: "printf '%s' '{cwd}'", title });
+  await expect(form.getByLabel("Agent command", { exact: true })).toHaveValue("printf '%s' '{cwd}'");
+  await expect(form.locator(".create-session-submit")).toHaveAttribute("aria-disabled", "false");
+  const response = page.waitForResponse(reply => reply.request().method() === "POST" && new URL(reply.url()).pathname === "/api/sessions");
+  await form.locator(".create-session-submit").click();
+  expect((await response).status()).toBe(400);
+  await expect(form.locator(".launch-composer-refusal-alert")).toContainText("write {cwd} unquoted as its own word");
+  const listing = await request.get("/api/sessions");
+  expect(listing.ok()).toBe(true);
+  expect((await listing.json()).sessions.some((row: { title: string }) => row.title === title)).toBe(false);
+});
+
+/**
  * Spec: a create into a folder that does not exist is refused with the
  * supervisor's own words inside an alert that starts "Not launched."; the
  * folder field is marked invalid and says the folder does not exist on the
