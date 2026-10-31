@@ -2,6 +2,47 @@
 
 Notable user-facing changes in each stable release of Farhelm. Release candidates and dev builds are not listed; their changes appear under the stable release that follows them. Entries are written for someone running Farhelm, not for someone reading its source, so internal mechanics are left out unless they change what you have to do. cargo-dist copies each release's section into its GitHub release; `releasing/AGENTS.md` describes the format and how a section is written.
 
+## v0.33.0 - 2026-10-30
+
+**DRAFT release notes - not yet finalized**
+
+### 💥 Breaking
+
+- This release *requires* you to update your remote hosts. (#2825)
+- Custom commands, resume commands and wrapper prefixes now run through Bash, saved ones included, so `~`, `$VARIABLE`, globs, quotes and operators such as `;` and `|` that used to be passed as literal text now have their shell meaning. (#2847, #2848)
+- Wrapper prefixes saved by earlier releases lost their quotes when saved, so `--profile 'work space'` now passes `work` and `space` as two words; re-enter any prefix that depended on quoting. (#2848)
+- Placeholders such as `{cwd}` in a custom command must now be separate, unquoted words, and a saved command that quotes one or joins it to other text, like `--dir={cwd}`, is refused at its next start. (#2847)
+- Containerized sessions now start from an image already in the host's local Podman storage, named in the new **Image** field, instead of from an archive file; Farhelm does not pull images. Settings, templates and sessions that named an archive need an image before they launch again (**Replace with** can set one for an existing session). (#2825)
+- A containerized session with a wrapper prefix now needs `bash` in its image. (#2848)
+- New containers now use an account matching your host user name, user ID and home where the image allows it, instead of always the image's user-1000 account; existing containers keep theirs until replaced. If your host user ID is not 1000, an image set up only for that account may need its agents installed system-wide and their configuration in `/etc/skel`. (#2832)
+- Large user or group IDs, such as those of some directory-service accounts, can now keep a new container from starting, when rootless Podman cannot map the IDs of the account Farhelm picks in the image. (#2832)
+
+### 🚀 Added
+
+- You can now see Farhelm's keyboard shortcuts, including which templates hold the ⚡ and number keys, with Cmd+/ on a Mac, Ctrl+Shift+/ elsewhere, or **Keyboard shortcuts** in the **Help** menu. The [keyboard shortcuts page](https://farhelm.io/docs/using/keyboard-shortcuts/) lists them for the desktop app and browsers. (#2827)
+- When combining templates from the keyboard (Cmd+X in the Mac app, Ctrl+Shift+X elsewhere), you can now type template names separated by spaces, with Tab completion and matching names shown as you type, as well as using number keys. New template names can no longer contain spaces; existing names with spaces keep working. (#2828, #2829)
+- Each host's supervisor log now shows how long each permanent deletion from Trash, and each removal of an unused prepared checkout, took and where the time went, to help track down slow cleanup. (#2839)
+
+### 🔄 Changed
+
+- The host rail, now called the navigation rail, no longer widens over the session list when you point at it or move keyboard focus into it. Full host names and destinations are in tooltips instead, and a new button below Help expands the whole rail beside the list; each device remembers the choice. (#2841, #2849)
+- Farhelm no longer waits for the disk to confirm each small change to its saved state, which on a busy host could take a fraction of a second each time and hold up other work. In exchange, an OS crash or power loss can lose the latest changes, though what was saved before stays intact; a backup of Farhelm's state taken while it runs should include the new `-wal` and `-shm` files beside each database. (#2840)
+- Save in the template editor is now greyed out while there are no unsaved changes, so you can see that a save went through. (#2845)
+
+### 🔧 Fixes worth highlighting
+
+- On hosts running tmux 3.8 (a Mac uses its installed tmux; the tmux Farhelm ships for Linux is still 3.7c), Restart, Replace, Stop and Delete now work on a session whose agent has exited, and so does closing a terminal tab whose shell has exited. On tmux 3.8, if an agent switches to another conversation just before it exits, a later Restart can still resume the previous one. (#2861)
+
+### 🩹 Misc fixes
+
+*Fixes that would normally be summed up as a single "various bug fixes" line. In the interest of transparency, the complete list is included.*
+
+- Restart and closing a terminal tab can no longer act on a different terminal of the same session when the one they meant has disappeared, and automatic cleanup of a tab now checks again that its shell really has exited before ending it. This came out of investigating commands in a terminal tab being killed during heavy output, which is still unexplained. (#2846)
+- When keyboard focus is on a dialog itself, so that Enter runs its main action, a later update to the dialog no longer moves focus to Cancel. (#2817)
+- The Settings gear is now round, with evenly spaced teeth, instead of looking squashed. (#2826)
+- The quick-launch ⚡ in the Templates list is now an outline for unmarked templates and a filled amber bolt for the marked one, so you can tell at a glance which template quick launch uses. (#2844)
+- When a settings save is slow, the app's other requests waiting behind it no longer time out slightly before their time limit. (#2816)
+
 ## v0.32.0 - 2026-10-29
 
 ### 💥 Breaking
