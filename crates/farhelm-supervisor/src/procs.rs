@@ -221,6 +221,42 @@ pub(crate) fn read_environ(pid: u32) -> Option<Vec<u8>> {
     imp::read_environ(pid)
 }
 
+/// The executable a live process runs, as the kernel reports it.
+///
+/// For checking that a process recorded as running some program still runs
+/// it, rather than having exec'd something else under the same pid and
+/// start identity. `path` is the image's path (on Linux without procfs's
+/// ` (deleted)` mark, which appears once the file at that path has been
+/// replaced). `file` is the running image's own device and inode where the
+/// platform offers it cheaply: Linux does (`/proc/<pid>/exe` stays bound to
+/// the exec'd file even after its path is reused), macOS does not, so there
+/// it is `None` and only the path can be compared.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ProcessImage {
+    pub(crate) path: std::path::PathBuf,
+    pub(crate) file: Option<(u64, u64)>,
+}
+
+/// Read `pid`'s [`ProcessImage`]. An unreadable image (the process exited,
+/// belongs to another user, or is not dumpable) is an error: callers
+/// re-read the process to tell "gone" from "could not look".
+pub(crate) fn process_image(pid: u32) -> Result<ProcessImage, String> {
+    use std::os::unix::ffi::OsStrExt as _;
+    let bytes = imp::process_exe(pid)?;
+    let bytes = bytes.strip_suffix(b" (deleted)").unwrap_or(&bytes);
+    let path = std::path::PathBuf::from(std::ffi::OsStr::from_bytes(bytes));
+    #[cfg(target_os = "linux")]
+    let file = {
+        use std::os::unix::fs::MetadataExt as _;
+        let metadata = std::fs::metadata(format!("/proc/{pid}/exe"))
+            .map_err(|error| format!("reading process {pid} executable identity: {error}"))?;
+        Some((metadata.dev(), metadata.ino()))
+    };
+    #[cfg(not(target_os = "linux"))]
+    let file = None;
+    Ok(ProcessImage { path, file })
+}
+
 /// A PID paired with the kernel token that distinguishes it from PID reuse.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct ProcessIdentity {

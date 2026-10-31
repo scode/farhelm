@@ -6,8 +6,13 @@
 //! and re-checked after it, under the locks install, setup and (on macOS) the
 //! runtime use; see `locks`.
 //! Runtime shutdown is an operator prerequisite; this command does not inspect
-//! processes or sessions. Setup-owned services are the sole automatic shutdown
-//! operation.
+//! processes or sessions, with two exceptions: setup-owned services, and the
+//! supervisor the desktop app started (which outlives the app, so quitting the
+//! app no longer stops it). That supervisor is stopped only when the app's own
+//! record identifies the live process exactly and its program is one of the
+//! versions inside the app being removed
+//! (`farhelm_supervisor::managed_supervisor`), the orderly way and never by
+//! force.
 
 use anyhow::{Context as _, Result, bail};
 use std::{
@@ -39,6 +44,12 @@ struct Inputs {
     xdg_config_home: Option<OsString>,
     xdg_state_home: Option<OsString>,
     interactive: bool,
+    /// How long uninstall waits for the desktop app's supervisor to stop
+    /// before refusing: [`ORDERLY_STOP_GRACE`] outside tests, which shorten
+    /// it to check the refusal without waiting that long.
+    ///
+    /// [`ORDERLY_STOP_GRACE`]: farhelm_supervisor::managed_supervisor::ORDERLY_STOP_GRACE
+    supervisor_stop_grace: std::time::Duration,
 }
 
 /// The CLI boundary owns environment capture and real terminal handles.
@@ -61,6 +72,7 @@ pub(crate) fn run(options: Options) -> Result<()> {
         xdg_config_home: std::env::var_os("XDG_CONFIG_HOME"),
         xdg_state_home: std::env::var_os("XDG_STATE_HOME"),
         interactive: stdin.is_terminal(),
+        supervisor_stop_grace: farhelm_supervisor::managed_supervisor::ORDERLY_STOP_GRACE,
     };
     run_with_inputs(
         &inputs,
@@ -148,6 +160,22 @@ fn run_with_inputs(
         }
     }
     let state = farhelm_supervisor::default_state_dir_for(inputs.xdg_state_home.as_deref(), home);
+    let app_supervisors = match &plan {
+        ownership::OwnershipPlan::App(app)
+            if inputs.ownership.platform == ownership::PlatformArtifacts::Macos =>
+        {
+            app_supervisors(&runtime_state_dirs(&state, home), app)?
+        }
+        _ => Vec::new(),
+    };
+    for stop in &app_supervisors {
+        writeln!(
+            preview,
+            "stop the desktop app's supervisor (process {}) using {}",
+            stop.record.pid,
+            path_text(&stop.state_dir)
+        )?;
+    }
     writeln!(preview, "retain data under {}", path_text(&state))?;
     preview.push_str("Other custom data locations, projects, agent tools and dependencies are untouched.\nAn install or upgrade running now makes uninstall refuse, and one started during it refuses instead.\n");
     output
@@ -177,14 +205,23 @@ fn run_with_inputs(
     // Held until the removal below has finished, and released before the
     // report is written, so a blocked output pipe cannot keep them; see
     // `locks`.
-    let mut held = lock_and_recheck(inputs, home, &state, &plan, services.as_ref(), manager)?;
+    let mut held = lock_and_recheck(
+        inputs,
+        home,
+        &state,
+        &plan,
+        services.as_ref(),
+        &app_supervisors,
+        manager,
+    )?;
     let mut report = String::new();
     let result = (|| {
         if let Some(services) = &services {
             crate::setup::remove_selected_services_locked(services, false, manager, &mut report)?;
         }
         match &plan {
-            ownership::OwnershipPlan::App(app) => remove_app_locked(app, &mut held, &mut report),
+            ownership::OwnershipPlan::App(app) => remove_app_locked(app, &mut held, &mut report)
+                .map_err(|error| after_stop(error, held.stopped_supervisor)),
             ownership::OwnershipPlan::Flat(_) => {
                 removal::remove(&plan, &held.running_records, &mut report)
             }
@@ -332,6 +369,9 @@ fn hold_versions(app: &app::AppPlan, folders: &removal::HeldFs) -> Result<Vec<st
 }
 
 struct HeldLocks {
+    /// Whether uninstall stopped the desktop app's supervisor on its way
+    /// here, so a refusal after that point can say so.
+    stopped_supervisor: bool,
     /// The Running records of the state directories whose runtime locks are
     /// held, for removal: with those locks held no supervisor can be
     /// running from them.
@@ -362,6 +402,7 @@ fn lock_and_recheck(
     state: &Path,
     plan: &ownership::OwnershipPlan,
     services: Option<&crate::setup::SelectedServicePlan>,
+    app_supervisors: &[AppSupervisor],
     manager: &mut dyn crate::setup::UnitManager,
 ) -> Result<HeldLocks> {
     let macos = inputs.ownership.platform == ownership::PlatformArtifacts::Macos;
@@ -393,21 +434,18 @@ fn lock_and_recheck(
         Some(services) => crate::setup::lock_for_selected_services(services)?,
         None => None,
     };
-    // The desktop app, opened from Finder or the Dock, does not see a
-    // shell's `XDG_STATE_HOME`, so its supervisor and helm use the default
-    // location even when this shell names another; both are checked.
+    // Only the helm locks for now: an open desktop app holds its helm's, so
+    // uninstall refuses here, before it has stopped anything. The supervisor
+    // locks follow once the re-check below has passed and the app's own
+    // supervisor is stopped.
     let mut running_records = Vec::new();
-    let runtime = if macos {
-        let mut state_dirs = vec![state.to_path_buf()];
-        let default = farhelm_supervisor::default_state_dir_for(None, home);
-        if default != state {
-            state_dirs.push(default);
-        }
+    let mut runtime = if macos {
+        let state_dirs = runtime_state_dirs(state, home);
         running_records = state_dirs
             .iter()
             .map(|dir| dir.join(farhelm_supervisor::app_bundle::RUNNING_RECORD))
             .collect();
-        Some(locks::RuntimeLocks::acquire(&state_dirs)?)
+        Some(locks::RuntimeLocks::acquire_helm(&state_dirs)?)
     } else {
         None
     };
@@ -446,7 +484,15 @@ fn lock_and_recheck(
             return Err(changed("the Farhelm services set up for this installation"));
         }
     }
+    let mut stopped_supervisor = false;
+    if let Some(runtime) = &mut runtime {
+        stopped_supervisor = stop_app_supervisors(app_supervisors, inputs.supervisor_stop_grace)?;
+        runtime
+            .lock_supervisors()
+            .map_err(|error| after_stop(error, stopped_supervisor))?;
+    }
     Ok(HeldLocks {
+        stopped_supervisor,
         running_records,
         _install: install,
         installation,
@@ -454,6 +500,145 @@ fn lock_and_recheck(
         _setup: setup,
         _runtime: runtime,
     })
+}
+
+/// The state directories whose runtime locks uninstall takes on macOS: the
+/// one this shell selects and the default one.
+///
+/// The desktop app, opened from Finder or the Dock, does not see a shell's
+/// `XDG_STATE_HOME`, so its supervisor and helm use the default location even
+/// when this shell names another; both are checked.
+fn runtime_state_dirs(state: &Path, home: &Path) -> Vec<PathBuf> {
+    let mut state_dirs = vec![state.to_path_buf()];
+    let default = farhelm_supervisor::default_state_dir_for(None, home);
+    if default != state {
+        state_dirs.push(default);
+    }
+    state_dirs
+}
+
+/// A supervisor the desktop app started that uninstall will stop.
+#[derive(Debug, Clone)]
+struct AppSupervisor {
+    state_dir: PathBuf,
+    record: farhelm_supervisor::managed_supervisor::ManagedSupervisor,
+}
+
+/// The supervisors this installation's app started that are still running,
+/// one per state directory at most.
+///
+/// Only a record that matches a live process exactly (pid, start identity
+/// and running image; see `ManagedSupervisor::observe`) and whose program
+/// file is one of the version programs of the app being removed counts. The
+/// program is matched by file identity, not by path, so a path that merely
+/// spells its way into the app (`..`), or a different app put at the same
+/// place, does not count. A supervisor started from another installation, a
+/// development build, or by hand is never stopped here, and still makes
+/// uninstall refuse on its lock as before.
+fn app_supervisors(state_dirs: &[PathBuf], app: &app::AppPlan) -> Result<Vec<AppSupervisor>> {
+    use farhelm_supervisor::managed_supervisor::{ManagedSupervisor, Observation};
+    use std::os::unix::fs::MetadataExt as _;
+    let versions: Vec<(u64, u64)> = app
+        .versions
+        .iter()
+        .filter_map(|version| std::fs::metadata(&version.program).ok())
+        .map(|metadata| (metadata.dev(), metadata.ino()))
+        .collect();
+    let mut found = Vec::new();
+    for state_dir in state_dirs {
+        let record = ManagedSupervisor::read(state_dir).with_context(|| {
+            format!(
+                "reading the desktop app's supervisor record in {}",
+                path_text(state_dir)
+            )
+        })?;
+        let Some(record) = record else { continue };
+        if !versions.contains(&(record.program_dev, record.program_ino))
+            || found
+                .iter()
+                .any(|known: &AppSupervisor| known.record.pid == record.pid)
+        {
+            continue;
+        }
+        let observed = record.observe().map_err(|error| {
+            anyhow::anyhow!(
+                "checking the desktop app's supervisor (process {}) using {}: {error}",
+                record.pid,
+                path_text(state_dir)
+            )
+        })?;
+        if observed == Observation::Matches {
+            found.push(AppSupervisor {
+                state_dir: state_dir.clone(),
+                record,
+            });
+        }
+    }
+    Ok(found)
+}
+
+/// Stop the app's own supervisors that the confirmed plan listed, the
+/// orderly way, or refuse with nothing removed. Returns whether any was
+/// stopped, so later refusals can say so.
+///
+/// Each one is re-read first: a record that changed since the plan (another
+/// supervisor started meanwhile) is not stopped, and its lock then refuses
+/// as for any supervisor the app did not start. A supervisor that does not
+/// exit within the grace refuses; uninstall never kills one, since a kill
+/// can take its tmux server and every session with it. A stop that could not
+/// be confirmed (the process could not be read or signalled) refuses too and
+/// keeps the record, which is what lets a later uninstall or app launch
+/// still recognize that supervisor. The record of a supervisor confirmed
+/// gone is removed best-effort: a record whose process is gone authorizes
+/// nothing, so failing to remove it is no reason to stop the uninstall.
+fn stop_app_supervisors(planned: &[AppSupervisor], grace: std::time::Duration) -> Result<bool> {
+    use farhelm_supervisor::managed_supervisor::{ManagedSupervisor, StopOutcome};
+    let mut stopped = false;
+    for stop in planned {
+        let current = ManagedSupervisor::read(&stop.state_dir).with_context(|| {
+            format!(
+                "re-reading the desktop app's supervisor record in {}; nothing was removed",
+                path_text(&stop.state_dir)
+            )
+        })?;
+        if current.as_ref() != Some(&stop.record) {
+            continue;
+        }
+        let outcome = stop.record.stop(grace, false).map_err(|error| {
+            anyhow::anyhow!(
+                "stopping the desktop app's supervisor (process {}) could not be confirmed: \
+                 {error}; nothing was removed; stop it yourself, then run uninstall again",
+                stop.record.pid
+            )
+        })?;
+        match outcome {
+            StopOutcome::AlreadyGone => {}
+            StopOutcome::Stopped | StopOutcome::Killed => stopped = true,
+            StopOutcome::StillRunning => bail!(
+                "the desktop app's supervisor (process {}) did not stop within {} seconds; \
+                 nothing was removed; stop it yourself, then run uninstall again",
+                stop.record.pid,
+                grace.as_secs()
+            ),
+        }
+        let _ = ManagedSupervisor::remove(&stop.state_dir);
+    }
+    Ok(stopped)
+}
+
+/// Add to a refusal that comes after uninstall stopped the desktop app's
+/// supervisor that it did: "nothing was removed" is true of files, but the
+/// user's sessions have lost the supervisor serving them until the app is
+/// opened again.
+fn after_stop(error: anyhow::Error, stopped: bool) -> anyhow::Error {
+    if stopped {
+        error.context(
+            "uninstall had already stopped the desktop app's supervisor; opening Farhelm starts \
+             it again",
+        )
+    } else {
+        error
+    }
 }
 
 /// Escape paths so a filename cannot forge an extra line of diagnostic output.
@@ -513,6 +698,7 @@ mod tests {
             xdg_config_home: None,
             xdg_state_home: Some(state.as_os_str().to_os_string()),
             interactive: true,
+            supervisor_stop_grace: std::time::Duration::from_secs(10),
         }
     }
 
@@ -822,6 +1008,7 @@ mod tests {
                 xdg_config_home: Some(config.path().as_os_str().to_os_string()),
                 xdg_state_home: None,
                 interactive: true,
+                supervisor_stop_grace: std::time::Duration::from_secs(10),
             },
             &Options {
                 dry_run: false,
@@ -1007,5 +1194,485 @@ mod tests {
 
     fn fs_remove(path: &Path) {
         std::fs::remove_file(path).expect("remove fixture file");
+    }
+
+    // ---- The desktop app's own supervisor -------------------------------
+    //
+    // A supervisor the desktop app started can outlive the app and hold
+    // `supervisor.lock` with the app closed. Uninstall stops it itself, but
+    // only the one the app recorded, only once an open app has been ruled
+    // out, and only the orderly way. The stand-ins below are copies of
+    // `sleep` put in place of the fixture app's version programs, so each
+    // really runs the program its record names; each holds a state
+    // directory's supervisor lock as its inherited stdin, so the lock goes
+    // when the process does.
+
+    use farhelm_supervisor::managed_supervisor::{ManagedSupervisor, Observation, ProgramFile};
+
+    /// A process standing in for a supervisor using `state_dir`, run from
+    /// `program` (put in place with [`runnable`]), with the record the app
+    /// would have written for it.
+    ///
+    /// Its exit status is collected on a thread, as init would collect a
+    /// supervisor whose app has quit, so a stopped stand-in reads as gone
+    /// rather than lingering as this test's zombie.
+    struct StandIn {
+        record: ManagedSupervisor,
+        exit: std::sync::mpsc::Receiver<std::process::ExitStatus>,
+    }
+
+    impl StandIn {
+        /// Start one and write its record into `state_dir`. With
+        /// `ignore_term` it ignores SIGTERM, standing in for a supervisor
+        /// that does not stop in time: it starts as a shell that ignores the
+        /// signal and exec's `program` (an ignored disposition survives
+        /// exec), and is waited for until its record matches. A `pre_exec`
+        /// hook would avoid the shell but forces the slower fork path, whose
+        /// longer window lets the child hold other tests' lock descriptors.
+        fn start(state_dir: &Path, program: &Path, ignore_term: bool) -> Self {
+            std::fs::create_dir_all(state_dir).expect("fixture: state directory");
+            let lock = std::fs::OpenOptions::new()
+                .create(true)
+                .truncate(false)
+                .write(true)
+                .open(state_dir.join("supervisor.lock"))
+                .expect("fixture: supervisor lock");
+            lock.try_lock().expect("fixture: the lock is free");
+            // Read before the spawn, as the app must.
+            let file = ProgramFile::read(program).expect("fixture: reading the program");
+            let mut command = if ignore_term {
+                let mut command = std::process::Command::new("/bin/sh");
+                command
+                    .args(["-c", "trap '' TERM; exec \"$0\" 60"])
+                    .arg(program);
+                command
+            } else {
+                let mut command = std::process::Command::new(program);
+                command.arg("60");
+                command
+            };
+            let mut child = command
+                .stdin(lock)
+                .spawn()
+                .expect("fixture: spawning the stand-in");
+            let record = ManagedSupervisor::for_process(child.id(), &file)
+                .expect("fixture: the stand-in is alive");
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            while record.observe() != Ok(Observation::Matches) {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "fixture: the stand-in never exec'd its program"
+                );
+                // sleep-ok: polling interval for the stand-in's exec.
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            record
+                .write(state_dir)
+                .expect("fixture: writing the record");
+            let (send, exit) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = send.send(child.wait().expect("fixture: waiting for the stand-in"));
+            });
+            Self { record, exit }
+        }
+
+        /// Whether the stand-in still runs, by the same observation the
+        /// code under test uses: a stopped or killed process reads as gone
+        /// at once, without waiting for the collector thread.
+        fn running(&self) -> bool {
+            self.record.observe() == Ok(Observation::Matches)
+        }
+
+        /// The signal that ended the stand-in, waiting briefly for the
+        /// collector thread to see an exit that has already happened.
+        fn ended_by(&self) -> Option<i32> {
+            use std::os::unix::process::ExitStatusExt as _;
+            self.exit
+                .recv_timeout(std::time::Duration::from_secs(10))
+                .expect("the stand-in exited")
+                .signal()
+        }
+    }
+
+    impl Drop for StandIn {
+        /// Kill a stand-in a test left running. The record's own
+        /// observation guards the signal; between it and the kill the
+        /// collector could reap the process and the pid pass on, which is
+        /// the same short window `ManagedSupervisor::stop` accepts.
+        fn drop(&mut self) {
+            if self.running() {
+                // SAFETY: kill has no memory preconditions.
+                unsafe { libc::kill(self.record.pid as libc::pid_t, libc::SIGKILL) };
+            }
+        }
+    }
+
+    /// Make `program` (a fixture file) a runnable copy of `sleep`, and
+    /// return it.
+    ///
+    /// Copied by `cp`, not in this process: a file this multi-threaded test
+    /// process holds open for writing can be inherited by a child another
+    /// test is spawning at that moment, and exec'ing the copy then fails
+    /// with "Text file busy".
+    fn runnable(program: &Path) -> PathBuf {
+        // Replaced rather than overwritten: `cp` onto an existing file keeps
+        // that file's (non-executable) mode.
+        let _ = std::fs::remove_file(program);
+        let copied = std::process::Command::new("cp")
+            .arg("/bin/sleep")
+            .arg(program)
+            .status()
+            .expect("fixture: running cp");
+        assert!(copied.success(), "fixture: copying sleep");
+        program.to_path_buf()
+    }
+
+    /// The program the app at `fixture` runs its supervisor from (a fixture
+    /// file until [`runnable`] makes it a program).
+    fn app_program(fixture: &AppFixture) -> PathBuf {
+        fixture.app.join("Contents/Versions/1.2.4/farhelm")
+    }
+
+    /// Run a confirmed uninstall with `inputs`, returning its result and
+    /// what it printed.
+    fn uninstall_with(inputs: &Inputs) -> (Result<()>, String) {
+        let mut output = Vec::new();
+        let result = run_with_inputs(
+            inputs,
+            &Options {
+                dry_run: false,
+                yes: true,
+            },
+            &mut NoUnits,
+            &mut std::io::Cursor::new(Vec::new()),
+            &mut output,
+        );
+        (result, String::from_utf8_lossy(&output).into_owned())
+    }
+
+    /// The plan line naming the stop of `stand_in` in `dir`.
+    fn stop_line(stand_in: &StandIn, dir: &Path) -> String {
+        format!(
+            "stop the desktop app's supervisor (process {}) using {}",
+            stand_in.record.pid,
+            path_text(dir)
+        )
+    }
+
+    /// Uninstall stops the supervisor the app it removes started, in both
+    /// state directories it checks, and then proceeds.
+    ///
+    /// Why: a supervisor the desktop app started can outlive the app, so
+    /// after an ordinary quit it still holds its lock and its version, and
+    /// without this stop every uninstall would refuse until the user found
+    /// and stopped a process they never started themselves. Spec: with the
+    /// app quit and its recorded supervisor alive in the `XDG_STATE_HOME`
+    /// state directory and in the default one (each running one of the
+    /// app's versions), the plan names both stops; each is ended by SIGTERM
+    /// (the orderly stop, never a kill) and its record is removed; the app
+    /// is removed.
+    #[test]
+    fn the_apps_own_supervisor_is_stopped_and_the_uninstall_proceeds() {
+        let fixture = AppFixture::new();
+        let state = tempfile::tempdir().expect("state");
+        let inputs = inputs(&fixture, state.path());
+        let old = runnable(&fixture.app.join("Contents/Versions/1.2.3/farhelm"));
+        let dirs = [
+            state.path().join("farhelm"),
+            fixture.home.join(".local/state/farhelm"),
+        ];
+        let stand_ins = [
+            StandIn::start(&dirs[0], &runnable(&app_program(&fixture)), false),
+            StandIn::start(&dirs[1], &old, false),
+        ];
+        let (result, output) = uninstall_with(&inputs);
+        result.expect("uninstall stops the app's supervisors and proceeds");
+        for (dir, stand_in) in dirs.iter().zip(&stand_ins) {
+            assert!(output.contains(&stop_line(stand_in, dir)), "{output}");
+            assert_eq!(
+                stand_in.ended_by(),
+                Some(libc::SIGTERM),
+                "{}",
+                dir.display()
+            );
+            assert_eq!(
+                ManagedSupervisor::read(dir).unwrap(),
+                None,
+                "the record of a stopped supervisor is removed"
+            );
+        }
+        assert!(!fixture.app.exists(), "{output}");
+    }
+
+    /// A supervisor the app did not start is left running, and uninstall
+    /// refuses on its lock and says how to find it.
+    ///
+    /// Why: uninstall may stop only what this installation's app started. A
+    /// supervisor run by hand or from another build is the user's, and a
+    /// record naming a program that is not one of this app's versions (here
+    /// a path that spells its way into the app with `..`, and a plain one
+    /// outside it) must not make it ours. Spec: with such a live record and
+    /// that process holding the supervisor lock, the plan names no stop,
+    /// uninstall refuses naming the lock and `lsof`, the process keeps
+    /// running, and nothing is removed.
+    #[test]
+    fn a_supervisor_the_app_did_not_start_is_not_stopped() {
+        let fixture = AppFixture::new();
+        let elsewhere = fixture.home.join("Elsewhere");
+        std::fs::create_dir_all(&elsewhere).expect("fixture: another folder");
+        let foreign = runnable(&elsewhere.join("farhelm"));
+        let spelled_in = fixture.app.join("../../Elsewhere/farhelm");
+        for program in [&foreign, &spelled_in] {
+            let state = tempfile::tempdir().expect("state");
+            let inputs = inputs(&fixture, state.path());
+            let dir = state.path().join("farhelm");
+            let stand_in = StandIn::start(&dir, program, false);
+            let (result, output) = uninstall_with(&inputs);
+            let error = result.expect_err("a foreign supervisor's lock refuses");
+            let text = format!("{error:#}");
+            assert!(
+                text.contains("supervisor.lock") && text.contains("lsof"),
+                "{text}"
+            );
+            assert!(
+                !output.contains("stop the desktop app's supervisor"),
+                "{output}"
+            );
+            assert!(
+                stand_in.running(),
+                "a supervisor the app did not start keeps running"
+            );
+            assert!(app_program(&fixture).exists(), "nothing removed");
+        }
+    }
+
+    /// An open app refuses the uninstall before its supervisor is stopped.
+    ///
+    /// Why: the app's helm holds `helm-token.lock` while it is open, and
+    /// stopping its supervisor under it would end the user's sessions only
+    /// for the uninstall to refuse anyway. Spec: with the helm lock held and
+    /// the app's recorded supervisor alive, uninstall refuses telling the
+    /// user to quit Farhelm Desktop, the supervisor keeps running with its
+    /// record in place, and nothing is removed.
+    #[test]
+    fn an_open_app_refuses_before_its_supervisor_is_stopped() {
+        let fixture = AppFixture::new();
+        let state = tempfile::tempdir().expect("state");
+        let inputs = inputs(&fixture, state.path());
+        let dir = state.path().join("farhelm");
+        let stand_in = StandIn::start(&dir, &runnable(&app_program(&fixture)), false);
+        let helm = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(dir.join("helm-token.lock"))
+            .expect("helm lock");
+        helm.try_lock().expect("the open app's helm holds the lock");
+        let (result, _) = uninstall_with(&inputs);
+        let error = result.expect_err("an open app refuses");
+        assert!(
+            format!("{error:#}").contains("quit Farhelm Desktop"),
+            "{error:#}"
+        );
+        assert!(stand_in.running(), "the supervisor was not stopped");
+        assert_eq!(
+            ManagedSupervisor::read(&dir).unwrap(),
+            Some(stand_in.record.clone())
+        );
+        assert!(app_program(&fixture).exists(), "nothing removed");
+    }
+
+    /// An installation that changed after the user confirmed refuses before
+    /// the supervisor is stopped.
+    ///
+    /// Why: SPEC.md orders the stop after the installation-ownership checks;
+    /// stopping the user's supervisor for an uninstall that then refuses
+    /// over a changed plan would end their sessions for nothing. Spec: when
+    /// the app changes as the user confirms, uninstall refuses saying the
+    /// installation changed, and the supervisor keeps running with its
+    /// record in place.
+    #[test]
+    fn a_plan_that_changed_after_confirmation_stops_nothing() {
+        let fixture = AppFixture::new();
+        let state = tempfile::tempdir().expect("state");
+        let dir = state.path().join("farhelm");
+        let stand_in = StandIn::start(&dir, &runnable(&app_program(&fixture)), false);
+        let desktop = fixture.app.join("Contents/MacOS/farhelm-desktop");
+        let mut input = ConfirmWhile {
+            answer: std::io::Cursor::new(b"y\n".to_vec()),
+            meanwhile: Some(|| fs_remove(&desktop)),
+        };
+        let error = run_with_inputs(
+            &inputs(&fixture, state.path()),
+            &Options {
+                dry_run: false,
+                yes: false,
+            },
+            &mut NoUnits,
+            &mut input,
+            &mut Vec::new(),
+        )
+        .expect_err("a changed plan refuses");
+        assert!(
+            format!("{error:#}").contains("changed after you confirmed"),
+            "{error:#}"
+        );
+        assert!(stand_in.running(), "the supervisor was not stopped");
+        assert_eq!(
+            ManagedSupervisor::read(&dir).unwrap(),
+            Some(stand_in.record.clone())
+        );
+    }
+
+    /// A dry run names the supervisor uninstall would stop, and stops
+    /// nothing.
+    ///
+    /// Why: SPEC.md has `--dry-run` show what the uninstall would do without
+    /// changing anything, and stopping a process is now part of that. Spec:
+    /// with the app's recorded supervisor alive, `--dry-run` prints the stop
+    /// with its process number and state directory, and the supervisor keeps
+    /// running.
+    #[test]
+    fn a_dry_run_names_the_stop_and_stops_nothing() {
+        let fixture = AppFixture::new();
+        let state = tempfile::tempdir().expect("state");
+        let inputs = inputs(&fixture, state.path());
+        let dir = state.path().join("farhelm");
+        let stand_in = StandIn::start(&dir, &runnable(&app_program(&fixture)), false);
+        let mut output = Vec::new();
+        run_with_inputs(
+            &inputs,
+            &Options {
+                dry_run: true,
+                yes: false,
+            },
+            &mut NoUnits,
+            &mut std::io::Cursor::new(Vec::new()),
+            &mut output,
+        )
+        .expect("dry run");
+        let output = String::from_utf8_lossy(&output);
+        assert!(output.contains(&stop_line(&stand_in, &dir)), "{output}");
+        assert!(stand_in.running(), "a dry run stops nothing");
+        assert!(app_program(&fixture).exists());
+    }
+
+    /// A supervisor that does not stop within the grace refuses the
+    /// uninstall with nothing removed, and is not killed.
+    ///
+    /// Why: killing a supervisor can take its tmux server and every session
+    /// with it, so uninstall never escalates; and removing the app under a
+    /// supervisor still running from it is what the locks exist to prevent.
+    /// Spec: with the app's recorded supervisor ignoring SIGTERM, uninstall
+    /// refuses saying it did not stop and that nothing was removed; the
+    /// supervisor keeps running with its record in place.
+    #[test]
+    fn a_supervisor_that_does_not_stop_refuses_with_nothing_removed() {
+        let fixture = AppFixture::new();
+        let state = tempfile::tempdir().expect("state");
+        let mut inputs = inputs(&fixture, state.path());
+        inputs.supervisor_stop_grace = std::time::Duration::from_millis(500);
+        let dir = state.path().join("farhelm");
+        let stand_in = StandIn::start(&dir, &runnable(&app_program(&fixture)), true);
+        let (result, _) = uninstall_with(&inputs);
+        let text = format!(
+            "{:#}",
+            result.expect_err("a supervisor that does not stop refuses")
+        );
+        assert!(
+            text.contains("did not stop") && text.contains("nothing was removed"),
+            "{text}"
+        );
+        assert!(stand_in.running(), "uninstall never kills");
+        assert_eq!(
+            ManagedSupervisor::read(&dir).unwrap(),
+            Some(stand_in.record.clone())
+        );
+        assert!(app_program(&fixture).exists(), "nothing removed");
+        assert_eq!(
+            record_of(&fixture).state,
+            farhelm_supervisor::installation::InstallState::Complete
+        );
+    }
+
+    /// A refusal after the supervisor was stopped says so.
+    ///
+    /// Why: "nothing was removed" is true of files, but the user's sessions
+    /// have lost their supervisor until the app is opened again, and the
+    /// refusal is the only place they would learn it. Spec: when a version
+    /// is still in use after uninstall stopped the app's supervisor, the
+    /// refusal names the version and adds that the supervisor was stopped
+    /// and opening Farhelm starts it again.
+    #[test]
+    fn a_refusal_after_the_stop_says_the_supervisor_was_stopped() {
+        let fixture = AppFixture::new();
+        let state = tempfile::tempdir().expect("state");
+        let inputs = inputs(&fixture, state.path());
+        let dir = state.path().join("farhelm");
+        let stand_in = StandIn::start(&dir, &runnable(&app_program(&fixture)), false);
+        let old =
+            std::fs::File::open(fixture.app.join("Contents/Versions/1.2.3/farhelm")).expect("open");
+        old.lock_shared()
+            .expect("a running 1.2.3 holds its version");
+        let (result, _) = uninstall_with(&inputs);
+        let text = format!("{:#}", result.expect_err("a version in use refuses"));
+        assert!(
+            text.contains("Farhelm 1.2.3 is still in use")
+                && text.contains("already stopped the desktop app's supervisor"),
+            "{text}"
+        );
+        assert_eq!(stand_in.ended_by(), Some(libc::SIGTERM));
+    }
+
+    /// A record replaced after the user confirmed is not acted on: the
+    /// supervisor the plan named is not stopped, and the lock then refuses.
+    ///
+    /// Why: the user confirmed stopping one particular process; another app
+    /// launch between the plan and the stop may have replaced the record,
+    /// and the stop must not follow it to a process the user was not shown.
+    /// Spec: when the record changes as the user confirms (to another live
+    /// process running one of the app's versions), uninstall stops neither
+    /// process, refuses on the supervisor lock, and removes nothing.
+    #[test]
+    fn a_record_replaced_after_confirmation_is_not_acted_on() {
+        let fixture = AppFixture::new();
+        let state = tempfile::tempdir().expect("state");
+        let dir = state.path().join("farhelm");
+        let planned = StandIn::start(&dir, &runnable(&app_program(&fixture)), false);
+        // The replacement holds another directory's lock, which is all a
+        // stand-in for "another process" needs; its record is then written
+        // over the planned one.
+        let other = StandIn::start(
+            &state.path().join("elsewhere"),
+            &runnable(&fixture.app.join("Contents/Versions/1.2.3/farhelm")),
+            false,
+        );
+        let (record_dir, replacement) = (dir.clone(), other.record.clone());
+        let mut input = ConfirmWhile {
+            answer: std::io::Cursor::new(b"y\n".to_vec()),
+            meanwhile: Some(move || {
+                replacement
+                    .write(&record_dir)
+                    .expect("fixture: replacing the record");
+            }),
+        };
+        let error = run_with_inputs(
+            &inputs(&fixture, state.path()),
+            &Options {
+                dry_run: false,
+                yes: false,
+            },
+            &mut NoUnits,
+            &mut input,
+            &mut Vec::new(),
+        )
+        .expect_err("the planned supervisor still holds its lock");
+        assert!(
+            format!("{error:#}").contains("supervisor.lock"),
+            "{error:#}"
+        );
+        assert!(planned.running(), "the planned supervisor was not stopped");
+        assert!(other.running(), "the replacement was not stopped");
+        assert!(app_program(&fixture).exists(), "nothing removed");
     }
 }
