@@ -3286,3 +3286,48 @@ temporary evidence, which expires with cleanup.
 Class: unknown
 
 Cause: hypothesis
+
+## 2026-10-31 — feedback dialog's disabled Send color, again and alone (e2e/tests/feedback.spec.ts)
+
+`the dialog refuses blank and over-long messages without sending`, recorded as open on 2026-10-30, failed again on
+WebKit, this time on a Tensorlake sandbox rather than the shared development machine: in the plans landing monitor's
+full browser run for sqlite-wal and tab-output-hangup (stacked on main `e9095ef8`, tested commit `4ae16b11`), it was the
+only failure in run `a4a4ad3b-56c1-426f-8377-149f23f29d12`, the shard of 300 tests that held the feedback spec. It
+failed on the background rather than the text color: the disabled Send button's `background-color` was `rgb(29, 34, 44)`
+where the test expected `rgb(233, 237, 244)`, for the whole 5-second wait. Run alone three times on the same build (run
+`7b4a27da-01e2-4721-aef3-c5c6c201ae50`), it failed once more the same way and passed twice, the first time it has failed
+alone; the earlier five of five alone were on the development machine.
+
+Every failure recorded so far came in the test's light-scheme pass, after `page.emulateMedia({ colorScheme: "light" })`.
+`rgb(29, 34, 44)` is the dark palette's `--bg-1`, and `rgb(155, 165, 184)` from the earlier entry is the dark palette's
+`--fg-2`; each expected value is the light palette's, resolved by a probe element the test creates after the switch. So
+the switch had reached the document and a new element took the light palette, while the Send button that already existed
+kept a dark value through every retry. In the earlier two failures the background had already passed its light check and
+only the text color stayed dark, so whatever is left behind is part of the button's style, not all of it. That narrows
+the earlier hypothesis from a value sampled a moment too early to WebKit leaving an existing element's style on the old
+palette after the emulated color scheme changes. It is still a hypothesis. The stack's only UI change was a desktop
+message; the spec and its color helper last changed on 2026-10-30, when the keyboard shortcuts overview edited only the
+Help-menu test. Open, still excluded from deflake sweeps; no fix was attempted.
+
+```text
+Error: expect(locator).toHaveCSS(expected) failed
+Locator:  getByRole('dialog', { name: 'Send feedback', exact: true }).getByRole('button', { name: 'Send', exact: true })
+Expected: "rgb(233, 237, 244)"
+Received: "rgb(29, 34, 44)"
+Timeout:  5000ms
+```
+
+Evidence: a Tensorlake sandbox, a 4-vCPU x86_64 Linux virtual machine (Ubuntu 24.04, kernel 7.0.7) running only this
+shard, three Playwright workers with one owned stack each; load average not measured. Both runs through
+`scripts/record-test-run.py --kind development --tmux required` in its generic mode: the full run as
+`npx playwright test --project=<engine>-<spec> ... --retries=0 --reporter=line` over 22 of the suite's 218 projects, the
+rerun as the same with `--project=webkit-feedback`, `-g` on the test's name and `--repeat-each=3` (12.1 seconds for the
+three attempts; the full run's attempt duration was not extracted). Tracked files matched the tested commit; the tree
+held one untracked changelog fragment from another plan, which no test reads. Node 24.16, with the Playwright and WebKit
+builds the tested tree pins. Recorded tmux 3.7c executable SHA256
+`1f51ad46eb731a90b75e74afc35719666405e8231fa73ab58ff35a5e9e6f92cd`, locale C.UTF-8; child `FARHELM_TEST_TRACE_DIR` only,
+with no ambient `FARHELM_*`. Run UUIDs address retained temporary evidence, which expires with cleanup.
+
+Class: unknown
+
+Cause: hypothesis
