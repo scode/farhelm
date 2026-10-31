@@ -641,6 +641,9 @@ if ! [ -x "$mac_tmux" ] || [ "$("$mac_tmux" -V 2>/dev/null)" != "tmux $tmux_vers
   mv -f "$mac_tmux.tmp" "$mac_tmux"
 fi
 echo "== Mac tmux: $mac_tmux ($("$mac_tmux" -V))"
+# Shows that the private tmux loads only system libraries (no Homebrew path,
+# no deleted build folder).
+otool -L "$mac_tmux" | sed 's/^/   /'
 
 printf '%s\n%s\n' "$built_from" "$state" >"$stamp"
 echo "== staged in $devbuild, built from $built_from"

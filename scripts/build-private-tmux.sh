@@ -78,6 +78,7 @@ download "ncurses.tar.gz" "$NCURSES_SHA256" \
 
 prefix="$work/prefix"
 configure_host=()
+mac_utf8proc=0
 static_link=()
 tmux_configure=()
 ncurses_configure=()
@@ -112,7 +113,11 @@ case "$target" in
     # tmux 3.7c's darwin configure refuses to guess about jemalloc (as it
     # already does about utf8proc): an explicit choice is required, and
     # the private build links nothing but its own prefix.
-    tmux_configure=(--disable-jemalloc)
+    # THROWAWAY (devbuild experiment): utf8proc on, as Homebrew's tmux has
+    # it, because macOS's own width data mishandles emoji. It is built
+    # static into the prefix below.
+    tmux_configure=(--disable-jemalloc --enable-utf8proc)
+    mac_utf8proc=1
     # A case-insensitive APFS volume cannot represent every upstream terminfo
     # key. macOS owns the runtime database, so install only the private
     # archives and compile the system lookup path into ncurses instead.
@@ -138,6 +143,20 @@ esac
 # wide header is named ncurses.h. Both names must resolve to the same private
 # archive or the final link falls through to a host library.
 ln -s libncursesw.a "$prefix/lib/libncurses.a"
+
+# THROWAWAY (devbuild experiment): static utf8proc for the macOS tmux. The
+# checksum was taken from the first download of the v2.11.3 release asset
+# on 2026-10-31, not from a published value. Only the archive and header go
+# into the prefix: a dylib there would make the macOS linker prefer it, and
+# the finished tmux would then load a library from this deleted work folder.
+if [ "$mac_utf8proc" -eq 1 ]; then
+  UTF8PROC_VERSION=2.11.3
+  download "utf8proc.tar.gz" 415189fd2c85cd6ee5ff26af500fa387de9ada1e3e316e93f7338551481d557d \
+    "https://github.com/JuliaStrings/utf8proc/releases/download/v${UTF8PROC_VERSION}/utf8proc-${UTF8PROC_VERSION}.tar.gz"
+  (cd "$work/utf8proc-$UTF8PROC_VERSION" && make libutf8proc.a CC="$CC" AR="$AR" &&
+    install -m 0644 libutf8proc.a "$prefix/lib/libutf8proc.a" &&
+    install -m 0644 utf8proc.h "$prefix/include/utf8proc.h")
+fi
 
 export PKG_CONFIG_PATH="$prefix/lib/pkgconfig"
 # tmux probes the standalone tinfow/tinfo modules before ncursesw. Restricting
