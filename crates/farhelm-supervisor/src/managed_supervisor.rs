@@ -542,15 +542,16 @@ mod tests {
         assert!(!record.started_from(&ProgramFile::read(&program).unwrap()));
     }
 
-    /// On Linux a running supervisor still matches its record after its
-    /// program file was replaced at the same path, because the check follows
-    /// the running image, not the path.
+    /// A running supervisor still matches its record after its program file
+    /// was replaced at the same path.
     ///
-    /// Why it matters: that is exactly the supervisor an update or a
-    /// development build needs to stop, so the replacement must not make it
-    /// unrecognizable. (macOS compares only the path, which the replacement
-    /// keeps; see [`ManagedSupervisor::observe`].)
-    #[cfg(target_os = "linux")]
+    /// Why it matters: that is exactly the supervisor a development build
+    /// needs to stop (every build renames a new file over the old one), so
+    /// the replacement must not make it unrecognizable. Linux follows the
+    /// running image (`/proc/<pid>/exe` keeps its identity); macOS compares
+    /// only the path `proc_pidpath` reports for it (see
+    /// [`ManagedSupervisor::observe`]), and this test is what shows on macOS
+    /// CI that it still reports the recorded path for an unlinked image.
     #[farhelm_testtrace::test]
     fn a_running_supervisor_matches_after_its_program_is_replaced() {
         let dir = tempfile::tempdir().unwrap();

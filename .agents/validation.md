@@ -115,9 +115,13 @@ that its required systemd or SSH substrate ran.
   stderr line and exit status 1 (the app's own preflight, run before it would spawn its managed supervisor), and a
   non-tmux bootstrap failure (an unusable state directory) exits 1 through the ordinary fallback path with no panic. The
   non-pixel Xvfb integration gate that follows covers the embedded helm, managed supervisor, desktop authentication, the
-  tmux override reaching the managed supervisor, hard-exit tether, restart persistence, and that every asset the window
-  requested went through the desktop asset handler. API checks retain host-qualified session references; tmux and scope
-  checks use their local session IDs. The optional coordinate-driven leg is not part of CI.
+  tmux override reaching the managed supervisor, the supervisor outliving a hard exit and an ordinary quit (reused, then
+  replaced by a launch whose program file changed, with a session surviving the replacement), a second launch with
+  another program refusing beside the open app without stopping its supervisor, a replacement that would fail its tmux
+  preflight stopping nothing, a frozen (SIGSTOP) supervisor being replaced with a kill after the grace, restart
+  persistence, and that every asset the window requested went through the desktop asset handler. API checks retain
+  host-qualified session references; tmux and scope checks use their local session IDs. The optional coordinate-driven
+  leg is not part of CI.
 - `DESKTOP_SMOKE_APPEARANCE=1 scripts/desktop-smoke.sh` — optional Linux native appearance integration using the
   ordinary owned Xvfb/openbox setup. Four fresh/stored dark/light cases check native media-query premises, palette
   before renderer content, real Settings choices, private WebKit profile persistence, Inter, embedded assets and the
@@ -127,9 +131,10 @@ that its required systemd or SSH substrate ran.
   supplies its own private profile and closed scenario inputs.
 - `DESKTOP_SMOKE_APPEARANCE=no-initialize scripts/desktop-smoke.sh` — one optional Linux missing-initialize leg using
   the same builds and owned display. A fixed valid rootless index exercises the creation-time startup deadline before
-  App renders. It requires actual hidden native creation, natural refusal with exit 1, the owned supervisor's birth and
-  stdin-pipe identity, and its natural exit before cleanup. Private profiles and bounded process/window observations are
-  retained. X11 polling supplies sampled no-observed-map evidence; an absent hidden XID is recorded as unknown
+  App renders. It requires actual hidden native creation, natural refusal with exit 1, the owned supervisor's birth, its
+  detached setup (own session, `/dev/null` stdin, its log file as stderr) and the app's record of it, and that it keeps
+  running after the refusal; teardown stops it by that record. Private profiles and bounded process/window observations
+  are retained. X11 polling supplies sampled no-observed-map evidence; an absent hidden XID is recorded as unknown
   realization, never manufactured by showing the window. Requires Linux pidfd support in the existing Python runner.
 - `sh -n scripts/install.sh && shellcheck scripts/install.sh scripts/test-install-sh.sh` — the curl-installer is POSIX
   `sh` run unread on a fresh machine (`curl | sh`), so a syntax slip or a shellcheck-catchable bug in it gets caught
@@ -159,7 +164,9 @@ that its required systemd or SSH substrate ran.
   keeper tests
   (`cargo nextest run -p farhelm-supervisor --lib -E 'test(/installation::|version_lock::|session_hold::/)'` and
   `cargo nextest run -p farhelm --test session_hold --test version_lock_forwarder`), each through the recorder with four
-  slots and `--tmux none`.
+  slots and `--tmux none`. The focused macOS CI job (not the release gate) also runs the desktop app's supervisor record
+  and stop tests the same way: `cargo nextest run -p farhelm-supervisor --lib -E 'test(managed_supervisor::)'` (the
+  uninstall stop's own tests are part of `uninstall::` above).
 - `scripts/test-provision-centos.sh` — the x86_64 Linux release gate boots a systemd CentOS Stream 9 container and makes
   the helm provision it over ssh, which is the only coverage of a helm installing onto a distribution other than its
   own. Needs docker and `musl-tools`: the payloads it pushes are the release's musl-static `farhelm` and static tmux,

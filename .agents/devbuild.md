@@ -37,6 +37,14 @@ check and the host's supervisor reports its database version; the host then need
 installed app, or a target built before schema reporting was added, still lets that Update strand the host until the
 newer build is put back.
 
+The devbuild's local supervisor keeps running after the app quits (for targets that contain the detached supervisor; an
+older target's app stops it on quit). Its log is `supervisor.log` in the devbuild state directory, not the terminal the
+app runs in. The next devbuild's first launch replaces it, because every build installs a new `farhelm` file. A devbuild
+of a target from before this behavior knows nothing about that record: it reuses the running supervisor (or refuses on a
+protocol difference), so stop the supervisor first when handing out such a target. To stop it by hand, take the pid from
+`desktop-supervisor.json` in that state directory, check with `ps -p <pid> -o command=` that it still is the devbuild's
+`farhelm supervisor run`, then send it SIGTERM.
+
 NOTE: Every devbuild shares that one devbuild state, and its supervisor and helm apply any database migration the target
 adds. A later devbuild of a target without the migration (main, say) then refuses that database, and another unlanded
 migration with the same number can misread it. When the target changes a supervisor or helm database schema, say so

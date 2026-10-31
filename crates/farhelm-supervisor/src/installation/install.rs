@@ -622,8 +622,12 @@ impl Context<'_> {
                                      install is unfinished until the installer runs again",
                                         self.app_path.display()
                                     ),
-                                    &["Quit Farhelm and whatever else runs that version, then \
-                                   re-run the installer."],
+                                    &["Quit Farhelm and whatever else runs that version (the \
+                                   app's local supervisor keeps running after you quit; its \
+                                   process number is in desktop-supervisor.json in Farhelm's \
+                                   state directory, ~/.local/state/farhelm unless \
+                                   XDG_STATE_HOME says otherwise), then re-run the \
+                                   installer."],
                                 ));
                             }
                             Err(std::fs::TryLockError::Error(error)) => {

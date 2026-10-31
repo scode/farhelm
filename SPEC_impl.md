@@ -4421,8 +4421,9 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   exactly one of the refused names gets a `307` to the fixed `http://127.0.0.1:<port>/`, built from the literal rather
   than from the request; API calls and WebSocket upgrades under those names get the ordinary 403.
 - The native app embeds farhelm-helm in-process; the Linux helm is the same code behind `farhelm helm run`. The local
-  supervisor is a separate process either way — the app discovers one that already answers and leaves it alone, or
-  starts `farhelm supervisor run` from its sibling binary and owns that child for its own lifetime.
+  supervisor is a separate process either way — the app discovers one that already answers and leaves it alone (unless
+  it is the app's own outdated or wedged one), or starts `farhelm supervisor run` detached, and it keeps running after
+  the app quits (see "Side-by-side versions inside Farhelm.app").
 - Schema 29 adds the supervisor session column `launch_hooked` (integer, default 0). New spawns record the argv decision
   before tmux starts; relaunch clears it, and a pending-create retry inserts a fresh unhooked decision before spawn
   decides again. Older supervisors refuse this upgraded database on downgrade; upgrades preserve stored conversations
@@ -4698,9 +4699,12 @@ headlessly in on-demand CI and the release gate.
 
 ## Logging
 
-`tracing` everywhere, with `tracing-subscriber` env-filter semantics. The intended mature shape uses spans carrying
-session and host ids, so SPEC.md's required diagnostic trails (creation, PTY lifecycle, attachment transfer,
-reconnection, resume) fall out of structured context rather than ad-hoc log lines.
+`tracing` everywhere, with `tracing-subscriber` env-filter semantics. Processes log to stderr; where stderr goes is the
+starter's choice: the systemd journal for a setup-managed supervisor, the terminal for one started by hand, and for the
+desktop app's detached supervisor `supervisor.log` in its state directory (see "Side-by-side versions inside
+Farhelm.app"), because that supervisor outlives the app whose stderr it used to share. The intended mature shape uses
+spans carrying session and host ids, so SPEC.md's required diagnostic trails (creation, PTY lifecycle, attachment
+transfer, reconnection, resume) fall out of structured context rather than ad-hoc log lines.
 
 M1 emits structured lifecycle and failure events, attaching session or channel fields where that context exists. The
 host half of the span discipline above now exists: M6's connection manager runs every actor inside a span carrying the
@@ -5130,6 +5134,46 @@ missing or removed before the lock was taken, refuses startup with one sentence 
 does one still held exclusively after the five-second wait. The lock's descriptor is close-on-exec, so neither the
 supervisor nor the updater's installer inherits it.
 
+The app starts that supervisor detached, so it outlives the app, as a Linux supervisor runs under systemd: in a session
+of its own (`setsid`), with stdin and stdout on `/dev/null` and stderr appended to `supervisor.log` in the state
+directory (0600; a launch that starts a supervisor first moves a log of 16 MiB or more aside as `supervisor.log.1`).
+Nothing stops it when the app quits, refuses at startup or panics. `--exit-on-stdin-close` remains a supervisor option,
+used by tests; the app no longer passes it. The app records the supervisor it started in `desktop-supervisor.json` in
+the state directory (`farhelm_supervisor::managed_supervisor`): pid, kernel start identity, and the resolved program
+path with that file's device and inode, read before the spawn. This record is a deliberate ownership marker between
+processes, which "Cleanup on quit" otherwise rules out without approval; the maintainer chose it on 2026-10-31 (the Mac
+supervisor outliving the app), and it is the only thing that lets anything stop that supervisor. The record authorizes
+an action only after the live process is read again and matches it: same pid and start identity, running the recorded
+executable (on Linux also the running image's device and inode; macOS exposes only the path). A supervisor the app did
+not start is never stopped by it.
+
+At startup the app decides from the record and from discovery (`plan_local_supervisor` in
+`crates/farhelm-ui/src/desktop.rs`). Without a matching record, an answering supervisor is reused as it is and only
+absence starts one, as before. With one, the app's own supervisor is replaced when it was started from another program
+file than the one this launch would start (by resolved path, device and inode, not version: every untagged build reports
+the same version), and when it does not answer at all (holding the state directory without serving); otherwise it is
+reused. The whole decision, and any stop or start, happens under the helm's `helm-token.lock`, taken before the record
+is read or anything is discovered (waiting up to five seconds for a brief holder, as the helm does) and released just
+before the launch's own embedded helm takes it: a launch beside an open app refuses without touching anything, and two
+launches cannot act on what they saw before the other changed it. Every writer and remover of the record holds that
+lock, uninstall included. A replacement does everything that could refuse first: the new supervisor's prerequisites (the
+session program path and the tmux preflight), a `--version` run of the program it would start (a file that cannot run
+would otherwise look like a predecessor that does not answer), and opening its log. A discovery that fails outright
+counts as not answering only for the app's own supervisor. One that runs the current program and does not answer,
+whether nothing listens or its hello fails, may still be starting: before binding its socket it waits for the state
+directory or migrates its database, and after binding it runs startup sweeps (the launch directory, the repository
+cache, attachment reconciliation) before it accepts. So the app first gives it `MANAGED_SUPERVISOR_SERVING_WAIT` to
+answer, reuses it if it does, and only then treats it as wedged. Interrupting it after the wait is acceptable because
+those sweeps survive interruption (the repository-cache sweep renames before it removes); post-bind startup work that
+could not survive a kill would change that. Then the app stops the old one with SIGTERM, waits `ORDERLY_STOP_GRACE` (the
+output-client shutdown budget plus five seconds), kills it only after that, removes its record once it is confirmed
+gone, and starts the new one, with `STATE_DIR_CLAIM_WAIT` covering the handover. The log is rotated only then, when a
+supervisor is about to start, and a rotation that fails falls back to appending. A supervisor started by hand in that
+window races the new one for the state directory; if it wins, this launch fails to start, and the next launch reuses it.
+The record is written right after the spawn, so a crash in between leaves a supervisor the app treats as not its own:
+reused while it answers, and not replaced on an update until it exits. A long-lived supervisor keeps its version's lock,
+so pruning keeps that version until the supervisor is replaced.
+
 A session's window runs the supervisor's own versioned `farhelm`, not the forwarder, so in this layout the supervisor
 starts it as `<farhelm> internal hold <spec> -- <shell argv>` (`crates/farhelm-supervisor/src/session_hold.rs`) to hold
 the version through the login shell's startup. The hold step takes the version lock, starts a keeper
@@ -5336,10 +5380,11 @@ has no updater to mount it.
 
 Restart to update spawns a detached helper in its own process group: a short `/bin/sh` script that waits, bounded at
 about a minute, for the app's process to exit, then runs `/usr/bin/open` on the bundle, and gives up without opening
-anything if the app has not exited by then. The app then quits the way closing its window does, so the managed
-supervisor's stdin tether and its 20-second wait for the state directory cover the handover, and sessions keep running.
-The new main program starts its own version's supervisor from its folder, as any launch does; nothing else is needed.
-Opening the releases page uses the same external-link path as the Documentation item.
+anything if the app has not exited by then. The app then quits the way closing its window does, which leaves its
+supervisor running. The new main program finds the previous version's supervisor by its record, running another program
+file than its own, and replaces it in order (see "Side-by-side versions inside Farhelm.app"); sessions keep running. The
+real update handover is exercised by the release brick test. Opening the releases page uses the same external-link path
+as the Documentation item.
 
 What it trusts over TLS alone is the answer to "which release is the latest". A wrong answer cannot make it run anything
 unsigned, but it can withhold updates (by naming an old release), or, by naming one that fails verification, put up the

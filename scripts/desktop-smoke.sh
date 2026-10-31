@@ -55,7 +55,7 @@
 # appshots supply visual review. Linux observations are not macOS evidence.
 # DESKTOP_SMOKE_APPEARANCE=no-initialize runs only the fixed rootless-document
 # fault: the hidden native window must refuse within its creation deadline and
-# its owned supervisor must stop through the stdin tether before cleanup.
+# the supervisor it started must keep running, detached, after the refusal.
 #
 # Known handling quirks, learned the hard way:
 # - The window sometimes maps at 10x10 and stays black until a resize
@@ -218,6 +218,7 @@ TEARDOWN_DONE=""
 SID="" # set once the create-form phase produces a session; read by teardown
 SID_NEWEST="" # second restart fixture; empty during the interaction-only create
 SID_ROTATED="" # post-rotation fixture: proves native REST still works; read by teardown
+SID_KEPT="" # held across the supervisor replacement to prove sessions survive it; read by teardown
 # The helm's API IDs include their host entry; tmux names and systemd scopes
 # belong to this run's local supervisor and contain only the session component.
 # Keep both spellings so API cleanup never loses the routing identity.
@@ -269,6 +270,57 @@ PASS=""
 APPEARANCE_STATES=()
 APPEARANCE_PROFILES=()
 
+# Whether state directory $1 holds nothing but an empty `helm-token.lock` (or
+# nothing at all): what a launch that refused before writing any state
+# leaves behind.
+only_the_lock_file() {
+  local entries
+  entries=$(ls -A "$1") || return 1
+  [ -z "$entries" ] && return 0
+  [ "$entries" = "helm-token.lock" ] && [ ! -s "$1/helm-token.lock" ]
+}
+
+# Stops the supervisor a desktop app started in state directory $1, by the
+# record the app keeps there (`desktop-supervisor.json`), which is the only
+# handle on it: the app starts it detached and it outlives the app. The pid is
+# signalled only while its kernel start time and executable still match the
+# record, so a reused pid is never hit; SIGTERM first (the orderly stop), and
+# SIGKILL only if it is still running 20 s later. Nothing to do without a
+# record, or when its process is already gone.
+stop_recorded_supervisor() {
+  [ -f "$1/desktop-supervisor.json" ] || return 0
+  python3 - "$1/desktop-supervisor.json" <<'PY'
+import json, os, signal, sys, time
+from pathlib import Path
+
+record = json.loads(Path(sys.argv[1]).read_text())
+
+def same_live_process():
+    """Only the recorded birth, still running the recorded program."""
+    try:
+        fields = Path(f'/proc/{record["pid"]}/stat').read_text().rsplit(') ', 1)[1].split()
+        if fields[0] == 'Z' or int(fields[19]) != record['start']:
+            return False
+        image = os.readlink(f'/proc/{record["pid"]}/exe').removesuffix(' (deleted)')
+        return image == record['program']
+    except (FileNotFoundError, ProcessLookupError):
+        return False
+
+for sig, wait in ((signal.SIGTERM, 20), (signal.SIGKILL, 5)):
+    if not same_live_process():
+        sys.exit(0)
+    try:
+        os.kill(record['pid'], sig)
+    except ProcessLookupError:
+        sys.exit(0)
+    deadline = time.monotonic() + wait
+    while same_live_process() and time.monotonic() < deadline:
+        # sleep-ok: bounded wait for the recorded supervisor to exit.
+        time.sleep(0.1)
+sys.exit(1 if same_live_process() else 0)
+PY
+}
+
 teardown() {
   [ -n "$TEARDOWN_DONE" ] && return
   TEARDOWN_DONE=1
@@ -286,43 +338,17 @@ teardown() {
   [ -n "$SID" ] && [ -s "$CURL_AUTH_CONFIG" ] && curl_auth -s --max-time 30 -X DELETE "$API/api/sessions/$SID" >/dev/null 2>&1
   [ -n "$SID_NEWEST" ] && [ -s "$CURL_AUTH_CONFIG" ] && curl_auth -s --max-time 30 -X DELETE "$API/api/sessions/$SID_NEWEST" >/dev/null 2>&1
   [ -n "$SID_ROTATED" ] && [ -s "$CURL_AUTH_CONFIG" ] && curl_auth -s --max-time 30 -X DELETE "$API/api/sessions/$SID_ROTATED" >/dev/null 2>&1
+  [ -n "$SID_KEPT" ] && [ -s "$CURL_AUTH_CONFIG" ] && curl_auth -s --max-time 30 -X DELETE "$API/api/sessions/$SID_KEPT" >/dev/null 2>&1
 
   for p in desktop openbox xvfb; do
     [ -f "$X/$p.pid" ] && kill "$(cat "$X/$p.pid")" 2>/dev/null
   done
-  # A failed tether assertion must retain its evidence before this fallback.
-  # pidfd signalling plus the recorded birth identity cannot hit a reused PID.
-  if [ -f "$X/no-initialize/supervisor.json" ]; then
-    python3 - "$X/no-initialize/supervisor.json" <<'PY'
-import json, os, signal, sys, time
-from pathlib import Path
-
-owned = json.loads(Path(sys.argv[1]).read_text())
-try:
-    descriptor = os.pidfd_open(owned["pid"])
-except ProcessLookupError:
-    sys.exit(0)
-try:
-    def same_live_child():
-        """Only this recorded birth may receive failure-path cleanup signals."""
-        try:
-            fields = Path(f'/proc/{owned["pid"]}/stat').read_text().rsplit(') ', 1)[1].split()
-            return fields[0] != 'Z' and int(fields[19]) == owned['startTicks']
-        except FileNotFoundError:
-            return False
-    if same_live_child():
-        signal.pidfd_send_signal(descriptor, signal.SIGTERM)
-        deadline = time.monotonic() + 2
-        while same_live_child() and time.monotonic() < deadline:
-            time.sleep(0.1)
-        if same_live_child():
-            signal.pidfd_send_signal(descriptor, signal.SIGKILL)
-except ProcessLookupError:
-    pass  # The owned child completed between the final observation and signal.
-finally:
-    os.close(descriptor)
-PY
-  fi
+  # The app's supervisor outlives the app, so it is stopped here by its
+  # record, before its tmux server goes.
+  stop_recorded_supervisor "$X/state"
+  for state in "${APPEARANCE_STATES[@]}"; do
+    stop_recorded_supervisor "$state"
+  done
   tmux -S "$X/state/tmux.sock" kill-server 2>/dev/null
   for state in "${APPEARANCE_STATES[@]}"; do
     timeout 10 tmux -S "$state/tmux.sock" kill-server 2>/dev/null
@@ -545,12 +571,16 @@ cmp -s "$TMUX_PREFLIGHT_STDERR" "$EXPECTED_TMUX_PREFLIGHT_STDERR" ||
   fail "tmux preflight stderr did not match exactly (see $TMUX_PREFLIGHT_STDERR)"
 # `ensure_private_dir` runs before discovery, so the directory itself is
 # expected to exist — but the preflight refuses immediately after
-# discovery and before anything is ever written into it, so it must still
-# be EMPTY: no desktop-client.json, no supervisor socket, nothing.
+# discovery and before any state is written into it: no
+# desktop-client.json, no supervisor socket, no supervisor record or log.
+# The one thing allowed is the helm's empty lock file, which the launch
+# takes before it looks at anything, so two launches cannot act on what
+# each saw before the other changed it (the helm itself creates the same
+# file on every run).
 [ -d "$PREFLIGHT_MISSING_STATE" ] ||
   fail "expected the preflight's own private state directory to exist ($PREFLIGHT_MISSING_STATE)"
-[ -z "$(ls -A "$PREFLIGHT_MISSING_STATE")" ] ||
-  fail "the missing-tmux preflight must refuse before writing anything into its state directory"
+only_the_lock_file "$PREFLIGHT_MISSING_STATE" ||
+  fail "the missing-tmux preflight must refuse before writing any state into its state directory"
 # An empty state directory proves nothing spawned SURVIVED, but a
 # spawn-then-kill implementation (start the managed supervisor, run the
 # preflight right after, tear the child down on refusal before it wrote a
@@ -598,8 +628,8 @@ cmp -s "$TMUX_PREFLIGHT_BELOWFLOOR_STDERR" "$EXPECTED_TMUX_PREFLIGHT_BELOWFLOOR_
   fail "below-floor tmux preflight stderr did not match exactly (see $TMUX_PREFLIGHT_BELOWFLOOR_STDERR)"
 [ -d "$PREFLIGHT_BELOWFLOOR_STATE" ] ||
   fail "expected the preflight's own private state directory to exist ($PREFLIGHT_BELOWFLOOR_STATE)"
-[ -z "$(ls -A "$PREFLIGHT_BELOWFLOOR_STATE")" ] ||
-  fail "the below-floor preflight must refuse before writing anything into its state directory"
+only_the_lock_file "$PREFLIGHT_BELOWFLOOR_STATE" ||
+  fail "the below-floor preflight must refuse before writing any state into its state directory"
 # See the missing-tmux leg's comment above: the empty state directory does
 # not distinguish "never spawned" from "spawned and killed before it wrote
 # anything", so this checks the instrumented sibling's log directly.
@@ -732,7 +762,7 @@ def windows(visible=False):
     return observed.stdout.split()
 
 def identify_supervisor():
-    """Prove direct ownership, exact private state, and the actual stdin pipe."""
+    """Prove direct ownership, exact private state, and the detached setup."""
     children = Path(f'/proc/{desktop}/task/{desktop}/children').read_text().split()
     assert len(children) <= 128, 'unexpected desktop child count'
     matches = []
@@ -740,28 +770,20 @@ def identify_supervisor():
         candidate = process(int(child))
         if not live(candidate):
             continue
-        if candidate.get('argv', [])[1:] == ['supervisor', 'run', '--exit-on-stdin-close', '--state-dir', str(state)]:
+        if candidate.get('argv', [])[1:] == ['supervisor', 'run', '--state-dir', str(state)]:
             assert candidate['ppid'] == desktop and Path(candidate['exe']).resolve() == program, 'managed child executable/parent mismatch'
             matches.append(candidate)
     assert len(matches) == 1, 'expected exactly one live managed supervisor child'
     owned = matches[0]
-    pipe = os.readlink(f'/proc/{owned["pid"]}/fd/0')
-    assert pipe.startswith('pipe:['), 'managed supervisor stdin is not the lifetime pipe'
-    descriptors = list(Path(f'/proc/{desktop}/fd').iterdir())
-    assert len(descriptors) <= 1024, 'unexpected desktop descriptor count'
-    writers = []
-    for descriptor in descriptors:
-        try:
-            if os.readlink(descriptor) != pipe:
-                continue
-            info = Path(f'/proc/{desktop}/fdinfo/{descriptor.name}').read_text()
-            flags = next(line.split()[1] for line in info.splitlines() if line.startswith('flags:'))
-            if int(flags, 8) & os.O_ACCMODE == os.O_WRONLY:
-                writers.append(int(descriptor.name))
-        except FileNotFoundError:
-            continue
-    assert writers, 'desktop holds no write end of the supervisor stdin pipe'
-    owned.update(stdinPipe=pipe, desktopWriterFds=writers)
+    # Detached: a session of its own, no terminal-facing stdio, and its
+    # diagnostics in its own log file in the state directory.
+    session = int(Path(f'/proc/{owned["pid"]}/stat').read_text().rsplit(') ', 1)[1].split()[3])
+    assert session == owned['pid'], 'managed supervisor does not lead a session of its own'
+    assert os.readlink(f'/proc/{owned["pid"]}/fd/0') == '/dev/null', 'managed supervisor stdin is not /dev/null'
+    assert os.readlink(f'/proc/{owned["pid"]}/fd/2') == str((state / 'supervisor.log').resolve()), 'managed supervisor stderr is not its log file'
+    record = json.loads((state / 'desktop-supervisor.json').read_text())
+    assert (record['pid'], record['start'], record['program']) == (owned['pid'], owned['startTicks'], str(program)), 'the app did not record the supervisor it started'
+    owned.update(session=session)
     (evidence / 'supervisor.json').write_text(json.dumps(owned, indent=2) + '\n')
     return owned
 
@@ -811,8 +833,8 @@ try:
         if owned is not None:
             child = process(owned['pid'])
             if not live(child) or child['startTicks'] != owned['startTicks']:
-                # Desktop and tethered child can both exit between samples.
-                # Recheck the owner before calling a natural exit premature.
+                # The desktop can exit between samples; recheck it before
+                # calling the supervisor's exit premature.
                 current = process(desktop)
                 if not live(current):
                     (evidence.parent / 'desktop.pid').unlink(missing_ok=True)
@@ -837,16 +859,16 @@ try:
         assert forbidden not in log, f'unexpected fault-path marker: {forbidden}'
     stored = json.loads((state / 'desktop-client.json').read_text())
     assert stored['webview_auth_generation'] == 0, 'webview authenticated despite missing initialize'
-    child_deadline = time.monotonic() + 20
-    while True:
+    # The refusal is a quit like any other: the detached supervisor keeps
+    # running after it. Teardown stops it by its record.
+    outlived_until = time.monotonic() + 3
+    while time.monotonic() < outlived_until:
         child = process(owned['pid'])
-        if not live(child) or child['startTicks'] != owned['startTicks']:
-            result['supervisorAfterRefusal'] = child
-            break
-        assert time.monotonic() < child_deadline, 'managed supervisor outlived the closed desktop stdin tether'
-        # sleep-ok: bounded observation of this captured child's natural tether shutdown before cleanup.
+        assert live(child) and child['startTicks'] == owned['startTicks'], 'managed supervisor did not outlive the refused desktop'
+        # sleep-ok: bounded observation that the detached supervisor survives the refusal.
         time.sleep(0.1)
-    result['supervisorStoppedBeforeCleanup'] = True
+    result['supervisorAfterRefusal'] = process(owned['pid'])
+    result['supervisorOutlivedRefusal'] = True
     result['ok'] = True
 except Exception as error:
     result['error'] = str(error)
@@ -873,10 +895,10 @@ PY
   [ "$?" -eq 0 ] || fail "recording actual missing-initialize exit status"
   rm -f "$X/desktop.pid"
   [ "$desktop_status" -eq 1 ] || fail "missing-initialize app did not naturally refuse with exit status 1"
-  printf '%s\n' 'Native creation deadline refused before App initialization; owned supervisor stopped before cleanup.' \
+  printf '%s\n' 'Native creation deadline refused before App initialization; its detached supervisor kept running.' \
     'No mapped client observed by bounded X11 polling; no continuous event assertion.' \
     'Linux-only fault evidence, not ordinary appearance or macOS paint coverage.' >"$evidence/assessment.txt"
-  echo "missing-initialize native deadline/tether assertions passed; evidence kept at $evidence"
+  echo "missing-initialize native deadline/detached-supervisor assertions passed; evidence kept at $evidence"
   PASS=1
   exit 0
 fi
@@ -1075,6 +1097,29 @@ with open(stderr_path) as stderr:
 assert "another process owns token control" in message, message
 PY_SECOND
 curl_auth -sf --max-time 5 "$API/api/hosts" >/dev/null || fail "second launch disturbed the incumbent helm"
+# A second launch whose program differs would plan to replace the open app's
+# supervisor; it must refuse at the open app's lock before stopping anything.
+echo "== a second launch with another program refuses without stopping the open app's supervisor"
+OPEN_SUPERVISOR_PID=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pid"])' "$X/state/desktop-supervisor.json") ||
+  fail "the app did not record the supervisor it started"
+cp "$BUILT_FARHELM" "$X/other-farhelm" || fail "copying the program for the other-program launch"
+python3 - "$BUILT_FARHELM_DESKTOP" "$X/other-farhelm" "$X/state" "$X/second-desktop-other.stderr" <<'PY_SECOND' || fail "second desktop refusal with another program"
+import os
+import subprocess
+import sys
+
+binary, sibling, state, stderr_path = sys.argv[1:]
+child_env = dict(os.environ, FARHELM_DESKTOP_STATE_DIR=state, FARHELM_DESKTOP_FARHELM=sibling)
+with open(stderr_path, "wb") as stderr:
+    result = subprocess.run([binary], env=child_env, stdout=subprocess.DEVNULL,
+                            stderr=stderr, timeout=60)
+assert result.returncode == 1, f"second desktop exited {result.returncode}"
+with open(stderr_path) as stderr:
+    message = stderr.read()
+assert "another process owns token control" in message, message
+PY_SECOND
+kill -0 "$OPEN_SUPERVISOR_PID" 2>/dev/null || fail "the other-program launch stopped the open app's supervisor"
+curl_auth -sf --max-time 5 "$API/api/hosts" >/dev/null || fail "the other-program launch disturbed the incumbent helm"
 [ -s "$X/tmux-override-used" ] || fail "managed supervisor did not run the tmux named by FARHELM_TMUX"
 # A nonempty marker alone is not enough: the desktop's own tmux preflight
 # calls this same wrapper with plain `-V` before the managed supervisor
@@ -1221,6 +1266,9 @@ echo "== killing the app without Rust cleanup and relaunching it"
 OLD_DESKTOP_PID=$(cat "$X/desktop.pid")
 SUPERVISOR_PID=$(ps -eo pid=,ppid=,args= | awk -v parent="$OLD_DESKTOP_PID" '$2 == parent && /supervisor run/ { print $1; exit }')
 [ -n "$SUPERVISOR_PID" ] || fail "could not identify the managed supervisor child"
+RECORDED_PID=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pid"])' "$X/state/desktop-supervisor.json") ||
+  fail "the app did not record the supervisor it started"
+[ "$RECORDED_PID" = "$SUPERVISOR_PID" ] || fail "the app recorded process $RECORDED_PID, not its supervisor $SUPERVISOR_PID"
 kill -KILL "$OLD_DESKTOP_PID" || fail "terminating desktop app without graceful cleanup"
 for _ in $(seq 1 20); do
   DESKTOP_STAT=$(ps -o stat= -p "$OLD_DESKTOP_PID" 2>/dev/null | tr -d ' ')
@@ -1232,15 +1280,12 @@ DESKTOP_STAT=$(ps -o stat= -p "$OLD_DESKTOP_PID" 2>/dev/null | tr -d ' ')
 wait "$OLD_DESKTOP_PID" 2>/dev/null
 KILLED_STATUS=$?
 [ "$KILLED_STATUS" -ne 0 ] || fail "desktop app unexpectedly reported graceful success after SIGKILL"
-SUPERVISOR_GONE=""
+# The supervisor is detached and outlives the app: still running after a
+# hard kill of the app, and reused (same process) by the relaunch below.
 for _ in $(seq 1 20); do
-  if ! kill -0 "$SUPERVISOR_PID" 2>/dev/null; then
-    SUPERVISOR_GONE=1
-    break
-  fi
+  kill -0 "$SUPERVISOR_PID" 2>/dev/null || fail "the managed supervisor did not outlive the desktop app"
   sleep 0.25
 done
-[ -n "$SUPERVISOR_GONE" ] || fail "managed supervisor outlived the desktop app"
 
 rm -f "$DESKTOP_READY"
 DISPLAY=$DISP \
@@ -1286,6 +1331,9 @@ RESTART_SORT=$(printf '%s' "$RESTART_PREFERENCES" | python3 -c 'import json,sys;
 [ "$RESTART_SELECTION" = "$SID" ] || fail "restart changed the helm's remembered selection"
 [ "$RESTART_SORT" = "title" ] || fail "restart dropped the helm's remembered sort"
 tmux -S "$X/state/tmux.sock" has-session -t "fh-$LOCAL_SID" 2>/dev/null || fail "the tmux-held session did not survive the app restart"
+kill -0 "$SUPERVISOR_PID" 2>/dev/null || fail "the relaunch stopped the supervisor it should have reused"
+REUSED_PID=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pid"])' "$X/state/desktop-supervisor.json")
+[ "$REUSED_PID" = "$SUPERVISOR_PID" ] || fail "the relaunch replaced its own current supervisor (now $REUSED_PID) instead of reusing it"
 wait_for_listing_request "$X/desktop-restart.log" "sort=title"
 RESTORED_ATTACHMENT=""
 for _ in $(seq 1 30); do
@@ -1538,7 +1586,144 @@ close_app_and_wait() { # $1 = window id, $2 = app pid
 
 if [ "${DESKTOP_SMOKE_LEGACY_INTERACTION:-}" != 1 ]; then
   assert_watchdog_silent
+  KEPT_BODY=$(python3 -c 'import json,sys; print(json.dumps({"cwd": sys.argv[1], "command": {"command": "bash", "yolo": False}, "title": "kept across replacement"}))' "$X/work") || fail "encoding the kept session"
+  SID_KEPT=$(curl_auth -sf --max-time 10 -H 'content-type: application/json' -d "$KEPT_BODY" "$API/api/sessions" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])') || fail "creating the session kept across the replacement"
+  LOCAL_SID_KEPT="${SID_KEPT#*:}"
+  for _ in $(seq 1 30); do
+    tmux -S "$X/state/tmux.sock" has-session -t "fh-$LOCAL_SID_KEPT" 2>/dev/null && break
+    sleep 1
+  done
+  tmux -S "$X/state/tmux.sock" has-session -t "fh-$LOCAL_SID_KEPT" 2>/dev/null || fail "the kept session never reached tmux"
   close_app_and_wait "$WID" "$(cat "$X/desktop.pid")"
+
+  # An ordinary quit leaves the supervisor running too. A launch whose
+  # program file differs from the one the running supervisor was started
+  # from (an update, or a development build replacing the file at the same
+  # path) replaces it: the old one is stopped and a new one started from the
+  # current file. The file is replaced the way an install does it, a new
+  # inode renamed over the path.
+  echo "== a launch with a replaced program replaces the app's own supervisor"
+  kill -0 "$SUPERVISOR_PID" 2>/dev/null || fail "the managed supervisor did not outlive an ordinary quit"
+  cp "$BUILT_FARHELM" "$BUILT_FARHELM.new" && mv -f "$BUILT_FARHELM.new" "$BUILT_FARHELM" ||
+    fail "replacing the program file"
+  # A replacement checks the new supervisor's prerequisites before it stops
+  # anything: with a tmux that does not exist, the launch refuses and the old
+  # supervisor keeps serving, its record unchanged.
+  echo "== a replacement that would fail its tmux preflight stops nothing"
+  DISPLAY=$DISP \
+    PATH="/usr/bin:/bin" \
+    FARHELM_TMUX="$X/replace-bad-tmux/tmux" \
+    FARHELM_DESKTOP_STATE_DIR="$X/state" \
+    FARHELM_DESKTOP_FARHELM="$BUILT_FARHELM" \
+    timeout 120 "$APP" >"$X/desktop-replace-refused.log" 2>&1
+  REFUSED_STATUS=$?
+  [ "$REFUSED_STATUS" -eq 1 ] || fail "a replacement with a missing tmux exited $REFUSED_STATUS, not 1 (see $X/desktop-replace-refused.log)"
+  grep -q 'needs tmux' "$X/desktop-replace-refused.log" ||
+    fail "the refused replacement did not report its tmux preflight (see $X/desktop-replace-refused.log)"
+  kill -0 "$SUPERVISOR_PID" 2>/dev/null || fail "a replacement that refused over tmux stopped the old supervisor"
+  [ "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pid"])' "$X/state/desktop-supervisor.json")" = "$SUPERVISOR_PID" ] ||
+    fail "a replacement that refused over tmux changed the record"
+  rm -f "$DESKTOP_READY"
+  DISPLAY=$DISP \
+    PATH="/usr/bin:/bin" \
+    FARHELM_TMUX="$SENTINEL_TMUX" \
+    FARHELM_SMOKE_TMUX_MARKER="$X/tmux-override-used" \
+    RUST_LOG="info,farhelm_ui::desktop=debug" \
+    FARHELM_DESKTOP_SMOKE_READY="$DESKTOP_READY" \
+    FARHELM_DESKTOP_STATE_DIR="$X/state" \
+    FARHELM_DESKTOP_FARHELM="$BUILT_FARHELM" \
+    "$APP" >"$X/desktop-replaced.log" 2>&1 &
+  echo $! >"$X/desktop.pid"
+  for _ in $(seq 1 60); do
+    [ -s "$DESKTOP_READY" ] && break
+    sleep 1
+  done
+  [ -s "$DESKTOP_READY" ] || fail "the relaunch with a replaced program did not publish readiness (see $X/desktop-replaced.log)"
+  read_desktop_ready "$DESKTOP_READY"
+  REPLACED_READY=""
+  for _ in $(seq 1 30); do
+    if curl_auth -sf --max-time 5 "$API/api/hosts" | python3 -c '
+import json,sys
+assert any(h["kind"] == "local" and h["state"]["phase"] == "connected" for h in json.load(sys.stdin)["hosts"])
+' 2>/dev/null; then
+      REPLACED_READY=1
+      break
+    fi
+    sleep 1
+  done
+  [ -n "$REPLACED_READY" ] || fail "the replacement supervisor never connected (see $X/desktop-replaced.log)"
+  ! kill -0 "$SUPERVISOR_PID" 2>/dev/null || fail "the previous supervisor was not stopped"
+  grep -q 'replacing the supervisor an earlier launch started' "$X/desktop-replaced.log" ||
+    fail "the relaunch did not report replacing its own supervisor (see $X/desktop-replaced.log)"
+  if grep -q 'ignored the orderly stop and was killed' "$X/desktop-replaced.log"; then
+    fail "the previous supervisor had to be killed instead of stopping in order (see $X/desktop-replaced.log)"
+  fi
+  REPLACEMENT_PID=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pid"])' "$X/state/desktop-supervisor.json")
+  [ "$REPLACEMENT_PID" != "$SUPERVISOR_PID" ] && kill -0 "$REPLACEMENT_PID" 2>/dev/null ||
+    fail "the record does not name a running replacement supervisor"
+  [ "$(stat -L -c %i "/proc/$REPLACEMENT_PID/exe")" = "$(stat -c %i "$BUILT_FARHELM")" ] ||
+    fail "the replacement supervisor does not run the replaced program file"
+  # Sessions survive the replacement: still in tmux, and still listed by the
+  # new supervisor through the relaunched app.
+  tmux -S "$X/state/tmux.sock" has-session -t "fh-$LOCAL_SID_KEPT" 2>/dev/null ||
+    fail "the kept session did not survive the supervisor replacement"
+  KEPT_LISTED=""
+  for _ in $(seq 1 30); do
+    if curl_auth -sf --max-time 5 "$API/api/sessions/$SID_KEPT" >/dev/null; then
+      KEPT_LISTED=1
+      break
+    fi
+    sleep 1
+  done
+  [ -n "$KEPT_LISTED" ] || fail "the replacement supervisor does not list the kept session"
+  curl_auth -sf --max-time 30 -X DELETE "$API/api/sessions/$SID_KEPT" >/dev/null || fail "deleting the kept session"
+  SID_KEPT=""
+  kill -KILL "$(cat "$X/desktop.pid")" 2>/dev/null
+  wait "$(cat "$X/desktop.pid")" 2>/dev/null
+  rm -f "$X/desktop.pid"
+
+  # A supervisor of the app's own that holds the state directory but never
+  # answers (here: frozen with SIGSTOP, so its socket still accepts while the
+  # hello never comes back) is replaced too, rather than leaving every launch
+  # stuck behind it. A stopped process cannot run its SIGTERM handler, so the
+  # app's stop falls through to the kill after its grace; that is the one case
+  # the kill is for.
+  echo "== a launch replaces the app's own supervisor when it never answers"
+  kill -STOP "$REPLACEMENT_PID" || fail "freezing the replacement supervisor"
+  rm -f "$DESKTOP_READY"
+  DISPLAY=$DISP \
+    PATH="/usr/bin:/bin" \
+    FARHELM_TMUX="$SENTINEL_TMUX" \
+    FARHELM_SMOKE_TMUX_MARKER="$X/tmux-override-used" \
+    RUST_LOG="info,farhelm_ui::desktop=debug" \
+    FARHELM_DESKTOP_SMOKE_READY="$DESKTOP_READY" \
+    FARHELM_DESKTOP_STATE_DIR="$X/state" \
+    FARHELM_DESKTOP_FARHELM="$BUILT_FARHELM" \
+    "$APP" >"$X/desktop-wedged.log" 2>&1 &
+  echo $! >"$X/desktop.pid"
+  # A frozen supervisor still holds its socket, so the probe times out; the
+  # app then gives it the startup wait (it could be a supervisor still in its
+  # post-bind startup sweeps), and only then stops it, waits the orderly
+  # grace and kills it. The probe, the 35 s wait, the 15 s grace and the new
+  # supervisor's start add up to over a minute; the bound leaves room for a
+  # loaded machine.
+  for _ in $(seq 1 180); do
+    [ -s "$DESKTOP_READY" ] && break
+    sleep 1
+  done
+  [ -s "$DESKTOP_READY" ] || fail "the relaunch beside a frozen supervisor did not publish readiness (see $X/desktop-wedged.log)"
+  read_desktop_ready "$DESKTOP_READY"
+  grep -q 'the supervisor an earlier launch started does not answer' "$X/desktop-wedged.log" ||
+    fail "the relaunch did not treat its frozen supervisor as wedged (see $X/desktop-wedged.log)"
+  grep -q 'ignored the orderly stop and was killed' "$X/desktop-wedged.log" ||
+    fail "the frozen supervisor was not killed after the grace, as a stopped process must be (see $X/desktop-wedged.log)"
+  ! kill -0 "$REPLACEMENT_PID" 2>/dev/null || fail "the frozen supervisor was not stopped"
+  UNWEDGED_PID=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pid"])' "$X/state/desktop-supervisor.json")
+  [ "$UNWEDGED_PID" != "$REPLACEMENT_PID" ] && kill -0 "$UNWEDGED_PID" 2>/dev/null ||
+    fail "the record does not name a running supervisor after the wedged one was replaced"
+  kill -KILL "$(cat "$X/desktop.pid")" 2>/dev/null
+  wait "$(cat "$X/desktop.pid")" 2>/dev/null
+  rm -f "$X/desktop.pid"
 
   # Every tmux-preflight leg so far starts from an EMPTY state directory and
   # so only ever exercises `DesktopBootstrap::start`'s `Absent` branch — a
