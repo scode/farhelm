@@ -24,6 +24,15 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Tie a late conversation report to its session on tmux 3.8.** tmux 3.8 no longer reports a pane's process id once
+  the pane is dead, and the supervisor accepts a hook report only when that id appears among the reporter's parents
+  (SPEC_impl.md, the five-step admission). So with tmux 3.8, a conversation report still waiting to be applied when its
+  agent exits is refused, and a later Restart can resume the conversation the agent had before it switched (a `/clear`
+  right before exiting, say). Every Mac on a current Homebrew runs 3.8. Left open by the tactical fix for Restart, Stop
+  and Delete failing on exited sessions under tmux 3.8 (2026-10-30). The review of that fix raised one option: anchor to
+  the pane pid the session-hold marks record, but any process running as the same user can write those files, which
+  makes them a weaker trust root than tmux, so that is a design decision.
+
 - **Revisit keeping full durability for the host identity under WAL.** Decided on the maintainer's behalf on 2026-10-30
   when the sqlite-wal landing was blocked: SPEC.md's rule that lasting damage is never accepted, however unlikely the
   trigger, was read as taking precedence over the plan's decision that no write keeps full durability. The plan went
