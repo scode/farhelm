@@ -75,6 +75,59 @@ test("template bolts use a fixed outline or filled drawing for their mark", asyn
   }
 });
 
+/** Clean Save must explain completion without dropping keyboard focus.
+ * Its aria-disabled state alone cannot prevent activation: exercise both Enter
+ * and a DOM click, then use stored data and a counted write to prove the guard
+ * and the subsequent real save rather than merely a changed button color. */
+test("template Save follows unsaved changes and retains focus after saving", async ({ page, request }, info) => {
+  const name = `save-state-${Date.now()}`;
+  let writes = 0;
+  let bodyFailed = true;
+  try {
+    await putTemplate(request, name, { kind: "command", command: "echo before", yolo: false });
+    expect((await storedTemplate(request, name)).fields.command).toBe("echo before");
+    const dialog = await openTemplates(page);
+    await dialog.locator(".templates-row-name").getByText(name, { exact: true }).click();
+    const save = dialog.locator(".templates-save");
+    const command = dialog.locator(".templates-command");
+    await expect(command).toHaveValue("echo before");
+    await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
+    await expect(save).toHaveAttribute("aria-disabled", "true");
+    await expect(save).toHaveJSProperty("disabled", false);
+    page.on("request", sent => {
+      if (sent.method() === "PUT" && new URL(sent.url()).pathname === `/api/templates/${name}`) writes++;
+    });
+    await save.focus();
+    await expect(save).toBeFocused();
+    await save.press("Enter");
+    await save.evaluate(node => (node as HTMLButtonElement).click());
+    expect((await storedTemplate(request, name)).fields.command).toBe("echo before");
+    expect(writes, "both clean activations must return before spawning a write").toBe(0);
+    await command.fill("echo after");
+    await expect(dialog.locator(".templates-unsaved")).toBeVisible();
+    await expect(save).toHaveAttribute("aria-disabled", "false");
+    await save.click();
+    await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
+    await expect(save).toHaveAttribute("aria-disabled", "true");
+    await expect(save).toBeFocused();
+    expect((await storedTemplate(request, name)).fields.command).toBe("echo after");
+    expect(writes).toBe(1);
+    // The ordinary color transition must settle into the neutral fill even
+    // while Save retains focus; capture that final state rather than a tween.
+    const quietFill = await dialog.locator(".templates-duplicate").evaluate(node => getComputedStyle(node).backgroundColor);
+    await expect(save).toHaveCSS("background-color", quietFill);
+    await page.screenshot({ path: info.outputPath("template-save-complete.png"), animations: "disabled" });
+    await command.fill("echo changed again");
+    await expect(save).toHaveAttribute("aria-disabled", "false");
+    await command.fill("echo after");
+    await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
+    await expect(save).toHaveAttribute("aria-disabled", "true");
+    bodyFailed = false;
+  } finally {
+    await cleanupOwnedSteps(bodyFailed, [["Save-state template", () => deleteTemplate(request, name)]]);
+  }
+});
+
 /** Names created now must be sequence words, while a historical spaced name
  * remains saveable and undoable. The API seed represents stored legacy data;
  * refusing it in the shared store would break that compatibility boundary. */

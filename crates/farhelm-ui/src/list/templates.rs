@@ -2502,7 +2502,16 @@ pub(super) fn TemplatesDialog(
                                             button { r#type: "button", class: "btn btn-neutral templates-duplicate", disabled: disabled || templates.pending(), "data-tooltip": "Open a new unsaved copy with a free name", onclick: move |_| depart.call(Departure::Duplicate), "Duplicate" }
                                             TemplateDeleteButtons { kind: delete_kind, disabled: disabled || templates.pending(), on_delete: delete }
                                         }
-                                        button { r#type: "button", class: "btn btn-primary templates-save", disabled, "data-tooltip": "Save the template's name, switch and shown fields", onclick: move |_| save.call(None), "Save" }
+                                        // Clean saves remain focusable so completion can return focus here.
+                                        // Keep the existing native busy lock; the leave prompt owns its Save.
+                                        button { r#type: "button", class: "btn btn-primary templates-save", disabled, aria_disabled: disabled || !dirty, "data-tooltip": "Save the template's name, switch and shown fields",
+                                            onclick: move |_| {
+                                                // Read the signals at activation, just as the dirty notice does;
+                                                // aria-disabled communicates availability but does not block clicks.
+                                                if draft() == baseline() { return; }
+                                                save.call(None);
+                                            }, "Save"
+                                        }
                                     }
                                 }
                             }
