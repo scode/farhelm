@@ -86,6 +86,13 @@ export default defineConfig({
       },
       // The app icon, cropped to its tile; scripts/render-svgs.mjs writes it.
       favicon: '/favicon.svg',
+      // The project's source and its community chat, as icon links at the
+      // header's top right, beside the theme menu. Starlight draws the icons
+      // and uses each label as the link's accessible name.
+      social: [
+        { icon: 'github', label: 'GitHub', href: 'https://github.com/scode/farhelm' },
+        { icon: 'discord', label: 'Discord', href: 'https://discord.gg/G3bukxTjXR' },
+      ],
       customCss: ['./src/styles/farhelm.css'],
       // The search box is wrapped so the install command can sit beside it in
       // the header (src/components/HeaderSearch.astro says why there), and the
