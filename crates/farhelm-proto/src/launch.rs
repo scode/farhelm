@@ -589,10 +589,12 @@ pub struct LaunchSelection {
     /// quoting style and shell expansion have no part in the persisted intent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permission_flags: Option<Vec<String>>,
-    /// Literal words prepended to the composed start and resume commands.
-    /// Absence preserves old launch fingerprints. A wrapper is the user's
-    /// assertion that the prefixed command still runs this agent; Farhelm
-    /// does not inspect or trust the wrapper's own behavior.
+    /// Raw shell words prepended to the composed start and resume commands.
+    /// Quotes and escapes remain exactly as typed; joining with spaces recovers the
+    /// wrapper source that Bash interprets before Farhelm's quoted agent arguments.
+    /// Absence preserves old launch fingerprints. A wrapper is the user's assertion
+    /// that the prefixed command still runs this agent; Farhelm does not inspect or
+    /// trust the wrapper's own behavior.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wrapper_prefix: Option<Vec<String>>,
     /// Optional capability isolation, preserved as launch intent rather than inferred
@@ -704,18 +706,29 @@ impl ContainerConfig {
     }
 }
 
-/// Parse a wrapper command line into literal argv words, with no shell run.
-/// Quotes and escapes select word boundaries; placeholders are reserved for
-/// Farhelm's later spawn pass and cannot come from this user-supplied prefix.
+/// Split editable wrapper source without removing its quotes or escapes.
+///
+/// Only word boundaries are interpreted here. Each stored word retains its original
+/// spelling so joining with spaces gives Bash the user's shell syntax at execution and
+/// gives editors the same spelling on redisplay. Interword space/tab/newline and comments
+/// are discarded; quoted whitespace and physical continuations within a word survive.
+/// Literal shape validation still uses `shell_words`, including its acceptance of a
+/// trailing unquoted backslash. That spelling acquires Bash meaning when later joined
+/// to the agent command; it is not converted back into a literal backslash argument.
 pub fn split_wrapper_prefix(text: &str) -> Result<Vec<String>, String> {
-    let words =
-        shell_words::split(text).map_err(|error| format!("invalid wrapper prefix: {error}"))?;
+    validate_wrapper_source(text)?;
+    let words = raw_wrapper_words(text);
     check_wrapper_prefix(Some(&words))?;
     Ok(words)
 }
 
-/// Check the persisted wrapper shape at every admission path, including API
-/// requests that did not pass through the editable command-line splitter.
+/// Check the persisted wrapper vector's shape without reinterpreting its word spelling.
+///
+/// This is also a stored-data boundary: words saved with literal argv semantics may contain
+/// unmatched quote bytes. Their joined source now has Bash meaning at execution, but they
+/// must remain readable. Syntax and dequoted-marker checks belong to the editor splitter;
+/// API vectors retain this same shape contract. Only exact raw placeholder elements can
+/// participate in Farhelm's later composed-argument filling, and those remain forbidden.
 pub fn check_wrapper_prefix(words: Option<&[String]>) -> Result<(), String> {
     let Some(words) = words else { return Ok(()) };
     if words.first().is_none_or(String::is_empty) {
@@ -731,6 +744,83 @@ pub fn check_wrapper_prefix(words: Option<&[String]>) -> Result<(), String> {
         return Err("wrapper prefix cannot contain Farhelm placeholders".into());
     }
     Ok(())
+}
+
+/// Keep the editor's literal shape oracle separate from raw spelling recovery.
+///
+/// NUL must be checked before parsing: a comment can remove it from the literal words.
+/// Decoding also catches quoted/escaped spellings of reserved markers without teaching
+/// the span scan about them. Direct API and stored vectors keep their shape-only check.
+fn validate_wrapper_source(text: &str) -> Result<(), String> {
+    if text.contains('\0') {
+        return Err("wrapper prefix cannot contain NUL".into());
+    }
+    let words =
+        shell_words::split(text).map_err(|error| format!("invalid wrapper prefix: {error}"))?;
+    check_wrapper_prefix(Some(&words))
+}
+
+/// Recover original word slices after the independent literal parser accepted the source.
+///
+/// This deliberately has only the quote, escape and comment states used by `shell_words`.
+/// Operators, substitutions and expansions remain source bytes for Bash, not syntax for
+/// this splitter. A continuation before a word is whitespace; within a word it belongs
+/// to that word's raw spelling. Byte indices keep non-ASCII text intact.
+fn raw_wrapper_words(text: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut start = None;
+    let mut quote = None;
+    let mut chars = text.char_indices();
+    while let Some((at, ch)) = chars.next() {
+        match quote {
+            Some('\'') => {
+                if ch == '\'' {
+                    quote = None;
+                }
+            }
+            Some('"') => match ch {
+                '"' => quote = None,
+                '\\' => {
+                    chars.next();
+                }
+                _ => {}
+            },
+            Some(_) => unreachable!("only single and double quotes establish quote state"),
+            None => match ch {
+                ' ' | '\t' | '\n' => {
+                    if let Some(begin) = start.take() {
+                        words.push(text[begin..at].to_owned());
+                    }
+                }
+                '#' if start.is_none() => {
+                    for (_, comment_ch) in chars.by_ref() {
+                        if comment_ch == '\n' {
+                            break;
+                        }
+                    }
+                }
+                '\\' => {
+                    // shell_words does not start an empty word for a bare continuation.
+                    // Keeping it outside the slice also avoids manufacturing a stored word.
+                    let next = chars.next();
+                    if start.is_some() || !matches!(next, Some((_, '\n'))) {
+                        start.get_or_insert(at);
+                    }
+                }
+                '\'' | '"' => {
+                    start.get_or_insert(at);
+                    quote = Some(ch);
+                }
+                _ => {
+                    start.get_or_insert(at);
+                }
+            },
+        }
+    }
+    if let Some(begin) = start {
+        words.push(text[begin..].to_owned());
+    }
+    words
 }
 
 /// Split editable permission text without evaluating expansions or commands.
@@ -1142,27 +1232,108 @@ mod tests {
         }
     }
 
-    /// Wrapper input is shell-like only for word boundaries. Persisted words
-    /// cannot ask the supervisor to substitute Farhelm's own placeholders,
-    /// including the Codex trust markers that are filled after checkout.
+    /// Wrapper storage must preserve shell spelling rather than literal argv. Redisplay
+    /// and launch both join these raw words, so quoting them again changes their meaning.
     #[test]
-    fn wrapper_prefix_parses_literal_words_and_rejects_reserved_values() {
+    fn wrapper_prefix_preserves_raw_spelling_and_join_roundtrips() {
         assert_eq!(
             super::split_wrapper_prefix("with-endpoint --profile 'work space' --").unwrap(),
-            vec!["with-endpoint", "--profile", "work space", "--"]
+            vec!["with-endpoint", "--profile", "'work space'", "--"]
         );
+        for (source, expected) in [
+            (
+                r#"wrap "$HOME" '$()' work\ space pre'quoted'post ''"#,
+                vec![
+                    "wrap",
+                    r#""$HOME""#,
+                    "'$()'",
+                    r"work\ space",
+                    "pre'quoted'post",
+                    "''",
+                ],
+            ),
+            (
+                r#"wrap "say \"hi\"" "\$HOME" "\q""#,
+                vec!["wrap", r#""say \"hi\"""#, r#""\$HOME""#, r#""\q""#],
+            ),
+            (
+                "écho\u{a0}name \t\"line\nbreak\" \\#literal word#tail # ignored\n next",
+                vec![
+                    "écho\u{a0}name",
+                    "\"line\nbreak\"",
+                    "\\#literal",
+                    "word#tail",
+                    "next",
+                ],
+            ),
+            (
+                "\\\nwrap arg\\\nument \\\n tail",
+                vec!["wrap", "arg\\\nument", "tail"],
+            ),
+            ("wrap\\", vec!["wrap\\"]),
+        ] {
+            let raw = super::split_wrapper_prefix(source).unwrap();
+            assert_eq!(raw, expected, "{source:?}");
+            let joined = raw.join(" ");
+            assert_eq!(
+                super::split_wrapper_prefix(&joined).unwrap(),
+                raw,
+                "{source:?}"
+            );
+            assert_eq!(
+                shell_words::split(&joined).unwrap(),
+                shell_words::split(source).unwrap(),
+                "{source:?}"
+            );
+            super::check_wrapper_prefix(Some(&raw)).unwrap();
+        }
+    }
+
+    /// Editors refuse syntax and dequoted markers, while API/stored vectors retain their
+    /// original shape boundary. Re-parsing stored literal quote bytes would make old rows
+    /// unreadable; Bash still interprets their raw joined source without a compatibility path.
+    #[test]
+    fn wrapper_prefix_refuses_invalid_shape_nul_and_dequoted_placeholders() {
         for text in [
             "",
+            "# comment only",
+            "'' arg",
             "'unfinished",
+            "\"unfinished\\",
             "{cwd}",
             "run {conversation}",
             "run {farhelm_args}",
             "run {codex:trusted-cwd}",
             "run {codex:untrusted-cwd}",
+            "run '{cwd}'",
+            "run \\{cwd\\}",
+            "run '{c'wd'}'",
+            "run # hidden\0",
         ] {
             assert!(super::split_wrapper_prefix(text).is_err(), "{text:?}");
         }
+        for marker in crate::session_launch::RESERVED_PLACEHOLDERS {
+            for spelling in [
+                marker.to_string(),
+                format!("'{marker}'"),
+                format!("\"{marker}\""),
+                format!("\\{marker}"),
+            ] {
+                assert!(super::split_wrapper_prefix(&format!("run {spelling}")).is_err());
+            }
+            assert!(
+                super::check_wrapper_prefix(Some(&["run".into(), marker.to_string()])).is_err()
+            );
+        }
         assert!(super::check_wrapper_prefix(Some(&["run\0bad".into()])).is_err());
+        assert!(super::check_wrapper_prefix(Some(&["run".into(), "# hidden\0".into()])).is_err());
+        assert!(super::check_wrapper_prefix(Some(&["".into(), "run".into()])).is_err());
+        assert!(super::check_wrapper_prefix(Some(&[])).is_err());
+        assert!(super::check_wrapper_prefix(None).is_ok());
+        assert!(super::check_wrapper_prefix(Some(&["''".into()])).is_ok());
+        for word in ["a'b", "'{cwd}'", "\\{cwd\\}", "''"] {
+            super::check_wrapper_prefix(Some(&["run".into(), word.into()])).unwrap();
+        }
     }
 
     /// Explicit consent and refusal must remain distinct in saved intent and

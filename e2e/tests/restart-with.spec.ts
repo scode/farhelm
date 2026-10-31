@@ -1905,7 +1905,7 @@ test("restart with applies an allowed partial agent template", async ({ page }) 
   await expect(dialog.getByRole("combobox", { name: "Model", exact: true })).toHaveValue("enter-model");
   await expect(dialog.locator(".launch-composer-effort-choice").getByRole("button", { name: "Low", exact: true }))
     .toHaveAttribute("aria-pressed", "true");
-  await expect(dialog.locator(".launch-composer-wrapper")).toHaveValue("env 'RESUME_MODE=1'");
+  await expect(dialog.locator(".launch-composer-wrapper")).toHaveValue("env RESUME_MODE=1");
   await dialog.locator(".create-session-submit").click();
   await expect(dialog).toHaveCount(0);
   expect(bodies).toEqual([{ stop_if_running: false, with: {

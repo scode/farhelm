@@ -1804,7 +1804,9 @@ pub struct IntegrationSnapshot {
     pub kind: AgentKind,
     /// Stored selection words before the composed program. OMP's launch
     /// provenance must classify the agent command behind this prefix, while
-    /// its runtime process corridor remains as strict as before.
+    /// its runtime process corridor remains as strict as before. The same count
+    /// separates raw wrapper shell spelling from the composed literal suffix
+    /// at execution; never re-split the prefix after placeholder or hook fills.
     pub wrapper_prefix_words: usize,
     /// The resume argv, so a path with spaces survives without quoting.
     /// `None` means the launch has no resume command at all: an agent type

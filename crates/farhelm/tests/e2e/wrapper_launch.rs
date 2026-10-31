@@ -8,7 +8,8 @@
 //! kernel `flock` on the directory while they are up). Farhelm could
 //! already launch such a thing, but only with the directory baked into
 //! the invocation string. `{cwd}` lets one command line follow the session's
-//! working directory; `Supervisor::spawn_agent` substitutes it once at launch.
+//! working directory; `Supervisor::spawn_agent` fills it as quoted data before
+//! handing the original command source to Bash.
 //! The report-driven tests use `hook-report`; other cases keep `claude-record`
 //! as a plain argv-echoing fixture. Identity always comes from an explicit report.
 //!
@@ -83,13 +84,16 @@ use crate::structured_launches::{fake_harness_with_script, observed_argv};
 /// `$1` is where `{cwd}` lands and `wrapper` is `$0` for the inner shell:
 /// the "positional slot" pattern `ensure_executable_argv`'s docs describe,
 /// which is what keeps the substituted directory out of the script TEXT.
-/// A directory spliced into the script would be re-parsed by the shell,
-/// and this feature's whole rule is that it never is.
+/// Keeping the fill site outside the script lets Farhelm quote its value
+/// once for the outer Bash command, rather than guessing how another shell
+/// would interpret a value embedded inside this script.
 const WRAPPER_SCRIPT: &str = r#"cd "$1" && shift && "$@"; exit $?"#;
 
 /// Structured prefixes cannot supply Farhelm placeholders. This wrapper
 /// stays resident while forwarding the compiler's agent argv unchanged.
-const STRUCTURED_WRAPPER_SCRIPT: &str = r#""$@"; exit $?"#;
+/// Its positional name witnesses the outer shell's quoted expansion; a new
+/// file on Restart proves that generation evaluated the raw prefix again.
+const STRUCTURED_WRAPPER_SCRIPT: &str = r#"test "$0" = "$WRAPPER_PROFILE" || exit 1; printf '%s\n' "$0" > wrapper-profile || exit 1; "$@"; exit $?"#;
 
 /// The argv slot `{cwd}` occupies in every wrapper vector this file
 /// builds: `sh`, `-c`, the script, `$0`, then `$1`.
@@ -106,13 +110,10 @@ const CWD_SLOT: usize = 4;
 /// The outer argv of a wrapper launch: `sh -c <script> wrapper {cwd}`
 /// followed by the agent command the wrapper is to run.
 ///
-/// Built element by element and returned as a VECTOR, never by splitting
-/// a string: that is the shape a resume template travels in, and it makes
-/// the whole-element rule hold by construction rather than by luck.
-/// Writing the command out as one string and splitting it would agree with
-/// this today, but only for as long as none of the paths spliced into it
-/// (the fixture binary, the record home) grows a space or a quote for the
-/// split to have to undo correctly.
+/// Build literal values before rendering source so the script, fixture paths
+/// and reserved fill sites have explicit boundaries. Both the start source
+/// and resume source use [`command_source`], which quotes ordinary values
+/// without hiding the placeholders from native admission.
 fn wrapper_argv(agent: &std::path::Path, agent_tail: &[&str]) -> Vec<String> {
     let mut argv = vec![
         "sh".to_string(),
@@ -126,23 +127,28 @@ fn wrapper_argv(agent: &std::path::Path, agent_tail: &[&str]) -> Vec<String> {
     argv
 }
 
-/// [`wrapper_argv`] as the invocation STRING a create carries.
+/// Render literal fixture argv as Bash source, keeping reserved fill sites bare.
 ///
-/// Quoted with `shell_words` per element rather than formatted by hand:
-/// the supervisor splits the invocation back apart with the same crate, so
-/// every element arrives as itself — the script text with its spaces and
-/// embedded quotes, the fixture paths, and the placeholder with its braces
-/// (which may come back quoted; the split strips the quotes and the
-/// whole-element rule sees `{cwd}` again).
-///
-/// What does NOT travel in this string is the session's directory. The
-/// invocation carries the literal placeholder and nothing else — the
-/// directory is substituted into the argv SLOT at spawn, long after this
-/// split — which is exactly why the tests can run in a work directory
-/// whose path contains a space without that path ever meeting a quoting
-/// rule.
+/// Command placeholders are admitted only as unquoted words. Quoting every
+/// element would turn these otherwise valid fixtures into refusal tests. All
+/// other values are data, including the inner shell program and fixture paths;
+/// the supervisor supplies the quoting for each placeholder's eventual value.
+fn command_source(argv: &[String]) -> String {
+    argv.iter()
+        .map(|word| {
+            if farhelm_supervisor::agent_kind::is_reserved_placeholder(word) {
+                word.clone()
+            } else {
+                farhelm_proto::text::shell_quote(word)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// A create carries the wrapper as source, with its directory fill site bare.
 fn wrapper_invocation(agent: &std::path::Path, agent_tail: &[&str]) -> String {
-    shell_words::join(wrapper_argv(agent, agent_tail))
+    command_source(&wrapper_argv(agent, agent_tail))
 }
 
 /// The record-writing fixture's own flags, as the wrapper's trailing agent
@@ -208,9 +214,8 @@ fn wrapper_launch_with_tail(
 
 /// A directory whose path contains a space, under `parent`.
 ///
-/// The whole point of substituting into an argv SLOT rather than into a
-/// command string is that a path like this survives as one element. A
-/// tempdir alone would never exercise it — nothing in the suite's /tmp
+/// The filled value must survive Bash parsing as one argument. A tempdir
+/// alone would never exercise it — nothing in the suite's temporary-name
 /// scheme produces a space — so the case has to be built deliberately.
 fn dir_with_a_space(parent: &std::path::Path) -> std::path::PathBuf {
     let path = parent.join("with space");
@@ -285,7 +290,7 @@ fn wrapper_slot_argv(session_id: &str) -> Vec<String> {
 /// Observe both processes in a structured wrapper launch through their
 /// inherited session marker. The wrapper must remain resident, while the
 /// fake agent must receive the same marker after the wrapper starts it.
-fn assert_structured_wrapper_and_agent(session_id: &str) {
+fn assert_structured_wrapper_and_agent(session_id: &str, profile: &str) {
     let marked = marked_pids(session_id);
     let wrappers: Vec<Vec<String>> = marked
         .iter()
@@ -298,6 +303,11 @@ fn assert_structured_wrapper_and_agent(session_id: &str) {
         "one resident structured wrapper must carry the session environment: {wrappers:?}"
     );
     let wrapper = &wrappers[0];
+    assert_eq!(
+        wrapper.get(3).map(String::as_str),
+        Some(profile),
+        "raw quoted environment expansion must supply the wrapper's positional name: {wrapper:?}"
+    );
     assert_eq!(
         wrapper.get(4).map(String::as_str),
         Some("claude"),
@@ -394,11 +404,10 @@ fn comm_and_ppid(pid: u32) -> (String, u32) {
 /// the session it launches can report its conversation through the hook.
 ///
 /// This is the feature in one test. The directory contains a SPACE
-/// deliberately: substitution is into the argv slot, never into a command
-/// string, so a path a shell would have word-split has to arrive as one
-/// element — and if it did not, the wrapper's `cd` would fail, the agent
-/// would never exec, and this test would time out rather than quietly
-/// pass.
+/// deliberately: the supervisor must quote a value the shell would otherwise
+/// split so it arrives as one element — and if it did not, the wrapper's
+/// `cd` would fail, the agent would never exec, and this test would time out
+/// rather than quietly pass.
 ///
 /// The wrapper's directory substitution remains the property under test. The
 /// explicit hook report supplies the identity; a wrong `{cwd}` would still
@@ -417,7 +426,7 @@ async fn a_wrapper_launch_receives_the_sessions_directory() {
             declared_command(
                 &format!("{} {{farhelm_args}}", invocation),
                 farhelm_proto::LaunchHarness::Claude,
-                Some(format!("{} {{farhelm_args}}", shell_words::join(&template))).as_deref(),
+                Some(format!("{} {{farhelm_args}}", command_source(&template))).as_deref(),
             ),
             None,
             WIDE_COLS,
@@ -485,7 +494,7 @@ async fn a_wrapper_session_resumes_through_the_wrapper() {
             declared_command(
                 &format!("{} {{farhelm_args}}", invocation),
                 farhelm_proto::LaunchHarness::Claude,
-                Some(format!("{} {{farhelm_args}}", shell_words::join(&template))).as_deref(),
+                Some(format!("{} {{farhelm_args}}", command_source(&template))).as_deref(),
             ),
             None,
             WIDE_COLS,
@@ -556,16 +565,21 @@ async fn a_wrapper_session_resumes_through_the_wrapper() {
     );
 }
 
-/// A structured wrapper surrounds the compiler's start and resume argv.
+/// A raw wrapper expands its own source while the compiled suffix remains data.
 ///
 /// This covers the boundary the command-launch tests above cannot reach:
 /// the wrapper prefix is a stored agent choice, while the agent command and
 /// Farhelm's own hook arguments are compiled later. Both generations must
-/// reach the fake Claude with its model choice and injected hook arguments;
-/// the resident shell and its agent child must retain the session marker.
+/// reach the fake Claude with its shell-sensitive model and injected hook
+/// arguments; the first prompt and resumed conversation must also stay literal.
+/// A quoted environment expansion supplies the wrapper's positional name in
+/// both generations, distinguishing raw Bash source from decoded argv storage.
 #[farhelm_testtrace::test]
 async fn a_structured_agent_wrapper_forwards_start_resume_and_environment() {
     let fixture = fake_harness_with_script("hook-report");
+    let profile = "wrapper ' profile *";
+    let model = "release/candidate'42;$WRAPPER_PROFILE*";
+    let prompt = "one ' \"$WRAPPER_PROFILE\" *; $(touch prompt-injected)\n{farhelm_args}";
     let shell = fixture.bash_shell().to_string_lossy().into_owned();
     let h = harness_with_seams(
         SupervisorTimeouts::default(),
@@ -579,6 +593,7 @@ async fn a_structured_agent_wrapper_forwards_start_resume_and_environment() {
                         .into_owned(),
                 ),
                 ("SHELL".to_string(), shell.clone()),
+                ("WRAPPER_PROFILE".to_string(), profile.to_string()),
             ],
             launch_shell: Some(shell),
             scopes: Arc::new(farhelm_supervisor::scope::ScopeManager::disabled()),
@@ -590,7 +605,7 @@ async fn a_structured_agent_wrapper_forwards_start_resume_and_environment() {
     let selection = farhelm_proto::LaunchSelection {
         permission_flags: None,
         harness: farhelm_proto::LaunchHarness::Claude,
-        model: Some("claude-fable-5".to_string()),
+        model: Some(model.to_string()),
         effort: None,
         // The compiler records Claude's effective default in the stored
         // selection; make the fixture's expected selection equally explicit.
@@ -598,8 +613,8 @@ async fn a_structured_agent_wrapper_forwards_start_resume_and_environment() {
         wrapper_prefix: Some(vec![
             "sh".to_string(),
             "-c".to_string(),
-            STRUCTURED_WRAPPER_SCRIPT.to_string(),
-            "wrapper".to_string(),
+            farhelm_proto::text::shell_quote(STRUCTURED_WRAPPER_SCRIPT),
+            "\"$WRAPPER_PROFILE\"".to_string(),
         ]),
         container: None,
         workspace_trust: None,
@@ -614,7 +629,10 @@ async fn a_structured_agent_wrapper_forwards_start_resume_and_environment() {
             None,
             WIDE_COLS,
             ROWS,
-            farhelm_helm::CreateExtras::default(),
+            farhelm_helm::CreateExtras {
+                prompt: Some(prompt.to_string()),
+                ..Default::default()
+            },
         )
         .await
         .expect("create a structured wrapper session");
@@ -623,19 +641,26 @@ async fn a_structured_agent_wrapper_forwards_start_resume_and_environment() {
     let first = shell_words::split(&observed_argv(&h, &session.id, 1).await)
         .expect("decode the first agent argv");
     assert!(
-        first
-            .windows(2)
-            .any(|words| words == ["--model", "claude-fable-5"]),
+        first.windows(2).any(|words| words == ["--model", model]),
         "the agent must receive the compiled model choice: {first:?}"
     );
     assert!(
         first.iter().any(|word| word == "--settings"),
         "Farhelm's hook arguments must pass through the wrapper: {first:?}"
     );
-    assert_structured_wrapper_and_agent(&session.id);
+    assert!(
+        first.windows(2).any(|words| words == ["--", prompt]),
+        "the initial prompt must remain one literal argument: {first:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.work().join("wrapper-profile")).unwrap(),
+        format!("{profile}\n")
+    );
+    assert!(!fixture.work().join("prompt-injected").exists());
+    assert_structured_wrapper_and_agent(&session.id, profile);
 
     let (channel, mut stream, mut seen) = attach_ready(&h, &session).await;
-    let conversation = "structured-wrapper-report";
+    let conversation = "structured-$WRAPPER_PROFILE;*$(false)";
     report_conversation(&h, channel, &mut stream, &mut seen, conversation).await;
     assert_eq!(
         snapshot_of(&h, &session.id)
@@ -647,6 +672,7 @@ async fn a_structured_agent_wrapper_forwards_start_resume_and_environment() {
         hook_log(&h, &session.id)
     );
 
+    std::fs::remove_file(fixture.work().join("wrapper-profile")).unwrap();
     h.client
         .restart_session(&session.id, true)
         .await
@@ -660,16 +686,24 @@ async fn a_structured_agent_wrapper_forwards_start_resume_and_environment() {
         "the wrapper must forward the captured conversation on resume: {resumed:?}"
     );
     assert!(
-        resumed
-            .windows(2)
-            .any(|words| words == ["--model", "claude-fable-5"]),
+        resumed.windows(2).any(|words| words == ["--model", model]),
         "the resumed agent must keep its compiled model choice: {resumed:?}"
     );
     assert!(
         resumed.iter().any(|word| word == "--settings"),
         "Farhelm's hook arguments must follow the agent on resume: {resumed:?}"
     );
-    assert_structured_wrapper_and_agent(&session.id);
+    assert!(
+        !resumed.iter().any(|word| word == prompt),
+        "the first prompt must not become reusable resume settings: {resumed:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.work().join("wrapper-profile")).unwrap(),
+        format!("{profile}\n"),
+        "Restart must evaluate the raw wrapper again"
+    );
+    assert!(!fixture.work().join("prompt-injected").exists());
+    assert_structured_wrapper_and_agent(&session.id, profile);
 }
 
 /// A wrapper is handed the user's own spelling of the directory at create
@@ -719,7 +753,7 @@ async fn a_wrapper_gets_the_literal_spelling_at_create_and_the_verified_path_on_
             declared_command(
                 &format!("{} {{farhelm_args}}", invocation),
                 farhelm_proto::LaunchHarness::Claude,
-                Some(format!("{} {{farhelm_args}}", shell_words::join(&template))).as_deref(),
+                Some(format!("{} {{farhelm_args}}", command_source(&template))).as_deref(),
             ),
             None,
             WIDE_COLS,

@@ -281,11 +281,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
     ("no resumable conversation yet"), and whether to offer optional nesting protection (only admit a report when a
     process with a named executable sits between the pane and the reporter).
 
-- **Expand `~` in the agent command.** A command launch whose program is written as `~/...` fails with `exec_failed` and
-  "No such file or directory", because the command is executed without a shell and nothing expands the tilde. Expand a
-  leading `~` to the home directory of the user the session runs as, at least in the program, and consider arguments
-  too. Plan: `plans/queue/command-shell-meaning.md`.
-
 - **An in-app signal for serious breaking changes.** Release notes alone are easy to miss. Give Farhelm a way to tell
   users inside the app about a serious breaking change in a release they just updated to, rather than relying on the
   release notes. Commands and wrappers starting to run through bash with full shell meaning

@@ -2649,6 +2649,54 @@ pub(crate) enum FarhelmArgsMode {
     Legacy,
 }
 
+/// User-owned source is interpreted only at the final execution boundary.
+/// Commands retain phase text; wrappers retain the raw prefix already present
+/// in the literal argv. Ordinary agents and legacy sessions never select Bash.
+#[derive(Clone, Copy)]
+enum ShellSource<'a> {
+    Command(&'a str),
+    Wrapper,
+}
+
+impl<'a> ShellSource<'a> {
+    /// Select this generation's source from its launch, never from argv spelling.
+    fn of(launch: &'a SessionLaunch, phase: crate::agent_kind::LaunchPhase) -> Option<Self> {
+        match launch {
+            SessionLaunch::Command(command) => match phase {
+                crate::agent_kind::LaunchPhase::Start => Some(Self::Command(&command.command)),
+                crate::agent_kind::LaunchPhase::Resume => {
+                    command.resume.as_deref().map(Self::Command)
+                }
+            },
+            SessionLaunch::Agent { selection, .. } => {
+                selection.wrapper_prefix.as_ref().map(|_| Self::Wrapper)
+            }
+            SessionLaunch::Legacy { .. } => None,
+        }
+    }
+}
+
+/// Join raw wrapper words with a safely quoted, entirely literal agent suffix.
+/// The prefix boundary is the stored selection's actual word count. Decoding
+/// or recounting it here would change raw quotes and break OMP provenance.
+fn wrapped_agent_shell_line(argv: &[String], prefix_words: usize) -> anyhow::Result<String> {
+    let (prefix, suffix) = argv
+        .split_at_checked(prefix_words)
+        .context("the wrapper prefix is longer than the composed agent command")?;
+    farhelm_proto::check_wrapper_prefix(Some(prefix)).map_err(anyhow::Error::msg)?;
+    crate::agent_kind::ensure_executable_argv("the wrapped agent command", suffix)
+        .map_err(anyhow::Error::msg)?;
+    Ok(format!(
+        "{} {}",
+        prefix.join(" "),
+        suffix
+            .iter()
+            .map(|word| farhelm_proto::text::shell_quote(word))
+            .collect::<Vec<_>>()
+            .join(" ")
+    ))
+}
+
 impl FarhelmArgsMode {
     /// The mode for spawning `launch`'s command for `phase`.
     pub(crate) fn of(launch: &SessionLaunch, phase: crate::agent_kind::LaunchPhase) -> Self {
@@ -10532,10 +10580,7 @@ impl Supervisor {
                 generation,
                 &tmux_name,
                 argv,
-                match &info.launch {
-                    SessionLaunch::Command(command) => Some(command.command.as_str()),
-                    SessionLaunch::Agent { .. } | SessionLaunch::Legacy { .. } => None,
-                },
+                ShellSource::of(&info.launch, crate::agent_kind::LaunchPhase::Start),
                 // The very snapshot the entry published below carries, so
                 // the kind that chose this launch's hook flags is the kind
                 // the session is durably recorded as. Re-deriving it here
@@ -12377,10 +12422,7 @@ impl Supervisor {
                 generation,
                 &tmux_name,
                 argv,
-                match launch {
-                    SessionLaunch::Command(command) => command.resume.as_deref(),
-                    SessionLaunch::Agent { .. } | SessionLaunch::Legacy { .. } => None,
-                },
+                ShellSource::of(launch, crate::agent_kind::LaunchPhase::Resume),
                 // The session's own immutable snapshot: a restart is a new
                 // generation of the SAME session, so the kind that decides
                 // the hook flags is the one the session was created with,
@@ -14944,7 +14986,7 @@ impl Supervisor {
     /// or argv are composed. The resulting spec retains only token-file paths;
     /// the shim reads the credential immediately before its Podman exec.
     ///
-    /// `shell_source` is present only for a command launch's selected phase.
+    /// `shell_source` selects command phase text or a wrapped agent's raw prefix.
     /// Its literal `argv` has already decoded the resume identity but still
     /// carries cwd and hook slots. Keep those representations paired until
     /// execution is built; metadata must never classify the inserted Bash.
@@ -14961,7 +15003,7 @@ impl Supervisor {
         generation: i64,
         tmux_name: &str,
         argv: Vec<String>,
-        shell_source: Option<&str>,
+        shell_source: Option<ShellSource<'_>>,
         snapshot: &IntegrationSnapshot,
         args_mode: FarhelmArgsMode,
         cwd: &str,
@@ -14980,8 +15022,19 @@ impl Supervisor {
             FarhelmArgsMode::Expand(crate::agent_kind::LaunchPhase::Start)
             | FarhelmArgsMode::Legacy => "command",
         };
-        if let Some(source) = shell_source {
+        if let Some(ShellSource::Command(source)) = shell_source {
             farhelm_proto::command_shell::validate_command_placeholders(command_field, source)
+                .map_err(|message| SpawnFailure::Spec(anyhow::anyhow!(message)))?;
+        }
+        if let Some(ShellSource::Wrapper) = shell_source {
+            // A reserved raw prefix element must be refused before cwd/hooks
+            // can replace it and hide the invalid prefix. Only the suffix may
+            // change length, so this boundary survives both fills and prompts.
+            let prefix = argv
+                .get(..snapshot.wrapper_prefix_words)
+                .context("the wrapper prefix is longer than the composed agent command")
+                .map_err(SpawnFailure::Spec)?;
+            farhelm_proto::check_wrapper_prefix(Some(prefix))
                 .map_err(|message| SpawnFailure::Spec(anyhow::anyhow!(message)))?;
         }
         // An alias is not a second bind inside the container. Resolve before
@@ -15013,10 +15066,12 @@ impl Supervisor {
         } else {
             argv
         };
-        let mut shell_values = shell_source
-            .map(|source| command_shell_values(source, &argv))
-            .transpose()
-            .map_err(SpawnFailure::Spec)?;
+        let mut shell_values = match shell_source {
+            Some(ShellSource::Command(source)) => Some(command_shell_values(source, &argv)),
+            Some(ShellSource::Wrapper) | None => None,
+        }
+        .transpose()
+        .map_err(SpawnFailure::Spec)?;
         // Hook arguments follow placeholder substitution; the one-time
         // literal prompt follows both. The spec is what the shim execs,
         // so composing everything here keeps the shim ignorant of hooks
@@ -15076,27 +15131,32 @@ impl Supervisor {
         // Metadata continues to read literal argv. Only the shim's executable
         // vector receives Bash, so OMP attribution and exact Restart keep their
         // original words and all bytes outside marker spans remain user-owned.
-        let (executable_argv, literal_argv) = if let Some(source) = shell_source {
-            let values = shell_values
-                .as_mut()
-                .expect("shell source has literal slots");
-            values.insert(
-                farhelm_proto::session_launch::FARHELM_ARGS_PLACEHOLDER.to_string(),
-                shell_arguments,
-            );
-            let line =
-                farhelm_proto::command_shell::render_command(command_field, source, |marker| {
-                    values.get(marker).cloned().ok_or_else(|| {
+        let (executable_argv, literal_argv) =
+            if let Some(ShellSource::Command(source)) = shell_source {
+                let values = shell_values
+                    .as_mut()
+                    .expect("shell source has literal slots");
+                values.insert(
+                    farhelm_proto::session_launch::FARHELM_ARGS_PLACEHOLDER.to_string(),
+                    shell_arguments,
+                );
+                let line =
+                    farhelm_proto::command_shell::render_command(command_field, source, |marker| {
+                        values.get(marker).cloned().ok_or_else(|| {
                         format!(
                             "{command_field}: {marker} has no corresponding literal argument slot"
                         )
                     })
-                })
-                .map_err(|message| SpawnFailure::Spec(anyhow::anyhow!(message)))?;
-            (vec!["bash".into(), "-c".into(), line], Some(argv))
-        } else {
-            (argv, None)
-        };
+                    })
+                    .map_err(|message| SpawnFailure::Spec(anyhow::anyhow!(message)))?;
+                (vec!["bash".into(), "-c".into(), line], Some(argv))
+            } else if let Some(ShellSource::Wrapper) = shell_source {
+                let line = wrapped_agent_shell_line(&argv, snapshot.wrapper_prefix_words)
+                    .map_err(SpawnFailure::Spec)?;
+                (vec!["bash".into(), "-c".into(), line], Some(argv))
+            } else {
+                (argv, None)
+            };
         // Resolve the actual wrapper before publishing the spec: its compatibility
         // bit must describe this command, including a selected scope whose manager
         // became unavailable before launch. The durable scope selection still owns
@@ -16803,6 +16863,52 @@ pub async fn connect(state_dir: &Path) -> anyhow::Result<UnixStream> {
 pub(crate) mod tests {
     mod claude_pin;
 
+    /// Wrapper syntax must execute, but every composed suffix element remains
+    /// exactly one argument, even when it contains shell syntax or a marker.
+    /// A real Bash child distinguishes quoting from a display-only round trip.
+    #[farhelm_testtrace::test]
+    fn wrapper_shell_line_interprets_only_the_raw_prefix() {
+        let prefix = [
+            "WRAPPER_VALUE='expanded word';",
+            "printf",
+            "'%s\\0'",
+            "\"$WRAPPER_VALUE\"",
+        ];
+        let suffix = [
+            "agent",
+            "model '$HOME; & | * >",
+            "$(printf injected)",
+            "",
+            "{cwd}",
+            "prompt\nwith \\ escapes",
+        ];
+        let argv = prefix
+            .into_iter()
+            .chain(suffix)
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        let line = wrapped_agent_shell_line(&argv, prefix.len()).unwrap();
+        assert!(line.starts_with(
+            "WRAPPER_VALUE='expanded word'; printf '%s\\0' \"$WRAPPER_VALUE\" 'agent' "
+        ));
+        let output = std::process::Command::new("bash")
+            .args(["-c", &line])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let expected = std::iter::once("expanded word")
+            .chain(suffix)
+            .flat_map(|word| word.as_bytes().iter().copied().chain(std::iter::once(0)))
+            .collect::<Vec<_>>();
+        assert_eq!(output.stdout, expected);
+        assert!(wrapped_agent_shell_line(&argv, argv.len() + 1).is_err());
+        assert!(wrapped_agent_shell_line(&argv[..prefix.len()], prefix.len()).is_err());
+    }
+
     /// Resume has already decoded the conversation and cwd filling preserves
     /// argument positions. Shell rendering must reuse those values, including
     /// marker-looking text inside them, without guessing from expanded argv.
@@ -16889,7 +16995,7 @@ pub(crate) mod tests {
                     generation,
                     "unused",
                     argv,
-                    Some(source),
+                    Some(ShellSource::Command(source)),
                     &snapshot,
                     FarhelmArgsMode::Expand(phase),
                     state.path().to_str().unwrap(),
@@ -16938,7 +17044,7 @@ pub(crate) mod tests {
                     0,
                     "unused",
                     vec!["agent".into(), "{cwd}".into()],
-                    Some("agent '{cwd}'"),
+                    Some(ShellSource::Command("agent '{cwd}'")),
                     &IntegrationSnapshot::of(&named_test_launch()),
                     FarhelmArgsMode::Expand(phase),
                     state.path().to_str().unwrap(),

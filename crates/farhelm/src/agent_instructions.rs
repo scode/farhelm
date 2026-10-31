@@ -149,8 +149,10 @@ fn render(agent: &Command) -> String {
          command come from helm settings.\n\
          An agent launch is --agent TYPE with optional --model, --effort, --permissions\n\
          and --wrapper COMMAND; Farhelm composes its command.\n\
-         A wrapper is a shell-quoted list of words placed before that command, with no\n\
-         placeholders or shell evaluation. A wrapper you supply needs the user's explicit\n\
+         A wrapper is Bash text placed before that command, with quotes and escapes\n\
+         retained and no Farhelm placeholders. Bash evaluates it on the host or inside\n\
+         the container; Farhelm's composed agent arguments remain literal.\n\
+         A wrapper you supply needs the user's explicit\n\
          Allow on hosts that ask before YOLO launches, even when they allow other Farhelm\n\
          commands without asking. A wrapper from a named template is already user-approved.\n\
          Do not put secrets in a wrapper: its words appear in process listings and templates.\n\

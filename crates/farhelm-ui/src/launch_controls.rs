@@ -634,7 +634,7 @@ pub(crate) fn LaunchControls(
                         disabled: busy, readonly: wrapper_unsafe, aria_invalid: wrapper_error.is_some(),
                         autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
                         placeholder: "with-endpoint --profile work --",
-                        "data-tooltip": "Wrapper prefix: shell-style words before Farhelm's agent command; no placeholders",
+                        "data-tooltip": "Wrapper prefix: Bash text before Farhelm's agent command; quotes and expansions keep their shell meaning; no placeholders",
                         oninput: move |event| { if !busy { on_wrapper_prefix.call(event.value()); } },
                         onkeydown: move |event| enter_choice(event, busy, || {}, on_choice_enter),
                     }
@@ -648,7 +648,7 @@ pub(crate) fn LaunchControls(
                         "Clear wrapper prefix"
                     }
                 }
-                p { class: "launch-composer-choice-help", "Runs before agent command; blank means none." }
+                p { class: "launch-composer-choice-help", "Runs through Bash before the agent command; blank means none." }
                 if let Some(reason) = wrapper_error.as_ref() {
                     div { class: "launch-composer-choice-error", role: "status", "{reason}" }
                 }

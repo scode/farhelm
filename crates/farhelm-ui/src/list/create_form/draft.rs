@@ -1041,8 +1041,9 @@ impl LaunchDraft {
     }
 
     /// Editing a remembered prefix makes it an explicit reusable choice.
-    /// Valid quoting/spacing changes preserve retry identity when literal words
-    /// match; malformed nonempty text never compares equal to an absent prefix.
+    /// Spacing between words is normalized, but quotes remain part of request
+    /// identity because they control Bash expansion. Malformed nonempty text
+    /// never compares equal to an absent prefix.
     pub(super) fn edit_wrapper(&mut self, text: String) -> bool {
         let changed = !matches!((super::wrapper_words(&self.wrapper), super::wrapper_words(&text)), (Ok(before), Ok(after)) if before == after);
         self.wrapper = text;
@@ -1083,7 +1084,11 @@ impl LaunchDraft {
             selection.permissions,
         );
         self.permission_flags = joined(selection.permission_flags.as_ref());
-        self.wrapper = joined(selection.wrapper_prefix.as_ref());
+        self.wrapper = selection
+            .wrapper_prefix
+            .as_ref()
+            .map(|words| words.join(" "))
+            .unwrap_or_default();
         self.container = ContainerDraft::from_config(selection.container.as_ref());
         self.permissions_explicit = true;
         self.wrapper_explicit = true;
@@ -1139,7 +1144,8 @@ impl LaunchDraft {
     }
 }
 
-/// Stored literal words become an initial editor buffer only at ownership changes.
+/// Permission flags are literal argv, so their editor must restore shell quoting.
+/// Wrapper words already carry their shell spelling and must not use this helper.
 fn joined(words: Option<&Vec<String>>) -> String {
     words.map(shell_words::join).unwrap_or_default()
 }
@@ -1489,8 +1495,8 @@ impl LaunchDraftState {
         self.apply_ordinary(|draft| draft.edit_conversation(text))
     }
 
-    /// Keep unfinished wrapper text editable and compare only proven word equality.
-    /// Admission preserves raw explicitness even when quoting changes no words.
+    /// Keep unfinished wrapper text editable and compare its raw shell words.
+    /// Admission preserves explicitness even when only inter-word spacing changes.
     pub(super) fn edit_wrapper(self, text: String) -> bool {
         self.apply_ordinary(|draft| draft.edit_wrapper(text))
     }
@@ -2412,7 +2418,12 @@ impl LaunchDraftState {
             None => {}
         }
         if let Some(prefix) = fields.wrapper_prefix {
-            draft.edit_wrapper(prefix.as_ref().map(shell_words::join).unwrap_or_default());
+            draft.edit_wrapper(
+                prefix
+                    .as_ref()
+                    .map(|words| words.join(" "))
+                    .unwrap_or_default(),
+            );
         }
         if let Some(container) = fields.container {
             draft.edit_container(ContainerDraft::from_config(container.as_ref()));
@@ -5863,7 +5874,7 @@ mod tests {
                     agent: Some(LaunchHarness::Codex),
                     permissions: Some(Some(LaunchPermission::Custom)),
                     permission_flags: Some(vec!["--mode".into(), "ask me".into()]),
-                    wrapper_prefix: Some(Some(vec!["nice".into(), "two words".into()])),
+                    wrapper_prefix: Some(Some(vec!["nice".into(), "\"two words\"".into()])),
                     container: None,
                     ..Default::default()
                 },
@@ -5935,7 +5946,7 @@ mod tests {
             assert_eq!(
                 *key.peek(),
                 pair,
-                "word-equivalent edits retain the full pair"
+                "equivalent permission words and unchanged wrapper spelling retain the full pair"
             );
             assert!(owner.choose_effort(Some(LaunchEffort::High), choices));
             assert!(
@@ -6252,8 +6263,8 @@ mod tests {
         );
     }
 
-    /// Request defaults and successfully parsed words establish equality; raw
-    /// permission omission, quoting and explicitness are retained editor state.
+    /// Request defaults and successfully parsed words establish equality.
+    /// Permission quoting is editor state; wrapper quoting changes shell meaning.
     /// Invalid parsers cannot establish that a different editor is a safe retry.
     #[test]
     fn permission_and_word_facts_follow_valid_submitted_values() {
@@ -6288,8 +6299,14 @@ mod tests {
         assert!(draft.edit_permission_flags("# no words".into()));
         assert!(draft.edit_wrapper("wrapper 'two words'".into()));
         let wrapped = structured(&draft);
-        assert!(!draft.edit_wrapper("wrapper \"two words\" ".into()));
+        assert!(!draft.edit_wrapper("wrapper 'two words' ".into()));
         assert_eq!(structured(&draft), wrapped);
+        assert!(draft.edit_wrapper("wrapper \"two words\" ".into()));
+        assert_ne!(
+            structured(&draft),
+            wrapped,
+            "quote spelling can change shell expansion"
+        );
         assert!(draft.wrapper_explicit());
         assert_eq!(draft.wrapper(), "wrapper \"two words\" ");
         assert!(draft.edit_wrapper("wrapper other".into()));
@@ -6779,7 +6796,7 @@ mod tests {
                     effort: None,
                     permissions: Some(LaunchPermission::Custom),
                     permission_flags: Some(vec!["--mode".into(), "ask me".into()]),
-                    wrapper_prefix: Some(vec!["prefix".into(), "two words".into()]),
+                    wrapper_prefix: Some(vec!["prefix".into(), "'two words'".into()]),
                     container: None,
                     workspace_trust: None,
                 }),
@@ -7787,6 +7804,8 @@ mod tests {
     /// Template defaults stay raw while the submitted request resolves them.
     /// A wrapper also belongs to its selected agent: a real switch loads the
     /// destination's memory and withdraws the old explicit-template marker.
+    /// Restoring a selection retains wrapper shell spelling while permission
+    /// flags are quoted from their literal argv, so Clone cannot change either.
     #[test]
     fn request_normalizes_defaults_and_agent_switch_loads_its_wrapper() {
         let mut draft = LaunchDraft::new(None);
@@ -7812,9 +7831,18 @@ mod tests {
         );
         assert_eq!(
             request.wrapper_prefix,
-            Some(vec!["my-wrapper".into(), "two words".into()])
+            Some(vec!["my-wrapper".into(), "'two words'".into()])
         );
         assert_eq!(request.workspace_trust, None);
+        let mut restored = LaunchDraft::new(None);
+        restored.restore_launch(&request, Some(LaunchHarness::Codex));
+        assert_eq!(restored.wrapper(), "my-wrapper 'two words'");
+        assert_eq!(restored.permission_flags(), "--mode 'ask me'");
+        assert_eq!(
+            structured(&restored),
+            request,
+            "restoring a launch must preserve shell spelling"
+        );
         draft.choose_harness(
             LaunchHarness::Claude,
             None,

@@ -301,7 +301,7 @@ test("typed launcher words mix with digits and chords in input order", async ({ 
     await expect(form.getByLabel("Name (optional)")).toHaveValue("bolt applied last");
     await expect(form.getByRole("combobox", { name: "Model", exact: true })).toHaveValue("typed-model");
     await expect(form.getByLabel("Initial prompt", { exact: true })).toHaveValue("from bare digit");
-    await expect(form.locator(".launch-composer-wrapper")).toHaveValue("env 'TYPED_SEQUENCE=1' --");
+    await expect(form.locator(".launch-composer-wrapper")).toHaveValue("env TYPED_SEQUENCE=1 --");
     await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: "Low", exact: true }))
       .toHaveAttribute("aria-pressed", "true");
     await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "Guarded", exact: true }))

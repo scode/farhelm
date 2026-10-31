@@ -930,10 +930,7 @@ fn action_rows(action: &ApprovalAction) -> Vec<CardRow> {
                     .agent_selection()
                     .and_then(|selection| selection.wrapper_prefix.as_ref())
             {
-                rows.push(CardRow::Block(
-                    "agent supplied wrapper",
-                    shell_words::join(words),
-                ));
+                rows.push(CardRow::Block("agent supplied wrapper", words.join(" ")));
             }
             launch_rows(launch, Runs::Start, &mut rows);
             if let ApprovalAction::LaunchWithPrompt { prompt, .. } = action {
@@ -1186,10 +1183,19 @@ enum Runs {
 /// stored choices even when the settings for newly composed launches changed.
 fn launch_rows(launch: &SessionLaunch, runs: Runs, rows: &mut Vec<CardRow>) {
     let start_label = "command";
-    let resume_text = |argv: &[String]| {
-        shell_words::join(argv.iter().filter(|element| {
+    let resume_text = |argv: &[String], prefix_words: usize| {
+        // Wrapper words already include their quotes. Only Farhelm's composed
+        // suffix is literal argv; quoting the whole vector would change the
+        // shell command the user is being asked to approve.
+        let (prefix, suffix) = argv.split_at(prefix_words.min(argv.len()));
+        let suffix = shell_words::join(suffix.iter().filter(|element| {
             element.as_str() != farhelm_proto::session_launch::FARHELM_ARGS_PLACEHOLDER
-        }))
+        }));
+        if prefix.is_empty() {
+            suffix
+        } else {
+            format!("{} {suffix}", prefix.join(" "))
+        }
     };
     match launch {
         SessionLaunch::Agent {
@@ -1236,7 +1242,13 @@ fn launch_rows(launch: &SessionLaunch, runs: Runs, rows: &mut Vec<CardRow>) {
                 rows.push(CardRow::Block(start_label, launch.display_command()));
             }
             match resume {
-                Some(resume) => rows.push(CardRow::Block("resume command", resume_text(resume))),
+                Some(resume) => rows.push(CardRow::Block(
+                    "resume command",
+                    resume_text(
+                        resume,
+                        selection.wrapper_prefix.as_ref().map_or(0, Vec::len),
+                    ),
+                )),
                 None => rows.push(CardRow::Note("resume command", "none")),
             }
         }
@@ -1265,7 +1277,7 @@ fn launch_rows(launch: &SessionLaunch, runs: Runs, rows: &mut Vec<CardRow>) {
                 rows.push(CardRow::Block(start_label, invocation.clone()));
             }
             match resume_template {
-                Some(resume) => rows.push(CardRow::Block("resume command", resume_text(resume))),
+                Some(resume) => rows.push(CardRow::Block("resume command", resume_text(resume, 0))),
                 None => rows.push(CardRow::Note("resume command", "none")),
             }
         }
@@ -1305,7 +1317,7 @@ fn template_rows(fields: &TemplateFields, host_name: Option<&str>, rows: &mut Ve
     }
     if let Some(wrapper) = &fields.wrapper_prefix {
         match wrapper {
-            Some(words) => rows.push(CardRow::Block("wrapper prefix", shell_words::join(words))),
+            Some(words) => rows.push(CardRow::Block("wrapper prefix", words.join(" "))),
             None => rows.push(CardRow::Note("wrapper prefix", "none")),
         }
     }
@@ -1864,10 +1876,15 @@ mod tests {
     }
 
     /// A wrapped launch's exact prefix is peer-controlled data the user must
-    /// see beside the full command before giving its one-time Allow.
+    /// see beside the full command before giving its one-time Allow. The
+    /// start and resume display retain shell syntax only in the raw prefix.
     #[test]
     fn agent_wrapper_card_names_the_agents_prefix() {
-        let words = vec!["with-endpoint".to_string(), "--".to_string()];
+        let words = vec![
+            "with-endpoint".to_string(),
+            "\"$PROFILE\"".to_string(),
+            "--".to_string(),
+        ];
         let launch = SessionLaunch::Agent {
             selection: farhelm_proto::LaunchSelection {
                 harness: farhelm_proto::LaunchHarness::Claude,
@@ -1881,11 +1898,20 @@ mod tests {
             },
             start: vec![
                 "with-endpoint".into(),
+                "\"$PROFILE\"".into(),
                 "--".into(),
                 "claude".into(),
                 farhelm_proto::session_launch::FARHELM_ARGS_PLACEHOLDER.into(),
             ],
-            resume: None,
+            resume: Some(vec![
+                "with-endpoint".into(),
+                "\"$PROFILE\"".into(),
+                "--".into(),
+                "claude".into(),
+                "--resume".into(),
+                "two words".into(),
+                farhelm_proto::session_launch::FARHELM_ARGS_PLACEHOLDER.into(),
+            ]),
         };
         let action = ApprovalAction::LaunchWithAgentWrapper {
             verb: LaunchVerb::Create,
@@ -1900,8 +1926,16 @@ mod tests {
         assert_eq!(action_kind(&action), "launch_with_agent_wrapper");
         assert!(action.requires_direct_allow());
         assert!(action_rows(&action).contains(&CardRow::Block(
-            "agent supplied wrapper",
-            shell_words::join(&words)
+            "command",
+            "with-endpoint \"$PROFILE\" -- claude".into()
+        )));
+        assert!(
+            action_rows(&action)
+                .contains(&CardRow::Block("agent supplied wrapper", words.join(" ")))
+        );
+        assert!(action_rows(&action).contains(&CardRow::Block(
+            "resume command",
+            "with-endpoint \"$PROFILE\" -- claude --resume 'two words'".into()
         )));
     }
 

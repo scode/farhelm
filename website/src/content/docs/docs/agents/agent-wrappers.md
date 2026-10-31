@@ -11,11 +11,14 @@ including on resume. It still chooses the agent's arguments, reads its status, a
 agent supports it. The wrapper must run that agent and pass its arguments and environment through. Farhelm takes your
 word for that; it cannot check what the wrapper actually does.
 
-The field splits quotes and backslash escapes into words, without running shell expansions. Farhelm refuses placeholders
-such as `{cwd}` in a prefix; use a custom command when your wrapper needs one. Leave it empty for no wrapper. Each agent
-has its own last used prefix, shared across your Farhelm windows; switching agents picks up that agent's value. A
-[launch template](/docs/using/launch-templates/) can set a prefix or explicitly clear one, including for
-[quick launch](/docs/using/launch-templates/#quick-launch). Clone, Replace with, and Restart with open with the
+The prefix runs through Bash, on the host or inside the session's container. `~`, variables, globs and shell operators
+have their usual Bash meaning; `with-endpoint --profile "$PROFILE" --`, for example, reads `PROFILE` when the session
+starts. Farhelm keeps your quotes and escapes as typed and quotes the agent's own arguments separately, so a model or
+initial prompt cannot become shell code. Previously saved prefixes acquire the same Bash meaning. Farhelm refuses
+placeholders such as `{cwd}` in a prefix; use a custom command when your wrapper needs one. Leave it empty for no
+wrapper. Each agent has its own last used prefix, shared across your Farhelm windows; switching agents picks up that
+agent's value. A [launch template](/docs/using/launch-templates/) can set a prefix or explicitly clear one, including
+for [quick launch](/docs/using/launch-templates/#quick-launch). Clone, Replace with, and Restart with open with the
 session's prefix so you can keep or change it. Plain Restart reuses the stored launch.
 
 NOTE: Do not put secrets in a prefix. It becomes part of the launch command, which other processes may see, and an agent
@@ -131,9 +134,9 @@ OMP accepts a prefix wrapper only when the wrapper `exec`s OMP, leaving no extra
 own launcher. A resident wrapper can run OMP, but Farhelm will not follow its conversation, so **Restart** stays
 unavailable. The same process rule applies when you write a custom command.
 
-A compound custom command, such as a wrapper followed by `; echo done`, keeps Bash running above the wrapper. That extra
-process can prevent Farhelm from following Grok's or OMP's conversation when the wrapper also stays running, leaving
-**Restart** unavailable. Claude, Muse and Codex tolerate that extra process.
+A compound command or prefix can keep Bash running above the wrapper. That extra process can prevent Farhelm from
+following Grok's or OMP's conversation when the wrapper also stays running, leaving **Restart** unavailable. Claude,
+Muse and Codex tolerate that extra process.
 
 Four variables travel in the environment rather than on the command line: `FARHELM_SESSION_ID` (which session this is —
 no sweep will claim a process that does not carry it), `FARHELM_AGENT_ID` (the same session id again, under a name that
@@ -148,13 +151,13 @@ session.
 ## What happens on stop
 
 There are fewer processes involved than the launch chain suggests. tmux starts the pane's login shell, the shell `exec`s
-Farhelm's launch shim, and the shim `exec`s your command. For a custom command, Bash interprets the command text and can
-replace itself with a simple command; compound commands can keep Bash running above the wrapper and agent. A wrapper
-that `exec`s the agent replaces itself in that chain. Where farhelm's own probe finds a WORKING systemd user manager —
-it creates a throwaway scope, looks it up, kills it, and confirms it went away, rather than trusting a `systemd-run` on
-`PATH` — the launch also runs inside a per-launch cgroup scope, which is containment rather than a level of the tree
-(`systemd-run --scope` execs in place too). Each launch records what it selected, so a session can outlive the manager
-that scoped it.
+Farhelm's launch shim, and the shim `exec`s your command. For a custom command or wrapper prefix, Bash interprets the
+text and can replace itself with a simple command; compound commands can keep Bash running above the wrapper and agent.
+A wrapper that `exec`s the agent replaces itself in that chain. Where farhelm's own probe finds a WORKING systemd user
+manager — it creates a throwaway scope, looks it up, kills it, and confirms it went away, rather than trusting a
+`systemd-run` on `PATH` — the launch also runs inside a per-launch cgroup scope, which is containment rather than a
+level of the tree (`systemd-run --scope` execs in place too). Each launch records what it selected, so a session can
+outlive the manager that scoped it.
 
 Stopping a session and restarting it reap the agent's tree and leave the session's terminal tabs running; deleting it
 takes the tabs too. What a stop claims is the pane process's descendants plus every process carrying the session's

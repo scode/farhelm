@@ -1912,7 +1912,13 @@ loading; native save/admission and spawn apply the placement check. Restart chec
 agent. Conversation decoding and working-directory/trust filling retain their existing boundaries, and hook arguments
 are computed once for both representations. Only `LaunchSpec.argv` receives `["bash", "-c", line]`. A missing Bash still
 produces the shim's exec sentinel; a missing program inside the line is an ordinary Bash exit, usually 127, with no
-exit-code classification. Unwrapped agent launches and legacy snapshots keep direct exec.
+exit-code classification. Wrapped agent launches likewise retain a literal vector for metadata. Its prefix length comes
+from the stored selection; those raw words are joined with spaces, followed by every composed suffix word single-quoted
+with the shared text quoting helper. Cwd/trust, hooks and the initial prompt are filled before quoting the suffix. The
+editor keeps raw word slices while using the existing literal splitter for shape checks; stored vectors keep their old
+shape validation and acquire Bash meaning without migration. Display joins only the prefix raw, then quotes the literal
+agent words. The shim and its container branch receive the same Bash vector, so expansion happens on the session's host
+or inside its container. Unwrapped agent launches and legacy snapshots keep direct exec.
 
 Never-started errors may retain the failed terminal's last five nonblank physical lines, at most 500 UTF-8 bytes after
 presentation-unsafe characters are escaped. The excerpt follows Farhelm's diagnosis in the existing durable error
@@ -3013,11 +3019,12 @@ refusal. No global geometry cache or new asset file is introduced.
   stock Debian/Ubuntu `.bashrc` interactivity guard doesn't bail out when the profile chains it. Either way the sourced
   file set matches an SSH-and-type session, which is the contract. When `$SHELL` is unset (user-manager services on
   systemd older than 255 don't set it), the supervisor falls back to the passwd database, then `/bin/sh`. Command and
-  resume text is then interpreted by non-login, non-interactive `bash -c` after the shim restores PATH, markers and the
-  working directory. Bash inherits that environment; the command text is not reconstructed from the literal argument
-  projection. Ordinary login/interactive rc files are not read again, and ordinary aliases and unexported functions are
-  not inherited. Plain Bash still honors inherited `BASH_ENV` and exported Bash functions; these are user-configured
-  behavior after the shim supplies its restored environment, just as a wrapper can change the environment it receives.
+  resume text, or raw wrapper text followed by quoted composed agent words, is then interpreted by non-login,
+  non-interactive `bash -c` after the shim restores PATH, markers and the working directory. Bash inherits that
+  environment; the command text is not reconstructed from the literal argument projection. Ordinary login/interactive rc
+  files are not read again, and ordinary aliases and unexported functions are not inherited. Plain Bash still honors
+  inherited `BASH_ENV` and exported Bash functions; these are user-configured behavior after the shim supplies its
+  restored environment, just as a wrapper can change the environment it receives.
 - The supervisor's shared agent-launch builder also writes the intended working directory into the launch spec. After
   checkout preparation, the shim enters it before exec and supplies matching `PWD`; a failed chdir prevents the agent
   from executing and writes the ordinary launch-failure sentinel naming the directory. Entry is separate from exec so an
@@ -6059,23 +6066,23 @@ permission flags and wrapper prefix. Older stored Muse agent launches derive the
 gain hooks through their existing `{farhelm_args}` at their next start, but retain their missing stored resume command
 and offer `NoResumeCommand` until recreated; there is no resume backfill or migration. `{farhelm_args}` sits where the
 previous release appended Farhelm's arguments, so an upgraded session and a new one spawn alike.
-`LaunchSelection.wrapper_prefix` stores optional literal words before both composed commands, including Goose's leading
-`env` words. The field is omitted when absent; the protocol bump refuses older peers rather than translating the new
-launch shape. OMP attribution skips exactly that many words before classifying the agent program, without relaxing its
-process proof. At spawn the supervisor fills `{cwd}` (and the compiler's Codex trust markers `{codex:trusted-cwd}` and
-`{codex:untrusted-cwd}`, which predate launch kinds and are filled in any launch that contains one, a command launch
-included, so a command copied from a composed Codex launch keeps working; SPEC.md states this as the one exception to a
-command launch running as written), then replaces `{farhelm_args}` with the declared kind's own arguments
-(`AgentIntegration::farhelm_args`, asked for a start or a resume and never shown the command) and puts that kind's
-reporter settings in `LaunchSpec.env`, which the shim sets on the agent process alone, after scrubbing inherited
-reporter variables. Goose is the one kind whose integration the environment still switches: its reporter is persisted in
-the resumed session, so a resume carries no argument and only `FARHELM_GOOSE_REPORTER_ENABLED` turns it on or off. A
-legacy session goes through the previous release's injection (`AgentIntegration::inject_hooks`, with its shape checks
-and `env` prefix). Its only other reader of a command line is OMP's process attribution (`classify_omp_launch`), which
-reads the program word of every OMP launch, new ones included, to choose how the running process is matched to the
-session; it decides nothing about YOLO, agent type or resume. The `env`-prefix helpers in `farhelm_proto::yolo` stay for
-these two. The command-line YOLO classifier, resume derivation (`default_resume_template`, the ambiguous-selector
-refusals, the selector strippers) and kind derivation from the program's basename are gone.
+`LaunchSelection.wrapper_prefix` stores optional raw shell words, quotes and escapes included, before both composed
+commands, including Goose's leading `env` words. The field is omitted when absent; the protocol bump refuses older peers
+rather than translating the new launch shape. OMP attribution skips exactly that many words before classifying the agent
+program, without relaxing its process proof. At spawn the supervisor fills `{cwd}` (and the compiler's Codex trust
+markers `{codex:trusted-cwd}` and `{codex:untrusted-cwd}`, which predate launch kinds and are filled in any launch that
+contains one, a command launch included, so a command copied from a composed Codex launch keeps working), then replaces
+`{farhelm_args}` with the declared kind's own arguments (`AgentIntegration::farhelm_args`, asked for a start or a resume
+and never shown the command) and puts that kind's reporter settings in `LaunchSpec.env`, which the shim sets on the
+agent process alone, after scrubbing inherited reporter variables. Goose is the one kind whose integration the
+environment still switches: its reporter is persisted in the resumed session, so a resume carries no argument and only
+`FARHELM_GOOSE_REPORTER_ENABLED` turns it on or off. A legacy session goes through the previous release's injection
+(`AgentIntegration::inject_hooks`, with its shape checks and `env` prefix). Its only other reader of a command line is
+OMP's process attribution (`classify_omp_launch`), which reads the program word of every OMP launch, new ones included,
+to choose how the running process is matched to the session; it decides nothing about YOLO, agent type or resume. The
+`env`-prefix helpers in `farhelm_proto::yolo` stay for these two. The command-line YOLO classifier, resume derivation
+(`default_resume_template`, the ambiguous-selector refusals, the selector strippers) and kind derivation from the
+program's basename are gone.
 
 Supervisor schema 26 converts each row in one transaction by `SessionLaunch::from_pre_launch_kinds`: a row with a stored
 structured selection becomes an agent launch whose stored start and resume commands gain `{farhelm_args}` at the end,
