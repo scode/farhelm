@@ -30,3 +30,21 @@ Possible cover: the subsecond person-action filter may apply, but the bridge-to-
 found. Proposed drop: none pending that filter ambiguity.
 
 Provenance: trailing-review run `a7b93df6-ca17-4bff-8608-f443575ae5e6`, discovery `g039/f4`.
+
+## Additional review at d6645f77
+
+Additional reviewed commit: d6645f771bee8ed03a66486ef8755834937d759d
+
+The keyboard shortcuts overview opener also ignores the admitted-but-not-mounted host-dialog reservation. The document
+chord listener checks existing dialog DOM and its hidden trigger; Help follows the same unguarded opener. Matching
+Dioxus eval/IPC/resumption source was inspected, and the current regression covers an already rendered modal rather than
+this gap. Mutual inertness and native interval width remain unobserved; Escape recovery is preserved. The Settings
+discard at TRIAGE_OUTCOMES.md:19996–20006 and broader delayed-dialog wording at 19969–19982 may cover this newer opener,
+but do not do so unambiguously. Suggested bucket remains other, unverified after investigation, without a launch or
+host-mutation consequence.
+
+Source and provenance, run `1e4abedb-1946-4bfb-93a4-fd2f4e241acd`:
+
+- `g156/f1`: `crates/farhelm-ui/src/keyboard_shortcuts.rs:51-59; crates/farhelm-ui/src/app_bar.rs:941-947`.
+
+Proposed drop: none for the retained remainder. No runtime reproduction, fix or triage decision was performed.

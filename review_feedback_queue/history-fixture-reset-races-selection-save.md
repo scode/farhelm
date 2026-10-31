@@ -25,3 +25,20 @@ The latest-wins product preference contract explains the application write, not 
 reproduction was performed.
 
 Original finding IDs: `session-history-tests-1/f1`.
+
+## Additional review at d6645f77
+
+Additional reviewed commit: d6645f771bee8ed03a66486ef8755834937d759d
+
+Documentation-capture paths add the same independent API-restoration versus queued GUI-selection-write race. Source
+investigation checked both incoming values and Playwright page lifetime: an already admitted older selection save can
+outlive context disposal, while a still-unsent correcting save can die with that page. An adverse final preference
+value/order remains unobserved, and the ordinary successful correction may restore the initial value. Suggested bucket
+stays other, investigated uncertainty for the additional capture schedules; no product user-work loss is claimed.
+
+Source and provenance, run `1e4abedb-1946-4bfb-93a4-fd2f4e241acd`:
+
+- `g073/f1`: `e2e/docs-shots/visual-review.spec.ts:2641-2644,3289-3296`.
+- `g075/f1`: `e2e/docs-shots/visual-review.spec.ts:530-551`.
+
+Proposed drop: none for the retained remainder. No runtime reproduction, fix or triage decision was performed.

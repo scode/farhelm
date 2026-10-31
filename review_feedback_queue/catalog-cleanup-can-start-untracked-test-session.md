@@ -76,3 +76,24 @@ Suggested bucket stays **other**: these are fake Codex sessions owned by the tes
 This extends the pre-POST cleanup defect, without claiming every route-removal/page-close ordering is unsafe or
 authenticating historical runtime results. Possible cover and the eight-block repair boundary remain as above.
 Provenance: run `ef6e18fa-8ac0-4850-a557-d59b8af5efb9`, `legacy-g036/f1`. No reproduction was performed.
+
+## Additional review at d6645f77
+
+Additional reviewed commit: d6645f771bee8ed03a66486ef8755834937d759d
+
+Further callers include held-create POST cleanup, terminal-create-idempotency and multi-host creation cleanup, and typed
+quick-launch cleanup. The held POST can be released while a one-shot Delete runs before owned creation settles. Other
+paths list captured IDs before a pending create/key mint settles. Exact locked Playwright 1.64 source establishes the
+live renderer/failure-screenshot and nonjoining route-continuation boundaries; page disposal does not retract an already
+admitted owned create. These are additional sites of the same session-settlement/cleanup ownership gap. The
+source-compatible opportunity is established, while actual adverse arrival order and successful late allocation were not
+measured. Suggested bucket remains other; only fake sessions on the private shared stack are claimed.
+
+Source and provenance, run `1e4abedb-1946-4bfb-93a4-fd2f4e241acd`:
+
+- `g040/f1`: `e2e/tests/sidebar.spec.ts:7908-7913 at d6645f771bee8ed03a66486ef8755834937d759d`.
+- `g042/f1`: `e2e/tests/terminal-create-idempotency.spec.ts:135-170; e2e/tests/terminal-multihost.spec.ts:4816-4839`.
+- `g160/f1`: `e2e/tests/quick-launch.spec.ts:386-410`.
+- `a031/g160-f1`: `e2e/tests/quick-launch.spec.ts:386-410`.
+
+Proposed drop: none for the retained remainder. No runtime reproduction, fix or triage decision was performed.

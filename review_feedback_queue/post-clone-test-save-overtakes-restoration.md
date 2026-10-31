@@ -72,3 +72,25 @@ coverage. Proposed drop: none. This differs from the no-restoration-attempt inst
 `checkout-test-skips-new-spare-setting-restoration.md`: no earlier cleanup error is necessary here.
 
 Provenance: trailing-review run `bfd30ff4-8bd3-46a2-9101-56314a921992`, `g016/g016-f3`, found during synthesis.
+
+## Additional review at d6645f77
+
+Additional reviewed commit: d6645f771bee8ed03a66486ef8755834937d759d
+
+The host naming test's created-sort save and the template bolt test's final unmark add callers for the same independent
+restoration ordering gap. The naming test observes local sort state and drains presentation routes, without retaining
+the page's sort PUT before direct API restoration. The successful bolt-test route requires an inherited non-null mark
+followed by a final null write committing after restoration; deleting the fixture only clears a mark equal to its name.
+A failed body with a pending initial mark is a separate branch and does not require a non-null incoming mark. Actual
+adverse scheduling remains unmeasured. Suggested bucket remains other; retain the observed-flake/trivial-fix ledger
+decision as possible coverage rather than silently extending it to every new caller.
+
+Source and provenance, run `1e4abedb-1946-4bfb-93a4-fd2f4e241acd`:
+
+- `g146/f5`:
+  `e2e/tests/host-short-names.spec.ts:24-42,288-294; historical 142efec47287404d1e8f9be461c2cdb78cbd542a:23-40,278-285,339-345`.
+- `g148/f1`: `e2e/tests/templates.spec.ts:64-74`.
+- `g173/f2`: `e2e/tests/templates.spec.ts:49-51,64-73`.
+- `g176/f2`: `e2e/tests/host-short-names.spec.ts:24-42,77-79,259-295`.
+
+Proposed drop: none for the retained remainder. No runtime reproduction, fix or triage decision was performed.

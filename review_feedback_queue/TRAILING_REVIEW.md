@@ -1,10 +1,76 @@
 # Trailing code review checkpoint
 
-Last reviewed commit: `da9d7411fd5c69255ea6d0b857a6a3aa48bd0c6c`
+Last reviewed commit: `d6645f771bee8ed03a66486ef8755834937d759d`
 
 This is the exclusive starting point for the next trailing code review of `main`. Advance it only after completing the
 procedure in [AGENTS.md](AGENTS.md#trailing-code-review), together with any resulting queue updates. A proposed
 checkpoint reaches `main` only when its review-result PR is merged.
+
+## Review through d6645f77
+
+Reviewed range: `da9d7411fd5c69255ea6d0b857a6a3aa48bd0c6c..d6645f771bee8ed03a66486ef8755834937d759d`, 224 commits. The
+exclusive checkpoint and inclusive main tip were fetched and pinned, with ancestry verified. The recording-time fetch
+found the same main, checkpoint and coverage sources. No later commit is claimed reviewed.
+
+The review is **complete** under the persistent-review protocol. Every individual commit/path patch, including deleted
+text and intermediate changes, was reconstructed from immutable history: 1,180 commit/path diffs assigned once across
+188 bounded functional groups. Seventy-eight independent auditors checked possibly-highest exclusions and cross-group
+questions, including withdrawals and candidates mentioned only in prose. All 277 mandatory manifests, including eleven
+supplements, have complete supported delivery audits. Combined assignments remain below 2,000 lines and 64 KiB. No
+assigned text remains unread; surrounding source and coverage sections were inspected selectively.
+
+All 266 reviewer identities used Codex `gpt-6.1-sol`, high reasoning, with at most nineteen concurrent external
+reviewers. Each completed initial review, later-turn synthesis after delivery and separate discovery on the same
+identity. There were 919 attempted turns and 914 completed reviewer turns; five failed attempts receive no completion
+credit. Every group ended in an inspected credible empty search. Genuinely new verified or investigated-uncertain
+discoveries received another search; new local IDs for global duplicates did not inflate productive-pass counts.
+Individual pass counts, new IDs, checks and empty-pass evidence remain in each reviewer's progress and actual replies.
+
+Five automatic cybersecurity stops affected five reviewer identities. Their exact attempts, sessions and transcript
+pointers remain in the private failure ledger. Later defensive source-only passes on the original identities resolved
+the outstanding protocol gaps without reproducing bugs, constructing exploits or developing alternate attack routes. In
+particular, the stopped token-path and initialized-container-file leads were reconciled with independently retained
+global findings, then their original reviewers completed credible discovery passes. This does not retroactively credit
+failed attempts or claim new independent verification from duplicate reconciliation. One optional failed turn followed
+an already completed required pass. The original nineteen externally launched jobs lack separate retained CLI exit
+files; their completed-turn events, final replies and delivery audits are retained. No exit code is inferred for them.
+
+The result records **134 new items: fifteen highest, five high and 114 other**. Of those, 102 have source-confirmed
+defects or complete conditional mechanisms, and 32 remain **unverified after investigation**. The highest items concern
+container approval/Stop disclosure, initialized-file cleanup, configured-token and proxy credential exposure, detached
+inner work, retained startup authority over replacement checkouts, critical durability and retained approvals/Resume,
+stored-wrapper prompt literalness, and checkpoint-image inspection. Their configuration, recovery and contract
+conditions are preserved; no runtime damage or deployed incidence is claimed. Missing harmful routes remain in lower
+buckets rather than becoming security findings by implication.
+
+Thirteen existing records gain source locations, callers or independent provenance. They cover late test saves and
+creates, capture-history restoration, download wording, Muse abort pinning, Trash viewport movement, shorter rail
+height, selected-menu focus contrast, overview/host-dialog admission, helper readiness and retained launcher/shortcut
+uncertainties. Three extensions have source-complete conditional mechanisms; ten retain investigated uncertainty in
+their additional scope. Together the new and extended records represent 147 retained concerns: 105 source-confirmed and
+42 investigated-uncertain. No existing item is fixed, removed or triaged.
+
+Independent exclusions remain narrow: exact legacy/child-report intervals and Latest-slot behavior, explicitly accepted
+checkout and Trash cases, captured targets and lifecycle ownership, particular template matching/Undo decisions,
+historical display and release-record policies, actual SQL durability settings, ordinary host-ID nonreuse, and shipped
+runtime ownership through database drain. None is a blanket subsystem-safety verdict. Ordinary host-ID nonreuse does not
+settle rollback with a preserved registry namespace; FULL/EXTRA selection does not prove Mac media durability; normal
+keeper admission does not settle checkpoint inspection; named approvals and explicit IDs do not waive concealed or
+understated consequences. Ambiguous coverage remains in the retained records.
+
+Private evidence is retained under run `1e4abedb-1946-4bfb-93a4-fd2f4e241acd`. `completion.md` is the compact record;
+`completion.json` preserves assignments, identities, manifests, actual turns, final audits and progress/reply pointers.
+`finding-events.json` and `dispositions.json` preserve all 1,039 reviewer-local finding identities and 2,387 events,
+including revisions, withdrawals, independent verdicts and parent queue mappings. The 795 latest open and 244 withdrawn
+identities include duplicates and audit verdicts, not 1,039 distinct bugs. Rejected clipped packets earn no credit;
+supported smaller reads supply required delivery. No manual delivery-audit fallback or hidden reasoning inspection was
+used. Delivery proves neither attention nor understanding, correctness or exhaustiveness.
+
+This was source-only. No product/runtime suite, browser/native experiment, vendor-agent turn, server or live-install
+action ran, and no historical runtime pass was reused. Private bookkeeping helpers were checked separately through the
+test recorder. Repository validation covers changed Markdown, whitespace, queue/index consistency, required fields,
+bounded exact assignments and instruction pointers. This checkpoint proposal stays in a draft PR for separate manual
+merging; preparing it does not advance main.
 
 ## Review through da9d7411
 

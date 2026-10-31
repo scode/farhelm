@@ -47,3 +47,29 @@ derivative consequence alone as another defect. Unread parent-report displacemen
 Provenance: original `a077/f1`, `g131/f3`; implementation `g078/f2`, `g079/f1`, independently retained by `a011/f1`.
 These are shared identities for one concern. Proposed drop: none for the conditional remainder; no fixes or triage were
 performed.
+
+## Additional review at d6645f77
+
+Additional reviewed commit: d6645f771bee8ed03a66486ef8755834937d759d
+
+The shared failed-Restart pin-reset concern now has Muse provenance. Available vendor documentation, SDK and reporter
+admission/capture source were checked; an ordinary hooked, unmarked delayed child producer and complete harmful
+re-attribution sequence remain unestablished. Independently checked ordinary hook-file admission during the unpublished
+abort gap refutes that specific narrower route, not every later failed-restoration consequence. Native same-process
+unmarked child attribution is separately recorded. Suggested bucket remains other and the Muse remainder is unverified
+after investigation; no vendor conversation or Resume target was changed.
+
+Source and provenance, run `1e4abedb-1946-4bfb-93a4-fd2f4e241acd`:
+
+- `g096/f3`:
+  `crates/farhelm-supervisor/src/store.rs:4165-4184,4254-4259; crates/farhelm-supervisor/src/service/report_files.rs:310-335; crates/farhelm-supervisor/src/service/core.rs:16525-16548`.
+- `g098/f1`: `crates/farhelm-supervisor/src/service/core/vendor/positional.rs:120-121`.
+- `a008/f1`:
+  `crates/farhelm-supervisor/src/store.rs:4165-4185,4253-4259; crates/farhelm-supervisor/src/service/report_files.rs:310-335`.
+- `a034/f1`:
+  `crates/farhelm-supervisor/src/store.rs:4165-4185,4253-4259; crates/farhelm-supervisor/src/service/report_files.rs:231-267,310-335`.
+- `a054/a034-f1`:
+  `crates/farhelm-supervisor/src/store.rs:4165-4185,4253-4259; service/report_files.rs:310-335; service/core/vendor/positional.rs:120-121,194-210`.
+- `a055/g098-f1`: `crates/farhelm-supervisor/src/store.rs:4165-4185,4253-4275; service/report_files.rs:304-338`.
+
+Proposed drop: none for the retained remainder. No runtime reproduction, fix or triage decision was performed.

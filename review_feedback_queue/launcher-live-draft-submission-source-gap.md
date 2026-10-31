@@ -49,3 +49,25 @@ choice-and-Enter behavior while binding or refusing the contradictory action.
 Provenance: trailing-review run `2b7a8eaf-c4e9-42ab-be93-1acf29106132`, `g11/f2`, `g02/f2`, `g03/f2`, `g04/f3`,
 `g05/f5`, `g13/f6`, and the scoped `g14/f2` interface correction; independent checks `a01/f4`, `a02/f1` and `a03/f18`.
 These are one investigated concern, not multiple defects.
+
+## Additional review at d6645f77
+
+Additional reviewed commit: d6645f771bee8ed03a66486ef8755834937d759d
+
+The current container-choice fields pass through the same live draft projection. Independent review found no distinct
+complete shipped input sequence establishing a contradictory accepted container launch, so this adds provenance rather
+than a new defect count. Invalid enabled-state projection, dormant Command badge and Restart container-edit routes
+retain their specific source refutations; those do not prove whole-draft render binding. The existing missing compatible
+activation/admission premise, other priority and investigated-uncertainty status remain unchanged.
+
+Source and provenance, run `1e4abedb-1946-4bfb-93a4-fd2f4e241acd`:
+
+- `g023/f1`: `crates/farhelm-ui/src/list/create_form.rs:4985-5084`.
+- `g036/f2`: `crates/farhelm-ui/src/list/create_form.rs:4915-4985,5050-5061,5152-5160`.
+- `g120/f1`: `crates/farhelm-ui/src/list/create_form.rs:4985-4997,5572-5588`.
+- `g123/f3`: `crates/farhelm-ui/src/list/create_form.rs:4981-4997,5572-5588`.
+- `a002/f5`: `crates/farhelm-ui/src/list/create_form.rs:4985-5027,5572-5629`.
+- `a005/f4`: `crates/farhelm-ui/src/list/create_form.rs:4981-4997,5572-5588`.
+- `a025/f2`: `crates/farhelm-ui/src/list/create_form.rs:4905-4985,5050-5119,5152-5161`.
+
+Proposed drop: none for the retained remainder. No runtime reproduction, fix or triage decision was performed.

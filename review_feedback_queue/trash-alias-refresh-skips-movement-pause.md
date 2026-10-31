@@ -36,3 +36,21 @@ movement, not this new alias remainder. proposed_drop: none for the remainder. N
 
 Provenance: `a056/f1`, `g227/f3`, `g143/f2`, `g279/f1`, `g280/f3`. These are reviewer-local identities, not additional
 findings. Proposed drop: none for the retained remainder.
+
+## Additional review at d6645f77
+
+Additional reviewed commit: d6645f771bee8ed03a66486ef8755834937d759d
+
+Idle viewport resize and browser zoom add a producer for the shared Trash movement-fingerprint omission. The inspected
+state-driven settle fingerprint does not observe that geometry change, and the separate scroll-region observer owns
+focusability rather than Delete settling. Source checks did not establish a supported complete pointer layout
+transferring an enabled destructive answer under the old point. Suggested bucket remains other, unverified after
+investigation for that harmful geometry; no destructive activation was reproduced. This does not revive a blanket
+highest classification from the missing movement field alone.
+
+Source and provenance, run `1e4abedb-1946-4bfb-93a4-fd2f4e241acd`:
+
+- `g017/f1`: `crates/farhelm-ui/src/list/trash.rs:839-877,1050-1066`.
+- `a020/g017-f1`: `crates/farhelm-ui/src/list/trash.rs:839-877,1050-1066`.
+
+Proposed drop: none for the retained remainder. No runtime reproduction, fix or triage decision was performed.

@@ -35,3 +35,18 @@ Verification is a comparison of the two contracts; product runtime tests would n
 Provenance: separate same-model adversarial reviewer of every individual commit in
 `738598601c142e9e184ee7f0427e8995b2d89e0f..5c6e49937b1e779be2a5445059637aadf3757356`, followed by the commissioner's
 inspection of the named specification sections and coverage sources.
+
+## Additional review at d6645f77
+
+Additional reviewed commit: d6645f771bee8ed03a66486ef8755834937d759d
+
+The linked public file-download guide repeats the unconditional partial-file cleanup promise. This extends the same
+wording conflict to user documentation; it does not ask for a startup sweep, stronger crash cleanup or reversal of the
+accepted exception. Confidence remains conditional on whether ordinary readers include process death in the unqualified
+interruption promise. Suggested bucket remains other; no runtime defect was reproduced.
+
+Source and provenance, run `1e4abedb-1946-4bfb-93a4-fd2f4e241acd`:
+
+- `g084/f1`: `website/src/content/docs/docs/using/work-in-a-session.mdx:79-80`.
+
+Proposed drop: none for the retained remainder. No runtime reproduction, fix or triage decision was performed.
