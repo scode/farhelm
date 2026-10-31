@@ -1658,6 +1658,10 @@ impl PaneModes {
 /// A pane's process state as stop/delete need it: the OS pid
 /// `kill_process_tree` (service.rs) reaps from, and whether tmux has
 /// already marked the pane dead.
+///
+/// Anything that signals, walks or anchors a kill reads the pid through
+/// [`Self::live_pid`], never the raw field: the raw field may be a stale
+/// number left over from a process that is long gone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PaneProcess {
     /// The pane's ORIGINAL child, the one `new-session`/`split-window`
@@ -1666,18 +1670,42 @@ pub struct PaneProcess {
     /// process the agent starts keeps that pid as an ancestor, which is
     /// exactly the property a tree-kill needs.
     ///
-    /// Meaningful only when `dead` is `false`: once tmux marks a pane
-    /// dead, this is the LAST pid it remembers for it — stale, and must
-    /// never be walked or signaled, since `remain-on-exit`'s whole point
-    /// is keeping the pane around after that process (and everything
-    /// under it) is long gone, and the number may already be recycled to
-    /// something unrelated by the time anyone reads it.
-    pub pid: u32,
+    /// `None` only for a dead pane whose tmux reported no pid. tmux 3.8
+    /// stopped expanding `#{pane_pid}` once it has closed the pane's
+    /// terminal, which every dead pane has; tmux 3.7c, the pinned build,
+    /// always expands it. Assuming it was always there is what made every
+    /// restart of an exited agent fail on tmux 3.8 with "cannot parse
+    /// integer from empty string". A pane that is NOT dead always has a
+    /// pid here: [`parse_pane_process_line`] refuses the other 3.8 shape
+    /// (terminal closed, exit status not yet collected) rather than
+    /// letting a live pane through with nothing to kill.
+    ///
+    /// When `dead` is `true` and this is `Some`, it is the LAST pid tmux
+    /// remembers for the pane: stale, and it must never be walked or
+    /// signaled, since `remain-on-exit`'s whole point is keeping the pane
+    /// around after that process (and everything under it) is long gone,
+    /// and the number may already be recycled to something unrelated by
+    /// the time anyone reads it.
+    pub pid: Option<u32>,
     /// tmux's own `#{pane_dead}` flag: set once the process backing this
     /// pane has exited. A dead pane means nothing is running in it — stop
     /// and delete both treat this as "no process tree to touch" rather
     /// than attempting to signal the stale `pid` above.
     pub dead: bool,
+}
+
+impl PaneProcess {
+    /// The pid a kill or sweep may root at: the pane's process while tmux
+    /// has not flagged the pane dead, and `None` for a dead pane, whose
+    /// pid (when tmux still reports one) is stale.
+    ///
+    /// Whether the agent is running is still decided by `dead`, so stop,
+    /// restart and delete pick the same path on every tmux version; this
+    /// only keeps a dead pane's leftover number away from code that
+    /// signals or walks processes.
+    pub fn live_pid(&self) -> Option<u32> {
+        if self.dead { None } else { self.pid }
+    }
 }
 
 /// Outcome of [`TmuxDriver::pane_process`]: a recorded pane id is either
@@ -1722,8 +1750,8 @@ pub struct PaneProcess {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PaneProbe {
     /// The pane exists and `#{session_name}` matches the session it was
-    /// recorded under: the recorded terminal is real and this pid may
-    /// anchor a kill (subject to [`PaneProcess::dead`]).
+    /// recorded under: the recorded terminal is real and its
+    /// [`PaneProcess::live_pid`], when there is one, may anchor a kill.
     Owned(PaneProcess),
     /// The pane id resolves to nothing — an unassigned id, a session
     /// killed out from under us, or no server at all. Callers read this
@@ -1737,6 +1765,92 @@ pub enum PaneProbe {
     /// deliberately not carried, because no caller has any business using
     /// it.
     ForeignOwner { owner: String },
+}
+
+/// Classify the `#{pane_pid} #{pane_dead} #{session_name}` line that
+/// [`TmuxDriver::pane_process_within`] asks tmux for, as recorded under
+/// `session`.
+///
+/// Split out of the query so the shapes different tmux versions print
+/// can be tested without running those versions: the pinned 3.7c always
+/// prints a pid, while 3.8 prints an empty one once the pane's terminal
+/// has closed (see [`PaneProcess::pid`]).
+///
+/// An empty pid is accepted only on a dead pane. tmux 3.8 can also print
+/// an empty pid for a pane it does not yet call dead: the terminal has
+/// closed but tmux has not collected an exit status. For an ordinary exit
+/// that lasts a moment, but a pane program that closes its terminal and
+/// keeps running stays in it indefinitely, and a live pane with no pid
+/// would let stop and restart proceed with nothing to kill (the marker
+/// and scope sweeps do not reliably find such a process, notably on
+/// macOS). So that shape is an error, which every caller already treats
+/// as "could not tell" and refuses on, the same fail-closed answer the
+/// strict parse gave before tmux 3.8. Anything else that is not a number
+/// is an error too, because a pid this parser guessed at would anchor
+/// kills.
+fn parse_pane_process_line(session: &str, out: &str) -> anyhow::Result<PaneProbe> {
+    // Only the line terminator is stripped, never surrounding spaces:
+    // a session name's own leading or trailing whitespace is part of
+    // the name, and the trailing field must survive verbatim so
+    // `ForeignOwner` can carry the FULL name a caller would log or
+    // compare against. The leading pid field relies on this too: tmux
+    // 3.8 prints a dead pane as ` 1 <name>`, and trimming the start
+    // would shift every field left by one.
+    let line = out.trim_end_matches(['\r', '\n']);
+    // A stale pane id against a server that has since dropped every
+    // session it knew (this one killed, nothing else ever created)
+    // does NOT error the way `has_session`'s docs describe for
+    // `has-session` — verified empirically against this exact
+    // config's `exit-empty off` server — it exits zero with every
+    // format variable expanding empty, mirroring the same "nothing to
+    // inspect" shape `bracket_paste_flag_is_missing` already handles
+    // for pane-mode queries. With the fields reordered, that case is
+    // the whole line collapsing to the format's own two separator
+    // spaces, which is why the tell is a blank line rather than a
+    // missing field. A pane that exists always expands `pane_dead` and
+    // `session_name`, so nothing real expands to whitespace alone, even
+    // on a tmux that leaves `pane_pid` empty.
+    if line.trim().is_empty() {
+        return Ok(PaneProbe::Gone);
+    }
+    // Exactly two splits: the third piece is the session name, spaces
+    // and all.
+    let mut fields = line.splitn(3, ' ');
+    let pid_field = fields
+        .next()
+        .with_context(|| format!("pane process query returned no pane_pid: {line:?}"))?;
+    let dead_field = fields
+        .next()
+        .with_context(|| format!("pane process query returned no pane_dead: {line:?}"))?;
+    let found_session = fields
+        .next()
+        .with_context(|| format!("pane process query returned no session_name: {line:?}"))?;
+    if found_session != session {
+        // Ownership is settled before the pid is parsed, so a
+        // stranger's pid never becomes a value any caller could reach
+        // for — and a foreign pane with output this parser would
+        // reject still classifies rather than erroring.
+        return Ok(PaneProbe::ForeignOwner {
+            owner: found_session.to_string(),
+        });
+    }
+    let dead = dead_field == "1";
+    let pid = if pid_field.is_empty() {
+        if !dead {
+            anyhow::bail!(
+                "tmux reports this pane as not dead but gives no process id for it, which tmux \
+                 3.8 does while the pane's program is exiting; try again in a moment: {line:?}"
+            );
+        }
+        None
+    } else {
+        Some(
+            pid_field
+                .parse()
+                .with_context(|| format!("parsing pane_pid from {line:?}"))?,
+        )
+    };
+    Ok(PaneProbe::Owned(PaneProcess { pid, dead }))
 }
 
 /// Only tmux's exact boolean expansion authorizes a paste. Older versions
@@ -1772,6 +1886,104 @@ mod prompt_mode_tests {
                 "{invalid:?}"
             );
         }
+    }
+}
+
+/// The pane process probe's parsing, against the line shapes each tmux
+/// version prints. The pinned tmux 3.7c never prints an empty pid, so the
+/// suites that run real tmux cannot reach the 3.8 shapes. ` 1 <name>` is
+/// what tmux 3.8 printed for a dead agent pane in the field, where Restart
+/// of an exited session failed to parse it; ` 0 <name>` comes from reading
+/// tmux 3.8's source.
+#[cfg(test)]
+mod pane_process_line_tests {
+    use super::{PaneProbe, PaneProcess, parse_pane_process_line};
+
+    const SESSION: &str = "fh-7c60a315-bae7-488e-9931-b661478e3a04";
+
+    /// tmux 3.8 leaves `#{pane_pid}` empty for a dead pane. That must read
+    /// as a dead pane with no pid, not as a parse failure: the failure is
+    /// what wedged restart, stop and delete for every exited session.
+    #[farhelm_testtrace::test]
+    fn tmux_3_8_dead_pane_has_no_pid() {
+        let probe = parse_pane_process_line(SESSION, &format!(" 1 {SESSION}\n"))
+            .expect("tmux 3.8's dead-pane line parses");
+        assert_eq!(
+            probe,
+            PaneProbe::Owned(PaneProcess {
+                pid: None,
+                dead: true
+            })
+        );
+    }
+
+    /// tmux 3.8 also drops the pid once a pane's terminal closes while
+    /// `#{pane_dead}` still says 0, which lasts indefinitely if the pane's
+    /// program closed its terminal and kept running. A live pane with no
+    /// pid would let stop and restart go ahead with nothing to kill, so
+    /// this must stay an error, which callers refuse on.
+    #[farhelm_testtrace::test]
+    fn tmux_3_8_live_pane_without_a_pid_is_refused() {
+        let error = parse_pane_process_line(SESSION, &format!(" 0 {SESSION}\n"))
+            .expect_err("a live pane with no pid must not parse");
+        assert!(error.to_string().contains("no process id"), "{error:#}");
+    }
+
+    /// The pinned tmux keeps printing a dead pane's last pid. It is still
+    /// parsed, since hook attribution anchors to it, but never offered as
+    /// a kill root: the number may already belong to another process.
+    #[farhelm_testtrace::test]
+    fn tmux_3_7c_dead_pane_pid_is_parsed_but_not_live() {
+        let PaneProbe::Owned(process) =
+            parse_pane_process_line(SESSION, &format!("4242 1 {SESSION}\n")).expect("parses")
+        else {
+            panic!("an own pane must classify as owned");
+        };
+        assert_eq!(process.pid, Some(4242));
+        assert!(process.dead);
+        assert_eq!(process.live_pid(), None);
+    }
+
+    /// The ordinary live pane, on any version: the pid is the kill root.
+    #[farhelm_testtrace::test]
+    fn live_pane_offers_its_pid() {
+        let PaneProbe::Owned(process) =
+            parse_pane_process_line(SESSION, &format!("4242 0 {SESSION}\n")).expect("parses")
+        else {
+            panic!("an own pane must classify as owned");
+        };
+        assert_eq!(process.live_pid(), Some(4242));
+    }
+
+    /// Accepting an empty pid must not loosen the parse into guessing: a
+    /// pid field that is present but not a number is still an error,
+    /// because a misread pid would anchor kills.
+    #[farhelm_testtrace::test]
+    fn malformed_pid_is_still_an_error() {
+        for line in [
+            format!("abc 0 {SESSION}\n"),
+            format!("-1 0 {SESSION}\n"),
+            format!("12x 1 {SESSION}\n"),
+        ] {
+            assert!(parse_pane_process_line(SESSION, &line).is_err(), "{line:?}");
+        }
+    }
+
+    /// The pre-existing shapes keep their meaning around the new one: an
+    /// all-empty expansion is a vanished pane, and a foreign name is
+    /// classified before any pid is looked at, even an empty one.
+    #[farhelm_testtrace::test]
+    fn gone_and_foreign_shapes_are_unchanged() {
+        assert_eq!(
+            parse_pane_process_line(SESSION, "  \n").expect("parses"),
+            PaneProbe::Gone
+        );
+        assert_eq!(
+            parse_pane_process_line(SESSION, " 1 someone else\n").expect("parses"),
+            PaneProbe::ForeignOwner {
+                owner: "someone else".to_string()
+            }
+        );
     }
 }
 
@@ -3754,53 +3966,7 @@ impl TmuxDriver {
             }
             Err(e) => return Err(e).context("querying pane process state"),
         };
-        // Only the line terminator is stripped, never surrounding spaces:
-        // a session name's own leading or trailing whitespace is part of
-        // the name, and the trailing field must survive verbatim so
-        // `ForeignOwner` can carry the FULL name a caller would log or
-        // compare against.
-        let line = out.trim_end_matches(['\r', '\n']);
-        // A stale pane id against a server that has since dropped every
-        // session it knew (this one killed, nothing else ever created)
-        // does NOT error the way `has_session`'s docs describe for
-        // `has-session` — verified empirically against this exact
-        // config's `exit-empty off` server — it exits zero with every
-        // format variable expanding empty, mirroring the same "nothing to
-        // inspect" shape `bracket_paste_flag_is_missing` already handles
-        // for pane-mode queries. With the fields reordered, that case is
-        // the whole line collapsing to the format's own two separator
-        // spaces, which is why the tell is a blank line rather than a
-        // missing field: a pane that exists always has a numeric
-        // `pane_pid`, so nothing real expands to whitespace alone.
-        if line.trim().is_empty() {
-            return Ok(PaneProbe::Gone);
-        }
-        // Exactly two splits: the third piece is the session name, spaces
-        // and all.
-        let mut fields = line.splitn(3, ' ');
-        let pid_field = fields
-            .next()
-            .with_context(|| format!("pane process query returned no pane_pid: {line:?}"))?;
-        let dead_field = fields
-            .next()
-            .with_context(|| format!("pane process query returned no pane_dead: {line:?}"))?;
-        let found_session = fields
-            .next()
-            .with_context(|| format!("pane process query returned no session_name: {line:?}"))?;
-        if found_session != session {
-            // Ownership is settled before the pid is parsed, so a
-            // stranger's pid never becomes a value any caller could reach
-            // for — and a foreign pane with output this parser would
-            // reject still classifies rather than erroring.
-            return Ok(PaneProbe::ForeignOwner {
-                owner: found_session.to_string(),
-            });
-        }
-        let pid = pid_field
-            .parse()
-            .with_context(|| format!("parsing pane_pid from {line:?}"))?;
-        let dead = dead_field == "1";
-        Ok(PaneProbe::Owned(PaneProcess { pid, dead }))
+        parse_pane_process_line(session, &out)
     }
 
     /// The last thing `pane` printed, as plain text, bounded to
