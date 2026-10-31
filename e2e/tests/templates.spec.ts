@@ -25,6 +25,56 @@ async function deleteTemplate(request: APIRequestContext, name: string) {
   expect(response.ok() || response.status() === 404, `deleting template ${name}`).toBe(true);
 }
 
+/** The mark must be readable without depending on a platform's color emoji.
+ * Exercise both directions on one row: adding its shortcut line must change
+ * the drawing's fill without changing its dimensions or position in the row. */
+test("template bolts use a fixed outline or filled drawing for their mark", async ({ page, request }, info) => {
+  const name = `bolt-drawing-${Date.now()}`;
+  const previous = (await readPreferences(request)).quick_launch_template;
+  let bodyFailed = true;
+  try {
+    await putTemplate(request, name, { kind: "command", command: "echo bolt", yolo: false });
+    expect((await storedTemplate(request, name)).fields.command).toBe("echo bolt");
+    await patchPreferences(request, { quick_launch_template: null });
+    const dialog = await openTemplates(page);
+    const bolt = dialog.getByRole("button", { name: `Quick launch ${name}`, exact: true });
+    const icon = bolt.locator("svg");
+    await expect(bolt).toHaveAttribute("aria-pressed", "false");
+    await expect(icon).toHaveCSS("fill", "none");
+    const before = await icon.boundingBox();
+    expect(before).not.toBeNull();
+    const rowBefore = await bolt.locator("..").boundingBox();
+    expect(rowBefore).not.toBeNull();
+    const muted = await icon.evaluate(node => getComputedStyle(node).stroke);
+    await bolt.click();
+    await expect(bolt).toHaveAttribute("aria-pressed", "true");
+    await expect.poll(async () => (await readPreferences(request)).quick_launch_template).toBe(name);
+    await expect(bolt.locator("..").locator(".templates-quick-chord")).toBeVisible();
+    const amber = await icon.evaluate(node => getComputedStyle(node).color);
+    expect(amber).not.toBe(muted);
+    await expect(icon).toHaveCSS("fill", amber);
+    await expect(icon).toHaveCSS("stroke", amber);
+    const after = await icon.boundingBox();
+    expect(after).not.toBeNull();
+    const rowAfter = await bolt.locator("..").boundingBox();
+    expect(rowAfter).not.toBeNull();
+    expect(after!.y - rowAfter!.y).toBe(before!.y - rowBefore!.y);
+    expect({ x: after!.x, width: after!.width, height: after!.height }).toEqual({ x: before!.x, width: before!.width, height: before!.height });
+    await page.screenshot({ path: info.outputPath("template-bolt-marked.png") });
+    await bolt.click();
+    await expect(bolt).toHaveAttribute("aria-pressed", "false");
+    await expect(icon).toHaveCSS("fill", "none");
+    await expect(icon).toHaveCSS("stroke", muted);
+    await page.screenshot({ path: info.outputPath("template-bolt-unmarked.png") });
+    bodyFailed = false;
+  } finally {
+    await cleanupOwnedSteps(bodyFailed, [
+      ["previous quick-launch mark", () => patchPreferences(request, { quick_launch_template: previous ?? null })],
+      ["bolt template", () => deleteTemplate(request, name)],
+    ]);
+  }
+});
+
 /** Names created now must be sequence words, while a historical spaced name
  * remains saveable and undoable. The API seed represents stored legacy data;
  * refusing it in the shared store would break that compatibility boundary. */

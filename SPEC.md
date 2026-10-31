@@ -841,13 +841,14 @@ agent choice is independent of that destination:
   says "Delete permanently" before deletion and no undo is offered. The label the user saw decides: a click on "Delete
   permanently" never offers undo, and a click on plain "Delete" always does, even if the template list changed in
   between. Closing the dialog ends its undo notice.
-- Quick launch: at most one saved template is marked with ⚡ in Templates. Cmd+P on macOS or Ctrl+Shift+P elsewhere
-  starts it directly in the browser and desktop app when no dialog is open, without showing the launcher on success.
-  While the session launcher is the only visible dialog, the same chord applies its template to that draft and leaves
-  Launch to the user. Consecutive presses apply in order; a refusal changes nothing from that press and does not discard
-  a later press. A missing mark or failed read shows its refusal where `tl:` does, without opening Templates. During a
-  launch or while saving a template, the chord is consumed without changing the draft. Applying by shortcut leaves focus
-  and search text alone, unless its edits remove the focused control, when focus returns to the launcher's search. Other
+- Quick launch: at most one saved template is marked with ⚡ in Templates. Its list button shows a muted outline bolt
+  when unmarked and a filled amber bolt when marked, at the same size. Cmd+P on macOS or Ctrl+Shift+P elsewhere starts
+  it directly in the browser and desktop app when no dialog is open, without showing the launcher on success. While the
+  session launcher is the only visible dialog, the same chord applies its template to that draft and leaves Launch to
+  the user. Consecutive presses apply in order; a refusal changes nothing from that press and does not discard a later
+  press. A missing mark or failed read shows its refusal where `tl:` does, without opening Templates. During a launch or
+  while saving a template, the chord is consumed without changing the draft. Applying by shortcut leaves focus and
+  search text alone, unless its edits remove the focused control, when focus returns to the launcher's search. Other
   visible dialogs keep the keyboard. A hidden quick-launch launcher still consumes the chord without applying it.
   Applying it on the page uses exactly New's defaults and ordinary launch path: the open session's host, else this
   machine, and New's default folder for that host (Working directory above), with the template overriding only its own
