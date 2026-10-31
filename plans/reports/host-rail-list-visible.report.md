@@ -110,3 +110,93 @@ measurements that could miss a failure while the intended font was still loading
 final padding correction was also inspected. No source findings remain. A fresh own-model scope reassessment kept the
 narrow fix to the existing wrapping facility rather than a new layout mechanism. Commit and PR wording passed a separate
 cold read, and the documentation pass is complete.
+
+### Landing
+
+Landed with one fix at landing (below). The sidebar's left column of host icons no longer widens over the session list
+when the pointer rests on it or keyboard focus enters it. Full host names and destinations now show in hover text, and a
+new button below Help expands the whole column beside the list instead of over it; each device remembers its choice.
+
+- #2841: the expand button and its remembered state, removal of the hover and focus widening, tests, the specification
+  text, a changelog entry, and removal of the TODO entry that asked to revisit the widening.
+
+#### What landed since the stack was based, and whether it interacted
+
+The column was renamed the "navigation rail" on main (#2849) after this plan was based, with a changelog entry that
+announces the new name in the same release; that is the fix below. During this round a docs refresh and a README
+screenshot refresh (#2851, #2852) also landed; the rebase onto them was clean, and nothing else interacted. This round
+also checked tab-output-hangup and command-shell-meaning, which went back to their executors, and
+template-bolt-and-save, which lands right after this plan.
+
+#### Fixes made at landing
+
+- The new button said "Expand host rail" / "Collapse host rail", the old name. Its labels and hover text, the SPEC.md
+  sentence quoting them, the tests pinning them and the changelog entry now say "navigation rail". Internal names and
+  SPEC.md's other mentions of the host rail stay, as #2849 left them.
+
+#### Things you should know
+
+- In a window too narrow for the sidebar to grow (about 620px or less), the expanded rail leaves a 76px session column;
+  and at the window's limit, dragging the sidebar edge changes the stored width before the visible edge moves. The plan
+  accepted both.
+- A tooltip already open on the button keeps its old text until it is shown again.
+- One leftover style rule no longer does anything.
+- The docs refresh that landed during this round (#2851) says on Manage hosts to rest the pointer on the rail to see
+  full names; that still holds (they are now hover text), but no docs page mentions the new expand button yet.
+
+#### Checks
+
+The round first checked four plans stacked on main `8754d34f`: this round's two landing plans, and tab-output-hangup and
+command-shell-meaning, which went back to their executors. On that stack:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, the web-target UI lint, the binaries' lint,
+  the desktop-build checks, the check that every test delay states its reason (`python -B scripts/check-test-sleeps.py`,
+  327 delays, none without a reason), `dprint check`, `python3 releasing/check-changelog.py format`, the docs website
+  build, the workspace debug build, the UI's release web build and `scripts/check-desktop-assets.sh`: all passed.
+- The UI's Rust tests, `cargo nextest run -p farhelm-ui`, run `cf586b3d-ea51-4690-886b-2aa9548bf91e`: all 833 passed;
+  its desktop-build tests, `cargo nextest run -p farhelm-ui --features desktop`, run
+  `6d1750da-8ae8-4a2e-8ce3-39a71fe9fa83`: all 1016 passed. The UI's JavaScript tests (`node --test` in
+  `crates/farhelm-ui/js-tests`), run `07ad99dd-9259-406b-a620-4c2108aa3aea`: all 383 passed.
+- The whole Rust workspace, `cargo nextest run --workspace --exclude farhelm-desktop`, run
+  `7ec0376d-1c10-4848-877a-ec3ea8d4c44c`: 4615 passed, 41 left out by the test runner, 2 failed, both
+  command-shell-meaning's own tests (it went back for them).
+- `npx playwright test` in `e2e/`, the whole browser suite on Chromium and WebKit, three workers, no retries, run
+  `afafdf3a-2c2c-4d7f-8ef0-28e9e3706ad0`: 2839 passed, 14 skipped by design, 11 failed, while the machine was heavily
+  loaded (2.6 hours). Every spec with a failure was run again below.
+
+With host-rail-list-visible and template-bolt-and-save alone on main `8754d34f`, after the navigation-rail fix:
+
+- `dprint check`, `cargo fmt --all -- --check`, `python3 releasing/check-changelog.py format`,
+  `cargo check -p farhelm-ui --features desktop`, the web-target UI lint, the workspace debug build and the UI's release
+  web build passed. The UI's Rust tests, run `ac263c0a-bac9-4c61-97bb-cd3a00842f8f`: all 833 passed. The UI's JavaScript
+  tests, run `4f7454e0-248c-4f7d-a39d-bd7bbba82ce5`: all 383 passed.
+- At the maintainer's request, the browser specs ran on ten Tensorlake sandboxes (cloud virtual machines, not the usual
+  development machine) using the binaries and web bundle built locally from this pair. Each sandbox booted the usual
+  three test stacks and ran its share of the projects through the recorder
+  (`python3 scripts/record-test-run.py --kind development ...` running
+  `npx playwright test --project=<engine>-<spec> ... --retries=0`, the recorder's generic mode, because its Playwright
+  mode cannot select one engine). The selection was 21 specs on both engines: the plans' own (host short names, sidebar,
+  sidebar resize, templates, template list shortcut, quick launch, launcher template shortcuts, the hover-text sweep,
+  filters, sort, Hosts panel, settings) and every spec that failed above (terminal link clicks, feedback, GitHub
+  checkout composer, GitHub checkouts, header, launcher Enter, modal layout, Replace, provisioning). Across the ten runs
+  (`4ebee4f8-3271-4bad-9c44-2ec88c155acc`, `a88d1d9a-7e6c-4b78-a00f-197dc8051020`,
+  `845df979-0649-477f-be13-a122fe0cca2d`, `29a48694-8549-4f87-88d3-c0fafc480b84`,
+  `0f1c4576-5530-4fd7-bec6-c9c74e3d0d03`, `d6db4aaa-c0b1-47f1-9573-30a6a956755c`,
+  `e948da86-d374-4f9a-bbf5-9b1b1e81f8fe`, `8845e6fb-966f-4eba-8ea9-9ab1e814ace3`,
+  `02911f73-2e0b-4a38-816c-4986d9f2670f`, `058fb81e-f3f8-4e1d-9b94-a6e605ccea7a`; only the two failed runs' records were
+  kept, the rest went with their sandboxes), 1174 passed and 2 failed, both on Chromium. "a wrong-host UPDATE acceptance
+  warns on its source row and claims nothing" (provisioning) has failed in earlier rounds too, on main without these
+  plans among them, and an open draft PR records it as a flake. "typed page refusals are atomic and empty Enter leaves
+  later bindings paired" (quick launch) is a single observation. Re-run three times each on both engines with `-g` and
+  `--repeat-each=3`, all 12 passed (runs `c7c7d0da-96a8-4fbd-b6f0-23bb6dd6d65d`, `e47e4345-6e33-42ef-9d8c-3670f9345851`,
+  `b620e1ab-4a59-429a-b91c-55774a0cb055`, `59d04d10-b37b-4d88-a969-d89205166bbf`). The sandboxes ran Node 24.16, against
+  24.20 locally.
+- Reused from the four-plan run: the whole Rust workspace's passes, because the pair changes only the UI crate, whose
+  tests were run again above, and both of that run's failures were command-shell-meaning's own tests; the desktop-build
+  tests, since the pair changes no desktop-specific code and its desktop build was compiled above; and the browser suite
+  outside the specs above, since no other spec checks the renamed button's text. Not run: the desktop smoke tests and
+  the native Mac app (not runnable on Linux).
+
+The report's checks were the executor's selected runs; this landing ran the full battery with all four of the round's
+plans stacked, and the affected specs again on this plan and template-bolt-and-save alone. Nothing in the executor's
+report became untrue at landing beyond the button's name.
