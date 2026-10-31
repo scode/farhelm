@@ -16,6 +16,7 @@ import { shot } from "./shot";
 
 const PAGE = "stop-restart-resume";
 
+/** Distinguish the session actions while leaving disabled Restart's explanation visible. */
 test("header actions", async ({ page, request }) => {
   const { director } = await open(page, request);
   // The row at the top of the open session, which holds its terminal tabs
@@ -29,16 +30,15 @@ test("header actions", async ({ page, request }) => {
   );
   await director.callout(header.locator(".header-replace"), "Replace: a fresh conversation with the same settings.", {
     side: "bottom",
-    dx: -260,
+    dx: -120,
     dy: 150,
   });
   await director.callout(header.locator(".header-clone"), "Clone: another session like this one, which stays.", {
     side: "bottom",
-    dy: 150,
+    dy: 300,
   });
-  // An arrow ends at the point of its button nearest the box's centre, so the
-  // clone box sits straight under clone: pushed right, its arrow met clone's
-  // corner beside replace with. The replace box moves left to make room.
+  // Stagger the boxes vertically. Replace's arrow then stays to the right of
+  // Restart's explanation, and Clone's arrow clears both other boxes.
   // The action buttons sit at the row's far end; crop to them rather than
   // the whole row, which is wider than the docs' text column.
   await shot(page, `${PAGE}/header-actions`, [header.locator(".restart-primary"), header.locator(".header-delete").first()]);

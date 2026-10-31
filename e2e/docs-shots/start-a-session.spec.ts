@@ -143,27 +143,31 @@ test("harness and model", async ({ page, request }) => {
   await shot(page, `${PAGE}/harness-and-model`, [harness, model]);
 });
 
+/** Explain the independent effort and approval choices without covering either control. */
 test("effort and permissions", async ({ page, request }) => {
   const { director } = await open(page, request);
   const form = await openLauncher(page);
   await form.locator(".launch-composer-harness-choice button", { hasText: /^Codex$/ }).click();
   const effort = form.locator(".launch-composer-effort-choice");
   const permissions = form.locator(".launch-composer-permissions-choice");
-  await expect(permissions).toBeVisible();
+  const effortChoice = effort.getByRole("button", { name: "High", exact: true });
+  const permissionChoices = permissions.getByRole("group", { name: "Permission mode", exact: true });
+  await expect(effortChoice).toBeVisible();
+  await expect(permissionChoices).toBeVisible();
   // The overlay does not keep callouts apart, and these controls are close
-  // together and of different widths. Each callout is pushed right (dx) to a
-  // shared column beside the widest control and nudged up or down (dy) so
-  // the boxes stack without overlapping. Trust is not here: it moved to
-  // Settings, which the page links to.
-  await director.callout(effort, "How much effort the model puts in. Default leaves it to the agent.", {
+  // together and of different widths. Anchor the arrows to the actual choices,
+  // not the full-width rows' blank space, then push their boxes right (dx)
+  // into a shared column and apart vertically (dy). Trust is not here: it
+  // moved to Settings, which the page links to.
+  await director.callout(effortChoice, "How much effort the model puts in. Default leaves it to the agent.", {
     side: "right",
     dx: 160,
     dy: -40,
   });
   await director.callout(
-    permissions,
+    permissionChoices,
     "Guarded lets the agent approve its own actions through a safety check, which can still refuse or ask you. YOLO skips those checks: the agent runs commands and changes files without asking. Custom passes your own flags and counts as YOLO.",
-    { side: "right", dx: 290, dy: 70 },
+    { side: "right", dx: 900, dy: 90 },
   );
   await shot(page, `${PAGE}/effort-and-permissions`, [effort, permissions]);
 });
