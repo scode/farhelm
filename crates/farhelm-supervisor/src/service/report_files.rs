@@ -49,7 +49,9 @@
 //! Every report, whatever its vendor, must carry the hook's recorded process
 //! chain, and the chain must reach the session's CURRENT pane process
 //! (`procs::anchor_chain`): by pid and start token while that process is
-//! alive, by pid alone once it has exited and tmux still lists the pane. Every
+//! alive, by pid alone once it has exited and tmux still lists the pane (on
+//! tmux 3.8, which no longer reports a dead pane's pid, such a report is
+//! refused instead; see `Supervisor::owned_pane_anchor`). Every
 //! launch runs a new pane process, so a report made under an earlier launch,
 //! or one whose pane is gone entirely (a reboot killed tmux), is discarded.
 //! The per-kind attribution (Claude's position, Codex's, Grok's and OMP's

@@ -321,7 +321,8 @@ fn link_argv_bytes(link: &ChainLink) -> usize {
 /// `start` is the pane process's kernel start token while it is alive, and
 /// `None` once it has exited but tmux still lists the pane (`remain-on-exit`):
 /// a dead process has no start token left to read, so only its pid can be
-/// compared. Every launch runs a new pane process, which is what ties a chain
+/// compared. On tmux 3.8, which no longer reports a dead pane's pid, there is
+/// no anchor at all once the process has exited. Every launch runs a new pane process, which is what ties a chain
 /// to the launch it was collected under.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PaneAnchor {

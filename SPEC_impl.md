@@ -3286,8 +3286,9 @@ refusal. No global geometry cache or new asset file is introduced.
   budget runs out, and notes why it stopped; every edge and image is then re-read, and the chain is cut below the first
   one that changed (an exec between observation and re-read). Anchoring runs in the supervisor, when it applies the
   report: the chain must contain the session's current pane process, by pid and start token while that process is alive
-  and by pid alone once it has exited and tmux still lists the pane, and is cut there; it must be one unbroken line of
-  parents within the depth and argv budgets, re-checked because the chain is now file input. Every launch runs a new
+  and by pid alone once it has exited and tmux still lists the pane (tmux 3.8 no longer reports a dead pane's pid, so
+  there a report applied after its agent exited is refused; a known gap), and is cut there; it must be one unbroken line
+  of parents within the depth and argv budgets, re-checked because the chain is now file input. Every launch runs a new
   pane process, so anchoring is also what ties a report to its launch, for every vendor. The per-kind step applies its
   own restrictive corridor to the anchored chain — only the reporter plus a narrow trampoline between runtime and
   reporter; any other session-hosting runtime or unclassified intermediary below the emitter refuses. Codex attributes

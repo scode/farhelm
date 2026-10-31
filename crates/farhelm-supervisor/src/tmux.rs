@@ -1670,14 +1670,15 @@ pub struct PaneProcess {
     /// process the agent starts keeps that pid as an ancestor, which is
     /// exactly the property a tree-kill needs.
     ///
-    /// `None` when tmux reported no pid at all. tmux 3.8 stopped
-    /// expanding `#{pane_pid}` once it has closed the pane's terminal,
-    /// which covers every dead pane and also the short window between
-    /// the terminal closing and tmux collecting the exit status (where
-    /// `dead` is still `false`). tmux 3.7c, the pinned build, always
-    /// expands it. Assuming it was always there is what made every
+    /// `None` only for a dead pane whose tmux reported no pid. tmux 3.8
+    /// stopped expanding `#{pane_pid}` once it has closed the pane's
+    /// terminal, which every dead pane has; tmux 3.7c, the pinned build,
+    /// always expands it. Assuming it was always there is what made every
     /// restart of an exited agent fail on tmux 3.8 with "cannot parse
-    /// integer from empty string".
+    /// integer from empty string". A pane that is NOT dead always has a
+    /// pid here: [`parse_pane_process_line`] refuses the other 3.8 shape
+    /// (terminal closed, exit status not yet collected) rather than
+    /// letting a live pane through with nothing to kill.
     ///
     /// When `dead` is `true` and this is `Some`, it is the LAST pid tmux
     /// remembers for the pane: stale, and it must never be walked or
@@ -1694,17 +1695,14 @@ pub struct PaneProcess {
 }
 
 impl PaneProcess {
-    /// The pid a kill or sweep may root at: the pane's process, while
-    /// tmux has not flagged the pane dead and still reports a pid.
+    /// The pid a kill or sweep may root at: the pane's process while tmux
+    /// has not flagged the pane dead, and `None` for a dead pane, whose
+    /// pid (when tmux still reports one) is stale.
     ///
-    /// This does NOT decide whether the agent is running; callers keep
-    /// reading `dead` for that, so stop, restart and delete pick the same
-    /// path on every tmux version. A pane that is not dead but has no pid
-    /// (tmux 3.8, between the terminal closing and the exit status being
-    /// collected) is a live pane with no root to walk from, the same
-    /// situation as a live pane whose process vanished before its
-    /// identity could be captured. The marker and scope sweeps still
-    /// cover it.
+    /// Whether the agent is running is still decided by `dead`, so stop,
+    /// restart and delete pick the same path on every tmux version; this
+    /// only keeps a dead pane's leftover number away from code that
+    /// signals or walks processes.
     pub fn live_pid(&self) -> Option<u32> {
         if self.dead { None } else { self.pid }
     }
@@ -1775,10 +1773,21 @@ pub enum PaneProbe {
 ///
 /// Split out of the query so the shapes different tmux versions print
 /// can be tested without running those versions: the pinned 3.7c always
-/// prints a pid, while 3.8 prints an empty one for a dead pane (see
-/// [`PaneProcess::pid`]). An empty pid is accepted only as "no pid";
-/// anything else that is not a number is still an error, because a pid
-/// this parser guessed at would anchor kills.
+/// prints a pid, while 3.8 prints an empty one once the pane's terminal
+/// has closed (see [`PaneProcess::pid`]).
+///
+/// An empty pid is accepted only on a dead pane. tmux 3.8 can also print
+/// an empty pid for a pane it does not yet call dead: the terminal has
+/// closed but tmux has not collected an exit status. For an ordinary exit
+/// that lasts a moment, but a pane program that closes its terminal and
+/// keeps running stays in it indefinitely, and a live pane with no pid
+/// would let stop and restart proceed with nothing to kill (the marker
+/// and scope sweeps do not reliably find such a process, notably on
+/// macOS). So that shape is an error, which every caller already treats
+/// as "could not tell" and refuses on, the same fail-closed answer the
+/// strict parse gave before tmux 3.8. Anything else that is not a number
+/// is an error too, because a pid this parser guessed at would anchor
+/// kills.
 fn parse_pane_process_line(session: &str, out: &str) -> anyhow::Result<PaneProbe> {
     // Only the line terminator is stripped, never surrounding spaces:
     // a session name's own leading or trailing whitespace is part of
@@ -1825,7 +1834,14 @@ fn parse_pane_process_line(session: &str, out: &str) -> anyhow::Result<PaneProbe
             owner: found_session.to_string(),
         });
     }
+    let dead = dead_field == "1";
     let pid = if pid_field.is_empty() {
+        if !dead {
+            anyhow::bail!(
+                "tmux reports this pane as not dead but gives no process id for it, which tmux \
+                 3.8 does while the pane's program is exiting; try again in a moment: {line:?}"
+            );
+        }
         None
     } else {
         Some(
@@ -1834,7 +1850,6 @@ fn parse_pane_process_line(session: &str, out: &str) -> anyhow::Result<PaneProbe
                 .with_context(|| format!("parsing pane_pid from {line:?}"))?,
         )
     };
-    let dead = dead_field == "1";
     Ok(PaneProbe::Owned(PaneProcess { pid, dead }))
 }
 
@@ -1874,11 +1889,12 @@ mod prompt_mode_tests {
     }
 }
 
-/// The pane process probe's parsing, against the literal lines each tmux
+/// The pane process probe's parsing, against the line shapes each tmux
 /// version prints. The pinned tmux 3.7c never prints an empty pid, so the
-/// suites that run real tmux cannot reach the 3.8 shapes; these lines are
-/// what tmux 3.8 printed for a dead agent pane in the field, where every
-/// restart, stop and delete of an exited session failed to parse them.
+/// suites that run real tmux cannot reach the 3.8 shapes. ` 1 <name>` is
+/// what tmux 3.8 printed for a dead agent pane in the field, where Restart
+/// of an exited session failed to parse it; ` 0 <name>` comes from reading
+/// tmux 3.8's source.
 #[cfg(test)]
 mod pane_process_line_tests {
     use super::{PaneProbe, PaneProcess, parse_pane_process_line};
@@ -1901,20 +1917,16 @@ mod pane_process_line_tests {
         );
     }
 
-    /// tmux 3.8 also drops the pid between closing a pane's terminal and
-    /// collecting the exit status, while `#{pane_dead}` still says 0. The
-    /// pane stays live (callers' stop/restart choice reads `dead`), but it
-    /// offers no pid to root a kill at.
+    /// tmux 3.8 also drops the pid once a pane's terminal closes while
+    /// `#{pane_dead}` still says 0, which lasts indefinitely if the pane's
+    /// program closed its terminal and kept running. A live pane with no
+    /// pid would let stop and restart go ahead with nothing to kill, so
+    /// this must stay an error, which callers refuse on.
     #[farhelm_testtrace::test]
-    fn tmux_3_8_closing_pane_is_live_without_a_pid() {
-        let PaneProbe::Owned(process) =
-            parse_pane_process_line(SESSION, &format!(" 0 {SESSION}\n")).expect("parses")
-        else {
-            panic!("an own pane must classify as owned");
-        };
-        assert!(!process.dead);
-        assert_eq!(process.pid, None);
-        assert_eq!(process.live_pid(), None);
+    fn tmux_3_8_live_pane_without_a_pid_is_refused() {
+        let error = parse_pane_process_line(SESSION, &format!(" 0 {SESSION}\n"))
+            .expect_err("a live pane with no pid must not parse");
+        assert!(error.to_string().contains("no process id"), "{error:#}");
     }
 
     /// The pinned tmux keeps printing a dead pane's last pid. It is still

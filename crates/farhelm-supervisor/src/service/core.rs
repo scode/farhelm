@@ -7235,12 +7235,9 @@ impl Supervisor {
             .pane_process_within(&hold.session, &hold.pane, Some(left))
             .await
         {
-            // A live pane with no pid to compare (tmux 3.8, as its terminal
-            // closes) is on its way out and will never write a matching
-            // mark, so it counts as settled like a dead one.
-            Ok(PaneProbe::Owned(pane)) if !pane.dead => pane
-                .live_pid()
-                .is_none_or(|pid| crate::session_hold::read_mark(&hold.held) == Some(pid)),
+            Ok(PaneProbe::Owned(pane)) if !pane.dead => {
+                crate::session_hold::read_mark(&hold.held) == pane.live_pid()
+            }
             Ok(_) => true,
             Err(error) => {
                 debug!(error = %format!("{error:#}"), "could not check a new session's pane");
@@ -16526,9 +16523,11 @@ impl Supervisor {
             ));
         };
         // tmux 3.8 stops reporting a pid once the pane's terminal closes
-        // (see `PaneProcess::pid`), so a report that arrives after the agent
-        // exited has nothing to anchor to there and is refused, where the
-        // pinned tmux 3.7c would still anchor it by the stale pid below.
+        // (see `PaneProcess::pid`), so a report still waiting to be applied
+        // after the agent exited has nothing to anchor to there and is
+        // refused, where the pinned tmux 3.7c would still anchor it by the
+        // stale pid below. A known gap, recorded in SPEC_impl.md: such a
+        // report can be the conversation a later Restart should resume.
         let Some(pid) = process.pid else {
             return Err(RequestError::new(
                 ErrorKind::Conflict,
