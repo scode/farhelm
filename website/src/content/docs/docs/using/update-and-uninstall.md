@@ -31,10 +31,11 @@ reopen it or your Mac reboots.
 ## Check for an update now
 
 To check right away, select the version number at the top of the sidebar, unless an update is already waiting. You can
-also select the **?** button there and choose **Check for updates**, or choose **Update** in the menu of your Mac's own
-row in the host list. Each one installs a new release if there is one. Beside the version number the app shows
-**Checking…**, then **Installing…**, **Up to date**, or **Check failed**. **Up to date** stays for about five seconds;
-**Check failed** stays until you dismiss it or check again, and hovering over it gives the reason.
+also select the **?** button at the foot of the [navigation rail](/docs/using/manage-hosts/) and choose **Check for
+updates**, or choose **Update** in the menu of your Mac's own row in the host list. Each one installs a new release if
+there is one. Beside the version number the app shows **Checking…**, then **Installing…**, **Up to date**, or **Check
+failed**. **Up to date** stays for about five seconds; **Check failed** stays until you dismiss it or check again, and
+hovering over it gives the reason.
 
 A check Farhelm makes by itself shows nothing while it goes well; when it installs an update, the version number turns
 red. If downloading or installing an update fails, **Check failed** appears right away. If Farhelm cannot reach the
@@ -51,10 +52,10 @@ interrupted works the same way: run it again to finish removing Farhelm, or run 
 
 ## Turn automatic updates off
 
-Select the gear at the top of the sidebar, choose **App**, and turn off **Install updates automatically**. Farhelm then
-stops checking by itself. **Check for updates** and your Mac's **Update** still work, and you can still update by
-running the installer again, as in [Install Farhelm](/docs/get-started/install/). The red version number still appears
-when a newer version is installed, however it got there.
+Select the gear at the foot of the navigation rail, choose **App**, and turn off **Install updates automatically**.
+Farhelm then stops checking by itself. **Check for updates** and your Mac's **Update** still work, and you can still
+update by running the installer again, as in [Install Farhelm](/docs/get-started/install/). The red version number still
+appears when a newer version is installed, however it got there.
 
 ## How updates are checked
 
@@ -70,8 +71,9 @@ it. See the [security model](/docs/how-it-works/security-model/) for the rest of
 ## Update remote hosts, or uninstall
 
 Your remote hosts are not updated automatically unless you turn on **Update remote hosts automatically** in Settings,
-under **Hosts**. Once Farhelm on your Mac has restarted on a new version, the host list shows which hosts run an older
-version and lets you update them; see [Manage hosts](/docs/using/manage-hosts/#update-a-host).
+under **Hosts**. Once Farhelm on your Mac has restarted on a new version, the **Hosts** button at the foot of the
+navigation rail shows an up-arrow, the session list offers to update the hosts that run an older version, and the host
+list lets you update them; see [Manage hosts](/docs/using/manage-hosts/#update-a-host).
 
 To remove Farhelm, see [Uninstall Farhelm](/docs/get-started/uninstall/). Uninstall keeps your managed checkouts,
 including their trash and [prepared checkouts](/docs/using/start-a-session/#prepared-checkouts) inside the directory set

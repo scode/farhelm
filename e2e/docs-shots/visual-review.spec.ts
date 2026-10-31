@@ -916,7 +916,7 @@ async function hostHintShots(page: Page, request: APIRequestContext, scenario: S
   const host = hostRowByName(page, remote.alias);
   const remove = page.locator(".host-remove-dialog");
   const window = [page.locator("body")];
-  const hint = 'Undo "don\'t ask again" with the gear at the foot of the host rail';
+  const hint = 'Undo "don\'t ask again" with the gear at the foot of the navigation rail';
   try {
     await openHostMenu(host);
     await host.locator(".host-remove").click();

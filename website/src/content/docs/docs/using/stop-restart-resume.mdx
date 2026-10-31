@@ -13,7 +13,8 @@ again; after a stop its terminal stays readable too. Only deleting a session rem
 ## The header's actions
 
 The action buttons share the row above the terminal with its tabs. The session's name, host, and other details are in
-the bar below the terminal.
+the bar below the terminal. **Restart** and **Replace** each have an arrow beside them that opens a menu with the plain
+action and **Restart with…** or **Replace with…**.
 
 <Screenshot
   name="stop-restart-resume/header-actions"
@@ -22,19 +23,22 @@ the bar below the terminal.
 
 Restart always continues the session's own conversation; there is no restart that starts a new one. When Farhelm has no
 conversation it can resume, because the agent cannot report one or none was captured, **Restart** is greyed out and
-hovering over it says why. Right after a launch that is usually just a wait: Farhelm captures a Codex conversation once
+hovering over it says why. Right after a launch that is usually just a wait: Farhelm captures a Codex or [Muse](/docs/agents/muse/) conversation once
 you submit your first prompt, a Pi or OMP conversation after the agent's first reply, a Claude conversation a few
 seconds after it starts, a Goose conversation as soon as it starts, and a Grok conversation after your first prompt,
 once [its hooks](/docs/agents/grok/#setup) are installed; **Restart** can take a couple of seconds more to become
 available. If it never comes, replace is how you start the session over. [Supported agents](/docs/agents/) says which
 agents Farhelm can resume, and a command you run yourself needs an agent and a resume command declared for it; see
-[Custom commands](/docs/agents/custom-commands/).
+[Custom commands](/docs/agents/custom-commands/). A [containerized session](/docs/agents/containerized-sessions/)
+never offers Restart; replace it instead.
 
-**Restart with** resumes the conversation the same way, with different settings. It opens the
+**Restart with…**, in the menu beside **Restart**, resumes the conversation the same way, with different settings. It opens the
 [session launcher](/docs/using/start-a-session/) filled in with this session's choices, where you can change the model,
-effort, permission mode or wrapper prefix; the agent, host, directory, session name and first message stay as they are. For an agent Farhelm can resume, you can also name the conversation it should enter. If
+effort, permission mode or wrapper prefix; the agent, host, directory, session name and first message stay as they are; [templates](/docs/using/launch-templates/)
+work here as long as they leave those as they are. For an agent Farhelm can resume, you can also name the conversation it should enter. If
 Farhelm never learned its id, **Restart with** remains available and requires the id or, for Pi and OMP, the session
-file. Muse, Cursor and OpenCode still cannot use Restart with. Enter on one of its choices picks it and restarts
+file. Cursor and OpenCode cannot use Restart with, and neither can a Muse session started before Farhelm could resume Muse;
+[Muse](/docs/agents/muse/#restarting-a-conversation) says how to recreate it. Enter on one of its choices picks it and restarts
 with the result (in the model field, Enter only picks the model); when the button says **Stop and restart**, because the agent is working, Enter also confirms stopping
 it first.
 
@@ -43,7 +47,7 @@ For Codex, Muse and Pi in a managed checkout, **Replace with** and **Clone** use
 Plain **Restart** and **Replace** keep the trust carried by the saved launch.
 
 The entered conversation is a choice for this start only, as in [the session launcher](/docs/using/start-a-session/#continue-a-conversation-you-know).
-Farhelm keeps the previous conversation until the agent reports the new one. Codex reports at your first prompt, so
+Farhelm keeps the previous conversation until the agent reports the new one. Codex and Muse report at your first prompt, so
 Restart before then still opens the previous conversation. Goose cannot report after this kind of start; naming a new
 conversation forgets the old one and leaves later Restart unavailable. The same happens for an agent whose Farhelm
 hooks are turned off with `FARHELM_AGENT_HOOKS`, except Grok, whose hooks are the ones you install.
@@ -81,7 +85,8 @@ buttons and returns you to the terminal.
 keyboard, including Rename and the quick switcher.
 
 To delete, replace, restart and close shell tabs on the first click, turn on **Skip session confirmations** in
-the **Sessions** section of **Settings**, behind the gear beside the sidebar version. It starts off and applies to your
+the **Sessions** section of **Settings**, behind the gear at the foot of the [navigation rail](/docs/using/manage-hosts/), the column of icons down the left edge
+of the sidebar. It starts off and applies to your
 helm; other open windows pick it up when they reload. YOLO, host and trash questions keep their own rules, and **Restart with** still opens the
 launcher.
 
@@ -89,8 +94,8 @@ For a [managed checkout](/docs/using/start-a-session/#start-from-a-managed-check
 session uses it; deleting its last session moves the directory, including uncommitted work, into
 `.farhelm-trash` in the directory managed checkouts go into. Existing trash moves into this hidden directory
 automatically when Farhelm next uses it. This archive is the checkout's trash: the
-move preserves its contents and frees no disk space. The [trash button beside
-New](/docs/using/session-list/#managed-checkout-trash) shows where to recover that work and lets you delete it
+move preserves its contents and frees no disk space. The [trash button at the top of the session
+list](/docs/using/session-list/#managed-checkout-trash) shows where to recover that work and lets you delete it
 permanently, one checkout at a time or all at once. If the move fails, Delete still removes the session and tells you
 which directory was left behind; Farhelm no longer manages it.
 

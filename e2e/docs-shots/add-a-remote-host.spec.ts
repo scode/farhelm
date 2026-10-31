@@ -25,10 +25,14 @@ async function openAddDialog(page: Page) {
 
 test("add button", async ({ page, request }) => {
   const { director } = await open(page, request);
-  await showHostsPanel(page);
-  const button = page.locator(".add-host-button");
+  // The always-visible way in: Add host on the navigation rail, which never
+  // opens the host list.
+  const button = page.locator(".host-rail-add");
+  await expect(button).toBeVisible();
   await director.callout(button, "Adds a host: a Linux machine you can reach over ssh.", { side: "right" });
-  await shot(page, `${PAGE}/add-button`, [button, page.locator(".host-list")], { maxWidth: 900 });
+  // The hosts above the button and the callout; the whole rail runs the
+  // window's full height.
+  await shot(page, `${PAGE}/add-button`, [button, page.locator(".host-rail-entry").first()], { maxWidth: 900 });
 });
 
 test("add dialog", async ({ page, request }) => {

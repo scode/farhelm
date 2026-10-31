@@ -13,7 +13,8 @@ another, rename, stop, restart, or delete sessions, change your [launch template
 [add, edit or remove hosts](/docs/using/approve-agent-requests/#host-changes). It can also ask to open a web link in
 your browser ([Open links from a remote session](#open-links-from-a-remote-session)). Farhelm asks you before any of
 those changes happens, whoever typed the command; a command you type yourself in a session's terminal is asked about the
-same way. Looking never asks.
+same way. Looking never asks. An agent in a [containerized session](/docs/agents/containerized-sessions/) cannot make
+any of these requests.
 
 An agent starting another session can supply its first message with `--prompt` or `--prompt-file` (`-` reads stdin). The
 approval card shows the full message. It is sent once when the new agent starts; restarting, copying or replacing that
@@ -127,7 +128,7 @@ When an agent or a command in a remote session tries to open a web link through 
 your machine. The card names the session and host and shows the site it would open and the full URL. Only HTTP and HTTPS
 links are accepted. **Allow** opens it in your default browser from the Mac app, or in a new tab from Farhelm's web UI.
 **Deny** opens nothing. Commands can also ask directly with `farhelm agent open-url -- https://example.com`, from any
-session, including ones on your Mac.
+session except a [containerized](/docs/agents/containerized-sessions/) one, including ones on your Mac.
 
 The host settings have two separate permissions, both off initially. **Open links without asking** covers public
 addresses. **Open local-network links without asking** covers addresses on your own machine or private network; those
@@ -148,10 +149,10 @@ most programs do, so its own opener does not forward; use the explicit Farhelm c
 
 In the Mac app, a localhost link from a remote session also offers **Tunnel and open** first. That opens the service on
 the remote host; **Open** keeps the ordinary behavior of reaching the address on your Mac. The first tunnel needs your
-acceptance of a security warning, and you can close tunnels below the session's title or turn them off under
-**Terminal** in settings. [Work in a session](/docs/using/work-in-a-session/#open-a-remote-localhost-link) explains the
-access you grant. A host's permission to open links without asking still opens the raw address; it does not create a
-tunnel automatically.
+acceptance of a security warning, and you can close tunnels from their list beside the session's terminal tabs or turn
+them off under **Terminal** in settings.
+[Work in a session](/docs/using/work-in-a-session/#open-a-remote-localhost-link) explains the access you grant. A host's
+permission to open links without asking still opens the raw address; it does not create a tunnel automatically.
 
 A login redirecting to `localhost` on the remote host is not forwarded automatically. Opening a link does not itself
 connect that remote login callback to your machine.

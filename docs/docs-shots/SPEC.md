@@ -22,22 +22,26 @@ something the fleet lacks, as long as the existing shots still show what their p
 ## What is real and what is not
 
 Everything visible comes from a real helm, real supervisors, and real terminals, with the hero's two exceptions (the
-staged fleet, and each row's age and folder rewritten in transit) and five more, all of them in transit, all of them
-from `scenario.json5`, and no others. The last two are installed only for the shots that ask for them, so every other
-shot shows the fleet's real replies:
+staged fleet, and each row's age and folder rewritten in transit) and six more, all of them in transit, all of them from
+`scenario.json5`, and no others. The last two are installed only for the shots that ask for them, so every other shot
+shows the fleet's real replies:
 
 - **Launch history.** The session launcher's recent setups come from launches it remembers. A fresh stack remembers
   none, and staged sessions are not launches made from the launcher, so the history reply carries the scenario's
   `launch_history` instead. The model catalog the launcher checks those setups against is the real one.
 - **Recent folders.** The folders offered under the launcher's folder field come from the same reply, from the
   scenario's `folders`.
+- **Folder check.** The launcher checks that the directory it will start in exists on the chosen host, and warns under
+  the field when it does not. The scenario's directories are invented and do not exist on the capturing machine, so for
+  a directory the scenario names on that host (in `folders`, `sessions` or `launch_history`) the check answers that it
+  exists. Browsing a directory, and checking any other path, still reaches the real helm.
 - **Host destinations.** Host settings and details show each host's ssh destination. The staged remotes are self-ssh
   spellings on the capturing machine, and one of them names its account, which must never be photographed, so every host
   reply shows each remote's `shown_ssh` instead.
-- **Managed checkout trash.** The trash beside new lists managed checkouts whose last session was deleted. Making one
-  needs a real GitHub clone, which the staged fleet does not make, so the trash shots get the scenario's
-  `checkout_trash` as each host's listing, with names and paths built the way Farhelm records an archive. Deleting from
-  that trash is refused outright.
+- **Managed checkout trash.** The trash at the top of the session list lists managed checkouts whose last session was
+  deleted. Making one needs a real GitHub clone, which the staged fleet does not make, so the trash shots get the
+  scenario's `checkout_trash` as each host's listing, with names and paths built the way Farhelm records an archive.
+  Deleting from that trash is refused outright.
 - **Terminal file checks.** Hovering a file path in a session's terminal checks it on the session's host and shows the
   host, the full path, and the size. The staged sessions' real directories are the run's temporary state, which must
   never be photographed, and the transcripts name files that do not exist there, so the download shot gets the
@@ -121,6 +125,11 @@ when the pinned snapshot lacks a release shot it should carry over rather than d
 A shot is a test in `e2e/docs-shots/<page>.spec.ts` named after the page. It opens the staged fleet, drives the UI to
 the state it shows without launching sessions or changing settings, draws annotations with the docs overlay theme, and
 calls `shot(page, "<page>/<shot>", [regions])`. The image is cropped to the regions plus every annotation on screen.
+
+Every docs shot, release shots included, is taken in the app's dark theme. The maintainer wants no light theme in the
+docs, and the app follows the device's appearance, which Playwright emulates as light unless told otherwise, so
+`e2e/docs-shots.config.ts` makes dark the default for every test. Only `visual-review.spec.ts`, whose shots no page
+shows, chooses light explicitly.
 
 `visual-review.spec.ts` is the development-review exception: it captures unannotated app surfaces in dark and light
 mode, at wide and constrained window widths, for the Steel plans' visual reviews. It may change the owned staged fleet's

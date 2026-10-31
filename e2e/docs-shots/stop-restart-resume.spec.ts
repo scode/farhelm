@@ -53,11 +53,11 @@ test("row menu", async ({ page, request }) => {
   await director.callout(
     panel.locator(".session-row-stop"),
     "Stop: ends the agent and everything it started. The session and its terminal stay.",
-    { side: "right", dy: -20 },
+    { side: "right", dy: -5 },
   );
   await director.callout(panel.locator(".session-row-delete"), "Delete: removes the session altogether.", {
     side: "right",
-    dy: 40,
+    dy: 30,
   });
   await shot(page, `${PAGE}/row-menu`, [row, panel], { maxWidth: 930 });
 });

@@ -24,8 +24,12 @@ const stackBaseURL = `http://127.0.0.1:${stackPort}`;
 // after the config is loaded and reads the variable rather than a path.
 process.env[STACK_INFO_ENV] = DOCS_STACK_INFO_PATH;
 
+// Docs shots are dark by default: the app follows the device's appearance, and
+// Playwright emulates light unless told otherwise. A test that wants light,
+// as visual-review.spec.ts does for its review shots, sets it explicitly.
 const browser = {
   ...devices["Desktop Chrome"],
+  colorScheme: "dark" as const,
   viewport: { width: scenario.viewport.width, height: scenario.viewport.height },
   deviceScaleFactor: scenario.viewport.scale,
 };

@@ -32,7 +32,7 @@ your Mac, and they keep running on the host while your Mac sleeps or Farhelm is 
 
 <Screenshot
   name="add-a-remote-host/add-button"
-  alt="The add button at the top of the host list."
+  alt="The Add host button on the navigation rail."
 />
 
 <Screenshot
@@ -52,27 +52,31 @@ closes. Otherwise Farhelm shows what it would set up there and asks first:
 />
 
 When the host has no new enough tmux, Farhelm brings its own copy, as the list shows. After you choose **Set up**, the
-dialog closes and the host's row in the host list follows the setup until it is done:
+dialog closes and setup runs: the host's mark on the [navigation rail](/docs/using/manage-hosts/), the column of icons
+down the left edge of the sidebar, shows a ring until it is done, and its row in the host list, under **Hosts** at the
+rail's foot, shows each step:
 
 <Screenshot
   name="add-a-remote-host/connected-host"
   alt="A remote host in the host list with its green connected dot explained."
 />
 
-The host now appears in the session launcher's host menu; see [Start a
+The host now appears on the navigation rail, where choosing it shows only its sessions, and in the session launcher's
+host menu; see [Start a
 session](/docs/using/start-a-session/#choose-where-it-runs). On the host, Farhelm runs as a service of your user
 account, so it and its sessions keep running after you disconnect. It starts again when the machine boots where the
 system allows that, and at your next login where it does not.
 
 To have Farhelm ask again before setting up a host, turn off **Set up new hosts without asking** under **Hosts** in the
-settings behind the gear at the top of the sidebar; [Manage hosts](/docs/using/manage-hosts/) has the rest of a host's settings.
+settings behind the gear at the foot of the navigation rail; [Manage hosts](/docs/using/manage-hosts/) has the rest of a host's settings.
 
 ## If something goes wrong
 
 - When Farhelm cannot reach the host, the dialog shows ssh's own error. Check that `ssh <destination> true` works in
   a terminal without a password.
 - A host without systemd's services for your user account cannot be set up automatically, and the dialog says so.
-- When setup fails partway, open the host's `⋯` menu and choose **Re-run** to try again.
+- When setup fails partway, the host's mark on the navigation rail shows a warning until you open **Hosts**, where its
+  row shows which step failed. Choose **Re-run** in the host's `⋯` menu there to try again.
 - Adding a destination that is already in your host list is refused, and the dialog names that host. To set it up
   again, use **Update** in its `⋯` menu, or **Re-run** if its setup failed.
 

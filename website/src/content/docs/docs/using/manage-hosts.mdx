@@ -7,18 +7,23 @@ sidebar:
 
 import Screenshot from '../../../../components/Screenshot.astro';
 
-The host list at the top of the sidebar holds every machine that runs your sessions: your Mac, listed as **Local (this
-machine)**, and each Linux machine you added. Each row's dot says whether Farhelm can reach that host right now. Adding
-a host is covered in [Add a remote host](/docs/get-started/add-a-remote-host/).
+The navigation rail, the column of icons down the left edge of the sidebar, shows every machine that runs your
+sessions: your Mac, captioned **Local**, and each Linux machine you added, each with its mark, a short name, and a dot
+that says whether Farhelm can reach that host right now. Rest the pointer on the rail to see full names. Choosing a host
+there shows only its sessions, and **All** shows every host's again ([Read the session list](/docs/using/session-list/)).
+The **Hosts** button at the foot of the rail swaps the session list for the host list, where your Mac is listed as
+**Local (this machine)** and everything on this page happens; choose a host or **All** on the rail to go back. Adding a
+host is covered in [Add a remote host](/docs/get-started/add-a-remote-host/).
 
 ## The host menu
 
 <Screenshot
   name="manage-hosts/host-menu"
-  alt="A remote host's menu, opened from its three dots, with retry, settings, uninstall, and remove explained."
+  alt="A remote host's menu, opened from its three dots, with settings, uninstall, and remove explained."
 />
 
-**Update** installs your Mac's version of Farhelm on the host; [Update a host](#update-a-host) has more. Other items
+Open it from a host's `⋯` in the host list, or right-click the host's mark on the navigation rail. **Update** installs
+your Mac's version of Farhelm on the host; [Update a host](#update-a-host) has more. Other items
 appear only when a host needs attention, such as setting Farhelm up on a host that does not have it yet. Your Mac's own
 row has no **Uninstall** or **Remove**. In the Farhelm app installed on your Mac, its **Update** checks for a new
 release of Farhelm and installs it, as [Update or uninstall Farhelm](/docs/using/update-and-uninstall/) describes. In a
@@ -34,7 +39,8 @@ If **Retry** or **Adopt** fails, a dialog shows why.
 
 The destination is what you would type after `ssh`, such as `dev@build-box` or a name from your ssh configuration. The
 alias is only for display: it changes how the host is shown everywhere in Farhelm, up to 64 characters, and nothing on
-the host itself. Your Mac's destination cannot be changed. **Start YOLO sessions without asking** is the same choice the
+the host itself. Without an alias, the navigation rail and the session list show a short name instead: the first part
+of the hostname, or the whole IP address. Your Mac's destination cannot be changed. **Start YOLO sessions without asking** is the same choice the
 YOLO confirmation offers when you [start a session](/docs/using/start-a-session/#confirm-a-yolo-launch). **Run farhelm
 commands without asking** decides whether agents in this host's sessions ask you before they start, stop, change, or
 delete sessions, or edit or delete your launch templates; [Approve what agents do](/docs/using/approve-agent-requests/)
@@ -48,7 +54,8 @@ the web UI's one-click opening, and why allowing local-network links needs a sep
 replaced host turns all four permissions off again.
 
 For any host, choose an icon and a color under **Appearance** to tell its sessions apart at a glance. The mark
-appears beside its sessions, in the host list and quick switcher, and in the session launcher's host picker. Each choice saves
+appears on the navigation rail, beside its sessions, in the host list and quick switcher, and in the session launcher's
+host picker. Each choice saves
 as you make it and appears in your other open Farhelm windows. Your Mac starts with a red laptop mark, which you can change.
 
 In Settings, **Color terminal frames by host** under **Sessions** adds a thin frame around every terminal in its host's
@@ -58,9 +65,10 @@ they reload.
 
 ## Update a host
 
-The **Hosts** button shows an up-arrow when a host has an update. The session list also shows a card for optional
-updates, or a banner when a host must be updated before you can use it. Both let you update those hosts or open the host
-list; you can dismiss the optional card.
+When a host has an update, its mark on the navigation rail and the **Hosts** button at the rail's foot show an
+up-arrow. While the host list is closed, the session list also shows a card for optional updates, or a banner when a
+host must be updated before you can use it. Both let you update those hosts or open the host list with **Show hosts**;
+you can dismiss the optional card.
 
 When a remote host runs an older version of Farhelm than your Mac, an **↑ Update** button appears beside its name: amber
 when updating is optional, red when the host cannot connect until it is updated. Hover over it to see both versions.
@@ -68,11 +76,13 @@ Clicking it updates the host straight away, without asking, and shows the progre
 top of the host list updates every remote host at once.
 
 Updating a host does not interrupt its sessions: they keep running through the update.
-If Farhelm cannot plan an update, a dialog shows the reason before anything changes.
+If Farhelm cannot plan an update, a dialog shows the reason before anything changes. If an update fails while the host
+list is closed, the host's mark on the rail shows a warning until you open **Hosts**, where its row shows what happened.
 
 To have Farhelm update remote hosts as soon as updates are available, turn on **Update remote hosts automatically** in
 Settings, under **Hosts**. It starts off. Once on, it works whenever Farhelm is running, which on your Mac means while
-the app is open. It never updates your Mac. The choice applies to every remote host; other open Farhelm windows pick it
+the app is open. It never updates your Mac. If an automatic update of a host fails, Farhelm does not try that host again
+until it reconnects or Farhelm restarts; the host keeps its up-arrow, so you can update it yourself. The choice applies to every remote host; other open Farhelm windows pick it
 up when they reload.
 
 ## Uninstall Farhelm from a remote host
@@ -121,7 +131,7 @@ a refusal opens a short dialog instead.
   alt="The Settings dialog with hosts selected, showing the section list and the switches for asking before setting up or removing hosts."
 />
 
-The gear beside the version number at the top of the sidebar opens Settings at **Sessions**. Choose **Hosts** in its
+The gear at the foot of the navigation rail, below **Hosts**, opens Settings at **Sessions**. Choose **Hosts** in its
 section list for these two questions. Turning on **Set up new hosts without asking** or **Remove hosts without asking**
 skips that question for actions you start in the UI; turn it off to be asked again.
 [Agents' host requests](/docs/using/approve-agent-requests/#host-changes) still need your approval. These two apply to
@@ -139,7 +149,9 @@ and, in the desktop app, file types to open with a modifier-click and
 [**Keep a checkout ready for faster launches**](/docs/using/start-a-session/#prepared-checkouts), while **Agent trust** holds the managed-checkout trust switches; both are covered in
 [Start a session](/docs/using/start-a-session/#start-from-a-managed-checkout).
 
-**Notifications** groups [sounds](/docs/using/session-list/#sounds-when-an-agent-needs-you) and
+**Appearance** chooses **System**, **Dark** or **Light**; **System** follows your device's own setting, and the terminal
+stays dark either way. Unlike the other settings, this choice is kept by the browser or app on this device rather than
+by your helm. **Notifications** groups [sounds](/docs/using/session-list/#sounds-when-an-agent-needs-you) and
 [ntfy alerts](/docs/using/session-list/#ntfy-alerts). In the installed Farhelm app on your Mac, **App** holds **Install
 updates automatically**, which is about updating Farhelm itself; see
 [Turn automatic updates off](/docs/using/update-and-uninstall/#turn-automatic-updates-off).
@@ -148,7 +160,7 @@ updates automatically**, which is about updating Farhelm itself; see
 
 <Screenshot
   name="manage-hosts/details"
-  alt="The host list with details ticked: each host's Farhelm version, sessions, and a renamed host's destination."
+  alt="The host list with Details switched on: each host's Farhelm version, sessions, and a renamed host's destination."
 />
 
 ## Next

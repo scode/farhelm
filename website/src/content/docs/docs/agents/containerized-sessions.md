@@ -21,11 +21,11 @@ GitHub token. Other host directories and Farhelm's own credentials are kept outs
 
 :::caution[Git hooks in the checkout]
 
-The agent can change anything in the checkout, including the Git hooks and settings in its `.git` folder and an agent's
-own project settings. Those can run with your account's full access when Git or an agent later runs in that checkout
-outside the container: from your terminal, a shell prompt that shows Git status, your editor or a later ordinary
-session. Treat the checkout as untrusted after a containerized session and check its `.git` folder and agent settings
-before entering it from the host.
+The agent can change anything in the checkout, including the Git hooks and settings in its `.git` directory and an
+agent's own project settings. Those can run with your account's full access when Git or an agent later runs in that
+checkout outside the container: from your terminal, a shell prompt that shows Git status, your editor or a later
+ordinary session. Treat the checkout as untrusted after a containerized session and check its `.git` directory and agent
+settings before entering it from the host.
 
 :::
 
@@ -113,9 +113,10 @@ mounts or environment settings you put there.
 Farhelm imposes no CPU or memory limits on the container; its programs can still exhaust the host's resources.
 
 Farhelm's conversation integration is off inside the container. It still reads the agent's screen for status, but it
-does not follow the conversation or warn about missing conversation reports, and `$farhelm` requests are unavailable.
-The host's Claude trust configuration is not changed. **Restart** and **Restart with** are unavailable; **Replace** or
-**Replace with** starts a fresh session and container.
+does not follow the conversation or warn about missing conversation reports. `$farhelm` requests are unavailable, and
+links opened inside the container do not reach your browser through Farhelm. The host's Claude trust configuration is
+not changed. **Restart** and **Restart with** are unavailable; **Replace** or **Replace with** starts a fresh session
+and container.
 
 ## Stopping and deleting
 

@@ -36,10 +36,10 @@ What Farhelm can then do for a custom-command session depends on what you tell i
 
 ## Declaring the agent
 
-Declaring the agent type gives the session what Farhelm does for that agent, as far as the agent allows: Claude's and
-Codex's reading of the screen, including showing when the agent waits for you, and conversation tracking for Claude,
-Codex, Goose, OMP, Pi, and Grok (with its hooks installed). Declaring Cursor, Muse, or OpenCode gives no tracking, since
-Farhelm has none for them.
+Declaring the agent type gives the session what Farhelm does for that agent, as far as the agent allows: Claude's,
+Codex's and Muse's reading of the screen, including showing when the agent waits for you (for Muse, only at its
+directory-trust question), and conversation tracking for Claude, Codex, Muse, Goose, OMP, Pi, and Grok (with its hooks
+installed). Declaring Cursor or OpenCode gives no tracking, since Farhelm has none for them.
 
 A declared agent needs `{farhelm_args}` in the command, once, as a whole argument, where that agent's own arguments go.
 Farhelm puts there whatever it needs to follow the conversation; for an agent that takes nothing, it becomes nothing.
@@ -54,13 +54,13 @@ where `{conversation}` stands. Without all of that, **Restart** stays greyed out
 
 The resume command is usually the start command plus the agent's own way of picking a conversation:
 
-| Agent     | Resume command, after your start command's options                        |
-| --------- | ------------------------------------------------------------------------- |
-| Claude    | `--resume {conversation} {farhelm_args}`                                  |
-| Codex     | `resume {conversation} {farhelm_args}`                                    |
-| Goose     | `--resume --session-id {conversation} {farhelm_args}`, on `goose session` |
-| OMP, Grok | `--resume {conversation} {farhelm_args}`                                  |
-| Pi        | `--session {conversation} {farhelm_args}`                                 |
+| Agent       | Resume command, after your start command's options                        |
+| ----------- | ------------------------------------------------------------------------- |
+| Claude      | `--resume {conversation} {farhelm_args}`                                  |
+| Codex, Muse | `resume {conversation} {farhelm_args}`                                    |
+| Goose       | `--resume --session-id {conversation} {farhelm_args}`, on `goose session` |
+| OMP, Grok   | `--resume {conversation} {farhelm_args}`                                  |
+| Pi          | `--session {conversation} {farhelm_args}`                                 |
 
 So `claude --model sonnet {farhelm_args}` resumes as `claude --model sonnet --resume {conversation} {farhelm_args}`.
 Your answer to **Runs in YOLO mode** covers the resume command too.

@@ -5,9 +5,9 @@ sidebar:
   order: 8
 ---
 
-To tell Farhelm's maintainer something, whether a bug, a wish, or a one-line remark, select the **?** button at the top
-of the sidebar, to the right of the gear, and choose **Send feedback**. Type your message and, if you want an answer,
-how to reach you. Then select **Send**.
+To tell Farhelm's maintainer something, whether a bug, a wish, or a one-line remark, select the **?** button at the foot
+of the [navigation rail](/docs/using/manage-hosts/), the column of icons down the left edge of the sidebar, and choose
+**Send feedback**. Type your message and, if you want an answer, how to reach you. Then select **Send**.
 
 Your feedback goes privately to the maintainer. It is not a public issue, and you need no account for it. If you would
 rather discuss something in the open, you can still [open an issue on GitHub](https://github.com/scode/farhelm/issues).
@@ -33,7 +33,8 @@ it shows the new remembered contact after you reload it.
 If sending fails, the dialog says so and keeps your text, so you can try again or copy it. The remembered contact stays
 as it was.
 
-The same menu's **Documentation** item opens these docs in your browser, and **Release notes** opens
+The same menu's **Documentation** item opens these docs in your browser, **Keyboard shortcuts** shows the
+[keys Farhelm uses](/docs/using/keyboard-shortcuts/), and **Release notes** opens
 [what changed in each release](/docs/release-notes/). **SSH needs 2FA?** shows commands to start connections to
 [hosts that ask for approval on every ssh login](/docs/get-started/add-a-remote-host/). **Welcome** shows the
 introduction again, with a link to [your first session](/docs/get-started/first-session/). In the Farhelm app on your

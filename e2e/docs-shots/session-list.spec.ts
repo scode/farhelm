@@ -59,24 +59,32 @@ test("statuses", async ({ page, request }) => {
 });
 
 test("list controls", async ({ page, request }) => {
-  await page.setViewportSize({ width: 930, height: 1000 });
   const { director } = await open(page, request);
+  // The menu stays closed: its choices carry their own descriptions, and
+  // opening it hides the status filter behind it. The title's and the status
+  // filter's callouts sit right of the list, the host's under the rail.
   const filter = page.locator(".host-rail-avatar").first();
   const sort = page.locator(".sort-title");
-  await sort.click();
-  const menu = page.getByRole("menu", { name: "Sort", exact: true });
-  const compact = menu.getByRole("menuitemcheckbox", { name: /^Compact(?:$|\s)/ });
-  await expect(compact).toBeVisible();
-  // Stack the labels over the terminal within the docs-width viewport;
-  // a wide-window offset would put the last label beyond this shot's crop.
-  await director.callout(compact, "One line per session, for a long list.", { side: "right", dy: 260 });
-  await director.callout(filter, "Show only one host's sessions.", { side: "right", dx: 420, dy: 220 });
-  await director.callout(sort, "Order: recently active (working and waiting agents first), newest created, or by title.", {
+  const status = page.locator(".session-status-filter");
+  await expect(status).toBeVisible();
+  await director.callout(
+    sort,
+    "The list's order. Click it for Recently active, Newest created or Title A–Z, or for Compact: one line per session.",
+    { side: "right", dx: 320, dy: 0 },
+  );
+  await director.callout(status, "Show only running, waiting or idle sessions. Ended sessions appear under All.", {
     side: "right",
-    dx: 280,
-    dy: 80,
+    dx: 40,
+    dy: 120,
   });
-  await shot(page, `${PAGE}/controls`, [filter, sort, menu], { maxWidth: 930 });
+  // Below the rail's top rather than beside it, so its arrow runs up the rail
+  // instead of across the list.
+  await director.callout(filter, "Show only this host's sessions; All above it shows every host.", {
+    side: "bottom",
+    dx: 120,
+    dy: 300,
+  });
+  await shot(page, `${PAGE}/controls`, [filter, sort, status], { maxWidth: 930 });
 });
 
 test("row menu", async ({ page, request }) => {

@@ -273,6 +273,35 @@ async function installDocsRewrites(page: Page, request: APIRequestContext, scena
     }));
     await route.fulfill({ status: response.status, headers, json: body });
   });
+
+  // The launcher's folder check (a membership-only directory browse) asks the
+  // real host about the scenario's invented directories, which do not exist
+  // on the capturing machine, so every launcher shot would warn that its
+  // folder is missing. For those directories alone, on their own host, the
+  // check answers that they exist. Browse and any other path still reach the
+  // real helm. The reply carries the helm's build stamp, as the trash's does:
+  // a reply without one latches build skew for the rest of the page.
+  const identity = await request.get("/api/hosts");
+  expect(identity.ok(), "GET /api/hosts for the staged folder check").toBeTruthy();
+  const build = requireHelmBuild(identity, "docs staged folder check");
+  const home = (cwd: string) => cwd.replace(/^\/home\/you(?=\/|$)/, "~");
+  const known = new Set(
+    [...(scenario.folders ?? []), ...scenario.sessions, ...(scenario.launch_history ?? [])].map(
+      (place) => `${place.host}\n${place.cwd}`,
+    ),
+  );
+  await page.route((url) => url.pathname === "/api/browse-directory", async (route) => {
+    const body = route.request().postDataJSON() as { host?: number; cwd?: string; membership_only?: boolean };
+    const key = body.host === undefined ? undefined : keyById.get(body.host);
+    if (!body.membership_only || !body.cwd || !key || !known.has(`${key}\n${home(body.cwd)}`)) {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({
+      headers: { "x-farhelm-build": build },
+      json: { cwd: body.cwd, parent: null, children: [], truncated: false },
+    });
+  });
 }
 
 /**
