@@ -65,8 +65,8 @@ Linux" below).
   [the agent wrappers page](../website/src/content/docs/docs/agents/agent-wrappers.md).
 
 To use an ordinary browser instead of the app window, quit the app, run a standalone `farhelm helm run` on the same
-state directory, open `http://127.0.0.1:7433/`, and paste the token printed by `farhelm helm token show`. Quitting the
-app also stops its local supervisor, so local sessions keep running without one until you relaunch the app.
+state directory, open `http://127.0.0.1:7433/`, and paste the token printed by `farhelm helm token show`. The app's
+local supervisor keeps running after you quit the app, so the standalone helm connects to it.
 `farhelm helm token rotate` replaces that token and invalidates every browser that has signed in.
 
 ## Setting up supervisors

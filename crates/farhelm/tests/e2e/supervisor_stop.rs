@@ -19,9 +19,14 @@ use crate::harness::*;
 /// How the test asks the supervisor to stop.
 #[derive(Clone, Copy, Debug)]
 enum Stop {
-    /// What `systemctl stop`/`restart` sends under `KillMode=process`.
+    /// What `systemctl stop`/`restart` sends under `KillMode=process`, and
+    /// what the desktop app and uninstall send to stop the app's detached
+    /// supervisor (`farhelm_supervisor::managed_supervisor`).
     Sigterm,
-    /// The desktop app exiting: its end of the stdin tether closes.
+    /// The parent of a supervisor run with `--exit-on-stdin-close` closing
+    /// its end of that stdin tether. The desktop app used to run its
+    /// supervisor that way and no longer does; the option remains for tests
+    /// and other parents that want the supervisor's lifetime tied to theirs.
     TetherClosed,
     /// A terminal hangup: the terminal the supervisor's stderr is on goes
     /// away, then SIGHUP reaches the whole process group the supervisor
@@ -66,14 +71,15 @@ async fn sigterm_closes_output_clients_in_order_and_exits_cleanly() {
     stop_attached_supervisor(Stop::Sigterm).await;
 }
 
-/// Spec: the desktop app's stdin tether closing runs the same orderly output
-/// shutdown as SIGTERM before the managed supervisor exits.
+/// Spec: a closed stdin tether (`--exit-on-stdin-close`) runs the same
+/// orderly output shutdown as SIGTERM before the supervisor exits.
 /// Its agent must still answer fresh input after the tether closes, since
 /// a retained dead pane alone would not prove running work survived.
 ///
 /// Why it matters: the tether used to be raced against the supervisor and
 /// win by dropping it mid-stream, which is the same abrupt close as a
-/// signal death; quitting the desktop app is a routine stop, not a crash.
+/// signal death; a tethering parent going away is a routine stop, not a
+/// crash.
 #[farhelm_testtrace::test]
 async fn a_closed_desktop_tether_closes_output_clients_in_order() {
     stop_attached_supervisor(Stop::TetherClosed).await;
@@ -419,14 +425,14 @@ async fn an_inherited_ignored_hangup_leaves_the_supervisor_running() {
     );
 }
 
-/// Spec: a desktop-managed supervisor whose tether closes while it is still
-/// starting up exits promptly, even when a tmux command it is waiting on
-/// never returns.
+/// Spec: a tethered supervisor (`--exit-on-stdin-close`) whose tether closes
+/// while it is still starting up exits promptly, even when a tmux command it
+/// is waiting on never returns.
 ///
 /// Why: building a supervisor runs tmux commands with no timeout of their
 /// own (starting the private server among them). If the stop were only
-/// watched once serving began, a desktop app that quit during a hung
-/// startup would leave its managed supervisor running with no parent.
+/// watched once serving began, a tethering parent that went away during a
+/// hung startup would leave its supervisor running with no parent.
 /// Nothing streams before startup finishes, so there is nothing to close in
 /// order; the process should simply go.
 #[farhelm_testtrace::test]

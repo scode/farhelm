@@ -243,7 +243,10 @@ pub mod checkout_config;
 
 /// Private local coordination between the token CLI and a serving helm.
 mod token_control;
-pub use token_control::{rotate as rotate_token, show as show_token};
+pub use token_control::{
+    LOCK_NAME as HELM_LOCK_FILE, SERVING_CLAIM_WAIT as HELM_LOCK_WAIT, rotate as rotate_token,
+    show as show_token,
+};
 
 /// Local and SSH transport implementations behind the connection manager's seam.
 mod transport;

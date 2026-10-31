@@ -1243,11 +1243,12 @@ enum SupervisorCmd {
         /// defined ordering for those stages against a stable release.
         #[arg(long = "tmux", value_name = "PATH")]
         tmux: Option<PathBuf>,
-        /// Exit when the spawning desktop app closes its inherited pipe.
+        /// Exit when the spawning parent closes the pipe it gave as stdin.
         ///
         /// Hidden because ordinary foreground and systemd supervisors own
-        /// their own lifetime; only the bundled desktop launcher holds the
-        /// corresponding pipe open.
+        /// their own lifetime. The desktop app used it to tie its supervisor
+        /// to itself and no longer does (it starts the supervisor detached;
+        /// `farhelm_supervisor::managed_supervisor`); tests still use it.
         #[arg(long, hide = true)]
         exit_on_stdin_close: bool,
         /// TEST ONLY: read this host's boot id from PATH instead of the

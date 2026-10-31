@@ -184,10 +184,12 @@ open -n --stdout "$guest_evidence/launch.stdout" --stderr "$guest_evidence/launc
 ```
 
 Both releases exercised the real logged-in GUI session and retained the first launch's stderr, including old updater
-activity. For ordinary updates, use **? → check for updates**, then select the changed version readout and its **restart
-to update** item. Its helper's candidate relaunch had stderr routed to `/dev/null` on the exercised guest; report that
-diagnostic gap. Do not manually launch the candidate to conceal a failed helper. A later deliberate quit and reopen may
-use the verified launch command with new evidence filenames.
+activity. A release whose app starts its supervisor detached writes the supervisor's diagnostics to
+`~/.local/state/farhelm/supervisor.log` instead of `launch.stderr`; collect that file as well. For ordinary updates, use
+**? → check for updates**, then select the changed version readout and its **restart to update** item. Its helper's
+candidate relaunch had stderr routed to `/dev/null` on the exercised guest; report that diagnostic gap. Do not manually
+launch the candidate to conceal a failed helper. A later deliberate quit and reopen may use the verified launch command
+with new evidence filenames.
 
 Native override forwarding remains unverified until an installed stable release carries the override. Check its source
 at the actual old tag and follow RECIPE.md's path selection. A successful ordinary updater run proves neither forwarding

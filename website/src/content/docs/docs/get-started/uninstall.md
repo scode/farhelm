@@ -21,9 +21,14 @@ every version kept inside it, and the `farhelm` command from `~/.local/bin`. It 
 checkouts. Your projects, your agents, tmux, and your managed checkouts (including their trash and
 [prepared checkouts](/docs/using/start-a-session/#prepared-checkouts) in `.farhelm-spares` inside the directory set as
 **Checkout folder**) are not touched. To see the list without changing anything, add `--dry-run`. If Farhelm is still
-open when you confirm, it refuses and asks you to quit it first, and nothing is removed. It also refuses while any other
-program still runs a version of Farhelm, and names the `lsof` command that shows which one, so you can quit it and run
-uninstall again. If an uninstall is interrupted, running it again finishes it.
+open when you confirm, it refuses and asks you to quit it first, and nothing is removed.
+
+Farhelm's [supervisor](/docs/how-it-works/the-pieces/), the part that keeps your sessions running, keeps running after
+you quit Farhelm. Uninstall stops it for you once you confirm, and lists that among what it will do. If it does not stop
+within about 15 seconds, uninstall refuses and nothing is removed. A supervisor you started yourself is left alone:
+uninstall refuses while it runs and names the `lsof` command that shows it. It also refuses while any other program
+still runs a version of Farhelm, and names the `lsof` command that shows which one, so you can quit it and run uninstall
+again. If an uninstall is interrupted, running it again finishes it.
 
 If uninstall refuses because the installation's record is newer than it understands and asks you to rerun the installer,
 it is an uninstall from an older Farhelm, typed in a terminal tab whose session still runs that older version. Quit

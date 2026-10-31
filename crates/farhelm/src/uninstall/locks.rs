@@ -58,8 +58,11 @@ use std::{
 const INSTALL_LOCK: &str = ".farhelm-install.lock";
 /// The supervisor's state-directory lock (`supervisor.lock`).
 const SUPERVISOR_LOCK: &str = "supervisor.lock";
-/// The helm's state-directory lock (`helm-token.lock`).
-const HELM_LOCK: &str = "helm-token.lock";
+/// The helm's state-directory lock (`helm-token.lock`). Named through the
+/// helm's own constant: the desktop app's supervisor record is safe only
+/// because every writer and remover of it, uninstall included, holds this
+/// same lock.
+const HELM_LOCK: &str = farhelm_helm::HELM_LOCK_FILE;
 
 /// The installer's lock on the install directory, held by this uninstall.
 ///

@@ -781,13 +781,13 @@ are not.
   displays; do not fix it blind. Deferred in review-feedback triage on 2026-10-11
   (`window-restoration-uses-wrong-display-scale-macos.md`).
 
-- **Let the Mac's supervisor outlive the desktop app.** Quitting the app stops the Mac's local supervisor while its
-  sessions keep running, so until the app is reopened the agents' `farhelm` commands that need a supervisor
-  (`farhelm spawn`, and the `farhelm agent` verbs, which also need the helm) fail inside those sessions. Consider
-  letting the supervisor keep running after the app quits (the app already reuses a supervisor it finds running), or a
-  launchd agent like the Linux systemd units, so that those commands, and the skills and command-line features built on
-  them, keep working with the app closed. Deferred 2026-10-04 while planning `plans/queue/hook-report-files.md`, which
-  keeps conversation tracking working without a supervisor and states this gap in the spec as expected for now.
+- **Let the Mac's supervisor outlive the desktop app.** The local supervisor now keeps running after the app quits, but
+  the helm lives in the app, so until the app is reopened the agents' `farhelm` commands that need it (`farhelm spawn`,
+  and the `farhelm agent` verbs) fail inside those sessions, and nothing restarts a supervisor that crashes while the
+  app is closed or starts one at login. Consider a launchd agent like the Linux systemd units, so that those commands,
+  and the skills and command-line features built on them, keep working with the app closed. Deferred 2026-10-04 while
+  planning `plans/queue/hook-report-files.md`, which keeps conversation tracking working without a supervisor and states
+  this gap in the spec as expected for now.
 
 - **Keep a nested Grok from erasing the session's conversation switch.** A `grok` started inside a Grok session can make
   Restart resume the wrong conversation. Here's the sequence. You are in conversation A in a Grok session and run

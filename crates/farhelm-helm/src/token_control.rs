@@ -21,7 +21,11 @@ use std::path::{Path, PathBuf};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 
 const SOCKET_NAME: &str = "helm-token.sock";
-const LOCK_NAME: &str = "helm-token.lock";
+/// The helm's state-directory lock file: held by a serving helm for its
+/// lifetime (an open desktop app's embedded helm included), and taken briefly
+/// by offline token commands. Other programs that must not act while an app
+/// is open (uninstall, a desktop launch replacing its supervisor) test it.
+pub const LOCK_NAME: &str = "helm-token.lock";
 const MAX_REPLY_BYTES: u64 = 128;
 const CONTROL_DEADLINE: std::time::Duration = std::time::Duration::from_secs(2);
 /// How long the CLI waits for the helm's answer once `rotate` was sent.
@@ -42,7 +46,7 @@ const ROTATE_REPLY_DEADLINE: std::time::Duration = std::time::Duration::from_sec
 /// after it restarts the helm. A serving helm holds the lock for its whole
 /// life. Waiting this long rides out the CLI and still refuses a rival helm
 /// within seconds.
-const SERVING_CLAIM_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+pub const SERVING_CLAIM_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
 /// Pause between a starting helm's ownership attempts; the same cadence the
 /// CLI's own retry uses.
 const SERVING_CLAIM_RETRY: std::time::Duration = std::time::Duration::from_millis(10);
