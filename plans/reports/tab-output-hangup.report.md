@@ -155,3 +155,76 @@ focused regression and correction. No finding was rejected. Scope reassessment f
 diagnostics sufficient, without a new lifecycle subsystem. Separate review of both validation failures found no concrete
 patch defect and recommended retaining the observations without assertion weakening or broader hunting. The commit/PR
 wording passed an independent cold read.
+
+### Landing
+
+Landed on its second attempt, with no fixes at landing. The plan could not find what terminated the command in the
+reported incident; it delivers the agreed fallback: terminal-tab cleanup now checks a terminal's identity before it
+kills or relaunches anything, so a cleanup can no longer hit the wrong terminal, and the log now records more context
+(pauses and the session's processes) toward finding the cause if it happens again, though not proof of it.
+
+- #2846: the identity checks on tab cleanup and Restart's relaunch, the diagnostics, tests, the specification text and a
+  changelog entry.
+
+The first landing attempt (2026-10-30) sent this plan back because an ordinary Restart's relaunch would fail with a tmux
+syntax error for a session whose folder path contains `}`. The redelivery single-quotes every word of the commands it
+nests inside tmux (the environment, the folder, the window command, the window kill and the reads of the terminal's
+state), and adds an end-to-end test that restarts a live session in a folder ending in `left}right` through that
+relaunch, against a real tmux.
+
+#### What landed since the stack was based, and whether it interacted
+
+Nothing that landed on main since touches tmux or tab cleanup. sqlite-wal landed right before this plan in the same
+round; the two change separate code.
+
+#### Things you should know
+
+- One tmux quirk quoting cannot fix: inside a quoted word, tmux drops spaces and tabs after a newline, and a newline
+  followed by `#` starts a comment. A session folder whose name contains a newline followed by a space, tab or `#` would
+  restart in the wrong folder (tmux falls back to the home directory). Creating such a session still works; refusing
+  such paths, or writing the newline differently, would be a follow-up.
+- Before each kill step of Stop, Delete and Restart's cleanup, the supervisor now asks the systemd user manager which
+  processes the session holds, only to log them (up to 5 seconds on a slow manager); and closing a tab fails if tmux's
+  pane listing fails.
+
+#### Checks
+
+This round landed sqlite-wal and tab-output-hangup, stacked in that order on main `e9095ef8`. On that stack:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, the web-target UI lint,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, the check that every
+  test delay states its reason (`python -B scripts/check-test-sleeps.py`, 327 delays, none without a reason),
+  `dprint check`, `python3 releasing/check-changelog.py format`, the workspace debug build and the UI's release web
+  build: all passed.
+- The UI's Rust tests, `cargo nextest run -p farhelm-ui`, run `a47ccf43-6220-4fa1-a441-918dd35fd486`: all 833 passed;
+  its desktop-build tests, `cargo nextest run -p farhelm-ui --features desktop`, run
+  `19b4cecc-69ec-47c1-9d7b-1549b0f5d95c`: all 1016 passed. The UI's JavaScript tests (`node --test` in
+  `crates/farhelm-ui/js-tests`), run `f937cb3a-908c-4912-aa54-16e68f300565`: all 383 passed.
+- The whole Rust workspace, `cargo nextest run --workspace --exclude farhelm-desktop`, with the pinned test runner and
+  tmux, no retries, on a machine with rootless Podman, run `c7309da5-bfd5-494f-a120-8ee35001698e`: all 4612 passed, 41
+  left out by the test runner (tests marked ignored, such as real-agent captures).
+- The whole browser suite on Chromium and WebKit, on ten Tensorlake sandboxes at the maintainer's request (cloud virtual
+  machines, not the usual development machine; each booted the usual three test stacks and ran its share of the suite's
+  218 projects through the recorder's generic mode, `python3 scripts/record-test-run.py --kind development ...` running
+  `npx playwright test --project=<engine>-<spec> ... --retries=0`, with the binaries and web bundle built locally from
+  this stack; Node 24.16 there, against 24.20 locally). It took 16 minutes. Across the ten runs
+  (`0c8864cb-3172-4c93-b299-459fe2be756c`, `8b206f4c-20eb-4e1f-9502-c77dd9f59481`,
+  `0beabe85-c643-48b7-a4c0-d5f75e2f686a`, `bc37b0d7-481a-4b8d-b693-76657dab38a1`,
+  `7df60eb0-647f-4a3e-b2bf-db779a98a056`, `b4321572-5693-4867-a361-fcdc51e4d2cc`,
+  `a3114930-73dc-4590-8467-de75e94d1d93`, `a4a4ad3b-56c1-426f-8377-149f23f29d12`,
+  `8ac5a34e-85cd-4f2c-86c5-ac9756d7ba46`, `3419f1ed-b945-43c4-96ab-3403b80ca8c0`; only the two failed runs' records were
+  kept), 2846 passed, 14 skipped by design, 2 failed, both on WebKit. Re-run three times each on the same build, also on
+  sandboxes, with `-g` and `--repeat-each=3` (runs `f075c442-c5a9-401a-a226-ec07dffc3f8e` and
+  `7b4a27da-01e2-4721-aef3-c5c6c201ae50`). "unchanged launcher tab, harness, permissions and default model retain the
+  retry › selected Agent Home" (launcher Enter: the Launch button did not take keyboard focus within 5 seconds) passed 3
+  of 3; it is a first observation with no known cause, its record is kept, and it is not logged as a flake on one
+  observation. "the dialog refuses blank and over-long messages without sending" (the Send feedback dialog) is a
+  recorded open flake, but this time it failed on the Send button's background color (dark where light was expected,
+  which fits the record's color-scheme hypothesis) and once more in the three runs alone, both new to its record.
+  Neither plan touches either.
+- Reused: nothing. Not run: the doctests (the stack adds no doc examples), `cargo check -p farhelm-desktop` and the
+  desktop smoke tests (only a message changed in the desktop code, and the desktop-feature UI build was checked above),
+  the docs website build (no page changed) and the native Mac app (not runnable on Linux).
+
+The report's checks were the executor's selected runs; this landing ran the checks below, in which the two tests the
+report disclosed as failing during execution passed. Nothing in the executor's report became untrue at landing.
