@@ -11,7 +11,8 @@
  *   make-template --name <sandbox>     bootstrap a fresh sandbox, prove it with a probe shard, snapshot it, print the ID
  *   run --template <snapshot> --prefix <name-prefix> --shards <n> --out <dir> [--grep <title>] [--repeat <n>]
  *       [project ...]                  shard the projects (default: all) over clones of the template, collect results;
- *                                      --grep and --repeat narrow a rerun and apply to every shard
+ *                                      --grep and --repeat narrow a rerun and apply to every shard; --reuse-pack
+ *                                      sends the previous run's pack (the same build) instead of packing again
  *   sweep [--keep <snapshot>]          terminate ledger sandboxes still alive, delete snapshots of ledger sandboxes
  *
  * The sandbox-side work is in `bootstrap.sh` and `run-shard.sh` beside this file. They are Bash because they run on the
@@ -173,7 +174,9 @@ async function freeNames(prefix: string, n: number) {
 // --- subcommands
 
 async function run(a: Record<string, string>, projects: string[]) {
-  const pack_ = await pack(a.scratch);
+  // A rerun of failures must test the same build. Rust test builds relink `target/debug/farhelm` with test features, so
+  // packing again while or after they run would send a different binary; --reuse-pack keeps the earlier pack.
+  const pack_ = a["reuse-pack"] ? `${a.scratch}/pack` : await pack(a.scratch);
   const shards = balance(projects.length ? projects : allProjects(), Number(a.shards), specLines);
   const names = await freeNames(a.prefix, shards.length);
   const extra = [...(a.grep ? ["-g", a.grep] : []), ...(a.repeat ? [`--repeat-each=${a.repeat}`] : [])];
@@ -217,6 +220,7 @@ async function makeTemplate(a: Record<string, string>) {
 if (import.meta.main) {
   const args = parseArgs(Deno.args, {
     string: ["scratch", "name", "template", "prefix", "shards", "out", "keep", "repo", "grep", "repeat"],
+    boolean: ["reuse-pack"],
   });
   const [cmd, ...rest] = args._.map(String);
   const a = args as unknown as Record<string, string>;

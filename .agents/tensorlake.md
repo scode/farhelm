@@ -35,11 +35,13 @@ agent needs to run them, and to rebuild the sandbox template from scratch when t
    left, so they must come from that revision.
 2. `scripts/tensorlake/sandbox-tests.ts run --scratch <dir> --template <snapshot> --prefix <name-prefix> --shards <n> --out <dir> [--grep <title>] [--repeat <n>] [project ...]`.
    Projects are named as in `e2e/playwright.config.ts` (`chromium-settings`, `webkit-settings`); with none it runs every
-   project of the suite. `--grep` and `--repeat` apply to every shard and are for narrow reruns of failures. The script
-   packs the tracked tree, the binaries, the web bundle, the pinned tmux and a one-commit Git checkout; balances the
-   projects into shards by spec size (WebKit weighted heavier); clones one sandbox per shard; runs all shards at once,
-   each in one attached exec; copies back each shard's `summary.txt` and `console.log`, and for a failed shard its
-   retained run directories as `runs.tar.gz`; and terminates and sweeps.
+   project of the suite. `--grep` and `--repeat` apply to every shard and are for narrow reruns of failures; add
+   `--reuse-pack` to send the previous run's pack, the same build, because a Rust test build since then relinks
+   `target/debug/farhelm` with test features. The script packs the tracked tree, the binaries, the web bundle, the
+   pinned tmux and a one-commit Git checkout; balances the projects into shards by spec size (WebKit weighted heavier);
+   clones one sandbox per shard; runs all shards at once, each in one attached exec; copies back each shard's
+   `summary.txt` and `console.log`, and for a failed shard its retained run directories as `runs.tar.gz`; and terminates
+   and sweeps.
 3. Read the results like any recorded run. Each shard is its own recorder run, identified by the run ID in its
    `summary.txt`; its record lives on the sandbox and goes with it, except a failed shard's, which comes back as the
    tarball. A failed run's tarball is the retained evidence `.agents/test-evidence.md` requires; keep it until the
