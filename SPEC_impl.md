@@ -1504,6 +1504,10 @@ by the flow-control window and ultimately by the stall detach. The permission is
 the supervisor no longer takes it up (see the session sink, below) — it is what keeps the layers above free of any
 assumption about which way tmux answered.
 
+Pause-recovery logs identify the session's terminal and whether its output pump requested a pause after pane death or
+observed ordinary tmux flow control. A death request can overlap a pause already queued by flow control; the log reports
+the request rather than claiming those events are mutually exclusive.
+
 The producer-side bound is tmux's, and tmux implements it in one of two ways. With `pause-after` set on the supervisor's
 control client, a client that stops reading gets EITHER of these (audited 2026-07-29 on 3.3a, 3.4, and 3.7b, both with a
 standalone control client and through the full supervisor stack):
@@ -3636,6 +3640,14 @@ refusal. No global geometry cache or new asset file is introduced.
   new agent as an outer tab's process. On both platforms the marker is read from the memory where the kernel placed the
   environment at exec (`/proc/<pid>/environ` on Linux, `KERN_PROCARGS2` on macOS), which is live: a program that
   rewrites its process title can overwrite it, and SPEC.md accepts that such a detached process escapes the sweep.
+
+  Automatic tab cleanup rechecks the whole tab window under its lifecycle claim before signalling: an old ticker death
+  observation does not authorize ending a shell that is live now. Its log names the tab, pane and tmux death report.
+  Window kills validate pane and session identity in the same synchronous tmux command group as the kill, so a vanished
+  pane cannot redirect cleanup to its session's current window. Explicit tab closes and failed-open cleanup name their
+  reason. Each process-sweep signal logs the target and a capped list of successful syscall recipients. Scope signals
+  log a capped best-effort direct-member snapshot, or mark it unavailable; membership can change before systemd delivers
+  the signal, and nested cgroup members are not included in that diagnostic snapshot.
 
   The sweep sends SIGTERM, allows a short grace, quiesces with SIGSTOP, re-enumerates, sends SIGKILL, and polls for
   confirmed disappearance. PID/start-time revalidation narrows reuse races; it does not make the separate identity read

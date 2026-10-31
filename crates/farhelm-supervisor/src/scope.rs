@@ -119,6 +119,26 @@ const UNIT_POLL_INTERVAL: Duration = Duration::from_millis(50);
 /// found on a host is recognizably ours.
 const UNIT_PREFIX: &str = "farhelm-";
 
+/// Decode only complete PID records from a bounded cgroup.procs read.
+/// A byte cap can split a decimal PID into a different valid number, so an
+/// unterminated final record at that boundary supplies no membership evidence.
+fn parse_process_snapshot(text: &str, byte_cap_reached: bool) -> Option<(Vec<u32>, bool)> {
+    let complete = if byte_cap_reached && !text.ends_with('\n') {
+        &text[..text.rfind('\n').map_or(0, |end| end + 1)]
+    } else {
+        text
+    };
+    let mut pids = complete
+        .lines()
+        .map(str::parse::<u32>)
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?;
+    pids.sort_unstable();
+    let truncated = pids.len() > 32 || byte_cap_reached;
+    pids.truncate(32);
+    Some((pids, truncated))
+}
+
 /// The transient scope unit name for one launch of one session, or `None`
 /// for a session id that cannot safely name a unit.
 ///
@@ -1060,6 +1080,59 @@ impl ScopeManager {
         }
     }
 
+    /// Best-effort diagnostic snapshot of direct members of this scope.
+    /// It grants no kill authority and cannot affect teardown success. A
+    /// concurrent fork, exit or cgroup move can change recipients after this
+    /// sample; callers must label it as a snapshot, not a signal receipt.
+    /// None means unavailable; the boolean says the 32-PID list was capped.
+    pub(crate) async fn process_snapshot(&self, unit: &str) -> Option<(Vec<u32>, bool)> {
+        #[cfg(test)]
+        if matches!(self.mode, Mode::Fake { .. }) {
+            return Some((Vec::new(), false));
+        }
+        if !matches!(self.mode, Mode::Systemd) {
+            return None;
+        }
+        let tools = self.tools(false).await?;
+        let out = run_with_timeout(tokio::process::Command::new(&tools.systemctl).args([
+            "--user",
+            "show",
+            "--property=ControlGroup",
+            "--value",
+            unit,
+        ]))
+        .await
+        .ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        let group = std::str::from_utf8(&out.stdout).ok()?.trim();
+        let relative = group.strip_prefix('/')?;
+        if relative.is_empty()
+            || std::path::Path::new(relative)
+                .components()
+                .any(|part| !matches!(part, std::path::Component::Normal(_)))
+        {
+            return None;
+        }
+        let path = std::path::Path::new("/sys/fs/cgroup")
+            .join(relative)
+            .join("cgroup.procs");
+        tokio::task::spawn_blocking(move || {
+            use std::io::Read;
+            let mut text = String::new();
+            std::fs::File::open(path)
+                .ok()?
+                .take(16 * 1024)
+                .read_to_string(&mut text)
+                .ok()?;
+            parse_process_snapshot(&text, text.len() == 16 * 1024)
+        })
+        .await
+        .ok()
+        .flatten()
+    }
+
     /// Send `signal` to EVERY process in `unit`'s cgroup.
     ///
     /// The whole point of the mechanism: `systemctl kill` with the default
@@ -1578,6 +1651,25 @@ mod tests {
     use super::*;
     use std::sync::Arc;
 
+    /// A byte-capped diagnostic must never invent membership from a PID
+    /// prefix. Complete records survive, and truncation remains explicit even
+    /// when the partial suffix contains no newline at all.
+    #[test]
+    fn process_snapshot_discards_a_pid_split_by_the_byte_cap() {
+        let records = "8\n123456\n";
+        let captured = &records[..4];
+        assert_eq!(captured, "8\n12", "fixture cap cuts the second PID");
+        assert_eq!(
+            parse_process_snapshot(captured, true),
+            Some((vec![8], true))
+        );
+        assert_eq!(parse_process_snapshot("12", true), Some((vec![], true)));
+        assert_eq!(parse_process_snapshot("8\n", true), Some((vec![8], true)));
+        assert_eq!(
+            parse_process_snapshot(records, false),
+            Some((vec![8, 123456], false))
+        );
+    }
     /// The program lookup skips a copy under a directory whose path is not
     /// valid UTF-8 and keeps walking, so junk early on the supervisor's
     /// `$PATH` cannot hide the ordinary copy; with only the unusable copy

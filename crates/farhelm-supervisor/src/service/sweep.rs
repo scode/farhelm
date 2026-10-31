@@ -649,7 +649,8 @@ fn enumerate_tree(
 /// start-time will have moved on (or the pid will be gone outright), and
 /// this refuses to touch whatever now holds that number.
 ///
-/// Returns `Ok(())` for every outcome that is NOT a genuine failure worth
+/// Returns whether the signal syscall succeeded. A false result means no
+/// recipient was confirmed; it is not a failure worth
 /// reporting: the pid being gone entirely, its start-time no longer
 /// matching (pid reused), and `ESRCH` from the signal call itself (a
 /// benign race against the process's own concurrent exit — a DIFFERENT
@@ -660,7 +661,7 @@ fn enumerate_tree(
 /// process this sweep was supposed to reach could not be confirmed
 /// reachable, which the caller must learn about rather than silently
 /// treat as handled.
-fn signal_validated(pid: u32, expected_starttime: u64, signal: i32) -> Result<(), String> {
+fn signal_validated(pid: u32, expected_starttime: u64, signal: i32) -> Result<bool, String> {
     match procs::read_process(pid) {
         Ok(Some((_, starttime, _state))) if starttime == expected_starttime => {
             // SAFETY: `libc::kill` validates `pid` itself; passing a pid
@@ -674,11 +675,11 @@ fn signal_validated(pid: u32, expected_starttime: u64, signal: i32) -> Result<()
                     return Err(format!("signaling pid {pid} with signal {signal}: {err}"));
                 }
             }
-            Ok(())
+            Ok(ret == 0)
         }
         // Gone, or a different process now wears this number: neither is
         // ours to signal, and neither is an error.
-        Ok(_) => Ok(()),
+        Ok(_) => Ok(false),
         Err(e) => Err(format!("re-validating pid {pid} before signaling: {e}")),
     }
 }
@@ -695,6 +696,33 @@ fn signal_all(pids: &HashMap<u32, u64>, signal: i32) -> Vec<String> {
             errors.push(e);
         }
     }
+    errors
+}
+
+/// Record actual successful signal syscalls, without changing selection or
+/// allowing a large tree to flood the log. PIDs that vanished or changed
+/// identity before the syscall do not appear as signal recipients.
+fn signal_sweep(
+    pids: &HashMap<u32, u64>,
+    signal: i32,
+    session_id: &str,
+    target: &SweepTarget,
+) -> Vec<String> {
+    let mut errors = Vec::new();
+    let mut signalled = Vec::new();
+    for (&pid, &starttime) in pids {
+        match signal_validated(pid, starttime, signal) {
+            Ok(true) => signalled.push(pid),
+            Ok(false) => {}
+            Err(error) => errors.push(error),
+        }
+    }
+    signalled.sort_unstable();
+    let signalled_count = signalled.len();
+    signalled.truncate(32);
+    info!(session = %session_id, tab = ?target.selects_tab(), target = ?target, signal,
+        signalled_count, pids = ?signalled, truncated = signalled_count > signalled.len(),
+        errors = errors.len(), "process-tree sweep signal completed");
     errors
 }
 
@@ -1103,7 +1131,12 @@ async fn kill_process_tree_with_grace(
         hangup: HashSet::new(),
     };
     let mut found = enumerate_or_reuse(None, session_id, &seed, target, &mut errors).await;
-    errors.extend(signal_all(&found.identities, libc::SIGTERM));
+    errors.extend(signal_sweep(
+        &found.identities,
+        libc::SIGTERM,
+        session_id,
+        target,
+    ));
     // Hang up the tab processes too. An interactive shell ignores SIGTERM
     // (bash does, absent a trap) but exits on SIGHUP, which is the signal
     // its terminal closing would have delivered; without it a tab's shell
@@ -1123,7 +1156,7 @@ async fn kill_process_tree_with_grace(
             .map(|(&pid, &starttime)| (pid, starttime))
             .collect(),
     };
-    errors.extend(signal_all(&to_hang_up, libc::SIGHUP));
+    errors.extend(signal_sweep(&to_hang_up, libc::SIGHUP, session_id, target));
 
     // The grace is a bounded wait on everything just signalled, not a
     // fixed sleep: it ends as soon as every one of those pids is confirmed
@@ -1134,7 +1167,12 @@ async fn kill_process_tree_with_grace(
     let _ = poll_until_gone(&found.identities, grace).await;
 
     found = enumerate_or_reuse(None, session_id, &found, target, &mut errors).await;
-    errors.extend(signal_all(&found.identities, libc::SIGSTOP));
+    errors.extend(signal_sweep(
+        &found.identities,
+        libc::SIGSTOP,
+        session_id,
+        target,
+    ));
     let mut stopped = StoppedProcessGuard::new();
     stopped.record(&found.identities);
 
@@ -1155,7 +1193,12 @@ async fn kill_process_tree_with_grace(
             break;
         }
         stopped.record(&newly_found);
-        errors.extend(signal_all(&newly_found, libc::SIGSTOP));
+        errors.extend(signal_sweep(
+            &newly_found,
+            libc::SIGSTOP,
+            session_id,
+            target,
+        ));
     }
     if !converged {
         // This diagnostic explains why the bounded fixpoint failed. It leads
@@ -1165,7 +1208,7 @@ async fn kill_process_tree_with_grace(
     }
 
     let kill_set = stopped.kill_set(&found.identities);
-    errors.extend(signal_all(&kill_set, libc::SIGKILL));
+    errors.extend(signal_sweep(&kill_set, libc::SIGKILL, session_id, target));
     stopped.disarm();
     errors.extend(confirm_gone(&kill_set, KILL_CONFIRM_TIMEOUT).await);
 
@@ -1615,6 +1658,27 @@ async fn kill_scope(
     kill_scope_with_grace(scopes, unit, session_id, KILL_GRACE).await
 }
 
+/// Describe only the derived target scope, never broad host process state.
+/// Membership is a capped best-effort snapshot; systemd selects recipients at
+/// its later signal call, so these diagnostics do not claim exact delivery.
+async fn signal_scope(
+    scopes: &crate::scope::ScopeManager,
+    unit: &str,
+    session_id: &str,
+    signal: &str,
+) -> anyhow::Result<()> {
+    let snapshot = scopes.process_snapshot(unit).await;
+    let tab = unit
+        .strip_prefix(&format!("farhelm-{session_id}-tab-"))
+        .and_then(|tail| tail.strip_suffix(".scope"));
+    info!(session = %session_id, tab = ?tab, unit, signal,
+        member_snapshot = ?snapshot.as_ref().map(|(pids, _)| pids),
+        snapshot_available = snapshot.is_some(),
+        snapshot_truncated = snapshot.as_ref().is_some_and(|(_, capped)| *capped),
+        "signalling cgroup scope; member snapshot can race delivery");
+    scopes.kill(unit, signal).await
+}
+
 /// [`kill_scope`] with the SIGTERM grace bound as a parameter, for the
 /// same reason [`kill_process_tree_with_grace`] has one: a test can make
 /// "ended early" and "ran the full bound" each unambiguous.
@@ -1650,7 +1714,7 @@ async fn kill_scope_with_grace(
         session = %session_id, unit,
         "killing the launch's cgroup scope before the backstop process-tree sweep"
     );
-    if let Err(e) = scopes.kill(unit, "SIGTERM").await {
+    if let Err(e) = signal_scope(scopes, unit, session_id, "SIGTERM").await {
         advisory.push(format!("{e:#}"));
     }
     // A tab's scope holds an interactive shell, which ignores SIGTERM and
@@ -1659,7 +1723,7 @@ async fn kill_scope_with_grace(
     // sitting it out and dying to the SIGKILL; a launch scope holds the
     // agent, whose graceful SIGTERM handling a hangup would pre-empt.
     if crate::scope::is_tab_unit(unit)
-        && let Err(e) = scopes.kill(unit, "SIGHUP").await
+        && let Err(e) = signal_scope(scopes, unit, session_id, "SIGHUP").await
     {
         advisory.push(format!("{e:#}"));
     }
@@ -1674,7 +1738,7 @@ async fn kill_scope_with_grace(
     // failure. A check that itself fails counts as "still there", since the
     // honest response to "cannot tell" is to try.
     if !wait_for_scope_to_retire(scopes, unit, grace).await
-        && let Err(e) = scopes.kill(unit, "SIGKILL").await
+        && let Err(e) = signal_scope(scopes, unit, session_id, "SIGKILL").await
     {
         advisory.push(format!("{e:#}"));
     }
@@ -3448,5 +3512,40 @@ mod tests {
         signal_validated(pid, real_starttime, libc::SIGKILL)
             .expect("signaling with the correct starttime must succeed");
         let _ = child.wait();
+    }
+
+    /// A signal receipt names its exact tab and only successful recipients.
+    /// The owned child establishes a real syscall outcome, while a stale
+    /// identity must not be described as a process that received the signal.
+    #[farhelm_testtrace::test]
+    fn sweep_signal_log_distinguishes_recipients_from_stale_candidates() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("60")
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        let (_, identity, _) = procs::read_process(pid)
+            .unwrap()
+            .expect("owned child is live");
+        let target = SweepTarget::Tab("sample-tab".into());
+        let stale = HashMap::from([(pid, identity.wrapping_add(1))]);
+        assert!(signal_sweep(&stale, libc::SIGKILL, "sample-session", &target).is_empty());
+        assert!(
+            child.try_wait().unwrap().is_none(),
+            "stale identity must not signal the child"
+        );
+        let live = HashMap::from([(pid, identity)]);
+        assert!(signal_sweep(&live, libc::SIGKILL, "sample-session", &target).is_empty());
+        child.wait().unwrap();
+        let lines = farhelm_testtrace::current_capture()
+            .unwrap()
+            .matching("process-tree sweep signal completed")
+            .unwrap();
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].fields["signalled_count"], "0");
+        assert_eq!(lines[1].fields["signalled_count"], "1");
+        assert_eq!(lines[1].fields["pids"], format!("[{pid}]"));
+        assert_eq!(lines[1].fields["tab"], format!("{:?}", Some("sample-tab")));
+        assert_eq!(lines[1].fields["truncated"], "false");
     }
 }

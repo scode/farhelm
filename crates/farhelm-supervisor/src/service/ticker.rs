@@ -3084,6 +3084,65 @@ mod tests {
         );
     }
 
+    /// A stale dead observation grants no authority to kill a live shell.
+    /// The close gate sits after discovery but before its destructive boundary;
+    /// respawning there must leave the revived pane running and un-signalled.
+    #[farhelm_testtrace::test]
+    async fn automatic_tab_close_rechecks_death_after_waiting_to_teardown() {
+        let state = StateDir::new();
+        let held = HeldTabCloses::new();
+        let sup = supervisor_with(
+            &state,
+            SupervisorSeams {
+                faults: super::super::core::FaultHooks {
+                    tab_close_gate: Some(held.hook()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        )
+        .await;
+        install_live_session(&sup, "recheck-reap", "sleep 600").await;
+        let (pane, tab) = dead_tab_running(&sup, "fh-recheck-reap", "true").await;
+        assert!(sup.try_close_tab("recheck-reap", &tab).is_some());
+        wait_until("automatic close reached teardown gate", || {
+            held.entered.load(Ordering::SeqCst) == 1
+        })
+        .await;
+        sup.tmux
+            .relaunch_in_pane(
+                "fh-recheck-reap",
+                &pane,
+                "/",
+                &[],
+                &["sh".into(), "-c".into(), "sleep 600".into()],
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            sup.tmux
+                .pane_process("fh-recheck-reap", &pane)
+                .await
+                .unwrap(),
+            crate::tmux::PaneProbe::Owned(crate::tmux::PaneProcess { dead: false, .. })
+        ));
+        held.release.add_permits(1);
+        wait_until("automatic close released its lifecycle claim", || {
+            !sup.lifecycle_locks.claimed_for_test("recheck-reap")
+        })
+        .await;
+        assert!(
+            matches!(
+                sup.tmux
+                    .pane_process("fh-recheck-reap", &pane)
+                    .await
+                    .unwrap(),
+                crate::tmux::PaneProbe::Owned(crate::tmux::PaneProcess { dead: false, .. })
+            ),
+            "a revived tab must survive automatic cleanup based on stale evidence"
+        );
+    }
+
     /// The per-tick reap budget defers, never drops: a burst of dead tabs
     /// larger than [`REAP_BUDGET_PER_TICK`] is finished by the NEXT pass,
     /// with the budget boundary observable in between.

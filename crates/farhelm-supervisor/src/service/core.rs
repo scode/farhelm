@@ -14072,7 +14072,8 @@ impl Supervisor {
         // teardowns racing over the same window. It is also what makes
         // `Attach`'s own tab revalidation meaningful (see that handler).
         let lifecycle = self.lifecycle_locks.claim(session_id).await;
-        self.close_tab_claimed(lifecycle, session_id, tab_id).await
+        self.close_tab_claimed(lifecycle, session_id, tab_id, false)
+            .await
     }
 
     /// Start an owned automatic close without waiting for its teardown.
@@ -14102,13 +14103,16 @@ impl Supervisor {
         let tab_id = tab_id.to_string();
         tokio::spawn(async move {
             let _permit = permit;
-            match sup.close_tab_claimed(lifecycle, &session_id, &tab_id).await {
+            match sup
+                .close_tab_claimed(lifecycle, &session_id, &tab_id, true)
+                .await
+            {
                 Ok(()) => info!(session = %session_id, tab = %tab_id,
                     "reaped a terminal tab whose shell exited"),
                 Err(e) if e.kind == ErrorKind::NotFound => debug!(
                     session = %session_id, tab = %tab_id, error = %e.message,
-                    "an exited tab vanished before its reap — a manual close or \
-                     the open path's own cleanup won the race"
+                    "automatic tab cleanup no longer applies; the tab vanished or \
+                     is no longer confirmed dead"
                 ),
                 Err(e) => warn!(session = %session_id, tab = %tab_id, error = %e.message,
                     "reaping an exited tab failed; if its window survives the next tick \
@@ -14122,12 +14126,15 @@ impl Supervisor {
 
     /// The close itself, run under a lifecycle claim the caller already
     /// holds; the guard moves onto the close task and is released when the
-    /// close finishes.
+    /// close finishes. `only_if_dead` marks ticker authority, which must be
+    /// renewed at the destructive boundary; an explicit close supplies the
+    /// user's authority to end a live shell instead.
     async fn close_tab_claimed(
         self: &Arc<Self>,
         lifecycle: KeyedGuard,
         session_id: &str,
         tab_id: &str,
+        only_if_dead: bool,
     ) -> Result<(), RequestError> {
         let entry = self.sessions.lock().await.get(session_id).cloned();
         let Some(entry) = entry else {
@@ -14161,6 +14168,7 @@ impl Supervisor {
                     &terminal,
                     &tab_id,
                     recorded_agent_pane.as_deref(),
+                    only_if_dead,
                 )
                 .await;
             // On the owned task for the same reason as `open_tab`'s hint.
@@ -14179,14 +14187,61 @@ impl Supervisor {
     }
 
     /// [`Self::close_tab`]'s side-effecting half, split out so the whole
-    /// of it runs on one supervisor-owned task.
+    /// of it runs on one supervisor-owned task. Automatic cleanup rechecks
+    /// every pane before granting any signal or window-removal authority.
     async fn close_tab_window(
         &self,
         session_id: &str,
         terminal: &Terminal,
         tab_id: &str,
         recorded_agent_pane: Option<&str>,
+        only_if_dead: bool,
     ) -> Result<(), RequestError> {
+        if let Some(gate) = self.seams.faults.tab_close_gate() {
+            gate().await;
+        }
+        // A ticker snapshot only nominates a tab for cleanup. Resolve the
+        // entire window again under the lifecycle claim, immediately before
+        // any signals: an exited half of a split cannot condemn a live half.
+        let states = self.tmux.pane_states().await.map_err(|e| {
+            RequestError::new(
+                error_kind(&e),
+                format!("could not recheck terminal tab before closing it: {e:#}"),
+            )
+        })?;
+        if only_if_dead {
+            let dead =
+                tabs_from_pane_states(states.values(), &terminal.tmux_name, recorded_agent_pane)
+                    .into_iter()
+                    .any(|tab| tab.id == tab_id && tab.pane == terminal.pane && tab.dead);
+            if !dead {
+                return Err(RequestError::new(
+                    ErrorKind::NotFound,
+                    "the terminal tab is no longer confirmed dead; automatic cleanup was skipped",
+                ));
+            }
+            let death = self
+                .tmux
+                .pane_death_detail(&terminal.tmux_name, &terminal.pane)
+                .await
+                .map_err(|e| {
+                    RequestError::new(
+                        error_kind(&e),
+                        format!("could not read exited tab diagnostics: {e:#}"),
+                    )
+                })?;
+            if death.is_none() {
+                return Err(RequestError::new(
+                    ErrorKind::NotFound,
+                    "the terminal tab is no longer confirmed dead; automatic cleanup was skipped",
+                ));
+            }
+            info!(session = %session_id, tab = %tab_id, pane = %terminal.pane,
+                death = ?death, "automatically closing a terminal tab confirmed dead");
+        }
+        info!(session = %session_id, tab = %tab_id, pane = %terminal.pane,
+            reason = if only_if_dead { "shell_exited" } else { "user_close" },
+            "closing terminal tab");
         // Recheck the pane-to-window identity immediately before any process
         // reap or window kill. Discovery already excludes the recorded agent
         // window, but a same-account process can change mutable markers after
@@ -14195,15 +14250,6 @@ impl Supervisor {
         // pane supplies no evidence, so it deliberately does not block an
         // otherwise valid tab close.
         if let Some(recorded_agent_pane) = recorded_agent_pane {
-            let states = self.tmux.pane_states().await.map_err(|e| {
-                RequestError::new(
-                    error_kind(&e),
-                    format!(
-                        "could not recheck terminal identity before closing tab {}: {e:#}",
-                        truncate_for_error(tab_id)
-                    ),
-                )
-            })?;
             let agent_window = states
                 .get(recorded_agent_pane)
                 .filter(|state| state.session_name == terminal.tmux_name)
@@ -14223,9 +14269,6 @@ impl Supervisor {
                     ),
                 ));
             }
-        }
-        if let Some(gate) = self.seams.faults.tab_close_gate() {
-            gate().await;
         }
         // Read once, while the window still exists, and used for both reap
         // passes: the second runs after `kill-window`, when there is no
@@ -14288,7 +14331,7 @@ impl Supervisor {
         // when process or output-client cleanup remains unconfirmed.
         let detach = self.detach_closed_tab(session_id, tab_id).await;
         tab_close_cleanup_result(tab_id, survivors, detach)?;
-        info!(session = %session_id, tab = %tab_id, "terminal tab closed");
+        info!(session = %session_id, tab = %tab_id, pane = %terminal.pane, "terminal tab closed");
         Ok(())
     }
 
@@ -14384,6 +14427,8 @@ impl Supervisor {
         tab_scope: TabScopeMarker,
         because: String,
     ) -> RequestError {
+        info!(session = %session_id, tab = %tab_id, pane = %terminal.pane,
+            reason = "failed_open", "discarding a terminal tab that did not finish opening");
         let mut left_behind: Vec<String> = Vec::new();
         if let Err(e) = self
             .reap_tab_tree(
