@@ -37,6 +37,7 @@ test("this machine", async ({ page, request }) => {
   await shot(page, `${PAGE}/this-machine`, [local, page.locator(".host-rail-entry").last()], { maxWidth: 900 });
 });
 
+/** Connect the list's running status to the live terminal a new user types into. */
 test("a running session", async ({ page, request }) => {
   const { scenario, director } = await open(page, request);
   const openSession = scenario.sessions.find((session) => session.open);
@@ -46,7 +47,8 @@ test("a running session", async ({ page, request }) => {
   await director.callout(
     row,
     "Your session in the session list. The dot shows what its agent is doing: filled and pulsing while it works.",
-    { side: "right", dy: 90 },
+    // The terminal's callout sits above this one; leave room for both boxes.
+    { side: "right", dy: 130 },
   );
   // The terminal fills the window's height; anchoring on a line of it keeps
   // the crop to the part that shows something.

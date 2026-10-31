@@ -13,6 +13,7 @@ import { shot } from "./shot";
 
 const PAGE = "session-list";
 
+/** Keep a row's status, permissions and location readable as separate explanations. */
 test("a row", async ({ page, request }) => {
   const { scenario, director } = await open(page, request);
   const row = rowOf(page, scenario, (session) => session.status === "waiting");
@@ -20,14 +21,15 @@ test("a row", async ({ page, request }) => {
   // Three callouts on one row, pushed right past the list (dx) so they sit in
   // the terminal's space and stack without covering other rows.
   await director.callout(
-    row.locator(".session-status-slot"),
+    row.locator(".session-status-slot .status-dot"),
     "Status: green and pulsing while the agent works, red when it waits for you, blue when it finished since you last looked, grey when idle.",
-    { side: "right", dx: 330, dy: -110 },
+    // Approach the small indicator from above, clear of the adjacent host mark.
+    { side: "top", dx: 520, dy: -20 },
   );
   await director.callout(
     row.locator(".session-agent"),
     "Which agent, and its permissions: an amber slashed shield is YOLO; a green shield is guarded, where a safety check can refuse an action or ask you.",
-    { side: "right", dx: 70, dy: 60 },
+    { side: "right", dx: 70, dy: 85 },
   );
   // Below the row rather than beside it: the right-hand space already holds
   // the other two, and an arrow from there would cross one of them.

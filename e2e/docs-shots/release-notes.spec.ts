@@ -23,6 +23,98 @@ import { shot } from "./shot";
 
 const PAGE = "release-notes";
 
+/** The image choice is a draft: photographing it neither pulls nor starts an image. */
+test("v0.33.0 container image", async ({ page, request }) => {
+  const name = `${PAGE}/v0-33-0-container-image`;
+  skipFrozenReleaseShot(name);
+  await page.setViewportSize({ width: 930, height: 1800 });
+  const { director } = await open(page, request);
+  const form = await openLauncherWithClaude(page);
+  await form.locator(".destination-type-control button", { hasText: "Managed checkout" }).click();
+  const choice = form.locator(".launch-composer-container-choice");
+  await choice.getByRole("checkbox", { name: "Containerized", exact: true }).check();
+  const image = choice.getByRole("textbox", { name: "Image", exact: true });
+  await expect(image).toBeVisible();
+  await image.fill("localhost/agent:latest");
+  await choice.scrollIntoViewIfNeeded();
+  await form.focus();
+  await director.callout(image, "Name an image already in this host's local Podman storage. Farhelm does not pull images.", { side: "bottom", dy: 100 });
+  await shot(page, name, [choice], { maxWidth: 930 });
+});
+
+/** Help shows the actual client's keys and bindings without changing either. */
+test("v0.33.0 keyboard shortcuts", async ({ page, request }) => {
+  const name = `${PAGE}/v0-33-0-keyboard-shortcuts`;
+  skipFrozenReleaseShot(name);
+  await page.setViewportSize({ width: 930, height: 1600 });
+  const { director } = await open(page, request);
+  await page.getByRole("button", { name: "Help", exact: true }).click();
+  await page.getByRole("menu", { name: "Help", exact: true }).locator('[data-bar-menu-item="Keyboard shortcuts"]').click();
+  const dialog = page.getByRole("dialog", { name: "Keyboard shortcuts", exact: true });
+  await expect(dialog).toBeVisible();
+  await dialog.focus();
+  await director.callout(dialog.locator(".keyboard-shortcuts-section").last(), "See your keyboard shortcuts and the templates assigned to quick launch and number keys.", { side: "bottom", dy: 50 });
+  await shot(page, name, [dialog], { maxWidth: 930 });
+});
+
+/** Stop before Enter: composing template names must not start a session. */
+test("v0.33.0 typed template combinations", async ({ page, request }) => {
+  const name = `${PAGE}/v0-33-0-template-names`;
+  skipFrozenReleaseShot(name);
+  await page.setViewportSize({ width: 930, height: 1100 });
+  const { director } = await open(page, request);
+  const form = await openLauncher(page);
+  await expect(form.locator('.launch-composer-search input[role="combobox"]')).toBeFocused();
+  await page.keyboard.press("Control+Shift+KeyX");
+  await page.keyboard.type("codex-deep api");
+  const indicator = page.locator(".launch-sequence-indicator");
+  await expect(indicator).toBeVisible();
+  await expect(indicator.locator(".launch-sequence-candidates")).toContainText("api-repo");
+  await director.callout(indicator, "Combine templates by typing their names separated by spaces. Tab completes a matching name.", { side: "top", dy: -60 });
+  await shot(page, name, [indicator], { maxWidth: 930 });
+  await page.keyboard.press("Escape");
+});
+
+/** Expand the navigation beside the list; the shot changes only this device's layout. */
+test("v0.33.0 expanded navigation rail", async ({ page, request }) => {
+  const name = `${PAGE}/v0-33-0-navigation-rail`;
+  skipFrozenReleaseShot(name);
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const { director } = await open(page, request);
+  // The label changes with the layout; keep the locator on the same control.
+  const toggle = page.locator("#host-rail-toggle");
+  await expect(toggle).toHaveAccessibleName("Expand navigation rail");
+  await toggle.click();
+  await expect(toggle).toHaveAccessibleName("Collapse navigation rail");
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  await director.callout(toggle, "Expand or collapse the navigation rail beside the list. This device remembers your choice.", { side: "right", dy: -100 });
+  // The rail's footer is a separate region; keep the annotated toggle in the crop.
+  await shot(page, name, [page.locator(".host-rail"), page.locator(".session-list"), toggle], { maxWidth: 930 });
+});
+
+/** Saved controls are photographed without marking a template or saving an edit. */
+test("v0.33.0 template controls", async ({ page, request }) => {
+  const name = `${PAGE}/v0-33-0-template-controls`;
+  skipFrozenReleaseShot(name);
+  await page.setViewportSize({ width: 930, height: 1100 });
+  const { director } = await open(page, request);
+  await page.locator(".templates-button").click();
+  const dialog = page.locator(".templates-dialog");
+  await expect(dialog.locator(".templates-sidebar")).toHaveAttribute("aria-busy", "false");
+  const row = dialog.locator(".templates-row").filter({ has: page.getByText("codex-deep", { exact: true }) });
+  await row.click();
+  const save = dialog.locator(".templates-save");
+  await expect(save).toHaveAttribute("aria-disabled", "true");
+  await dialog.focus();
+  // The bolt belongs to the list item beside its separate template-name button.
+  const bolt = row.locator("..").locator(".templates-quick-mark");
+  await expect(bolt).toBeVisible();
+  await expect(bolt).toHaveAttribute("aria-pressed", "false");
+  await director.callout(bolt.locator(".templates-quick-icon"), "An outline bolt means this template is not marked for quick launch.", { side: "bottom", dy: 100 });
+  await director.callout(save, "Save is greyed out when there are no unsaved changes.", { side: "top", dx: -100, dy: -80 });
+  await shot(page, name, [dialog], { maxWidth: 930 });
+});
+
 // v0.32.0 captions retain the release-note author's wording. These shots
 // change only local launcher drafts and navigation; no setting is saved and
 // no session starts. Device appearance follows Playwright's media preference.

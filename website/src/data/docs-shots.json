@@ -1,9 +1,9 @@
 {
   "_comment": "Written by scripts/publish-docs-shots.sh; never edit by hand. See docs/docs-shots/SPEC.md.",
   "base": "https://raw.githubusercontent.com/scode/farhelm",
-  "captured_at": "2026-10-30T20:26:32Z",
-  "captured_from": "40b1784aa9c88a6996f112b70d150b696c36c16b",
-  "commit": "f32cdc3bc3463bc38ea3e306a7effcc9683c9a82",
+  "captured_at": "2026-10-31T05:59:13Z",
+  "captured_from": "a48702321b58474f085c902ecb9885c9ef09e223",
+  "commit": "6fd26380a25658f02e631fb4a9ac05d1cb113862",
   "shots": {
     "add-a-remote-host/add-button": {
       "height": 576,
@@ -22,7 +22,7 @@
       "width": 1772
     },
     "first-session/running-session": {
-      "height": 522,
+      "height": 602,
       "width": 1702
     },
     "first-session/statuses": {
@@ -277,13 +277,33 @@
       "height": 820,
       "width": 1778
     },
+    "release-notes/v0-33-0-container-image": {
+      "height": 684,
+      "width": 1744
+    },
+    "release-notes/v0-33-0-keyboard-shortcuts": {
+      "height": 1992,
+      "width": 1344
+    },
+    "release-notes/v0-33-0-navigation-rail": {
+      "height": 1552,
+      "width": 1152
+    },
+    "release-notes/v0-33-0-template-controls": {
+      "height": 1776,
+      "width": 1852
+    },
+    "release-notes/v0-33-0-template-names": {
+      "height": 684,
+      "width": 1070
+    },
     "session-list/controls": {
       "height": 1160,
       "width": 1652
     },
     "session-list/row": {
-      "height": 694,
-      "width": 1472
+      "height": 744,
+      "width": 1486
     },
     "session-list/row-menu": {
       "height": 1040,
@@ -310,7 +330,7 @@
       "width": 2272
     },
     "start-a-session/effort-and-permissions": {
-      "height": 702,
+      "height": 742,
       "width": 2542
     },
     "start-a-session/harness-and-model": {
@@ -350,7 +370,7 @@
       "width": 1860
     },
     "stop-restart-resume/header-actions": {
-      "height": 640,
+      "height": 940,
       "width": 1368
     },
     "stop-restart-resume/row-menu": {
@@ -363,7 +383,7 @@
     },
     "work-in-a-session/header": {
       "height": 382,
-      "width": 1322
+      "width": 1308
     },
     "work-in-a-session/tabs": {
       "height": 384,

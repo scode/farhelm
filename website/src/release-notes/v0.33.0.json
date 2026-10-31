@@ -1,0 +1,34 @@
+{
+  "screenshots": [
+    {
+      "entry": 2825,
+      "name": "release-notes/v0-33-0-container-image",
+      "alt": "The containerized session launcher with an Image field naming an image in the host's local Podman storage."
+    },
+    {
+      "entry": 2827,
+      "name": "release-notes/v0-33-0-keyboard-shortcuts",
+      "alt": "The Keyboard shortcuts dialog showing this client's keys and current template shortcuts."
+    },
+    {
+      "entry": 2828,
+      "name": "release-notes/v0-33-0-template-names",
+      "alt": "A typed template combination with codex-deep followed by api and the matching api-repo template."
+    },
+    {
+      "entry": 2841,
+      "name": "release-notes/v0-33-0-navigation-rail",
+      "alt": "The expanded navigation rail beside the session list, with full host names and the collapse button."
+    },
+    {
+      "entry": 2844,
+      "name": "release-notes/v0-33-0-template-controls",
+      "alt": "The template editor with an outline quick-launch bolt and Save greyed out because there are no unsaved changes."
+    },
+    {
+      "entry": 2845,
+      "name": "release-notes/v0-33-0-template-controls",
+      "alt": "The template editor with Save greyed out because there are no unsaved changes."
+    }
+  ]
+}
