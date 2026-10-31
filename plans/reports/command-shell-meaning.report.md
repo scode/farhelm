@@ -183,3 +183,91 @@ findings. The original corrected trees matched the amended commits exactly; the 
 the sole TODO conflict preserved both plans' completed-entry removals. Existing commit/PR wording is unchanged from the
 previously cold-read text. The report passed an independent cold read after clarifying the earlier landing failures and
 their disposition.
+
+### Landing
+
+Landed on its second attempt, with no fixes at landing. Custom agent commands and resume commands now run through Bash,
+so a command written as `~/bin/agent`, or with `$VAR`, globs, `&&` and other shell syntax, works as it would typed into
+Bash (your own aliases and shell functions do not apply); and wrapper words saved from now on are handed to Bash exactly
+as typed, ahead of the agent command. Farhelm does not check Bash syntax, but it refuses an unmatched quote or a NUL
+character, a command placeholder that is quoted, escaped or joined to other text, any placeholder in a wrapper, and an
+empty or comment-only wrapper, before anything starts.
+
+- #2847: commands through Bash, the placeholder checks and refusal messages, the `--command` CLI help, the specification
+  text, two docs pages, the changelog entry and their tests.
+- #2848: wrapper words through Bash, the wrapper editor and template changes, the `--wrapper` CLI help, and their tests
+  and docs.
+
+The first landing attempt (2026-10-30) sent this plan back: two supervisor tests still expected the old direct launch,
+and the changelog did not tell users what changes for their saved wrappers. The redelivery updates both tests, and the
+changelog entry and the Containerized sessions page now say what changes and what a wrapped container launch needs. The
+landing's rebase onto current main was clean.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the executor's last base, sqlite-wal (#2840) and tab-output-hangup (#2846) landed, both in the supervisor, and a
+Tensorlake test-script change (#2858). A fresh-context review found no interaction: tmux only ever receives Farhelm's
+own launch helper and the path of its launch file, never the Bash line, so tab-output-hangup's tmux quoting and this
+plan's Bash quoting do not stack. None of the executor's Rust runs included those two plans; this landing's run did
+(below), including tab-output-hangup's test that restarts a custom-command session in a folder whose name contains `}`.
+Earlier interactions the review rechecked also hold: opening an old template does not mark it as needing Save, and
+Codex's `--no-daemon` still reaches Codex as one argument, on hosts and in containers.
+
+#### Things you should know
+
+- This changes what existing saved wrappers do: a quoted word such as `--profile 'work space'` now splits, words with
+  `$`, `*` or quotes take shell meaning, and a word starting with `#` comments out the rest; the changelog entry says
+  so. It also means an old word with a trailing backslash or an unmatched quote breaks the agent command after it, which
+  the entry covers only in general terms. This reaches templates (including ones already approved for agents),
+  remembered setups and existing wrapped sessions on their next start or Restart.
+- A wrapped containerized launch now needs `bash` in the image; a stock Alpine image, which has none, fails.
+- The new Bash parser library (`tree-sitter`) builds in every ordinary local build and was tried in a debug static Linux
+  build; the release's optimized builds, ARM Linux and Apple Silicon (the Mac app included) will first build it in the
+  release workflow. This landing did not repeat that check or the Bash 3.2 one, since nothing they depend on changed.
+- Bash 3.2, the version macOS ships, was tested as a Linux build of GNU Bash 3.2.0, not Apple's 3.2.57.
+
+#### Checks
+
+This round landed only this plan, stacked on main `d346d5f6`. On the stack as redelivered:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, the web-target UI lint,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, the check that every
+  test delay states its reason (`python -B scripts/check-test-sleeps.py`, 327 delays, none without a reason),
+  `dprint check`, `python3 releasing/check-changelog.py format`, the docs website build (`bun run build` in `website/`),
+  the workspace debug build and the UI's release web build: all passed.
+- The UI's Rust tests, `cargo nextest run -p farhelm-ui`, run `88564717-9a7a-4b98-8d70-6d90606b4c44`: all 833 passed;
+  its desktop-build tests, `cargo nextest run -p farhelm-ui --features desktop`, run
+  `c4767829-c3ee-44a2-9e6e-50dd25c77e28`: all 1016 passed. The UI's JavaScript tests (`node --test` in
+  `crates/farhelm-ui/js-tests`), run `d199d10c-5bb0-497c-b9c6-148bf7262dd4`: all 383 passed.
+- The whole Rust workspace, `cargo nextest run --workspace --exclude farhelm-desktop`, with the pinned test runner and
+  tmux, no retries, on a machine with rootless Podman, run `19319332-b7a2-4c26-882b-53a0f62b23c2`: 4628 passed, 41 left
+  out by the test runner (tests marked ignored), 1 failed: the recorded open flake "shallow pause resumes without reset
+  or replay", in terminal code this plan does not touch. The supervisor package and the Restart end-to-end tests ran on
+  current main, with sqlite-wal and tab-output-hangup in place.
+- The whole browser suite on Chromium and WebKit, on ten Tensorlake sandboxes at the maintainer's request (cloud virtual
+  machines, not the usual development machine; each booted the usual three test stacks and ran its share of the suite's
+  218 projects through the recorder's generic mode, `python3 scripts/record-test-run.py --kind development ...` running
+  `npx playwright test --project=<engine>-<spec> ... --retries=0`, with the binaries and web bundle built locally from
+  this stack; Node 24.16 there, against 24.20 locally). It took 17 minutes. Across the ten runs
+  (`4b461405-64db-4f22-9c85-8d3db8eea0d8`, `b25b068f-0d3f-4afc-8a28-5f56b3775409`,
+  `9d3669cc-75ad-46aa-9031-0eabcd00e0ad`, `c44ee887-cb9b-46c9-ae8e-866287c05905`,
+  `bf8f03f1-0a38-4f84-8b0f-3d90b0954c7e`, `2adb2f05-45e3-43dc-80a4-e9e404c65b62`,
+  `aea87688-5bd6-4eb9-962e-7e8d8452f160`, `d47390c9-c136-49d3-95d9-bc3aad647108`,
+  `400fa847-8a4c-4953-9f4e-eece438b284a`, `f76033d5-5777-4d3b-b010-65d0f9b2359b`; only the two failed runs' records were
+  kept), 2847 passed, 14 skipped by design, 3 failed, all on WebKit. Each was re-run three times on the same build (the
+  harness's `--reuse-pack`, which sends the earlier pack), also on sandboxes, with `-g` and `--repeat-each=3` (runs
+  `5a6bf015-3bcc-4476-a916-953366cd4237`, `4a9ee122-8eb1-414f-875f-b79ed225aa53`,
+  `0f250f53-83be-4811-ae09-d9dc9f049882`): "host-settings scrollports stay reachable while saving" (modal layout) passed
+  3 of 3; it has no flake record, and one failure is not recorded as one; and "a wrong-host UPDATE acceptance warns on
+  its source row and claims nothing" (provisioning), which has failed in earlier rounds too and which an open draft PR
+  (#2670) records as a flake, passed 3 of 3. "post-clone commands with carriage returns refuse edits but can be cleared"
+  (settings) failed once more in three, on a timeout in its own cleanup while waiting for an intercepted save request;
+  the plan does not touch post-clone commands, and on main `d346d5f6` without the plan the same case failed 1 of 5 on
+  WebKit (run `9e3dd819-eedb-40b4-be7c-6bc0b41e11ec`), so it is not this plan's; an open draft PR (#2549) has recorded
+  it as a flake since 2026-10-22.
+- Reused: nothing. Not run: the doctests (the stack adds no doc examples), the desktop smoke tests (no desktop-specific
+  code changed) and the native Mac app (not runnable on Linux).
+
+The report's checks were the executor's selected runs, all on its older base; this landing ran the checks below on
+current main, including the quick-launch, launcher Enter and Replace specs the answer asked for. Nothing in the
+executor's report became untrue at landing.
