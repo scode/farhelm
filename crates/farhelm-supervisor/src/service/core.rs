@@ -7235,9 +7235,12 @@ impl Supervisor {
             .pane_process_within(&hold.session, &hold.pane, Some(left))
             .await
         {
-            Ok(PaneProbe::Owned(pane)) if !pane.dead => {
-                crate::session_hold::read_mark(&hold.held) == Some(pane.pid)
-            }
+            // A live pane with no pid to compare (tmux 3.8, as its terminal
+            // closes) is on its way out and will never write a matching
+            // mark, so it counts as settled like a dead one.
+            Ok(PaneProbe::Owned(pane)) if !pane.dead => pane
+                .live_pid()
+                .is_none_or(|pid| crate::session_hold::read_mark(&hold.held) == Some(pid)),
             Ok(_) => true,
             Err(error) => {
                 debug!(error = %format!("{error:#}"), "could not check a new session's pane");
@@ -11740,7 +11743,10 @@ impl Supervisor {
         // Capture the pane identity before recording the stop intent. That
         // write and the subsequent sweep may outlive the original process;
         // the start time prevents a recycled pid from becoming the root.
-        let alive_identity = match alive_pane.map(|pane| capture_process_identity(pane.pid)) {
+        let alive_identity = match alive_pane
+            .and_then(|pane| pane.live_pid())
+            .map(capture_process_identity)
+        {
             None => None,
             Some(identity) => identity.map_err(|error| {
                 RequestError::new(ErrorKind::Internal, format!("not restarting: {error:#}"))
@@ -14712,8 +14718,11 @@ impl Supervisor {
                 .await
                 .context("reading a terminal tab's pane process before reaping it")?
             {
-                PaneProbe::Owned(state) if !state.dead => capture_process_identity(state.pid)?,
-                PaneProbe::Owned(_) | PaneProbe::Gone => None,
+                PaneProbe::Owned(state) => match state.live_pid() {
+                    Some(pid) => capture_process_identity(pid)?,
+                    None => None,
+                },
+                PaneProbe::Gone => None,
                 // A RECOGNIZED foreign owner gives no root to walk from —
                 // the recorded pane died with a previous tmux server, and
                 // walking the stranger that inherited its id would reap
@@ -16516,21 +16525,28 @@ impl Supervisor {
                 "the session's foreground pane is no longer owned by this session",
             ));
         };
+        // tmux 3.8 stops reporting a pid once the pane's terminal closes
+        // (see `PaneProcess::pid`), so a report that arrives after the agent
+        // exited has nothing to anchor to there and is refused, where the
+        // pinned tmux 3.7c would still anchor it by the stale pid below.
+        let Some(pid) = process.pid else {
+            return Err(RequestError::new(
+                ErrorKind::Conflict,
+                "the session's foreground pane has exited and tmux no longer reports its process",
+            ));
+        };
         // A live pane process anchors by pid and start token. One that has
         // exited (still listed under `remain-on-exit`) or exits right now has
         // no token left to read, and anchors by pid alone.
         let start = if process.dead {
             None
         } else {
-            match crate::procs::read_process(process.pid) {
+            match crate::procs::read_process(pid) {
                 Ok(Some((_, start, crate::procs::ProcessState::Running))) => Some(start),
                 _ => None,
             }
         };
-        Ok(crate::procs::PaneAnchor {
-            pid: process.pid,
-            start,
-        })
+        Ok(crate::procs::PaneAnchor { pid, start })
     }
 
     /// Offer a witnessed transition to `session`'s durable outcome and
@@ -19111,6 +19127,9 @@ pub(crate) mod tests {
         else {
             panic!("the tab pane must belong to its session");
         };
+        let tab_shell_pid = tab_shell
+            .live_pid()
+            .expect("fixture premise: the tab shell is live and tmux reports its pid");
 
         /// Clean up the unmarked, HUP-resistant fixture even before its
         /// pidfile has been read. The pane shell leads its process group;
@@ -19155,19 +19174,19 @@ pub(crate) mod tests {
             }
         }
 
-        let (_, shell_start, shell_state) = crate::procs::read_process(tab_shell.pid)
+        let (_, shell_start, shell_state) = crate::procs::read_process(tab_shell_pid)
             .expect("read the owned tab shell")
             .expect("the owned tab shell exists");
         let mut fixture = UnmarkedFixture {
-            shell: (tab_shell.pid, shell_start),
+            shell: (tab_shell_pid, shell_start),
             job: None,
         };
         assert!(!tab_shell.dead, "fixture premise: the tab shell is live");
         assert_ne!(shell_state, crate::procs::ProcessState::Zombie);
         // SAFETY: getpgid only queries the process identified by the pane.
         assert_eq!(
-            unsafe { libc::getpgid(tab_shell.pid as libc::pid_t) },
-            tab_shell.pid as libc::pid_t,
+            unsafe { libc::getpgid(tab_shell_pid as libc::pid_t) },
+            tab_shell_pid as libc::pid_t,
             "fixture premise: the tab shell leads the group holding its background job"
         );
 
@@ -19205,14 +19224,14 @@ pub(crate) mod tests {
         // A malformed pidfile must not grant cleanup authority over an
         // unrelated process. The group guard already covers our real job
         // if this premise fails before an independent identity is admitted.
-        if ppid == tab_shell.pid {
+        if ppid == tab_shell_pid {
             fixture.job = Some((pid, job_start));
         }
         assert_eq!(
-            ppid, tab_shell.pid,
+            ppid, tab_shell_pid,
             "fixture premise: the job is a direct child of the tab's pane process"
         );
-        for (what, process) in [("tab shell", tab_shell.pid), ("job", pid)] {
+        for (what, process) in [("tab shell", tab_shell_pid), ("job", pid)] {
             let environ = crate::procs::read_environ(process).unwrap_or_default();
             assert!(
                 !environ
@@ -19231,7 +19250,7 @@ pub(crate) mod tests {
         // zombie until its adopter reaps it, which this test cannot force.
         let mut survivors = Vec::new();
         for (what, process, start) in [
-            ("tab shell", tab_shell.pid, shell_start),
+            ("tab shell", tab_shell_pid, shell_start),
             ("job", pid, job_start),
         ] {
             match crate::procs::read_process(process).expect("read the fixture process") {
@@ -21280,7 +21299,7 @@ pub(crate) mod tests {
                     .await
                     .expect("agent process probe")
                 {
-                    PaneProbe::Owned(process) if !process.dead => Some(process.pid),
+                    PaneProbe::Owned(process) => process.live_pid(),
                     _ => None,
                 }
             };
@@ -21471,7 +21490,10 @@ pub(crate) mod tests {
             .await
             .expect("tab process probe")
         {
-            PaneProbe::Owned(process) if !process.dead => process.pid,
+            PaneProbe::Owned(crate::tmux::PaneProcess {
+                pid: Some(pid),
+                dead: false,
+            }) => pid,
             other => panic!("tab process premise failed: {other:?}"),
         };
 
@@ -21510,7 +21532,10 @@ pub(crate) mod tests {
             .await
             .expect("tab process after restart")
         {
-            PaneProbe::Owned(process) if !process.dead => process.pid,
+            PaneProbe::Owned(crate::tmux::PaneProcess {
+                pid: Some(pid),
+                dead: false,
+            }) => pid,
             other => panic!("preserved tab process disappeared: {other:?}"),
         };
         assert_eq!(after_pid, tab_pid, "restart must not replace the tab shell");
@@ -21649,7 +21674,10 @@ pub(crate) mod tests {
             .await
             .expect("tab process probe")
         {
-            PaneProbe::Owned(process) if !process.dead => process.pid,
+            PaneProbe::Owned(crate::tmux::PaneProcess {
+                pid: Some(pid),
+                dead: false,
+            }) => pid,
             other => panic!("tab process premise failed: {other:?}"),
         };
 
@@ -21664,7 +21692,10 @@ pub(crate) mod tests {
             .await
             .expect("tab process after restart")
         {
-            PaneProbe::Owned(process) if !process.dead => process.pid,
+            PaneProbe::Owned(crate::tmux::PaneProcess {
+                pid: Some(pid),
+                dead: false,
+            }) => pid,
             other => panic!("preserved tab process disappeared: {other:?}"),
         };
         assert_eq!(after_pid, tab_pid, "restart must not replace the tab shell");
@@ -22010,7 +22041,10 @@ pub(crate) mod tests {
             .await
             .expect("tab process probe")
         {
-            PaneProbe::Owned(process) if !process.dead => process.pid,
+            PaneProbe::Owned(crate::tmux::PaneProcess {
+                pid: Some(pid),
+                dead: false,
+            }) => pid,
             other => panic!("tab process premise failed: {other:?}"),
         };
 
@@ -22060,7 +22094,10 @@ pub(crate) mod tests {
                 .await
                 .expect("tab process after restart")
             {
-                PaneProbe::Owned(process) if !process.dead => process.pid,
+                PaneProbe::Owned(crate::tmux::PaneProcess {
+                    pid: Some(pid),
+                    dead: false,
+                }) => pid,
                 other => panic!("forged-marker tab process disappeared: {other:?}"),
             },
             tab_pid,
@@ -22129,7 +22166,10 @@ pub(crate) mod tests {
                 .await
                 .expect("tab process probe")
             {
-                PaneProbe::Owned(process) if !process.dead => process.pid,
+                PaneProbe::Owned(crate::tmux::PaneProcess {
+                    pid: Some(pid),
+                    dead: false,
+                }) => pid,
                 other => panic!("tab process premise failed: {other:?}"),
             };
             sup.tmux
@@ -22190,7 +22230,10 @@ pub(crate) mod tests {
                 .await
                 .expect("tab process after failed restart")
             {
-                PaneProbe::Owned(process) if !process.dead => process.pid,
+                PaneProbe::Owned(crate::tmux::PaneProcess {
+                    pid: Some(pid),
+                    dead: false,
+                }) => pid,
                 other => panic!("{stage:?}: preserved tab process disappeared: {other:?}"),
             };
             assert_eq!(after_pid, tab_pid, "{stage:?}: tab shell was not replaced");
@@ -27093,7 +27136,10 @@ exit 0
             panic!("fixture premise: the pane belongs to this session");
         };
         assert!(!process.dead, "fixture premise: the agent pane is live");
-        let (_, start, process_state) = crate::procs::read_process(process.pid)
+        let process_pid = process
+            .live_pid()
+            .expect("fixture premise: tmux reports the live agent pane's pid");
+        let (_, start, process_state) = crate::procs::read_process(process_pid)
             .expect("read the live agent identity")
             .expect("the agent exists");
         assert_ne!(process_state, crate::procs::ProcessState::Zombie);
@@ -27176,7 +27222,7 @@ exit 0
         assert!(message.contains("nothing was killed"), "{message}");
         assert!(
             matches!(
-                crate::procs::read_process(process.pid).expect("read agent after refusal"),
+                crate::procs::read_process(process_pid).expect("read agent after refusal"),
                 Some((_, observed, state)) if observed == start && state != crate::procs::ProcessState::Zombie
             ),
             "the same live agent must survive the refused Stop"
@@ -27972,7 +28018,10 @@ exit 0
             .await
             .expect("a window standing in for a new session's");
         let pane_pid = match sup.tmux.pane_process(name, &pane).await.expect("probe") {
-            PaneProbe::Owned(process) => process.pid,
+            PaneProbe::Owned(crate::tmux::PaneProcess {
+                pid: Some(pid),
+                dead: false,
+            }) => pid,
             other => panic!("fixture: the window must be running: {other:?}"),
         };
         let spec = crate::launch::spec_path_for_launch(state.path(), "s", 0);
@@ -28040,7 +28089,10 @@ exit 0
             .await
             .expect("a window standing in for a new session's");
         let pane_pid = match sup.tmux.pane_process(name, &pane).await.expect("probe") {
-            PaneProbe::Owned(process) => process.pid,
+            PaneProbe::Owned(crate::tmux::PaneProcess {
+                pid: Some(pid),
+                dead: false,
+            }) => pid,
             other => panic!("fixture: the window must be running: {other:?}"),
         };
         let spec = crate::launch::spec_path_for_launch(state.path(), "s", 0);
@@ -28214,7 +28266,10 @@ exit 0
             .await
             .expect("a window standing in for the new sessions'");
         let pane_pid = match sup.tmux.pane_process(name, &pane).await.expect("probe") {
-            PaneProbe::Owned(process) => process.pid,
+            PaneProbe::Owned(crate::tmux::PaneProcess {
+                pid: Some(pid),
+                dead: false,
+            }) => pid,
             other => panic!("fixture: the window must be running: {other:?}"),
         };
         let first = crate::launch::spec_path_for_launch(state.path(), "a", 0);

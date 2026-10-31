@@ -182,9 +182,9 @@ impl Supervisor {
                 .pane_process(&tmux_name, pane)
                 .await
                 .map_err(TeardownError::PaneProbe)?
-                && !process.dead
+                && let Some(pid) = process.live_pid()
             {
-                roots.extend(capture_process_identity(process.pid).map_err(TeardownError::Sweep)?);
+                roots.extend(capture_process_identity(pid).map_err(TeardownError::Sweep)?);
             }
         }
         Ok(roots)
@@ -327,8 +327,8 @@ impl Supervisor {
         // enumeration, and archive work can give the kernel time to recycle
         // this pid. A vanished process leaves no root; an unreadable one
         // fails the delete rather than sweeping without it.
-        let root_identity = match live_pane.filter(|pane| !pane.dead) {
-            Some(pane) => capture_process_identity(pane.pid).map_err(TeardownError::Sweep)?,
+        let root_identity = match live_pane.and_then(|pane| pane.live_pid()) {
+            Some(pid) => capture_process_identity(pid).map_err(TeardownError::Sweep)?,
             None => None,
         };
         // Every other live pane of the session is a root too, captured at
