@@ -258,6 +258,9 @@ esac
 
 devbuild="$repo/target/devbuild"
 payloads="$devbuild/payloads"
+# THROWAWAY (devbuild experiment, never merge): the app's local supervisor
+# drives this privately built tmux instead of Homebrew's; see "Mac tmux" below.
+mac_tmux="$devbuild/tmux/mac/tmux"
 # Written last by a build that staged everything, removed first by the next
 # one, so its presence means `target/devbuild` holds one complete build. Its
 # first line names the commit that build came from, which `--run-only`
@@ -310,10 +313,15 @@ launch() {
     kill -0 "${old##*.}" 2>/dev/null || rm -f "$old"
   done
   printf '%s\n' "$state" >"$devbuild/launch-state.$$"
+  if ! [ -x "$mac_tmux" ]; then
+    echo "no private Mac tmux at $mac_tmux; rebuild without --run-only" >&2
+    exit 1
+  fi
   echo "== starting farhelm-desktop built from $(sed -n 1p "$stamp")"
   echo "   state: $state"
+  echo "   tmux: $mac_tmux ($("$mac_tmux" -V))"
   exec env -u FARHELM_DESKTOP_FARHELM FARHELM_DESKTOP_STATE_DIR="$state" \
-    FARHELM_HELM_PAYLOAD_DIR="$payloads" "$devbuild/farhelm-desktop"
+    FARHELM_HELM_PAYLOAD_DIR="$payloads" FARHELM_TMUX="$mac_tmux" "$devbuild/farhelm-desktop"
 }
 
 # `--run-only` needs none of the build tools checked below, so it leaves
@@ -619,6 +627,20 @@ for arch in "${arches[@]}"; do
   cp "$tmux_cache/$name" "$payloads/$name"
   chmod 0755 "$payloads/$name"
 done
+
+# --- Mac tmux (THROWAWAY) --------------------------------------------------------
+#
+# Builds the pinned tmux for this Mac with the release's own private-build
+# script (Apple arm64 branch: private libevent and ncurses, system libraries
+# only), once, and reuses it while it still reports the pinned version. The
+# launch hands it to the app as FARHELM_TMUX, which the app takes as given.
+if ! [ -x "$mac_tmux" ] || [ "$("$mac_tmux" -V 2>/dev/null)" != "tmux $tmux_version" ]; then
+  echo "== building tmux $tmux_version for this Mac (a few minutes, once)"
+  mkdir -p "$(dirname "$mac_tmux")"
+  "$repo/scripts/build-private-tmux.sh" aarch64-apple-darwin "$mac_tmux.tmp"
+  mv -f "$mac_tmux.tmp" "$mac_tmux"
+fi
+echo "== Mac tmux: $mac_tmux ($("$mac_tmux" -V))"
 
 printf '%s\n%s\n' "$built_from" "$state" >"$stamp"
 echo "== staged in $devbuild, built from $built_from"

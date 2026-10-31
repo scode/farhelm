@@ -3257,8 +3257,12 @@ pub(super) fn parse_reach_output(output: &[u8]) -> Result<ReachOutcome, BackendF
         BackendFailure::new("the host reported an unusable tmux path", error.to_string())
     })?;
     let tmux = String::from_utf8_lossy(fields[5]);
-    let tmux_ok =
+    // THROWAWAY (devbuild experiment, never merge): always push and pin
+    // Farhelm's bundled tmux, even when the host's own tmux clears the floor,
+    // to try "always bundled" on real hosts without cutting a release.
+    let _host_tmux_ok =
         tmux_meets_floor(&tmux) && tmux_path.is_absolute() && path_text(&tmux_path).is_ok();
+    let tmux_ok = false;
     Ok(ReachOutcome::Supported(Reach {
         home,
         user_unit_dir,
