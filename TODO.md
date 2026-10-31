@@ -24,6 +24,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Detect and upgrade an outdated tmux on a host.** tmux is meant to be an implementation detail, so it is a bug that
+  Farhelm does not notice when the tmux server running a host's sessions is out of date: older than the tmux Farhelm
+  would now use there, or a version with known security problems. Detect that, warn the user (more insistently when a
+  security issue is known), and offer to upgrade. Upgrading means replacing the running tmux server, which ends every
+  session on that host much like a reboot does, so it has to be the user's choice and say so plainly. The same applies
+  when a host's tmux binary was upgraded underneath a server still running the old one (a Linuxbrew `brew upgrade`, or a
+  Farhelm update that changes the bundled tmux).
+
 - **Tie a late conversation report to its session on tmux 3.8.** tmux 3.8 no longer reports a pane's process id once the
   pane is dead, and the supervisor accepts a hook report only when that id appears among the reporter's parents
   (SPEC_impl.md, the five-step admission). So with tmux 3.8, a conversation report still waiting to be applied when its
