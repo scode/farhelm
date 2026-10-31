@@ -400,11 +400,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   until focused evidence supports removing them.
 
 - **Feedback dialog's disabled Send color on WebKit.** `the dialog refuses blank and over-long messages without sending`
-  in `e2e/tests/feedback.spec.ts` saw the disabled Send button settle on `rgb(155, 165, 184)` instead of
-  `rgb(90, 101, 121)` in full browser runs `0a494db0-73b5-462c-8e8d-33510baf9df6` and
-  `8f80714f-9f10-46f5-af67-be60e573be31`, on stacks that did not touch the dialog, and passed five of five alone in
-  `756ea4b1-29d9-4954-b8a0-31d9cae25dee`. Hypothesis: the color is sampled before a color-scheme switch's values apply
-  (FLAKES.md, 2026-10-30).
+  in `e2e/tests/feedback.spec.ts` keeps a dark-palette color on the disabled Send button through its light-scheme check:
+  text color `rgb(155, 165, 184)` instead of `rgb(90, 101, 121)` in full browser runs
+  `0a494db0-73b5-462c-8e8d-33510baf9df6` and `8f80714f-9f10-46f5-af67-be60e573be31`, and background `rgb(29, 34, 44)`
+  instead of `rgb(233, 237, 244)` in `a4a4ad3b-56c1-426f-8377-149f23f29d12` on a Tensorlake sandbox, all on stacks that
+  did not touch the dialog. Alone it passed five of five in `756ea4b1-29d9-4954-b8a0-31d9cae25dee` but failed one of
+  three in `7b4a27da-01e2-4721-aef3-c5c6c201ae50`. Hypothesis: WebKit leaves the existing button's style on the dark
+  palette after the test switches the emulated color scheme to light (FLAKES.md, 2026-10-30 and 2026-10-31).
 
 ### Difficult deflake
 
