@@ -18,6 +18,7 @@
   <a href="https://github.com/scode/farhelm/releases/latest"><img alt="latest release" src="https://img.shields.io/github/v/release/scode/farhelm"></a>
   <img alt="platform: macOS and Linux" src="https://img.shields.io/badge/platform-macOS%20%C2%B7%20Linux-007ec6">
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/github/license/scode/farhelm"></a>
+  <a href="https://discord.gg/G3bukxTjXR"><img alt="Discord" src="https://img.shields.io/badge/chat-Discord-5865F2?logo=discord&logoColor=white"></a>
 </p>
 
 <p align="center">
@@ -102,3 +103,7 @@ goes through a relay, and every box in the diagram can restart without losing a 
 ## Docs and installation
 
 See [farhelm.io](https://farhelm.io) for documentation and installation instructions.
+
+## Community
+
+Questions, ideas, or something that broke? Come talk on [Discord](https://discord.gg/G3bukxTjXR).

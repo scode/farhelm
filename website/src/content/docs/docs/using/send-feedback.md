@@ -10,7 +10,8 @@ of the [navigation rail](/docs/using/manage-hosts/), the column of icons down th
 **Send feedback**. Type your message and, if you want an answer, how to reach you. Then select **Send**.
 
 Your feedback goes privately to the maintainer. It is not a public issue, and you need no account for it. If you would
-rather discuss something in the open, you can still [open an issue on GitHub](https://github.com/scode/farhelm/issues).
+rather discuss something in the open, you can still [open an issue on GitHub](https://github.com/scode/farhelm/issues),
+or talk it through with the maintainer and other users on [Discord](https://discord.gg/G3bukxTjXR).
 
 Nothing is sent until you select **Send**, and once it has started, closing the window does not stop it. Below your
 message, the dialog shows everything else that goes with it, and nothing else does:
