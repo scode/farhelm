@@ -110,6 +110,9 @@ Generic recorder wrapping is fine but not required for these; record each result
   `scripts/plans-watch.sh`, `scripts/test-plans-watch.sh` and `scripts/publish-docs-shots.sh`
 - `python3 scripts/test-todo-picker.py` (TODO extraction and legacy standalone checklist)
 - `deno test -A scripts/serve-page.ts` (legacy standalone server; agent pages use the `interactive-artifact` skill)
+- `deno test -A scripts/tensorlake/sandbox-tests.ts` and
+  `shellcheck scripts/tensorlake/bootstrap.sh scripts/tensorlake/run-shard.sh` (the Tensorlake harness's own checks;
+  running the harness is only on the maintainer's request, `.agents/tensorlake.md`)
 - `python3 scripts/test-record-test-run.py` and `python3 scripts/test-test-run-traces.py`
 - The recorded portable brick-test helper suite from `.agents/validation.md`, with process-group inspection available;
   this exercises compiled task contracts, fixed operations, structured native actions, restart handoff failures and

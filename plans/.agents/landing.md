@@ -104,7 +104,8 @@ Then, for each `[complete]` plan in queue order:
    both sides. Main has moved since the review before step 1 if an earlier plan just landed; check what that plan
    changed against this one again.
 3. Confirm no PR in the stack touches `plans/`.
-4. Run the checks the rebase calls for, per `AGENTS.md`, "Tests and validation", and `.agents/validation.md`.
+4. Run the checks the rebase calls for, per `AGENTS.md`, "Tests and validation", and `.agents/validation.md`. When the
+   maintainer has asked for Tensorlake in this flow, run the browser specs on sandboxes per `.agents/tensorlake.md`.
 5. Land the stack bottom-up per `jjstack`, marking each PR ready as it lands, and record each merged PR in the monitor
    log. Before each merge, run `queue status` and confirm the line still carries your claim id; if it does not, the
    maintainer released it, so stop landing that plan and treat it as released (`plans/.agents/landing.md`, "Starting and
