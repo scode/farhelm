@@ -1221,6 +1221,7 @@ async fn a_finished_upload_channel_can_be_attached_as_a_terminal() {
         terminal: TerminalSelector::default(),
         lease: "after-upload".to_string(),
         if_unowned: false,
+        grid: false,
     };
     peer.control(&attach).await;
     let refused = peer.next_outcome(20).await;
@@ -1259,6 +1260,7 @@ async fn a_finished_upload_channel_can_be_attached_as_a_terminal() {
                 ControlMsg::Attached {
                     req_id: 3,
                     channel: 1,
+                    ..
                 } => break,
                 ControlMsg::Error {
                     req_id: 3,
@@ -1670,6 +1672,7 @@ async fn an_ack_arrives_ahead_of_a_backlog_of_terminal_output() {
         terminal: TerminalSelector::default(),
         lease: "flooding-lease".to_string(),
         if_unowned: false,
+        grid: false,
     })
     .await;
     let replay_deadline = tokio::time::Instant::now() + Duration::from_secs(30);

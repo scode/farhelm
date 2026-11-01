@@ -249,6 +249,7 @@ async fn queued_download_bytes_cannot_enter_a_reused_channel() {
         cols: 80,
         rows: 24,
         if_unowned: false,
+        grid: false,
         lease: "reuse-refused".into(),
     })
     .await;

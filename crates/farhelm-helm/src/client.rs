@@ -623,6 +623,29 @@ impl std::fmt::Display for Detach {
     }
 }
 
+/// Which streams the viewer behind an attach can take, sent as
+/// `ControlMsg::Attach`'s `grid`.
+///
+/// Every terminal can stream bytes; only a viewer with the grid client can
+/// take a grid stream, which is the only way a terminal in a terminal host
+/// can be shown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ViewerStreams {
+    /// Terminal bytes only: attaching a terminal in a terminal host is
+    /// refused.
+    BytesOnly,
+    /// Bytes or grids, whichever the terminal streams.
+    BytesOrGrid,
+}
+
+/// What the two attach entry points differ in, carried to their shared
+/// body together.
+struct AttachPolicy {
+    /// `ControlMsg::Attach::if_unowned`.
+    if_unowned: bool,
+    streams: ViewerStreams,
+}
+
 /// One attached terminal, as the client holds it: the bounded event queue
 /// (`Data` and, as of PLAN_M5.md item 4, `ReplayComplete`) plus an
 /// out-of-band detach signal.
@@ -653,9 +676,19 @@ pub struct TermStream {
     events: mpsc::Receiver<TermEvent>,
     detach: watch::Receiver<Option<Detach>>,
     ended: bool,
+    /// What the data events carry, from the supervisor's `Attached` reply.
+    stream: farhelm_proto::StreamKind,
 }
 
 impl TermStream {
+    /// What this attachment's `Data` events carry: terminal bytes, or grid
+    /// messages (`farhelm_proto::grid`). Fixed for the attachment's life by
+    /// the supervisor's `Attached` reply; the helm passes it on to the
+    /// browser and relays the data either way without reading it.
+    pub fn stream_kind(&self) -> farhelm_proto::StreamKind {
+        self.stream
+    }
+
     /// Next event, or `None` once the attachment has ended and its
     /// backlog is drained.
     ///
@@ -3531,8 +3564,15 @@ impl SupervisorClient {
         // Displacing, like every pre-M6 attach: this wrapper exists for
         // callers with no lease and no reconnect flow, and a refusal is
         // something only an automatic retry knows what to do with.
-        self.attach_terminal(session_id, cols, rows, TerminalSelector::default(), "")
-            .await
+        self.attach_terminal(
+            session_id,
+            cols,
+            rows,
+            TerminalSelector::default(),
+            "",
+            ViewerStreams::BytesOnly,
+        )
+        .await
     }
 
     /// Attach naming the terminal and the lease explicitly.
@@ -3545,6 +3585,9 @@ impl SupervisorClient {
     /// cannot. `lease` must be high-entropy and non-empty to group
     /// several terminals into one client; the empty lease means the
     /// pre-M4 singleton reading (see `ControlMsg::Attach`).
+    ///
+    /// `streams` says which streams the caller can take; the returned
+    /// stream's [`TermStream::stream_kind`] says which one it got.
     pub async fn attach_terminal(
         &self,
         session_id: &str,
@@ -3552,8 +3595,13 @@ impl SupervisorClient {
         rows: u16,
         terminal: TerminalSelector,
         lease: &str,
+        streams: ViewerStreams,
     ) -> anyhow::Result<(u32, TermStream)> {
-        self.attach_with_policy(session_id, cols, rows, terminal, lease, false)
+        let policy = AttachPolicy {
+            if_unowned: false,
+            streams,
+        };
+        self.attach_with_policy(session_id, cols, rows, terminal, lease, policy)
             .await
     }
 
@@ -3570,7 +3618,7 @@ impl SupervisorClient {
     /// Refused with `ErrorKind::TakenOver` (its message,
     /// [`farhelm_proto::ATTACH_REFUSED_TAKEN_OVER`], is display text only),
     /// and nothing is installed on a refusal — the channel this named stays
-    /// unattached.
+    /// unattached. `streams` is as for [`Self::attach_terminal`].
     pub async fn attach_terminal_if_unowned(
         &self,
         session_id: &str,
@@ -3578,13 +3626,24 @@ impl SupervisorClient {
         rows: u16,
         terminal: TerminalSelector,
         lease: &str,
+        streams: ViewerStreams,
     ) -> anyhow::Result<(u32, TermStream)> {
-        self.attach_with_policy(session_id, cols, rows, terminal, lease, true)
+        let policy = AttachPolicy {
+            if_unowned: true,
+            streams,
+        };
+        self.attach_with_policy(session_id, cols, rows, terminal, lease, policy)
             .await
     }
 
     /// The shared body of the two attach entry points above; `if_unowned`
-    /// is the one thing they differ in and it goes straight onto the wire.
+    /// is the one thing they differ in, and it goes straight onto the wire
+    /// with the caller's grid capability.
+    ///
+    /// A `Grid` reply to an attach that did not ask for one is refused and
+    /// the attachment released, so the caller never tells a viewer that
+    /// cannot draw grids to expect one (a supervisor bug, but the browser
+    /// would feed grid JSON to xterm.js).
     async fn attach_with_policy(
         &self,
         session_id: &str,
@@ -3592,15 +3651,17 @@ impl SupervisorClient {
         rows: u16,
         terminal: TerminalSelector,
         lease: &str,
-        if_unowned: bool,
+        policy: AttachPolicy,
     ) -> anyhow::Result<(u32, TermStream)> {
         let channel = allocate_channel(&self.next_channel)?;
         let (events_tx, events_rx) = mpsc::channel(TERM_EVENT_QUEUE);
         let (detach_tx, detach_rx) = watch::channel(None);
-        let stream = TermStream {
+        let mut stream = TermStream {
             events: events_rx,
             detach: detach_rx,
             ended: false,
+            // Set from the reply below; nothing reads it before that.
+            stream: farhelm_proto::StreamKind::Bytes,
         };
         // Register before sending Attach: replay data frames may arrive
         // before the Attached reply is processed. The insert cannot clobber
@@ -3626,7 +3687,8 @@ impl SupervisorClient {
                     rows,
                     terminal,
                     lease: lease.to_string(),
-                    if_unowned,
+                    if_unowned: policy.if_unowned,
+                    grid: policy.streams == ViewerStreams::BytesOrGrid,
                 },
             )
             .await;
@@ -3638,7 +3700,22 @@ impl SupervisorClient {
         // attachment, or the caller waits on a terminal nobody is
         // feeding.
         match result? {
-            ControlMsg::Attached { .. } => Ok((channel, stream)),
+            ControlMsg::Attached {
+                stream: farhelm_proto::StreamKind::Grid,
+                ..
+            } if policy.streams == ViewerStreams::BytesOnly => {
+                // The supervisor holds an attachment now; release it, as the
+                // overflow and closed-receiver paths do.
+                self.terminals.lock().await.remove(&channel);
+                self.release_upstream(channel);
+                Err(anyhow::anyhow!(
+                    "the supervisor answered with a grid stream, which this attach did not ask for"
+                ))
+            }
+            ControlMsg::Attached { stream: kind, .. } => {
+                stream.stream = kind;
+                Ok((channel, stream))
+            }
             other => {
                 self.terminals.lock().await.remove(&channel);
                 Err(wrong_reply("Attach", &other))
@@ -4291,6 +4368,7 @@ mod tests {
             events: events_rx,
             detach: detach_rx,
             ended: false,
+            stream: farhelm_proto::StreamKind::Bytes,
         }
     }
 
@@ -5806,7 +5884,11 @@ mod tests {
                 .await
                 .unwrap();
             writer
-                .write_control(&ControlMsg::Attached { req_id, channel })
+                .write_control(&ControlMsg::Attached {
+                    req_id,
+                    channel,
+                    stream: farhelm_proto::StreamKind::Bytes,
+                })
                 .await
                 .unwrap();
 
@@ -5845,7 +5927,11 @@ mod tests {
                 .await
                 .unwrap();
             writer
-                .write_control(&ControlMsg::Attached { req_id, channel })
+                .write_control(&ControlMsg::Attached {
+                    req_id,
+                    channel,
+                    stream: farhelm_proto::StreamKind::Bytes,
+                })
                 .await
                 .unwrap();
         });
@@ -5853,7 +5939,14 @@ mod tests {
         let (r, w) = tokio::io::split(client_side);
         let client = SupervisorClient::start(r, w).await.unwrap();
         let (_first_channel, mut first_stream) = client
-            .attach_terminal("session", 80, 24, TerminalSelector::default(), "")
+            .attach_terminal(
+                "session",
+                80,
+                24,
+                TerminalSelector::default(),
+                "",
+                ViewerStreams::BytesOnly,
+            )
             .await
             .unwrap();
         assert!(
@@ -5873,7 +5966,14 @@ mod tests {
             .expect("the peer never observed the first attachment's detach")
             .expect("the peer dropped its detach readiness signal");
         let (_second_channel, mut second_stream) = client
-            .attach_terminal("session", 80, 24, TerminalSelector::default(), "")
+            .attach_terminal(
+                "session",
+                80,
+                24,
+                TerminalSelector::default(),
+                "",
+                ViewerStreams::BytesOnly,
+            )
             .await
             .unwrap();
         assert!(

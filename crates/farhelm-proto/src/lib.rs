@@ -106,6 +106,11 @@ pub(crate) use enum_with_all;
 /// Acting `farhelm` commands waiting for the user's approval, as the helm
 /// serves them to the GUI (see the module's own docs).
 pub mod approvals;
+// The grid stream a host terminal's attachment carries instead of terminal
+// bytes, and the input its viewer sends back. Its docs are all its own: an
+// outer doc comment here would make rustdoc resolve the module's links from
+// this file, where its items are not in scope.
+pub mod grid;
 /// Stable remote-host identity choices shared with the browser UI.
 pub mod host_appearance;
 /// The display-only short-name rule; callers retain raw text until rendering.
@@ -224,7 +229,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_67` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_68` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -235,7 +240,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 67;
+pub const PROTOCOL_VERSION: u32 = 68;
 
 /// Browser saves buffer the body, so both hosts enforce this decimal 100 MB cap.
 pub const DOWNLOAD_LIMIT_BYTES: u64 = 100_000_000;
@@ -1627,6 +1632,28 @@ pub enum TerminalSelector {
     /// terminal — attaching the WRONG terminal quietly would be worse
     /// than failing.
     Tab { id: String },
+}
+
+/// What an attachment's data channel carries, as `ControlMsg::Attached`
+/// reports it.
+///
+/// The kind follows from the terminal, not from the request: tmux terminals
+/// stream bytes, terminals in terminal hosts stream grids
+/// ([`grid`]). The helm passes it to the browser as a
+/// `{"type":"stream","kind":...}` text frame before any data, and the browser
+/// picks xterm.js or its grid client from it. `#[default]` is `Bytes`, so an
+/// `Attached` that says nothing means what every attach meant before
+/// protocol 68.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum StreamKind {
+    /// Raw terminal output, replayed and then live, as tmux terminals have
+    /// always sent it.
+    #[default]
+    Bytes,
+    /// Grid messages ([`grid::GridOutput`]) out and grid input
+    /// ([`grid::GridInput`]) in, one message per data frame.
+    Grid,
 }
 
 /// One terminal tab as the supervisor reports it (PLAN_M4.md item 2). Not
@@ -3530,12 +3557,35 @@ pub enum ControlMsg {
         /// reconnect after transport loss finds waiting for it.
         #[serde(default)]
         if_unowned: bool,
+        /// The client can render grid streams ([`grid`]).
+        /// Added with `PROTOCOL_VERSION` 68.
+        ///
+        /// Not additive despite the serde default, which is why it came with
+        /// a bump: it changes what the supervisor may answer. A terminal in a
+        /// terminal host can only be shown as a grid, so an attach to one
+        /// without this capability is refused with a clear error rather than
+        /// sent a stream the client cannot draw; that refusal is permanent
+        /// behavior. tmux terminals stream bytes whatever this says.
+        /// `#[serde(default)]` (false) is every client before version 68,
+        /// and what the helm sends until it can relay grid streams (the
+        /// [`grid`] module docs, "Attach and the stream kind").
+        #[serde(default)]
+        grid: bool,
     },
     /// Attach accepted. Data frames on `channel` may arrive *before* this
     /// reply is processed — the supervisor starts the replay as soon as
     /// the attachment is installed — so a client must have the channel
     /// registered before it sends `Attach`, not after it sees `Attached`.
-    Attached { req_id: u64, channel: u32 },
+    Attached {
+        req_id: u64,
+        channel: u32,
+        /// What `channel` carries (added with `PROTOCOL_VERSION` 68).
+        /// `Grid` only ever answers an `Attach` that set `grid`, and the helm
+        /// refuses one that breaks that. Absent reads as `Bytes`, the only
+        /// kind before version 68.
+        #[serde(default)]
+        stream: StreamKind,
+    },
     /// Give up an attachment voluntarily. No reply, and no error if the
     /// channel was never attached or was already taken over: detach is
     /// idempotent so a client tearing down a closed terminal never has to
@@ -4447,6 +4497,7 @@ mod tests {
             terminal: TerminalSelector::default(),
             lease: String::new(),
             if_unowned: false,
+            grid: false,
         };
         let json = serde_json::to_value(&msg).unwrap();
         assert_eq!(
@@ -4461,7 +4512,87 @@ mod tests {
                 "terminal": { "kind": "agent" },
                 "lease": "",
                 "if_unowned": false,
+                "grid": false,
             })
+        );
+    }
+
+    /// Protocol 68's two attach fields, golden-pinned in both directions, and
+    /// the shapes from before them still decoding to what they always meant.
+    ///
+    /// Why: `Attach::grid` decides whether a host terminal can be attached
+    /// at all, and `Attached::stream` decides which terminal component the
+    /// browser builds, so a renamed key or a default flipped the wrong way
+    /// would attach the wrong renderer or refuse every attach, while every
+    /// round-trip test kept passing. Spec: `grid` and `stream` serialize
+    /// under those keys with `stream` as `"bytes"`/`"grid"`; an `Attach`
+    /// without `grid` decodes as `grid: false`; an `Attached` without
+    /// `stream` decodes as `Bytes`.
+    #[farhelm_testtrace::test]
+    fn attach_grid_and_attached_stream_json_shapes_are_pinned() {
+        let attach = ControlMsg::Attach {
+            req_id: 4,
+            session_id: "s1".into(),
+            channel: 2,
+            cols: 100,
+            rows: 30,
+            terminal: TerminalSelector::Tab { id: "t1".into() },
+            lease: "client-abc".into(),
+            if_unowned: false,
+            grid: true,
+        };
+        let attach_json = serde_json::json!({
+            "type": "attach",
+            "req_id": 4,
+            "session_id": "s1",
+            "channel": 2,
+            "cols": 100,
+            "rows": 30,
+            "terminal": { "kind": "tab", "id": "t1" },
+            "lease": "client-abc",
+            "if_unowned": false,
+            "grid": true,
+        });
+        assert_eq!(serde_json::to_value(&attach).unwrap(), attach_json);
+        assert_eq!(
+            serde_json::from_value::<ControlMsg>(attach_json).unwrap(),
+            attach
+        );
+
+        for (stream, wire) in [(StreamKind::Bytes, "bytes"), (StreamKind::Grid, "grid")] {
+            let attached = ControlMsg::Attached {
+                req_id: 4,
+                channel: 2,
+                stream,
+            };
+            let json = serde_json::json!({
+                "type": "attached", "req_id": 4, "channel": 2, "stream": wire,
+            });
+            assert_eq!(serde_json::to_value(&attached).unwrap(), json);
+            assert_eq!(
+                serde_json::from_value::<ControlMsg>(json).unwrap(),
+                attached
+            );
+        }
+
+        let old_attach = serde_json::json!({
+            "type": "attach", "req_id": 5, "session_id": "s1", "channel": 3,
+            "cols": 80, "rows": 24, "terminal": { "kind": "agent" }, "lease": "",
+            "if_unowned": false,
+        });
+        let ControlMsg::Attach { grid, .. } = serde_json::from_value(old_attach).unwrap() else {
+            panic!("an Attach without `grid` must still decode as an Attach");
+        };
+        assert!(!grid, "a client that does not say it can draw grids cannot");
+
+        let old_attached = serde_json::json!({"type": "attached", "req_id": 5, "channel": 3});
+        assert_eq!(
+            serde_json::from_value::<ControlMsg>(old_attached).unwrap(),
+            ControlMsg::Attached {
+                req_id: 5,
+                channel: 3,
+                stream: StreamKind::Bytes,
+            }
         );
     }
 
@@ -4487,6 +4618,7 @@ mod tests {
                     terminal: TerminalSelector::Agent,
                     lease: "client-abc".into(),
                     if_unowned: false,
+                    grid: false,
                 },
                 serde_json::json!({
                     "type": "attach",
@@ -4497,7 +4629,7 @@ mod tests {
                     "rows": 24,
                     "terminal": { "kind": "agent" },
                     "lease": "client-abc",
-                    "if_unowned": false,
+                    "if_unowned": false, "grid": false,
                 }),
             ),
             (
@@ -4510,6 +4642,7 @@ mod tests {
                     terminal: TerminalSelector::Tab { id: "t1".into() },
                     lease: "client-abc".into(),
                     if_unowned: true,
+                    grid: false,
                 },
                 serde_json::json!({
                     "type": "attach",
@@ -4520,7 +4653,7 @@ mod tests {
                     "rows": 24,
                     "terminal": { "kind": "tab", "id": "t1" },
                     "lease": "client-abc",
-                    "if_unowned": true,
+                    "if_unowned": true, "grid": false,
                 }),
             ),
         ] {
@@ -5274,8 +5407,8 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_67() {
-        assert_eq!(PROTOCOL_VERSION, 67);
+    fn protocol_version_is_pinned_at_68() {
+        assert_eq!(PROTOCOL_VERSION, 68);
     }
 
     /// A follow-up is an approved mutation even though its success has no

@@ -37,16 +37,22 @@
 //!
 //! ## What crosses the socket
 //!
-//! Terminal bytes are binary frames in both directions. Text frames are the
-//! control channel (`WsClientMsg`): resize, and the browser's own
-//! watermark pause/resume, which is forwarded to the supervisor rather than
-//! interpreted here. Two answers are synthesized on this side —
-//! `PONG_TEXT_MESSAGE` for the heartbeat and `REPLAY_COMPLETE_TEXT_MESSAGE`
-//! for the marker that separates replayed scrollback from live output.
+//! Binary frames are the attachment's data in both directions: terminal
+//! bytes, or for a grid stream (`farhelm_proto::grid`) one grid message per
+//! frame, relayed without being read either way. Text frames are the
+//! control channel (`WsClientMsg`): resize, and the browser's own watermark
+//! pause/resume, which is forwarded to the supervisor rather than
+//! interpreted here. Three text frames are made on this side —
+//! `PONG_TEXT_MESSAGE` for the heartbeat, `REPLAY_COMPLETE_TEXT_MESSAGE` for
+//! the marker that separates replayed scrollback from live output, and the
+//! stream notice (`stream_notice`), which opens every attached socket and
+//! says which kind of data follows. `?grid=1` is how the browser says it
+//! can take grid streams; the helm does not pass that on yet
+//! (`GRID_RELAY_READY`).
 
 use crate::auth::AuthenticatedSocket;
 use crate::sessions::{default_cols, default_rows, resolve_session_ref, route_session};
-use crate::{AppState, SupervisorClient, SupervisorError, TermEvent, TermStream};
+use crate::{AppState, SupervisorClient, SupervisorError, TermEvent, TermStream, ViewerStreams};
 use axum::Extension;
 use axum::extract::{Path as AxPath, Query, State, WebSocketUpgrade, ws};
 use axum::response::IntoResponse;
@@ -107,6 +113,47 @@ pub(crate) struct TermQuery {
     /// reading the latter as empty, and collapsing them early would
     /// destroy exactly the distinction that refusal depends on.
     lease: Option<String>,
+    /// `?grid=1`: the browser can render grid streams, forwarded as
+    /// `ControlMsg::Attach`'s `grid` once the helm can relay them (see
+    /// [`GRID_RELAY_READY`]). Only the exact value `1` means yes;
+    /// absent, or any other value, is a client that cannot, which is what
+    /// every browser bundle from before grid streams is. Kept as a string
+    /// rather than a `bool` because the query decoder reads only
+    /// `true`/`false` as booleans and would refuse the whole upgrade over
+    /// any other value, where an unknown value should cost only the
+    /// capability.
+    grid: Option<String>,
+}
+
+/// Whether this helm passes a browser's `?grid=1` on to the supervisor.
+///
+/// Not yet. Grid messages can be up to 1 MiB (`GRID_MAX_MESSAGE`), and this
+/// helm still stall-detaches any incoming terminal frame over 64 KiB, bounds
+/// its per-terminal queue in frames rather than bytes, and cuts browser
+/// input into 32 KiB frames, which would split one grid input message into
+/// two invalid ones. A helm that asked for grids now would break host
+/// terminals in exactly those cases, and since the fix does not change the
+/// protocol version, a helm built before it could meet a supervisor that
+/// sends grids. Asking for nothing instead gets the supervisor's clear
+/// refusal for host terminals, the designed degradation. The change that
+/// makes this helm a grid relay turns this on.
+const GRID_RELAY_READY: bool = false;
+
+impl TermQuery {
+    /// Whether the browser said it can render grid streams.
+    fn asks_for_grid(&self) -> bool {
+        self.grid.as_deref() == Some("1")
+    }
+
+    /// What this attach tells the supervisor the viewer can take: grids
+    /// only when the browser asked and this helm can relay them.
+    fn streams(&self) -> ViewerStreams {
+        if GRID_RELAY_READY && self.asks_for_grid() {
+            ViewerStreams::BytesOrGrid
+        } else {
+            ViewerStreams::BytesOnly
+        }
+    }
 }
 
 /// Turn a `?tab=`/`?lease=` query pair into what `attach_terminal` wants,
@@ -196,19 +243,34 @@ async fn attach_from_query(
     // ordinary last-attach-wins attach.
     let (channel, stream) = if if_unowned {
         client
-            .attach_terminal_if_unowned(&key.session_id, q.cols, q.rows, terminal, lease)
+            .attach_terminal_if_unowned(
+                &key.session_id,
+                q.cols,
+                q.rows,
+                terminal,
+                lease,
+                q.streams(),
+            )
             .await?
     } else {
         client
-            .attach_terminal(&key.session_id, q.cols, q.rows, terminal, lease)
+            .attach_terminal(
+                &key.session_id,
+                q.cols,
+                q.rows,
+                terminal,
+                lease,
+                q.streams(),
+            )
             .await?
     };
     Ok((client, key.session_id, channel, stream))
 }
 
-/// Terminal WebSocket: binary frames are terminal bytes in both
-/// directions; text frames are small JSON control messages (client →
-/// resize/pause/resume; server → detached notice, replay-complete marker).
+/// Terminal WebSocket: binary frames are the attachment's data in both
+/// directions (terminal bytes, or grid messages for a grid stream); text
+/// frames are small JSON control messages (client → resize/pause/resume/ping;
+/// server → stream notice, detached notice, replay-complete marker, pong).
 /// This is the browser-facing twin of the proto data channel, kept equally
 /// dumb.
 ///
@@ -265,8 +327,18 @@ async fn attach_from_query(
 /// The browser side that SENDS them lands with the UI work in
 /// PLAN_M2_5.md step 4; the server accepts them now.
 ///
-/// Server → client, both text: `{"type":"detached","reason":...}` and, as
-/// of PLAN_M5.md item 4, `{"type":"replay_complete"}` — the attach's
+/// `?grid=1` says the browser can render grid streams (see
+/// `TermQuery::asks_for_grid`; not passed on yet, see [`GRID_RELAY_READY`]),
+/// and every attached socket carries the
+/// `{"type":"stream","kind":"bytes"|"grid"}` notice saying which one the
+/// supervisor chose (see `stream_notice`). The browser can rely on this
+/// order: the stream notice comes before the first binary frame and before
+/// `replay_complete`; a `pong` or `detached` may come before it and settles
+/// nothing about the stream.
+///
+/// Server → client, all text: the stream notice, `{"type":"pong"}`,
+/// `{"type":"detached","reason":...}` and, as of PLAN_M5.md item 4,
+/// `{"type":"replay_complete"}` — the attach's
 /// catch-up boundary, forwarded on this SAME socket after the binary
 /// replay bytes it follows and before any binary live bytes, because
 /// [`TermEvent::ReplayComplete`] rides the terminal's data queue rather
@@ -329,6 +401,19 @@ fn refused_as_missing_tab(error: &anyhow::Error, q: &TermQuery) -> bool {
 /// carries both.
 fn detached_notice(detach: &crate::client::Detach) -> serde_json::Value {
     serde_json::json!({"type": "detached", "reason": detach.reason, "code": detach.code})
+}
+
+/// The browser's `{"type":"stream","kind":"bytes"|"grid"}` notice, the first
+/// frame of every attached socket.
+///
+/// It has to precede the first binary frame because the browser builds a
+/// different terminal for each kind (xterm.js for bytes, the grid client for
+/// grids) and would otherwise hand that frame to the wrong one. It is sent
+/// for bytes too, so a browser that asked for grids learns the answer from a
+/// message rather than from silence; browser bundles from before grid streams
+/// ignore text frames whose type they do not know.
+fn stream_notice(kind: farhelm_proto::StreamKind) -> serde_json::Value {
+    serde_json::json!({"type": "stream", "kind": kind})
 }
 
 pub(crate) async fn term_ws(
@@ -594,52 +679,64 @@ async fn serve_term(
     // sender to keep alive so the receiver does not spin.
     let pong = Arc::new(tokio::sync::Notify::new());
     let pong_outbound = Arc::clone(&pong);
+    // The stream notice opens the socket, ahead of anything already queued:
+    // replay data can be waiting before `attach_from_query` even returned,
+    // because the supervisor starts the replay before its `Attached` reply.
+    // It goes through the same detach-racing send as everything else, so a
+    // browser that never reads cannot pin the handler on it.
+    let mut stream_notice_first = Some(ws::Message::Text(
+        stream_notice(events.stream_kind()).to_string().into(),
+    ));
     let mut outbound = tokio::spawn(async move {
         loop {
-            // A pong does not queue behind the terminal's events: a
-            // heartbeat is only ever sent when that queue has been silent,
-            // so parking the answer behind it would answer late precisely
-            // when the answer is being timed. It still goes out through the
-            // same detach-racing send below as everything else, which is
-            // what keeps a wedged browser from pinning this handler on a
-            // one-frame write — and through the same sink, since two halves
-            // writing to one socket is exactly the interleaving that would
-            // let a pong land in the middle of a terminal frame.
-            let next = tokio::select! {
-                event = events.recv() => match event {
-                    Some(event) => Some(event),
-                    None => break,
-                },
-                // `None` stands for the pong: the signal carries no
-                // payload, because the only thing a ping conveys is that it
-                // arrived.
-                _ = pong_outbound.notified() => None,
-            };
-            let message = match next {
-                None => ws::Message::Text(PONG_TEXT_MESSAGE.into()),
-                Some(TermEvent::Data(bytes)) => ws::Message::Binary(bytes.into()),
-                // The catch-up boundary (PLAN_M5.md item 4). Built as an
-                // ordinary outbound `Message` rather than sent inline like
-                // `Detached` below, deliberately: it must go through the
-                // SAME `select!` — racing the browser's detach signal —
-                // as a `Data` message would, so a viewer that vanished
-                // between the marker and this send abandons it exactly
-                // like abandoned data, instead of the marker getting a
-                // priority path data never had.
-                Some(TermEvent::ReplayComplete) => {
-                    ws::Message::Text(REPLAY_COMPLETE_TEXT_MESSAGE.into())
-                }
-                Some(TermEvent::Detached(reason)) => {
-                    let notice = detached_notice(&reason);
-                    // Bound this notice because a peer that cannot accept a
-                    // hundred-byte notice within the grace period is one the
-                    // reason would never have reached anyway.
-                    let _ = tokio::time::timeout(
-                        WS_TEARDOWN_GRACE,
-                        ws_tx.send(ws::Message::Text(notice.to_string().into())),
-                    )
-                    .await;
-                    break;
+            let message = if let Some(notice) = stream_notice_first.take() {
+                notice
+            } else {
+                // A pong does not queue behind the terminal's events: a
+                // heartbeat is only ever sent when that queue has been silent,
+                // so parking the answer behind it would answer late precisely
+                // when the answer is being timed. It still goes out through the
+                // same detach-racing send below as everything else, which is
+                // what keeps a wedged browser from pinning this handler on a
+                // one-frame write — and through the same sink, since two halves
+                // writing to one socket is exactly the interleaving that would
+                // let a pong land in the middle of a terminal frame.
+                let next = tokio::select! {
+                    event = events.recv() => match event {
+                        Some(event) => Some(event),
+                        None => break,
+                    },
+                    // `None` stands for the pong: the signal carries no
+                    // payload, because the only thing a ping conveys is that it
+                    // arrived.
+                    _ = pong_outbound.notified() => None,
+                };
+                match next {
+                    None => ws::Message::Text(PONG_TEXT_MESSAGE.into()),
+                    Some(TermEvent::Data(bytes)) => ws::Message::Binary(bytes.into()),
+                    // The catch-up boundary (PLAN_M5.md item 4). Built as an
+                    // ordinary outbound `Message` rather than sent inline like
+                    // `Detached` below, deliberately: it must go through the
+                    // SAME `select!` — racing the browser's detach signal —
+                    // as a `Data` message would, so a viewer that vanished
+                    // between the marker and this send abandons it exactly
+                    // like abandoned data, instead of the marker getting a
+                    // priority path data never had.
+                    Some(TermEvent::ReplayComplete) => {
+                        ws::Message::Text(REPLAY_COMPLETE_TEXT_MESSAGE.into())
+                    }
+                    Some(TermEvent::Detached(reason)) => {
+                        let notice = detached_notice(&reason);
+                        // Bound this notice because a peer that cannot accept a
+                        // hundred-byte notice within the grace period is one the
+                        // reason would never have reached anyway.
+                        let _ = tokio::time::timeout(
+                            WS_TEARDOWN_GRACE,
+                            ws_tx.send(ws::Message::Text(notice.to_string().into())),
+                        )
+                        .await;
+                        break;
+                    }
                 }
             };
             tokio::select! {
@@ -918,7 +1015,12 @@ mod tests {
                 panic!("expected terminal admission");
             };
             assert_eq!(session_id, "sess-1");
-            peer.send(&ControlMsg::Attached { req_id, channel }).await;
+            peer.send(&ControlMsg::Attached {
+                req_id,
+                channel,
+                stream: farhelm_proto::StreamKind::Bytes,
+            })
+            .await;
             peer.send_frame(&Frame::data(channel, b"ready".to_vec()))
                 .await;
             let ControlMsg::Resize {
@@ -937,6 +1039,7 @@ mod tests {
         let mut harness = rest_harness::spliced_helm(client_side).await;
         let addr = harness.serve().await;
         let mut ws = connect_session(&harness, addr, "/api/sessions/sess-1/term").await;
+        expect_stream_notice(&mut ws, "bytes").await;
         let (opcode, bytes) = tokio::time::timeout(Duration::from_secs(5), ws.recv())
             .await
             .expect("attached terminal must deliver its live bytes")
@@ -1053,7 +1156,11 @@ mod tests {
                 panic!("expected Attach, got {request:?}");
             };
             writer
-                .write_control(&ControlMsg::Attached { req_id, channel })
+                .write_control(&ControlMsg::Attached {
+                    req_id,
+                    channel,
+                    stream: farhelm_proto::StreamKind::Bytes,
+                })
                 .await
                 .expect("attach reply");
 
@@ -1079,7 +1186,14 @@ mod tests {
             .await
             .expect("client handshake");
         let (channel, _events) = client
-            .attach_terminal("sess-1", 80, 24, TerminalSelector::default(), "")
+            .attach_terminal(
+                "sess-1",
+                80,
+                24,
+                TerminalSelector::default(),
+                "",
+                crate::ViewerStreams::BytesOnly,
+            )
             .await
             .expect("terminal attach");
 
@@ -1128,7 +1242,11 @@ mod tests {
             attach_seen_tx.send(()).unwrap();
             release_rx.await.unwrap();
             writer
-                .write_control(&ControlMsg::Attached { req_id, channel })
+                .write_control(&ControlMsg::Attached {
+                    req_id,
+                    channel,
+                    stream: farhelm_proto::StreamKind::Bytes,
+                })
                 .await
                 .unwrap();
             loop {
@@ -1246,6 +1364,7 @@ mod tests {
             .await
             .unwrap();
 
+        expect_stream_notice(&mut ws, "bytes").await;
         let (opcode, payload) = tokio::time::timeout(Duration::from_secs(5), ws.recv())
             .await
             .expect("no replay data arrived")
@@ -1291,6 +1410,9 @@ mod tests {
             peer
         );
         let (_reader, _writer, _channel) = peer.unwrap();
+        // Take the stream notice first, so the close below is the only thing
+        // left for the socket to deliver.
+        expect_stream_notice(&mut ws, "bytes").await;
 
         // The header declares more than MAX_FRAME_LEN, but no payload bytes
         // are sent. Only the frame bound can reject this declaration before
@@ -1344,6 +1466,7 @@ mod tests {
             .write_frame(&Frame::data(channel, b"first".to_vec()))
             .await
             .unwrap();
+        expect_stream_notice(&mut ws, "bytes").await;
         let (opcode, payload) = tokio::time::timeout(Duration::from_secs(5), ws.recv())
             .await
             .expect("no first frame")
@@ -1467,10 +1590,284 @@ mod tests {
             panic!("expected an Attach, got {request:?}");
         };
         writer
-            .write_control(&ControlMsg::Attached { req_id, channel })
+            .write_control(&ControlMsg::Attached {
+                req_id,
+                channel,
+                stream: farhelm_proto::StreamKind::Bytes,
+            })
             .await
             .unwrap();
         (reader, writer, channel)
+    }
+
+    /// Read the stream notice every attached socket opens with and check its
+    /// kind, so a test can go on to the frames it is about.
+    async fn expect_stream_notice(ws: &mut WsTestClient, kind: &str) {
+        let (opcode, payload) = tokio::time::timeout(Duration::from_secs(5), ws.recv())
+            .await
+            .expect("no stream notice arrived")
+            .expect("socket closed before the stream notice");
+        assert_eq!(opcode, 1, "the stream notice is a text frame");
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&payload).unwrap(),
+            serde_json::json!({"type": "stream", "kind": kind}),
+        );
+    }
+
+    /// The stream notice is the socket's first frame and comes before data
+    /// that reached the helm ahead of the supervisor's answer.
+    ///
+    /// Why: the browser builds xterm.js or the grid client from this notice,
+    /// so a binary frame ahead of it would be handed to whichever terminal
+    /// the browser guessed. The supervisor starts its replay before its
+    /// `Attached` reply, so early data is the ordinary case, not a contrived
+    /// one. Spec: the supervisor sends a data frame and then
+    /// `Attached { stream: Bytes }`; the browser receives
+    /// `{"type":"stream","kind":"bytes"}` and then that data frame,
+    /// unchanged.
+    #[farhelm_testtrace::test]
+    async fn the_stream_notice_comes_before_data_that_beat_the_reply() {
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request =
+                farhelm_proto::io::parse_control(&reader.read_frame().await.unwrap().unwrap())
+                    .unwrap();
+            let ControlMsg::Attach {
+                req_id, channel, ..
+            } = request
+            else {
+                panic!("expected an Attach, got {request:?}");
+            };
+            writer
+                .write_frame(&Frame::data(channel, b"early".to_vec()))
+                .await
+                .unwrap();
+            writer
+                .write_control(&ControlMsg::Attached {
+                    req_id,
+                    channel,
+                    stream: farhelm_proto::StreamKind::Bytes,
+                })
+                .await
+                .unwrap();
+            (reader, writer)
+        });
+        let mut harness = rest_harness::spliced_helm(client_side).await;
+        let addr = harness.serve().await;
+        let (mut ws, peer) = tokio::join!(
+            connect_session(&harness, addr, "/api/sessions/sess-1/term"),
+            peer
+        );
+        let _peer_halves = peer.unwrap();
+
+        expect_stream_notice(&mut ws, "bytes").await;
+        let (opcode, payload) = tokio::time::timeout(Duration::from_secs(5), ws.recv())
+            .await
+            .expect("the early data frame never arrived")
+            .expect("socket closed before the early data frame");
+        assert_eq!(opcode, 2, "attachment data travels as binary frames");
+        assert_eq!(payload, b"early");
+    }
+
+    /// The grid notice names the kind the way the browser matches on it.
+    ///
+    /// Why: no supervisor answers `grid` to this helm yet (it does not ask),
+    /// so the socket tests cannot reach this notice; the browser's grid
+    /// client switches on exactly this text. Spec: the notice for each kind
+    /// is `{"type":"stream","kind":"bytes"}` or `{"type":"stream","kind":"grid"}`.
+    #[farhelm_testtrace::test]
+    fn the_stream_notice_names_each_kind() {
+        assert_eq!(
+            super::stream_notice(farhelm_proto::StreamKind::Bytes),
+            serde_json::json!({"type": "stream", "kind": "bytes"})
+        );
+        assert_eq!(
+            super::stream_notice(farhelm_proto::StreamKind::Grid),
+            serde_json::json!({"type": "stream", "kind": "grid"})
+        );
+    }
+
+    /// A supervisor that answers a grid stream to an attach that did not ask
+    /// for one is refused, and its attachment released.
+    ///
+    /// Why: `Attached::stream` is `grid` only for an attach that set `grid`,
+    /// and a browser that cannot draw grids ignores the grid notice and would
+    /// feed grid JSON to xterm.js. Failing closed turns a supervisor bug into
+    /// a visible failed attach. Spec: the supervisor answers
+    /// `Attached { stream: Grid }` to an attach with `grid: false`; the
+    /// browser gets a `detached` notice saying so and no stream notice, and
+    /// the supervisor gets a `Detach` for the channel.
+    #[farhelm_testtrace::test]
+    async fn an_unasked_grid_stream_is_refused_and_released() {
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request =
+                farhelm_proto::io::parse_control(&reader.read_frame().await.unwrap().unwrap())
+                    .unwrap();
+            let ControlMsg::Attach {
+                req_id,
+                channel,
+                grid,
+                ..
+            } = request
+            else {
+                panic!("expected an Attach, got {request:?}");
+            };
+            assert!(!grid, "fixture premise: this attach did not ask for grids");
+            writer
+                .write_control(&ControlMsg::Attached {
+                    req_id,
+                    channel,
+                    stream: farhelm_proto::StreamKind::Grid,
+                })
+                .await
+                .unwrap();
+            loop {
+                let frame = reader.read_frame().await.unwrap().unwrap();
+                let message = farhelm_proto::io::parse_control(&frame).unwrap();
+                if matches!(message, ControlMsg::Detach { channel: got } if got == channel) {
+                    return;
+                }
+            }
+        });
+        let mut harness = rest_harness::spliced_helm(client_side).await;
+        let addr = harness.serve().await;
+        let mut ws = connect_session(&harness, addr, "/api/sessions/sess-1/term").await;
+
+        let (opcode, payload) = tokio::time::timeout(Duration::from_secs(5), ws.recv())
+            .await
+            .expect("no notice arrived")
+            .expect("socket closed before the notice");
+        assert_eq!(opcode, 1);
+        let notice: serde_json::Value = serde_json::from_slice(&payload).unwrap();
+        assert_eq!(notice["type"], "detached", "not a stream notice: {notice}");
+        assert!(
+            notice["reason"]
+                .as_str()
+                .unwrap()
+                .contains("did not ask for"),
+            "{notice}"
+        );
+        tokio::time::timeout(Duration::from_secs(5), peer)
+            .await
+            .expect("the refused attachment must be released upstream")
+            .unwrap();
+    }
+
+    /// Only `?grid=1` asks for grid streams, the request reaches the
+    /// supervisor only once the helm can relay grids, and no value of `grid`
+    /// refuses the socket; all of it on both terminal routes.
+    ///
+    /// Why: `grid` decides whether the supervisor may answer with a stream
+    /// only the grid client can draw, so a stray value must not turn a
+    /// bundle that cannot draw grids into one that claims it can, and a helm
+    /// that cannot relay grids must not ask for them for anyone (see
+    /// `GRID_RELAY_READY`). The query is parsed before the upgrade, where a
+    /// parse failure would refuse the terminal with a bare HTTP error instead
+    /// of the on-socket notice every other failure gets. And the automatic
+    /// reconnect's route (`/term/unowned`) has its own call into the client,
+    /// which must carry the same capability. Spec: on both routes, absent,
+    /// `0` and `true` attach with `grid: false`; `1` attaches with
+    /// `grid: GRID_RELAY_READY`; each socket opens with the stream notice.
+    #[farhelm_testtrace::test]
+    async fn only_grid_1_asks_for_grid_streams_on_both_routes() {
+        for route in [
+            "/api/sessions/sess-1/term",
+            "/api/sessions/sess-1/term/unowned",
+        ] {
+            for (query, asks) in [
+                ("", false),
+                ("?grid=1", true),
+                ("?grid=0", false),
+                ("?grid=true", false),
+            ] {
+                let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+                let peer = tokio::spawn(async move {
+                    let (r, w) = tokio::io::split(peer_side);
+                    let mut reader = FrameReader::new(r);
+                    let mut writer = FrameWriter::new(w);
+                    handshake(&mut reader, &mut writer, "supervisor")
+                        .await
+                        .unwrap();
+                    let request = farhelm_proto::io::parse_control(
+                        &reader.read_frame().await.unwrap().unwrap(),
+                    )
+                    .unwrap();
+                    let ControlMsg::Attach {
+                        req_id,
+                        channel,
+                        grid,
+                        ..
+                    } = request
+                    else {
+                        panic!("expected an Attach, got {request:?}");
+                    };
+                    writer
+                        .write_control(&ControlMsg::Attached {
+                            req_id,
+                            channel,
+                            stream: farhelm_proto::StreamKind::Bytes,
+                        })
+                        .await
+                        .unwrap();
+                    (grid, reader, writer)
+                });
+                let mut harness = rest_harness::spliced_helm(client_side).await;
+                let addr = harness.serve().await;
+                let path = format!("{route}{query}");
+                let (mut ws, peer) = tokio::join!(connect_session(&harness, addr, &path), peer);
+                let (grid, _reader, _writer) = peer.unwrap();
+                assert_eq!(grid, super::GRID_RELAY_READY && asks, "for {path:?}");
+                expect_stream_notice(&mut ws, "bytes").await;
+            }
+        }
+    }
+
+    /// `TermQuery::asks_for_grid` reads only the exact value `1`, and the
+    /// capability sent upstream is that answer gated on the relay.
+    ///
+    /// Why: while `GRID_RELAY_READY` is off, the socket test above cannot
+    /// tell a parser that reads `?grid=1` from one that ignores it; this one
+    /// can, so the parsing is in place and tested when the gate opens.
+    /// Spec: `1` asks; absent, `0`, `true` and `yes` do not; the viewer's
+    /// streams are bytes or grids exactly when the query asks and the gate
+    /// is open.
+    #[farhelm_testtrace::test]
+    fn only_the_exact_value_1_asks_for_grids() {
+        for (value, asks) in [
+            (None, false),
+            (Some("1"), true),
+            (Some("0"), false),
+            (Some("true"), false),
+            (Some("yes"), false),
+        ] {
+            let q = super::TermQuery {
+                cols: 80,
+                rows: 24,
+                tab: None,
+                lease: None,
+                grid: value.map(str::to_string),
+            };
+            assert_eq!(q.asks_for_grid(), asks, "for {value:?}");
+            let expected = if super::GRID_RELAY_READY && asks {
+                crate::ViewerStreams::BytesOrGrid
+            } else {
+                crate::ViewerStreams::BytesOnly
+            };
+            assert_eq!(q.streams(), expected, "for {value:?}");
+        }
     }
 
     /// The heartbeat's ping is answered BY THE HELM and never relayed
@@ -1506,6 +1903,7 @@ mod tests {
         ws.send_text(r#"{"type":"ping"}"#).await;
         ws.send_text(r#"{"type":"pause"}"#).await;
 
+        expect_stream_notice(&mut ws, "bytes").await;
         let (opcode, payload) = tokio::time::timeout(Duration::from_secs(5), ws.recv())
             .await
             .expect("the helm never answered the heartbeat")
@@ -1678,7 +2076,11 @@ mod tests {
                 assert_eq!(terminal, expected_terminal, "for query {query:?}");
                 assert_eq!(lease, expected_lease, "for query {query:?}");
                 writer
-                    .write_control(&ControlMsg::Attached { req_id, channel })
+                    .write_control(&ControlMsg::Attached {
+                        req_id,
+                        channel,
+                        stream: farhelm_proto::StreamKind::Bytes,
+                    })
                     .await
                     .unwrap();
             });
@@ -1724,7 +2126,11 @@ mod tests {
             assert_eq!(terminal, TerminalSelector::Tab { id: "tab-1".into() });
             assert_eq!(lease, "client-abc");
             writer
-                .write_control(&ControlMsg::Attached { req_id, channel })
+                .write_control(&ControlMsg::Attached {
+                    req_id,
+                    channel,
+                    stream: farhelm_proto::StreamKind::Bytes,
+                })
                 .await
                 .unwrap();
         });

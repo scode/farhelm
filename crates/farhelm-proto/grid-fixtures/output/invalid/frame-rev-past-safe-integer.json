@@ -1,0 +1,7 @@
+{
+  "t": "frame",
+  "rev": 9007199254740992,
+  "cols": 80,
+  "rows": 24,
+  "cursor": { "x": 0, "y": 0, "visible": true, "shape": "block", "blink": true }
+}

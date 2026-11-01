@@ -1,0 +1,11 @@
+{
+  "t": "history",
+  "first": 0,
+  "cols": 80,
+  "rows": [
+    { "w": true, "r": [[0, 3, "abc", [0, -1, -1]]] },
+    { "w": false, "r": [] },
+    { "w": false, "r": [[0, 4, "link", [8, -1, -1], 0]] }
+  ],
+  "links": [["a", "https://example.com/a"]]
+}

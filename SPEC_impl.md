@@ -2121,6 +2121,17 @@ or `ssh -O exit` on its socket); see the `CONNECTION_OVERRIDES` docs. `ClearAllF
 because the jump runs as its own `ssh -W` child; that was checked with a real connection through a jump on localhost.
 JSON control frames keep the protocol debuggable by eye; raw binary data channels keep PTY throughput off the JSON path.
 
+Protocol 68 adds grid streams, the form in which terminals that run in terminal hosts reach their viewers: the
+supervisor interprets their output and sends the screen as rows of styled runs. `Attach` carries the client's `grid`
+capability and `Attached` the channel's stream kind (`bytes` or `grid`), which the helm passes to the browser as a
+`{"type":"stream","kind":...}` text frame before any data. A grid channel carries one JSON message per data frame in
+each direction, and the helm relays them without reading them. Until the helm can relay grid messages (they can be far
+larger than the terminal frames it admits today, and browser input must stay one message per frame), it never asks for
+grid streams, and it refuses a grid stream it did not ask for. The format is not permanent: it changes with ordinary
+protocol bumps, unlike the terminal host's protocol and snapshots. Its contract, bounds and golden fixtures are in
+`farhelm-proto` (`crates/farhelm-proto/src/grid.rs` and `crates/farhelm-proto/grid-fixtures/`). Nothing sends grid
+streams until terminal hosts are switched on.
+
 `SessionInfo` carries a `last_activity_at` (unix seconds) beside `created_at`: the last time the supervisor observed
 that session's agent pane change. It was added WITHIN protocol version 11 rather than bumping it, per the running rule
 every version since 3 has followed — a new optional field with a decode default, whose omission a receiver can ignore
