@@ -1,0 +1,67 @@
+screens dropped false
+size 16x7
+mode TermMode(SHOW_CURSOR | LINE_WRAP | ALTERNATE_SCROLL | URGENCY_HINTS)
+scroll region 0..7
+tab stops 0 8
+active charset G0
+title None
+title stack []
+cursor style CursorStyle { shape: Block, blinking: false }
+REP character Some('中')
+clean true
+history trimmed no
+primary saved cursor 0,0 template ' ' fg Foreground bg Background charsets Ascii Ascii Ascii Ascii
+primary cursor 6,2 template ' ' fg Foreground bg Background charsets Ascii Ascii Ascii Ascii
+primary history 0
+primary    0 |bolddimitalinvhi|
+primary    0,0: 'b' fg Foreground bg Background flags Flags(BOLD)
+primary    0,1: 'o' fg Foreground bg Background flags Flags(BOLD)
+primary    0,2: 'l' fg Foreground bg Background flags Flags(BOLD)
+primary    0,3: 'd' fg Foreground bg Background flags Flags(BOLD)
+primary    0,4: 'd' fg Foreground bg Background flags Flags(BOLD | DIM)
+primary    0,5: 'i' fg Foreground bg Background flags Flags(BOLD | DIM)
+primary    0,6: 'm' fg Foreground bg Background flags Flags(BOLD | DIM)
+primary    0,7: 'i' fg Foreground bg Background flags Flags(ITALIC)
+primary    0,8: 't' fg Foreground bg Background flags Flags(ITALIC)
+primary    0,9: 'a' fg Foreground bg Background flags Flags(ITALIC)
+primary    0,10: 'l' fg Foreground bg Background flags Flags(ITALIC)
+primary    0,11: 'i' fg Foreground bg Background flags Flags(INVERSE)
+primary    0,12: 'n' fg Foreground bg Background flags Flags(INVERSE)
+primary    0,13: 'v' fg Foreground bg Background flags Flags(INVERSE)
+primary    0,14: 'h' fg Foreground bg Background flags Flags(HIDDEN)
+primary    0,15: 'i' fg Foreground bg Background flags Flags(WRAPLINE | HIDDEN)
+primary    1 |abcdefg         |
+primary    1,0: 'a' fg Foreground bg Background flags Flags(UNDERLINE)
+primary    1,1: 'b' fg Foreground bg Background flags Flags(DOUBLE_UNDERLINE)
+primary    1,2: 'c' fg Foreground bg Background flags Flags(UNDERCURL)
+primary    1,3: 'd' fg Foreground bg Background flags Flags(DOTTED_UNDERLINE)
+primary    1,4: 'e' fg Foreground bg Background flags Flags(DASHED_UNDERLINE)
+primary    1,5: 'f' fg Foreground bg Background flags Flags(DASHED_UNDERLINE) underline i9
+primary    1,6: 'g' fg Foreground bg Background flags Flags(DASHED_UNDERLINE) underline #010203
+primary    2 |rRitgGbB        |
+primary    2,0: 'r' fg Red bg Background
+primary    2,1: 'R' fg BrightRed bg Background
+primary    2,2: 'i' fg i200 bg Background
+primary    2,3: 't' fg #010203 bg Background
+primary    2,4: 'g' fg #010203 bg Green
+primary    2,5: 'G' fg #010203 bg BrightGreen
+primary    2,6: 'b' fg #010203 bg i17
+primary    2,7: 'B' fg #010203 bg #090807
+primary    3 |中 😀 é̈中́ 	a       |
+primary    3,0: '中' fg Foreground bg Background flags Flags(WIDE_CHAR)
+primary    3,1: ' ' fg Foreground bg Background flags Flags(WIDE_CHAR_SPACER)
+primary    3,2: '😀' fg Foreground bg Background flags Flags(WIDE_CHAR)
+primary    3,3: ' ' fg Foreground bg Background flags Flags(WIDE_CHAR_SPACER)
+primary    3,5: '中' fg Foreground bg Background flags Flags(WIDE_CHAR)
+primary    3,6: ' ' fg Foreground bg Background flags Flags(WIDE_CHAR_SPACER)
+primary    4 |link plain      |
+primary    4,0: 'l' fg Foreground bg Background link "doc" "https://example.test/doc"
+primary    4,1: 'i' fg Foreground bg Background link "doc" "https://example.test/doc"
+primary    4,2: 'n' fg Foreground bg Background link "doc" "https://example.test/doc"
+primary    4,3: 'k' fg Foreground bg Background link "doc" "https://example.test/doc"
+primary    5 |                |
+primary    5,15: ' ' fg Foreground bg Background flags Flags(WRAPLINE | LEADING_WIDE_CHAR_SPACER)
+primary    6 |中               |
+primary    6,0: '中' fg Foreground bg Background flags Flags(WIDE_CHAR)
+primary    6,1: ' ' fg Foreground bg Background flags Flags(WIDE_CHAR_SPACER)
+alternate saved cursor 0,0 template ' ' fg Foreground bg Background charsets Ascii Ascii Ascii Ascii

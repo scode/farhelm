@@ -1,0 +1,26 @@
+screens dropped false
+size 20x5
+mode TermMode(APP_CURSOR | APP_KEYPAD | BRACKETED_PASTE | SGR_MOUSE | LINE_FEED_NEW_LINE | ORIGIN | INSERT | FOCUS_IN_OUT | MOUSE_DRAG | ALTERNATE_SCROLL | URGENCY_HINTS)
+scroll region 1..4
+tab stops 4 12
+active charset G0
+title Some("third")
+title stack [Some("first"), Some("second;with;semicolons")]
+cursor style CursorStyle { shape: Beam, blinking: true }
+color 1 #102030
+color 200 #ff0080
+color 256 #aabbcc
+color 257 #010203
+color 258 #ff00ff
+REP character Some('n')
+clean true
+history trimmed no
+primary saved cursor 0,0 template ' ' fg Foreground bg Background charsets Ascii Ascii Ascii Ascii
+primary cursor 2,11 template ' ' fg Foreground bg Background charsets SpecialCharacterAndLineDrawing SpecialCharacterAndLineDrawing Ascii Ascii
+primary history 0
+primary    0 |            ┌─┐     |
+primary    1 |                    |
+primary    2 |  ␋┼ ⎼␊±␋⎺┼         |
+primary    3 |                    |
+primary    4 |                    |
+alternate saved cursor 0,0 template ' ' fg Foreground bg Background charsets Ascii Ascii Ascii Ascii

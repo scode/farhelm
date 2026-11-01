@@ -23,6 +23,11 @@ dist = false
 # `serde` default feature is off because nothing here serializes alacritty's
 # types.
 alacritty_terminal = { version = "=0.26.0", default-features = false }
+# Character widths for the snapshot encoder, which must agree with alacritty's
+# own about where each printed character lands. alacritty asks for `0.2` too,
+# so cargo resolves both to one copy; a snapshot records that copy's Unicode
+# version (`snapshot` module docs).
+unicode-width = "0.2"
 
 [dev-dependencies]
 # Byte-wise against chunked feeding, and the delegation check, over generated

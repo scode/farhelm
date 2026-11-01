@@ -9,24 +9,24 @@
 //! rather than on process memory, which other tests running in parallel
 //! would make meaningless.
 //!
-//! Not covered here, on purpose: a bound on how many distinct hyperlinks one
-//! terminal may hold, and the measurement of a terminal's memory against a
-//! budget. Each cap here bounds one piece of state; the total is for the
-//! snapshot format's change to bound and measure against a per-terminal
-//! memory budget.
+//! Each cap here bounds one piece of state. The whole terminal's resident
+//! memory is measured against the per-terminal budget by the ignored tests in
+//! `memory.rs` (crate docs, "Memory budget").
 
 mod common;
 
 use std::time::Instant;
 
 use common::{emulator, feed};
+use farhelm_terminal_emulator::alacritty_terminal::grid::Dimensions;
 use farhelm_terminal_emulator::alacritty_terminal::index::{Column, Line};
 use farhelm_terminal_emulator::alacritty_terminal::term::cell::{Cell, MAX_ZEROWIDTH_CHARS};
 use farhelm_terminal_emulator::alacritty_terminal::term::{
-    MAX_HYPERLINK_ID_BYTES, MAX_HYPERLINK_URI_BYTES, MAX_TITLE_BYTES,
+    CELL_EXTRA_COST, HYPERLINK_COST, MAX_EXTRA_STORAGE_BYTES, MAX_HYPERLINK_ID_BYTES,
+    MAX_HYPERLINK_URI_BYTES, MAX_TITLE_BYTES,
 };
 use farhelm_terminal_emulator::alacritty_terminal::vte::OSC_PAYLOAD_LIMIT;
-use farhelm_terminal_emulator::{ClipboardTarget, Collected, Emulator, Notice};
+use farhelm_terminal_emulator::{ClipboardTarget, Collected, Emulator, Notice, Size};
 
 const MIB: usize = 1024 * 1024;
 
@@ -321,5 +321,76 @@ fn a_screen_full_of_tabs_captures_in_linear_time() {
     assert!(
         tabs_took <= plain_took * MAX_RATIO,
         "tabs took {tabs_took:?}, plain {plain_took:?}: more than {MAX_RATIO} times as long"
+    );
+}
+
+/// A new hyperlink before every character, and a combining mark on every
+/// cell, stop attaching once the terminal's cell extras take
+/// `MAX_EXTRA_STORAGE_BYTES`: the text after that prints unlinked and without
+/// its marks. A snapshot restores what was there, charged to the restored
+/// terminal's own storage. Once the text is cleared and its rows reused, the
+/// storage is back and links attach again.
+///
+/// The rows matter, not the clearing alone: alacritty can keep up to a
+/// thousand rows that left the grid, cells and all, to reuse them, and their
+/// extras stay alive (and counted) until new output reaches and resets them,
+/// which takes about that many new lines; so the test prints them.
+///
+/// Why: without the bound, a program doing either over a full scrollback
+/// gives every cell an allocation of its own, about 390 MiB per terminal, or
+/// about 6 GB with the longest links (vendor/README.md); the per-cell length
+/// caps alone cannot stop it.
+#[test]
+fn floods_of_cell_extras_are_bounded() {
+    let size = Size {
+        columns: 200,
+        lines: 100,
+    };
+    let mut emulator = Emulator::new(size, 1200);
+    let link = |n: usize| (format!("{n:06}"), format!("http://x/{n:06}"));
+    let per_link = |n: usize| {
+        let (id, uri) = link(n);
+        id.len() + uri.len() + HYPERLINK_COST + CELL_EXTRA_COST
+    };
+    let fits = MAX_EXTRA_STORAGE_BYTES / per_link(0);
+    let mut output = String::new();
+    for n in 0..fits + 100 {
+        let (id, uri) = link(n);
+        output.push_str(&format!("\x1b]8;id={id};{uri}\x1b\\x"));
+    }
+    feed_in_reads(&mut emulator, output.as_bytes());
+    let storage = emulator.term().extra_storage().used();
+    assert_eq!(storage, fits * per_link(0));
+    let grid = emulator.term().grid();
+    let linked = (-(grid.history_size() as i32)..100)
+        .flat_map(|line| (0..200).map(move |column| (line, column)))
+        .filter(|&(line, column)| grid[Line(line)][Column(column)].hyperlink().is_some())
+        .count();
+    assert_eq!(linked, fits);
+
+    let restored = Emulator::restore(&emulator.snapshot(16 << 20).unwrap().blob, 1200)
+        .unwrap()
+        .emulator;
+    assert_eq!(restored.term().extra_storage().used(), storage);
+
+    feed(&mut emulator, b"\x1b[H\x1b[2J\x1b[3J");
+    feed(&mut emulator, b"\x1b]8;;\x1b\\");
+    feed(&mut emulator, "\r\n".repeat(1300).as_bytes());
+    assert_eq!(emulator.term().extra_storage().used(), 0);
+    feed(&mut emulator, b"\x1b]8;id=again;http://x/\x1b\\y");
+    assert!(cell(&emulator, 99, 0).hyperlink().is_some());
+
+    // Room in history for every cell, so that no row is reused (and its
+    // extras given back) before the storage fills.
+    let mut marked = Emulator::new(size, 2200);
+    let fits = MAX_EXTRA_STORAGE_BYTES / CELL_EXTRA_COST;
+    let cells = fits + 100;
+    feed_in_reads(&mut marked, "e\u{301}".repeat(cells).as_bytes());
+    assert_eq!(marked.term().extra_storage().used(), fits * CELL_EXTRA_COST);
+    let last = cell(&marked, 99, (cells - 1) % 200);
+    assert_eq!(
+        (last.c, last.zerowidth()),
+        ('e', None),
+        "the last mark dropped"
     );
 }
