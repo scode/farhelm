@@ -1434,6 +1434,16 @@ declare_assets! {
     // File recognition and hover ownership are shared with the JS test harness.
     const TERMINAL_FILES_JS: Asset = asset!("/assets/terminal-files.js");
     const TERMINAL_LINKS_JS: Asset = asset!("/assets/terminal-links.js");
+    // The grid terminal, which terminal.js mounts for an attachment whose
+    // stream is a grid (terminals that run in a terminal host) instead of
+    // xterm.js. The three pure parts are their own assets for the same
+    // reason as the helpers above, so `node --test` runs the shipped code;
+    // terminal.js treats all four globals as mount preconditions, so an
+    // attachment can switch to the grid without waiting on a script.
+    const GRID_MODEL_JS: Asset = asset!("/assets/grid-model.js");
+    const GRID_STYLE_JS: Asset = asset!("/assets/grid-style.js");
+    const GRID_INPUT_JS: Asset = asset!("/assets/grid-input.js");
+    const GRID_TERMINAL_JS: Asset = asset!("/assets/grid-terminal.js");
     const TERMINAL_JS: Asset = asset!("/assets/terminal.js");
     // The invalidation feed's socket (PLAN_M6_75.md item 6) — its own asset
     // rather than a corner of terminal.js, because it has nothing to do with a
@@ -1851,6 +1861,10 @@ fn AppBody() -> Element {
         document::Script { src: CLIPBOARD_WRITER_JS }
         document::Script { src: TERMINAL_LINKS_JS }
         document::Script { src: TERMINAL_FILES_JS }
+        document::Script { src: GRID_MODEL_JS }
+        document::Script { src: GRID_STYLE_JS }
+        document::Script { src: GRID_INPUT_JS }
+        document::Script { src: GRID_TERMINAL_JS }
         document::Script { src: TERMINAL_JS }
         document::Script { src: EVENTS_JS }
         document::Script { src: SIDEBAR_WIDTH_JS }

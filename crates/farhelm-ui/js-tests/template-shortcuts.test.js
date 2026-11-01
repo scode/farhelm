@@ -169,7 +169,7 @@ class Element {
     return this.editable === undefined ? !!this.parent?.isContentEditable : this.editable;
   }
   matches(selector) {
-    if (selector === ".xterm-helper-textarea") return this.terminal;
+    if (selector === ".xterm-helper-textarea, .grid-terminal-input") return this.terminal;
     if (selector === "input, textarea") return ["input", "textarea"].includes(this.tag);
     if (selector === ".launch-sequence-trigger") return this.action !== undefined;
     if (selector === '[role="dialog"][aria-modal="true"]') return this.modal;
