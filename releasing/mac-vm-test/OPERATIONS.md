@@ -109,11 +109,12 @@ observation, while `model-result.json` and enriched `result.json` retain the bou
 native captures. Failures of the tester's tools or evidence preparation use `automation-failure`, not a product `fail`.
 
 `guest_operations.py` exposes only named operations for signed inputs, installation, app launch, version/service
-inspection, continuity and earlier receipts. It forwards genuine native CUA through the same serial tool server. A
-failed command or native tool closes the action gate before another request can run, even when the model did not inspect
-the failure. An unexpected bridge restart is refused rather than replaying an uncertain action. The shell tool is
-disabled and ambient user configuration is not loaded; explicit guest-only tool approval cannot authorize an arbitrary
-shell command. This is an accidental-failure boundary, not a sandbox against a malicious native tester.
+inspection, session rows, terminal hosts, continuity and earlier receipts. It forwards genuine native CUA through the
+same serial tool server. A failed command or native tool closes the action gate before another request can run, even
+when the model did not inspect the failure. An unexpected bridge restart is refused rather than replaying an uncertain
+action. The shell tool is disabled and ambient user configuration is not loaded; explicit guest-only tool approval
+cannot authorize an arbitrary shell command. This is an accidental-failure boundary, not a sandbox against a malicious
+native tester.
 
 Launch logs and digest-bound receipt references live in the private pass directory. A later checkpoint requests
 `prior_receipts`; it never infers a previous model working directory or recreates a missing observation. Repeated
@@ -124,6 +125,28 @@ appeared, is returned explicitly; unexpected command or transport failures close
 `checkpoint_contract.py` binds the host-selected update path to both the offered operations and the required evidence.
 The model receives only that path's instructions: a manual installer test cannot acquire override-removal obligations.
 Installers and app launches run at most once per attempt; repeated observations can poll for actual readiness.
+
+The version observation counts the app's own supervisor: its direct child, or, while the app runs, the process its
+supervisor record (`desktop-supervisor.json` in the state directory) names, when the live process matches the record's
+pid, program path and start second. An app that starts its supervisor detached reuses it on a later launch, when it is
+no longer the app's child; terminal hosts and session reporters running a versioned `farhelm` are never counted.
+
+P0's old sessions use read-only observations and two samples that only the old-session checks may take. `inspect_state`
+and `remote_inspect_state` read only the session identity columns of each side's `supervisor.db`, including the stored
+`terminal_kind` where the schema has it (`remote_` runs over the pinned SSH alias). `terminal_hosts` and
+`remote_terminal_hosts` list the terminal hosts, recognized by their last two arguments, `--socket` and a socket
+directly inside the state directory's `hosts/`, with each host's children; identities are pid plus start identity (`ps`
+`lstart` under the C locale on the Mac, kernel start ticks and boot ID on Linux). Only a host's socket path is kept: no
+child's or other process's command line reaches a receipt, and a failed process scan keeps its exit status, byte count
+and bounded stderr, never its output. A process-table line that does not parse is skipped and counted. At `old-fixture`
+the sample is refused until that attempt has observed the side's one captured session, and requires at most one host
+with one live child; at the new-session checks it is refused until the new session exists and reads its rows too, so the
+import can compare the stored kind with the hosts. `host_survival` and `remote_host_survival` run once per attempt,
+before the old session is touched, and take their own samples: they report the branch, whether the session (and in the
+host branch its host and child) survived, whether the candidate creates hosts and whether Restart is due, plus any
+stored-kind disagreement. `old_session_after` and `remote_old_session_after` take the final sample and are refused until
+the comparison ran. The tester's import refuses an old-session pass that contradicts them; see BRICK-TEST.md, "Perform
+the product checks".
 
 `guest_ui.py` exposes single structured app actions through the official native provider; executable JavaScript is not
 offered to the model. Restart is a separate lifecycle action: one native click, independent observation of the running

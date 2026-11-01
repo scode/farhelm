@@ -8,6 +8,7 @@ returning an error to the model alone would still let a batched click run.
 """
 
 import argparse
+import calendar
 from collections import deque
 import hashlib
 import json
@@ -20,7 +21,7 @@ import sys
 import time
 from urllib.request import urlopen
 
-from checkpoint_contract import available_operations, require_applicable_operation
+from checkpoint_contract import SIDES, available_operations, host_identity, require_applicable_operation
 from guest_ui import NativeUI, tool_definition, wait_running
 from window_geometry import calibrate, select_frame
 
@@ -28,9 +29,112 @@ from window_geometry import calibrate, select_frame
 LIMIT = 512 * 1024
 OPERATIONS = ('prerequisites', 'verify_candidate', 'verify_previous', 'fixture_clean', 'install_candidate',
               'install_previous', 'launch', 'launch_override', 'versions', 'remote_version',
-              'update_logs', 'public_latest', 'inspect_state', 'continuity_command',
+              'update_logs', 'public_latest', 'inspect_state', 'remote_inspect_state', 'terminal_hosts',
+              'remote_terminal_hosts', 'host_survival', 'remote_host_survival', 'old_session_after',
+              'remote_old_session_after', 'continuity_command',
               'continuity_before', 'continuity_remote_before', 'continuity_remote_after',
               'continuity_reopen_before', 'continuity_reopen_after', 'prior_receipts', 'window_frame', 'finder_frame')
+# Only the test's session identity columns. `terminal_kind` is the stored kind
+# once the product keeps one; schema introspection drops any absent column, so
+# older releases' databases keep the same observation contract.
+SESSION_COLUMNS = ('id', 'name', 'generation', 'captured_conversation', 'conversation_source', 'terminal_kind')
+# Like remote_version's default install path, the Linux scripts assume the
+# default state directory, `~/.local/state/farhelm`. A base that gave the
+# provisioned supervisor an XDG_STATE_HOME would need them to follow it.
+REMOTE_INSPECT = '''from pathlib import Path
+import contextlib,json,sqlite3
+p=Path.home()/'.local/state/farhelm/supervisor.db'
+wanted=%r
+observed={'present':False}
+if p.is_file():
+ with contextlib.closing(sqlite3.connect(p.as_uri()+'?mode=ro',uri=True)) as c:
+  actual={row[1] for row in c.execute('PRAGMA table_info(sessions)')}
+  columns=[name for name in wanted if name in actual]
+  observed={'sessions':[dict(zip(columns,row)) for row in c.execute('SELECT '+','.join(columns)+' FROM sessions LIMIT 100')]} if columns else {}
+print(json.dumps({'supervisor.db':observed}))
+''' % (SESSION_COLUMNS,)
+# Linux has exact argv (NUL-separated) and kernel start ticks. The script itself
+# keeps only hosts whose last two arguments are `--socket` and a path in this
+# state directory's hosts/, plus their direct children, and sends no other
+# command line, not even the children's, off the guest.
+REMOTE_HOSTS = '''from pathlib import Path
+import json
+prefix=str(Path.home()/'.local/state/farhelm/hosts')+'/'
+boot=Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+rows=[]
+for entry in Path('/proc').iterdir():
+ if not entry.name.isdigit():
+  continue
+ try:
+  argv=[part.decode(errors='replace') for part in (entry/'cmdline').read_bytes().split(b'\\0') if part]
+  fields=(entry/'stat').read_text().rsplit(')',1)[1].split()
+  row=dict(pid=int(entry.name),ppid=int(fields[1]),start=dict(start_ticks=int(fields[19]),boot_id=boot))
+ except (OSError,ValueError,IndexError):
+  continue
+ if fields[0] in ('Z','X'):
+  continue
+ socket=argv[-1] if len(argv)>=2 and argv[-2]=='--socket' else ''
+ row['args']=' --socket '+socket if socket.startswith(prefix) else ''
+ rows.append(row)
+hosts={row['pid'] for row in rows if row['args']}
+print(json.dumps(dict(hosts_dir=prefix[:-1],rows=[row for row in rows if row['pid'] in hosts or row['ppid'] in hosts])))
+'''
+
+
+def parse_mac_processes(table):
+    """Read `ps -o pid=,ppid=,stat=,lstart=,args=` rows: host candidates and their children, plus a skip count.
+
+`lstart` is the kernel's process start time printed to the second under the C
+locale: with the pid it is the Mac's platform start identity here, since pid
+reuse within one second on a quiet guest is not a realistic collision. Zombies
+are not live processes. A line that does not parse (a command line with an
+unescaped newline, say) is skipped and counted rather than ending the
+observation: hosts and their children always parse. Only processes whose
+arguments contain ` --socket ` keep their command line here, and children keep
+none; `select_hosts` then keeps nothing but a matching socket path, so no
+other process's arguments reach a receipt.
+"""
+    rows, unparsed = [], 0
+    for line in table.splitlines():
+        parts = line.split(None, 8)
+        try:
+            pid, ppid = int(parts[0]), int(parts[1])
+        except (ValueError, IndexError):
+            unparsed += 1
+            continue
+        if len(parts) < 8:
+            unparsed += 1
+            continue
+        if parts[2].startswith('Z'):
+            continue
+        rows.append({'pid': pid, 'ppid': ppid, 'start': ' '.join(parts[3:8]),
+                     'args': parts[8] if len(parts) == 9 else ''})
+    hosts = {row['pid'] for row in rows if ' --socket ' in row['args']}
+    kept = [dict(row, args=row['args'] if row['pid'] in hosts else '') for row in rows
+            if row['pid'] in hosts or row['ppid'] in hosts]
+    return kept, unparsed
+
+
+def select_hosts(rows, hosts_dir):
+    """Identify terminal hosts by their socket in the supervisor's host directory, with their children.
+
+A host's only argument is its socket (terminal-host SPEC.md, "Command line and
+child spec"), and the supervisor keeps those sockets directly in
+`<state dir>/hosts/`. Matching that, rather than a program name, keeps the
+observation independent of which build started the host. Children are reported
+as found; whether exactly one live child is required is the caller's premise.
+"""
+    prefix = hosts_dir.rstrip('/') + '/'
+    hosts = []
+    for row in rows:
+        _, marker, socket = row['args'].rpartition(' --socket ')
+        name = socket[len(prefix):]
+        if not marker or not socket.startswith(prefix) or not name or '/' in name:
+            continue
+        children = sorted(({'pid': child['pid'], 'start': child['start']} for child in rows
+                           if child['ppid'] == row['pid']), key=lambda child: child['pid'])
+        hosts.append({'pid': row['pid'], 'start': row['start'], 'socket': socket, 'children': children})
+    return sorted(hosts, key=lambda host: host['pid'])
 
 
 def write_json(path, value, replace=False):
@@ -75,17 +179,27 @@ only receipt references and test observations, never authentication contents.
         self.latest_images = {}
         self.failure = None
 
-    def command(self, argv, *, cwd=None, env=None, data=None, timeout=60):
-        """Check each fixed command before its caller can perform a later action."""
+    def command(self, argv, *, cwd=None, env=None, data=None, timeout=60, private_output=False):
+        """Check each fixed command before its caller can perform a later action.
+
+`private_output` marks a command whose stdout can hold other processes' command
+lines (a full process table). Its caller filters that output before anything
+is retained, so a failure keeps only the exit status, the byte count and a
+bounded stderr: a raw table must never reach a receipt, whatever the outcome.
+Such output is held in memory only, so it gets a larger bound than receipts.
+"""
         result = self.runner(argv, cwd=cwd, env=env, input=data, capture_output=True, timeout=timeout)
         row = {'argv': argv, 'returncode': result.returncode,
                'stdout': result.stdout.decode(errors='replace'), 'stderr': result.stderr.decode(errors='replace')}
-        if len(json.dumps(row).encode()) > LIMIT:
+        if len(json.dumps(row).encode()) > (16 * 1024 * 1024 if private_output else LIMIT):
             raise RuntimeError('managed command output exceeds its bound')
         if result.returncode:
             # Preserve the exact failed command too; a failure must not require
             # a second model-written script to explain what happened.
-            self.receipt('failed-command', row)
+            retained = row if not private_output else dict(
+                row, stdout=f'<{len(result.stdout)} bytes withheld: may hold other processes\' command lines>',
+                stderr=row['stderr'][:2000])
+            self.receipt('failed-command', retained)
             raise RuntimeError(f'managed command exited {result.returncode}: {argv[0]}')
         return row
 
@@ -135,9 +249,13 @@ only receipt references and test observations, never authentication contents.
                                          self.context.get('update_path'), operation)
             # Repeating an uncertain installer or launch can hide the first
             # outcome. Observation operations may poll; mutations run once.
+            # The survival comparison is an observation that also runs once:
+            # repeated after the old session's Restart it would observe the
+            # legitimate replacement and overwrite the comparison that counts.
             if operation in self.completed and operation in (
-                    'install_previous', 'install_candidate', 'launch', 'launch_override'):
-                raise RuntimeError('managed mutation already completed; it cannot be replayed')
+                    'install_previous', 'install_candidate', 'launch', 'launch_override',
+                    'host_survival', 'remote_host_survival'):
+                raise RuntimeError('managed mutation or one-time observation already completed; it cannot be replayed')
             value = self.perform(operation)
             name = self.receipt(operation.replace('_', '-'), value)
             self.completed.add(operation)
@@ -148,18 +266,27 @@ only receipt references and test observations, never authentication contents.
             self.fail(f'{type(error).__name__}: {error}')
             raise
 
-    def ssh(self, script):
+    def ssh(self, script, private_output=False):
         """Use the manifest-pinned peer and fixed Python, never a model command string."""
         return self.command(['/usr/bin/ssh', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes',
-            self.context['ssh']['alias'], '/usr/bin/python3', '-'], data=script.encode(), timeout=30)
+            self.context['ssh']['alias'], '/usr/bin/python3', '-'], data=script.encode(), timeout=30,
+            private_output=private_output)
 
     def version(self):
-        """Separate installed payloads from the live app and its managed supervisor.
+        """Separate installed payloads from the live app and the supervisor it uses.
 
-The GUI executable has an unversioned bundle path. Its direct supervisor child
-uses the versioned payload path; old session reporters can outlive app updates
-and must not be mistaken for that live child. The native UI readout separately
-establishes the GUI's in-memory release, and PID changes establish its restart.
+The GUI executable has an unversioned bundle path. Its supervisor uses the
+versioned payload path; old session reporters and terminal hosts can outlive
+app updates and must not be mistaken for it. A supervisor the app started is
+its direct child. Since the app starts it detached, it outlives a quit, and a
+later launch of the same app reuses it: by then it is no longer the app's
+child, so the app's own supervisor record (`desktop-supervisor.json`) names
+it instead. As the product's own stop does, the record is trusted only when
+the live process matches all of it: pid, program path and start time (to the
+second `ps` shows). It counts only while an app runs, so this still reports
+the running app's supervisor, not a leftover one. The native UI readout
+separately establishes the GUI's in-memory release, and PID changes establish
+its restart.
 """
         app = self.home / 'Applications/Farhelm.app'
         result = {'installed': None, 'bundle': None, 'processes': [], 'running_versions': []}
@@ -174,8 +301,12 @@ establishes the GUI's in-memory release, and PID changes establish its restart.
         rows = [line.split(maxsplit=2) for line in result['processes']]
         desktop = {int(row[0]) for row in rows if len(row) == 3
                    and row[2] == str(app / 'Contents/MacOS/farhelm-desktop')}
+        record = self.recorded_supervisor() if desktop else None
         for row in rows:
-            if len(row) != 3 or int(row[1]) not in desktop:
+            if len(row) != 3:
+                continue
+            recorded = record is not None and int(row[0]) == record['pid'] and row[2] == record['program']
+            if not (int(row[1]) in desktop or (recorded and self.started_at(record))):
                 continue
             match = re.fullmatch(re.escape(str(app / 'Contents/Versions')) + r'/([^/]+)/farhelm', row[2])
             if match:
@@ -184,6 +315,39 @@ establishes the GUI's in-memory release, and PID changes establish its restart.
         result['desktop_pids'] = sorted(desktop)
         result['desktop_running'] = bool(desktop)
         return result
+
+    def recorded_supervisor(self):
+        """Read the app's supervisor record, or None when absent, unreadable or incomplete.
+
+Older releases tether their supervisor and write no record.
+"""
+        try:
+            value = json.loads((self.home / '.local/state/farhelm/desktop-supervisor.json').read_text())
+        except (OSError, ValueError):
+            return None
+        if (not isinstance(value, dict) or type(value.get('pid')) is not int or type(value.get('start')) is not int
+                or not isinstance(value.get('program'), str)):
+            return None
+        return value
+
+    def started_at(self, record):
+        """Report whether the recorded pid's live process started in the record's start second.
+
+The record keeps the kernel start time in microseconds since the epoch; `ps`
+prints it to the second, here in UTC so that `timegm` reads it back without
+the local daylight-saving ambiguity of one autumn hour. A pid that no longer
+exists is an ordinary answer (False), not a failed command.
+"""
+        result = self.runner(['/bin/ps', '-p', str(record['pid']), '-o', 'lstart='], cwd=None,
+                             env=dict(os.environ, LC_ALL='C', TZ='UTC'), input=None, capture_output=True, timeout=30)
+        text = ' '.join(result.stdout.decode(errors='replace').split())
+        if result.returncode or not text:
+            return False
+        try:
+            started = calendar.timegm(time.strptime(text, '%a %b %d %H:%M:%S %Y'))
+        except ValueError:
+            return False
+        return started == record['start'] // 1_000_000
 
     def perform(self, operation):
         """Implement the fixed vocabulary; native UI interactions stay in the official tool."""
@@ -211,15 +375,8 @@ print(json.dumps(dict(cli=r.stdout.strip(),authentication_metadata='private regu
                 result['native_geometry_toolchain'] = self.command(['/usr/bin/swift', '--version'])
             return result
         if operation == 'prior_receipts':
-            rows = []
-            for row in self.state['receipts']:
-                if row['check_id'] == check:
-                    continue
-                path = Path(row['path'])
-                if path.is_symlink() or not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != row['sha256']:
-                    raise RuntimeError('a prior managed receipt changed or disappeared')
-                rows.append(dict(check_id=row['check_id'], operation=row['operation'], value=json.loads(path.read_text())))
-            return rows
+            return [dict(check_id=row['check_id'], operation=row['operation'], value=self.read_receipt(row))
+                    for row in self.state['receipts'] if row['check_id'] != check]
         if operation in ('verify_candidate', 'verify_previous'):
             if check not in ('artifact-verification', 'old-fixture'):
                 raise RuntimeError('signature verification belongs to artifact or old-fixture setup')
@@ -343,6 +500,14 @@ raise SystemExit(0 if all(r['returncode']==0 for r in rows) else 1)
             return {'available': True, 'lines': [line for line in lines if 'updater' in line.lower()]}
         if operation == 'inspect_state':
             return self.inspect_state()
+        if operation == 'remote_inspect_state':
+            return json.loads(self.ssh(REMOTE_INSPECT)['stdout'])
+        if operation in ('terminal_hosts', 'remote_terminal_hosts'):
+            return self.terminal_hosts('remote' if operation.startswith('remote_') else 'local')
+        if operation in ('host_survival', 'remote_host_survival'):
+            return self.host_survival('remote' if operation.startswith('remote_') else 'local')
+        if operation in ('old_session_after', 'remote_old_session_after'):
+            return self.old_session_after('remote' if operation.startswith('remote_') else 'local')
         if operation in ('window_frame', 'finder_frame'):
             return self.window_frame('farhelm' if operation == 'window_frame' else 'finder')
         if operation.startswith('continuity_'):
@@ -389,22 +554,200 @@ twenty-reference evidence budget alongside the ten required native images.
         self.save_record()
         return observation
 
+    def read_receipt(self, row):
+        """Return a retained receipt's value only while its bytes still match the recorded digest."""
+        path = Path(row['path'])
+        if path.is_symlink() or not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != row['sha256']:
+            raise RuntimeError('a prior managed receipt changed or disappeared')
+        return json.loads(path.read_text())
+
+    def prior_value(self, check, operation, required=True):
+        """Read the latest retained value of one earlier checkpoint's operation in this pass.
+
+This is how a fresh tester turn's machine-owned comparison reaches the old
+fixture's observations, without the model relaying them: the pass's managed
+state outlives each attempt, and the digest binding refuses a changed file.
+"""
+        name = operation.replace('_', '-')
+        rows = [row for row in self.state['receipts'] if row['check_id'] == check and row['operation'] == name]
+        if not rows:
+            if required:
+                raise RuntimeError(f'{check} retained no {name} receipt in this pass')
+            return None
+        return self.read_receipt(rows[-1])
+
+    def sample_hosts(self, side):
+        """Observe every live terminal host on one side of the pair, with its children's identities.
+
+The Mac reads its process table through `ps`; the Linux peer reads `/proc`
+over the pinned SSH alias, so its start identity is the kernel's start ticks
+plus boot identity, as in the continuity oracle. Both outputs can name other
+processes, so neither reaches a receipt raw, even on failure. Returns the
+hosts and how many process-table lines could not be parsed.
+"""
+        if side == 'remote':
+            observed = json.loads(self.ssh(REMOTE_HOSTS, private_output=True)['stdout'])
+            return select_hosts(observed['rows'], observed['hosts_dir']), 0
+        table = self.command(['/bin/ps', '-axww', '-o', 'pid=,ppid=,stat=,lstart=,args='],
+                             env=dict(os.environ, LC_ALL='C'), private_output=True)['stdout']
+        rows, unparsed = parse_mac_processes(table)
+        return select_hosts(rows, str(self.home / '.local/state/farhelm/hosts')), unparsed
+
+    def sample_sessions(self, side):
+        """Read the side's session rows (the fixed identity columns only) at this moment."""
+        if side == 'remote':
+            observed = json.loads(self.ssh(REMOTE_INSPECT)['stdout'])
+        else:
+            observed = self.inspect_state()
+        return observed.get('supervisor.db', {}).get('sessions', [])
+
+    def old_session(self, side):
+        """Return the old fixture's one captured session row for this side, from its digest-bound receipt."""
+        rows = [row for row in self.prior_value('old-fixture', SIDES[side]['state']).get(
+            'supervisor.db', {}).get('sessions', []) if row.get('captured_conversation')]
+        if len(rows) != 1:
+            raise RuntimeError('the old fixture retained no single captured session to compare')
+        return {key: rows[0][key] for key in SESSION_COLUMNS if key in rows[0]}
+
+    def terminal_hosts(self, side):
+        """Record the side's terminal hosts, refusing a sample taken before the moment it stands for.
+
+At the updater pair's old fixture this is the baseline (elsewhere an old
+fixture starts no session, and the sample is a plain diagnostic), so it is
+refused until this attempt
+has observed the side's one captured session: sampled earlier, an empty list
+would misread a host-run session as tmux. The baseline is either no host (the
+previous release runs the old session in tmux) or exactly that session's one
+host with its one live child; more would make the survival comparison
+ambiguous, and a host contradicts a previous release whose source has none.
+At the new-session check it reads the session rows itself and is refused
+until a session other than the old one exists; it reports the new rows (with
+their stored terminal kind, where the schema has one) beside the hosts the old
+fixture did not see, so the import can compare the two. No later decision
+depends on when these samples were taken: the old-session check samples again.
+"""
+        names = SIDES[side]
+        check = self.task['check_id']
+        baseline_turn = check == 'old-fixture' and self.task['pass_id'] == 'p0-updater-upgrade'
+        if check == 'old-fixture' and not baseline_turn:
+            # Other old fixtures start no session: this is only a diagnostic.
+            hosts, unparsed = self.sample_hosts(side)
+            return {'hosts': hosts, 'unparsed_lines': unparsed}
+        if baseline_turn:
+            rows = self.observations.get(names['state'], {}).get('supervisor.db', {}).get('sessions', [])
+            if len(rows) != 1 or not rows[0].get('captured_conversation'):
+                raise RuntimeError('sample the old fixture terminal hosts only after this attempt observed '
+                                   'its one captured session')
+        hosts, unparsed = self.sample_hosts(side)
+        if baseline_turn:
+            if len(hosts) > 1 or any(len(host['children']) != 1 for host in hosts):
+                raise RuntimeError('the old fixture needs at most one terminal host, with one live child')
+            if hosts and self.context.get('previous_can_create_hosts') is False:
+                raise RuntimeError('a terminal host contradicts the previous release source, which has none')
+            return {'hosts': hosts, 'unparsed_lines': unparsed}
+        baseline = self.prior_value('old-fixture', names['hosts'], required=False)
+        known = {host_identity(host) for host in (baseline or {'hosts': []})['hosts']}
+        value = {'hosts': hosts, 'new_hosts': [host for host in hosts if host_identity(host) not in known],
+                 'unparsed_lines': unparsed}
+        if check == names['agent_check']:
+            old_id = self.old_session(side)['id']
+            value['new_sessions'] = [row for row in self.sample_sessions(side) if row.get('id') != old_id]
+            if not value['new_sessions']:
+                raise RuntimeError('sample the new session terminal hosts only after the new agent session exists')
+        return value
+
+    def host_survival(self, side):
+        """Compare the old session and its terminal with the old fixture, from samples this operation takes, once.
+
+Every input to the branch is taken here, before the old session is touched,
+or read from the old fixture's digest-bound receipts; none depends on when
+the tester called an earlier observation. No host at the old fixture means
+the old session ran in tmux, one host that it ran in a terminal host. Either
+way it survived only if its session row keeps its id and launch generation
+and still has a captured conversation; in the host branch also the same host process, socket
+and child (pid and start identity), so a replacement that restored the screen
+and resumed the conversation still reads as not survived. Whether the
+candidate creates hosts comes from hosts present now that the old fixture did
+not have (the new agent session's, which must still exist), cross-checked
+against the new sessions' stored terminal kind where the schema has it. Called
+after a Restart, every branch reads as not survived: a late call can only be
+refused, never pass.
+"""
+        names = SIDES[side]
+        old_hosts = self.prior_value('old-fixture', names['hosts'])['hosts']
+        old = self.old_session(side)
+        current, unparsed = self.sample_hosts(side)
+        sessions = self.sample_sessions(side)
+        rows = [row for row in sessions if row.get('id') == old['id']]
+        new_sessions = [row for row in sessions if row.get('id') != old['id']]
+        if not new_sessions:
+            raise RuntimeError('the new agent session from the agent check is gone; it decides what the candidate creates')
+        branch = 'host' if old_hosts else 'tmux'
+        row = rows[0] if len(rows) == 1 else None
+        session_survived = (row is not None and row.get('generation') == old.get('generation')
+                            and bool(row.get('captured_conversation')))
+        observed = None
+        if old_hosts:
+            observed = next((host for host in current if host['pid'] == old_hosts[0]['pid']), None)
+        host_survived = observed == old_hosts[0] if old_hosts else None
+        baseline = {host_identity(host) for host in old_hosts}
+        creates = any(host_identity(host) not in baseline for host in current)
+        disagreements = []
+        kinds = [entry['terminal_kind'] for entry in new_sessions if 'terminal_kind' in entry]
+        if kinds and ('host' in kinds) != creates:
+            disagreements.append(f'new sessions store terminal_kind {kinds} but a new host is {"" if creates else "not "}running')
+        for label, entry in (('old fixture', old), ('current', row or {})):
+            if 'terminal_kind' in entry and entry['terminal_kind'] != branch:
+                disagreements.append(f'{label} old session stores terminal_kind {entry["terminal_kind"]!r}, '
+                                     f'not the observed {branch!r}')
+        return {'branch': branch, 'survived': session_survived and host_survived is not False,
+                'session_survived': session_survived, 'host_survived': host_survived,
+                'old_fixture_host': old_hosts[0] if old_hosts else None, 'observed_host': observed,
+                'old_session': old, 'current_session': row, 'candidate_creates_hosts': creates,
+                'restart_required': branch == 'host' or creates, 'pre_restart_hosts': current,
+                'kind_disagreements': disagreements, 'unparsed_lines': unparsed}
+
+    def old_session_after(self, side):
+        """Take the old-session check's final sample: its session row and the hosts, after any Restart.
+
+Refused until `host_survival` ran in this attempt, so "after" is relative to a
+comparison the coordinator owns. Hosts are compared with that comparison's
+own pre-Restart sample, so a host counts as the restarted session's only if
+it appeared since. A call made before the Restart shows the old launch
+generation and no new host, which the import refuses when a Restart was due.
+"""
+        names = SIDES[side]
+        if names['survival'] not in self.completed:
+            raise RuntimeError(f'call {names["survival"]} before observing the old session afterwards')
+        survival = self.observations[names['survival']]
+        hosts, unparsed = self.sample_hosts(side)
+        rows = [row for row in self.sample_sessions(side) if row.get('id') == survival['old_session']['id']]
+        before = {host_identity(host) for host in survival['pre_restart_hosts']}
+        identities = {host_identity(host) for host in hosts}
+        old_host = survival['old_fixture_host']
+        return {'session': rows[0] if len(rows) == 1 else None, 'hosts': hosts,
+                'appeared_hosts': [host for host in hosts if host_identity(host) not in before],
+                'old_host_present': old_host is not None and host_identity(old_host) in identities,
+                'unparsed_lines': unparsed}
+
     def inspect_state(self):
         """Read only the test's session, template and display-setting columns.
 
 Never return token-bearing tables or arbitrary SQL. Schema introspection lets
 the historical upgrade fixtures expose the same bounded observation contract.
 """
+        import contextlib
         import sqlite3
         result = {}
-        for database, tables in (('supervisor.db', {'sessions': ('id', 'name', 'generation', 'captured_conversation', 'conversation_source')}),
+        for database, tables in (('supervisor.db', {'sessions': SESSION_COLUMNS}),
                                  ('helm.db', {'launch_templates': ('name', 'fields_json'),
                                               'preferences': ('compact', 'codex_trust', 'tunnel_consent', 'color_terminal_frames')})):
             path = self.home / '.local/state/farhelm' / database
             if not path.is_file():
                 result[database] = {'present': False}
                 continue
-            with sqlite3.connect(path.as_uri() + '?mode=ro', uri=True) as connection:
+            # A connection's own context manager only ends a transaction; close it too.
+            with contextlib.closing(sqlite3.connect(path.as_uri() + '?mode=ro', uri=True)) as connection:
                 observed = {}
                 for table, wanted in tables.items():
                     actual = {row[1] for row in connection.execute(f'PRAGMA table_info({table})')}

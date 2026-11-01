@@ -3,7 +3,110 @@
 The host selects an update path from release facts. The UI model must not have
 to decide which conditional recipe paragraphs apply, and the command gate and
 result validator must agree on that decision.
+
+The terminal transition (old sessions in tmux, new ones in terminal hosts) is
+the one place where a P0 checkpoint branches on something observed during the
+run rather than chosen by the host: the old session's terminal kind. That
+branch, and whether a Restart was due and moved the session, are decided by
+samples the fixed operations take themselves at moments they can check
+(`host_survival` before the old session is touched, `old_session_after` after
+it), compared with the old fixture's digest-bound receipts. The UI model's
+reading of session details is a further check, never the decision, and the
+order in which it calls observations can turn a pass into a refusal but never
+a refusal into a pass.
 """
+
+import json
+
+
+# Each side of the pair has its own fixed observation of terminal hosts and of
+# session rows; the old-session checkpoint for that side compares against the
+# old fixture's receipts of the same operations.
+SIDES = {
+    'local': {'hosts': 'terminal_hosts', 'survival': 'host_survival', 'after': 'old_session_after',
+              'state': 'inspect_state', 'agent_check': 'local-supervisor-agent', 'old_check': 'local-old-session'},
+    'remote': {'hosts': 'remote_terminal_hosts', 'survival': 'remote_host_survival',
+               'after': 'remote_old_session_after', 'state': 'remote_inspect_state',
+               'agent_check': 'remote-supervisor-agent', 'old_check': 'remote-old-session'},
+}
+
+# Checkpoints known to need longer than the ordinary default turn, as a floor
+# under the operator's `--timeout` (capped at the tester's 3600 s maximum).
+# The updater pair's old fixture installs, launches and provisions as before and
+# now also waits two genuine Codex conversations through capture; each
+# old-session check runs two agent turns around an agent Restart.
+TURN_FLOORS = {('old-fixture', 'p0-updater-upgrade'): 2400,
+               ('local-old-session', 'p0-updater-upgrade'): 1800,
+               ('remote-old-session', 'p0-updater-upgrade'): 1800}
+
+
+def turn_timeout(check, pass_id, requested):
+    """Give a checkpoint at least its known floor, never more than the tester's maximum."""
+    return min(3600, max(requested, TURN_FLOORS.get((check, pass_id), 0)))
+
+
+def old_session_side(check):
+    """Name the pair side an old-session checkpoint observes, or None for any other checkpoint."""
+    return next((side for side, names in SIDES.items() if names['old_check'] == check), None)
+
+
+def host_identity(host):
+    """Key one observed terminal host by pid and platform start identity, never by pid alone.
+
+The start identity is a string on the Mac and a dict on Linux; canonical JSON
+compares both the same way across receipts.
+"""
+    return host['pid'], json.dumps(host['start'], sort_keys=True)
+
+
+def require_agent_terminal(observation):
+    """Refuse a new-session check whose stored terminal kind contradicts the hosts it sampled.
+
+The operation sampled both together, after the new session existed. Where the
+schema stores `terminal_kind`, a new `host` row needs a new host process and a
+new `tmux` row none. Without the column this is the UI model's to compare.
+"""
+    kinds = [row['terminal_kind'] for row in observation.get('new_sessions', []) if 'terminal_kind' in row]
+    if kinds and ('host' in kinds) != bool(observation['new_hosts']):
+        raise ValueError(f'new sessions store terminal_kind {kinds}, which the terminal hosts contradict')
+
+
+def require_old_session(observations, side):
+    """Refuse an old-session pass whose machine-owned samples contradict it.
+
+The survival comparison must hold in both branches: the old session keeps its
+id and launch generation across the upgrade, and in the host branch its host
+and child are the same processes. Stored terminal kinds must agree with the
+observed branch and with what the candidate creates. With no Restart due (tmux,
+and the candidate creates no hosts), the final sample must still show the old
+launch generation. With a Restart due, it must show a later generation with a
+captured conversation, exactly one host that appeared since the survival
+sample, a stored kind of `host` where the schema has one, and in the host
+branch the old fixture's host gone. A Restart back into tmux is refused.
+Whether the resumed agent remembers the earlier turn stays the UI's to report.
+"""
+    names = SIDES[side]
+    survival = observations[names['survival']]
+    after = observations[names['after']]
+    if survival['kind_disagreements']:
+        raise ValueError('; '.join(survival['kind_disagreements']))
+    if survival['survived'] is not True:
+        raise ValueError('the old session or its terminal host did not survive the upgrade')
+    old, row = survival['old_session'], after['session']
+    if row is None:
+        raise ValueError('the old session is gone after the check')
+    if type(row.get('generation')) is not int or type(old.get('generation')) is not int:
+        raise ValueError('the old session has no comparable launch generation')
+    if not survival['restart_required']:
+        if row['generation'] != old['generation']:
+            raise ValueError('the old session relaunched although no Restart was due')
+        return
+    if row['generation'] <= old['generation'] or not row.get('captured_conversation'):
+        raise ValueError('the old session restart and resume premise was not established')
+    if len(after['appeared_hosts']) != 1 or row.get('terminal_kind', 'host') != 'host':
+        raise ValueError('Restart did not move the old session to one new terminal host')
+    if after['old_host_present']:
+        raise ValueError('the old terminal host is still running after Restart')
 
 
 def required_operations(check, pass_id, update_path):
@@ -14,7 +117,13 @@ def required_operations(check, pass_id, update_path):
         'app-start': {'launch', 'versions'},
         'old-fixture': {'fixture_clean', 'verify_previous', 'install_previous', 'launch', 'versions'},
         'update-discovery': {'update_logs', 'versions'}, 'update-relaunch': {'versions'},
-        'local-supervisor-agent': {'versions'}, 'remote-supervisor-agent': {'remote_version'},
+        # Evidence of the new session's terminal, checked against its stored kind.
+        'local-supervisor-agent': {'versions', 'terminal_hosts'},
+        'remote-supervisor-agent': {'remote_version', 'remote_terminal_hosts'},
+        # The survival comparison samples before the session is touched and runs
+        # once; the final sample is refused unless the comparison ran first.
+        'local-old-session': {'prior_receipts', 'host_survival', 'old_session_after'},
+        'remote-old-session': {'prior_receipts', 'remote_host_survival', 'remote_old_session_after'},
         'remote-provision': {'remote_version'}, 'codex-conversation': {'inspect_state'},
         'seed-state': {'inspect_state', 'versions'},
         'continuity-before': {'continuity_before'}, 'preserved-state': {'inspect_state'},
@@ -27,6 +136,10 @@ def required_operations(check, pass_id, update_path):
         result.add('finder_frame')
     if check == 'old-fixture' and pass_id != 'p0-installer-upgrade':
         result.add('remote_version')
+    if check == 'old-fixture' and pass_id == 'p0-updater-upgrade':
+        # P0's one deliberate old session per host: its session row, captured
+        # conversation and terminal identities are the later checks' baseline.
+        result |= {'inspect_state', 'remote_inspect_state', 'terminal_hosts', 'remote_terminal_hosts'}
     if check == 'update-relaunch' and update_path == 'manual':
         result.add('install_candidate')
     if check == 'update-relaunch' and update_path == 'override':
@@ -44,7 +157,8 @@ Read-only observations can help diagnose an unexpected UI state. Installers,
 launches and continuity milestones belong only to their declared checkpoint.
 """
     result = required_operations(check, pass_id, update_path) | {
-        'prior_receipts', 'versions', 'remote_version', 'update_logs', 'inspect_state'}
+        'prior_receipts', 'versions', 'remote_version', 'update_logs', 'inspect_state',
+        'remote_inspect_state', 'terminal_hosts', 'remote_terminal_hosts'}
     if check == 'continuity-before':
         result.add('continuity_command')
     if check == 'window-drag':
@@ -82,7 +196,10 @@ Call update_logs and require the startup override announcement.\n''' + discovery
 coordinates from a fresh native image of that menu: args [[x,y]]. The harness
 owns the single native click and process handoff.
 Require the candidate returns usable, dismiss welcome with got it if present
-and observe local connection. Never manually launch or use getApp to rescue a
+and observe local connection. An old app that runs its supervisor detached
+leaves it running when it quits, and the candidate replaces it on first launch,
+so a brief connecting state is the handover: wait for the connected candidate
+local supervisor, never stop one yourself. Never manually launch or use getApp to rescue a
 missing restart. Call versions after the candidate returns. Capture the final
 native acceptance state. Remote upgrade belongs to its later checkpoint.'''
     if check == 'update-discovery':
