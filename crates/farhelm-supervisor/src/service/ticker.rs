@@ -1127,6 +1127,7 @@ async fn reap_pass(sup: &Arc<Supervisor>, stop: &mut oneshot::Receiver<()>) {
                 *entry.run.outcome.lock().expect("outcome mutex poisoned"),
                 LastOutcome::Running | LastOutcome::StopRequested
             ) && entry.terminal.as_ref().is_some_and(|terminal| {
+                let Terminal::Tmux(terminal) = terminal;
                 states
                     .get(&terminal.pane)
                     .is_some_and(|state| state.session_name == terminal.tmux_name && state.dead)
@@ -1151,7 +1152,7 @@ pub(super) fn publish_pane_deaths(
     let observations: Vec<_> = match sup.attachments.try_lock() {
         Ok(attachments) => attachments
             .values()
-            .filter_map(|attachment| attachment.pane_death.observed_in(states, probe_started))
+            .filter_map(|attachment| attachment.backend.observed_death(states, probe_started))
             .collect(),
         Err(_) => return,
     };
@@ -1526,12 +1527,20 @@ async fn sample_pass(
     // another session is absent for this launch even while that pane is alive.
     let known = sup.known_tmux_names().await;
     observe_entries(sup, &entries, &states, &known).await;
+    // The live set keeps each `Terminal` whole: the budget, the screen
+    // readers and the work-start persistence below apply to every kind of
+    // terminal, and their screen and title reads dispatch per kind. Only
+    // liveness is decided here, per kind, from this pass's evidence.
     let mut live: Vec<(Arc<SessionEntry>, Terminal)> = entries
         .into_iter()
         .filter_map(|entry| {
             let terminal = entry.terminal.clone()?;
-            let state = states.get(&terminal.pane)?;
-            (state.session_name == terminal.tmux_name && !state.dead).then_some((entry, terminal))
+            let alive = match &terminal {
+                Terminal::Tmux(tmux) => states
+                    .get(&tmux.pane)
+                    .is_some_and(|state| state.session_name == tmux.tmux_name && !state.dead),
+            };
+            alive.then_some((entry, terminal))
         })
         .collect();
     if live.is_empty() {
@@ -1574,11 +1583,7 @@ async fn sample_pass(
             },
         ) {
             Some(fault) => Err(fault),
-            None => {
-                sup.tmux
-                    .capture_pane_tail(&terminal.tmux_name, &terminal.pane, SAMPLE_TAIL_BYTES)
-                    .await
-            }
+            None => terminal.screen_tail(sup, SAMPLE_TAIL_BYTES).await,
         };
         let tail = match captured {
             Ok(tail) => tail,
@@ -1597,16 +1602,12 @@ async fn sample_pass(
                 continue;
             }
         };
-        // The title is the reader's to ask for: a separate tmux call, and
-        // only Codex uses it (its spinner lives there while prose streams).
-        // A title that cannot be read is simply absent evidence; the screen
-        // still gets read.
+        // The title is the reader's to ask for: a separate read (for tmux,
+        // a separate call), and only Codex uses it (its spinner lives there
+        // while prose streams). A title that cannot be read is simply
+        // absent evidence; the screen still gets read.
         let title = if reader.wants_title() {
-            match sup
-                .tmux
-                .pane_title(&terminal.tmux_name, &terminal.pane)
-                .await
-            {
+            match terminal.title(sup).await {
                 Ok(title) => title,
                 Err(e) => {
                     debug!(
@@ -1917,6 +1918,9 @@ async fn reap_dead_tabs(
         let Some(terminal) = entry.terminal.as_ref() else {
             continue;
         };
+        // Tabs are tmux windows, found by their markers in the agent's tmux
+        // session's pane states.
+        let Terminal::Tmux(terminal) = terminal;
         let Some(session_states) = by_session.get(terminal.tmux_name.as_str()) else {
             continue;
         };
@@ -2075,7 +2079,7 @@ mod tests {
     use super::super::channels::ConnectionChannels;
     use super::super::connection::{CONNECTION_WRITER_QUEUE, ConnectionCtx};
     use super::super::core::RunCells;
-    use super::super::core::tests::{StateDir, a_terminal, dummy_exe, entry_with};
+    use super::super::core::tests::{StateDir, a_terminal, agent_tmux, dummy_exe, entry_with};
     use super::super::core::{SupervisorSeams, SupervisorTimeouts};
     use super::super::handlers::handle_control;
     use super::super::status::live_status;
@@ -2218,7 +2222,7 @@ mod tests {
     ) {
         let tmux_name = format!("fh-{id}");
         let pane = spawn_pane(sup, &tmux_name, command).await;
-        install_entry_of_kind(sup, id, Terminal { tmux_name, pane }, kind).await;
+        install_entry_of_kind(sup, id, Terminal::tmux(tmux_name, pane), kind).await;
     }
 
     /// Install one `Running` session in both places a witnessed exit must
@@ -2257,8 +2261,8 @@ mod tests {
                         agent_kind: AgentKind::Generic,
                         resume_template: None,
                     },
-                    tmux_name: terminal.tmux_name.clone(),
-                    pane: terminal.pane.clone(),
+                    tmux_name: terminal.expect_tmux().tmux_name.clone(),
+                    pane: terminal.expect_tmux().pane.clone(),
                     outcome: LastOutcome::Running,
                     canonical_cwd: None,
                     captured_conversation: None,
@@ -2330,15 +2334,7 @@ mod tests {
                 .establish_launch_excerpt_fence(&name, &pane)
                 .await
                 .unwrap();
-            let entry = install_durable_running_entry(
-                &sup,
-                id,
-                Terminal {
-                    tmux_name: name,
-                    pane,
-                },
-            )
-            .await;
+            let entry = install_durable_running_entry(&sup, id, Terminal::tmux(name, pane)).await;
             *entry.run.launch_excerpt.lock().unwrap() = Some(fence);
             let spec = crate::launch::spec_path_for_launch(state.path(), id, entry.generation);
             std::fs::create_dir_all(spec.parent().unwrap()).unwrap();
@@ -2347,7 +2343,7 @@ mod tests {
         }
         let states = sup.tmux.pane_states().await.unwrap();
         for entry in &entries {
-            let terminal = entry.terminal.as_ref().unwrap();
+            let terminal = entry.terminal.as_ref().unwrap().expect_tmux();
             let pane = &states[&terminal.pane];
             assert!(pane.dead && pane.session_name == terminal.tmux_name);
             assert!(entry.run.launch_excerpt.lock().unwrap().is_some());
@@ -2360,7 +2356,10 @@ mod tests {
             super::super::status::KnownTmuxNames::from_sessions(entries.iter().map(|entry| {
                 (
                     entry.info.id.as_str(),
-                    entry.terminal.as_ref().map(|t| t.tmux_name.as_str()),
+                    entry
+                        .terminal
+                        .as_ref()
+                        .map(|t| t.expect_tmux().tmux_name.as_str()),
                 )
             }));
         observe_entries(&sup, &entries, &states, &known).await;
@@ -2591,8 +2590,10 @@ mod tests {
             .expect("the busy session is in the map");
         let terminal = entry
             .terminal
-            .clone()
-            .expect("the busy session has an owned terminal");
+            .as_ref()
+            .expect("the busy session has an owned terminal")
+            .expect_tmux()
+            .clone();
         let baseline = entry
             .run
             .activity
@@ -2655,7 +2656,11 @@ mod tests {
             .get(id)
             .cloned()
             .expect("the session is in the map");
-        let terminal = entry.terminal.as_ref().expect("the session has a terminal");
+        let terminal = entry
+            .terminal
+            .as_ref()
+            .expect("the session has a terminal")
+            .expect_tmux();
         let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
         loop {
             let captured = sup
@@ -2707,6 +2712,7 @@ mod tests {
                 sup.sessions.lock().await.values().cloned().collect();
             let any_live_agent = entries.iter().any(|entry| {
                 entry.terminal.as_ref().is_some_and(|terminal| {
+                    let terminal = terminal.expect_tmux();
                     states.get(&terminal.pane).is_some_and(|state| {
                         state.session_name == terminal.tmux_name && !state.dead
                     })
@@ -3504,7 +3510,7 @@ mod tests {
             .get("forged-agent-reap")
             .cloned()
             .expect("the session is installed");
-        let agent = entry.terminal.clone().expect("agent terminal");
+        let agent = agent_tmux(&entry);
         let genuine_dead_pane = dead_tab_in(&sup, tmux_name).await;
         let forged_id = uuid::Uuid::new_v4().to_string();
         sup.tmux
@@ -3544,7 +3550,10 @@ mod tests {
             "genuine dead tab is present"
         );
 
-        let listed = sup.session_tabs(&agent).await.expect("tab listing");
+        let listed = sup
+            .session_tabs(&Terminal::Tmux(agent.clone()))
+            .await
+            .expect("tab listing");
         assert!(
             listed.is_empty(),
             "dead forged and genuine tabs stay hidden from listing"
@@ -3629,10 +3638,7 @@ mod tests {
         let recorded = install_durable_running_entry(
             &sup,
             "ticker-exit",
-            Terminal {
-                tmux_name: recorded_name.to_string(),
-                pane: recorded_pane.clone(),
-            },
+            Terminal::tmux(recorded_name.to_string(), recorded_pane.clone()),
         )
         .await;
         wait_for_dead_pane(&sup, &recorded_pane).await;
@@ -3669,10 +3675,7 @@ mod tests {
         let readonly = install_durable_running_entry(
             &sup,
             "ticker-read-only",
-            Terminal {
-                tmux_name: readonly_name.to_string(),
-                pane: readonly_pane.clone(),
-            },
+            Terminal::tmux(readonly_name.to_string(), readonly_pane.clone()),
         )
         .await;
         wait_for_dead_pane(&sup, &readonly_pane).await;
@@ -3708,10 +3711,7 @@ mod tests {
         let entry = install_durable_running_entry(
             &sup,
             "moved",
-            Terminal {
-                tmux_name: "fh-previous-owner".to_string(),
-                pane: moved_pane,
-            },
+            Terminal::tmux("fh-previous-owner".to_string(), moved_pane),
         )
         .await;
 
@@ -3747,10 +3747,7 @@ mod tests {
         install_durable_running_entry(
             &sup,
             "renamed",
-            Terminal {
-                tmux_name: "fh-renamed".to_string(),
-                pane,
-            },
+            Terminal::tmux("fh-renamed".to_string(), pane),
         )
         .await;
 
@@ -3789,10 +3786,7 @@ mod tests {
         install_durable_running_entry(
             &sup,
             "list-exit",
-            Terminal {
-                tmux_name: name.to_string(),
-                pane: pane.clone(),
-            },
+            Terminal::tmux(name.to_string(), pane.clone()),
         )
         .await;
         wait_for_dead_pane(&sup, &pane).await;
@@ -3833,10 +3827,7 @@ mod tests {
         let entry = install_durable_running_entry(
             &sup,
             "wake-failure",
-            Terminal {
-                tmux_name: "fh-wake-failure".into(),
-                pane: pane.clone(),
-            },
+            Terminal::tmux("fh-wake-failure".into(), pane.clone()),
         )
         .await;
         wait_for_dead_pane(&sup, &pane).await;
@@ -3912,10 +3903,7 @@ mod tests {
         let entry = install_durable_running_entry(
             &sup,
             "settled",
-            Terminal {
-                tmux_name: "fh-settled".into(),
-                pane: pane.clone(),
-            },
+            Terminal::tmux("fh-settled".into(), pane.clone()),
         )
         .await;
         wait_for_dead_pane(&sup, &pane).await;
@@ -3984,10 +3972,7 @@ mod tests {
             let entry = install_durable_running_entry(
                 &sup,
                 "retry-read",
-                Terminal {
-                    tmux_name: "fh-retry-read".into(),
-                    pane: pane.clone(),
-                },
+                Terminal::tmux("fh-retry-read".into(), pane.clone()),
             )
             .await;
             wait_for_dead_pane(&sup, &pane).await;
@@ -4085,10 +4070,7 @@ mod tests {
         install_durable_running_entry(
             &sup,
             "ended-boot",
-            Terminal {
-                tmux_name: "fh-ended-boot".into(),
-                pane: pane.clone(),
-            },
+            Terminal::tmux("fh-ended-boot".into(), pane.clone()),
         )
         .await;
         wait_for_dead_pane(&sup, &pane).await;
@@ -4172,10 +4154,7 @@ mod tests {
         let entry = install_durable_running_entry(
             &sup,
             "boot-settled",
-            Terminal {
-                tmux_name: "fh-boot-settled".into(),
-                pane: pane.clone(),
-            },
+            Terminal::tmux("fh-boot-settled".into(), pane.clone()),
         )
         .await;
         wait_for_dead_pane(&sup, &pane).await;
@@ -4207,10 +4186,7 @@ mod tests {
         let entry = install_durable_running_entry(
             &sup,
             "cleanup-once",
-            Terminal {
-                tmux_name: "fh-cleanup-once".into(),
-                pane: pane.clone(),
-            },
+            Terminal::tmux("fh-cleanup-once".into(), pane.clone()),
         )
         .await;
         wait_for_dead_pane(&sup, &pane).await;
@@ -4283,10 +4259,7 @@ mod tests {
         install_durable_running_entry(
             &sup,
             "failed",
-            Terminal {
-                tmux_name: "fh-failed".to_string(),
-                pane,
-            },
+            Terminal::tmux("fh-failed".to_string(), pane),
         )
         .await;
         let spec = crate::launch::spec_path_for_launch(state.path(), "failed", 0);
@@ -4334,21 +4307,11 @@ mod tests {
         install_entry(
             &sup,
             "newer",
-            Terminal {
-                tmux_name: "fh-newer".to_string(),
-                pane: pane.clone(),
-            },
+            Terminal::tmux("fh-newer".to_string(), pane.clone()),
         )
         .await;
-        install_durable_running_entry(
-            &sup,
-            "stale",
-            Terminal {
-                tmux_name: "fh-stale".to_string(),
-                pane,
-            },
-        )
-        .await;
+        install_durable_running_entry(&sup, "stale", Terminal::tmux("fh-stale".to_string(), pane))
+            .await;
 
         let mut cursor = None;
         let (_stop_tx, mut stop) = never_stopped();
@@ -5820,10 +5783,7 @@ mod tests {
         install_entry(
             &sup,
             "one",
-            Terminal {
-                tmux_name: "fh-somebody-else".to_string(),
-                pane,
-            },
+            Terminal::tmux("fh-somebody-else".to_string(), pane),
         )
         .await;
         let sample = sample_of(&sup, "one").await;
@@ -6685,8 +6645,10 @@ mod tests {
                 .get(id)
                 .expect("fixture session")
                 .terminal
-                .clone()
-                .expect("fixture terminal");
+                .as_ref()
+                .expect("fixture terminal")
+                .expect_tmux()
+                .clone();
             let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
             loop {
                 let capture = sup
@@ -6756,7 +6718,7 @@ mod tests {
         let tmux_name = "fh-resuming".to_string();
         let pane = spawn_pane(&sup, &tmux_name, "printf 'work resumed\\n'; sleep 300").await;
         let base =
-            install_durable_running_entry(&sup, "resuming", Terminal { tmux_name, pane }).await;
+            install_durable_running_entry(&sup, "resuming", Terminal::tmux(tmux_name, pane)).await;
         let mut integrated = entry_with(base.terminal.clone(), LastOutcome::Running);
         integrated.info = base.info.clone();
         integrated.snapshot = IntegrationSnapshot {

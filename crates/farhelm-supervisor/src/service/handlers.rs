@@ -17,12 +17,12 @@
 
 use super::channels::ConnectionChannels;
 use super::connection::{
-    ConnectionCtx, Forwarder, admit_or_refuse, notify_detached, reply_frame, send_reply,
-    set_attachment_paused, spawn_admitted,
+    AttachOutput, ConnectionCtx, Forwarder, TmuxOutput, admit_or_refuse, notify_detached,
+    reply_frame, send_reply, set_attachment_paused, spawn_admitted,
 };
 use super::core::{
     CreateInputs, RequestError, SessionEntry, Supervisor, create_fingerprint,
-    ensure_title_printable, error_kind, truncate_for_error, unknown_pane_owner_refusal,
+    ensure_title_printable, error_kind, truncate_for_error,
 };
 use super::launch_artifacts::{
     append_launch_excerpt, cleanup_error_once, read_launch_sentinel, sentinel_could_still_apply,
@@ -36,9 +36,9 @@ use super::sweep::{
 };
 use super::teardown::TeardownError;
 use super::terminals::{
-    ActiveAttach, AttachmentKey, DETACH_REASON_REPLACED, DETACH_REASON_TAKEOVER, InputRoute,
-    MAX_LEASE_BYTES, SUPERVISOR_STOPPING, Terminal, TerminalId, displaced_by_attach,
-    resolve_terminal,
+    ActiveAttach, AttachBackend, AttachmentKey, DETACH_REASON_REPLACED, DETACH_REASON_TAKEOVER,
+    InputRoute, MAX_LEASE_BYTES, SUPERVISOR_STOPPING, Terminal, TerminalId, TmuxAttach,
+    displaced_by_attach, resolve_terminal,
 };
 use super::uploads::{
     MAX_UPLOADS_PER_CONNECTION, UPLOAD_CHUNK_QUEUE, UPLOAD_SIGNAL_QUEUE, UploadCommand,
@@ -529,8 +529,11 @@ async fn session_info_now(
 ) -> anyhow::Result<SessionInfo> {
     // Without a terminal there is no pane to classify, so neither the tmux
     // probe nor the registry snapshot is worth taking.
-    let (pane_states, known) = match entry.terminal {
-        Some(_) => (sup.tmux.pane_states().await?, sup.known_tmux_names().await),
+    // Matched per kind, not as `Some(_)`: whether tmux must be asked depends
+    // on the terminal's kind, and a catch-all would send a terminal tmux
+    // does not hold into the tmux query.
+    let (pane_states, known) = match &entry.terminal {
+        Some(Terminal::Tmux(_)) => (sup.tmux.pane_states().await?, sup.known_tmux_names().await),
         None => (HashMap::new(), KnownTmuxNames::default()),
     };
     sup.with_checkout_metadata(entry_info(entry, &pane_states, &known))
@@ -803,11 +806,7 @@ async fn handle_stop_session(
         // survivor once there is no live pane to walk from at
         // all. See `service::sweep`'s `kill_process_tree` docs.
         let pane_state = match entry.terminal.as_ref() {
-            Some(terminal) => match sup
-                .tmux
-                .pane_process(&terminal.tmux_name, &terminal.pane)
-                .await
-            {
+            Some(terminal) => match terminal.probe_process(&sup).await {
                 Ok(PaneProbe::Owned(pane)) => Some(pane),
                 Ok(PaneProbe::Gone) => None,
                 // A RECOGNIZED owner folds into the dead-or-absent path,
@@ -834,7 +833,7 @@ async fn handle_stop_session(
                             &tx,
                             req_id,
                             ErrorKind::Internal,
-                            unknown_pane_owner_refusal(&terminal.pane, &owner, &terminal.tmux_name),
+                            terminal.unknown_owner_refusal(&owner),
                         )
                         .await;
                         return;
@@ -932,7 +931,10 @@ async fn handle_stop_session(
             let classification = match sentinel {
                 Ok(Some(detail)) => Transition::SentinelError {
                     detail,
-                    pane: entry.terminal.as_ref().map(|t| t.pane.clone()),
+                    pane: entry
+                        .terminal
+                        .as_ref()
+                        .map(|t| t.recorded_pane().to_owned()),
                 },
                 // The wrapper-failure shape outranks the plain exit
                 // for the same reason a sentinel does: an agent that
@@ -955,7 +957,10 @@ async fn handle_stop_session(
                     {
                         Ok(Some(detail)) => Transition::SentinelError {
                             detail: append_launch_excerpt(&sup, &entry, detail, &mut true).await,
-                            pane: entry.terminal.as_ref().map(|t| t.pane.clone()),
+                            pane: entry
+                                .terminal
+                                .as_ref()
+                                .map(|t| t.recorded_pane().to_owned()),
                         },
                         Ok(None) | Err(_) => Transition::ObservedExit { exit_code },
                     }
@@ -1373,6 +1378,16 @@ async fn handle_attach(
         }
     };
     let key = AttachmentKey::new(&session_id, terminal_id);
+    // The kind is decided here, once, for the whole setup below: a tmux
+    // terminal is attached through the session's sink, a replay stream and
+    // an input client of its own, and a pane-death latch, all addressed by
+    // the tmux handles. Those become the attachment's `AttachBackend::Tmux`
+    // and its forwarder's `AttachOutput::Tmux` (which also carries the
+    // stream's attach replay), and everything after this handler (input,
+    // death observation, output, replay rendering, teardown) dispatches on
+    // those per kind. Resize and the revalidation below keep the
+    // `Terminal` itself.
+    let Terminal::Tmux(tmux) = &terminal;
 
     // Reserve one writer slot BEFORE taking any lock, so this
     // handler's eventual reply — success or failure — can be enqueued
@@ -1413,7 +1428,7 @@ async fn handle_attach(
     // traffic. Nothing about the sink needs the lock: the registry
     // has its own, and it is this `Arc` rather than any map entry
     // that keeps the sink alive.
-    let sink = match sup.ensure_session_sink(&terminal.tmux_name).await {
+    let sink = match sup.ensure_session_sink(&tmux.tmux_name).await {
         Ok(sink) => sink,
         Err(e) => {
             permit.send(error_frame(req_id, error_kind(&e), format!("{e:#}")));
@@ -1474,25 +1489,21 @@ async fn handle_attach(
     // entry for a title change — same run, same pane, same
     // generation). A replacement is accepted when it still
     // describes what this attach resolved: same generation, same
-    // terminal identity. Everything else is refused exactly as
-    // before — a changed generation is a restart, a vanished entry
-    // is a delete (or an id something else took), and a changed
-    // terminal is a substrate this attach never validated.
+    // terminal identity (`Terminal`'s equality: same kind, same
+    // handles). Everything else is refused exactly as before — a
+    // changed generation is a restart, a vanished entry is a delete
+    // (or an id something else took), and a changed terminal is a
+    // substrate this attach never validated.
     //
     // The accepted entry — not the one resolved earlier — is what
     // gets installed below, so the route pins the CURRENT title and
     // the shared cells behind it.
-    let same_terminal = |a: Option<&Terminal>, b: Option<&Terminal>| match (a, b) {
-        (Some(a), Some(b)) => a.tmux_name == b.tmux_name && a.pane == b.pane,
-        (None, None) => true,
-        _ => false,
-    };
     let current = sup.sessions.lock().await.get(&session_id).cloned();
     let entry = match current {
         Some(current)
             if Arc::ptr_eq(&current, &entry)
                 || (current.generation == entry.generation
-                    && same_terminal(current.terminal.as_ref(), entry.terminal.as_ref())) =>
+                    && current.terminal == entry.terminal) =>
         {
             current
         }
@@ -1590,14 +1601,15 @@ async fn handle_attach(
         );
     let mut forwarders = tokio::task::JoinSet::new();
     for (old_key, old, reason) in doomed {
-        // `..` drops this attachment's input client (killing its
-        // control-mode process via `kill_on_drop`) and its pause
-        // sender, which is what every teardown path does.
+        // `..` drops this attachment's pause sender. Its backend (for tmux,
+        // the input client, whose control-mode process `kill_on_drop` ends,
+        // and the sink share) goes with the forwarder's join below, which
+        // is what every teardown path does.
         let ActiveAttach {
             channel,
             notify,
             forwarder,
-            sink,
+            backend,
             ..
         } = old;
         // Await until the old forwarder either reaps its control client or
@@ -1607,7 +1619,7 @@ async fn handle_attach(
         // deadlock.
         forwarders.spawn(async move {
             let joined = forwarder.await;
-            drop(sink);
+            drop(backend);
             (old_key, joined, channel, notify, reason)
         });
     }
@@ -1674,11 +1686,7 @@ async fn handle_attach(
     // mutation the incumbent would have seen, and a later prep
     // failure would have left its terminal reflowed to a size
     // nobody is using.
-    if let Err(e) = sup
-        .tmux
-        .resize_window(&terminal.tmux_name, &terminal.pane, cols, rows)
-        .await
-    {
+    if let Err(e) = terminal.resize(sup, cols, rows).await {
         warn!(session = %session_id, error = %e, "resize during attach failed");
     }
 
@@ -1708,7 +1716,7 @@ async fn handle_attach(
     // to this one by pane id (see `tmux::OutputStream`), which is
     // what keeps a tab's output out of the agent's terminal.
     let stream_candidate = match sup
-        .open_replay_stream_candidate(key.clone(), &terminal.tmux_name, &terminal.pane)
+        .open_replay_stream_candidate(key.clone(), &tmux.tmux_name, &tmux.pane)
         .await
     {
         Ok(candidate) => candidate,
@@ -1727,7 +1735,7 @@ async fn handle_attach(
     // a client nothing will ever read from or write to again.
     let input = match sup
         .tmux
-        .open_input_client(&terminal.tmux_name, &terminal.pane)
+        .open_input_client(&tmux.tmux_name, &tmux.pane)
         .await
     {
         Ok(input) => input,
@@ -1773,13 +1781,13 @@ async fn handle_attach(
         terminal: key.terminal.clone(),
         channel,
         tx: tx.clone(),
-        stream,
+        stream: AttachOutput::Tmux(TmuxOutput::new(modes, prefill, stream)),
         pause_rx,
         death_rx,
         stall_timeout: sup.timeouts.stall_detach,
         cleanup: forwarder_cleanup,
     };
-    let task = tokio::spawn(forwarder.run(modes, prefill, shutdown_rx));
+    let task = tokio::spawn(forwarder.run(shutdown_rx));
 
     attachments.insert(
         key.clone(),
@@ -1790,10 +1798,12 @@ async fn handle_attach(
             forwarder: task,
             forwarder_shutdown,
             forwarder_cleanup: cleanup_rx,
-            input,
             pause: pause_tx,
-            pane_death,
-            sink,
+            backend: AttachBackend::Tmux(TmuxAttach {
+                pane_death,
+                input,
+                sink,
+            }),
         },
     );
     drop(attachments);
@@ -1839,7 +1849,7 @@ async fn handle_detach(
         // take this lock.
         sup.begin_forwarder_shutdown(route.key.clone(), &a);
         let ActiveAttach {
-            forwarder, sink, ..
+            forwarder, backend, ..
         } = a;
         if let Err(cleanup) = sup.record_forwarder_join(route.key.clone(), forwarder.await) {
             warn!(
@@ -1850,11 +1860,12 @@ async fn handle_detach(
             );
         }
 
-        // Dropping the final lease publishes this session's reaping barrier
+        // Dropping the backend releases its sink lease, and dropping the
+        // final lease publishes this session's reaping barrier
         // synchronously. The runtime-owned reaper may finish afterward, but
         // the next attach already has a state it must wait on; a shared sink
         // simply retains its other lease and never enters that state.
-        drop(sink);
+        drop(backend);
     }
 }
 
@@ -1944,11 +1955,7 @@ async fn handle_resize(
         // window). The pane is paired with its session in the
         // target, so even a resolution that went stale in an
         // unexpected way cannot reach another session's window.
-        if let Err(e) = sup
-            .tmux
-            .resize_window(&terminal.tmux_name, &terminal.pane, cols, rows)
-            .await
-        {
+        if let Err(e) = terminal.resize(sup, cols, rows).await {
             warn!(session = %session_id, error = %e, "resize failed");
         }
     }
@@ -7183,10 +7190,7 @@ mod tests {
             .await
             .expect("fixture premise: a tmux session to attach to");
         let mut entry = entry_with(
-            Some(Terminal {
-                tmux_name: tmux_name.clone(),
-                pane,
-            }),
+            Some(Terminal::tmux(tmux_name.clone(), pane)),
             LastOutcome::Running,
         );
         entry.info.id = id.clone();
@@ -9761,10 +9765,7 @@ mod tests {
                     working_copy: None,
                     notifications: Vec::new(),
                 },
-                terminal: Some(Terminal {
-                    tmux_name: "fh-fake".to_string(),
-                    pane: "%0".to_string(),
-                }),
+                terminal: Some(Terminal::tmux("fh-fake".to_string(), "%0".to_string())),
                 run: RunCells {
                     launch_excerpt: Arc::new(std::sync::Mutex::new(None)),
                     launch_boot_ended: false,
@@ -10313,7 +10314,7 @@ mod tests {
                 .create_session(&tmux_name, "/", 80, 24, &[], &["cat".into()])
                 .await
                 .expect("fixture premise: a tmux pane running cat");
-            let mut entry = entry_with(Some(Terminal { tmux_name, pane }), LastOutcome::Running);
+            let mut entry = entry_with(Some(Terminal::tmux(tmux_name, pane)), LastOutcome::Running);
             entry.info.id = id;
             sup.sessions
                 .lock()
@@ -10750,7 +10751,7 @@ mod tests {
                             )
                             .await
                             .expect("target terminal control needs its own live cat pane");
-                        Some(Terminal { tmux_name, pane })
+                        Some(Terminal::tmux(tmux_name, pane))
                     } else {
                         None
                     };
