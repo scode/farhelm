@@ -1680,6 +1680,39 @@ every update: the protocol only grows, and every client release must keep workin
 since the host forks. Nothing starts hosts yet; the supervisor's use of them, and the terminal kinds, come with the
 switch that turns them on.
 
+The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
+
+- **Socket directory.** Host sockets live in `<state dir>/hosts`, created with mode 0700. A directory there that is not
+  exactly 0700, belongs to another user, or is not a directory (a symlink included) is refused, not repaired: its
+  permissions are the only boundary a host has, and a looser one may already have let someone in.
+- **Socket names** are 8 random base32 characters. `hosts/` plus 8 is one byte shorter than `supervisor.sock`, so a host
+  socket path is always shorter than the supervisor's own, and every state directory that works today works for hosts
+  under macOS's 104-byte socket path limit. Names mean nothing; what a host is for is in its tag.
+- **Starting a host** runs the supervisor's own executable (`/proc/self/exe` on Linux, which stays the running build
+  through an update's rename; its own versioned program on the Mac, never the forwarder) as
+  `internal terminal-host --socket <path>` (the path made absolute), with an empty environment, writes the child spec to
+  its stdin, and takes readiness from its first stage's exit status alone. The empty environment keeps the session
+  markers that Stop's sweep searches for, and any credential, off the host; the child's environment travels only in the
+  spec. A start that does not finish (the deadline, a first stage killed by a signal, a failed wait) is never reported
+  as a clean refusal: the host may have reported ready just before, and a tab found later by its tag would pass for one
+  the user was told never opened. The spawn kills and reaps the first stage, ends whatever answers at the socket (a
+  second stage that has not reported yet ends itself when its report finds no reader), and returns either "nothing left"
+  or the socket where something may remain.
+- **The client tag** records the session, the role (agent with its launch generation, or tab with its tab id and whether
+  it runs in its own scope) and the spawn time in nanoseconds, which orders a session's tabs without new persistence.
+  Its encoding is permanent, because a host keeps its tag across every update: every tag starts with the magic `FHTG`
+  and a version, a shipped version never changes (new fields take a new version), every version keeps golden fixtures in
+  `crates/farhelm-supervisor/tests/fixtures/host-tag/`, and a supervisor that cannot read a tag (another version, not
+  Farhelm's, malformed) keeps the host and shows it as unavailable, never reclaiming it as an orphan. The layout is in
+  `hosts/tag.rs`.
+
+Test harnesses end the hosts they leave behind: `farhelm-teststate` ends every host whose socket is in a `hosts`
+directory within an owned run directory (its dead-run sweep, and every `TestDir` drop) through a small blocking client
+(take over, `Shutdown`, then wait for the end of the connection and for the host's socket file to go), and keeps the
+directory for a later sweep when it cannot confirm a host ended or could not read the whole tree. A socket that only
+refuses connections counts as left by a killed host after three seconds of refusals, never sooner, since on macOS a live
+host with a full backlog refuses too.
+
 ## Terminal substrate: private tmux server
 
 Each supervisor runs a dedicated tmux server on a private socket (`~/.local/state/farhelm/tmux.sock`) with a locked-down
@@ -3799,19 +3832,20 @@ refusal. No global geometry cache or new asset file is introduced.
   prepublication staging cleanup, no-clobber semantics, prompt desktop Quit, or the healthy-local-filesystem assumption.
 - The rest of the state directory: `supervisor.sock` (the unix socket that is the supervisor's only doorway — mode 0600,
   inside a 0700 directory, because reaching it means running commands as the user), `tmux.sock` and `tmux.conf` for the
-  private tmux server, `repo-cache/` (host-local repository objects and permanent locks; see "Owned checkout admission
-  and lifetime"), `hook-log/<session>.log` (each session's hook diagnostics) and `hook-reports/<session>/` (its waiting
-  report files; see "Report files"), and `launch/` holding one 0600 JSON spec per LAUNCH, named
-  `<session>.<generation>.json`, plus a `.status` failure sentinel and an empty `.waypoint` proving a scoped command
-  reached its wrapper step. The waypoint follows the same generation cleanup and superseded-launch sweep as the spec;
-  orphan waypoints are removed too. A launch spec carries the agent's command line and the session credential, but
-  nothing the session's own database row does not already hold, in the same private state directory, for the session's
-  whole lifetime (the plaintext invocation, and the credential kept so a restart can inject the same one). Removing
-  specs is therefore tidiness, not a credential boundary: the shim unlinks its spec as soon as it has read it, creation
-  removes it if the session never starts, and the supervisor's startup sweep removes specs of sessions that no longer
-  exist and of launches a later generation superseded. A current-generation spec whose launch never reached the shim (a
-  login shell that exited in its rc files, a reboot, or a stop before launch) may stay until the session is deleted,
-  whichever path observed the outcome (startup reconciliation, the runtime observers, or Stop); Delete removes it.
+  private tmux server, `hosts/` (0700, the terminal hosts' sockets; see "Terminal host"), `repo-cache/` (host-local
+  repository objects and permanent locks; see "Owned checkout admission and lifetime"), `hook-log/<session>.log` (each
+  session's hook diagnostics) and `hook-reports/<session>/` (its waiting report files; see "Report files"), and
+  `launch/` holding one 0600 JSON spec per LAUNCH, named `<session>.<generation>.json`, plus a `.status` failure
+  sentinel and an empty `.waypoint` proving a scoped command reached its wrapper step. The waypoint follows the same
+  generation cleanup and superseded-launch sweep as the spec; orphan waypoints are removed too. A launch spec carries
+  the agent's command line and the session credential, but nothing the session's own database row does not already hold,
+  in the same private state directory, for the session's whole lifetime (the plaintext invocation, and the credential
+  kept so a restart can inject the same one). Removing specs is therefore tidiness, not a credential boundary: the shim
+  unlinks its spec as soon as it has read it, creation removes it if the session never starts, and the supervisor's
+  startup sweep removes specs of sessions that no longer exist and of launches a later generation superseded. A
+  current-generation spec whose launch never reached the shim (a login shell that exited in its rc files, a reboot, or a
+  stop before launch) may stay until the session is deleted, whichever path observed the outcome (startup
+  reconciliation, the runtime observers, or Stop); Delete removes it.
 - Symlink TOCTOU hardening of the state directory is intentionally absent. The directory create, chmod, lock, socket,
   and sweep operations are plain path-based calls that follow symlinks; making them airtight means `O_NOFOLLOW` opens,
   dir-fd-relative operations, and ownership verification throughout. Exploiting the gap requires write access to a

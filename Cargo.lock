@@ -2048,6 +2048,7 @@ dependencies = [
  "shell-words",
  "subtle",
  "tempfile",
+ "terminal-host",
  "thiserror 2.0.21",
  "tokio",
  "toml",
@@ -2070,6 +2071,7 @@ dependencies = [
  "farhelm-testtrace",
  "libc",
  "tempfile",
+ "terminal-host",
  "tracing",
 ]
 
