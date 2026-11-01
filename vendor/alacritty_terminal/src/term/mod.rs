@@ -1,6 +1,7 @@
 // Modified for Farhelm: adds snapshot accessors to `Term`, caps hyperlink and
-// title lengths, and reuses the active hyperlink when an identical one is sent
-// again. See vendor/README.md in the Farhelm repository.
+// title lengths, reuses the active hyperlink when an identical one is sent
+// again, and drops a wide character a one-column grid cannot hold. See
+// vendor/README.md in the Farhelm repository.
 
 //! Exports the `Term` type which is a high-level API for the Grid.
 
@@ -1163,6 +1164,14 @@ impl<T: EventListener> Handler for Term<T> {
             }
 
             self.grid[line][column].push_zerowidth(c);
+            return;
+        }
+
+        // Farhelm patch: a wide character needs two cells, and a grid one
+        // column wide has only one even after wrapping. Upstream would write
+        // the spacer cell past the end of the row and panic. Drop the
+        // character instead; the cursor does not move.
+        if width > 1 && self.columns() < 2 {
             return;
         }
 
@@ -3427,6 +3436,51 @@ mod tests {
         let mut parser: ansi::Processor = ansi::Processor::new();
         parser.advance(&mut term, bytes);
         term
+    }
+
+    /// Spec: on a grid one column wide, a wide character is dropped without
+    /// moving the cursor, the narrow text around it is printed as usual,
+    /// and a resize to one column of a grid holding wide characters keeps
+    /// working.
+    ///
+    /// Why: a terminal may be one column wide, and upstream indexes the wide
+    /// character's spacer cell past the end of the row, a panic any program
+    /// could trigger by printing; its reflow to one column moved a wide
+    /// character from row to row forever, allocating as it went.
+    #[test]
+    fn a_one_column_grid_drops_wide_characters() {
+        // (mode setup, the column's text from the top line down)
+        let cases = [("", "ab "), ("\x1b[?7l", "b  ")];
+        for (setup, expected) in cases {
+            let term = fed_term(1, 3, 0, format!("{setup}a\u{4e2d}b").as_bytes());
+            let column: String = (0..3).map(|line| term.grid()[Line(line)][Column(0)].c).collect();
+            assert_eq!(column, expected, "{setup:?}");
+            let wide = cell::Flags::WIDE_CHAR
+                | cell::Flags::WIDE_CHAR_SPACER
+                | cell::Flags::LEADING_WIDE_CHAR_SPACER;
+            for line in 0..3 {
+                assert!(!term.grid()[Line(line)][Column(0)].flags.intersects(wide), "{setup:?}");
+            }
+        }
+
+        // On its own thread with a time limit: if the reflow fix regresses,
+        // the reflow allocates rows without end, and the test fails after 10
+        // seconds rather than running until memory runs out. That bounds time,
+        // not memory (about 1 GB allocated by then in a debug build). The
+        // thread outlives a timeout, but the test binary ends soon after.
+        let (done, finished) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut term = fed_term(4, 3, 10, "\u{4e2d}\u{4e2d}\r\nx\u{4e2d}".as_bytes());
+            term.resize(TermSize::new(1, 3));
+            let mut parser: ansi::Processor = ansi::Processor::new();
+            parser.advance(&mut term, "\u{4e2d}y".as_bytes());
+            term.resize(TermSize::new(4, 3));
+            parser.advance(&mut term, "\u{4e2d}".as_bytes());
+            let _ = done.send(());
+        });
+        finished
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("resizing to one column panicked or ran past 10 s (the reflow fix)");
     }
 
     /// Spec: a cell keeps the first `MAX_ZEROWIDTH_CHARS` zero-width

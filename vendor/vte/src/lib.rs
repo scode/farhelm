@@ -1,6 +1,7 @@
 // Modified for Farhelm: adds `is_ground()`, caps the buffered OSC payload
-// (`OSC_PAYLOAD_LIMIT`) and reports a dropped OSC (`Perform::osc_overflow`).
-// See vendor/README.md in the Farhelm repository.
+// (`OSC_PAYLOAD_LIMIT`), reports a dropped OSC (`Perform::osc_overflow`), and
+// stops a UTF-8 character split across calls from swallowing the characters
+// after it. See vendor/README.md in the Farhelm repository.
 
 //! Parser for implementing virtual terminal emulators
 //!
@@ -767,7 +768,11 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
                     performer.print(c);
 
                     self.partial_utf8_len = 0;
-                    return valid_bytes - old_bytes;
+                    // Farhelm patch: consume only this first character's bytes,
+                    // as the `Ok` arm above does. Upstream returned
+                    // `valid_bytes - old_bytes`, which also consumed the valid
+                    // characters copied in after it without printing them.
+                    return c.len_utf8() - old_bytes;
                 }
 
                 match err.error_len() {
@@ -1631,8 +1636,9 @@ mod tests {
     }
 
     // Farhelm patch tests. They run with `cargo test --manifest-path
-    // vendor/vte/Cargo.toml` (vendor/README.md). The emulator's own tests in
-    // the supervisor cover the same caps through the public API.
+    // vendor/vte/Cargo.toml` (vendor/README.md). The emulator crate's tests
+    // (`crates/farhelm-terminal-emulator/tests/hostile.rs`) cover the same
+    // caps through its public API.
 
     /// Spec: `is_ground()` is true exactly between sequences: not inside an
     /// escape, CSI, OSC or DCS sequence, and not between the bytes of one
@@ -1665,6 +1671,27 @@ mod tests {
             parser.advance(&mut dispatcher, bytes);
             assert_eq!(parser.is_ground(), *ground, "after {bytes:?}");
         }
+    }
+
+    /// Spec: a UTF-8 character split across two calls is printed, and so is
+    /// every character after it, even when an invalid byte follows within
+    /// the next three; the result is the same as from one call.
+    ///
+    /// Why: upstream printed the split character and silently dropped the
+    /// valid ones copied in after it (`advance_partial_utf8`), so what a
+    /// terminal showed depended on where reads happened to end.
+    #[test]
+    fn split_utf8_does_not_drop_the_characters_after_it() {
+        let mut whole = Dispatcher::default();
+        Parser::new().advance(&mut whole, b"\xc3\xa9a\x80b");
+
+        let mut split = Dispatcher::default();
+        let mut parser = Parser::new();
+        parser.advance(&mut split, b"\xc3");
+        parser.advance(&mut split, b"\xa9a\x80b");
+
+        assert_eq!(split.dispatched, whole.dispatched);
+        assert_eq!(split.dispatched[..2], [Sequence::Print('\u{e9}'), Sequence::Print('a')]);
     }
 
     /// Spec: an OSC whose payload is exactly `OSC_PAYLOAD_LIMIT` bytes is
