@@ -1758,7 +1758,13 @@ async fn handle_attach(
     // stalled-terminal detach. And it must not AWAIT here, because
     // `attachments` is held: `permit` makes the enqueue
     // infallible and instant.
-    permit.send(reply_frame(&ControlMsg::Attached { req_id, channel }));
+    // Bytes: this path attaches tmux terminals only (see the dispatch's note
+    // on `Attach::grid`).
+    permit.send(reply_frame(&ControlMsg::Attached {
+        req_id,
+        channel,
+        stream: farhelm_proto::StreamKind::Bytes,
+    }));
 
     // Everything from here on — the replay prefill and the live
     // pump — happens inside the forwarder task rather than here,
@@ -2879,6 +2885,11 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             terminal: selector,
             lease,
             if_unowned,
+            // Every terminal this supervisor can attach is a tmux terminal,
+            // which streams bytes whatever the client can render. The
+            // capability starts to matter with host terminals, which only a
+            // grid-capable client may attach.
+            grid: _,
         } => {
             handle_attach(
                 sup,
@@ -7218,6 +7229,7 @@ mod tests {
                         terminal: TerminalSelector::default(),
                         lease: "stop-test".to_string(),
                         if_unowned: false,
+                        grid: false,
                     },
                     ConnectionCtx {
                         panics: &mpsc::channel(1).0,
@@ -7306,6 +7318,7 @@ mod tests {
                         },
                         lease: "timeout-test".to_string(),
                         if_unowned: false,
+                        grid: false,
                     },
                     ConnectionCtx {
                         panics: &mpsc::channel(1).0,
@@ -10371,6 +10384,7 @@ mod tests {
                 terminal: TerminalSelector::default(),
                 lease: "busy-host".into(),
                 if_unowned: false,
+                grid: false,
             })
             .await;
             let attached = self.reply(1).await;
@@ -10809,6 +10823,7 @@ mod tests {
                             terminal: TerminalSelector::Agent,
                             lease: "conformance-target".into(),
                             if_unowned: false,
+                            grid: false,
                         })
                         .await;
                         let attached = host.reply(10).await;

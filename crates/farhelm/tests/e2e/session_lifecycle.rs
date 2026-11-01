@@ -1257,6 +1257,7 @@ async fn attachment_channels_must_be_nonzero_and_unique() {
             terminal: TerminalSelector::default(),
             lease: String::new(),
             if_unowned: false,
+            grid: false,
         })
         .await
         .unwrap();
@@ -1279,6 +1280,10 @@ async fn attachment_channels_must_be_nonzero_and_unique() {
             terminal: TerminalSelector::default(),
             lease: String::new(),
             if_unowned: false,
+            // A client that can draw grids still gets bytes from a tmux
+            // terminal: the stream kind follows the terminal, not the
+            // capability (protocol 68).
+            grid: true,
         })
         .await
         .unwrap();
@@ -1286,7 +1291,8 @@ async fn attachment_channels_must_be_nonzero_and_unique() {
         parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap(),
         ControlMsg::Attached {
             req_id: 2,
-            channel: 7
+            channel: 7,
+            stream: farhelm_proto::StreamKind::Bytes,
         }
     ));
 
@@ -1300,6 +1306,7 @@ async fn attachment_channels_must_be_nonzero_and_unique() {
             terminal: TerminalSelector::default(),
             lease: String::new(),
             if_unowned: false,
+            grid: false,
         })
         .await
         .unwrap();
@@ -1406,6 +1413,7 @@ async fn a_peer_one_protocol_version_behind_is_refused_before_it_can_attach() {
             terminal: TerminalSelector::Agent,
             lease: "lease-from-an-old-peer".to_string(),
             if_unowned: true,
+            grid: false,
         })
         .await;
     let outcome = tokio::time::timeout(std::time::Duration::from_secs(10), async {

@@ -1,0 +1,10 @@
+{
+  "t": "state",
+  "mouse": "off",
+  "focus": false,
+  "alt_screen": false,
+  "default_fg": null,
+  "default_bg": -1,
+  "history_trimmed": false,
+  "exit": null
+}

@@ -15,7 +15,9 @@
 //! `use crate::harness::*;`, matching what the pre-split file offered
 //! implicitly through shared top-of-file imports.
 
-pub(crate) use farhelm_helm::{Detach, SupervisorClient, SupervisorError, TermEvent, TermStream};
+pub(crate) use farhelm_helm::{
+    Detach, SupervisorClient, SupervisorError, TermEvent, TermStream, ViewerStreams,
+};
 pub(crate) use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
 pub(crate) use farhelm_proto::{
     ControlMsg, ErrorKind, Frame, FrameKind, SessionInfo, SessionStatus, TerminalSelector,
@@ -215,7 +217,14 @@ impl SupervisorClientAttachExt for SupervisorClient {
         lease: &str,
     ) -> anyhow::Result<(u32, Vec<u8>, TermStream)> {
         let (channel, mut stream) = self
-            .attach_terminal(session_id, cols, rows, terminal, lease)
+            .attach_terminal(
+                session_id,
+                cols,
+                rows,
+                terminal,
+                lease,
+                ViewerStreams::BytesOnly,
+            )
             .await?;
         let mut replay = Vec::new();
         wait_for_replay_complete(&mut stream, &mut replay, ATTACH_LIVE_REPLAY_BUDGET_SECS).await;
@@ -230,8 +239,15 @@ impl SupervisorClientAttachExt for SupervisorClient {
         terminal: TerminalSelector,
         lease: &str,
     ) -> anyhow::Result<(u32, TermStream)> {
-        self.attach_terminal(session_id, cols, rows, terminal, lease)
-            .await
+        self.attach_terminal(
+            session_id,
+            cols,
+            rows,
+            terminal,
+            lease,
+            ViewerStreams::BytesOnly,
+        )
+        .await
     }
 
     async fn attach_terminal_if_unowned_at_boundary(
@@ -242,8 +258,15 @@ impl SupervisorClientAttachExt for SupervisorClient {
         terminal: TerminalSelector,
         lease: &str,
     ) -> anyhow::Result<(u32, TermStream)> {
-        self.attach_terminal_if_unowned(session_id, cols, rows, terminal, lease)
-            .await
+        self.attach_terminal_if_unowned(
+            session_id,
+            cols,
+            rows,
+            terminal,
+            lease,
+            ViewerStreams::BytesOnly,
+        )
+        .await
     }
 }
 
