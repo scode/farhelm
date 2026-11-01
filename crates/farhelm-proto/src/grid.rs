@@ -251,6 +251,11 @@
 //! and focus changes. Resize stays the existing control message; the grid
 //! client sends no pause or resume (see "Attach and the stream kind").
 //!
+//! Each `key` message says whether the viewer runs on a Mac (`mac`, absent
+//! meaning false), since today's xterm.js encodes some keys differently
+//! there; the supervisor encodes each key from the message alone, with no
+//! per-attachment platform to keep across reconnects.
+//!
 //! A paste is split into parts of at most [`GRID_MAX_PASTE_PART_BYTES`] of
 //! text that also stay within [`GRID_MAX_INPUT_MESSAGE`] once encoded (a part
 //! of newlines doubles in size when escaped), and text input the same way.
@@ -316,9 +321,9 @@
 //! the grid client's own change adds). `output/` is supervisor to client and
 //! `input/` client to supervisor; under each, `valid/` fixtures decode and
 //! encode back to the same JSON, `tolerated/` fixtures decode (unknown
-//! fields, explicitly empty optional fields) but need not encode back to
-//! themselves, and `invalid/` fixtures must be rejected, each for the one
-//! reason its name gives. Size limits and the rules spanning messages have no
+//! fields, explicitly empty optional fields, a `mac` written out as false)
+//! but need not encode back to themselves, and `invalid/` fixtures must be
+//! rejected, each for the one reason its name gives. Size limits and the rules spanning messages have no
 //! fixtures; the tests construct those.
 
 use serde::de::{self, IgnoredAny, MapAccess, SeqAccess, Visitor};
@@ -982,7 +987,8 @@ pub enum CursorShape {
 pub enum MouseMode {
     /// No mouse reporting.
     Off,
-    /// Presses and releases (modes 9 and 1000).
+    /// Presses and releases (mode 1000). X10 mode 9 is not tracked by the
+    /// supervisor's emulator, so a program that sets only it shows `Off`.
     Click,
     /// Also motion while a button is held (mode 1002).
     Drag,
@@ -1107,6 +1113,11 @@ pub enum GridOutput {
 /// `skip_serializing_if` for `shift`, which is absent when 0.
 fn is_zero(value: &u16) -> bool {
     *value == 0
+}
+
+/// `skip_serializing_if` for a key's `mac`, which is absent when false.
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 impl GridOutput {
@@ -1430,22 +1441,43 @@ pub enum MouseEventKind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "t", rename_all = "snake_case")]
 pub enum GridInput {
-    /// A keydown the client does not handle itself (its own shortcuts, like
-    /// Cmd+K/J, Ctrl+Shift+K/J and the text-size keys, never get here).
+    /// A keydown that today's xterm.js would send a sequence for at keydown.
     /// `key`, `code` and `kc` (`keyCode`) are the browser's values; the
     /// supervisor encodes them the way the vendored xterm.js
     /// `evaluateKeyboardEvent` does with Farhelm's options, including
-    /// Shift+Enter as ESC CR in one write. Printable keys that xterm.js sends
-    /// at keydown (key code 48 and up) arrive here too, so the supervisor
-    /// produces their bytes exactly as that function does; capitals, space,
-    /// Option/AltGr characters, dead keys and composition results arrive as
-    /// `text`.
+    /// Shift+Enter as ESC CR in one write.
+    ///
+    /// Which keydowns become `key` messages is the client's decision, made as
+    /// xterm.js's `_keyDown` makes it before and after calling that function;
+    /// the supervisor never second-guesses it. The client sends no `key` for
+    /// its own shortcuts (Cmd+K/J, Ctrl+Shift+K/J, the text-size keys), for a
+    /// keydown `evaluateKeyboardEvent` gives no sequence for, nor for one
+    /// `_keyDown` leaves to the browser's text input or drops: a third-level
+    /// shift (Option without Ctrl or Meta on a Mac, Ctrl+Alt or AltGraph on
+    /// Windows, as AltGr) on a key code above 47 or of 0, a single capital
+    /// A to Z without Ctrl, Alt or Meta, and the first sending keydown after
+    /// a dead key or AltGraph. The characters those type arrive as `text`,
+    /// as do space, other composed characters and composition results; a
+    /// third-level shift on a key code 0 (the iOS arrow names) or 112 to 123
+    /// (F1 to F12) sends nothing at all, as today. Printable keys that
+    /// xterm.js sends at keydown (key code 48 and up) are `key` messages, and
+    /// the supervisor produces their bytes exactly as that function does.
     Key {
         key: String,
         code: String,
         kc: u32,
         /// The [`modifiers`] bit set.
         mods: u8,
+        /// The viewer runs on a Mac, by xterm.js's exact platform list
+        /// (`navigator.platform` is `Macintosh`, `MacIntel`, `MacPPC` or
+        /// `Mac68K`). Some keys encode differently there in today's xterm.js,
+        /// which treats Option as a key of its own on a Mac and Alt as Meta
+        /// elsewhere (Ctrl+Option with `_` or `@`, among others). Carried on
+        /// every key rather than once per attachment so that a message is
+        /// enough to encode it. Absent means false, and false is left out
+        /// when encoding.
+        #[serde(default, skip_serializing_if = "is_false")]
+        mac: bool,
     },
     /// Text to type as is: the printable characters that do not arrive as
     /// `key` (see there), and composition results.
@@ -1463,6 +1495,13 @@ pub enum GridInput {
     /// `button` is 0 left, 1 middle, 2 right for `down`, `up` and `move`
     /// (and -1 for motion with no button held); for `wheel` it is 0 up and 1
     /// down.
+    ///
+    /// De-duplicating motion is the client's job, as xterm.js's mouse
+    /// service does it with its last reported event: a `move` in the same
+    /// cell, with the same button and the same Shift, Alt and Ctrl as the last
+    /// mouse message sent, is not sent. The supervisor encodes every `move`
+    /// it gets, so a client that forwarded every pixel's `mousemove` would
+    /// repeat the same report to the program.
     Mouse {
         kind: MouseEventKind,
         button: i8,

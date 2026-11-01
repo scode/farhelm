@@ -123,6 +123,10 @@ const TABLE_QUERIES: &[&str] = &[
     "\x1b[?2004h\x1b[?2004$p\x1b[?2004l",
     "\x1b[1 q\x1b[?12$p\x1b[0 q",
     "\x1b[?1003h\x1b[?1003$p\x1b[?1002$p\x1b[?1000$p\x1b[?1003l",
+    // The UTF-8 and SGR mouse encodings are separate modes, both reported set
+    // whichever was set first (a vendored patch; upstream kept the last).
+    "\x1b[?1006h\x1b[?1005h\x1b[?1005$p\x1b[?1006$p\x1b[?1005l\x1b[?1006l",
+    "\x1b[?1005h\x1b[?1006h\x1b[?1005$p\x1b[?1006$p\x1b[?1006l\x1b[?1005$p\x1b[?1005l",
     "\x1b[?47h\x1b[?1049$p\x1b[?47$p\x1b[?47l",
     "\x1b[?1047h\x1b[?1049$p\x1b[?1047$p\x1b[?1047l",
 ];

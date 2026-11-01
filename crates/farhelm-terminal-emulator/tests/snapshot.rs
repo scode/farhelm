@@ -18,8 +18,8 @@ use farhelm_terminal_emulator::alacritty_terminal::term::TermMode;
 use farhelm_terminal_emulator::alacritty_terminal::term::cell::Flags;
 use farhelm_terminal_emulator::alacritty_terminal::vte::ansi::{Color, NamedColor};
 use farhelm_terminal_emulator::{
-    Emulator, FORMAT_VERSION, MAX_RESTORE_CELLS, MIN_SNAPSHOT_LIMIT, NotClean, Size, SnapshotError,
-    WidthTable, history_seed_from_lines,
+    Emulator, FORMAT_VERSION, MAX_RESTORE_CELLS, MIN_SNAPSHOT_LIMIT, MouseEncoding, NotClean, Size,
+    SnapshotError, WidthTable, history_seed_from_lines,
 };
 
 /// Version 1's limits on a fixup cell: the longest hyperlink URI and `id`,
@@ -2001,4 +2001,58 @@ fn the_wrap_flag_round_trips_whatever_autowrap_was() {
     common::resize(&mut resized, 6, 3);
     assert!(resized.term().grid().cursor.input_needs_wrap);
     assert!(!resized.term().mode().contains(TermMode::LINE_WRAP));
+}
+
+/// Every combination of the UTF-8 (1005) and SGR (1006) mouse encodings
+/// round-trips, both set included, under click reporting and the alternate
+/// screen alike; and resetting either one afterwards leaves the restored
+/// terminal in the same encoding as the live one.
+///
+/// Why: the two are independent modes (the vendored patch, as in tmux), so
+/// a terminal can hold both, and the stream sets each on its own; a restore
+/// that kept only one would encode the program's mouse reports differently
+/// once it turned SGR off after a supervisor restart. Spec: `paint`'s
+/// private modes, and `Modes::mouse_encoding`.
+#[test]
+fn both_mouse_encodings_set_round_trip() {
+    let encodings = [
+        "",
+        "\x1b[?1005h",
+        "\x1b[?1006h",
+        "\x1b[?1006h\x1b[?1005h",
+        "\x1b[?1005h\x1b[?1006h",
+    ];
+    for screen in ["", "\x1b[?1049h"] {
+        for set in encodings {
+            for reset in ["", "\x1b[?1006l", "\x1b[?1005l"] {
+                let case = format!("{screen:?} {set:?} then {reset:?}");
+                let mut live = emulator(20, 4);
+                feed(
+                    &mut live,
+                    format!("{screen}\x1b[?1000h{set}text").as_bytes(),
+                );
+                let mut restored = restore(&live.snapshot(MAX).unwrap().blob).emulator;
+                assert!(diff(&live, &restored).is_empty(), "{case}");
+                for emulator in [&mut live, &mut restored] {
+                    feed(emulator, reset.as_bytes());
+                }
+                assert_eq!(restored.modes(), live.modes(), "{case}");
+                assert!(diff(&live, &restored).is_empty(), "{case}");
+            }
+        }
+    }
+    // The state this exists for: both set, in either order, restores with
+    // both set, and SGR reported until 1006 is reset.
+    let both = TermMode::SGR_MOUSE | TermMode::UTF8_MOUSE;
+    for set in ["\x1b[?1006h\x1b[?1005h", "\x1b[?1005h\x1b[?1006h"] {
+        let mut live = emulator(20, 4);
+        feed(&mut live, format!("\x1b[?1000h{set}").as_bytes());
+        assert!(live.term().mode().contains(both), "{set:?}");
+        let mut restored = restore(&live.snapshot(MAX).unwrap().blob).emulator;
+        assert!(restored.term().mode().contains(both), "{set:?}");
+        let encoding = |emulator: &Emulator| emulator.modes().mouse_encoding;
+        assert_eq!(encoding(&restored), MouseEncoding::Sgr, "{set:?}");
+        feed(&mut restored, b"\x1b[?1006l");
+        assert_eq!(encoding(&restored), MouseEncoding::Utf8, "{set:?}");
+    }
 }
