@@ -47,11 +47,11 @@ wrapper requires review of that wrapper's responsibility.
 
 Source reads are bounded to 2 MiB per file, 64 MiB total, 10,000 files and 100,000 directory entries. Reports are
 bounded to 10,000 calls and an 8 MiB cumulative budget for annotation/report fields; formatted JSON is capped at 16 MiB.
-Annotations are indexed once by source row instead of searched afresh for every call. The 60-second deadline is checked
-during syntax traversal and result construction as well as between filesystem operations; it cannot interrupt a
-kernel-blocked filesystem call. Parser errors are failures, not an empty inventory. The pinned Rust grammar is tested
-against ordinary `raw` variable references as well as test syntax; changing parser versions requires rechecking the
-source inventory.
+Annotations are indexed once by source row instead of searched afresh for every call. The 180-second deadline is checked
+around every filesystem operation, parse, native module query and result, and during syntax traversal (where the clock
+is read every 256 nodes); it cannot interrupt a kernel-blocked filesystem call. Parser errors are failures, not an empty
+inventory. The pinned Rust grammar is tested against ordinary `raw` variable references as well as test syntax; changing
+parser versions requires rechecking the source inventory.
 
 Focused checker validation uses the same environment:
 

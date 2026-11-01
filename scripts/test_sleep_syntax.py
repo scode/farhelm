@@ -9,7 +9,7 @@ import json
 import pathlib
 import posixpath
 import ast
-from tree_sitter import Language, Parser
+from tree_sitter import Language, Parser, Query, QueryCursor
 import tree_sitter_rust
 import tree_sitter_typescript
 
@@ -17,8 +17,10 @@ import tree_sitter_typescript
 class SyntaxBudget:
     """Share discovery and report bounds across files, before eagerly retaining results."""
 
-    def __init__(self, *, check=lambda: None, calls=10000, report_bytes=8 * 1024 * 1024):
+    def __init__(self, *, check=lambda: None, node=None, calls=10000, report_bytes=8 * 1024 * 1024):
         self.check = check
+        # The per-syntax-node form of `check`, which may read the clock less often (see SourceBudget.node).
+        self.node = node or check
         self.calls_left = calls
         self.report_bytes_left = report_bytes
 
@@ -159,6 +161,30 @@ def module_path_attribute(node, source):
     return paths[0] if paths else None
 
 
+# Compiled once: building the query costs a few milliseconds, which per file added up to more than running it. The
+# language object is kept alongside it, because the binding does not keep it alive for the query (a temporary here
+# crashed the interpreter).
+_RUST_LANGUAGE = Language(tree_sitter_rust.language())
+_MODULE_QUERY = Query(_RUST_LANGUAGE, '(mod_item) @module')
+
+
+def mod_items(root, check):
+    """Every `mod` item under `root`, in source order, found by the parser's own query engine.
+
+    This used to be a Python walk over every node of the file's tree, done once per file, and a query does the same
+    search in native code. Sorting by start byte gives the order a depth-first walk would, because an item starts after
+    the item that contains it. `check` (the unthrottled budget check: this runs once per file, not per node) runs right
+    before and after the query, so cancellation and the deadline bound
+    it the way they bound a parse: a query takes milliseconds per file. It is not run from the query's progress
+    callback, which would let them stop the search itself, because that callback crashes the pinned tree-sitter
+    binding (0.25.2) with a segmentation fault on this repository's sources.
+    """
+    check()
+    found = QueryCursor(_MODULE_QUERY).captures(root).get('module', [])
+    check()
+    return sorted(found, key=lambda node: node.start_byte)
+
+
 def external_modules(source, filename, *, crate_root=False, budget=None):
     """Return source-declared module candidates and whether their declaration is test-only.
 
@@ -175,8 +201,9 @@ def external_modules(source, filename, *, crate_root=False, budget=None):
     path = pathlib.PurePosixPath(filename)
     base = path.parent if crate_root or path.name == 'mod.rs' else path.with_suffix('')
     result = []
-    for node in walk(tree.root_node, budget.check):
-        if node.type != 'mod_item' or node.child_by_field_name('body') is not None:
+    for node in mod_items(tree.root_node, budget.check):
+        budget.check()
+        if node.child_by_field_name('body') is not None:
             continue
         name = symbol_name(node.child_by_field_name('name'), source)
         ancestors, current = [], node.parent
@@ -204,7 +231,7 @@ def annotation_index(nodes, source, budget):
     """Decode each eligible comment once and index it by row for constant-size call lookup."""
     result = {}
     for comment in nodes:
-        budget.check()
+        budget.node()
         if comment.type not in {'line_comment', 'comment'}:
             continue
         spelling = text(comment, source).strip()
@@ -298,7 +325,7 @@ def import_aliases(nodes, names, source, budget):
             edges.setdefault(original, set()).add(alias)
 
     for node in nodes:
-        budget.check()
+        budget.node()
         if node.type == 'import_specifier':
             original = symbol_name(node.child_by_field_name('name'), source)
             alias = symbol_name(node.child_by_field_name('alias'), source)
@@ -314,7 +341,7 @@ def import_aliases(nodes, names, source, budget):
             leaves = []
             sibling = node.next_sibling
             while sibling is not None and sibling.type != ';':
-                for part in walk(sibling, budget.check):
+                for part in walk(sibling, budget.node):
                     if part.type in {'identifier', 'as'}:
                         leaves.append(part)
                 sibling = sibling.next_sibling
@@ -365,7 +392,7 @@ def sleep_details(source, language, *, whole_file=True, budget=None):
     budget.check()
     if tree.root_node.has_error:
         raise ValueError('source has syntax errors under the pinned grammar')
-    nodes = list(walk(tree.root_node, budget.check))
+    nodes = list(walk(tree.root_node, budget.node))
     names = {'sleep', 'sleep_until'} if rust else {'setTimeout', 'setInterval', 'waitForTimeout'}
     # Explicit import renames are visible syntax. Track them so renaming sleep
     # to pause cannot bypass the check; dynamic aliases need author review.
@@ -373,7 +400,7 @@ def sleep_details(source, language, *, whole_file=True, budget=None):
     found = {}
     comments = annotation_index(nodes, source, budget)
     for node in nodes:
-        budget.check()
+        budget.node()
         if node.type not in {'call_expression', 'token_tree'}:
             continue
         if node.type == 'call_expression':
