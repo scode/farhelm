@@ -307,6 +307,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   easily identified.
 - **Add a Discord link to the feedback dialog and the ? menu.** The website header already links Discord (#2869);
   surface the same link in the app, where users who just had a problem can find it.
+- **Support adding remote macOS hosts.** V1 provisioning targets Linux hosts with a usable systemd user manager
+  (SPEC.md, Topology); a Mac can only be added today by running the supervisor binary by hand, and the remote
+  provisioning and remote Update flows do not cover it. Make adding a macOS machine as a remote host a supported flow.
+
+- **Better feedback when launching sessions.** When a remote host is slow, a launch can feel hung: it is not clear
+  whether the session is succeeding, failing, still in flight, or stuck. Make the launch's state and progress visible so
+  a slow host reads as in flight rather than dead.
 
 ## Doc todo
 
