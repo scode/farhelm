@@ -181,6 +181,8 @@ A repo-wide rename, sweep or cleanup leaves these alone; each changes only under
   `docs/readme-video/`, which change only when the maintainer asks (`.agents/docs-media.md`).
 - The docs Overview page and the words in its intro SVGs, which mirror the README introduction (`website/AGENTS.md` has
   the rule and its one exception).
+- The upstream code in `vendor/alacritty_terminal/` and `vendor/vte/`, which changes only together with its patch file
+  (`vendor/README.md`).
 
 ## Code rules
 
@@ -276,6 +278,7 @@ Before creating, editing or deleting anything under these paths, read the file n
   `scripts/publish-readme-hero.sh`, `scripts/readme-video.sh`, `scripts/docs-screenshots.sh`,
   `scripts/publish-docs-shots.sh`: `.agents/docs-media.md`.
 - `.github/workflows/`, `scripts/`, `e2e/`, any test: `.agents/validation.md`.
+- `vendor/`: `vendor/README.md` (never edit the upstream trees there without their patch files).
 
 ## Flows
 
