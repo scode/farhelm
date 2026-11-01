@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 const FIXTURES: &[&str] = &[
     "input/invalid/code-too-long.json",
     "input/invalid/focus-missing-in.json",
+    "input/invalid/key-mac-not-bool.json",
     "input/invalid/key-too-long.json",
     "input/invalid/key-undefined-modifier.json",
     "input/invalid/mouse-down-no-button.json",
@@ -26,11 +27,13 @@ const FIXTURES: &[&str] = &[
     "input/invalid/paste-too-long.json",
     "input/invalid/text-too-long.json",
     "input/invalid/unknown-type.json",
+    "input/tolerated/key-mac-false.json",
     "input/tolerated/key-unknown-field.json",
     "input/valid/focus-in.json",
     "input/valid/focus-out.json",
     "input/valid/key-all-modifiers.json",
     "input/valid/key-longest.json",
+    "input/valid/key-mac.json",
     "input/valid/key.json",
     "input/valid/mouse-down.json",
     "input/valid/mouse-move-no-button.json",
@@ -233,6 +236,7 @@ fn tolerated_fixtures_decode() {
 const INVALID_REASONS: &[(&str, &str)] = &[
     ("input/invalid/code-too-long.json", "code of 65 bytes"),
     ("input/invalid/focus-missing-in.json", "missing field `in`"),
+    ("input/invalid/key-mac-not-bool.json", "expected a boolean"),
     ("input/invalid/key-too-long.json", "key of 65 bytes"),
     (
         "input/invalid/key-undefined-modifier.json",
@@ -648,6 +652,7 @@ fn key(key: &str, code: &str, mods: u8) -> Either {
         code: code.to_string(),
         kc: 65,
         mods,
+        mac: false,
     })
 }
 

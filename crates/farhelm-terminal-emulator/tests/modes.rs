@@ -67,13 +67,16 @@ fn each_mode_follows_its_sequences() {
     }
 }
 
-/// Mouse reporting modes replace one another, as do mouse encodings, and
-/// turning off the active one leaves reporting off.
+/// Mouse reporting modes replace one another, and turning off the active
+/// one leaves reporting off; the UTF-8 (1005) and SGR (1006) encodings are
+/// separate modes instead, and while 1006 is set the encoding is SGR
+/// whichever was set first; resetting it leaves UTF-8 if 1005 is set.
 ///
 /// Why: the encoder must report exactly the events the program asked for
-/// last, in the encoding it asked for last.
+/// last, and in the encoding tmux and today's xterm.js use: SGR whenever
+/// 1006 is set (`vendor/README.md`, the independent mouse encodings).
 #[test]
-fn mouse_modes_replace_one_another() {
+fn mouse_modes_replace_one_another_but_encodings_combine() {
     let mut emulator = emulator(80, 24);
     let mut expect = |output: &str, reporting, encoding| {
         feed(&mut emulator, output.as_bytes());
@@ -96,9 +99,13 @@ fn mouse_modes_replace_one_another() {
         MouseEncoding::Default,
     );
     expect("\x1b[?1006h", MouseReporting::Motion, MouseEncoding::Sgr);
-    expect("\x1b[?1005h", MouseReporting::Motion, MouseEncoding::Utf8);
+    // 1005 after 1006 leaves SGR in force.
+    expect("\x1b[?1005h", MouseReporting::Motion, MouseEncoding::Sgr);
+    expect("\x1b[?1006l", MouseReporting::Motion, MouseEncoding::Utf8);
+    // 1006 after 1005 wins too.
+    expect("\x1b[?1006h", MouseReporting::Motion, MouseEncoding::Sgr);
     expect(
-        "\x1b[?1006h\x1b[?1000h",
+        "\x1b[?1005l\x1b[?1000h",
         MouseReporting::Clicks,
         MouseEncoding::Sgr,
     );
@@ -107,6 +114,11 @@ fn mouse_modes_replace_one_another() {
         MouseReporting::Off,
         MouseEncoding::Default,
     );
+    expect("\x1b[?1005;1006h", MouseReporting::Off, MouseEncoding::Sgr);
+    // 1005 set first survives 1006: with 1006 reset, UTF-8 is left (the
+    // exclusive rule would leave the default encoding here).
+    expect("\x1b[?1006l", MouseReporting::Off, MouseEncoding::Utf8);
+    expect("\x1b[?1005l", MouseReporting::Off, MouseEncoding::Default);
     // X10 compatibility mode is not implemented; it changes nothing.
     expect("\x1b[?9h", MouseReporting::Off, MouseEncoding::Default);
 }
