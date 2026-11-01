@@ -270,6 +270,7 @@ Before creating, editing or deleting anything under these paths, read the file n
 - `lore/`: `lore/AGENTS.md`.
 - `crates/farhelm-ui/src/icons.rs`, `crates/farhelm-ui/src/icons/`: `docs/harness-marks.md`.
 - `crates/farhelm-supervisor/tests/fixtures/screens/`: `docs/agent-screen-fixtures.md`.
+- `crates/terminal-host/`: `crates/terminal-host/SPEC.md` (running hosts outlive every release; its "Change policy").
 - `packaging/farhelm-desktop/`, `website/src/assets/intro/`, `docs/readme-hero/`, `docs/readme-video/`,
   `docs/docs-shots/`, `e2e/readme-hero/`, `e2e/readme-video/`, `e2e/docs-shots/`, `scripts/readme-screenshot.sh`,
   `scripts/publish-readme-hero.sh`, `scripts/readme-video.sh`, `scripts/docs-screenshots.sh`,

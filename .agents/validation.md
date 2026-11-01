@@ -82,6 +82,12 @@ that its required systemd or SSH substrate ran.
   test process with its own recorded nextest report. Keep this explicit release subset while the full e2e target remains
   excluded there. A successful local workspace nextest run already covers these tests on the same pinned substrate; do
   not duplicate them merely because this script is listed. A distro tmux loses the affected-version coverage.
+- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'terminal host' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p terminal-host`
+  — the terminal host crate's wire protocol and journal (`crates/terminal-host/`, contract in its `SPEC.md`): golden
+  fixtures of every version-1 frame (`tests/golden/v1/`, which a test holds to exactly the fixture list, with at least
+  one fixture per message kind), property tests of the codec and of the journal against a model, fixed journal cases,
+  and a check that `SPEC.md`'s resource-bounds table is the code's (`tests/spec_bounds.rs`). Pure: no pty, process or
+  socket. Seconds. Part of the workspace nextest run.
 - `cd crates/farhelm-ui/js-tests && node --test` — the JS unit harness for the asset-JS layer's pure functions
   (PLAN_M6_5.md item 1); node is already a CI requirement for Playwright below, so this adds no dependency. Run from
   inside the directory rather than as a glob from the repo root: node's no-argument default discovery (every `*.test.js`
