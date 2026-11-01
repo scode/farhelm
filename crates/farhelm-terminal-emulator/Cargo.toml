@@ -1,0 +1,30 @@
+[package]
+name = "farhelm-terminal-emulator"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The supervisor's terminal emulator: interprets one terminal's output, answers its queries and tracks its modes"
+
+# A library linked into the supervisor, never an artifact of its own; see
+# `farhelm-helm/Cargo.toml` for why every non-shipping member says so
+# explicitly.
+[package.metadata.dist]
+dist = false
+
+# A crate of its own rather than a supervisor module: the supervisor's
+# test binary is slow to build, and this crate's property and hostile-output
+# tests need quick iteration. It depends on no other Farhelm crate.
+
+[dependencies]
+# The emulator itself. Exactly `=0.26.0`: the root `Cargo.toml` swaps in the
+# patched copy under `vendor/` only while the requested version matches it, and
+# this crate relies on the patch's accessors and caps (vendor/README.md). Its
+# `serde` default feature is off because nothing here serializes alacritty's
+# types.
+alacritty_terminal = { version = "=0.26.0", default-features = false }
+
+[dev-dependencies]
+# Byte-wise against chunked feeding, and the delegation check, over generated
+# terminal output.
+proptest = "1"
