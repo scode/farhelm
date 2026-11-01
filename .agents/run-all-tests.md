@@ -117,6 +117,9 @@ Generic recorder wrapping is fine but not required for these; record each result
 - The vendored terminal crates' three recorded test commands from `.agents/validation.md` (`vendor/vte`,
   `vendor/alacritty_terminal`, and both together in `vendor/pair-tests`), which the sweep's workspace batteries never
   reach
+- The terminal emulator's ignored tests from `.agents/validation.md`, in release: the snapshot spike's full round-trip
+  configuration, the review's short scripts and hostile blobs, and the per-terminal memory measurement (on Linux), whose
+  assertions fail when an emulator exceeds the crate's stated budget; the workspace batteries skip ignored tests
 - The recorded portable brick-test helper suite from `.agents/validation.md`, with process-group inspection available;
   this exercises compiled task contracts, fixed operations, structured native actions, restart handoff failures and
   calibrated window-trace and bonus gesture-readiness gates. The guest-only Swift helper separately needs SDK type-check

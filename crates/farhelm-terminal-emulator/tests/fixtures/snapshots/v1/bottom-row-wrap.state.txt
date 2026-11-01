@@ -1,0 +1,22 @@
+screens dropped false
+size 10x4
+mode TermMode(SHOW_CURSOR | LINE_WRAP | ALTERNATE_SCROLL | URGENCY_HINTS)
+scroll region 0..4
+tab stops 0 8
+active charset G0
+title None
+title stack []
+cursor style CursorStyle { shape: Block, blinking: false }
+REP character Some('e')
+clean true
+history trimmed no
+primary saved cursor 0,0 template ' ' fg Foreground bg Background charsets Ascii Ascii Ascii Ascii
+primary cursor 1,6 template ' ' fg Foreground bg Background charsets Ascii Ascii Ascii Ascii
+primary history 1
+primary   -1 |top       |
+primary    0 |          |
+primary    1 |middle    |
+primary    2 |          |
+primary    3 |abcdefghij|
+primary    3,9: 'j' fg Foreground bg Background flags Flags(WRAPLINE)
+alternate saved cursor 0,0 template ' ' fg Foreground bg Background charsets Ascii Ascii Ascii Ascii

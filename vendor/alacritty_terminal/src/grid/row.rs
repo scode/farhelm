@@ -1,3 +1,6 @@
+// Modified for Farhelm: growing a row keeps its old cells within `occ`. See
+// vendor/README.md in the Farhelm repository.
+
 //! Defines the Row type which makes up lines in the grid.
 
 use std::cmp::{max, min};
@@ -62,6 +65,14 @@ impl<T: Default> Row<T> {
             return;
         }
 
+        // Farhelm patch: `reset` skips the cells from `occ` on when the last
+        // cell already has the template's background, trusting that they hold
+        // a blank of that background. The default cells added here can make
+        // that last cell's background wrong for the old cells (after a reset
+        // with another background, say), which would let a later reset skip
+        // them and leave their old background showing; so count the old cells
+        // as occupied.
+        self.occ = max(self.occ, self.inner.len());
         self.inner.resize_with(columns, T::default);
     }
 

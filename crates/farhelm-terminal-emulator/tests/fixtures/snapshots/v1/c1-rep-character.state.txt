@@ -1,0 +1,17 @@
+screens dropped false
+size 10x1
+mode TermMode(SHOW_CURSOR | LINE_WRAP | ALTERNATE_SCROLL | URGENCY_HINTS)
+scroll region 0..1
+tab stops 0 8
+active charset G0
+title None
+title stack []
+cursor style CursorStyle { shape: Block, blinking: false }
+REP character Some('\u{85}')
+clean true
+history trimmed no
+primary saved cursor 0,0 template ' ' fg Foreground bg Background charsets Ascii Ascii Ascii Ascii
+primary cursor 0,1 template ' ' fg Foreground bg Background charsets Ascii Ascii Ascii Ascii
+primary history 0
+primary    0 |x         |
+alternate saved cursor 0,0 template ' ' fg Foreground bg Background charsets Ascii Ascii Ascii Ascii

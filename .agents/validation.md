@@ -135,9 +135,30 @@ that its required systemd or SSH substrate ran.
   the mode accessors (mouse tracking resets as in tmux), the browser theme's colors, one-column terminals with wide
   characters and resizes (each bounded to 10 seconds, so that a regression of the vendored reflow fix fails after about
   1 GB of allocation instead of running until memory runs out), a screen full of tabs captured in linear time, and
-  hostile output through the vendored caps (combining floods, 8 MB OSC 52 and titles, long hyperlinks, a synchronized
-  update past vte's 2 MiB buffer). Seconds. Part of the workspace nextest run. Run it when the crate or anything under
-  `vendor/` changes.
+  hostile output through the vendored caps (combining floods, 8 MB OSC 52 and titles, long hyperlinks, floods of
+  hyperlinks and combining marks against the per-terminal extra storage, a synchronized update past vte's 2 MiB buffer).
+  The terminal snapshot format: the round trip (a recording fed in reads, snapshots where the emulator is clean after a
+  read's split candidate or end, restore, then compare field by field with the uninterrupted emulator after the rest of
+  the output in the same reads, after probes, and after the rest in other reads and a final flush) as a property test
+  over generated output, over a one-column terminal and over two short synthetic recordings, and over 20,000 short
+  scripts of awkward output and resizes (from 8x4 and two columns, each continued after the restore); the review
+  reproducers (a one-column encoder panic, four round-trip losses); the version 1 golden fixtures
+  (`tests/fixtures/snapshots/v1/`: each blob restores to its recorded state, each script still encodes to its blob and
+  reaches its feature); hand-built version 1 blobs and refusals of malformed, truncated, oversized (before allocating)
+  and unknown-version blobs, of streams holding sequences version 1 never writes or taking too much work to replay
+  (before feeding), and of fixups no live output makes; history past the restore's cell bound dropped and marked
+  trimmed; mutated and crafted blobs never panicking; extras shared by content through a restore, within the extra
+  storage limit; the size ladder (titles before history); the trimmed mark across restores; the character width table's
+  fingerprint; the Restart seeds. About a minute. Part of the workspace nextest run. Run it when the crate or anything
+  under `vendor/` changes. Ignored tests, run by hand in release: the snapshot spike's full round-trip configuration
+  (`cargo nextest run -p farhelm-terminal-emulator --release --run-ignored only -E 'test(/^full_size_round_trip_seed_/)'`,
+  a few minutes), the review's 300,000 short scripts (`-E 'test(short_scripts_round_trip_at_review_size)'`) and 230,000
+  hostile blobs (`-E 'test(hostile_blobs_never_panic_at_review_size)'`), the full round trip over private recordings of
+  real sessions named in `FARHELM_SNAPSHOT_RECORDINGS` (`-E 'test(private_recordings_round_trip)'`, passed to the
+  recorder with `--keep-farhelm-env`), the per-terminal memory measurement against the crate's stated budget
+  (`-E 'binary(memory)'`, release, Linux; its numbers print only with `--no-capture`, which the recorder's generic mode
+  accepts), and `write_missing_golden_fixtures`, which writes the fixtures of a new golden script and never overwrites
+  one.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'emulator parity with tmux' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run -p farhelm-supervisor --lib -E 'test(emulator_parity::)'`
   — the terminal emulator against the pinned tmux 3.7c, run with Farhelm's server configuration in a private server per
   test (`crates/farhelm-supervisor/src/emulator_parity/`): screen text, cursor, title and query answers compared at
@@ -160,11 +181,12 @@ that its required systemd or SSH substrate ran.
   `python3 scripts/record-test-run.py --kind development --selection 'vendored crates paired' --concurrency 'libtest default threads' --tmux none -- cargo test --locked --manifest-path vendor/pair-tests/Cargo.toml`
   — the vendored, patched terminal crates (`vendor/README.md`): upstream's unit tests plus the tests of Farhelm's
   patches (the parser's ground state, the OSC payload and its overflow notice, zero-width, hyperlink and title caps,
-  hyperlink reuse, the history counters, XTVERSION, the erase and cursor movement fixes), and in `vendor/pair-tests/`
-  the tests that need both patched crates together (an OSC 8 the parser drops ending the terminal's hyperlink). These
-  are excluded from the workspace, so no workspace test run, clippy, `cargo fmt` or dprint (beyond `vendor/README.md`
-  and `vendor/pair-tests/Cargo.toml`) reaches them, and CI does not run them. Run all three when anything under
-  `vendor/` changes; seconds, plus a first download of the crates' own locked dependencies.
+  hyperlink reuse, the per-terminal extra storage, the history counters, XTVERSION, the pending-wrap flag only under
+  autowrap, the erase and cursor movement fixes, clearing a row after it grew), and in `vendor/pair-tests/` the tests
+  that need both patched crates together (an OSC 8 the parser drops ending the terminal's hyperlink). These are excluded
+  from the workspace, so no workspace test run, clippy, `cargo fmt` or dprint (beyond `vendor/README.md` and
+  `vendor/pair-tests/Cargo.toml`) reaches them, and CI does not run them. Run all three when anything under `vendor/`
+  changes; seconds, plus a first download of the crates' own locked dependencies.
 - `cd crates/farhelm-ui/js-tests && node --test` — the JS unit harness for the asset-JS layer's pure functions
   (PLAN_M6_5.md item 1); node is already a CI requirement for Playwright below, so this adds no dependency. Run from
   inside the directory rather than as a glob from the repo root: node's no-argument default discovery (every `*.test.js`

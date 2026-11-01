@@ -7,7 +7,7 @@ patch file together.
 The supervisor's terminal emulator (`crates/farhelm-terminal-emulator/`) runs on `alacritty_terminal` 0.26.0 and its
 parser `vte` 0.15.0. Both are used as published on crates.io except for a few small patches: accessors that snapshot and
 restore need, caps on what hostile program output can make them store, two history counters for the grid stream, one
-more query for the handler to answer, and eight bug fixes. The root `Cargo.toml` swaps these trees in for the crates.io
+more query for the handler to answer, and nine bug fixes. The root `Cargo.toml` swaps these trees in for the crates.io
 versions with `[patch.crates-io]`.
 
 ## What is here
@@ -96,28 +96,46 @@ it reaches the parser: a pre-scan would need a second parser to know where seque
   instead of building an equal copy, so the cells after it share one allocation. A link without an `id` always gets a
   fresh generated one, so it is never equal to the active link and is built as before (xterm.js also keeps such links
   apart).
+- Cell extra storage per terminal, `alacritty_terminal::term::MAX_EXTRA_STORAGE_BYTES` = 64 MiB. A cell keeps its
+  combining characters, underline color and hyperlink in a separate allocation (a cell extra), shared by the cells
+  printed with one cursor template but made anew whenever a program varies them from cell to cell: a combining mark on
+  every cell, an underline color changed before every character, a new hyperlink before every character (an OSC 8
+  without an `id` is a new link even when its URI repeats). The caps above bound one cell's or one link's size, not how
+  many there are: such output takes about 390 MiB per terminal at 12,000 lines of 200 columns, and about 6 GB with
+  maximal hyperlinks. Each `Term` now has an `ExtraStorage` that every cell extra and every link is charged to: an extra
+  `CELL_EXTRA_COST` (160 bytes, its allocation and the most its combining characters take, as 64-bit glibc rounds them),
+  a link its `id` and URI lengths plus `HYPERLINK_COST` (128 bytes for its own allocations). A charge is given back when
+  what it was charged for is dropped, and a copy that alacritty makes when it changes a shared extra is charged too. The
+  limit is hard: every change that would make a new extra goes through the storage's setters, which check for room
+  first, and degrade the cell when there is none. An added combining character is dropped, an added underline color
+  falls back to the default, an OSC 8 ends the active hyperlink (like one over the length caps), and a removal that
+  would have to copy an extra other cells share (an `SGR 59` after `ESC 8` restored a template whose extra the printed
+  cells hold, say) drops the cell's whole extra rather than copy it. A cell can lose attributes this way; the storage
+  never grows past the limit, whatever a program saves and restores. A cell's setters also leave its extra alone when
+  the value does not change, and clearing a wide character copies its extra only when there are combining characters to
+  clear, so that repeating an attribute copies nothing. 64 MiB holds an extra for about 400,000 cells, a sixth of that
+  scrollback, or about 25,000 maximal hyperlinks; text with combining marks on a third of its cells fills it only past
+  6,000 such lines. Note what "gone" means: alacritty can keep up to a thousand rows that leave the grid (cleared
+  history, a shrunk screen) to reuse them, cells and all, so extras on those rows stay alive and counted until new
+  output reuses the rows. An embedder that writes cells with extras itself, as a snapshot restore does, gives them their
+  extras through `Term::extra_storage()`'s setters (or shares an extra already made that way); upstream's constructors
+  still make uncharged ones, which the terminal never uses.
 - Window title length, `alacritty_terminal::term::MAX_TITLE_BYTES` = 4096. A longer title is cut at the last character
   boundary that fits, and gives back the rest of its allocation, which the parser sized for the whole payload and which
   would otherwise travel on in `Event::Title` to whoever keeps the latest title. This one exists because of the OSC cap:
   the title stack holds up to 4096 titles, so with 10 MiB titles one program could pin about 40 GiB. 4096 bytes leaves
   room for a shell's title holding a long path.
 
-NOTE: These caps bound each piece of state, not a terminal's total, and they cannot hold a terminal anywhere near the
-plain grid's size (a cell is 24 bytes, so 12,000 lines of history at 200 columns is about 58 MB). A bound on the total
-is for the supervisor's emulator and its memory budget to set; it does not exist yet. Here is what is left, estimated
-from the types' sizes and glibc's allocation rounding, not measured:
-
-- Hyperlinks are the worst case. An OSC 8 without an `id` is a new link even when its URI repeats, so a program that
-  sends one with a 2083-byte URI before every character gives each cell its own cell extra, link and copy of the URI:
-  about 2.2 KB per cell, about 2.5 KB with a 250-byte `id`. On the grid above that is about 5.5 to 6 GB, from about 5 GB
-  of output. Reusing a repeated link does not change this, since it only applies to links with an explicit `id`.
-- Combining characters and underline colors have the same per-cell shape on a smaller scale: about 100 bytes per cell
-  for one combining mark, about 150 for sixteen, and about 64 for an underline color changed before every cell. On the
-  same grid that is a few hundred MB.
-- Outside the grid, each terminal can hold up to about 30 MiB more: the title stack (4096 titles of up to 4096 bytes, 16
-  MiB), an OSC the program never ends (up to the 10 MiB limit buffered, in a `Vec` whose capacity can reach 16 MiB as it
-  doubles), and the 2 MiB buffer vte's `Processor` reserves up front for synchronized updates (resident only as far as
-  an update fills it).
+NOTE: These caps bound each piece of state, and the extra storage the cells' extras together. A terminal's total is the
+supervisor's per-terminal memory budget, measured and stated in the emulator crate
+(`crates/farhelm-terminal-emulator/src/lib.rs`, "Memory budget", and its `tests/memory.rs`), at 12,000 lines of 200
+columns: 56 MiB measured for ordinary output (a cell is 24 bytes), 120 MiB measured for the worst hostile output that
+gives every cell an extra, and a bound of about 190 MiB for a terminal doing everything hostile at once (the 56 MiB
+grid, 64 MiB of extras, 38 MiB measured outside the grid and about 32 MiB while a snapshot is taken). Outside the grid:
+the title stack (4096 titles of up to 4096 bytes, 16 MiB), an OSC the program never ends (up to the 10 MiB limit
+buffered, in a `Vec` whose capacity can reach 16 MiB as it doubles), and the 2 MiB buffer vte's `Processor` reserves up
+front for synchronized updates (resident only as far as an update fills it): 34 MiB of buffers, 38 MiB resident with the
+allocator's overhead.
 
 ### Per-patch records for upstream reports
 
@@ -548,6 +566,93 @@ by the supervisor's comparison with a live tmux 3.7c (`crates/farhelm-supervisor
   `emulator_parity::generated::generated_streams_match_tmux`.
 - Upstream status: not yet reported. Upstreamable as is.
 
+#### alacritty_terminal: a per-terminal limit on cell extra storage
+
+- Upstream today: a cell keeps combining characters, an underline color and an OSC 8 hyperlink in a separate
+  `Arc<CellExtra>`, shared by the cells printed from one cursor template and copied on write (`Arc::make_mut`) whenever
+  one cell's set changes. Nothing bounds how many there are, so output that varies them from cell to cell gives every
+  cell its own allocation, and a hyperlink sent without an `id` is always a new link. One terminal's memory then grows
+  with its scrollback times the size of an extra and its link.
+- Reproduction (200x60, `scrolling_history` 12,000): 12,060 lines that each repeat, 200 times,
+  `ESC [ 58 ; 2 ; <r> ; <c> ; <g> m` (a different underline color per cell), then `e` and sixteen U+0301. Observed: 387
+  MiB resident, against 56 MiB for the same grid of plain text. With
+  `ESC ] 8 ; id=<unique 250 bytes> ; <2083-byte URI> ESC \ x` per cell, about 6 GB. Without any combining marks, saving
+  a template with an underline color and a link
+  (`ESC ] 8 ; id=keep ; http://k/ ESC \ ESC [ 58 ; 5 ; 3 m ESC 7 ESC [ 59 m ESC ] 8 ; ; ESC \`), then repeating `ESC 8`,
+  a cursor move and `ESC [ 59 m x` once per cell also gives every cell a copy (122 MiB after 4,000 rows). Expected with
+  the patch: at most `MAX_EXTRA_STORAGE_BYTES` (64 MiB) charged, 120 MiB resident in the first case.
+- tmux 3.7c keeps at most 32 bytes of UTF-8 per cell (`tmux.h`, `UTF8_SIZE`) and at most 5,000 hyperlinks in the whole
+  server, evicting the oldest (`hyperlinks.c`, `MAX_HYPERLINKS`); its extended cell attributes are a small fixed-size
+  entry per cell. xterm keeps a fixed number of combining characters per cell (its `combiningChars` resource; its source
+  was not checked for this record).
+- Fix: each `Term` has an `ExtraStorage`, a byte count shared through an `Arc<AtomicUsize>` by everything charged to it.
+  A `CellExtra` is charged `CELL_EXTRA_COST` (160 bytes) when `ExtraStorage::adopt` takes on a fresh one and again when
+  a charged one is copied (the charge's `Clone`); a hyperlink made by `ExtraStorage::link` is charged its `id` and URI
+  lengths plus `HYPERLINK_COST` (128); every charge is refunded in `Drop`. Every path that could make a new extra goes
+  through `ExtraStorage`'s setters (`push_zerowidth`, `set_underline_color`, `set_hyperlink`, `clear_wide`), which check
+  for room first; without room they degrade the cell (a combining mark dropped, an underline color falling back to the
+  default, a link ended, or, when removing an attribute would copy a shared extra, the cell's whole extra dropped), so
+  the count never exceeds `MAX_EXTRA_STORAGE_BYTES`.
+- Why Farhelm needs it: every terminal's emulator runs in one long-lived supervisor, where one program must not be able
+  to grow the shared process without bound. The per-terminal memory budget rests on this limit
+  (`farhelm-terminal-emulator`, `src/lib.rs`, "Memory budget").
+- Upstream code: `alacritty_terminal/src/term/cell.rs`, `ExtraStorage`, `StorageCharge`, the `charge` field of
+  `CellExtra` and `HyperlinkInner`; `alacritty_terminal/src/term/mod.rs`, `MAX_EXTRA_STORAGE_BYTES`, `CELL_EXTRA_COST`,
+  `HYPERLINK_COST`, the `extra_storage` field and accessor, and the calls in `Term::input` (combining characters),
+  `Term::write_at_cursor` (`clear_wide`), `Term::set_hyperlink` and `Term::terminal_attribute` (`Attr::UnderlineColor`,
+  `Attr::Reset`).
+- Tests: `term::tests::hyperlinks_are_bounded_by_the_extra_storage`,
+  `term::tests::combining_characters_and_underline_colors_are_bounded` and
+  `term::tests::restoring_a_saved_cursor_cannot_grow_the_storage_past_the_limit` (vendored);
+  `floods_of_cell_extras_are_bounded` (`farhelm-terminal-emulator`, `tests/hostile.rs`),
+  `fixups_share_extras_and_respect_the_storage` (`tests/snapshot.rs`), and the ignored measurements in
+  `tests/memory.rs`.
+- Upstream status: not yet reported. The limit itself is Farhelm policy (one process hosting many terminals); alacritty
+  runs one terminal per window, where unbounded growth is the user's own program's doing. An upstream-friendly version
+  would make the limit a `Config` field (`max_extra_storage: Option<usize>`, `None` meaning unlimited, as today), keep
+  the accounting, and leave the degrade behavior as documented here.
+
+#### alacritty_terminal: a cell's setters leave its extra alone when nothing changes
+
+- Upstream today: `Cell::set_underline_color` and `Cell::set_hyperlink` call `Arc::make_mut` on the cell's extra even
+  when the value is the one it already has, and `Cell::clear_wide` does so even when there are no combining characters
+  to clear. On the cursor template, whose extra the printed cells share, each such call copies the extra.
+- Reproduction (100x20, no history): `ESC ] 8 ; id=a ; http://e/ ESC \`, then `ESC [ 59 m ESC [ 0 m x` repeated 1,000
+  times. Observed: a new `CellExtra` for every `x` (1,000 extras holding the same link). Expected: one extra shared by
+  all 1,000 cells.
+- xterm and tmux: not applicable, as neither shares per-cell storage this way.
+- Fix: the setters return early when the value would not change, after their existing "drop an empty extra" branch;
+  `clear_wide` touches the extra only when it holds combining characters. No visible state changes.
+- Why Farhelm needs it: without it, a program repeating `SGR 0` before every character while a link is active made a
+  copy per cell, which the extra storage limit above could only catch by refusing an attribute the program never
+  changed.
+- Upstream code: `alacritty_terminal/src/term/cell.rs`, `Cell::set_underline_color`, `Cell::set_hyperlink`,
+  `Cell::clear_wide`.
+- Tests: `term::tests::repeating_an_unchanged_attribute_copies_nothing` (vendored). It goes through the terminal, whose
+  extra storage setters make the same check before calling these, so it pins the behavior rather than this hunk alone;
+  an upstream version without the storage would carry the test as is.
+- Upstream status: not yet reported. Upstreamable as is: a pure saving of memory and allocation with no behavior change.
+
+#### alacritty_terminal: clearing a row after it grew
+
+- Upstream today: `Row::reset` skips the cells from `occ` on when the row's last cell already has the template's
+  background, trusting that those cells hold a blank of that background. `Row::grow` appends default cells without
+  counting the old ones in `occ`. After a row was reset with a colored background (which leaves `occ` at 0) and then
+  narrowed and widened again, a reset with the default background skips the old cells and leaves their color.
+- Reproduction (10x3, no history): `ESC [ ? 1049 h ESC [ 44 m ESC [ 2 J` (the alternate screen resizes without
+  reflowing), resize to 4x3 and back to 10x3, then `ESC [ 0 m ESC [ 2 J`. Observed: cells 0 to 3 of every row keep a
+  blue background (`Color::Named(NamedColor::Blue)`). Expected: every cell the default background. In alacritty itself
+  this shows as stale colored blocks after a full-screen program with a colored background clears its screen once the
+  window was made narrower and wider again.
+- tmux clears every cell of the screen on `CSI 2 J`, whatever resizes came before (`screen-write.c`,
+  `screen_write_clearscreen`, through `grid_view_clear`). xterm's source was not checked for this record.
+- Fix: `Row::grow` sets `occ` to at least the old length before appending, so the old cells count as occupied.
+- Why Farhelm needs it: correct screens, and because a snapshot cannot reproduce a row's `occ`, the stale colors made a
+  restored terminal differ from the original after the next clear (the snapshot round-trip test found it).
+- Upstream code: `alacritty_terminal/src/grid/row.rs`, `Row::grow`.
+- Tests: `term::tests::clearing_after_a_resize_clears_every_cell` (vendored; fails without the fix).
+- Upstream status: not yet reported. Upstreamable as is.
+
 ### History counters
 
 The grid stream sends scrollback to viewers as appended ranges and needs to know how many lines entered history since it
@@ -559,9 +664,10 @@ skipped by serde and left out of `Grid`'s `PartialEq`, so serialized grids and g
 
 ### Bug fixes
 
-Two of the eight upstream bugs the patches fix, the two that ordinary program output reaches on a one-column terminal or
-across reads; each fix is a few lines in the place the bug is. The other six are described only in their per-patch
-records above (the two erase fixes, the wrap-flag fix, and the cursor-movement, CHA and origin-mode fixes).
+Three of the nine upstream bugs the patches fix: the two that ordinary program output reaches on a one-column terminal
+or across reads, and clearing a row after it grew; each fix is a few lines in the place the bug is. The other six are
+described only in their per-patch records above (the two erase fixes, the wrap-flag fix, and the cursor-movement, CHA
+and origin-mode fixes).
 
 - A wide character on a grid one column wide. A wide character needs two cells, and upstream's `Term::input` writes its
   spacer cell into the second column even when there is none, which panics with an index out of bounds; and
@@ -583,6 +689,14 @@ records above (the two erase fixes, the wrap-flag fix, and the cursor-movement, 
   as the character a later REP (`CSI Ps b`) repeats, so REP repeats nothing instead of the character before it. It takes
   an encoded C1 control split across reads and then a REP to show, and the patch is kept to the bug that loses
   characters.
+
+- Clearing a row after it grew. `Row::reset` skips the cells from the row's `occ` (how many cells may differ from a
+  cleared one) on when the row's last cell already has the background it clears to, trusting that those cells hold a
+  blank of that background. Upstream's `Row::grow` appended default cells without counting the old ones in `occ`, so
+  after a row was cleared with a colored background (which leaves `occ` at 0), narrowed and widened again (the alternate
+  screen resizes without reflowing), a clear with the default background skipped the old cells and left them colored.
+  `grow` now counts the old cells as occupied. Besides the stale color, the bug made a terminal's state depend on how
+  its rows came to be, which a snapshot cannot reproduce: the snapshot round-trip test found it.
 
 ## How the trees stay out of the workspace's checks
 
@@ -646,10 +760,12 @@ To upgrade to a new version:
 
 - Read upstream's changelog and the diff between the two versions for anything touching the patched code: the OSC buffer
   and its dispatch and `advance_partial_utf8` in `vte/src/lib.rs`, `Processor` and the CSI dispatch in
-  `vte/src/ansi.rs`, `Cell::push_zerowidth`, `Term::input` (and every reader of `Cursor::input_needs_wrap`, whose
-  upstream code the wrap-flag fix relies on), `Term::clear_screen`, `Term::unset_private_mode`, the `Term` cursor moves,
-  `Term::set_hyperlink`, `Term::set_title`, `Grid::scroll_up`, `Grid::shrink_columns` and `Grid::clear_history`. A cap
-  that upstream now enforces itself may make a hunk unnecessary; a moved field may need the hunk rewritten.
+  `vte/src/ansi.rs`, `Cell::push_zerowidth`, `Cell`'s setters and `CellExtra`, `Hyperlink` and `HyperlinkInner`,
+  `Term::input` (and every reader of `Cursor::input_needs_wrap`, whose upstream code the wrap-flag fix relies on),
+  `Term::clear_screen`, `Term::unset_private_mode`, the `Term` cursor moves, `Term::set_hyperlink`,
+  `Term::terminal_attribute`, `Term::set_title`, `Grid::scroll_up`, `Grid::shrink_columns`, `Grid::clear_history` and
+  `Row::grow`. A cap that upstream now enforces itself may make a hunk unnecessary; a moved field may need the hunk
+  rewritten.
 - Unpack the new crate twice in the scratch directory, as `a/<name>` (left as published, minus `tests/` for
   `alacritty_terminal`) and `b/<name>`, and apply the old patch to `b` with `patch -p1 -d b`. Fix rejected hunks by
   hand, keeping each hunk small and marked `Farhelm patch`.

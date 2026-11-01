@@ -1,0 +1,81 @@
+screens dropped false
+size 20x3
+mode TermMode(SHOW_CURSOR | LINE_WRAP | ALTERNATE_SCROLL | URGENCY_HINTS)
+scroll region 0..3
+tab stops 0 8 16
+active charset G0
+title None
+title stack []
+cursor style CursorStyle { shape: Block, blinking: false }
+REP character Some('n')
+clean true
+history trimmed for 1000 more lines
+primary saved cursor 0,0 template ' ' fg Foreground bg Background charsets Ascii Ascii Ascii Ascii
+primary cursor 2,6 template ' ' fg Foreground bg Background charsets Ascii Ascii Ascii Ascii
+primary history 2
+primary   -2 |blue line four      |
+primary   -2,0: 'b' fg Blue bg Background
+primary   -2,1: 'l' fg Blue bg Background
+primary   -2,2: 'u' fg Blue bg Background
+primary   -2,3: 'e' fg Blue bg Background
+primary   -2,4: ' ' fg Blue bg Background
+primary   -2,5: 'l' fg Blue bg Background
+primary   -2,6: 'i' fg Blue bg Background
+primary   -2,7: 'n' fg Blue bg Background
+primary   -2,8: 'e' fg Blue bg Background
+primary   -2,9: ' ' fg Blue bg Background
+primary   -2,10: 'f' fg Blue bg Background
+primary   -2,11: 'o' fg Blue bg Background
+primary   -2,12: 'u' fg Blue bg Background
+primary   -2,13: 'r' fg Blue bg Background
+primary   -1 |magenta line five   |
+primary   -1,0: 'm' fg Magenta bg Background
+primary   -1,1: 'a' fg Magenta bg Background
+primary   -1,2: 'g' fg Magenta bg Background
+primary   -1,3: 'e' fg Magenta bg Background
+primary   -1,4: 'n' fg Magenta bg Background
+primary   -1,5: 't' fg Magenta bg Background
+primary   -1,6: 'a' fg Magenta bg Background
+primary   -1,7: ' ' fg Magenta bg Background
+primary   -1,8: 'l' fg Magenta bg Background
+primary   -1,9: 'i' fg Magenta bg Background
+primary   -1,10: 'n' fg Magenta bg Background
+primary   -1,11: 'e' fg Magenta bg Background
+primary   -1,12: ' ' fg Magenta bg Background
+primary   -1,13: 'f' fg Magenta bg Background
+primary   -1,14: 'i' fg Magenta bg Background
+primary   -1,15: 'v' fg Magenta bg Background
+primary   -1,16: 'e' fg Magenta bg Background
+primary    0 |cyan line six       |
+primary    0,0: 'c' fg Cyan bg Background
+primary    0,1: 'y' fg Cyan bg Background
+primary    0,2: 'a' fg Cyan bg Background
+primary    0,3: 'n' fg Cyan bg Background
+primary    0,4: ' ' fg Cyan bg Background
+primary    0,5: 'l' fg Cyan bg Background
+primary    0,6: 'i' fg Cyan bg Background
+primary    0,7: 'n' fg Cyan bg Background
+primary    0,8: 'e' fg Cyan bg Background
+primary    0,9: ' ' fg Cyan bg Background
+primary    0,10: 's' fg Cyan bg Background
+primary    0,11: 'i' fg Cyan bg Background
+primary    0,12: 'x' fg Cyan bg Background
+primary    1 |white line seven    |
+primary    1,0: 'w' fg White bg Background
+primary    1,1: 'h' fg White bg Background
+primary    1,2: 'i' fg White bg Background
+primary    1,3: 't' fg White bg Background
+primary    1,4: 'e' fg White bg Background
+primary    1,5: ' ' fg White bg Background
+primary    1,6: 'l' fg White bg Background
+primary    1,7: 'i' fg White bg Background
+primary    1,8: 'n' fg White bg Background
+primary    1,9: 'e' fg White bg Background
+primary    1,10: ' ' fg White bg Background
+primary    1,11: 's' fg White bg Background
+primary    1,12: 'e' fg White bg Background
+primary    1,13: 'v' fg White bg Background
+primary    1,14: 'e' fg White bg Background
+primary    1,15: 'n' fg White bg Background
+primary    2 |screen              |
+alternate saved cursor 0,0 template ' ' fg Foreground bg Background charsets Ascii Ascii Ascii Ascii
