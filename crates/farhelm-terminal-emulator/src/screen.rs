@@ -37,8 +37,9 @@
 //! in its spacing (`tests/screen.rs` pins those cases). Matching tmux there
 //! would mean tracking every tab's span through every edit.
 //!
-//! The comparison against a real tmux, on recorded sessions, follows in a
-//! later change; the tests here pin the shape on hand-built screens.
+//! The tests here pin the shape on hand-built screens. The supervisor's
+//! `emulator_parity` tests compare it against a live pinned tmux, on
+//! generated output and on recorded agent sessions.
 
 use alacritty_terminal::Term;
 use alacritty_terminal::grid::Dimensions;

@@ -41,6 +41,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   the pane pid the session-hold marks record, but any process running as the same user can write those files, which
   makes them a weaker trust root than tmux, so that is a design decision.
 
+- **Emoji made wide by a variation selector in grid terminals.** In tmux, an emoji followed by the emoji variation
+  selector (U+FE0F, as in "❤️") takes two columns; the emulator behind terminals in a terminal host gives it one, as
+  alacritty does. A program that counts it as two columns, as tmux does, finds the rest of that row one column off in
+  such a terminal. It did not come up in the recorded Claude Code and Codex sessions the emulator was checked against.
+  Decide whether to match tmux (a change to the vendored `alacritty_terminal`); what xterm.js shows today for the same
+  output was not checked. The difference is pinned in the supervisor's emulator parity tests
+  (`crates/farhelm-supervisor/src/emulator_parity/generated.rs`).
+
 - **Revisit keeping full durability for the host identity under WAL.** Decided on the maintainer's behalf on 2026-10-30
   when the sqlite-wal landing was blocked: SPEC.md's rule that lasting damage is never accepted, however unlikely the
   trigger, was read as taking precedence over the plan's decision that no write keeps full durability. The plan went
