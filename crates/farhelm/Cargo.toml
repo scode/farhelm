@@ -70,6 +70,9 @@ shell-words.workspace = true
 # setups; tempfile is the same crate the tests already used, promoted to a
 # regular dependency so the product path can use it too.
 tempfile.workspace = true
+# The terminal host, run as `farhelm internal terminal-host` so it ships inside
+# this binary rather than as an artifact of its own.
+terminal-host.workspace = true
 tokio.workspace = true
 # `tracing-subscriber` installs the subscriber (init_tracing); `tracing`
 # itself is here for the handful of diagnostics this binary emits on its
