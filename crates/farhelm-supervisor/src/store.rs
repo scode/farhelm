@@ -88,7 +88,7 @@ use subtle::ConstantTimeEq;
 /// database has ever had, and the template every later one follows.
 /// Public because the supervisor's hello reports it and the helm's Update
 /// refuses a host whose reported schema is above this build's.
-pub const SCHEMA_VERSION: i64 = 31;
+pub const SCHEMA_VERSION: i64 = 32;
 
 /// Random payload size behind one URL-safe session bearer.
 const SESSION_TOKEN_BYTES: usize = 32;
@@ -826,11 +826,12 @@ type RelaunchBasisColumns = (OutcomeColumns, String, i64, Option<String>, i64, i
 /// The columns [`SessionStore::restart_pending_launch`] reads inside its
 /// transaction: the outcome state, the pane, `created_at`, the title, the
 /// session token, the creation sequence, `last_activity_at`, the generation,
-/// and `conversation_source` — in that positional order.
+/// `conversation_source` and `terminal_kind` — in that positional order.
 ///
-/// The first two and the last are the takeover's CONDITIONS (evidence that
-/// a launch happened); the rest are the values a takeover must carry across
-/// its delete-and-reinsert. They are read as one tuple in one statement
+/// The first two and the last two are the takeover's CONDITIONS (evidence
+/// that a launch happened, and the kind of terminal it would have happened
+/// in); the rest are the values a takeover must carry across its
+/// delete-and-reinsert. They are read as one tuple in one statement
 /// deliberately, so the row the transaction refuses is provably the same row
 /// whose timestamps and title it would otherwise have preserved.
 ///
@@ -846,6 +847,7 @@ type LaunchTakeoverColumns = (
     i64,
     i64,
     Option<String>,
+    String,
 );
 
 /// The new launch generation a restart claimed, and what it replaced.
@@ -1079,6 +1081,57 @@ fn resume_template_from_column(text: Option<String>) -> anyhow::Result<Option<Ve
 /// instant does. Production always passes `None`.
 pub type BootTxFault = Arc<dyn Fn() -> anyhow::Result<()> + Send + Sync>;
 
+/// Where a session's agent terminal lives: in the supervisor's private tmux
+/// server, or in a terminal host of its own (SPEC_impl.md, "Terminal host").
+///
+/// Stored per row as `sessions.terminal_kind` (schema 32), because a
+/// terminal never changes kind while it lives and a restarted supervisor
+/// must look for it in the right place: a tmux pane by id or session name,
+/// a host by its socket and tag. The kind also says how to read
+/// [`StoredSession::pane`].
+///
+/// The schema bump that added the column makes a supervisor from before it
+/// refuse the database (it refuses any newer schema) rather than take a
+/// host's socket name for a tmux pane, find no such pane, and record a live
+/// session as exited. That bump alone is not the whole fence: builds at
+/// schema 32 that cannot create host terminals in production decode the
+/// kind but do not act on it, and would misread a host row the same way.
+/// So the change that first lets a supervisor create host terminals in
+/// production must bump the schema again, to 33, making every one of those
+/// builds refuse a database that may hold host rows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerminalKind {
+    /// A pane in the supervisor's private tmux server. Every row written
+    /// before schema 32 is one.
+    Tmux,
+    /// A terminal host process that owns the pty and the agent in it.
+    Host,
+}
+
+impl TerminalKind {
+    /// Stable SQLite spelling, independent of Rust variant names. The
+    /// table's `CHECK` constraint names exactly these two values, so a new
+    /// kind needs a schema change, not just a new arm here.
+    fn column(self) -> &'static str {
+        match self {
+            TerminalKind::Tmux => "tmux",
+            TerminalKind::Host => "host",
+        }
+    }
+
+    /// Decode the stored kind, refusing rather than guessing: the `CHECK`
+    /// keeps anything else out of a database this build wrote, so another
+    /// value means a hand edit or damage, and treating an unknown terminal
+    /// as tmux would misread its `pane`.
+    fn from_column(text: &str) -> anyhow::Result<Self> {
+        Ok(match text {
+            "tmux" => TerminalKind::Tmux,
+            "host" => TerminalKind::Host,
+            other => anyhow::bail!("unrecognized terminal kind {other:?}"),
+        })
+    }
+}
+
 /// The stored fields the supervisor actually consumes: wire metadata plus
 /// the tmux handles a session was created with.
 ///
@@ -1211,7 +1264,25 @@ pub struct StoredSession {
     /// committed. An empty pane is therefore "not yet confirmed", never
     /// "no pane": `service::Supervisor::reload_sessions` re-discovers it
     /// from tmux when the launch did in fact happen before the crash.
+    ///
+    /// For a [`TerminalKind::Host`] row this holds the host's socket name
+    /// instead of a tmux pane id, so "empty means the launch is not yet
+    /// confirmed" holds for both kinds; [`StoredSession::terminal_kind`]
+    /// says which reading applies.
     pub pane: String,
+    /// Whether the agent terminal this row describes is a tmux pane or a
+    /// terminal host. Rows from before schema 32 are [`TerminalKind::Tmux`].
+    ///
+    /// Written when the row is inserted, never at confirm, so a crash before
+    /// the launch is confirmed is reconciled against the right kind. A
+    /// relaunch keeps it today, which holds only until Restart can move an
+    /// old tmux session into a terminal host (step 7 of the terminal-host
+    /// goal). From then the relaunch must write the new launch's kind when it
+    /// opens the generation, save the prior kind with the rest of
+    /// [`PriorRun`], and [`SessionStore::abort_relaunch`] must restore it
+    /// together with the pane, so a restored pane is read the way it was
+    /// written.
+    pub terminal_kind: TerminalKind,
     /// The last transition the supervisor witnessed for this session.
     pub outcome: LastOutcome,
     /// Working directory resolved at create, used to refuse a relaunch if a
@@ -1492,6 +1563,12 @@ pub(crate) struct StoredSessionNotification {
 /// - 30: retain proof that a launch's boot ended, so already-exited rows
 ///   can settle negative evidence across later supervisor restarts without
 ///   treating same-boot pane absence as final.
+/// - 32: `sessions.terminal_kind`, whether the row's agent terminal is a tmux
+///   pane or a terminal host ([`TerminalKind`]). Existing rows become `tmux`.
+///   An older supervisor refuses this database instead of misreading host
+///   rows; the change that first creates host terminals in production must
+///   bump to 33, because builds at 32 before it do not act on the kind
+///   (see [`TerminalKind`]).
 ///
 /// `may_migrate` is the caller's assertion that it holds this state
 /// directory's exclusivity (see `service::StateDirOwnership`). Upgrading a
@@ -1549,7 +1626,9 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
                  session_launch     TEXT,
                  launch_hooked      INTEGER NOT NULL DEFAULT 0,
                  launch_boot_ended  INTEGER NOT NULL DEFAULT 0,
-                 codex_report_pin TEXT
+                 codex_report_pin TEXT,
+                 terminal_kind TEXT NOT NULL DEFAULT 'tmux'
+                     CHECK (terminal_kind IN ('tmux', 'host'))
              ) STRICT;
 
              CREATE TABLE supervisor_meta (
@@ -1609,7 +1688,7 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
              CREATE TRIGGER session_notifications_follow_sessions
                  AFTER DELETE ON sessions
                  BEGIN DELETE FROM session_notifications WHERE session_id = OLD.id; END;
-             PRAGMA user_version = 31;
+             PRAGMA user_version = 32;
              COMMIT;",
         )
         .context("creating schema")?;
@@ -2284,6 +2363,23 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
         .context("migrating schema from version 30 to 31")?;
         version = 31;
     }
+    if version == 31 {
+        // Every terminal before this version is a tmux pane, so the default
+        // is the truth for existing rows rather than a guess. `ALTER TABLE`
+        // can add the CHECK only as a column constraint, and the fresh DDL
+        // uses the same form so both paths build the same table. A column's
+        // own CHECK does not block `DROP COLUMN`, which the test fixtures
+        // that rewind a current database to an older version rely on.
+        conn.execute_batch(
+            "BEGIN;
+             ALTER TABLE sessions ADD COLUMN terminal_kind TEXT NOT NULL DEFAULT 'tmux'
+                 CHECK (terminal_kind IN ('tmux', 'host'));
+             PRAGMA user_version = 32;
+             COMMIT;",
+        )
+        .context("migrating schema from version 31 to 32")?;
+        version = 32;
+    }
     if version == SCHEMA_VERSION {
         return Ok(());
     }
@@ -2506,9 +2602,10 @@ fn insert_session_row(
           canonical_cwd, captured_conversation, \
           generation, launch_scoped, parent, session_token, \
           last_activity_at, last_work_started_at, conversation_source, session_launch, \
-          capture_ownership_version, omp_reporter_asset, omp_launch_program, launch_hooked, launch_boot_ended) \
+          capture_ownership_version, omp_reporter_asset, omp_launch_program, launch_hooked, launch_boot_ended, \
+          terminal_kind) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, \
-                 ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
+                 ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27)",
         rusqlite::params![
             row.id,
             row.title,
@@ -2536,6 +2633,7 @@ fn insert_session_row(
             row.omp_launch_program,
             i64::from(row.launch_hooked),
             i64::from(row.launch_boot_ended),
+            row.terminal_kind.column(),
         ],
     )
     .context("inserting session row")?;
@@ -2586,16 +2684,18 @@ const SESSION_COLUMNS: &str = "id, title, cwd, tmux_name, pane, \
                                parent, creation_seq, \
                                last_activity_at, last_work_started_at, conversation_source, \
                                session_launch, \
-                               capture_ownership_version, omp_reporter_asset, omp_launch_program, launch_hooked, launch_boot_ended";
+                               capture_ownership_version, omp_reporter_asset, omp_launch_program, launch_hooked, launch_boot_ended, \
+                               terminal_kind";
 
 /// The raw columns of one session row, before the fallible decoding that
 /// cannot happen inside a rusqlite row mapper (whose error type is
 /// rusqlite's own — see `load_all`'s two-stage comment).
 ///
-/// The trailing members are the raw creation sequence and the raw launch
-/// JSON; every other column is already in place on the partially-built
-/// `StoredSession`, because only these (with the outcome) can be REFUSED.
-type SessionColumns = (StoredSession, OutcomeColumns, i64, Option<String>);
+/// The trailing members are the raw creation sequence, the raw launch JSON
+/// and the raw terminal kind; every other column is already in place on the
+/// partially-built `StoredSession`, because only these (with the outcome)
+/// can be REFUSED.
+type SessionColumns = (StoredSession, OutcomeColumns, i64, Option<String>, String);
 
 /// Read one row's columns positionally, matching [`SESSION_COLUMNS`].
 ///
@@ -2614,6 +2714,7 @@ fn read_session_columns(r: &rusqlite::Row<'_>) -> rusqlite::Result<SessionColumn
             launch: farhelm_proto::SessionLaunch::plain_command(""),
             tmux_name: r.get(3)?,
             pane: r.get(4)?,
+            terminal_kind: TerminalKind::Tmux,
             outcome: LastOutcome::Launching,
             canonical_cwd: r.get(9)?,
             captured_conversation: r.get(10)?,
@@ -2633,6 +2734,7 @@ fn read_session_columns(r: &rusqlite::Row<'_>) -> rusqlite::Result<SessionColumn
         (r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?),
         r.get::<_, i64>(15)?,
         r.get(19)?,
+        r.get(25)?,
     ))
 }
 
@@ -2654,7 +2756,10 @@ fn read_session_columns(r: &rusqlite::Row<'_>) -> rusqlite::Result<SessionColumn
 /// session could capture an identity and then be unable to resume with it,
 /// SPEC.md's exact-conversation promise silently false).
 fn decode_session_row(columns: SessionColumns) -> anyhow::Result<StoredSession> {
-    let (mut row, (state, exit_code, annotation, error_detail), creation_seq, launch) = columns;
+    let (mut row, (state, exit_code, annotation, error_detail), creation_seq, launch, kind) =
+        columns;
+    row.terminal_kind =
+        TerminalKind::from_column(&kind).with_context(|| format!("session {}", row.id))?;
     row.creation_seq = u64::try_from(creation_seq)
         .with_context(|| format!("session {} has a negative creation sequence", row.id))?;
     row.outcome = LastOutcome::from_columns(&state, exit_code, annotation, error_detail)
@@ -3756,6 +3861,8 @@ impl SessionStore {
     /// would leave every list this process serves showing the old label
     /// until the next reload. A row a restart moved past generation zero is
     /// never taken over: it returns `Launched`, so the retry replays it.
+    /// Neither is a row whose terminal kind differs from `row`'s, because the
+    /// evidence that it never launched was gathered for its own kind only.
     /// Fresh-checkout provenance also survives independently
     /// of registry membership: deleting it here would let a later damaged
     /// registry silently change this session's recovery and Restart contract.
@@ -3785,7 +3892,8 @@ impl SessionStore {
                     let current: Option<LaunchTakeoverColumns> = tx
                         .query_row(
                             "SELECT outcome_state, pane, created_at, title, session_token, \
-                     creation_seq, last_activity_at, generation, conversation_source FROM sessions \
+                     creation_seq, last_activity_at, generation, conversation_source, \
+                     terminal_kind FROM sessions \
                      WHERE id = ?1",
                             rusqlite::params![row.id],
                             |r| {
@@ -3799,6 +3907,7 @@ impl SessionStore {
                                     r.get(6)?,
                                     r.get(7)?,
                                     r.get(8)?,
+                                    r.get(9)?,
                                 ))
                             },
                         )
@@ -3849,6 +3958,17 @@ impl SessionStore {
                     // the row whose timestamp and launch fence the caller must
                     // honor. Reading them from one committed snapshot rules out a
                     // second query disagreeing about which row it saw.
+                    //
+                    // The terminal kind is a condition too. The evidence above,
+                    // and the caller's probes, only show that the crashed attempt
+                    // left nothing in the kind of terminal it was started in. A
+                    // retry in the other kind would rewrite the row to that kind,
+                    // and an agent the crashed attempt did start (a host the
+                    // caller's tmux probes cannot see, say) would then belong to a
+                    // session row that no longer describes it, which no orphan or
+                    // superseded-host cleanup reclaims. So a kind mismatch replays
+                    // instead, the same conservative direction as every other
+                    // refusal here.
                     let (
                         preserved_created_at,
                         preserved_title,
@@ -3867,6 +3987,7 @@ impl SessionStore {
                             last_activity_at,
                             generation,
                             conversation_source,
+                            terminal_kind,
                         )) => {
                             // A Restart since the crashed attempt (generation past
                             // zero) owns the row now; replay it rather than take it
@@ -3875,6 +3996,7 @@ impl SessionStore {
                                 || !matches!(state.as_str(), "launching" | "interrupted" | "error")
                                 || conversation_source.is_some()
                                 || generation != 0
+                                || terminal_kind != row.terminal_kind.column()
                             {
                                 return Ok(RetryClaim::Launched);
                             }
@@ -4045,7 +4167,13 @@ impl SessionStore {
     ///   alone;
     /// - the exit code and the error detail go for the same reason;
     /// - the pane is emptied, because the relaunch has not confirmed one
-    ///   yet.
+    ///   yet. `terminal_kind` is KEPT for now, so the pane an abort restores
+    ///   is read as it was written. That holds only while every relaunch
+    ///   stays in the same kind of terminal: once Restart can move an old
+    ///   tmux session into a terminal host (step 7 of the terminal-host
+    ///   goal), this call must write the new kind, [`PriorRun`] must carry
+    ///   the old one, and the abort must restore it with the pane
+    ///   ([`StoredSession::terminal_kind`]).
     /// - boot-finality proof clears because a new shim can write. A definitive
     ///   abort restores that proof with the prior external run's facts.
     /// - Codex's process pin clears: it authorizes one launch's reports, not
@@ -6296,6 +6424,7 @@ mod tests {
                     },
                     tmux_name: format!("fh-{id}"),
                     pane: "%0".to_string(),
+                    terminal_kind: TerminalKind::Tmux,
                     outcome: LastOutcome::Running,
                     canonical_cwd: None,
                     captured_conversation: None,
@@ -7042,8 +7171,9 @@ mod tests {
     /// Scope, stated rather than implied: this compares `PRAGMA table_info`
     /// (tables, column order, type, nullability, DEFAULT, primary key) and
     /// separately asserts the properties that pragma does NOT report and
-    /// that this schema depends on — `STRICT` typing and
-    /// `supervisor_meta`'s single-row `CHECK`. DDL text is deliberately
+    /// that this schema depends on — `STRICT` typing,
+    /// `supervisor_meta`'s single-row `CHECK`, and the `CHECK` on
+    /// `sessions.terminal_kind`. DDL text is deliberately
     /// not compared: `ALTER TABLE ADD COLUMN` produces differently
     /// punctuated SQL for an identical result.
     ///
@@ -7079,8 +7209,17 @@ mod tests {
                 "both tables must keep STRICT typing in {}: {ddl:?}",
                 path.display()
             );
+            // `sessions` carries a CHECK of its own (the terminal kind's), so
+            // only the metadata table's DDL can say whether this one survived.
+            let meta_ddl: String = conn
+                .query_row(
+                    "SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'supervisor_meta'",
+                    [],
+                    |r| r.get(0),
+                )
+                .expect("supervisor_meta exists");
             assert!(
-                ddl.iter().any(|sql| sql.contains("CHECK")),
+                meta_ddl.contains("CHECK"),
                 "supervisor_meta must keep its single-row CHECK in {}",
                 path.display()
             );
@@ -7091,6 +7230,21 @@ mod tests {
                 [],
             )
             .expect_err("a second metadata row must be refused");
+            // The terminal kind's CHECK is the other constraint
+            // `table_info` cannot see; the migration adds it with
+            // `ALTER TABLE`, so it is the one most easily lost on that path.
+            conn.execute(
+                "INSERT INTO sessions (id, title, cwd, tmux_name, pane, created_at, terminal_kind) \
+                 VALUES ('s', 't', '/', 'fh-s', '', 0, 'screen')",
+                [],
+            )
+            .expect_err("a terminal kind outside the vocabulary must be refused");
+            conn.execute(
+                "INSERT INTO sessions (id, title, cwd, tmux_name, pane, created_at, terminal_kind) \
+                 VALUES ('s', 't', '/', 'fh-s', '', 0, 'host')",
+                [],
+            )
+            .expect("a host row is accepted");
         }
     }
 
@@ -7445,7 +7599,7 @@ mod tests {
         Connection::open(&path)
             .unwrap()
             .execute_batch(
-                "ALTER TABLE sessions DROP COLUMN codex_report_pin; PRAGMA user_version = 30;",
+                "ALTER TABLE sessions DROP COLUMN terminal_kind; ALTER TABLE sessions DROP COLUMN codex_report_pin; PRAGMA user_version = 30;",
             )
             .unwrap();
         for _ in 0..2 {
@@ -7459,6 +7613,231 @@ mod tests {
             assert_eq!(row.conversation_source.as_deref(), Some("hook"));
             assert_eq!(reopened.report_pin("old-codex").await.unwrap(), None);
         }
+    }
+
+    // -----------------------------------------------------------------
+    // Schema 32: the stored terminal kind
+    // -----------------------------------------------------------------
+
+    /// Every session that existed before schema 32 runs in tmux, and the
+    /// upgrade must say so: a row that came out of the migration as anything
+    /// else, or not at all, would send a restarted supervisor looking for a
+    /// live agent in the wrong place.
+    ///
+    /// Specified: a schema-31 database holding a confirmed running session
+    /// and a not-yet-confirmed launching one migrates to version 32 with both
+    /// rows kept field for field and marked [`TerminalKind::Tmux`], and a
+    /// second open of the migrated database reads the same rows.
+    #[farhelm_testtrace::test]
+    async fn terminal_kind_migration_marks_existing_sessions_tmux() {
+        let (dir, store) = fresh_store().await;
+        let path = dir.path().join("supervisor.db");
+        insert_running(&store, "old-running").await;
+        store
+            .insert_session(launching_row("old-launching"), None)
+            .await
+            .unwrap();
+        let mut before = store.load_all().await.unwrap();
+        before.sort_by(|a, b| a.id.cmp(&b.id));
+        drop(store);
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "ALTER TABLE sessions DROP COLUMN terminal_kind; PRAGMA user_version = 31;",
+            )
+            .unwrap();
+            assert!(
+                conn.prepare("SELECT terminal_kind FROM sessions").is_err(),
+                "the fixture premise: a genuine schema-31 table without the column"
+            );
+        }
+
+        for _ in 0..2 {
+            let reopened = SessionStore::open(&path, true).await.unwrap();
+            let mut after = reopened.load_all().await.unwrap();
+            after.sort_by(|a, b| a.id.cmp(&b.id));
+            assert_eq!(after, before, "the migration changes no session's fields");
+            assert!(
+                after
+                    .iter()
+                    .all(|row| row.terminal_kind == TerminalKind::Tmux),
+                "every pre-existing session is a tmux session: {after:?}"
+            );
+            let conn = reopened.conn.lock();
+            // The stored values, not only the decoded ones: the decoder
+            // starts from a `Tmux` placeholder, so a decoded `Tmux` alone
+            // cannot tell the migration's value from a decoder that never
+            // read the column.
+            let raw: Vec<String> = conn
+                .prepare("SELECT terminal_kind FROM sessions ORDER BY id")
+                .unwrap()
+                .query_map([], |r| r.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            assert_eq!(raw, vec!["tmux"; 2]);
+            let version: i64 = conn
+                .query_row("PRAGMA user_version", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(version, 32);
+        }
+    }
+
+    /// A row written without naming the column gets `tmux`, the same value
+    /// the migration gives old rows. Pinned separately because it is the
+    /// column's DEFAULT, not the migration, that a later writer omitting the
+    /// column would rely on, and a default of anything else would quietly
+    /// turn such rows into host rows.
+    ///
+    /// Specified: an `INSERT` into `sessions` that leaves `terminal_kind`
+    /// out reads back as [`TerminalKind::Tmux`].
+    #[farhelm_testtrace::test]
+    async fn a_row_written_without_a_terminal_kind_is_tmux() {
+        let (_dir, store) = fresh_store().await;
+        store
+            .insert_session(launching_row("original"), None)
+            .await
+            .unwrap();
+        store
+            .conn
+            .lock()
+            .execute(
+                "INSERT INTO sessions \
+                 (id, title, cwd, tmux_name, pane, created_at, creation_seq, session_launch) \
+                 SELECT 'copy', title, cwd, 'fh-copy', pane, created_at, 99, session_launch \
+                 FROM sessions WHERE id = 'original'",
+                [],
+            )
+            .unwrap();
+        let copy = store
+            .session("copy")
+            .await
+            .unwrap()
+            .expect("the copy exists");
+        assert_eq!(copy.terminal_kind, TerminalKind::Tmux);
+        // The stored value as well, for the reason the migration test gives.
+        let raw: String = store
+            .conn
+            .lock()
+            .query_row(
+                "SELECT terminal_kind FROM sessions WHERE id = 'copy'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(raw, "tmux");
+    }
+
+    /// A host row must come back as a host row, with its socket name in
+    /// `pane`, through every read path and across a restart that is aborted.
+    /// Nothing in production writes `host` yet, so this round trip is the
+    /// only evidence that the later change which does will find the kind
+    /// where it put it.
+    ///
+    /// Specified: a [`TerminalKind::Host`] row inserted with a socket name
+    /// for `pane` reads back unchanged through `session` and `load_all`; a
+    /// relaunch keeps the kind while it empties `pane`; aborting that
+    /// relaunch restores the socket name under the same kind.
+    #[farhelm_testtrace::test]
+    async fn a_host_terminal_kind_round_trips_and_survives_an_aborted_relaunch() {
+        let (_dir, store) = fresh_store().await;
+        let mut row = launching_row("host-row");
+        row.terminal_kind = TerminalKind::Host;
+        row.pane = "abcd2345".to_string();
+        row.outcome = LastOutcome::Running;
+        store.insert_session(row.clone(), None).await.unwrap();
+
+        let read = store
+            .session("host-row")
+            .await
+            .unwrap()
+            .expect("row exists");
+        assert_eq!(read.terminal_kind, TerminalKind::Host);
+        assert_eq!(read.pane, "abcd2345");
+        let loaded = store.load_all().await.unwrap();
+        assert_eq!(loaded, vec![read.clone()], "both read paths agree");
+        assert_eq!(
+            read,
+            StoredSession {
+                creation_seq: read.creation_seq,
+                ..row
+            },
+            "every field round-trips, not just the kind"
+        );
+
+        let RelaunchDecision::Claimed(claim) = store
+            .begin_relaunch(
+                "host-row",
+                OfferBasis {
+                    captured_conversation: None,
+                    capture_ownership_version: 0,
+                },
+                false,
+            )
+            .await
+            .unwrap()
+        else {
+            panic!("the relaunch must be claimed");
+        };
+        let relaunching = store.session("host-row").await.unwrap().unwrap();
+        assert_eq!(
+            relaunching.pane, "",
+            "the fixture premise: the relaunch emptied the pane"
+        );
+        assert_eq!(relaunching.terminal_kind, TerminalKind::Host);
+
+        assert!(
+            store
+                .abort_relaunch("host-row", claim.generation, &claim.prior)
+                .await
+                .unwrap()
+        );
+        let restored = store.session("host-row").await.unwrap().unwrap();
+        assert_eq!(restored.pane, "abcd2345");
+        assert_eq!(restored.terminal_kind, TerminalKind::Host);
+    }
+
+    /// The `CHECK` keeps the kind to the two values this build can act on,
+    /// and the decoder refuses anything that gets past it (a hand edit with
+    /// checks off) instead of guessing a kind and misreading `pane`.
+    ///
+    /// Specified: writing any other kind is refused by SQLite; a row holding
+    /// one anyway makes reading that session fail with an error naming the
+    /// session and the value.
+    #[farhelm_testtrace::test]
+    async fn an_unknown_terminal_kind_is_refused_on_write_and_on_read() {
+        let (_dir, store) = fresh_store().await;
+        store
+            .insert_session(launching_row("odd-kind"), None)
+            .await
+            .unwrap();
+        {
+            let conn = store.conn.lock();
+            conn.execute(
+                "UPDATE sessions SET terminal_kind = 'screen' WHERE id = 'odd-kind'",
+                [],
+            )
+            .expect_err("the CHECK refuses a kind outside the vocabulary");
+            conn.execute_batch(
+                "PRAGMA ignore_check_constraints = ON;
+                 UPDATE sessions SET terminal_kind = 'screen' WHERE id = 'odd-kind';
+                 PRAGMA ignore_check_constraints = OFF;",
+            )
+            .unwrap();
+        }
+        let error = store
+            .session("odd-kind")
+            .await
+            .expect_err("an unknown kind must not decode");
+        let message = format!("{error:#}");
+        assert!(
+            message.contains("odd-kind") && message.contains("screen"),
+            "the refusal names the session and the value: {message}"
+        );
+        store
+            .load_all()
+            .await
+            .expect_err("loading every session refuses the same row");
     }
 
     /// Real Claude and Codex launches exercise the same pin persistence contract.
@@ -7927,7 +8306,7 @@ mod tests {
         {
             let conn = Connection::open(&path).unwrap();
             conn.execute_batch(
-                "ALTER TABLE sessions DROP COLUMN codex_report_pin; ALTER TABLE sessions DROP COLUMN launch_boot_ended; ALTER TABLE sessions DROP COLUMN launch_hooked; PRAGMA user_version = 28;",
+                "ALTER TABLE sessions DROP COLUMN terminal_kind; ALTER TABLE sessions DROP COLUMN codex_report_pin; ALTER TABLE sessions DROP COLUMN launch_boot_ended; ALTER TABLE sessions DROP COLUMN launch_hooked; PRAGMA user_version = 28;",
             )
             .unwrap();
             assert!(
@@ -7958,7 +8337,7 @@ mod tests {
         {
             let conn = Connection::open(&path).unwrap();
             conn.execute_batch(
-                "ALTER TABLE sessions DROP COLUMN codex_report_pin; ALTER TABLE sessions DROP COLUMN launch_boot_ended; PRAGMA user_version = 29;",
+                "ALTER TABLE sessions DROP COLUMN terminal_kind; ALTER TABLE sessions DROP COLUMN codex_report_pin; ALTER TABLE sessions DROP COLUMN launch_boot_ended; PRAGMA user_version = 29;",
             )
             .unwrap();
             assert!(
@@ -8396,6 +8775,7 @@ mod tests {
                     },
                     tmux_name: "fh-1".to_string(),
                     pane: String::new(),
+                    terminal_kind: TerminalKind::Tmux,
                     outcome: LastOutcome::Launching,
                     canonical_cwd: None,
                     captured_conversation: None,
@@ -8450,6 +8830,7 @@ mod tests {
                     },
                     tmux_name: "fh-1".to_string(),
                     pane: String::new(),
+                    terminal_kind: TerminalKind::Tmux,
                     outcome: LastOutcome::Launching,
                     canonical_cwd: None,
                     captured_conversation: None,
@@ -9058,6 +9439,7 @@ mod tests {
                     },
                     tmux_name: "fh-abc".to_string(),
                     pane: "%3".to_string(),
+                    terminal_kind: TerminalKind::Tmux,
                     outcome: LastOutcome::Running,
                     canonical_cwd: None,
                     captured_conversation: None,
@@ -9137,6 +9519,7 @@ mod tests {
                     launch: session_launch.clone(),
                     tmux_name: "fh-s1".to_string(),
                     pane: "%3".to_string(),
+                    terminal_kind: TerminalKind::Tmux,
                     outcome: LastOutcome::Running,
                     canonical_cwd: Some("/tmp/work".to_string()),
                     captured_conversation: Some("conversation-7".to_string()),
@@ -9279,6 +9662,7 @@ mod tests {
                         launch: session_launch.clone(),
                         tmux_name: "fh-s-structured".to_string(),
                         pane: String::new(),
+                        terminal_kind: TerminalKind::Tmux,
                         outcome: LastOutcome::Exited {
                             exit_code: Some(0),
                             annotation: None,
@@ -9576,6 +9960,11 @@ mod tests {
     /// has a real migration ladder, the refusal is a fall-through at the
     /// END of that ladder rather than a lone `match` arm, and an
     /// off-by-one there would let exactly the adjacent version through.
+    ///
+    /// Earlier builds carry the same fall-through, which is what the
+    /// terminal-host downgrade fence (schema 32, [`TerminalKind`]) relies
+    /// on: a supervisor from before terminal hosts refuses the database
+    /// rather than reading host rows as tmux rows.
     #[farhelm_testtrace::test]
     async fn open_refuses_an_unrecognized_schema_version() {
         for version in [SCHEMA_VERSION + 1, 99] {
@@ -10100,7 +10489,7 @@ mod tests {
         let path = dir.path().join("supervisor.db");
         {
             let conn = Connection::open(&path).unwrap();
-            conn.execute_batch("ALTER TABLE sessions DROP COLUMN codex_report_pin; ALTER TABLE sessions DROP COLUMN launch_boot_ended; ALTER TABLE sessions DROP COLUMN launch_hooked; ALTER TABLE session_notifications DROP COLUMN resolved_at; PRAGMA user_version = 27;").unwrap();
+            conn.execute_batch("ALTER TABLE sessions DROP COLUMN terminal_kind; ALTER TABLE sessions DROP COLUMN codex_report_pin; ALTER TABLE sessions DROP COLUMN launch_boot_ended; ALTER TABLE sessions DROP COLUMN launch_hooked; ALTER TABLE session_notifications DROP COLUMN resolved_at; PRAGMA user_version = 27;").unwrap();
             assert!(
                 conn.prepare("SELECT resolved_at FROM session_notifications")
                     .is_err(),
@@ -10331,6 +10720,7 @@ mod tests {
                     },
                     tmux_name: "fh-s1".to_string(),
                     pane: "%0".to_string(),
+                    terminal_kind: TerminalKind::Tmux,
                     outcome: LastOutcome::Running,
                     canonical_cwd: None,
                     captured_conversation: None,
@@ -10407,6 +10797,7 @@ mod tests {
             launch: legacy_launch("agent", farhelm_proto::AgentKind::Generic, None),
             tmux_name: format!("fh-{id}"),
             pane: String::new(),
+            terminal_kind: TerminalKind::Tmux,
             outcome: LastOutcome::Launching,
             captured_conversation: None,
             generation: 0,
@@ -11963,6 +12354,81 @@ mod tests {
         assert_eq!(row.conversation_source.as_deref(), Some("hook"));
     }
 
+    /// The takeover's evidence that a crashed create started nothing holds
+    /// only for the kind of terminal that create used, so a retry in the
+    /// other kind must replay rather than rewrite the row. Otherwise an
+    /// agent the crashed attempt did start, in a terminal the retry's
+    /// probes never looked at, would be left under a row describing a
+    /// different terminal, where no cleanup reclaims it.
+    ///
+    /// Specified: with an otherwise takeover-eligible launching row (empty
+    /// pane, no report, generation 0), a retry whose kind differs from the
+    /// stored one gets [`RetryClaim::Launched`] and leaves the stored row
+    /// and its kind as they were, in both directions; a retry of the same
+    /// kind is still acquired.
+    #[farhelm_testtrace::test]
+    async fn the_relaunch_takeover_refuses_a_retry_in_another_terminal_kind() {
+        let (_dir, store) = fresh_store().await;
+        let stored_kind = |id: &str| -> String {
+            store
+                .conn
+                .lock()
+                .query_row(
+                    "SELECT terminal_kind FROM sessions WHERE id = ?1",
+                    [id],
+                    |r| r.get(0),
+                )
+                .unwrap()
+        };
+
+        insert_reserved(&store, "tmux-crash", "tmux-crash", "fp").await;
+        assert_eq!(stored_kind("tmux-crash"), "tmux", "the fixture premise");
+        let mut host_retry = launching_row("tmux-crash");
+        host_retry.terminal_kind = TerminalKind::Host;
+        assert_eq!(
+            store
+                .restart_pending_launch(host_retry, "tmux-crash")
+                .await
+                .unwrap(),
+            RetryClaim::Launched
+        );
+        assert_eq!(stored_kind("tmux-crash"), "tmux");
+        assert_eq!(
+            store.session("tmux-crash").await.unwrap().unwrap().outcome,
+            LastOutcome::Launching,
+            "the refused takeover leaves the crashed attempt's row alone"
+        );
+
+        insert_reserved(&store, "host-crash", "host-crash", "fp").await;
+        store
+            .conn
+            .lock()
+            .execute(
+                "UPDATE sessions SET terminal_kind = 'host' WHERE id = 'host-crash'",
+                [],
+            )
+            .unwrap();
+        assert_eq!(
+            store
+                .restart_pending_launch(launching_row("host-crash"), "host-crash")
+                .await
+                .unwrap(),
+            RetryClaim::Launched
+        );
+        assert_eq!(stored_kind("host-crash"), "host");
+
+        let mut same_kind = launching_row("host-crash");
+        same_kind.terminal_kind = TerminalKind::Host;
+        assert!(matches!(
+            store
+                .restart_pending_launch(same_kind, "host-crash")
+                .await
+                .unwrap(),
+            RetryClaim::Acquired { .. }
+        ));
+        assert_eq!(stored_kind("host-crash"), "host");
+    }
+
     /// PLAN_M6.md's pagination promises a total order over STABLE columns
     /// (`PROTOCOL_VERSION`'s version-8 history), and `created_at` is the
     /// primary one — a retry that re-minted it would silently move a
@@ -12260,6 +12726,7 @@ mod tests {
                     },
                     tmux_name: "fh-s1".to_string(),
                     pane: String::new(),
+                    terminal_kind: TerminalKind::Tmux,
                     outcome: LastOutcome::Launching,
                     canonical_cwd: Some("/tmp/work".to_string()),
                     captured_conversation: None,
@@ -12757,6 +13224,7 @@ mod tests {
                     },
                     tmux_name: "fh-s1".to_string(),
                     pane: "%0".to_string(),
+                    terminal_kind: TerminalKind::Tmux,
                     outcome: LastOutcome::Running,
                     canonical_cwd: None,
                     captured_conversation: None,
@@ -12866,8 +13334,9 @@ mod tests {
     fn restore_pre_v26_launch_columns(conn: &Connection) {
         // These fixtures rewind a current database, unlike raw historical
         // schemas. Remove later additive columns so notification resolution,
-        // hook policy, boot finality and the Codex pin all exercise real upgrades.
-        conn.execute_batch("ALTER TABLE sessions DROP COLUMN codex_report_pin; ALTER TABLE sessions DROP COLUMN launch_boot_ended; ALTER TABLE sessions DROP COLUMN launch_hooked; ALTER TABLE session_notifications DROP COLUMN resolved_at;")
+        // hook policy, boot finality, the Codex pin and the terminal kind all
+        // exercise real upgrades.
+        conn.execute_batch("ALTER TABLE sessions DROP COLUMN terminal_kind; ALTER TABLE sessions DROP COLUMN codex_report_pin; ALTER TABLE sessions DROP COLUMN launch_boot_ended; ALTER TABLE sessions DROP COLUMN launch_hooked; ALTER TABLE session_notifications DROP COLUMN resolved_at;")
             .expect("restore pre-resolution notifications");
         let rows: Vec<(String, String)> = conn
             .prepare("SELECT id, session_launch FROM sessions")
@@ -14235,6 +14704,7 @@ mod tests {
             },
             tmux_name: "fh-s1".to_string(),
             pane: String::new(),
+            terminal_kind: TerminalKind::Tmux,
             outcome: LastOutcome::Launching,
             canonical_cwd: None,
             captured_conversation: None,
