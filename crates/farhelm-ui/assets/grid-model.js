@@ -34,8 +34,16 @@
 // - HISTORY is the lines above the screen, oldest first, numbered by an
 //   absolute line number that only grows, each with the width it was
 //   written at. Appends must be contiguous; the oldest lines past
-//   `history_cap` are dropped. Tier 1 does not display history, but it is
-//   kept here, bounded, so scrollback viewing has the data when it is built.
+//   `history_cap` are dropped. grid-terminal.js shows it as scrollback.
+// - The HISTORY QUEUE holds `history` and `history_reset` messages that
+//   have been accepted but not yet applied. An attach sends up to the whole
+//   history (12,000 lines by default, in many messages) right after the
+//   screen, and decoding all of it at once held the page for seconds on a
+//   loaded machine. With `deferHistory` set, `apply` only checks a history
+//   message's framing and queues it, and `drainHistory` applies queued rows
+//   until its caller says to yield, so the renderer can spread the work
+//   across tasks. Without it (the unit tests, small callers), `apply`
+//   drains at once and nothing is ever left queued.
 // - CLIPBOARD writes a program makes (OSC 52) arrive in contiguous parts
 //   and are handed out whole (`takeClipboard`).
 // - STATE is the small set of program modes the client acts on (mouse and
@@ -362,7 +370,19 @@
   // ## The model
 
   function freshDamage() {
-    return { all: false, size: false, shift: 0, rows: new Set(), cursor: false, state: false, history: false };
+    return {
+      all: false,
+      size: false,
+      shift: 0,
+      rows: new Set(),
+      cursor: false,
+      state: false,
+      history: false,
+      // History was cleared (a `history_reset` was applied): line numbers
+      // start over, so anything anchored to one (a scrolled-back view, a
+      // selection) is void.
+      historyReset: false,
+    };
   }
 
   /**
@@ -397,10 +417,20 @@
       this.cursor = { x: 0, y: 0, visible: false, shape: "block", blink: false };
       this.history = new LineStore();
       // Absolute line number of the oldest kept history line, and of the
-      // line the next `history` message must start at (`null` after a
-      // hello or reset, when the first append may start anywhere).
+      // line after the newest applied one (`null` after a hello or reset,
+      // when the first append may start anywhere).
       this.historyFirst = 0;
       this.historyNext = null;
+      // Where the next `history` message must start, counting the queued
+      // ones (`null` when the next may start anywhere): the contiguity rule
+      // is checked when a message arrives, not when it is applied.
+      this.historyExpected = null;
+      // See "The HISTORY QUEUE" in this file's header. Entries are
+      // `{reset: true}` (`trim: true` when `trimQueue` made it) or `{first, cols, rows, links, offset}` with `rows`
+      // and `links` still raw; `queuedRows` counts the rows not yet applied.
+      this.deferHistory = false;
+      this.historyQueue = [];
+      this.queuedRows = 0;
       this.state = {
         mouse: "off",
         focus: false,
@@ -415,7 +445,11 @@
 
     /**
      * Validate and apply one decoded message. Throws `GridProtocolError`
-     * without changing the model when the message violates the format.
+     * without changing the screen, cursor or state when the message
+     * violates the format. History is the exception: its rows are checked
+     * as they are applied (see "The HISTORY QUEUE"), so a bad history row
+     * can leave the rows before it applied. Every caller ends the
+     * attachment on a protocol error, so that history is never shown.
      */
     apply(message) {
       if (!this.started && message.t !== "hello") fail("first message is not hello");
@@ -523,9 +557,15 @@
       damage.cursor = true;
     }
 
+    /**
+     * Accept a `history` message: check what can be checked without
+     * decoding its rows (the line numbers, contiguity, the width, the links
+     * table) and queue it. The rows are validated as they are applied
+     * (`drainHistory`), so a bad row is reported then.
+     */
     applyHistory(message) {
       if (!Number.isSafeInteger(message.first) || message.first < 0) fail("bad history line number");
-      if (this.historyNext !== null && message.first !== this.historyNext) fail("history is not contiguous");
+      if (this.historyExpected !== null && message.first !== this.historyExpected) fail("history is not contiguous");
       if (!Array.isArray(message.rows)) fail("bad history rows");
       // Compared by subtraction: the sum itself can round back into range.
       if (message.rows.length > 0 && message.rows.length - 1 > Number.MAX_SAFE_INTEGER - message.first) {
@@ -536,27 +576,125 @@
       // for selection needs it to keep their trailing blanks.
       if (!isInt(message.cols, 1, MAX_DIMENSION)) fail("bad history width");
       const links = decodeLinks(message.links);
-      const rows = message.rows.map((raw) => {
-        const row = decodeRow(raw, message.cols, links, this.styles);
-        row.cols = message.cols;
-        return row;
-      });
-      if (this.historyNext === null) this.historyFirst = message.first;
-      for (const row of rows) this.history.push(row);
-      this.historyNext = message.first + rows.length;
-      const excess = this.history.length - this.historyCap;
-      if (excess > 0) {
-        this.history.dropOldest(excess);
-        this.historyFirst += excess;
-      }
-      this.damage.history = true;
+      this.historyExpected = message.first + message.rows.length;
+      this.historyQueue.push({ first: message.first, cols: message.cols, rows: message.rows, links, offset: 0 });
+      this.queuedRows += message.rows.length;
+      this.trimQueue();
+      if (!this.deferHistory) this.drainHistory();
     }
 
     applyHistoryReset() {
-      this.history.clear();
-      this.historyNext = null;
-      this.historyFirst = 0;
-      this.damage.history = true;
+      // Nothing queued before a reset can matter any more.
+      this.historyQueue = [{ reset: true }];
+      this.queuedRows = 0;
+      this.historyExpected = null;
+      if (!this.deferHistory) this.drainHistory();
+    }
+
+    /**
+     * Keep the queue within what applying it could leave in history: once
+     * more rows are queued than `history_cap`, the oldest queued rows would
+     * only be applied to be dropped again, together with every line already
+     * applied. So they are dropped now, unread, behind a reset that clears
+     * the applied lines when it is reached. This bounds what the queue holds
+     * by the cap however far applying falls behind the socket, and a row
+     * dropped this way is never decoded (its bounds are never checked, which
+     * is harmless: nothing ever reads it).
+     */
+    trimQueue() {
+      let excess = this.queuedRows - this.historyCap;
+      if (excess <= 0) return;
+      // A trim, not a `history_reset`: the kept rows keep their line numbers,
+      // so nothing anchored to them is void (`damage.historyReset` stays
+      // false; see `drainHistory`). Unless the queue held a real reset not
+      // yet applied: that one must still void the anchors.
+      const queueHadRealReset = this.historyQueue.some((entry) => entry.reset && !entry.trim);
+      const kept = [{ reset: true, trim: !queueHadRealReset }];
+      for (const entry of this.historyQueue) {
+        if (entry.reset) continue;
+        const left = entry.rows.length - entry.offset;
+        // An empty append drops nothing, but still settles where history
+        // starts, so it stays.
+        if (left > 0 && excess >= left) {
+          excess -= left;
+          this.queuedRows -= left;
+          continue;
+        }
+        if (excess > 0) {
+          entry.offset += excess;
+          this.queuedRows -= excess;
+          excess = 0;
+        }
+        kept.push(entry);
+      }
+      this.historyQueue = kept;
+    }
+
+    /** Whether accepted history is still waiting to be applied. */
+    get historyPending() {
+      return this.historyQueue.length > 0;
+    }
+
+    /**
+     * Apply queued history, oldest first, until the queue is empty or
+     * `shouldYield()` (checked between rows) says to stop. Returns whether
+     * anything is still queued. Throws `GridProtocolError` on a row that
+     * breaks the format; rows before it in the same message stay applied
+     * (the caller ends the attachment on a protocol error, so the partial
+     * history is never read).
+     */
+    drainHistory(shouldYield) {
+      while (this.historyQueue.length > 0) {
+        const entry = this.historyQueue[0];
+        if (entry.reset) {
+          this.history.clear();
+          this.historyNext = null;
+          this.historyFirst = 0;
+          this.damage.history = true;
+          if (!entry.trim) this.damage.historyReset = true;
+          this.historyQueue.shift();
+          continue;
+        }
+        if (this.historyNext === null) this.historyFirst = entry.first + entry.offset;
+        while (entry.offset < entry.rows.length) {
+          const row = decodeRow(entry.rows[entry.offset], entry.cols, entry.links, this.styles);
+          row.cols = entry.cols;
+          this.history.push(row);
+          entry.offset++;
+          this.queuedRows--;
+          this.historyNext = entry.first + entry.offset;
+          this.damage.history = true;
+          if (this.history.length > this.historyCap) {
+            this.history.dropOldest(1);
+            this.historyFirst++;
+          }
+          if (shouldYield && shouldYield()) {
+            if (entry.offset >= entry.rows.length) this.historyQueue.shift();
+            return this.historyQueue.length > 0;
+          }
+        }
+        // An empty append still settles where history starts.
+        if (this.historyNext === null) this.historyNext = entry.first;
+        this.historyQueue.shift();
+      }
+      return false;
+    }
+
+    /**
+     * The absolute line number of screen row 0: the line after the last
+     * history line accepted, queued or not. Screen rows keep their numbers
+     * while queued history is applied, so a view or selection anchored to a
+     * line number does not move under the user as the queue drains.
+     */
+    get screenBase() {
+      if (this.historyExpected !== null) return this.historyExpected;
+      if (this.historyNext !== null) return this.historyNext;
+      return this.historyFirst + this.history.length;
+    }
+
+    /** The absolute line number after the newest APPLIED history line. */
+    get historyEnd() {
+      return this.historyFirst + this.history.length;
     }
 
     /**

@@ -60,6 +60,7 @@ const PAGE = `<!doctype html>
 <script src="/assets/grid-model.js"></script>
 <script src="/assets/grid-style.js"></script>
 <script src="/assets/grid-input.js"></script>
+<script src="/assets/grid-buffer.js"></script>
 <script src="/assets/grid-terminal.js"></script>
 </head>
 <body style="margin: 0">
@@ -75,9 +76,11 @@ function stream(name: string): string[] {
 
 /**
  * Open the static page with a mounted grid terminal. `window.harness`
- * holds the component, every input message it sent, and the sizes it
- * reported; the bundled terminal font has loaded before this returns, so
- * cell metrics are the real ones.
+ * holds the component, every input message it sent, the sizes it
+ * reported, the selections it copied, the links it reported clicked and
+ * any late protocol error; `harness.withhold` is what `linkPress` answers.
+ * The bundled terminal font has loaded before this returns, so cell
+ * metrics are the real ones.
  */
 async function openGrid(page: Page): Promise<void> {
   await page.route(`${ORIGIN}/**`, async (route) => {
@@ -93,6 +96,9 @@ async function openGrid(page: Page): Promise<void> {
     await document.fonts.load('14px "JetBrains Mono"');
     const sent: unknown[] = [];
     const resizes: unknown[] = [];
+    const copies: string[] = [];
+    const links: unknown[] = [];
+    const errors: string[] = [];
     const w = window as any;
     const grid = w.farhelmGridTerminal.create(document.getElementById("term"), {
       fontSize: 14,
@@ -101,6 +107,22 @@ async function openGrid(page: Page): Promise<void> {
       platform: navigator.platform,
       send: (message: unknown) => sent.push(message),
       onResize: (cols: number, rows: number) => resizes.push({ cols, rows }),
+      onCopy: (text: string) => copies.push(text),
+      // The component's own links (hyperlinks and printed URLs), recording
+      // clicks; terminal.js's provider adds today's displays and checks.
+      links: {
+        row: (abs: number, done: (found: unknown[]) => void) => done(w.harness.grid.rowLinks(abs).map((found: any) => ({
+          ...found,
+          web: true,
+          decorations: { underline: true, pointerCursor: true },
+          hover() {},
+          leave() {},
+          activate: () => links.push({ kind: found.kind, uri: found.uri }),
+        }))),
+      },
+      linkPress: () => w.harness.withhold,
+      onProtocolError: (error: Error) => errors.push(error.message),
+      sanitizePaste: (text: string) => text.replace(/\x1b/g, ""),
     });
     grid.fit();
     const encoder = new TextEncoder();
@@ -108,6 +130,10 @@ async function openGrid(page: Page): Promise<void> {
       grid,
       sent,
       resizes,
+      copies,
+      links,
+      errors,
+      withhold: false,
       feed(lines: string[]) {
         for (const line of lines) grid.receive(encoder.encode(line));
         grid.flush();
@@ -147,6 +173,14 @@ const STATE = {
 
 function state(change: Record<string, unknown>): string {
   return JSON.stringify({ ...STATE, ...change });
+}
+
+/**
+ * Whether this browser is a Mac by xterm.js's exact platform list, the
+ * `mac` flag every key message carries (the format's `key` bullet).
+ */
+async function viewerIsMac(page: Page): Promise<boolean> {
+  return page.evaluate(() => ["Macintosh", "MacIntel", "MacPPC", "Mac68K"].includes(navigator.platform));
 }
 
 test("a recorded attach draws its text, wide boxes, styles and cursor in their cells", async ({ page }) => {
@@ -378,6 +412,7 @@ test("markup-looking, bidi-overriding and right-to-left text is drawn as literal
 });
 
 test("typing sends the same key and text messages today's terminal would", async ({ page }) => {
+  const mac = await viewerIsMac(page);
   // Keys xterm.js encodes at keydown go as `key` messages for the
   // supervisor to encode; keys whose character comes from text input
   // (capitals, space) go as `text`. Shift+Enter is a key with the Shift bit.
@@ -391,12 +426,12 @@ test("typing sends the same key and text messages today's terminal would", async
   await page.keyboard.press("Control+c");
   await page.keyboard.press("ArrowUp");
   await expect.poll(() => sent(page)).toEqual([
-    { t: "key", key: "a", code: "KeyA", kc: 65, mods: 0 },
+    { t: "key", key: "a", code: "KeyA", kc: 65, mods: 0, mac },
     { t: "text", data: "A" },
     { t: "text", data: " " },
-    { t: "key", key: "Enter", code: "Enter", kc: 13, mods: 1 },
-    { t: "key", key: "c", code: "KeyC", kc: 67, mods: 4 },
-    { t: "key", key: "ArrowUp", code: "ArrowUp", kc: 38, mods: 0 },
+    { t: "key", key: "Enter", code: "Enter", kc: 13, mods: 1, mac },
+    { t: "key", key: "c", code: "KeyC", kc: 67, mods: 4, mac },
+    { t: "key", key: "ArrowUp", code: "ArrowUp", kc: 38, mods: 0, mac },
   ]);
 });
 
@@ -579,4 +614,863 @@ test("the grid fits its container and refits at a new text size", async ({ page 
   expect(resizes).toHaveLength(2);
   expect(resizes[1].cols).toBeLessThan(resizes[0].cols);
   expect(resizes[1].rows).toBeLessThan(resizes[0].rows);
+});
+
+// ## Tier 2: scrollback, selection and copy, links, paste
+
+const PLAIN = [0, -1, -1];
+
+/** A wire row of one plain ASCII run at column 0 (`wrapped`: a soft wrap). */
+function textRow(text: string, wrapped = false) {
+  return { w: wrapped, r: text ? [[0, text.length, text, PLAIN]] : [] };
+}
+
+/**
+ * An attach of a `cols` x `rows` terminal whose screen rows read
+ * "screen <y>" and whose `lines` history lines read "line <n>", numbered
+ * from 0, as the supervisor sends it: hello, state, screen, history.
+ */
+function attachWithHistory(cols: number, rows: number, lines: number, extraState: Record<string, unknown> = {}): string[] {
+  const screen = Array.from({ length: rows }, (_, y) => [y, textRow(`screen ${y}`)]);
+  const out = [
+    JSON.stringify({ t: "hello", cols, rows, history_cap: 1000 }),
+    state(extraState),
+    JSON.stringify({ t: "rows", rows: screen }),
+    JSON.stringify({ t: "frame", rev: 1, cols, rows, cursor: { x: 0, y: rows - 1, visible: true, shape: "block", blink: true } }),
+  ];
+  if (lines) {
+    out.push(JSON.stringify({ t: "history", first: 0, cols, rows: Array.from({ length: lines }, (_, n) => textRow(`line ${n}`)) }));
+  }
+  return out;
+}
+
+/** The visible rows' text, trimmed. */
+async function visibleRows(page: Page): Promise<string[]> {
+  return page.evaluate(() => [...document.querySelectorAll(".grid-terminal-row")].map((row) => row.textContent!.trimEnd()));
+}
+
+async function viewport(page: Page): Promise<{ top: number; total: number; rows: number; following: boolean }> {
+  return page.evaluate(() => (window as any).harness.grid.viewport());
+}
+
+/** Wait until queued history has been applied and drawn. */
+async function settled(page: Page): Promise<void> {
+  await page.waitForFunction(() => !(window as any).harness.grid.snapshot().historyPending);
+  await page.evaluate(() => (window as any).harness.grid.flush());
+}
+
+/**
+ * The page position in cell (`x`, visible row `y`), `fx` of the way across
+ * it (the middle by default). A selection's ends move to the nearest cell
+ * boundary, so a drag ending exactly mid-cell would leave the rounding to
+ * sub-pixel layout; the drags below end clearly to one side.
+ */
+async function cellAt(page: Page, x: number, y: number, fx = 0.5): Promise<{ x: number; y: number }> {
+  const { width, height } = await cell(page);
+  const screen = (await page.locator(".grid-terminal-screen").boundingBox())!;
+  return { x: screen.x + (x + fx) * width, y: screen.y + (y + 0.5) * height };
+}
+
+test("the wheel scrolls back through history, which stays put while output arrives, and typing returns to the bottom", async ({ page }) => {
+  const mac = await viewerIsMac(page);
+  // Scrollback is the client's own view over the history it holds. A
+  // scrolled-back view is anchored to its lines, as xterm.js's viewport
+  // is, so new output does not drag it along; any input sent to the
+  // program brings it back to the bottom (`scrollOnUserInput`).
+  await openGrid(page);
+  await feed(page, attachWithHistory(20, 4, 30));
+  await settled(page);
+  expect(await visibleRows(page)).toEqual(["screen 0", "screen 1", "screen 2", "screen 3"]);
+  expect(await viewport(page)).toEqual({ top: 30, total: 34, rows: 4, following: true });
+  const at = await cellAt(page, 2, 1);
+  await page.mouse.move(at.x, at.y);
+  // One notch (120 wheel units in Chromium's normalization, 50 pixels) is
+  // about three lines at this text size; scroll well back.
+  for (let i = 0; i < 4; i++) await page.mouse.wheel(0, -100);
+  await expect.poll(async () => (await viewport(page)).following).toBe(false);
+  // Wheel events can still be arriving, and rows are drawn at the next
+  // animation frame: wait until two reads agree on the top and the rows
+  // show it.
+  let previous = -1;
+  await expect.poll(async () => {
+    const top = (await viewport(page)).top;
+    const settledTop = top === previous && (await visibleRows(page))[0] === `line ${top}`;
+    previous = top;
+    return settledTop;
+  }).toBe(true);
+  const back = await viewport(page);
+  expect(back.top).toBeLessThan(30);
+  const shown = await visibleRows(page);
+  // Output scrolls the screen by one line: the new history line arrives,
+  // then the frame. The view keeps showing the same lines.
+  await feed(page, [
+    JSON.stringify({ t: "history", first: 30, cols: 20, rows: [textRow("screen 0")] }),
+    JSON.stringify({ t: "rows", rows: [[3, textRow("screen 4")]] }),
+    JSON.stringify({ t: "frame", rev: 2, cols: 20, rows: 4, shift: 1, cursor: { x: 0, y: 3, visible: true, shape: "block", blink: true } }),
+  ]);
+  await settled(page);
+  expect(await visibleRows(page)).toEqual(shown);
+  // Typing goes to the program and returns the view to the bottom.
+  await page.evaluate(() => (window as any).harness.grid.focus());
+  await expect(page.locator(".grid-terminal-input")).toBeFocused();
+  await page.keyboard.press("a");
+  await expect.poll(() => sent(page)).toEqual([{ t: "key", key: "a", code: "KeyA", kc: 65, mods: 0, mac }]);
+  await expect.poll(() => visibleRows(page)).toEqual(["screen 1", "screen 2", "screen 3", "screen 4"]);
+  expect((await viewport(page)).following).toBe(true);
+});
+
+test("Shift+PageUp and PageDown scroll by a page without reaching the program, and the scrollbar drags", async ({ page }) => {
+  await openGrid(page);
+  await feed(page, attachWithHistory(20, 5, 40));
+  await settled(page);
+  await page.evaluate(() => (window as any).harness.grid.focus());
+  await page.keyboard.press("Shift+PageUp");
+  // A page is the rows less one, as xterm.js's `scrollPages`.
+  await expect.poll(async () => (await viewport(page)).top).toBe(40 - 4);
+  await page.keyboard.press("Shift+PageUp");
+  await expect.poll(async () => (await viewport(page)).top).toBe(40 - 8);
+  await page.keyboard.press("Shift+PageDown");
+  await expect.poll(async () => (await viewport(page)).top).toBe(40 - 4);
+  expect(await sent(page)).toEqual([]);
+  // The slider, shown while the pointer is over the terminal: dragging it
+  // to the top shows the oldest line.
+  const terminal = (await page.locator(".grid-terminal").boundingBox())!;
+  await page.mouse.move(terminal.x + 20, terminal.y + 20);
+  const slider = page.locator(".grid-terminal-slider");
+  await expect(page.locator(".grid-terminal-scrollbar")).toHaveCSS("opacity", "1");
+  const box = (await slider.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2, terminal.y - 50);
+  await page.mouse.up();
+  await expect.poll(async () => (await viewport(page)).top).toBe(0);
+  await expect.poll(async () => (await visibleRows(page))[0]).toBe("line 0");
+  // Pressing the slider reached neither the program nor a selection.
+  expect(await sent(page)).toEqual([]);
+  expect(await page.evaluate(() => (window as any).harness.grid.hasSelection())).toBe(false);
+});
+
+test("the alternate screen has no history to scroll, and lost history is marked above the oldest line", async ({ page }) => {
+  // A full-screen program's view is its own business (xterm.js's
+  // alternate buffer has no scrollback); `history_trimmed` says recovery
+  // lost some history, which the view says where the gap is.
+  await openGrid(page);
+  await feed(page, attachWithHistory(30, 3, 5, { history_trimmed: true }));
+  await settled(page);
+  expect(await viewport(page)).toEqual({ top: 6, total: 9, rows: 3, following: true });
+  await page.evaluate(() => {
+    const grid = (window as any).harness.grid;
+    grid.scrollLines(-100);
+    grid.flush();
+  });
+  await expect.poll(() => visibleRows(page)).toEqual(["Some earlier output could not be recovered", "line 0", "line 1"]);
+  await feed(page, [state({ alt_screen: true, history_trimmed: true })]);
+  await expect.poll(() => visibleRows(page)).toEqual(["screen 0", "screen 1", "screen 2"]);
+  expect(await viewport(page)).toEqual({ top: 0, total: 3, rows: 3, following: true });
+  await expect(page.locator(".grid-terminal-scrollbar")).toBeHidden();
+});
+
+test("a drag selects across history and screen, joins soft wraps, and copies every selection", async ({ page }) => {
+  // Copy-on-select as today: a plain drag with mouse reporting off copies
+  // when it ends, a wrapped row continues without a newline, and the same
+  // selection made again is copied again.
+  await openGrid(page);
+  await feed(page, [
+    JSON.stringify({ t: "hello", cols: 10, rows: 3, history_cap: 100 }),
+    state({}),
+    JSON.stringify({ t: "rows", rows: [[0, textRow("abcdefghij", true)], [1, textRow("klm")], [2, textRow("$ ")]] }),
+    JSON.stringify({ t: "frame", rev: 1, cols: 10, rows: 3, cursor: { x: 2, y: 2, visible: true, shape: "block", blink: true } }),
+    JSON.stringify({ t: "history", first: 0, cols: 10, rows: [textRow("old one"), textRow("old two")] }),
+  ]);
+  await settled(page);
+  await page.evaluate(() => {
+    const grid = (window as any).harness.grid;
+    grid.scrollLines(-1);
+    grid.flush();
+  });
+  expect(await visibleRows(page)).toEqual(["old two", "abcdefghij", "klm"]);
+  const from = await cellAt(page, 0, 0);
+  const to = await cellAt(page, 2, 2, 0.8);
+  for (let pass = 0; pass < 2; pass++) {
+    await page.mouse.move(from.x - 2, from.y);
+    await page.mouse.down();
+    await page.mouse.move(to.x, to.y, { steps: 4 });
+    await page.mouse.up();
+  }
+  await expect.poll(() => page.evaluate(() => (window as any).harness.copies.slice())).toEqual([
+    "old two\nabcdefghijklm",
+    "old two\nabcdefghijklm",
+  ]);
+  // The selection is drawn, and nothing reached the program.
+  await expect(page.locator(".grid-terminal-selection > div")).toHaveCount(3);
+  expect(await sent(page)).toEqual([]);
+  // A plain click clears it and copies nothing.
+  await page.mouse.click(to.x, to.y);
+  await expect(page.locator(".grid-terminal-selection > div")).toHaveCount(0);
+  expect(await page.evaluate(() => (window as any).harness.copies.length)).toBe(2);
+});
+
+test("under mouse reporting a plain drag is the program's and the forcing modifier selects locally", async ({ page }) => {
+  await openGrid(page);
+  await feed(page, [...stream("attach.jsonl"), state({ mouse: "drag" })]);
+  const from = await cellAt(page, 0, 0);
+  const to = await cellAt(page, 5, 0, 0.2);
+  await page.mouse.move(from.x - 2, from.y);
+  await page.mouse.down();
+  await page.mouse.move(to.x, to.y, { steps: 3 });
+  await page.mouse.up();
+  const kinds = (await sent(page)).map((m: any) => m.kind);
+  expect(kinds[0]).toBe("down");
+  expect(kinds.at(-1)).toBe("up");
+  expect(kinds.slice(1, -1).every((kind: string) => kind === "move")).toBe(true);
+  expect(kinds.length).toBeGreaterThan(2);
+  expect(await page.evaluate(() => (window as any).harness.copies.length)).toBe(0);
+  const mac = await viewerIsMac(page);
+  const before = (await sent(page)).length;
+  const forcing = mac ? "Alt" : "Shift";
+  await page.keyboard.down(forcing);
+  await page.mouse.move(from.x - 2, from.y);
+  await page.mouse.down();
+  await page.mouse.move(to.x, to.y, { steps: 3 });
+  await page.mouse.up();
+  await page.keyboard.up(forcing);
+  await expect.poll(() => page.evaluate(() => (window as any).harness.copies.slice())).toEqual(["$ ech"]);
+  expect((await sent(page)).length).toBe(before);
+});
+
+test("a double click selects a word, a triple click the wrapped line, and a drag past the edge scrolls", async ({ page }) => {
+  await openGrid(page);
+  await feed(page, [
+    ...attachWithHistory(20, 3, 20).slice(0, 4),
+    JSON.stringify({ t: "rows", rows: [[0, textRow("cat (foo.txt) and", false)], [1, textRow("a wrapped line that ", true)], [2, textRow("ends")]] }),
+    JSON.stringify({ t: "frame", rev: 2, cols: 20, rows: 3, cursor: { x: 0, y: 2, visible: true, shape: "block", blink: true } }),
+    JSON.stringify({ t: "history", first: 0, cols: 20, rows: Array.from({ length: 20 }, (_, n) => textRow(`line ${n}`)) }),
+  ]);
+  await settled(page);
+  const word = await cellAt(page, 6, 0);
+  await page.mouse.dblclick(word.x, word.y);
+  await expect.poll(() => page.evaluate(() => (window as any).harness.copies.at(-1))).toBe("foo.txt");
+  const line = await cellAt(page, 1, 2);
+  await page.mouse.click(line.x, line.y, { clickCount: 3 });
+  await expect.poll(() => page.evaluate(() => (window as any).harness.copies.at(-1))).toBe("a wrapped line that ends");
+  // A drag held above the screen scrolls history in and selects it, from
+  // the oldest line to where the drag started (cell boundary 3 of "ends").
+  const start = await cellAt(page, 2, 2, 0.8);
+  const screen = (await page.locator(".grid-terminal-screen").boundingBox())!;
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(screen.x - 30, screen.y - 30, { steps: 3 });
+  await expect.poll(async () => (await viewport(page)).top, { timeout: 10_000 }).toBe(0);
+  await page.mouse.up();
+  const copied = await page.evaluate(() => (window as any).harness.copies.at(-1));
+  expect(copied.startsWith("line 0\nline 1\n")).toBe(true);
+  expect(copied.endsWith("line 19\ncat (foo.txt) and\na wrapped line that end")).toBe(true);
+});
+
+test("a click on a link reports it; a drag across one never does; a withheld press reaches the program not at all", async ({ page }) => {
+  // The click/drag distinction and the press withholding are the
+  // component's; whether to open is terminal.js's (and covered there).
+  await openGrid(page);
+  await feed(page, [
+    JSON.stringify({ t: "hello", cols: 40, rows: 2, history_cap: 0 }),
+    state({}),
+    JSON.stringify({
+      t: "rows",
+      rows: [[0, textRow("see https://example.com/x now")], [1, { w: false, r: [[0, 4, "docs", PLAIN, 0]] }]],
+      links: [["d", "https://docs.example/"]],
+    }),
+    JSON.stringify({ t: "frame", rev: 1, cols: 40, rows: 2, cursor: { x: 0, y: 1, visible: false, shape: "block", blink: true } }),
+  ]);
+  const url = await cellAt(page, 8, 0);
+  await page.mouse.move(url.x, url.y);
+  // Hovering underlines the link and shows a hand.
+  await expect(page.locator(".grid-terminal")).toHaveClass(/grid-terminal-link-hover/);
+  await expect(page.locator(".grid-terminal-link-underline > div")).toHaveCount(1);
+  await page.mouse.click(url.x, url.y);
+  const osc = await cellAt(page, 1, 1);
+  await page.mouse.click(osc.x, osc.y);
+  const links = () => page.evaluate(() => (window as any).harness.links.slice());
+  expect(await links()).toEqual([
+    { kind: "text", uri: "https://example.com/x" },
+    { kind: "osc", uri: "https://docs.example/" },
+  ]);
+  // A drag that starts and ends on the link, but moves away in between.
+  await page.mouse.move(url.x, url.y);
+  await page.mouse.down();
+  await page.mouse.move(url.x + 40, url.y, { steps: 2 });
+  await page.mouse.move(url.x, url.y, { steps: 2 });
+  await page.mouse.up();
+  expect((await links()).length).toBe(2);
+  // Under mouse reporting a withheld press, its drag and release are never
+  // reported, and the click still counts; a press elsewhere is reported.
+  await feed(page, [state({ mouse: "drag" })]);
+  await page.evaluate(() => ((window as any).harness.withhold = true));
+  await page.mouse.click(url.x, url.y);
+  expect((await links()).length).toBe(3);
+  expect(await sent(page)).toEqual([]);
+  const plain = await cellAt(page, 35, 0);
+  await page.mouse.click(plain.x, plain.y);
+  expect((await sent(page)).map((m: any) => m.kind)).toEqual(["down", "up"]);
+});
+
+test("a paste goes to the program as paste messages and brings the view back", async ({ page }) => {
+  // Without terminal.js's attachment interception (covered with the
+  // island) the component pastes plain text itself, as xterm.js's own
+  // handler does. The supervisor adds bracketed-paste markers and converts
+  // line endings; the client only splits at the format's bounds.
+  await openGrid(page);
+  await feed(page, attachWithHistory(20, 3, 10));
+  await settled(page);
+  await page.evaluate(() => {
+    const grid = (window as any).harness.grid;
+    grid.scrollLines(-5);
+    grid.flush();
+  });
+  const big = "x".repeat(40 * 1024);
+  await page.evaluate((text) => {
+    const input = document.querySelector(".grid-terminal-input")!;
+    const event = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "clipboardData", { value: { getData: (type: string) => (type === "text/plain" ? text : "") } });
+    input.dispatchEvent(event);
+  }, `line one\r\nline two\x1b[201~${big}`);
+  const messages = await sent(page);
+  expect(messages.map((m: any) => [m.t, m.last])).toEqual([["paste", false], ["paste", true]]);
+  expect(messages.map((m: any) => m.data).join("")).toBe(`line one\r\nline two[201~${big}`);
+  expect((await viewport(page)).following).toBe(true);
+});
+
+test("the context menu finds the input under the pointer, holding the selection", async ({ page }) => {
+  // xterm.js's `moveTextAreaUnderMouseCursor`: the browser's own menu then
+  // offers Paste into the terminal and Copy of the selection.
+  await openGrid(page);
+  await feed(page, stream("attach.jsonl"));
+  await page.evaluate(() => (window as any).harness.grid.selectAll());
+  const at = await cellAt(page, 3, 1);
+  await page.evaluate(({ x, y }) => {
+    document.querySelector(".grid-terminal-screen")!.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: x, clientY: y }));
+  }, at);
+  const input = page.locator(".grid-terminal-input");
+  await expect(input).toBeFocused();
+  const box = (await input.boundingBox())!;
+  expect(Math.abs(box.x + box.width / 2 - at.x)).toBeLessThan(2);
+  expect(await input.inputValue()).toBe(await page.evaluate(() => (window as any).harness.grid.selectionText()));
+  // The next key parks it again and empties it.
+  await page.keyboard.press("Shift");
+  expect(await input.inputValue()).toBe("");
+});
+
+test("a large history is applied in slices: the screen draws at once and the rest fills in", async ({ page }) => {
+  // An attach sends the whole history after the screen. Applying it in
+  // one task held the page for seconds at the 12,000-line worst case (a
+  // true color per cell at 200 columns); the component applies one short
+  // slice per message and the rest on later tasks, so the screen is drawn
+  // before history is done. The messages are built in the page: 25 of
+  // them, 120 such lines each, within the format's 1 MiB.
+  await openGrid(page);
+  const result = await page.evaluate(() => {
+    const h = (window as any).harness;
+    const encoder = new TextEncoder();
+    const send = (message: unknown) => h.grid.receive(encoder.encode(JSON.stringify(message)));
+    const plain = [0, -1, -1];
+    send({ t: "hello", cols: 200, rows: 2, history_cap: 5000 });
+    send({ t: "state", mouse: "off", focus: false, alt_screen: false, default_fg: null, default_bg: null, history_trimmed: false, exit: null });
+    send({ t: "rows", rows: [[0, { w: false, r: [[0, 8, "screen 0", plain]] }], [1, { w: false, r: [[0, 8, "screen 1", plain]] }]] });
+    send({ t: "frame", rev: 1, cols: 200, rows: 2, cursor: { x: 0, y: 1, visible: true, shape: "block", blink: true } });
+    let seed = 7;
+    const color = () => 0x1000000 + ((seed = (seed * 1103515245 + 12345) & 0xffffff));
+    const row = () => ({ w: false, r: Array.from({ length: 200 }, (_, col) => [col, 1, "\u2580", [0, color(), color()]]) });
+    let pendingAfterFirst = null;
+    for (let first = 0; first < 3000; first += 120) {
+      send({ t: "history", first, cols: 200, rows: Array.from({ length: 120 }, row) });
+      if (pendingAfterFirst === null) pendingAfterFirst = h.grid.snapshot().historyPending;
+    }
+    h.grid.flush();
+    return { pendingAfterFirst, rows: [...document.querySelectorAll(".grid-terminal-row")].map((r) => r.textContent!.trimEnd()) };
+  });
+  // One slice cannot apply 24,000 true-color cells; the rest waits.
+  expect(result.pendingAfterFirst).toBe(true);
+  expect(result.rows).toEqual(["screen 0", "screen 1"]);
+  await page.waitForFunction(() => !(window as any).harness.grid.snapshot().historyPending, null, { timeout: 60_000 });
+  expect(await page.evaluate(() => (window as any).harness.grid.model.historyLength)).toBe(3000);
+});
+
+test("a bad history row found after the frame that carried it is reported as a protocol error", async ({ page }) => {
+  // The rows of a history message are checked as they are applied, which
+  // may be after `receive` returned; the error then comes through
+  // `onProtocolError`, which terminal.js treats as a bad frame.
+  await openGrid(page);
+  await feed(page, attachWithHistory(200, 2, 0));
+  const outcome = await page.evaluate(() => {
+    const h = (window as any).harness;
+    const encoder = new TextEncoder();
+    let seed = 3;
+    const color = () => 0x1000000 + ((seed = (seed * 1103515245 + 12345) & 0xffffff));
+    const rows: unknown[] = Array.from({ length: 120 }, () => ({ w: false, r: Array.from({ length: 200 }, (_, col) => [col, 1, "\u2580", [0, color(), color()]]) }));
+    rows.push({ w: false, r: [[0, 1, "x", [0, 999, -1]]] });
+    try {
+      h.grid.receive(encoder.encode(JSON.stringify({ t: "history", first: 0, cols: 200, rows })));
+      return "returned";
+    } catch (error) {
+      return `thrown: ${(error as Error).message}`;
+    }
+  });
+  // The premise: one slice did not reach the bad row.
+  expect(outcome).toBe("returned");
+  await expect.poll(() => page.evaluate(() => (window as any).harness.errors.slice())).toEqual(["bad foreground color"]);
+});
+
+test("a frozen grid sends nothing but still selects and copies", async ({ page }) => {
+  // A takeover's snapshot: the screen stays readable and copyable, and
+  // nothing typed or clicked reaches anyone.
+  await openGrid(page);
+  await feed(page, [...stream("attach.jsonl"), state({ mouse: "click" })]);
+  await page.evaluate(() => (window as any).harness.grid.freeze());
+  await page.evaluate(() => (window as any).harness.grid.focus());
+  await page.keyboard.press("a");
+  const mac = await viewerIsMac(page);
+  const forcing = mac ? "Alt" : "Shift";
+  const from = await cellAt(page, 0, 0);
+  const to = await cellAt(page, 5, 0, 0.2);
+  await page.keyboard.down(forcing);
+  await page.mouse.move(from.x - 2, from.y);
+  await page.mouse.down();
+  await page.mouse.move(to.x, to.y, { steps: 2 });
+  await page.mouse.up();
+  await page.keyboard.up(forcing);
+  await page.mouse.click(to.x, to.y);
+  expect(await sent(page)).toEqual([]);
+  expect(await page.evaluate(() => (window as any).harness.copies.slice())).toEqual(["$ ech"]);
+});
+
+// ## Round 2: scrolling, mouse and lookup regressions
+
+test("a wheel step after the history cap dropped lines moves by the step alone", async ({ page }) => {
+  // The view is anchored to its line; the wheel's own accumulator must not
+  // keep a position measured before the oldest lines were dropped.
+  await openGrid(page);
+  const row = (n: number) => textRow(String(n).padStart(2, "0"));
+  await feed(page, [
+    JSON.stringify({ t: "hello", cols: 4, rows: 3, history_cap: 10 }),
+    state({}),
+    JSON.stringify({ t: "frame", rev: 1, cols: 4, rows: 3, cursor: { x: 0, y: 0, visible: false, shape: "block", blink: true } }),
+    JSON.stringify({ t: "history", first: 0, cols: 4, rows: Array.from({ length: 10 }, (_, n) => row(n)) }),
+  ]);
+  await settled(page);
+  await page.evaluate(() => {
+    const grid = (window as any).harness.grid;
+    grid.scrollLines(-5);
+    grid.flush();
+  });
+  expect((await viewport(page)).top).toBe(5);
+  await feed(page, [
+    JSON.stringify({ t: "history", first: 10, cols: 4, rows: [row(10), row(11), row(12)] }),
+    JSON.stringify({ t: "frame", rev: 2, cols: 4, rows: 3, shift: 3, cursor: { x: 0, y: 0, visible: false, shape: "block", blink: true } }),
+  ]);
+  await settled(page);
+  // Three lines dropped at the cap: the same line is now at index 2.
+  expect((await viewport(page)).top).toBe(2);
+  expect((await visibleRows(page))[0]).toBe("05");
+  // One wheel step of exactly one row down (50 px a notch, as xterm.js's).
+  await page.evaluate(() => {
+    const element = document.querySelector(".grid-terminal") as HTMLElement;
+    const height = document.querySelector(".grid-terminal-screen")!.getBoundingClientRect().height / 3;
+    const event = new Event("wheel", { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "wheelDeltaY", { value: (-120 * height) / 50 });
+    element.dispatchEvent(event);
+    (window as any).harness.grid.flush();
+  });
+  expect((await viewport(page)).top).toBe(3);
+});
+
+test("a mouse report brings a scrolled-back view to the bottom and clears the selection, as input does", async ({ page }) => {
+  // xterm.js sends reports through its user-input path, which scrolls to
+  // the bottom and clears the selection; the program then sees the click
+  // on the screen it shows.
+  await openGrid(page);
+  await feed(page, [...attachWithHistory(20, 3, 10), state({ mouse: "click" })]);
+  await settled(page);
+  // A forced local selection first.
+  const forcing = (await viewerIsMac(page)) ? "Alt" : "Shift";
+  const from = await cellAt(page, 0, 0, 0.2);
+  const to = await cellAt(page, 4, 0, 0.2);
+  await page.keyboard.down(forcing);
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(to.x, to.y, { steps: 2 });
+  await page.mouse.up();
+  await page.keyboard.up(forcing);
+  expect(await page.evaluate(() => (window as any).harness.grid.hasSelection())).toBe(true);
+  await page.evaluate(() => {
+    const grid = (window as any).harness.grid;
+    grid.scrollLines(-4);
+    grid.flush();
+  });
+  expect((await viewport(page)).following).toBe(false);
+  const at = await cellAt(page, 2, 1);
+  await page.mouse.click(at.x, at.y);
+  await expect.poll(async () => (await viewport(page)).following).toBe(true);
+  expect((await sent(page)).map((m: any) => m.kind)).toEqual(["down", "up"]);
+  expect(await page.evaluate(() => (window as any).harness.grid.hasSelection())).toBe(false);
+});
+
+test("a quick Alt-click (Option on a Mac) moves the program's cursor with arrow keys", async ({ page }) => {
+  // xterm.js's altClickMovesCursor: the arrows its moveToCellSequence makes
+  // (here five cells right on the cursor's own row), sent as key messages.
+  await openGrid(page);
+  await feed(page, [
+    JSON.stringify({ t: "hello", cols: 20, rows: 3, history_cap: 0 }),
+    state({}),
+    JSON.stringify({ t: "rows", rows: [[2, textRow("$ ls")]] }),
+    JSON.stringify({ t: "frame", rev: 1, cols: 20, rows: 3, cursor: { x: 2, y: 2, visible: true, shape: "block", blink: true } }),
+  ]);
+  const mac = await viewerIsMac(page);
+  const at = await cellAt(page, 7, 2);
+  await page.keyboard.down("Alt");
+  await page.mouse.click(at.x, at.y);
+  await page.keyboard.up("Alt");
+  const arrow = { t: "key", key: "ArrowRight", code: "ArrowRight", kc: 39, mods: 0, mac };
+  await expect.poll(() => sent(page)).toEqual([arrow, arrow, arrow, arrow, arrow]);
+});
+
+test("Alt-drag off a Mac selects a column, copied one line per row", async ({ page }) => {
+  // xterm.js's column selection; on a Mac Option forces a selection instead.
+  test.skip(await viewerIsMac(page), "Option is the forcing modifier on a Mac");
+  await openGrid(page);
+  await feed(page, [
+    JSON.stringify({ t: "hello", cols: 10, rows: 3, history_cap: 0 }),
+    state({}),
+    JSON.stringify({ t: "rows", rows: [[0, textRow("abcdefgh", true)], [1, textRow("ijklmnop")]] }),
+    JSON.stringify({ t: "frame", rev: 1, cols: 10, rows: 3, cursor: { x: 0, y: 2, visible: true, shape: "block", blink: true } }),
+  ]);
+  const from = await cellAt(page, 2, 0, 0.2);
+  const to = await cellAt(page, 5, 1, 0.2);
+  await page.keyboard.down("Alt");
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(to.x, to.y, { steps: 3 });
+  await page.mouse.up();
+  await page.keyboard.up("Alt");
+  await expect.poll(() => page.evaluate(() => (window as any).harness.copies.slice())).toEqual(["cde\nklm"]);
+  await expect(page.locator(".grid-terminal-selection > div")).toHaveCount(2);
+  // A drag is not a click: the cursor stays where the program put it.
+  expect(await sent(page)).toEqual([]);
+});
+
+test("history trimmed after falling behind keeps a scrolled-back view at the oldest line", async ({ page }) => {
+  // More history than the cap arriving at once is trimmed by the client,
+  // not reset by the supervisor: line numbers hold, so the view stays on
+  // the oldest kept line instead of jumping to the bottom. (A selection is
+  // not voided by the trim either, but every line a selection could have
+  // been on is older than the cap's worth just received, so it goes with
+  // its lines, as in xterm.js; the unit test pins that the trim is no
+  // reset.)
+  await openGrid(page);
+  const row = (n: number) => textRow(`l${n}`);
+  await feed(page, [
+    JSON.stringify({ t: "hello", cols: 10, rows: 3, history_cap: 10 }),
+    state({}),
+    JSON.stringify({ t: "rows", rows: [[0, textRow("screen a")], [1, textRow("screen b")]] }),
+    JSON.stringify({ t: "frame", rev: 1, cols: 10, rows: 3, cursor: { x: 0, y: 2, visible: false, shape: "block", blink: true } }),
+    JSON.stringify({ t: "history", first: 0, cols: 10, rows: Array.from({ length: 10 }, (_, n) => row(n)) }),
+  ]);
+  await settled(page);
+  await page.evaluate(() => {
+    const grid = (window as any).harness.grid;
+    grid.scrollLines(-100);
+    grid.flush();
+  });
+  // The premise: scrolled to the top, not following.
+  expect(await viewport(page)).toMatchObject({ top: 0, following: false });
+  await feed(page, [JSON.stringify({ t: "history", first: 10, cols: 10, rows: Array.from({ length: 15 }, (_, n) => row(10 + n)) })]);
+  await settled(page);
+  const view = await viewport(page);
+  expect(view.following).toBe(false);
+  expect(view.top).toBe(0);
+  expect((await visibleRows(page))[0]).toBe("l15");
+});
+
+test("history keeps being applied after the page is hidden", async ({ page }) => {
+  // A slice waiting for an animation frame would wait for the tab to come
+  // back; hiding the page moves it to a task. The test stops frames from
+  // running, as a hidden page does, and reports the page hidden.
+  await openGrid(page);
+  const pendingWhileVisible = await page.evaluate(() => {
+    const w = window as any;
+    w.requestAnimationFrame = () => 0;
+    w.cancelAnimationFrame = () => {};
+    const encoder = new TextEncoder();
+    const send = (message: unknown) => w.harness.grid.receive(encoder.encode(JSON.stringify(message)));
+    send({ t: "hello", cols: 200, rows: 2, history_cap: 5000 });
+    send({ t: "state", mouse: "off", focus: false, alt_screen: false, default_fg: null, default_bg: null, history_trimmed: false, exit: null });
+    let seed = 5;
+    const color = () => 0x1000000 + ((seed = (seed * 1103515245 + 12345) & 0xffffff));
+    for (let first = 0; first < 1200; first += 120) {
+      send({ t: "history", first, cols: 200, rows: Array.from({ length: 120 }, () => ({ w: false, r: Array.from({ length: 200 }, (_, col) => [col, 1, "▀", [0, color(), color()]]) })) });
+    }
+    return w.harness.grid.snapshot().historyPending;
+  });
+  // The premise: frames do not run, so the backlog is stuck while visible.
+  expect(pendingWhileVisible).toBe(true);
+  await page.evaluate(() => {
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+    document.dispatchEvent(new Event("visibilitychange", { bubbles: true }));
+  });
+  // Polled on a timer: this page runs no animation frames now, which is
+  // what the default polling waits on.
+  await page.waitForFunction(() => !(window as any).harness.grid.snapshot().historyPending, null, { timeout: 60_000, polling: 100 });
+  expect(await page.evaluate(() => (window as any).harness.grid.model.historyLength)).toBe(1200);
+});
+
+test("redraws ask for links as xterm.js's linkifier does: never with nothing hovered, once per change to a hovered link's rows", async ({ page }) => {
+  // xterm.js re-asks on a render only for a hovered link whose rows were
+  // rendered; with nothing hovered it waits for the next move. A spinner
+  // redrawn every frame under a resting pointer therefore costs nothing,
+  // and a hovered link is asked for again exactly once per change to its
+  // rows (in a container, one host check), never more.
+  await openGrid(page);
+  await page.evaluate(() => {
+    const w = window as any;
+    w.harness.grid.dispose();
+    w.lookups = 0;
+    w.offerLink = false;
+    w.harness.grid = w.farhelmGridTerminal.create(document.getElementById("term"), {
+      fontSize: 14,
+      fontFamily: '"JetBrains Mono", monospace',
+      theme: w.farhelmTerminalTheme,
+      platform: navigator.platform,
+      send: () => {},
+      links: {
+        row: (abs: number, done: (links: unknown[]) => void) => {
+          w.lookups++;
+          done(w.offerLink ? [{
+            kind: "test",
+            web: false,
+            ranges: [{ start: { abs, col: 0 }, end: { abs, col: 6 } }],
+            decorations: { underline: true, pointerCursor: true },
+            hover() {},
+            leave() {},
+            activate() {},
+          }] : []);
+        },
+      },
+    });
+    w.harness.grid.fit();
+  });
+  /** Send `texts` to row `y`, one frame each, painting after each. */
+  const redraw = (y: number, texts: string[], from: number) => page.evaluate(async ({ y, texts, from }) => {
+    const grid = (window as any).harness.grid;
+    const encoder = new TextEncoder();
+    let rev = from;
+    for (const text of texts) {
+      grid.receive(encoder.encode(JSON.stringify({ t: "rows", rows: [[y, { w: false, r: [[0, text.length, text, [0, -1, -1]]] }]] })));
+      grid.receive(encoder.encode(JSON.stringify({ t: "frame", rev: rev++, cols: 20, rows: 2, cursor: { x: 0, y: 1, visible: false, shape: "block", blink: true } })));
+      grid.flush();
+      await new Promise((done) => requestAnimationFrame(done));
+    }
+  }, { y, texts, from });
+  await page.evaluate((lines) => {
+    const grid = (window as any).harness.grid;
+    const encoder = new TextEncoder();
+    for (const line of lines) grid.receive(encoder.encode(line));
+    grid.flush();
+  }, [
+    JSON.stringify({ t: "hello", cols: 20, rows: 2, history_cap: 0 }),
+    state({}),
+    JSON.stringify({ t: "rows", rows: [[0, textRow("spin |")]] }),
+    JSON.stringify({ t: "frame", rev: 1, cols: 20, rows: 2, cursor: { x: 0, y: 1, visible: false, shape: "block", blink: true } }),
+  ]);
+  const at = await cellAt(page, 2, 0);
+  await page.mouse.move(at.x, at.y);
+  await expect.poll(() => page.evaluate(() => (window as any).lookups)).toBe(1);
+  // Nothing hovered: a spinner redrawn every frame asks for nothing.
+  await redraw(0, Array.from({ length: 30 }, (_, i) => `spin ${"|/-\\"[i % 4]}`), 2);
+  expect(await page.evaluate(() => (window as any).lookups)).toBe(1);
+  // A link appears; the next move finds it.
+  await page.evaluate(() => ((window as any).offerLink = true));
+  await page.mouse.move(at.x + 1, at.y);
+  await expect.poll(() => page.evaluate(() => (window as any).lookups)).toBe(2);
+  // Its row redrawn ten times: ten fresh asks, one each.
+  await redraw(0, Array(10).fill("spin |"), 40);
+  expect(await page.evaluate(() => (window as any).lookups)).toBe(12);
+  // Another row redrawn: nothing.
+  await redraw(1, Array(10).fill("other"), 60);
+  expect(await page.evaluate(() => (window as any).lookups)).toBe(12);
+});
+
+test("a column selection whose first lines drop at the cap keeps its columns", async ({ page }) => {
+  // xterm.js's trim moves only the row of a selection's start; a column
+  // selection must not widen to column 0.
+  test.skip(await viewerIsMac(page), "Option is the forcing modifier on a Mac");
+  await openGrid(page);
+  await feed(page, [
+    JSON.stringify({ t: "hello", cols: 8, rows: 3, history_cap: 3 }),
+    state({}),
+    JSON.stringify({ t: "frame", rev: 1, cols: 8, rows: 3, cursor: { x: 0, y: 2, visible: false, shape: "block", blink: true } }),
+    JSON.stringify({ t: "history", first: 0, cols: 8, rows: [textRow("abcdefgh"), textRow("ijklmnop"), textRow("qrstuvwx")] }),
+  ]);
+  await settled(page);
+  await page.evaluate(() => {
+    const grid = (window as any).harness.grid;
+    grid.scrollLines(-100);
+    grid.flush();
+  });
+  expect(await visibleRows(page)).toEqual(["abcdefgh", "ijklmnop", "qrstuvwx"]);
+  const from = await cellAt(page, 2, 0, 0.2);
+  const to = await cellAt(page, 5, 2, 0.2);
+  await page.keyboard.down("Alt");
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(to.x, to.y, { steps: 3 });
+  await page.mouse.up();
+  await page.keyboard.up("Alt");
+  expect(await page.evaluate(() => (window as any).harness.grid.selectionText())).toBe("cde\nklm\nstu");
+  // One more line: the first selected line drops.
+  await feed(page, [JSON.stringify({ t: "history", first: 3, cols: 8, rows: [textRow("yz")] })]);
+  await settled(page);
+  expect(await page.evaluate(() => (window as any).harness.grid.selectionText())).toBe("klm\nstu");
+});
+
+// ## Round 4: late link answers
+
+/**
+ * Replace the harness grid with one whose provider holds every answer until
+ * the test releases it (`window.answer()`), as a container's host checks
+ * do, offering a link over columns 0-5 of the asked line. `window.hovers`
+ * counts the hovers started.
+ */
+async function gridWithHeldAnswers(page: Page, rows: number, history: string[]): Promise<void> {
+  await page.evaluate(({ rows, history }) => {
+    const w = window as any;
+    w.harness.grid.dispose();
+    w.hovers = [];
+    w.pending = [];
+    w.answer = () => {
+      const held = w.pending;
+      w.pending = [];
+      for (const release of held) release();
+    };
+    const grid = w.farhelmGridTerminal.create(document.getElementById("term"), {
+      fontSize: 14,
+      fontFamily: '"JetBrains Mono", monospace',
+      theme: w.farhelmTerminalTheme,
+      platform: navigator.platform,
+      send: () => {},
+      links: {
+        row: (abs: number, done: (links: unknown[]) => void) => {
+          w.pending.push(() => done([{
+            kind: "test",
+            web: false,
+            ranges: [{ start: { abs, col: 0 }, end: { abs, col: 6 } }],
+            decorations: { underline: true, pointerCursor: true },
+            hover: () => w.hovers.push(abs),
+            leave() {},
+            activate() {},
+          }]));
+        },
+      },
+    });
+    w.harness.grid = grid;
+    grid.fit();
+    const encoder = new TextEncoder();
+    const send = (message: unknown) => grid.receive(encoder.encode(JSON.stringify(message)));
+    const plain = [0, -1, -1];
+    send({ t: "hello", cols: 20, rows, history_cap: 100 });
+    send({ t: "state", mouse: "off", focus: false, alt_screen: false, default_fg: null, default_bg: null, history_trimmed: false, exit: null });
+    send({ t: "rows", rows: Array.from({ length: rows }, (_, y) => [y, { w: false, r: [[0, 8, `screen ${y}`, plain]] }]) });
+    send({ t: "frame", rev: 1, cols: 20, rows, cursor: { x: 0, y: rows - 1, visible: false, shape: "block", blink: true } });
+    if (history.length) send({ t: "history", first: 0, cols: 20, rows: history.map((text) => ({ w: false, r: [[0, text.length, text, plain]] })) });
+    grid.flush();
+  }, { rows, history });
+}
+
+/** Send a frame (and rows, if any) to the harness grid and paint it. */
+async function frame(page: Page, rev: number, rows: [number, string][], rowsInView = 3): Promise<void> {
+  await page.evaluate(({ rev, rows, rowsInView }) => {
+    const grid = (window as any).harness.grid;
+    const encoder = new TextEncoder();
+    const plain = [0, -1, -1];
+    if (rows.length) grid.receive(encoder.encode(JSON.stringify({ t: "rows", rows: rows.map(([y, text]) => [y, { w: false, r: [[0, text.length, text, plain]] }]) })));
+    grid.receive(encoder.encode(JSON.stringify({ t: "frame", rev, cols: 20, rows: rowsInView, cursor: { x: 3, y: 2, visible: true, shape: "block", blink: true } })));
+    grid.flush();
+  }, { rev, rows, rowsInView });
+}
+
+test("a late link answer still hovers after output that did not touch its line", async ({ page }) => {
+  // A container's link answers wait for host checks; a program writing
+  // meanwhile (a cursor-only frame, another row) must not void them, or no
+  // link appears while an agent is working.
+  await openGrid(page);
+  await gridWithHeldAnswers(page, 3, []);
+  const at = await cellAt(page, 2, 0);
+  await page.mouse.move(at.x, at.y);
+  await expect.poll(() => page.evaluate(() => (window as any).pending.length)).toBe(1);
+  await frame(page, 2, []);
+  await frame(page, 3, [[2, "busy..."]]);
+  await page.evaluate(() => (window as any).answer());
+  await expect.poll(() => page.evaluate(() => (window as any).hovers.length)).toBe(1);
+  // The control: an answer whose own line was replaced meanwhile is not used.
+  // (Any output drops the line's cached answer, so the move back asks.)
+  await page.mouse.move(at.x, at.y + 3 * (await cell(page)).height);
+  await frame(page, 4, []);
+  await page.mouse.move(at.x, at.y);
+  await expect.poll(() => page.evaluate(() => (window as any).pending.length)).toBe(1);
+  await frame(page, 5, [[0, "screen 0"]]);
+  await page.evaluate(() => (window as any).answer());
+  expect(await page.evaluate(() => (window as any).hovers.length)).toBe(1);
+});
+
+test("a late link answer is not used for a line the view scrolled away from the pointer", async ({ page }) => {
+  // Scrolling while the answer is pending puts another line under the
+  // pointer; hovering the asked line would show its display beside text it
+  // is not about.
+  await openGrid(page);
+  await gridWithHeldAnswers(page, 3, ["h0", "h1", "h2"]);
+  const at = await cellAt(page, 2, 1);
+  await page.mouse.move(at.x, at.y);
+  await expect.poll(() => page.evaluate(() => (window as any).pending.length)).toBe(1);
+  await page.evaluate(() => {
+    const grid = (window as any).harness.grid;
+    grid.scrollLines(-1);
+    grid.flush();
+  });
+  expect((await viewport(page)).following).toBe(false);
+  await page.evaluate(() => (window as any).answer());
+  expect(await page.evaluate(() => (window as any).hovers.slice())).toEqual([]);
+});
+
+test("a late link answer is dropped when a row of a long printed URL beyond the path detector's reach changes", async ({ page }) => {
+  // On narrow rows a printed URL can span more rows than the path detector
+  // reads (128); the URL found for a pending answer depends on all of them,
+  // so replacing row 129 of a 132-row URL must void the answer.
+  await openGrid(page);
+  await gridWithHeldAnswers(page, 3, []);
+  const premise = await page.evaluate(() => {
+    const grid = (window as any).harness.grid;
+    const encoder = new TextEncoder();
+    const send = (message: unknown) => grid.receive(encoder.encode(JSON.stringify(message)));
+    const plain = [0, -1, -1];
+    const url = "https://example.com/" + "a".repeat(1298);
+    const rows: unknown[] = [];
+    for (let at = 0; at < url.length; at += 10) {
+      const text = url.slice(at, at + 10);
+      rows.push([rows.length, { w: at + 10 < url.length, r: [[0, text.length, text, plain]] }]);
+    }
+    send({ t: "rows", rows });
+    send({ t: "frame", rev: 2, cols: 10, rows: rows.length, cursor: { x: 0, y: 0, visible: false, shape: "block", blink: true } });
+    grid.flush();
+    return rows.length;
+  });
+  expect(premise).toBe(132);
+  const at = await cellAt(page, 3, 0);
+  await page.mouse.move(at.x, at.y);
+  await expect.poll(() => page.evaluate(() => (window as any).pending.length)).toBe(1);
+  await page.evaluate(() => {
+    const grid = (window as any).harness.grid;
+    const encoder = new TextEncoder();
+    grid.receive(encoder.encode(JSON.stringify({ t: "rows", rows: [[129, { w: true, r: [[0, 10, "bbbbbbbbbb", [0, -1, -1]]] }]] })));
+    grid.receive(encoder.encode(JSON.stringify({ t: "frame", rev: 3, cols: 10, rows: 132, cursor: { x: 0, y: 0, visible: false, shape: "block", blink: true } })));
+    grid.flush();
+  });
+  await page.evaluate(() => (window as any).answer());
+  expect(await page.evaluate(() => (window as any).hovers.slice())).toEqual([]);
 });

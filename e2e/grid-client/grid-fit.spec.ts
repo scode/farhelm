@@ -29,6 +29,7 @@ const SCRIPTS = [
   "grid-model.js",
   "grid-style.js",
   "grid-input.js",
+  "grid-buffer.js",
   "grid-terminal.js",
 ];
 

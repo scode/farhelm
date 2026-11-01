@@ -24,6 +24,30 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Input-method typing in grid terminals.** Terminals that run in a terminal host are drawn by the grid terminal
+  client, which does not show an input method's composition at the cursor or place the candidate window there: composed
+  text reaches the program once committed, but the composing itself happens out of sight. Doing it the way xterm.js does
+  means porting its composition helper (a preview element and an input element kept at the cursor on every render, plus
+  Chrome and Korean input that arrives outside composition events), which failed the complexity gate of the
+  terminal-host work. Verifying it needs real input methods, not only synthetic composition events.
+
+- **Dropping files onto grid terminals.** xterm.js terminals accept dropped files and images through the attachment
+  handling that pasting uses; grid terminals (terminals in a terminal host) refuse a drop with a message saying to copy
+  and paste instead. Left out of the terminal-host work by decision. Turning it on is mostly passing `acceptDrops: true`
+  where the grid terminal installs the paste interception, plus tests on both browser engines.
+
+- **The drag-copy notice in grid terminals.** In xterm.js terminals, a plain drag over a program that uses the mouse
+  copies nothing and shows a notice saying how to select instead (Shift-drag, or Option-drag on a Mac). Grid terminals
+  do not show it yet; left out of the terminal-host work by decision.
+
+- **Assess the grid terminal's history memory.** Grid terminals (terminals in a terminal host) keep their scrollback in
+  the page as one JavaScript object per run of styled text, plus a style object per distinct color pair, where xterm.js
+  packs each cell into about 12 bytes. Measured in WebKit (the Mac desktop app's engine) at the 12,000-line scrollback
+  cap, 200 columns, growth in resident memory once settled: typical output 44 MiB (xterm.js 65), a different 256-color
+  color in every cell 364 MiB (xterm.js 408), a different true color in every cell 737 MiB (xterm.js 502). Not a
+  blocker; assess whether a more compact history representation (decoded on demand for the rows on screen and for
+  selection and link lookups) is worth it. Method and harness: the grid client's WebKit memory benchmark.
+
 - **Detect and upgrade an outdated tmux on a host.** tmux is meant to be an implementation detail, so it is a bug that
   Farhelm does not notice when the tmux server running a host's sessions is out of date: older than the tmux Farhelm
   would now use there, or a version with known security problems. Detect that, warn the user (more insistently when a
