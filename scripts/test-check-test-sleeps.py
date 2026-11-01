@@ -114,6 +114,20 @@ class SleepCheckerTest(unittest.TestCase):
             checker.inventory({'crates/sample/src/lib.rs': b'#[cfg(test)] mod missing;'}, checker.SourceBudget())
         with self.assertRaisesRegex(ValueError, 'elapsed-time budget'):
             checker.inventory({'crates/sample/src/lib.rs': b''}, checker.SourceBudget(seconds=0))
+        # A deadline that passes after the first check is still caught at the next operation boundary.
+        budget = checker.SourceBudget()
+        budget.check()
+        budget.deadline = 0
+        with self.assertRaisesRegex(ValueError, 'elapsed-time budget'):
+            checker.inventory({'crates/sample/src/lib.rs': b'fn f() {}'}, budget)
+        # The throttled per-node check still notices a deadline that passed after it last read the clock, within
+        # the 256 calls between reads.
+        budget = checker.SourceBudget()
+        budget.node()
+        budget.deadline = 0
+        with self.assertRaisesRegex(ValueError, 'elapsed-time budget'):
+            for _ in range(256):
+                budget.node()
 
     def test_cli_distinguishes_unannotated_clean_and_invalid_sources(self):
         """An explicit inventory remains failing until all recognized delays have a real rationale."""

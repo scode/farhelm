@@ -23,14 +23,20 @@ finally:
 
 
 class SourceBudget:
-    """Bound source inventory size and stop between operations after cancellation or timeout."""
+    """Bound source inventory size and stop between operations after cancellation or timeout.
 
-    def __init__(self, *, seconds=60, entries=100000, byte_limit=64 * 1024 * 1024):
+    The time bound exists so a stuck run fails instead of hanging CI, not to keep the check fast. It was 60 s until
+    the repository's tests alone took about that long to scan on a loaded machine (2026-11-01), and the scan grows
+    with every test added; 180 s keeps a hard stop with room for that growth and for busy runners.
+    """
+
+    def __init__(self, *, seconds=180, entries=100000, byte_limit=64 * 1024 * 1024):
         self.deadline = time.monotonic() + seconds
+        self.nodes = 0
         self.entries = entries
         self.bytes = byte_limit
         self.signal = None
-        self.syntax = SyntaxBudget(check=self.check)
+        self.syntax = SyntaxBudget(check=self.check, node=self.node)
 
     def cancel(self, number, _frame):
         """Record operator intent without opening files or printing from a signal handler."""
@@ -42,6 +48,20 @@ class SourceBudget:
         if self.signal is not None:
             raise ValueError('cancelled')
         if time.monotonic() >= self.deadline:
+            raise ValueError('source check exceeded its elapsed-time budget')
+
+    def node(self):
+        """The same check for the hot per-syntax-node loops, reading the clock on the first call and every 256th.
+
+        Syntax walks call it tens of millions of times on this repository, where reading the clock each time cost a
+        few percent of the run. Cancellation is still honored at every call. Between clock reads a walk visits at most
+        255 more nodes, a fraction of a millisecond; every other boundary (file reads, parses, results) uses the
+        unthrottled `check`, so an expensive operation cannot carry a run past the deadline unnoticed.
+        """
+        if self.signal is not None:
+            raise ValueError('cancelled')
+        self.nodes += 1
+        if self.nodes % 256 == 1 and time.monotonic() >= self.deadline:
             raise ValueError('source check exceeded its elapsed-time budget')
 
 
