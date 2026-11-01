@@ -1,0 +1,517 @@
+diff --git a/alacritty_terminal/src/grid/mod.rs b/alacritty_terminal/src/grid/mod.rs
+index 4e394d9..62b822c 100644
+--- a/alacritty_terminal/src/grid/mod.rs
++++ b/alacritty_terminal/src/grid/mod.rs
+@@ -1,3 +1,7 @@
++// Modified for Farhelm: counts the lines scrolled into history and the times
++// history was erased (`Grid::lines_scrolled_into_history`,
++// `Grid::history_clears`). See vendor/README.md in the Farhelm repository.
++
+ //! A specialized 2D grid implementation optimized for use in a terminal.
+ 
+ use std::cmp::{max, min};
+@@ -135,6 +139,20 @@ pub struct Grid<T> {
+ 
+     /// Maximum number of lines in history.
+     max_scroll_limit: usize,
++
++    /// Farhelm patch: see [`Grid::lines_scrolled_into_history`] and
++    /// [`Grid::history_clears`].
++    ///
++    /// Skipped by serde so that serialized grids keep upstream's format, and
++    /// left out of `PartialEq` so that two grids showing the same content
++    /// still compare equal.
++    #[cfg_attr(feature = "serde", serde(skip))]
++    lines_scrolled_into_history: u64,
++
++    /// Farhelm patch: see [`Grid::history_clears`]. Skipped by serde and left
++    /// out of `PartialEq` for the same reasons as the field above.
++    #[cfg_attr(feature = "serde", serde(skip))]
++    history_clears: u64,
+ }
+ 
+ impl<T: GridCell + Default + PartialEq> Grid<T> {
+@@ -147,9 +165,44 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
+             cursor: Cursor::default(),
+             lines,
+             columns,
++            // Farhelm patch: the history counters start at zero.
++            lines_scrolled_into_history: 0,
++            history_clears: 0,
+         }
+     }
+ 
++    /// Farhelm patch: how many lines have scrolled off the top of the screen
++    /// into this grid's history since the grid was created. It never
++    /// decreases.
++    ///
++    /// The count exists so that an embedder can send history as appended
++    /// ranges: when it grows by `n` and nothing else changed the history's
++    /// shape, the new lines are the newest `n` history lines (`Line(-1)` up to
++    /// `Line(-n)`, of which at most `history_size()` are still held).
++    ///
++    /// Every line `scroll_up` moves into history counts, whatever moved it:
++    /// output scrolling a region that starts at the top of the screen, `CSI S`,
++    /// clearing a screen with content, and the scrolling a resize does. A grid
++    /// without history (the alternate screen) never counts. The count does NOT
++    /// reflect lines dropped from the far end once history is full, history
++    /// erased by `CSI 3 J` or `clear_history`, lines a taller resize pulls back
++    /// out of history, or reflow; an embedder has to treat a resize and a
++    /// history erase (see [`Grid::history_clears`]) as changes of shape.
++    pub fn lines_scrolled_into_history(&self) -> u64 {
++        self.lines_scrolled_into_history
++    }
++
++    /// Farhelm patch: how many times `clear_history` erased this grid's history
++    /// since the grid was created (`CSI 3 J` calls it when there is history to
++    /// erase, a full reset always). It never decreases.
++    ///
++    /// A program erases history on its own, so unlike a resize the embedder
++    /// cannot know about it without this; a change means history lines sent
++    /// earlier are gone.
++    pub fn history_clears(&self) -> u64 {
++        self.history_clears
++    }
++
+     /// Update the size of the scrollback history.
+     pub fn update_history(&mut self, history_size: usize) {
+         let current_history_size = self.history_size();
+@@ -270,6 +323,11 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
+ 
+         // Only rotate the entire history if the active region starts at the top.
+         if region.start == 0 {
++            // Farhelm patch: see `lines_scrolled_into_history`.
++            if self.max_scroll_limit != 0 {
++                self.lines_scrolled_into_history += positions as u64;
++            }
++
+             // Create scrollback for the new lines.
+             self.increase_scroll_limit(positions);
+ 
+@@ -381,6 +439,9 @@ impl<T> Grid<T> {
+ 
+     #[inline]
+     pub fn clear_history(&mut self) {
++        // Farhelm patch: see `history_clears`.
++        self.history_clears += 1;
++
+         // Explicitly purge all lines from history.
+         self.raw.shrink_lines(self.history_size());
+ 
+diff --git a/alacritty_terminal/src/term/cell.rs b/alacritty_terminal/src/term/cell.rs
+index 484eabe..ba93315 100644
+--- a/alacritty_terminal/src/term/cell.rs
++++ b/alacritty_terminal/src/term/cell.rs
+@@ -1,3 +1,6 @@
++// Modified for Farhelm: caps the zero-width characters stored per cell
++// (`MAX_ZEROWIDTH_CHARS`). See vendor/README.md in the Farhelm repository.
++
+ use std::sync::Arc;
+ use std::sync::atomic::{AtomicU32, Ordering};
+ 
+@@ -36,6 +39,18 @@ bitflags! {
+     }
+ }
+ 
++/// Farhelm patch: the most zero-width (combining) characters one cell stores;
++/// [`Cell::push_zerowidth`] drops any beyond it.
++///
++/// Upstream appends without limit, so a program printing one base character
++/// followed by millions of combining marks grows a single cell by four bytes
++/// per mark. Sixteen covers real text with room to spare: stacked diacritics
++/// and Hangul jamo use two or three per cell, and a subdivision flag such as
++/// Scotland's (a base emoji plus six tag characters) uses six. tmux, whose
++/// screen Farhelm reads today, stores at most 32 bytes of UTF-8 per cell, which
++/// is fewer marks than this in practice.
++pub const MAX_ZEROWIDTH_CHARS: usize = 16;
++
+ /// Counter for hyperlinks without explicit ID.
+ static HYPERLINK_ID_SUFFIX: AtomicU32 = AtomicU32::new(0);
+ 
+@@ -162,6 +177,10 @@ impl Cell {
+     /// Write a new zerowidth character to this cell.
+     #[inline]
+     pub fn push_zerowidth(&mut self, character: char) {
++        // Farhelm patch: see `MAX_ZEROWIDTH_CHARS`.
++        if self.zerowidth().is_some_and(|zerowidth| zerowidth.len() >= MAX_ZEROWIDTH_CHARS) {
++            return;
++        }
+         let extra = self.extra.get_or_insert(Default::default());
+         Arc::make_mut(extra).zerowidth.push(character);
+     }
+diff --git a/alacritty_terminal/src/term/mod.rs b/alacritty_terminal/src/term/mod.rs
+index 8eb6797..3d3df7c 100644
+--- a/alacritty_terminal/src/term/mod.rs
++++ b/alacritty_terminal/src/term/mod.rs
+@@ -1,3 +1,7 @@
++// Modified for Farhelm: adds snapshot accessors to `Term`, caps hyperlink and
++// title lengths, and reuses the active hyperlink when an identical one is sent
++// again. See vendor/README.md in the Farhelm repository.
++
+ //! Exports the `Term` type which is a high-level API for the Grid.
+ 
+ use std::ops::{Index, IndexMut, Range};
+@@ -41,6 +45,32 @@ pub const MIN_SCREEN_LINES: usize = 1;
+ /// Max size of the window title stack.
+ const TITLE_STACK_MAX_DEPTH: usize = 4096;
+ 
++/// Farhelm patch: the longest hyperlink URI (OSC 8) a cell keeps, in bytes.
++///
++/// Every cell printed while a hyperlink is active holds it, and a program can
++/// start a new one before every character, so the URI's length multiplies into
++/// the grid's memory. A longer URI ends the current hyperlink instead, and the
++/// text after it prints unlinked. 2083 is the limit VTE and iTerm2 use, as
++/// documented in the OSC 8 specification
++/// (<https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda>).
++pub const MAX_HYPERLINK_URI_BYTES: usize = 2083;
++
++/// Farhelm patch: the longest explicit hyperlink `id` a cell keeps, in bytes.
++///
++/// The same reasoning and source as [`MAX_HYPERLINK_URI_BYTES`]: VTE limits the
++/// `id` to 250 bytes. A longer `id` ends the current hyperlink.
++pub const MAX_HYPERLINK_ID_BYTES: usize = 250;
++
++/// Farhelm patch: the longest window title (OSC 0 and 2) kept, in bytes; a
++/// longer title is cut at the last character boundary that fits.
++///
++/// The parser accepts an OSC of up to `vte::OSC_PAYLOAD_LIMIT` (10 MiB) so that
++/// clipboard writes keep working, and the title stack holds up to
++/// `TITLE_STACK_MAX_DEPTH` titles, so without this one program could pin about
++/// 40 GiB in titles. 4096 bytes leaves room for a shell's title holding a
++/// long path.
++pub const MAX_TITLE_BYTES: usize = 4096;
++
+ /// Default semantic escape characters.
+ pub const SEMANTIC_ESCAPE_CHARS: &str = ",│`|:\"' ()[]{}<>\t";
+ 
+@@ -953,6 +983,58 @@ impl<T> Term<T> {
+         &self.colors
+     }
+ 
++    // Farhelm patch: snapshot support. Access to the state an embedder needs to
++    // rebuild an equivalent `Term` from escape sequences. All are read-only
++    // except `inactive_grid_mut`, which a restore uses to write what no escape
++    // sequence can set; none changes behavior.
++
++    /// The grid that is not showing: the primary screen (with its scrollback)
++    /// while the alternate screen is active, otherwise the alternate screen.
++    pub fn inactive_grid(&self) -> &Grid<Cell> {
++        &self.inactive_grid
++    }
++
++    /// Mutable access to the inactive grid.
++    ///
++    /// Escape sequences cannot set the primary screen's saved cursor while the
++    /// alternate screen is active, because entering the alternate screen
++    /// overwrites it; a restore fixes it up through this.
++    pub fn inactive_grid_mut(&mut self) -> &mut Grid<Cell> {
++        &mut self.inactive_grid
++    }
++
++    /// The scrolling region (DECSTBM), as lines from the top of the screen.
++    pub fn scroll_region(&self) -> &Range<Line> {
++        &self.scroll_region
++    }
++
++    /// Tab stops, one entry per column.
++    pub fn tab_stops(&self) -> &[bool] {
++        &self.tabs.tabs
++    }
++
++    /// The character set slot (G0 or G1, chosen by SI/SO) that printing uses.
++    pub fn active_charset(&self) -> CharsetIndex {
++        self.active_charset
++    }
++
++    /// The window title, if the program set one.
++    pub fn title(&self) -> Option<&str> {
++        self.title.as_deref()
++    }
++
++    /// Titles saved by `CSI 22 t`, oldest first.
++    pub fn title_stack(&self) -> &[Option<String>] {
++        &self.title_stack
++    }
++
++    /// Kitty keyboard mode stacks for the active and the inactive screen.
++    ///
++    /// Both stay empty unless `Config::kitty_keyboard` is on.
++    pub fn keyboard_mode_stacks(&self) -> (&[KeyboardModes], &[KeyboardModes]) {
++        (&self.keyboard_mode_stack, &self.inactive_keyboard_mode_stack)
++    }
++
+     /// Insert a linebreak at the current cursor position.
+     #[inline]
+     fn wrapline(&mut self)
+@@ -1873,6 +1955,22 @@ impl<T: EventListener> Handler for Term<T> {
+     #[inline]
+     fn set_hyperlink(&mut self, hyperlink: Option<Hyperlink>) {
+         trace!("Setting hyperlink: {hyperlink:?}");
++        // Farhelm patch: see `MAX_HYPERLINK_URI_BYTES`.
++        let hyperlink = hyperlink.filter(|link| {
++            link.uri.len() <= MAX_HYPERLINK_URI_BYTES
++                && link.id.as_ref().is_none_or(|id| id.len() <= MAX_HYPERLINK_ID_BYTES)
++        });
++        // Farhelm patch: an OSC 8 that repeats the active link's `id` and URI
++        // keeps the active link rather than building an equal copy, so the
++        // cells after it share one allocation instead of each holding their
++        // own. A link without an explicit `id` is never equal to the active
++        // one, because it gets a fresh generated `id` (xterm.js likewise keeps
++        // such links apart), so it is built as before.
++        if let (Some(new), Some(active)) = (&hyperlink, self.grid.cursor.template.hyperlink()) {
++            if new.id.as_deref() == Some(active.id()) && new.uri == active.uri() {
++                return;
++            }
++        }
+         self.grid.cursor.template.set_hyperlink(hyperlink.map(|e| e.into()));
+     }
+ 
+@@ -2221,6 +2319,20 @@ impl<T: EventListener> Handler for Term<T> {
+     fn set_title(&mut self, title: Option<String>) {
+         trace!("Setting title to '{title:?}'");
+ 
++        // Farhelm patch: see `MAX_TITLE_BYTES`. The cut title also gives back
++        // its spare capacity: the parser hands over a title allocated for the
++        // whole payload, and it moves on into `Event::Title` below, where a
++        // listener keeping the latest title would otherwise hold all of it.
++        let mut title = title;
++        if let Some(title) = title.as_mut().filter(|title| title.len() > MAX_TITLE_BYTES) {
++            let mut end = MAX_TITLE_BYTES;
++            while !title.is_char_boundary(end) {
++                end -= 1;
++            }
++            title.truncate(end);
++            title.shrink_to_fit();
++        }
++
+         self.title.clone_from(&title);
+ 
+         let title_event = match title {
+@@ -3299,4 +3411,227 @@ mod tests {
+         assert_eq!(version_number("1.2.3-dev"), 1_02_03);
+         assert_eq!(version_number("999.99.99"), 9_99_99_99);
+     }
++
++    // Farhelm patch tests. They run with `cargo test --lib --manifest-path
++    // vendor/alacritty_terminal/Cargo.toml` (vendor/README.md), which builds
++    // against upstream vte rather than the patched one, so none of them
++    // depends on the vte patch. What needs both patches (an OSC 8 the patched
++    // parser drops for its length) is tested in `vendor/pair-tests/`.
++
++    /// A terminal of `columns` x `lines` with `history` lines of scrollback,
++    /// fed `bytes` through the real parser, the way an embedder drives it.
++    fn fed_term(columns: usize, lines: usize, history: usize, bytes: &[u8]) -> Term<VoidListener> {
++        let size = TermSize::new(columns, lines);
++        let config = Config { scrolling_history: history, ..Config::default() };
++        let mut term = Term::new(config, &size, VoidListener);
++        let mut parser: ansi::Processor = ansi::Processor::new();
++        parser.advance(&mut term, bytes);
++        term
++    }
++
++    /// Spec: a cell keeps the first `MAX_ZEROWIDTH_CHARS` zero-width
++    /// characters printed onto it, in order, and drops the rest; the next
++    /// printable character still goes to the next cell.
++    ///
++    /// Why: without the cap one cell grows by four bytes per combining mark
++    /// for as long as a program keeps sending them.
++    #[test]
++    fn zerowidth_characters_per_cell_are_capped() {
++        let mut input = "e".to_owned();
++        for _ in 0..1000 {
++            input.push('\u{301}');
++        }
++        input.push('x');
++        let term = fed_term(10, 2, 0, input.as_bytes());
++
++        let base = &term.grid()[Line(0)][Column(0)];
++        assert_eq!(base.c, 'e');
++        assert_eq!(base.zerowidth(), Some(&['\u{301}'; cell::MAX_ZEROWIDTH_CHARS][..]));
++        assert_eq!(term.grid()[Line(0)][Column(1)].c, 'x');
++    }
++
++    /// Spec: an OSC 8 hyperlink whose URI is at most `MAX_HYPERLINK_URI_BYTES`
++    /// and whose `id` is at most `MAX_HYPERLINK_ID_BYTES` applies to the text
++    /// after it; one over either limit ends the active hyperlink, so the text
++    /// after it is unlinked rather than attributed to the previous link.
++    ///
++    /// Why: every cell holds its hyperlink, so the URI's length multiplies into
++    /// the grid's memory; and keeping the previous link active instead would
++    /// point text at a URI it never had.
++    #[test]
++    fn hyperlink_uri_and_id_lengths_are_capped() {
++        let uri_at = format!("http://e/{}", "u".repeat(MAX_HYPERLINK_URI_BYTES - 9));
++        let uri_over = format!("{uri_at}u");
++        let id_at = "i".repeat(MAX_HYPERLINK_ID_BYTES);
++        let id_over = format!("{id_at}i");
++
++        // (OSC 8 parameters, URI, whether the cell printed after it is linked)
++        let cases = [
++            (String::new(), &uri_at, true),
++            (String::new(), &uri_over, false),
++            (format!("id={id_at}"), &uri_at, true),
++            (format!("id={id_over}"), &uri_at, false),
++        ];
++        for (params, uri, linked) in cases {
++            let input = format!("\x1b]8;;http://prev\x07a\x1b]8;{params};{uri}\x07b");
++            let term = fed_term(10, 2, 0, input.as_bytes());
++
++            let prev = term.grid()[Line(0)][Column(0)].hyperlink().expect("first link applies");
++            assert_eq!(prev.uri(), "http://prev");
++            let cell = term.grid()[Line(0)][Column(1)].hyperlink();
++            assert_eq!(cell.as_ref().map(|link| link.uri()), linked.then_some(uri.as_str()));
++        }
++    }
++
++    /// Spec: an OSC 8 with the active link's explicit `id` and URI continues
++    /// that link, so the cells on both sides of it share one cell extra; an
++    /// OSC 8 with no `id`, or with another `id` or URI, starts a new link even
++    /// when an equal-looking one is active.
++    ///
++    /// Why: sharing is what keeps a program that repeats one link before
++    /// every character from costing a URI allocation per cell, and it must
++    /// not merge links that upstream (and xterm.js) keep apart, which would
++    /// change what a hover highlights.
++    #[test]
++    fn repeated_hyperlink_is_shared() {
++        let a = "\x1b]8;id=a;http://e/\x07";
++        // (the OSC 8 sent before each of two cells, whether the cells share it)
++        let cases = [
++            (a, a, true),
++            ("\x1b]8;;http://e/\x07", "\x1b]8;;http://e/\x07", false),
++            (a, "\x1b]8;id=b;http://e/\x07", false),
++            (a, "\x1b]8;id=a;http://f/\x07", false),
++        ];
++        for (first, second, shared) in cases {
++            let term = fed_term(10, 2, 0, format!("{first}x{second}y").as_bytes());
++
++            let cells = [&term.grid()[Line(0)][Column(0)], &term.grid()[Line(0)][Column(1)]];
++            let [x, y] = cells.map(|cell| cell.extra.as_ref().expect("cell is linked"));
++            assert_eq!(Arc::ptr_eq(x, y), shared, "{first:?} then {second:?}");
++            let links = cells.map(|cell| cell.hyperlink().expect("cell is linked"));
++            assert_eq!(links[0] == links[1], shared, "{first:?} then {second:?}");
++        }
++    }
++
++    /// Spec: a window title longer than `MAX_TITLE_BYTES` is cut to the
++    /// longest prefix that fits and ends on a character boundary; the title
++    /// stack keeps the cut title, and the `Event::Title` the listener gets
++    /// holds no more than the limit, in length or in capacity.
++    ///
++    /// Why: the parser accepts OSC payloads of up to 10 MiB for clipboard
++    /// writes, and the title stack holds 4096 entries, so uncut titles would
++    /// let one program pin tens of gigabytes; and a listener that keeps the
++    /// latest title would still hold the whole payload's allocation if only
++    /// the length were cut.
++    #[test]
++    fn title_length_is_capped() {
++        use std::cell::RefCell;
++        use std::rc::Rc;
++
++        /// Keeps the length and capacity of every title sent to it.
++        #[derive(Clone, Default)]
++        struct Titles(Rc<RefCell<Vec<(usize, usize)>>>);
++
++        impl EventListener for Titles {
++            fn send_event(&self, event: Event) {
++                if let Event::Title(title) = event {
++                    self.0.borrow_mut().push((title.len(), title.capacity()));
++                }
++            }
++        }
++
++        // Two-byte characters with one leading ASCII byte, so that the limit
++        // falls in the middle of a character.
++        let long = format!("x{}", "é".repeat(MAX_TITLE_BYTES));
++        let input = format!("\x1b]2;{long}\x07\x1b[22t");
++        let titles = Titles::default();
++        let mut term = Term::new(Config::default(), &TermSize::new(10, 2), titles.clone());
++        let mut parser: ansi::Processor = ansi::Processor::new();
++        parser.advance(&mut term, input.as_bytes());
++
++        let title = term.title().expect("title set");
++        assert_eq!(title.len(), MAX_TITLE_BYTES - 1);
++        assert!(long.starts_with(title));
++        assert_eq!(term.title_stack(), [Some(title.to_owned())]);
++        let events = titles.0.borrow().clone();
++        assert_eq!(events.len(), 1, "title events: {events:?}");
++        let (len, capacity) = events[0];
++        assert_eq!(len, MAX_TITLE_BYTES - 1);
++        assert!(capacity <= MAX_TITLE_BYTES, "the event's title keeps {capacity} bytes");
++
++        // A title at the limit is kept whole.
++        let exact = "t".repeat(MAX_TITLE_BYTES);
++        let term = fed_term(10, 2, 0, format!("\x1b]2;{exact}\x07").as_bytes());
++        assert_eq!(term.title(), Some(exact.as_str()));
++    }
++
++    /// Spec: `lines_scrolled_into_history` counts each line that scrolls off
++    /// the top of the primary screen, keeps counting once history is full, and
++    /// ignores scrolling inside a region that does not start at the top and
++    /// everything on the alternate screen; `history_clears` counts `CSI 3 J`
++    /// erasing history, and neither count goes down.
++    ///
++    /// Why: the grid stream sends history as appended ranges sized by the
++    /// first count and resynchronizes on the second; a miscount sends the
++    /// viewer wrong or duplicate history lines.
++    #[test]
++    fn history_counters() {
++        // Five lines: the first four newlines move the cursor down, the
++        // remaining sixteen each push one line into a three-line history.
++        let mut term = fed_term(10, 5, 3, &[b'\n'; 20]);
++        assert_eq!(term.grid().lines_scrolled_into_history(), 16);
++        assert_eq!(term.grid().history_size(), 3);
++
++        let mut parser: ansi::Processor = ansi::Processor::new();
++
++        // A scroll region that leaves the top line out keeps lines on screen.
++        // The marker printed on the region's last line moving up three lines
++        // shows that the region did scroll.
++        parser.advance(&mut term, b"\x1b[2;5r\x1b[5;1HR\n\n\n\x1b[r");
++        assert_eq!(term.grid()[Line(1)][Column(0)].c, 'R');
++        assert_eq!(term.grid().lines_scrolled_into_history(), 16);
++
++        // The alternate screen has no history; the primary's count is kept
++        // while it is hidden. The marker shows the alternate screen scrolled.
++        parser.advance(&mut term, b"\x1b[?1049h\x1b[5;1HA\n\n\n");
++        assert_eq!(term.grid()[Line(1)][Column(0)].c, 'A');
++        assert_eq!(term.grid().lines_scrolled_into_history(), 0);
++        assert_eq!(term.inactive_grid().lines_scrolled_into_history(), 16);
++        parser.advance(&mut term, b"\x1b[?1049l\x1b[5;1H\n");
++        assert_eq!(term.grid().lines_scrolled_into_history(), 17);
++
++        assert_eq!(term.grid().history_clears(), 0);
++        parser.advance(&mut term, b"\x1b[3J");
++        assert_eq!(term.grid().history_size(), 0);
++        assert_eq!(term.grid().history_clears(), 1);
++        assert_eq!(term.grid().lines_scrolled_into_history(), 17);
++    }
++
++    /// Spec: clearing the primary screen (`CSI 2 J`) counts the lines it
++    /// moves into history, up to the last one with content; a full reset
++    /// (`ESC c`) counts as a history erase, even with no history to erase,
++    /// and leaves `lines_scrolled_into_history` as it was.
++    ///
++    /// Why: both are things a program does on its own, so the embedder learns
++    /// of them only through these counters; `clear` in a shell is `CSI 2 J`,
++    /// and missing it would leave the viewer without the cleared lines.
++    #[test]
++    fn history_counters_clear_and_reset() {
++        let mut term = fed_term(10, 5, 10, b"a\r\nb\r\nc");
++        assert_eq!(term.grid().lines_scrolled_into_history(), 0);
++
++        let mut parser: ansi::Processor = ansi::Processor::new();
++        parser.advance(&mut term, b"\x1b[2J");
++        assert_eq!(term.grid().lines_scrolled_into_history(), 3);
++        let history: Vec<char> = (1..=3).map(|n| term.grid()[Line(-n)][Column(0)].c).collect();
++        assert_eq!(history, ['c', 'b', 'a']);
++
++        parser.advance(&mut term, b"\x1bc");
++        assert_eq!(term.grid().history_size(), 0);
++        assert_eq!(term.grid().history_clears(), 1);
++        assert_eq!(term.grid().lines_scrolled_into_history(), 3);
++
++        parser.advance(&mut term, b"\x1bc");
++        assert_eq!(term.grid().history_clears(), 2);
++    }
+ }

@@ -112,3 +112,18 @@ here only to identify the Codex agent; no endorsement is implied.
 The Pi mark is the badge from the pi.dev press kit ([`https://pi.dev/press-kit`](https://pi.dev/press-kit)), served at
 `https://pi.dev/favicon.svg`, used unaltered apart from scale. The pi project is MIT-licensed (Copyright (c) 2025 Mario
 Zechner) and publishes its marks for reuse; no endorsement is implied.
+
+## Terminal emulator crates
+
+`vendor/alacritty_terminal/` and `vendor/vte/` are the
+[`alacritty_terminal`](https://crates.io/crates/alacritty_terminal) 0.26.0 and [`vte`](https://crates.io/crates/vte)
+0.15.0 crates from crates.io, part of the [Alacritty](https://github.com/alacritty/alacritty) project (authors Christian
+Duerr and Joe Wilm), with Farhelm's changes applied. `vendor/README.md` describes the changes, and `vendor/patches/`
+holds them as diffs against the published crates; each modified file says so in a `Modified for Farhelm` comment at its
+top. Upstream's reference test data (`alacritty_terminal`'s `tests/`) is not included.
+
+`alacritty_terminal` is licensed under the Apache License, Version 2.0 (`vendor/alacritty_terminal/LICENSE-APACHE`).
+`vte` is licensed under the Apache License, Version 2.0 or the MIT License, at your option (`vendor/vte/LICENSE-APACHE`,
+`vendor/vte/LICENSE-MIT`, Copyright (c) 2016 Joe Wilm), except `vendor/vte/src/ansi.rs`, which came from
+`alacritty_terminal` and is licensed under the Apache License, Version 2.0 only. Farhelm uses both crates under the
+Apache License, Version 2.0.

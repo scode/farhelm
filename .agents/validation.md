@@ -111,6 +111,17 @@ that its required systemd or SSH substrate ran.
   it without disturbing a shared machine", shows: loop-breaking mutants spin every test thread, and the hosts their
   tests start outlive the killed tests. Every surviving mutant is killed by a test or listed with its reason in that
   file.
+- `python3 scripts/record-test-run.py --kind development --selection 'vendored vte' --concurrency 'libtest default threads' --tmux none -- cargo test --manifest-path vendor/vte/Cargo.toml --features ansi`,
+  `python3 scripts/record-test-run.py --kind development --selection 'vendored alacritty_terminal' --concurrency 'libtest default threads' --tmux none -- cargo test --locked --lib --manifest-path vendor/alacritty_terminal/Cargo.toml`
+  and
+  `python3 scripts/record-test-run.py --kind development --selection 'vendored crates paired' --concurrency 'libtest default threads' --tmux none -- cargo test --locked --manifest-path vendor/pair-tests/Cargo.toml`
+  — the vendored, patched terminal crates (`vendor/README.md`): upstream's unit tests plus the tests of Farhelm's
+  patches (the parser's ground state, the OSC payload and its overflow notice, zero-width, hyperlink and title caps,
+  hyperlink reuse, the history counters), and in `vendor/pair-tests/` the tests that need both patched crates together
+  (an OSC 8 the parser drops ending the terminal's hyperlink). These are excluded from the workspace, so no workspace
+  test run, clippy, `cargo fmt` or dprint (beyond `vendor/README.md` and `vendor/pair-tests/Cargo.toml`) reaches them,
+  and CI does not run them. Run all three when anything under `vendor/` changes; seconds, plus a first download of the
+  crates' own locked dependencies.
 - `cd crates/farhelm-ui/js-tests && node --test` — the JS unit harness for the asset-JS layer's pure functions
   (PLAN_M6_5.md item 1); node is already a CI requirement for Playwright below, so this adds no dependency. Run from
   inside the directory rather than as a glob from the repo root: node's no-argument default discovery (every `*.test.js`
