@@ -1,7 +1,12 @@
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-/// A startup failure must exit while the desktop parent still holds stdin.
+/// A startup failure must exit while a tethering parent still holds stdin.
+///
+/// The desktop app no longer tethers its supervisor (it starts it detached);
+/// `--exit-on-stdin-close` remains for tests and other parents that tie the
+/// supervisor's lifetime to their own, and this keeps its failure path from
+/// hanging.
 ///
 /// This pins the reason the tether reader lives on a detached OS thread. A
 /// Tokio blocking-pool reader would keep runtime shutdown waiting for EOF and

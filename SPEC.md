@@ -28,8 +28,9 @@ absolutely catastrophically major mistake with huge user impact."
 - **Supervisor**: the per-host service that manages sessions on that host — launching agents, owning their terminals,
   receiving attachments, handling spawn requests — and nothing else. It has no UI and no knowledge of other hosts.
   Supervisors are the authority on their sessions, and sessions outlive supervisors (see Durability). Supervisors
-  themselves outlive clients and the helm wherever the platform layer provides it — Linux in v1; on the v1 Mac the app
-  hosts both, so quitting the app takes the supervisor down while its sessions keep running.
+  themselves outlive clients and the helm: on Linux under systemd, and on the Mac because the app starts its supervisor
+  detached, so quitting the app leaves the supervisor running (the helm lives in the app and stops with it). Nothing
+  restarts a Mac supervisor that crashes while the app is closed, and nothing starts one at login; opening the app does.
 - **Helm**: the single control-plane process. The user runs exactly one helm, on whichever machine is convenient — the
   Mac or a Linux host. It holds the host registry, connects directly to each registered supervisor, aggregates their
   sessions, and serves the UI. The helm holds no authoritative session state — supervisors are the authority — but its
@@ -89,11 +90,11 @@ Linux host — can register and drive. The supervisor is a plain command-line pr
 `farhelm supervisor run` in a terminal and you have a working host — that path always exists, on any platform, and is
 how you try Farhelm without a bunch of fuss. System integration is layered on top of that, not baked in. On Linux, v1
 ships that layer as user-level systemd units (auto-start at boot, which the durability promises assume) — never system
-units, never root. On the Mac, v1 ships no system integration at all: the supervisor runs while the native app runs, or
-the user starts it manually. Crude, and deliberately so — a Linux-helm setup can drive Mac agents today, and better Mac
-availability is packaging work for later, not an architecture change. In that setup, "run the supervisor" means the
-manual binary: the native app has no helmless mode in v1, so launching it alongside a Linux helm would start a second
-helm — the unsupported state.
+units, never root. On the Mac, v1 ships no system integration at all: the native app starts the supervisor and leaves it
+running when it quits, or the user starts it manually; nothing starts it at login or restarts it after a crash. Crude,
+and deliberately so — a Linux-helm setup can drive Mac agents today, and better Mac availability is packaging work for
+later, not an architecture change. In that setup, "run the supervisor" means the manual binary: the native app has no
+helmless mode in v1, so launching it alongside a Linux helm would start a second helm — the unsupported state.
 
 Remote provisioning: the helm can set up a remote supervisor itself, in the style of `herdr --remote`. There is at most
 one supervisor per user per host, and adding a host is discovery-first: the helm connects over SSH and looks for that
@@ -541,7 +542,7 @@ not enough. A one-time stop/restart when upgrading to the first uninstall-capabl
 
 Basic uninstall operates on files. It does not walk processes, discover runtime sockets, reconstruct session ownership,
 or introduce a runtime registry. One deliberate exception: on macOS it stops the supervisor the desktop app started, if
-that supervisor is still running, because a supervisor the app started can keep running after the app has quit, and
+that supervisor is still running, because the app's supervisor keeps running after the app quits (see Concepts), and
 would otherwise make the uninstall refuse until the user found a process they never started themselves. It stops only
 the process the app recorded starting, after checking that the live process is exactly that one and that it runs a
 program inside the app being removed; a supervisor started any other way is never stopped and refuses as before, with a
@@ -2438,15 +2439,17 @@ Sessions depend on exactly one thing staying up: their host. Every other compone
   the desktop app's automatic ones included, routine instead of scary.
 
 Local sessions have full behavioral parity with remote ones; what differs in v1 is availability, not behavior. The Mac's
-supervisor runs while the app runs (or when started manually — see Topology), and per the rule above, its sessions keep
+supervisor is started by the app and keeps running after the app quits (or is started manually — see Topology); nothing
+starts it at login or restarts it after a crash before the app is opened again. Per the rule above, its sessions keep
 running while the supervisor is down and reattach when it returns. Sessions persist across app restarts.
 
 Conversation tracking keeps working while a host's supervisor is down: when an agent reports which conversation it is in
 (a new session, a `/clear`), the report waits on the host and the supervisor applies it when it returns, so a later
 Restart uses the conversation Farhelm has recorded, subject to the tracking limits below. Asking Farhelm for something
 from inside a session does not work while the supervisor is down, and that is expected for now: an agent's
-`farhelm spawn` and `farhelm agent` commands fail until the supervisor is running again. On the Mac that is whenever the
-desktop app is closed.
+`farhelm spawn` and `farhelm agent` commands fail until the supervisor is running again. They also need the helm, which
+on the Mac lives in the desktop app, so there they fail whenever the app is closed, although the supervisor keeps
+running.
 
 Confirmed 2026-10-14: after a session or its conversation is replaced, by clicking, `/clear` in the agent, or similar,
 Restart resuming the previous conversation within a brief window is acceptable, and so is Farhelm then continuing with

@@ -138,10 +138,10 @@ transient paint correctness. This is not an extra default battery. See `.agents/
 
 The separate `DESKTOP_SMOKE_APPEARANCE=no-initialize scripts/desktop-smoke.sh` leg exercises one fixed
 missing-initialize fault through the same builds and owned display. It observes the hidden native creation deadline,
-natural refusal and the actual owned supervisor's stdin-tether shutdown before cleanup. It retains bounded
-process/window evidence, with sampled X11 visibility rather than a continuous no-map assertion. It is not another
-default battery or ordinary appearance coverage; see `.agents/validation.md` for its Linux pidfd prerequisite and
-limits.
+natural refusal, the owned supervisor's detached setup and the app's record of it, and that the supervisor keeps running
+after the refusal (teardown stops it by that record). It retains bounded process/window evidence, with sampled X11
+visibility rather than a continuous no-map assertion. It is not another default battery or ordinary appearance coverage;
+see `.agents/validation.md` for its Linux pidfd prerequisite and limits.
 
 A failure here is fixed or recorded per the ground rules before going on. Static fixes can be verified at once by
 rerunning the check.
