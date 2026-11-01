@@ -20,8 +20,8 @@
 //! | DA1 `CSI c`, `CSI 0 c` | `CSI ? 1 ; 2 c` | same (alacritty alone says `CSI ? 6 c`) |
 //! | DECID `ESC Z` | `CSI ? 1 ; 2 c` | tmux ignores it; vte reports it as DA1, indistinguishably |
 //! | DA2 `CSI > c` | `CSI > 0 ; 2600 ; 1 c` (alacritty's own) | tmux says `CSI > 84 ; 0 ; 0 c`, which claims to be tmux |
-//! | XTVERSION `CSI > q` | none | tmux says `tmux 3.7c`; vte does not parse the query |
-//! | DSR 5, DSR 6 (cursor position) | `CSI 0 n`, `CSI row ; col R` | same |
+//! | XTVERSION `CSI > q`, `CSI > 0 q` | `DCS > \| Farhelm <version> ST` | tmux says `tmux 3.7c` |
+//! | DSR 5, DSR 6 (cursor position) | `CSI 0 n`, `CSI row ; col R` | same, including past the last column (below) |
 //! | DECRQM `CSI Ps $ p` | see below | same except where noted below |
 //! | OSC 10, 11, 12 `?` | the theme's color, or the program's own if it set one | 10 and 11 the same; tmux leaves 12 to xterm.js (below) |
 //! | OSC 4 `; n ; ?` | the theme's palette entry, or the program's own | tmux leaves it to xterm.js (below) |
@@ -40,8 +40,31 @@
 //! tmux's passthrough envelope (`DCS tmux ; ... ST`), which this emulator
 //! drops like every DCS: a clipboard write sent that way would be lost.
 //! alacritty's own answer (terminal type 0, version 2600 for 0.26.0) is what
-//! this emulator is. XTVERSION raises the same question, and vte gives no way
-//! to answer it at all.
+//! this emulator is.
+//!
+//! XTVERSION raises the same question, and here not answering is not an
+//! option: Claude Code asks it first, and when it gets no answer it asks
+//! nothing further, including DECRQM 2026, so it decides the terminal lacks
+//! synchronized output and stops bracketing its redraws (as read from Claude
+//! Code 2.1.316's startup probe; vte parses the query only with Farhelm's
+//! patch, `vendor/README.md`). The answer names Farhelm, the terminal the
+//! user actually sees, with the Farhelm version this was built as
+//! ([`crate::VERSION_REPORT`]). It names neither tmux (as above) nor
+//! alacritty, whose own window has features this emulator does not, such as
+//! the kitty keyboard protocol. An unfamiliar name is enough for Claude Code:
+//! with any answer, unless `TERM_PROGRAM` is Apple's Terminal, it goes on to
+//! ask DECRQM 2026, and takes a report of set or reset (which this emulator
+//! gives) as support for synchronized output; it compares the name itself
+//! only with iTerm2, tmux, ghostty, kitty and xterm.js, for other features.
+//!
+//! A cursor position report while a wrap is pending (the program has just
+//! written the last column with autowrap on, and the next character goes to
+//! the next line) names the column after the last, as tmux does, where
+//! alacritty names the last column. Whether a wrap is pending depends on
+//! autowrap when the column was written, not when the report is asked for,
+//! as in tmux. Programs reading the position were tested against tmux's
+//! answer, which also tells them apart the two states the cursor can be in
+//! at that column.
 //!
 //! The color queries tmux does not answer pass through to xterm.js today,
 //! which answers them from the same theme but always ends its answer with ST.
@@ -56,15 +79,16 @@
 //! as alacritty does, so a program that waits for an answer before ending
 //! its update waits until the deadline. This is accepted rather than worked
 //! around: matching tmux would mean parsing inside the update, a change to
-//! vte's buffering. The tmux comparison on recorded agent sessions checks
-//! that the agents Farhelm runs never query inside an update.
+//! vte's buffering. No recorded agent session depends on it: the supervisor's
+//! replay of recorded sessions (`emulator_parity`'s `recordings`) feeds each
+//! recording to an emulator one byte at a time and fails if an update's end
+//! releases any answer, and for the one Claude Code 2.1.316 and one Codex
+//! 0.166.0 session recorded, none did.
 //!
-//! The answers vte cannot see (`CSI 15/16/19 t`, `CSI ? 996 n`, DECRQSS,
-//! XTVERSION) would each take a vte patch to route the query to a handler.
-//! They are left unanswered for now, a known difference from tmux, rather
-//! than growing the patch before anything is known to depend on them; the
-//! comparison against tmux on recorded agent sessions that follows this
-//! crate is where a dependence would show.
+//! The answers vte cannot see (`CSI 15/16/19 t`, `CSI ? 996 n`, DECRQSS)
+//! would each take a vte patch to route the query to a handler. They are left
+//! unanswered, a known difference from tmux, because no agent recorded under
+//! tmux sent them (Claude Code 2.1.316 and Codex 0.166.0, one session each).
 //!
 //! # DECRQM
 //!
@@ -278,7 +302,6 @@ impl Handler for QueryHandler<'_> {
         fn insert_blank(&mut self, count: usize);
         fn move_up(&mut self, rows: usize);
         fn move_down(&mut self, rows: usize);
-        fn device_status(&mut self, arg: usize);
         fn move_forward(&mut self, cols: usize);
         fn move_backward(&mut self, cols: usize);
         fn move_down_and_cr(&mut self, rows: usize);
@@ -344,6 +367,27 @@ impl Handler for QueryHandler<'_> {
             None => self.reply(PRIMARY_DEVICE_ATTRIBUTES.to_owned()),
             Some(_) => <Term<Listener> as Handler>::identify_terminal(self.term, intermediate),
         }
+    }
+
+    /// DSR, with the cursor position past the last column while a wrap is
+    /// pending (see the module docs).
+    fn device_status(&mut self, arg: usize) {
+        // The vendored alacritty's wrap flag stands for tmux's cursor one
+        // past the last column: `Term::input` raises it at the last column
+        // only with autowrap on, where tmux moves past the column
+        // (vendor/README.md).
+        let cursor = &self.term.grid().cursor;
+        if arg == 6 && cursor.input_needs_wrap {
+            let (line, column) = (cursor.point.line.0 + 1, cursor.point.column.0 + 2);
+            self.reply(format!("\x1b[{line};{column}R"));
+            return;
+        }
+        <Term<Listener> as Handler>::device_status(self.term, arg);
+    }
+
+    /// XTVERSION, which alacritty leaves unanswered (see the module docs).
+    fn report_version(&mut self) {
+        self.reply(crate::VERSION_REPORT.to_owned());
     }
 
     fn report_mode(&mut self, mode: Mode) {

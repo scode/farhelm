@@ -5,8 +5,9 @@
 //! expected value below is what `tmux capture-pane -p` (tmux 3.7c, a pane
 //! of the size given, 20 by 6 unless named) printed for the same output, with
 //! the title as `#{pane_title}` returned it; where the emulator knowingly
-//! differs, the test names both. The full comparison against a live tmux on
-//! recorded sessions is a separate test that follows this crate.
+//! differs, the test names both. The comparison against a live tmux, on
+//! generated output and recorded agent sessions, is the supervisor's
+//! `emulator_parity`, where the status readers are.
 
 mod common;
 
@@ -59,6 +60,11 @@ fn screens_capture_like_tmux() {
             "xbcdefghyjk\n\n\n\n\n\n",
         ),
         ("tab at a row's start", "a\tb\r\n\tc", "a\tb\n\tc\n\n\n\n\n"),
+        (
+            "tab in the last column",
+            "abc\x1b[1;20H\t\r\n\x1b[2;20H\t\tz",
+            "abc\n                   z\n\n\n\n\n",
+        ),
         ("wide characters", "中文x\r\n😀y", "中文x\n😀y\n\n\n\n\n"),
         (
             "combining characters",

@@ -244,7 +244,7 @@ pub(crate) mod pi;
 mod records;
 pub(crate) mod report_pin;
 #[cfg(test)]
-mod screen_fixtures;
+pub(crate) mod screen_fixtures;
 pub(crate) mod screen_reader;
 #[cfg(test)]
 mod status_line_fixtures;

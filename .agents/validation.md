@@ -138,17 +138,33 @@ that its required systemd or SSH substrate ran.
   hostile output through the vendored caps (combining floods, 8 MB OSC 52 and titles, long hyperlinks, a synchronized
   update past vte's 2 MiB buffer). Seconds. Part of the workspace nextest run. Run it when the crate or anything under
   `vendor/` changes.
+- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'emulator parity with tmux' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run -p farhelm-supervisor --lib -E 'test(emulator_parity::)'`
+  — the terminal emulator against the pinned tmux 3.7c, run with Farhelm's server configuration in a private server per
+  test (`crates/farhelm-supervisor/src/emulator_parity/`): screen text, cursor, title and query answers compared at
+  every cut of hand-picked and seeded random output (wide, combining and emoji characters, wraps, trailing blanks,
+  colors, the alternate screen, scroll regions, origin and insert modes, erases, saved cursors, titles, synchronized
+  updates, resizes), with every update closed and the uncompared cuts inside updates bounded, the harness's own
+  comparator and dead-pane checks, the frozen agent screens repainted with their status readers run on the emulator's
+  text, recorded agents' startup probes, and the emulator's whole answer table, with the known screen and answer
+  differences pinned on both sides. Without that tmux first on `PATH` each test says `SKIPPED`. Under a minute on a
+  quiet machine, a few on a loaded one (the generated streams). Part of the workspace nextest run, in the supervisor's
+  two-slot tmux group; run it when the emulator crate, `vendor/`, the supervisor's tmux configuration or a status reader
+  changes. Its one `#[ignore]`d test replays real agent sessions, which stay outside the repository because they hold
+  conversation text: set `FARHELM_TEST_AGENT_RECORDINGS` to `<harness>=<directory>` entries separated by `:` (each
+  directory holding the session's `raw.bin` and `events.jsonl`, `recordings.rs` gives the format) and run the same
+  command with `--keep-farhelm-env FARHELM_TEST_AGENT_RECORDINGS` before the `--` and `--run-ignored only` after
+  `--lib`, selecting `test(emulator_parity::recordings::)`.
 - `python3 scripts/record-test-run.py --kind development --selection 'vendored vte' --concurrency 'libtest default threads' --tmux none -- cargo test --manifest-path vendor/vte/Cargo.toml --features ansi`,
   `python3 scripts/record-test-run.py --kind development --selection 'vendored alacritty_terminal' --concurrency 'libtest default threads' --tmux none -- cargo test --locked --lib --manifest-path vendor/alacritty_terminal/Cargo.toml`
   and
   `python3 scripts/record-test-run.py --kind development --selection 'vendored crates paired' --concurrency 'libtest default threads' --tmux none -- cargo test --locked --manifest-path vendor/pair-tests/Cargo.toml`
   — the vendored, patched terminal crates (`vendor/README.md`): upstream's unit tests plus the tests of Farhelm's
   patches (the parser's ground state, the OSC payload and its overflow notice, zero-width, hyperlink and title caps,
-  hyperlink reuse, the history counters), and in `vendor/pair-tests/` the tests that need both patched crates together
-  (an OSC 8 the parser drops ending the terminal's hyperlink). These are excluded from the workspace, so no workspace
-  test run, clippy, `cargo fmt` or dprint (beyond `vendor/README.md` and `vendor/pair-tests/Cargo.toml`) reaches them,
-  and CI does not run them. Run all three when anything under `vendor/` changes; seconds, plus a first download of the
-  crates' own locked dependencies.
+  hyperlink reuse, the history counters, XTVERSION, the erase and cursor movement fixes), and in `vendor/pair-tests/`
+  the tests that need both patched crates together (an OSC 8 the parser drops ending the terminal's hyperlink). These
+  are excluded from the workspace, so no workspace test run, clippy, `cargo fmt` or dprint (beyond `vendor/README.md`
+  and `vendor/pair-tests/Cargo.toml`) reaches them, and CI does not run them. Run all three when anything under
+  `vendor/` changes; seconds, plus a first download of the crates' own locked dependencies.
 - `cd crates/farhelm-ui/js-tests && node --test` — the JS unit harness for the asset-JS layer's pure functions
   (PLAN_M6_5.md item 1); node is already a CI requirement for Playwright below, so this adds no dependency. Run from
   inside the directory rather than as a glob from the repo root: node's no-argument default discovery (every `*.test.js`
