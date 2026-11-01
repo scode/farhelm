@@ -1,0 +1,20 @@
+[package]
+name = "terminal-host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "A tiny long-lived process that keeps one terminal and its program alive and journals its output for a client"
+
+# Never an artifact of its own: the host is to ship inside the `farhelm`
+# binary. See `farhelm-helm/Cargo.toml` for why every non-shipping member says
+# so explicitly.
+[package.metadata.dist]
+dist = false
+
+# SPEC.md is the contract; it lives with the crate so the crate could be lifted
+# out as a project of its own without carrying anything from around it.
+
+[dev-dependencies]
+# Property tests for the codec and the journal. Dev-only: never part of a host.
+proptest = "1"
