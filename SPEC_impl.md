@@ -1677,8 +1677,9 @@ other Farhelm crate, no Farhelm concepts in its code, `libc` its only runtime de
 every update: the protocol only grows, and every client release must keep working with every host ever shipped (its
 "Change policy"). It ships inside the `farhelm` binary as `farhelm internal terminal-host`, which takes no version lock
 (a host lives for weeks and must keep neither pruning nor uninstall waiting) and runs before anything starts a thread,
-since the host forks. Nothing starts hosts yet; the supervisor's use of them, and the terminal kinds, come with the
-switch that turns them on.
+since the host forks. Nothing starts hosts yet; the supervisor's use of them comes with the switch that turns them on.
+Each session row already records its agent terminal's kind (the supervisor schema 32 column `terminal_kind`), and every
+row is `tmux` until that switch.
 
 The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
 
@@ -4535,6 +4536,22 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   and notifications. No hook clock or diagnostic latch is persisted.
 - Schema 30 adds the supervisor session column `launch_boot_ended` (integer, default 0), the boot-finality proof
   described under Runtime state. Older supervisors refuse this upgraded database on downgrade.
+- Schema 32 adds the supervisor session column `terminal_kind` (text, `tmux` or `host`, held to those two by a `CHECK`,
+  default `tmux`): whether the session's agent terminal is a tmux pane or a terminal host, so a restarted supervisor
+  looks for it in the right place. For a host row `pane` holds the host's socket name, so an empty `pane` still means
+  "launch not confirmed" for both kinds. The row's insert writes the kind, never the confirm, so a crash before confirm
+  is reconciled against the right kind, and a create retry whose kind differs from the crashed attempt's replays instead
+  of taking the row over (the evidence that the attempt started nothing covers its own kind only). A relaunch keeps the
+  kind, so an aborted relaunch's restored `pane` is read the way it was written; that holds only until Restart can move
+  an old tmux session into a terminal host (step 7 of the terminal-host goal), when opening the relaunch's generation
+  must write the new kind, the relaunch's saved prior state must carry the old one, and an abort must restore it with
+  the pane. Existing rows become `tmux`. Older supervisors refuse this upgraded database on downgrade, which is why the
+  kind got a schema bump instead of riding on an existing column: a supervisor from before terminal hosts would
+  otherwise take a host's socket name for a tmux pane, find no such pane, and record a live session as exited (SPEC.md,
+  "Upgrade compatibility and client scale"). Schema 32 alone does not fence every such build: builds at 32 that cannot
+  create host terminals in production decode the kind but do not act on it, so the change that first lets a supervisor
+  create host terminals in production must bump the schema again, to 33, so that every one of them refuses a database
+  that may hold host rows.
 - Session notifications (SPEC.md, Status) are recorded by the supervisor, which holds the specifics their wording
   depends on (which agent, which reporter, why a hook was not added), in a `session_notifications` table of its own
   database: a per-session sequence number that only grows, a kind naming the problem, the launch generation it belongs

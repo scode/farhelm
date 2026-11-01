@@ -556,6 +556,7 @@ mod tests {
                     },
                     tmux_name: format!("fh-{id}"),
                     pane: String::new(),
+                    terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: crate::store::LastOutcome::Running,
                     canonical_cwd: None,
                     captured_conversation: captured.map(str::to_string),

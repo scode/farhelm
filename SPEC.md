@@ -4143,6 +4143,17 @@ selection. Until history exists, automatic choice treats that retained selection
 listed-row and removed-session rules. Its normal selection save then records the visit. The new history column follows
 the normal one-way schema migration.
 
+Each session records whether the agent's terminal runs in tmux or in a small Farhelm process of its own that keeps that
+one terminal alive without tmux. The supervisor database upgrade that adds this records every existing session's agent
+terminal as a tmux one, and those sessions keep running. It is accepted as one-way, like other supervisor database
+upgrades. A supervisor from before this change does not start on the upgraded database: it refuses it as having a newer
+schema version than it understands, and that machine stays unreachable until a build at least as new runs there again.
+That refusal is the point: such a supervisor would treat a session whose agent's terminal runs outside tmux as having
+ended, record it as exited, and leave the process keeping that terminal running with nothing to end it. An older helm
+from v0.31.0 on refuses to Update a host already on this change, naming the host's newer schema, rather than install a
+supervisor that would refuse it. Going back otherwise needs a copy of the state directory taken before the upgrade,
+restored together with the older version, losing whatever changed after the copy.
+
 Until upgrade epochs exist (TODO.md), no change may break the upgrade path of the desktop app, the helm, or the
 supervisor. An installation of any stable release from v0.23.0 on, the first one the in-app updater and get.farhelm.io
 serve, must update to the new release through its normal path and come up on its existing state, and the new helm must
