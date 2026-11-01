@@ -1668,6 +1668,18 @@ is two or more letters, which keeps version and directory text such as `v1.2/` o
 not judging scheme-less IP text. The warning shows the link's text with Unicode format characters (bidi controls,
 zero-width characters) as visible escapes, because the terminal stores them unapplied and HTML would apply them.
 
+## Terminal host
+
+`crates/terminal-host/` is a tiny long-lived process that owns one pty and the program in it, journals the program's
+output in memory, and serves the journal, input and resizes to one client over a unix socket. Its own `SPEC.md` is the
+contract; this file stays authoritative for how Farhelm uses it. It is deliberately self-contained (no dependency on any
+other Farhelm crate, no Farhelm concepts in its code, `libc` its only runtime dependency) because running hosts outlive
+every update: the protocol only grows, and every client release must keep working with every host ever shipped (its
+"Change policy"). It ships inside the `farhelm` binary as `farhelm internal terminal-host`, which takes no version lock
+(a host lives for weeks and must keep neither pruning nor uninstall waiting) and runs before anything starts a thread,
+since the host forks. Nothing starts hosts yet; the supervisor's use of them, and the terminal kinds, come with the
+switch that turns them on.
+
 ## Terminal substrate: private tmux server
 
 Each supervisor runs a dedicated tmux server on a private socket (`~/.local/state/farhelm/tmux.sock`) with a locked-down

@@ -98,6 +98,11 @@ are running, and never has to reap a long-lived process:
    there is no socket yet; once they are, the start checks for one at fixed points up to its last step before readiness:
    one seen at a check fails the start (a child already started is killed and reaped first), and one that arrives after
    the last check lets the start be reported and then ends the host at once (see "Ending"), removing the socket.
+4. When the second stage cannot tell the first stage it is ready, because the first stage is gone (killed by a starter
+   that gave up waiting, say), the start fails the same way: the child is killed and reaped, the socket removed, and the
+   second stage exits. Its starter was not told that the host started, so a host that ran on would serve a terminal
+   nobody knows about. Once the report is written the host runs, even if the first stage dies before it exits: a starter
+   that sees the first stage killed by a signal cannot tell which happened, and ends whatever answers at the socket.
 
 The socket path must not exist; the host never removes or replaces an existing file there. Its parent directory is the
 caller's to create and protect.
