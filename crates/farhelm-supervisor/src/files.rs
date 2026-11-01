@@ -25,13 +25,16 @@
 //! guarantee — without it, a crash right after `rename` can still lose the
 //! directory-entry update on some filesystems/mount options, silently
 //! reverting the destination to its pre-rename content (or absence) after
-//! reboot. This tier exists for exactly one file class today: the launch
+//! reboot. This tier exists for the launch
 //! shim's exec-failure sentinel (`launch/<id>.status`, `crate::launch`
 //! module). Losing it flips a session's later classification from
 //! **error** to **exited** — the difference between "your invocation is
 //! broken" and "your agent ran and finished" (PLAN_M3.md item 3) — so it
 //! must survive not just a supervisor crash but a full host reboot with
 //! the same fidelity SQLite gives the rest of the session's metadata.
+//! The desktop app's record of the supervisor it started
+//! (`crate::managed_supervisor`) uses this tier too: a record lost to a
+//! crash would leave the app treating its own supervisor as foreign.
 //!
 //! **Best-effort atomic** ([`overwrite_private_file_sync`]). Write a fresh 0600
 //! temp file, `fsync` it, `rename` it over the destination; no fsync of
@@ -441,7 +444,8 @@ fn write_staged(path: &Path, bytes: &[u8], seam: &dyn FaultSeam, tier: Tier) -> 
 /// Durability-bearing write: temp file, `fsync` the file, REPLACING
 /// rename, `fsync` the parent directory. See the module docs for which
 /// file class this is for (today: the launch shim's exec-failure
-/// sentinel) and why it alone pays for both fsyncs.
+/// sentinel, and the desktop app's record of the supervisor it started,
+/// `managed_supervisor`) and why it alone pays for both fsyncs.
 ///
 /// Synchronous and callable with no tokio runtime present — load-bearing,
 /// not incidental: the launch shim (`launch::exec_launch_spec`) runs
@@ -449,8 +453,10 @@ fn write_staged(path: &Path, bytes: &[u8], seam: &dyn FaultSeam, tier: Tier) -> 
 /// runtime (`main.rs` never builds one for `internal launch`, to avoid
 /// paying for a runtime the successful-`exec` path replaces entirely), so
 /// this function must work as plain, blocking I/O. There is no async
-/// wrapper: nothing on the supervisor side writes a durability-bearing
-/// file today (only the shim does), so one would have no caller — add it
+/// wrapper: nothing on the supervisor's async side writes a
+/// durability-bearing file today (the shim and the desktop app's
+/// supervisor record are both written synchronously), so one would have
+/// no caller — add it
 /// if and when one exists, per the same reasoning that removed the
 /// asymmetric one this module used to carry.
 pub fn write_durable_sync(path: &Path, bytes: &[u8], seam: &dyn FaultSeam) -> io::Result<()> {

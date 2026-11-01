@@ -52,6 +52,7 @@ pub mod files;
 /// Conversation reports a hook drops as files for the supervisor to apply.
 pub mod hook_report;
 pub mod launch;
+pub mod managed_supervisor;
 mod pi_extension;
 mod repo_cache;
 pub mod repository_discovery;

@@ -28,16 +28,18 @@
 //! - setup's unit-directory flock, taken through
 //!   `setup::lock_for_selected_services` (Linux).
 //! - [`RuntimeLocks`] (macOS): the supervisor's and helm's state-directory
-//!   flocks. The desktop app's managed supervisor and embedded helm hold
-//!   them, so an open app refuses the uninstall, and an app started during
-//!   it cannot serve, which also rules out creating a session. A starting
-//!   supervisor waits a while for a held lock (a Farhelm that was just quit
-//!   may still be shutting down), so it can outlast the removal; it then
-//!   refuses because its own program is gone, and the app still does not
-//!   open. On Linux
-//!   uninstall stops setup's services itself, after which only a process
-//!   the user started by hand could hold these locks, and stopping those is
-//!   already the operator's job (SPEC.md, "Operator prerequisites").
+//!   flocks. The desktop app's embedded helm holds its lock while the app is
+//!   open, so an open app refuses the uninstall, and an app started during
+//!   it cannot serve, which also rules out creating a session. The app's
+//!   supervisor can outlive the app; uninstall stops that one itself
+//!   between taking the helm locks and the supervisor locks (see
+//!   `RuntimeLocks`). A starting supervisor waits a while for a held lock
+//!   (a Farhelm that was just quit may still be shutting down), so it can
+//!   outlast the removal; it then refuses because its own program is gone,
+//!   and the app still does not open. On Linux uninstall stops setup's
+//!   services itself, after which only a process the user started by hand
+//!   could hold these locks, and stopping those is already the operator's
+//!   job (SPEC.md, "Operator prerequisites").
 //!
 //! A refusal names the lock and what holding it usually means, never as
 //! proof that a process is running: a lock directory can be left by a
@@ -205,12 +207,31 @@ impl InstallationLocks {
 /// own mode for its lock) so a supervisor or helm starting meanwhile finds
 /// it held. A missing state directory is created with the supervisor's
 /// private 0700 rule for the same reason; uninstall otherwise retains it.
+///
+/// Taken in two steps because the desktop app's supervisor outlives the app:
+/// first the helm locks ([`Self::acquire_helm`]), which an open app holds, so
+/// uninstall refuses before it stops anything; then, after uninstall has
+/// stopped the app's own supervisor, the supervisor locks
+/// ([`Self::lock_supervisors`]).
 pub(super) struct RuntimeLocks {
+    /// The resolved state directories, each listed once.
+    resolved: Vec<PathBuf>,
     _files: Vec<fs::File>,
 }
 
 impl RuntimeLocks {
-    /// Take both locks in each of `state_dirs`, or refuse if any is held.
+    /// Take both locks in each of `state_dirs`, or refuse if any is held:
+    /// the two steps at once, for the tests of the locks themselves.
+    #[cfg(test)]
+    pub(super) fn acquire(state_dirs: &[PathBuf]) -> Result<Self> {
+        let mut locks = Self::acquire_helm(state_dirs)?;
+        locks.lock_supervisors()?;
+        Ok(locks)
+    }
+
+    /// Take the helm lock in each of `state_dirs`, or refuse if any is held
+    /// (an open desktop app holds its helm's).
+    ///
     /// A missing directory is created privately before taking its locks:
     /// otherwise a first desktop launch could create it after uninstall
     /// skipped it and start while the app is being removed.
@@ -219,7 +240,7 @@ impl RuntimeLocks {
     /// directory spelled two ways (a symlinked `~/.local/state`, macOS's
     /// `/var` alias) would otherwise be locked twice, and a second flock on
     /// a new descriptor conflicts with this process's own first one.
-    pub(super) fn acquire(state_dirs: &[PathBuf]) -> Result<Self> {
+    pub(super) fn acquire_helm(state_dirs: &[PathBuf]) -> Result<Self> {
         use std::os::unix::fs::PermissionsExt as _;
 
         let mut resolved: Vec<PathBuf> = Vec::new();
@@ -262,39 +283,57 @@ impl RuntimeLocks {
         }
         let mut files = Vec::new();
         for state_dir in &resolved {
-            files.extend(Self::acquire_one(state_dir)?);
+            files.push(Self::acquire_one(state_dir, HELM_LOCK)?);
         }
-        Ok(Self { _files: files })
+        Ok(Self {
+            resolved,
+            _files: files,
+        })
     }
 
-    fn acquire_one(state_dir: &Path) -> Result<Vec<fs::File>> {
+    /// Also take the supervisor lock in every directory, or refuse if one is
+    /// held. Called once uninstall has stopped the desktop app's own
+    /// supervisor, so a holder now is a supervisor the app did not start (or
+    /// one started after the user confirmed).
+    pub(super) fn lock_supervisors(&mut self) -> Result<()> {
+        for state_dir in &self.resolved {
+            let file = Self::acquire_one(state_dir, SUPERVISOR_LOCK)?;
+            self._files.push(file);
+        }
+        Ok(())
+    }
+
+    fn acquire_one(state_dir: &Path, name: &str) -> Result<fs::File> {
         use std::os::unix::fs::OpenOptionsExt as _;
-        let mut files = Vec::new();
-        for name in [SUPERVISOR_LOCK, HELM_LOCK] {
-            let path = state_dir.join(name);
-            let file = fs::OpenOptions::new()
-                .create(true)
-                .truncate(false)
-                .write(true)
-                .mode(0o600)
-                .open(&path)
-                .with_context(|| format!("opening {}", super::path_text(&path)))?;
-            match file.try_lock() {
-                Ok(()) => files.push(file),
-                Err(fs::TryLockError::WouldBlock) => bail!(
-                    "{} is held by another process (usually a Farhelm supervisor or helm using {}, \
-                     such as the desktop app's); quit Farhelm Desktop and stop any Farhelm processes \
-                     you started, then retry uninstall",
-                    super::path_text(&path),
-                    super::path_text(state_dir)
-                ),
-                Err(fs::TryLockError::Error(error)) => {
-                    return Err(error)
-                        .with_context(|| format!("locking {}", super::path_text(&path)));
-                }
+        let path = state_dir.join(name);
+        let file = fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .mode(0o600)
+            .open(&path)
+            .with_context(|| format!("opening {}", super::path_text(&path)))?;
+        match file.try_lock() {
+            Ok(()) => Ok(file),
+            Err(fs::TryLockError::WouldBlock) if name == HELM_LOCK => bail!(
+                "{} is held by another process (usually the Farhelm Desktop app or a helm using \
+                 {}); quit Farhelm Desktop and stop any Farhelm processes you started, then retry \
+                 uninstall",
+                super::path_text(&path),
+                super::path_text(state_dir)
+            ),
+            Err(fs::TryLockError::WouldBlock) => bail!(
+                "{} is held by another process, usually a Farhelm supervisor using {} that \
+                 uninstall did not stop (uninstall stops only one this installation's app \
+                 recorded starting); `lsof {}` shows which. Stop it, then retry uninstall",
+                super::path_text(&path),
+                super::path_text(state_dir),
+                super::path_text(&path)
+            ),
+            Err(fs::TryLockError::Error(error)) => {
+                Err(error).with_context(|| format!("locking {}", super::path_text(&path)))
             }
         }
-        Ok(files)
     }
 }
 
@@ -502,8 +541,13 @@ mod tests {
                 .err()
                 .expect("a held lock refuses")
                 .to_string();
+            let remedy = if name == HELM_LOCK {
+                "quit Farhelm Desktop"
+            } else {
+                "lsof"
+            };
             assert!(
-                refusal.contains(name) && refusal.contains("quit Farhelm Desktop"),
+                refusal.contains(name) && refusal.contains(remedy),
                 "{refusal}"
             );
             drop(holder);
