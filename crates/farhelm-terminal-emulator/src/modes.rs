@@ -26,12 +26,14 @@ pub enum MouseReporting {
     Motion,
 }
 
-/// How mouse events are encoded when reported. The modes exclude each other:
-/// the one set last wins (alacritty's rule).
+/// How mouse events are encoded when reported: SGR while the program has
+/// mode 1006 set, else UTF-8 coordinates while it has 1005 set, else the
+/// default encoding.
 ///
-/// tmux keeps 1005 and 1006 as separate flags and prefers SGR when both are
-/// set, so a program that sets 1006 and then 1005 gets SGR from tmux and
-/// UTF-8 here. The browser terminal today does not implement 1005 at all.
+/// 1005 and 1006 are separate modes a program can hold at once (the
+/// vendored patch, as in tmux), and SGR wins whichever was set first, as in
+/// tmux and the browser terminal today (which does not implement 1005 at
+/// all). xterm, and upstream alacritty, keep only the one set last.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MouseEncoding {
     /// The original X10-style encoding, `CSI M` and three bytes, which cannot

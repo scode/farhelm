@@ -24,6 +24,10 @@ test-seams = []
 anyhow.workspace = true
 base64.workspace = true
 farhelm-proto.workspace = true
+# The emulator of each terminal that runs in a terminal host. For now only
+# `grid_input` uses it, to encode viewer input from the program's modes as the
+# emulator tracks them.
+farhelm-terminal-emulator.workspace = true
 getrandom.workspace = true
 libc.workspace = true
 # Conversation report folders are watched (inotify on Linux, FSEvents on

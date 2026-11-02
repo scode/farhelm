@@ -445,10 +445,10 @@ index 484eabe..bcc1ff0 100644
              Arc::make_mut(extra).hyperlink = hyperlink;
          }
 diff --git a/alacritty_terminal/src/term/mod.rs b/alacritty_terminal/src/term/mod.rs
-index 8eb6797..9834fb0 100644
+index 8eb6797..a26597d 100644
 --- a/alacritty_terminal/src/term/mod.rs
 +++ b/alacritty_terminal/src/term/mod.rs
-@@ -1,3 +1,14 @@
+@@ -1,3 +1,15 @@
 +// Modified for Farhelm: adds snapshot accessors to `Term`, caps hyperlink and
 +// title lengths, reuses the active hyperlink when an identical one is sent
 +// again, drops a wide character a one-column grid cannot hold, raises the
@@ -456,14 +456,15 @@ index 8eb6797..9834fb0 100644
 +// line clear the first and `CSI J` with a wrap pending keep the last column,
 +// stops relative vertical cursor moves at the scroll margins, keeps CHA on the
 +// cursor's line in origin mode, homes the cursor when origin mode is reset,
-+// and bounds the storage one terminal's cell extras (combining characters,
++// keeps the UTF-8 (1005) and SGR (1006) mouse encodings independent, and
++// bounds the storage one terminal's cell extras (combining characters,
 +// underline colors, hyperlinks) take. See vendor/README.md in the Farhelm
 +// repository.
 +
  //! Exports the `Term` type which is a high-level API for the Grid.
  
  use std::ops::{Index, IndexMut, Range};
-@@ -17,7 +28,7 @@ use crate::event::{Event, EventListener};
+@@ -17,7 +29,7 @@ use crate::event::{Event, EventListener};
  use crate::grid::{Dimensions, Grid, GridIterator, Scroll};
  use crate::index::{self, Boundary, Column, Direction, Line, Point, Side};
  use crate::selection::{Selection, SelectionRange, SelectionType};
@@ -472,7 +473,7 @@ index 8eb6797..9834fb0 100644
  use crate::term::color::Colors;
  use crate::vi_mode::{ViModeCursor, ViMotion};
  use crate::vte::ansi::{
-@@ -41,6 +52,63 @@ pub const MIN_SCREEN_LINES: usize = 1;
+@@ -41,6 +53,63 @@ pub const MIN_SCREEN_LINES: usize = 1;
  /// Max size of the window title stack.
  const TITLE_STACK_MAX_DEPTH: usize = 4096;
  
@@ -536,7 +537,7 @@ index 8eb6797..9834fb0 100644
  /// Default semantic escape characters.
  pub const SEMANTIC_ESCAPE_CHARS: &str = ",│`|:\"' ()[]{}<>\t";
  
-@@ -327,6 +395,10 @@ pub struct Term<T> {
+@@ -327,6 +396,10 @@ pub struct Term<T> {
  
      /// Config directly for the terminal.
      config: Config,
@@ -547,7 +548,7 @@ index 8eb6797..9834fb0 100644
  }
  
  /// Configuration options for the [`Term`].
-@@ -441,6 +513,7 @@ impl<T> Term<T> {
+@@ -441,6 +514,7 @@ impl<T> Term<T> {
              selection: Default::default(),
              title: Default::default(),
              mode: Default::default(),
@@ -555,7 +556,7 @@ index 8eb6797..9834fb0 100644
          }
      }
  
-@@ -953,6 +1026,67 @@ impl<T> Term<T> {
+@@ -953,6 +1027,67 @@ impl<T> Term<T> {
          &self.colors
      }
  
@@ -623,7 +624,7 @@ index 8eb6797..9834fb0 100644
      /// Insert a linebreak at the current cursor position.
      #[inline]
      fn wrapline(&mut self)
-@@ -998,7 +1132,9 @@ impl<T> Term<T> {
+@@ -998,7 +1133,9 @@ impl<T> Term<T> {
              if wide && point.column < self.last_column() {
                  self.grid[point.line][point.column + 1].flags.remove(Flags::WIDE_CHAR_SPACER);
              } else if point.column > 0 {
@@ -634,7 +635,7 @@ index 8eb6797..9834fb0 100644
              }
  
              // Remove leading spacers.
-@@ -1017,6 +1153,36 @@ impl<T> Term<T> {
+@@ -1017,6 +1154,36 @@ impl<T> Term<T> {
          cursor_cell.extra = extra;
      }
  
@@ -671,7 +672,7 @@ index 8eb6797..9834fb0 100644
      #[inline]
      fn damage_cursor(&mut self) {
          // The normal cursor coordinates are always in viewport.
-@@ -1080,7 +1246,17 @@ impl<T: EventListener> Handler for Term<T> {
+@@ -1080,7 +1247,17 @@ impl<T: EventListener> Handler for Term<T> {
                  column.0 = column.saturating_sub(1);
              }
  
@@ -690,7 +691,7 @@ index 8eb6797..9834fb0 100644
              return;
          }
  
-@@ -1112,8 +1288,12 @@ impl<T: EventListener> Handler for Term<T> {
+@@ -1112,8 +1289,12 @@ impl<T: EventListener> Handler for Term<T> {
                      self.grid.cursor.template.flags.remove(Flags::LEADING_WIDE_CHAR_SPACER);
                      self.wrapline();
                  } else {
@@ -705,7 +706,7 @@ index 8eb6797..9834fb0 100644
                      return;
                  }
              }
-@@ -1130,9 +1310,13 @@ impl<T: EventListener> Handler for Term<T> {
+@@ -1130,9 +1311,13 @@ impl<T: EventListener> Handler for Term<T> {
              self.grid.cursor.template.flags.remove(Flags::WIDE_CHAR_SPACER);
          }
  
@@ -720,7 +721,7 @@ index 8eb6797..9834fb0 100644
              self.grid.cursor.input_needs_wrap = true;
          }
      }
-@@ -1180,7 +1364,9 @@ impl<T: EventListener> Handler for Term<T> {
+@@ -1180,7 +1365,9 @@ impl<T: EventListener> Handler for Term<T> {
      #[inline]
      fn goto_col(&mut self, col: usize) {
          trace!("Going to column: {col}");
@@ -731,7 +732,7 @@ index 8eb6797..9834fb0 100644
      }
  
      #[inline]
-@@ -1215,18 +1401,18 @@ impl<T: EventListener> Handler for Term<T> {
+@@ -1215,18 +1402,18 @@ impl<T: EventListener> Handler for Term<T> {
      fn move_up(&mut self, lines: usize) {
          trace!("Moving up: {lines}");
  
@@ -754,7 +755,7 @@ index 8eb6797..9834fb0 100644
      }
  
      #[inline]
-@@ -1349,16 +1535,16 @@ impl<T: EventListener> Handler for Term<T> {
+@@ -1349,16 +1536,16 @@ impl<T: EventListener> Handler for Term<T> {
      fn move_down_and_cr(&mut self, lines: usize) {
          trace!("Moving down and cr: {lines}");
  
@@ -775,7 +776,7 @@ index 8eb6797..9834fb0 100644
      }
  
      /// Insert tab at cursor position.
-@@ -1757,8 +1943,10 @@ impl<T: EventListener> Handler for Term<T> {
+@@ -1757,8 +1944,10 @@ impl<T: EventListener> Handler for Term<T> {
              ansi::ClearMode::Above => {
                  let cursor = self.grid.cursor.point;
  
@@ -788,7 +789,7 @@ index 8eb6797..9834fb0 100644
                      // Fully clear all lines before the current line.
                      self.grid.reset_region(..cursor.line);
                  }
-@@ -1774,7 +1962,15 @@ impl<T: EventListener> Handler for Term<T> {
+@@ -1774,7 +1963,15 @@ impl<T: EventListener> Handler for Term<T> {
              },
              ansi::ClearMode::Below => {
                  let cursor = self.grid.cursor.point;
@@ -805,7 +806,7 @@ index 8eb6797..9834fb0 100644
                      *cell = bg.into();
                  }
  
-@@ -1873,7 +2069,26 @@ impl<T: EventListener> Handler for Term<T> {
+@@ -1873,7 +2070,26 @@ impl<T: EventListener> Handler for Term<T> {
      #[inline]
      fn set_hyperlink(&mut self, hyperlink: Option<Hyperlink>) {
          trace!("Setting hyperlink: {hyperlink:?}");
@@ -833,7 +834,7 @@ index 8eb6797..9834fb0 100644
      }
  
      /// Set a terminal attribute.
-@@ -1881,15 +2096,19 @@ impl<T: EventListener> Handler for Term<T> {
+@@ -1881,15 +2097,19 @@ impl<T: EventListener> Handler for Term<T> {
      fn terminal_attribute(&mut self, attr: Attr) {
          trace!("Setting attribute: {attr:?}");
          let cursor = &mut self.grid.cursor;
@@ -855,7 +856,30 @@ index 8eb6797..9834fb0 100644
              },
              Attr::Reverse => cursor.template.flags.insert(Flags::INVERSE),
              Attr::CancelReverse => cursor.template.flags.remove(Flags::INVERSE),
-@@ -2031,7 +2250,12 @@ impl<T: EventListener> Handler for Term<T> {
+@@ -1968,15 +2188,13 @@ impl<T: EventListener> Handler for Term<T> {
+             },
+             NamedPrivateMode::ReportFocusInOut => self.mode.insert(TermMode::FOCUS_IN_OUT),
+             NamedPrivateMode::BracketedPaste => self.mode.insert(TermMode::BRACKETED_PASTE),
+-            // Mouse encodings are mutually exclusive.
+-            NamedPrivateMode::SgrMouse => {
+-                self.mode.remove(TermMode::UTF8_MOUSE);
+-                self.mode.insert(TermMode::SGR_MOUSE);
+-            },
+-            NamedPrivateMode::Utf8Mouse => {
+-                self.mode.remove(TermMode::SGR_MOUSE);
+-                self.mode.insert(TermMode::UTF8_MOUSE);
+-            },
++            // Farhelm patch: 1005 and 1006 are separate modes, as in tmux, so
++            // setting one does not reset the other, and an encoder that sees
++            // both uses SGR (1006), as tmux does (xterm.js ignores 1005, so
++            // 1006 stays in force there). xterm, which upstream follows,
++            // keeps only the last one set.
++            NamedPrivateMode::SgrMouse => self.mode.insert(TermMode::SGR_MOUSE),
++            NamedPrivateMode::Utf8Mouse => self.mode.insert(TermMode::UTF8_MOUSE),
+             NamedPrivateMode::AlternateScroll => self.mode.insert(TermMode::ALTERNATE_SCROLL),
+             NamedPrivateMode::LineWrap => self.mode.insert(TermMode::LINE_WRAP),
+             NamedPrivateMode::Origin => {
+@@ -2031,7 +2249,12 @@ impl<T: EventListener> Handler for Term<T> {
              NamedPrivateMode::Utf8Mouse => self.mode.remove(TermMode::UTF8_MOUSE),
              NamedPrivateMode::AlternateScroll => self.mode.remove(TermMode::ALTERNATE_SCROLL),
              NamedPrivateMode::LineWrap => self.mode.remove(TermMode::LINE_WRAP),
@@ -869,7 +893,7 @@ index 8eb6797..9834fb0 100644
              NamedPrivateMode::ColumnMode => self.deccolm(),
              NamedPrivateMode::BlinkingCursor => {
                  let style = self.cursor_style.get_or_insert(self.config.default_cursor_style);
-@@ -2221,6 +2445,20 @@ impl<T: EventListener> Handler for Term<T> {
+@@ -2221,6 +2444,20 @@ impl<T: EventListener> Handler for Term<T> {
      fn set_title(&mut self, title: Option<String>) {
          trace!("Setting title to '{title:?}'");
  
@@ -890,7 +914,7 @@ index 8eb6797..9834fb0 100644
          self.title.clone_from(&title);
  
          let title_event = match title {
-@@ -3299,4 +3537,605 @@ mod tests {
+@@ -3299,4 +3536,629 @@ mod tests {
          assert_eq!(version_number("1.2.3-dev"), 1_02_03);
          assert_eq!(version_number("999.99.99"), 9_99_99_99);
      }
@@ -1142,6 +1166,30 @@ index 8eb6797..9834fb0 100644
 +        let term = fed_term(4, 6, 0, b"\x1b[2;4r\x1b[?6h\x1b[2;2H\x1b[?6l");
 +        let point = term.grid().cursor.point;
 +        assert_eq!((point.line, point.column), (Line(0), Column(0)));
++    }
++
++    /// Spec: setting the UTF-8 (1005) and SGR (1006) mouse encodings, in
++    /// either order, leaves both set, and resetting one leaves the other.
++    ///
++    /// Why: tmux keeps the two separately and encodes with SGR whenever 1006
++    /// is set, and xterm.js ignores 1005, so 1006 stays in force there too;
++    /// upstream's "set one, reset the other" gave a program that sets 1006
++    /// and then 1005 UTF-8 coordinates instead.
++    #[test]
++    fn utf8_and_sgr_mouse_encodings_are_independent() {
++        let both = TermMode::UTF8_MOUSE | TermMode::SGR_MOUSE;
++        let sets: [&[u8]; 3] =
++            [b"\x1b[?1006h\x1b[?1005h", b"\x1b[?1005h\x1b[?1006h", b"\x1b[?1005;1006h"];
++        for bytes in sets {
++            let term = fed_term(4, 2, 0, bytes);
++            assert!(term.mode().contains(both), "after {bytes:?}");
++        }
++        let term = fed_term(4, 2, 0, b"\x1b[?1005h\x1b[?1006h\x1b[?1005l");
++        assert!(term.mode().contains(TermMode::SGR_MOUSE));
++        assert!(!term.mode().contains(TermMode::UTF8_MOUSE));
++        let term = fed_term(4, 2, 0, b"\x1b[?1005h\x1b[?1006h\x1b[?1006l");
++        assert!(term.mode().contains(TermMode::UTF8_MOUSE));
++        assert!(!term.mode().contains(TermMode::SGR_MOUSE));
 +    }
 +
 +    /// Spec: a cell keeps the first `MAX_ZEROWIDTH_CHARS` zero-width

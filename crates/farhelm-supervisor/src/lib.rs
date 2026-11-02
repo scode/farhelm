@@ -51,6 +51,9 @@ pub mod db;
 #[cfg(test)]
 mod emulator_parity;
 pub mod files;
+/// Turning a grid viewer's input messages into the bytes a program in a
+/// terminal host reads, from the program's modes.
+pub mod grid_input;
 /// Conversation reports a hook drops as files for the supervisor to apply.
 pub mod hook_report;
 pub mod hosts;
