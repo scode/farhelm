@@ -1667,7 +1667,45 @@ impl WsTestClient {
         addr: std::net::SocketAddr,
         path: &str,
     ) -> Result<WsTestClient, u16> {
-        let mut stream = tokio::net::TcpStream::connect(addr).await.expect("connect");
+        let stream = tokio::net::TcpStream::connect(addr).await.expect("connect");
+        WsTestClient::upgrade(stream, addr, path).await
+    }
+
+    /// [`Self::connect`], over a socket whose receive buffer is asked to be
+    /// `bytes` before it connects.
+    ///
+    /// For the tests whose premise is a browser that stopped reading with
+    /// the server's sends genuinely blocked: a loopback socket's receive
+    /// buffer otherwise grows to megabytes, which would hide how much the
+    /// server has queued behind it. The kernel rounds the request up to its
+    /// own minimum, so this bounds the buffer rather than setting it.
+    pub(crate) async fn connect_with_receive_buffer(
+        addr: std::net::SocketAddr,
+        path: &str,
+        bytes: u32,
+    ) -> WsTestClient {
+        let socket = if addr.is_ipv4() {
+            tokio::net::TcpSocket::new_v4()
+        } else {
+            tokio::net::TcpSocket::new_v6()
+        }
+        .expect("socket");
+        socket
+            .set_recv_buffer_size(bytes)
+            .expect("set the receive buffer size");
+        let stream = socket.connect(addr).await.expect("connect");
+        WsTestClient::upgrade(stream, addr, path)
+            .await
+            .unwrap_or_else(|status| panic!("WebSocket upgrade refused with HTTP {status}"))
+    }
+
+    /// Send the upgrade request on `stream` and read the response up to the
+    /// end of its headers.
+    async fn upgrade(
+        mut stream: tokio::net::TcpStream,
+        addr: std::net::SocketAddr,
+        path: &str,
+    ) -> Result<WsTestClient, u16> {
         // A fixed key is fine: nothing here verifies the accept hash,
         // which exists to defend against caching proxies, not tests.
         let request = format!(
@@ -1737,6 +1775,29 @@ impl WsTestClient {
         // frame may close before this whole write lands, and that close IS
         // the behaviour under test.
         let _ = self.stream.write_all(&frame).await;
+    }
+
+    /// Send several complete masked client frames, as `(opcode, payload)`,
+    /// in one write.
+    ///
+    /// For the tests about what a server does with a message that arrives
+    /// together with the ones after it: written one at a time, the later
+    /// messages may or may not be there yet when the server reads the
+    /// first, and the test would depend on that race.
+    pub(crate) async fn send_frames(&mut self, frames: &[(u8, &[u8])]) {
+        let mut bytes = Vec::new();
+        for (opcode, payload) in frames {
+            bytes.extend(frame_header(true, *opcode, payload.len()));
+            bytes.extend(
+                payload
+                    .iter()
+                    .enumerate()
+                    .map(|(i, byte)| byte ^ MASK[i % 4]),
+            );
+        }
+        // Ignored as in `send_frame`: a server that refuses one of these may
+        // close before the whole write lands.
+        let _ = self.stream.write_all(&bytes).await;
     }
 
     /// Send only a frame's HEADER, declaring `declared` payload bytes that

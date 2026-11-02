@@ -2604,12 +2604,40 @@ Protocol 68 adds grid streams, the form in which terminals that run in terminal 
 supervisor interprets their output and sends the screen as rows of styled runs. `Attach` carries the client's `grid`
 capability and `Attached` the channel's stream kind (`bytes` or `grid`), which the helm passes to the browser as a
 `{"type":"stream","kind":...}` text frame before any data. A grid channel carries one JSON message per data frame in
-each direction, and the helm relays them without reading them. Until the helm can relay grid messages (they can be far
-larger than the terminal frames it admits today, and browser input must stay one message per frame), it never asks for
-grid streams, and it refuses a grid stream it did not ask for. The format is not permanent: it changes with ordinary
-protocol bumps, unlike the terminal host's protocol and snapshots. Its contract, bounds and golden fixtures are in
-`farhelm-proto` (`crates/farhelm-proto/src/grid.rs` and `crates/farhelm-proto/grid-fixtures/`). Nothing sends grid
-streams until terminal hosts are switched on.
+each direction, and the helm relays them without reading them. The helm passes the browser's `grid=1` on as `grid`, and
+refuses a grid stream it did not ask for. Its relay differs from a byte stream's in three ways
+(`crates/farhelm-helm/src/terminal.rs`, "Grid streams"): it admits frames up to the grid bound of 1 MiB (a long row with
+its links does not fit in 64 KiB), up to 4,096 of them, while holding no more bytes per attachment than a byte stream's
+worst case of 16 MiB; it forwards each browser message as one data frame, never cut into the 32 KiB input chunks, and
+ends the attachment on a message over the 64 KiB input bound rather than forward it; and it pauses the supervisor
+itself. The grid client sends no pause or resume, and the helm reads its supervisor connection without waiting on any
+one terminal, so without that a browser slower than the supervisor's link would fill its attachment's queue at the first
+large catch-up (a full scrollback can be thousands of messages) and be detached as stalled. Instead the helm sends
+`PauseOutput` once a grid attachment's queue holds 2 MiB or 512 messages, and `ResumeOutput` once it has drained to 1.5
+MiB and 384. A paused grid stream is sent nothing, history included, until the resume, then what it owes; it costs
+screen frames, never output.
+
+The supervisor ends an attachment that stays paused past its 60 second stall timeout, counted from the pause, which is
+what ends a browser that stopped reading, for both kinds. It also sets the slowest browser that still reads and is not
+ended: from the pause it must drain the 512 KiB between the marks plus whatever was already on its way (up to the
+supervisor's writer queue, 64 messages of about 32 KiB, and what the link holds) within the 60 seconds. That is about 47
+KB/s locally during a scrollback catch-up, the realistic case for a pause, since the sender then fills its writer queue;
+about 10 KB/s when little was in flight; and about 110 KB/s over ssh if its channel window and socket buffers hold about
+4 MiB more, a figure that moves with however much the link actually holds. The resume's own wait in the helm's shared
+writer queue, behind other input, uploads and control messages, comes out of the same 60 seconds. A byte stream's
+browser pauses at 4 MiB of unparsed output and resumes at 1 MiB against the same deadline, so it must parse at least 3
+MiB plus what was in flight (52 KB/s and up), and a byte stream whose browser is slow on the network is not paused at
+all: it overflows the helm's queue and is detached at once. Rearming the deadline while the browser keeps draining would
+remove the floor, but needs the helm to report progress and the supervisor to act on it, a protocol and supervisor
+change; the marks keep the floor low enough without it. The pause leaves 14 MiB of the budget for what arrives after it,
+plenty at the sender's 32 KiB packing. Rows too large for that packing go alone in messages of up to 1 MiB, and a writer
+queue full of them (output that makes huge rows) can exceed the budget; that ends the attachment as stalled and the
+browser shows it as any stall until the user reconnects. The budget stays the hard bound; per-attachment credits that
+would avoid it are not built.
+
+The format is not permanent: it changes with ordinary protocol bumps, unlike the terminal host's protocol and snapshots.
+Its contract, bounds and golden fixtures are in `farhelm-proto` (`crates/farhelm-proto/src/grid.rs` and
+`crates/farhelm-proto/grid-fixtures/`). Nothing sends grid streams until terminal hosts are switched on.
 
 `SessionInfo` carries a `last_activity_at` (unix seconds) beside `created_at`: the last time the supervisor observed
 that session's agent pane change. It was added WITHIN protocol version 11 rather than bumping it, per the running rule
