@@ -1,0 +1,10 @@
+{
+  "t": "state",
+  "mouse": "motion",
+  "focus": false,
+  "alt_screen": false,
+  "default_fg": 33554431,
+  "default_bg": 19409972,
+  "history_trimmed": true,
+  "exit": { "code": 1 }
+}

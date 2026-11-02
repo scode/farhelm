@@ -326,6 +326,7 @@ async fn cancelled_tcp_channel_cannot_become_a_file_or_terminal_stream() {
             terminal: TerminalSelector::Agent,
             lease: "".into(),
             if_unowned: false,
+            grid: false,
         },
     ] {
         let req_id = request.request_req_id().unwrap();

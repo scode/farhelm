@@ -285,7 +285,7 @@ declare_execution_classes! {
             rows: 24,
             terminal: farhelm_proto::TerminalSelector::Tab { id: c.tab_id.into() },
             lease: "conformance".into(),
-            if_unowned: false,
+            if_unowned: false, grid: false,
         };
         Detach => InlineControl => |c| ControlMsg::Detach { channel: c.channel };
         Resize => InlineControl => |c| ControlMsg::Resize {
