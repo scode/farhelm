@@ -17,18 +17,22 @@
 //! the runtime's connection) is dropped first.
 //!
 //! Sections: fixtures; output, queries and the child; the clock; adoption;
-//! resizes and shutdown.
+//! recovery (checkpoints, the replay policy, gaps); resizes and shutdown.
+
+mod terminal_host_support;
 
 use farhelm_supervisor::hosts::terminal::ManualClock;
 use farhelm_supervisor::hosts::{
-    AdoptError, Adoption, ChildSpec, Clock, HostRole, HostTag, HostTerminal, HostTerminalOptions,
-    InputFate, Liveness, LivenessNotifier, Unavailability, spawn_host,
+    AdoptError, Adoption, CheckpointOutcome, ChildSpec, Clock, HostConnection, HostRole, HostTag,
+    HostTerminal, HostTerminalOptions, InputFate, Liveness, LivenessNotifier, NotTaken,
+    Unavailability, spawn_host,
 };
 use farhelm_supervisor::tmux::{PaneProbe, PaneProcess};
+use farhelm_terminal_emulator::{ClipboardTarget, Notice};
 use std::future::Future;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
-use terminal_host::protocol::{ChildExit, MAX_SNAPSHOT, Size};
+use terminal_host::protocol::{ChildExit, MAX_SNAPSHOT, MIN_JOURNAL_CAP, Size};
 
 /// How long any single wait in these tests may take before it fails.
 const WAIT: Duration = Duration::from_secs(10);
@@ -449,6 +453,444 @@ async fn a_recovered_runtime_rebuilds_the_screen() {
     .await;
     assert!(second.screen_tail(4096).contains("first line"));
     assert_eq!(second.child_root(), Some(root));
+}
+
+// ---- Recovery ------------------------------------------------------------------------
+
+/// A FIFO named `name` in `dir`, for a child to wait on (`read go < FIFO`)
+/// until the test releases it, or to report on (`echo done > FIFO`).
+fn fifo(dir: &Path, name: &str) -> PathBuf {
+    use std::os::unix::ffi::OsStrExt as _;
+    let path = dir.join(name);
+    let c_path = std::ffi::CString::new(path.as_os_str().as_bytes()).unwrap();
+    // SAFETY: a valid NUL-terminated path.
+    assert_eq!(unsafe { libc::mkfifo(c_path.as_ptr(), 0o600) }, 0, "mkfifo");
+    path
+}
+
+/// Whether process `pid` still exists (a zombie included), for a FIFO
+/// helper's diagnostics.
+fn still_runs(pid: u32) -> &'static str {
+    // SAFETY: signal 0 only checks for the process.
+    if unsafe { libc::kill(pid as libc::pid_t, 0) } == 0 {
+        "still runs"
+    } else {
+        "has ended"
+    }
+}
+
+/// Let a child (process `child`) waiting on `fifo` go on, within `bound`.
+///
+/// Never blocks: the FIFO is opened for writing without blocking, which
+/// fails until a reader has it open, and is tried again every 20 ms. A
+/// blocking open would wait for the reader for good, and a blocked thread
+/// cannot be cancelled, so a child that never came would hang the test.
+async fn try_release(fifo: &Path, child: u32, bound: Duration) -> Result<(), String> {
+    use std::io::Write as _;
+    use std::os::unix::fs::OpenOptionsExt as _;
+    let deadline = Instant::now() + bound;
+    loop {
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(fifo)
+        {
+            Ok(mut writer) => {
+                return writer
+                    .write_all(b"go\n")
+                    .map_err(|error| format!("writing {}: {error}", fifo.display()));
+            }
+            Err(error) if error.raw_os_error() == Some(libc::ENXIO) => {}
+            Err(error) => return Err(format!("opening {}: {error}", fifo.display())),
+        }
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "nobody read {} within {bound:?}; the child {child} {}",
+                fifo.display(),
+                still_runs(child)
+            ));
+        }
+        // sleep-ok: polling interval for a FIFO's reader, bounded above.
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+/// Wait, within `bound`, for a child (process `child`) to report a line on
+/// `fifo`, and return it.
+///
+/// Never blocks: the FIFO is opened for reading without blocking, with a
+/// writer of the test's own held open beside it, so that a read finds no
+/// data yet rather than an end of file until the child writes; it is read
+/// every 20 ms.
+async fn try_reported(fifo: &Path, child: u32, bound: Duration) -> Result<String, String> {
+    use std::io::Read as _;
+    use std::os::unix::fs::OpenOptionsExt as _;
+    let open = |write: bool| {
+        std::fs::OpenOptions::new()
+            .read(!write)
+            .write(write)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(fifo)
+            .map_err(|error| format!("opening {}: {error}", fifo.display()))
+    };
+    let mut reader = open(false)?;
+    let _writer = open(true)?;
+    let deadline = Instant::now() + bound;
+    let mut text = Vec::new();
+    let mut chunk = [0u8; 256];
+    loop {
+        match reader.read(&mut chunk) {
+            Ok(n) => text.extend_from_slice(&chunk[..n]),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+            Err(error) => return Err(format!("reading {}: {error}", fifo.display())),
+        }
+        if text.contains(&b'\n') {
+            return Ok(String::from_utf8_lossy(&text).into_owned());
+        }
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "nothing was reported on {} within {bound:?}; the child {child} {}",
+                fifo.display(),
+                still_runs(child)
+            ));
+        }
+        // sleep-ok: polling interval for a FIFO's writer, bounded above.
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+/// [`try_release`] within [`WAIT`], failing the test if it gives up.
+async fn release(fifo: &Path, child: u32) {
+    try_release(fifo, child, WAIT)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+}
+
+/// [`try_reported`] within [`WAIT`], failing the test if it gives up.
+async fn reported(fifo: &Path, child: u32) {
+    try_reported(fifo, child, WAIT)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+}
+
+/// The FIFO helpers give up within their bound when nobody is at the
+/// other end, and say whether the child still runs.
+///
+/// Why: a fixture whose child died or never reached its FIFO must fail
+/// with a message within the test's bound, not hang the test process in
+/// an open that waits for a peer that never comes (a thread blocked there
+/// cannot be cancelled, and the test runtime would wait for it at exit).
+/// Spec: on FIFOs nobody opens, with this process named as the child,
+/// releasing and waiting for a report each fail within 300 ms bounds, the
+/// two within 2 s in all, saying the child still runs.
+#[farhelm_testtrace::test]
+async fn fifo_helpers_give_up_within_their_bound() {
+    let fifos = tempfile::tempdir().unwrap();
+    let started = Instant::now();
+    let bound = Duration::from_millis(300);
+    let own = std::process::id();
+    let release = try_release(&fifo(fifos.path(), "nobody reads"), own, bound).await;
+    let report = try_reported(&fifo(fifos.path(), "nobody writes"), own, bound).await;
+    for failed in [release.map(|()| String::new()), report] {
+        let error = failed.expect_err("nobody was at the other end");
+        assert!(error.contains("still runs"), "{error}");
+    }
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "{:?}",
+        started.elapsed()
+    );
+}
+
+/// Drop `terminal`, standing in for a supervisor that crashed: no
+/// checkpoint, no shutdown. Waits until its runtime has let go of the host,
+/// so that output after this reaches no supervisor.
+async fn crash(terminal: HostTerminal) {
+    let mut status = terminal.subscribe();
+    drop(terminal);
+    within("the runtime to end", async {
+        while status.changed().await.is_ok() {}
+    })
+    .await;
+}
+
+/// A child line that writes about 170 KB of plain lines, more than
+/// [`MIN_JOURNAL_CAP`].
+const FLOOD: &str = "i=0; while [ $i -lt 3000 ]; do \
+     printf 'filler line %05d xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\\n' $i; i=$((i+1)); done";
+
+/// A recovered runtime answers only the query no supervisor saw, and
+/// reports only live clipboard writes and bells: nothing from output in the
+/// snapshot, nothing from output an earlier supervisor was sent after it,
+/// and of output written while no supervisor was attached, the query only.
+///
+/// Why: this is the replay policy (D-7) end to end, the goal's three cases.
+/// A query answered twice arrives at the program as typed garbage, one
+/// never answered leaves it waiting, and a bell or clipboard write
+/// delivered again surprises the user. The program here reads each answer
+/// in turn, so a second answer to an old query would be what it reads
+/// next. Spec: a raw-mode child asks DA1 and writes the clipboard and a
+/// bell (answered live, then checkpointed and accepted), does the same
+/// again (after the checkpoint, answered live), and, once the first runtime
+/// has gone as if crashed, asks for status, writes the clipboard and a bell,
+/// and reports that it asked; the first runtime shows everything before
+/// that, and an `Info`-only connection (no `Read`) shows all 21 bytes of
+/// the query, clipboard write and bell journaled past `delivered_end`
+/// before the recovery adopts the host. The recovered runtime makes the child print `1b 5b 30 6e`, the
+/// status answer; once released, the child writes `four` to the clipboard
+/// and rings, and a notice subscription taken on the recovered runtime
+/// receives that clipboard write and bell first.
+#[farhelm_testtrace::test]
+async fn the_replay_answers_only_what_no_supervisor_saw() {
+    let fifos = tempfile::tempdir().unwrap();
+    let first = fifo(fifos.path(), "first");
+    let second = fifo(fifos.path(), "second");
+    let asked = fifo(fifos.path(), "asked");
+    let third = fifo(fifos.path(), "third");
+    let host = Host::start(shell(&format!(
+        "stty raw -echo; \
+         printf '\\033[c\\033]52;c;b25l\\007\\007'; \
+         a=$(dd bs=1 count=7 2>/dev/null | od -An -tx1); printf 'one:%s\\r\\n' \"$a\"; \
+         read go < '{first}'; \
+         printf '\\033[c\\033]52;c;dHdv\\007\\007'; \
+         b=$(dd bs=1 count=7 2>/dev/null | od -An -tx1); printf 'two:%s\\r\\nend-two' \"$b\"; \
+         read go < '{second}'; \
+         printf '\\033[5n\\033]52;c;dGhyZWU=\\007\\007'; echo asked > '{asked}'; \
+         c=$(dd bs=1 count=4 2>/dev/null | od -An -tx1); printf 'three:%s\\r\\n' \"$c\"; \
+         read go < '{third}'; \
+         printf '\\033]52;c;Zm91cg==\\007\\007'; \
+         exec /bin/sleep 600",
+        first = first.display(),
+        second = second.display(),
+        asked = asked.display(),
+        third = third.display(),
+    )))
+    .await;
+    let terminal = host
+        .adopt(Adoption::Fresh, HostTerminalOptions::default())
+        .await;
+    let child = terminal.status().child_pid;
+    wait_until(&terminal, "the first answer", screen_has("one: 1b 5b 3f")).await;
+    let deadline = tokio::time::Instant::now() + WAIT;
+    let checkpoint = terminal.checkpoint_now(deadline).await;
+    assert!(
+        matches!(checkpoint, Ok(CheckpointOutcome::Accepted(_))),
+        "{checkpoint:?}"
+    );
+    release(&first, child).await;
+    // `end-two` is the last thing the child writes before the downtime
+    // block: shown, it was delivered, so `delivered_end` is where that
+    // block starts.
+    wait_until(&terminal, "the second answer", screen_has("end-two")).await;
+    crash(terminal).await;
+
+    release(&second, child).await;
+    reported(&asked, child).await;
+    // The premise: the whole downtime block (the status query, 4 bytes;
+    // the clipboard write, 16; the bell, 1) is journaled, past what any
+    // client was sent. Less, and the rest of the block would reach the
+    // recovered runtime live, its clipboard write and bell with it.
+    const DOWNTIME_BLOCK: u64 = 4 + 16 + 1;
+    let socket = host.socket.as_path();
+    let journaled = within(
+        "the downtime block to be journaled",
+        terminal_host_support::poll_until(move || async move {
+            let mut probe = HostConnection::connect(socket)
+                .await
+                .expect("connecting to the host");
+            let info = probe.info().await.expect("the host's Info");
+            info.end >= info.delivered_end + DOWNTIME_BLOCK
+        }),
+    )
+    .await;
+    assert!(journaled, "the downtime block was never journaled");
+
+    let recovered = host
+        .adopt(Adoption::Recovered, HostTerminalOptions::default())
+        .await;
+    let mut notices = recovered.subscribe_notices();
+    wait_until(&recovered, "the third answer", screen_has("three:")).await;
+    assert!(
+        recovered.screen_tail(4096).contains("three: 1b 5b 30 6e"),
+        "{:?}",
+        recovered.screen_tail(4096)
+    );
+    // Only now the live writes: the subscription, taken after adoption,
+    // would miss notices from before it.
+    release(&third, child).await;
+    assert_eq!(
+        within("the live clipboard write", notices.recv()).await,
+        Some(Notice::Clipboard {
+            target: ClipboardTarget::Clipboard,
+            text: "four".into()
+        })
+    );
+    assert_eq!(
+        within("the live bell", notices.recv()).await,
+        Some(Notice::Bell)
+    );
+}
+
+/// Output that overflows the journal while no supervisor is attached
+/// leaves a gap that a recovery marks and repairs by asking the program to
+/// redraw, which brings back a mode set in the lost output.
+///
+/// Why: a supervisor can be away for long (a crash not restarted at once)
+/// while a program keeps writing; what the host trimmed is gone, and the
+/// screen and modes rebuilt without it are stale until the program draws
+/// again. Spec: a shell child with the smallest journal cap prints
+/// `before`, is checkpointed, and with the first runtime gone as if
+/// crashed, turns bracketed paste on, writes about 170 KB and prints
+/// `after the gap`; on `SIGWINCH` it turns bracketed paste on again and
+/// prints `winch`. A recovered runtime shows `after the gap`, marks the
+/// history trimmed, and asks for a redraw: `winch` appears, and bracketed
+/// paste is on.
+#[farhelm_testtrace::test]
+async fn an_overflow_while_away_is_marked_and_redrawn() {
+    let fifos = tempfile::tempdir().unwrap();
+    let go = fifo(fifos.path(), "go");
+    let done = fifo(fifos.path(), "done");
+    let mut child = shell(&format!(
+        "trap 'printf \"\\033[?2004hwinch\\n\"' WINCH; \
+         printf 'before\\n'; read go < '{go}'; \
+         printf '\\033[?2004h'; {FLOOD}; printf 'after the gap\\n'; \
+         echo done > '{done}'; \
+         while :; do sleep 1; done",
+        go = go.display(),
+        done = done.display(),
+    ));
+    child.journal_cap = MIN_JOURNAL_CAP;
+    let host = Host::start(child).await;
+    let terminal = host
+        .adopt(Adoption::Fresh, HostTerminalOptions::default())
+        .await;
+    let child = terminal.status().child_pid;
+    wait_until(&terminal, "before", screen_has("before")).await;
+    let deadline = tokio::time::Instant::now() + WAIT;
+    let checkpoint = terminal.checkpoint_now(deadline).await;
+    assert!(
+        matches!(checkpoint, Ok(CheckpointOutcome::Accepted(_))),
+        "{checkpoint:?}"
+    );
+    crash(terminal).await;
+
+    release(&go, child).await;
+    reported(&done, child).await;
+    let recovered = host
+        .adopt(Adoption::Recovered, HostTerminalOptions::default())
+        .await;
+    wait_until(&recovered, "the recovery", |terminal| {
+        terminal.status().caught_up
+    })
+    .await;
+    assert!(recovered.screen_tail(4096).contains("after the gap"));
+    assert!(recovered.status().history_trimmed);
+    wait_until(&recovered, "the redraw", screen_has("winch")).await;
+    assert!(recovered.modes().bracketed_paste);
+}
+
+/// A program left mid-sequence and silent gets no checkpoint, so output
+/// after it that overflows the journal while no supervisor is attached
+/// ends in a gap, from which a recovery carries on with a clean parser.
+///
+/// Why: a snapshot is only valid at a clean boundary, and a program can
+/// stay mid-sequence for good; the orderly stop must not wait for one, and
+/// the recovery must not inherit the unfinished sequence. Spec: a child
+/// prints `start` and an unfinished CSI and waits; an orderly checkpoint is
+/// refused as `NotClean`; with the runtime gone, the child finishes the
+/// sequence, writes about 170 KB with the smallest journal cap and prints
+/// `end of output`; a recovered runtime shows `end of output` and marks
+/// the history trimmed.
+#[farhelm_testtrace::test]
+async fn a_sequence_left_open_then_silence_ends_in_a_gap() {
+    let fifos = tempfile::tempdir().unwrap();
+    let go = fifo(fifos.path(), "go");
+    let done = fifo(fifos.path(), "done");
+    let mut child = shell(&format!(
+        "printf 'start\\n\\033['; read go < '{go}'; printf 'm'; {FLOOD}; \
+         printf 'end of output\\n'; echo done > '{done}'; exec /bin/sleep 600",
+        go = go.display(),
+        done = done.display(),
+    ));
+    child.journal_cap = MIN_JOURNAL_CAP;
+    let host = Host::start(child).await;
+    let terminal = host
+        .adopt(Adoption::Fresh, HostTerminalOptions::default())
+        .await;
+    let child = terminal.status().child_pid;
+    wait_until(&terminal, "the open sequence", |terminal| {
+        terminal.status().position.offset >= 8
+    })
+    .await;
+    let deadline = tokio::time::Instant::now() + WAIT;
+    assert_eq!(
+        terminal.checkpoint_now(deadline).await,
+        Ok(CheckpointOutcome::Kept(NotTaken::NotClean))
+    );
+    crash(terminal).await;
+
+    release(&go, child).await;
+    reported(&done, child).await;
+    let recovered = host
+        .adopt(Adoption::Recovered, HostTerminalOptions::default())
+        .await;
+    wait_until(&recovered, "the recovery", |terminal| {
+        terminal.status().caught_up
+    })
+    .await;
+    assert!(recovered.screen_tail(4096).contains("end of output"));
+    assert!(recovered.status().history_trimmed);
+}
+
+/// A single sequence longer than the journal cap, written while no
+/// supervisor is attached, ends in a gap that a recovery carries on from.
+///
+/// Why: no snapshot can be taken inside a sequence, and the host keeps no
+/// more than its cap, so a sequence longer than the cap always loses its
+/// start; the recovery must take what follows as ordinary output, with a
+/// clean parser, rather than wedge or wait for an end it never sees the
+/// start of. Spec: with the smallest journal cap, a child prints `start`
+/// and is checkpointed; with that runtime gone as if crashed, it prints a
+/// title of 200,000 bytes and `done`; a recovered runtime shows `done` and
+/// marks the history trimmed.
+#[farhelm_testtrace::test]
+async fn a_sequence_longer_than_the_cap_ends_in_a_gap() {
+    let fifos = tempfile::tempdir().unwrap();
+    let go = fifo(fifos.path(), "go");
+    let done = fifo(fifos.path(), "done");
+    let mut child = shell(&format!(
+        "printf 'start\\n'; read go < '{go}'; \
+         printf '\\033]2;'; head -c 200000 /dev/zero | tr '\\000' x; \
+         printf '\\007done\\n'; echo done > '{done}'; exec /bin/sleep 600",
+        go = go.display(),
+        done = done.display(),
+    ));
+    child.journal_cap = MIN_JOURNAL_CAP;
+    let host = Host::start(child).await;
+    let terminal = host
+        .adopt(Adoption::Fresh, HostTerminalOptions::default())
+        .await;
+    let child = terminal.status().child_pid;
+    wait_until(&terminal, "start", screen_has("start")).await;
+    let deadline = tokio::time::Instant::now() + WAIT;
+    let checkpoint = terminal.checkpoint_now(deadline).await;
+    assert!(
+        matches!(checkpoint, Ok(CheckpointOutcome::Accepted(_))),
+        "{checkpoint:?}"
+    );
+    crash(terminal).await;
+
+    release(&go, child).await;
+    reported(&done, child).await;
+    let recovered = host
+        .adopt(Adoption::Recovered, HostTerminalOptions::default())
+        .await;
+    wait_until(&recovered, "the recovery", |terminal| {
+        terminal.status().caught_up
+    })
+    .await;
+    assert!(recovered.screen_tail(4096).contains("done"));
+    assert!(recovered.status().history_trimmed);
 }
 
 // ---- Resizes and shutdown ----------------------------------------------------------

@@ -34,17 +34,15 @@ use alacritty_terminal::term::ClipboardType;
 /// The mode applies to the effects of the parsing a call does, not to the
 /// bytes it passes. The difference shows in a synchronized update: vte holds
 /// its bytes and interprets them all when it ends, so their effects follow
-/// the mode of the feed (or flush) that ends it. An update that straddles the
-/// end of the seen part is therefore handled as unseen, and a query inside its
-/// seen part is answered a second time. That is part of the delivery
-/// ambiguity a supervisor crash leaves anyway; tracking a mode per buffered
-/// byte would mean reaching into vte's buffer.
-///
-/// The same rule applies at the end of a recovery: an update opened during
-/// [`FeedMode::ReplayUnseen`] and ended by the first live feed would ring its
-/// bells and write its clipboard live, long after the fact. So recovery must
-/// end with [`crate::Emulator::flush_sync`] in [`FeedMode::ReplayUnseen`]
-/// before the first live feed.
+/// the mode of the feed (or flush) that ends it. Tracking a mode per buffered
+/// byte would mean reaching into vte's buffer, so a caller that wants the
+/// effects to follow the bytes ends an open update with
+/// [`crate::Emulator::flush_sync`] where the mode changes, in the mode of the
+/// bytes before that point. The supervisor's host terminal runtime does so
+/// at the end of the seen part and at the end of the replay, so that a query
+/// in an update open across the first is not answered a second time, and the
+/// bells and clipboard writes of one open across the second are not reported
+/// live long after the fact.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FeedMode {
     /// Normal operation: answers go to the program, and bells, clipboard

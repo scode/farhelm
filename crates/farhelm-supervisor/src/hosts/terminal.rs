@@ -24,25 +24,58 @@
 //!   makes the terminal unavailable rather than fight whoever keeps taking
 //!   it.
 //! - **Adoption** reads the host from the start (`Read(0,0)`): the stored
-//!   snapshot record, if any, restores the emulator, and the tail after it is
-//!   fed. Which of that is replay depends on how the runtime came to the host
-//!   ([`Adoption`]). A host this supervisor has just spawned has had no other
-//!   reader, so all of its output is live. For a host that ran before,
-//!   output journaled before adoption has already been seen by an earlier
-//!   supervisor, and is fed without side effects; [`REPLAYED`] is the one
-//!   place that decides what replay may do, and the replay policy that
-//!   answers queries the program asked while no supervisor was attached
-//!   (the plan's D-7, split at the host's `delivered_end`) replaces it. A replay ends
-//!   with any open synchronized update flushed, so that an update the replay
-//!   opened is not drawn by the first live feed with live side effects.
+//!   snapshot record, if any, restores the emulator (a restore has no side
+//!   effects), and the tail after it is fed. What of the tail is replay, and
+//!   what its side effects may do, is the replay policy (the plan's D-7,
+//!   `Replay`), driven by the host's `delivered_end`, the end of the output
+//!   it had written whole to some client:
+//!   - output below `delivered_end` was sent to an earlier supervisor, which
+//!     answered its queries and showed its bells and clipboard writes: it is
+//!     fed with no side effects at all ([`FeedMode::ReplaySeen`]);
+//!   - output from there to where the host's journal ended at adoption was
+//!     written while no supervisor was attached: its queries are answered,
+//!     since the program may still wait for them, and its bells and
+//!     clipboard writes are dropped, since acting on them now, possibly much
+//!     later, would surprise the user ([`FeedMode::ReplayUnseen`]);
+//!   - output after that is live.
+//!
+//!   A host this supervisor has just spawned ([`Adoption::Fresh`]) has had
+//!   no reader: everything it journaled is live, short of output a client
+//!   was already sent, which is seen as above.
+//!
+//!   Effects follow the bytes, not the moment they are interpreted. A
+//!   synchronized update holds its bytes until something ends it (its end
+//!   marker, its deadline, a resize, a gap, the child's exit), and the
+//!   emulator gives everything it interprets then the effects of that one
+//!   moment. So where the replay crosses `delivered_end`, any update still
+//!   open is drawn with seen effects: what the update held is seen output,
+//!   and a query in it is never answered twice. Any later flush during the
+//!   replay holds only unseen bytes, and the replay ends with any update
+//!   still open drawn with unseen effects, so that the first live feed does
+//!   not draw it with live ones. The final state is the same either way:
+//!   a flush only draws sooner what would be drawn later.
+//!
+//!   What is delivered stays ambiguous where a supervisor stops without
+//!   interpreting everything it was sent, and the policy accepts that
+//!   rather than add an acknowledgement to the host's protocol: output
+//!   written whole to a supervisor counts as seen even if it never
+//!   interpreted it, so a query in it goes unanswered (the program waits
+//!   out its own timeout); and an answer a supervisor had worked out but
+//!   not yet written is lost the same way. This applies to a crash, and to
+//!   an orderly stop too, for the output still in flight between the host
+//!   and the stopping runtime when it lets the connection go. Nothing is
+//!   ever answered twice, and nothing shown to the user twice: bells and
+//!   clipboard writes reach notice subscribers only from live output.
 //! - **The clock is the caller's** ([`Clock`]). The emulator never reads the
 //!   time itself: each feed is stamped with the clock's `now`, and the task
 //!   wakes at the open update's deadline on the same clock. Production uses
 //!   tokio's clock; tests advance a manual one instead of waiting 150 ms.
 //! - **Answers** to the program's queries are written to it as `Input`, in
-//!   the order it asked, within the client's input window. Notices for the
-//!   user (bells, clipboard writes, titles) are not delivered: a viewer's
-//!   grid stream will carry them, and reads the title from the emulator.
+//!   the order it asked, within the client's input window. **Notices** for
+//!   the user (bells, clipboard writes, title changes) from live output go
+//!   to every [`NoticeSubscription`] open at the time, one per viewer
+//!   attachment; the runtime never waits for a subscriber, and one that
+//!   falls behind loses the oldest. Nothing in the product subscribes yet.
 //! - **Input** from callers is sent in order with the answers, each `Input`
 //!   whole, and is never resent: input whose connection ended before the
 //!   host acknowledged it is reported as [`InputFate::Unknown`], since some
@@ -105,6 +138,70 @@
 //!   gives the same three classes with what their consumers read
 //!   ([`HostEvidence`]), as the interim seam until `PaneEvidence` itself
 //!   carries owned liveness facts.
+//! - **Checkpoints** (`checkpoint`): once enough output has passed since
+//!   the previous attempt (the plan's D-8, revised), the runtime snapshots
+//!   its emulator at the next clean boundary and hands the host the
+//!   snapshot, which lets the host drop the output before it. Enough is
+//!   four times the latest snapshot's size, at least 1 MiB and at most a
+//!   quarter of the host's journal cap ([`CheckpointPolicy`]): a terminal
+//!   pays for a snapshot in proportion to what it costs, and a connected
+//!   supervisor keeps the host's tail far below the cap. Due-ness is
+//!   checked after each live read (at its split candidate and at its end),
+//!   after a synchronized update's deadline draws it, and when the replay
+//!   finishes; there is no time trigger, so a quiet terminal costs nothing.
+//!   [`HostTerminal::checkpoint_now`] takes one on demand for an orderly
+//!   stop, within a deadline, at the current position if the emulator is
+//!   clean there, or else leaves the host its last accepted snapshot and
+//!   the tail after it. [`HostStatus::checkpoint`] is the latest the host
+//!   is known to hold.
+//!
+//!   Encoding takes long at full scrollback (in a release build, about
+//!   0.3 s for typical output, 1.6 to 1.9 s for 12,000 lines of 200
+//!   columns in true color, a 12.6 MB blob, and over 10 s for a scrollback
+//!   colored like an image), so it never runs on an async worker, and
+//!   neither does a restore (0.25 to 0.46 s). For an encode the runtime
+//!   moves the emulator out of its slot into a task on tokio's blocking
+//!   pool, leaving a view of what the views read (screen text, title,
+//!   modes, size, whether history was trimmed); the task hands the emulator
+//!   back. The views read whichever is in the slot, taking its lock only
+//!   briefly, so they never wait for an encode; [`HostTerminal::read`],
+//!   which needs the whole emulator, waits for it to come back. The
+//!   runtime waits for the encode before it does anything else, so input,
+//!   resizes and requests wait too, for as long as the encode takes.
+//!   Letting input through meanwhile was considered and decided against:
+//!   the host stops acting on a client's requests while more than 256 KiB
+//!   of its output waits unread (`crates/terminal-host/SPEC.md`, the
+//!   bounds on slow clients), so during a flood, the case where an encode
+//!   hurts, a Ctrl-C would not take effect sooner; reading the connection
+//!   while the emulator is away would overflow the client's bounded event
+//!   queue, or need a backlog of megabytes that still runs out; and the
+//!   echo of typed input cannot be drawn until the emulator is back. An
+//!   orderly stop's deadline bounds its wait for the encode; one that runs
+//!   out leaves the host its previous snapshot, and the late snapshot is
+//!   sent as an ordinary checkpoint once it is done. An encoder that panics
+//!   hands the emulator back; an encode task lost altogether (cancelled, or
+//!   failed outside the encoder) took the emulator with it, and the runtime
+//!   ends, unavailable ([`Unavailability::EmulatorLost`]).
+//!
+//!   At about 100 KiB/s of output, a full terminal in true color spends
+//!   about 2% of a core on checkpoints (typical output about a fifth of
+//!   that); a quiet terminal spends nothing. A scrollback colored like an
+//!   image receiving about 1 MiB/s cannot be checkpointed as fast as it
+//!   fills the host's journal, and may gap while connected; the remedy is
+//!   a faster encoder, not more checkpoints.
+//! - **Gaps.** A gap (output the host trimmed before this runtime read it)
+//!   never resets the emulator: a healthy screen is worth more than the
+//!   bytes it missed. The runtime carries on after it, marks the history
+//!   trimmed ([`HostStatus::history_trimmed`]), and asks the program to
+//!   redraw by resizing the terminal one row smaller and back (the plan's
+//!   D-15: Linux sends no `SIGWINCH` for a resize to the size in force,
+//!   checked on Linux 6.8, and the BSD tty code macOS uses compares the
+//!   same way, read from its source and not tested; so one same-size
+//!   resize would do nothing). It does the
+//!   same after restoring a snapshot that left out the screens or was drawn
+//!   with another character width table. What a redraw cannot bring back
+//!   stays lost: the scrollback in the gap, and a mode the lost bytes set,
+//!   until the program sets it again as part of its redraw.
 //! - **Unavailable is final for a runtime, not for a host.** A runtime that
 //!   ends unavailable leaves its host alone and never tries it again. Some
 //!   reasons are lasting (a protocol or snapshot format this build does not
@@ -113,17 +210,10 @@
 //!   connection that kept ending). Whoever owns the runtimes adopts such a
 //!   host again, on a backoff, with a new runtime.
 //!
-//! Four things later steps build on are here as seams, and say so where
-//! they are: where a snapshot is taken (`Runtime::on_output` feeds each read
-//! whole, and a clean boundary within it, with the processed
-//! [`HostStatus::position`], is a checkpoint's place); where the host's
-//! `delivered_end` will decide what replay answers ([`REPLAYED`] and
-//! `Replay`); a gap in the journal or a snapshot that needs a redraw, after
-//! which the program will be asked to redraw (`Runtime::on_gap`,
-//! `Runtime::on_snapshot`); and the notices for the user, which `Answers`
-//! drops and a viewer's grid stream will deliver. None of them is done yet:
-//! no snapshot is taken, replay answers nothing, a gap is logged and
-//! continued from, and notices go nowhere.
+//! What a viewer's grid stream (a later step) builds on is here as seams:
+//! [`HostTerminal::subscribe_notices`], [`HostTerminal::try_read`] and
+//! [`EmulatorRef::rebuilds`], which tells a stream that the emulator was
+//! replaced (a restored snapshot) and its history must be sent again.
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -131,14 +221,16 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex, PoisonError, Weak};
 use std::time::{Duration, Instant};
 
-use farhelm_terminal_emulator::{Effects, Emulator, FeedMode, Modes, Notice, SnapshotError};
-use terminal_host::protocol::{ChildExit, Info, MAX_INPUT, Position, Size};
-use tokio::sync::{mpsc, oneshot, watch};
+use farhelm_terminal_emulator::{
+    Effects, Emulator, FeedMode, Modes, Notice, Snapshot, SnapshotError, snapshot_split_candidate,
+};
+use terminal_host::protocol::{ChildExit, Info, MAX_INPUT, MAX_SNAPSHOT, Position, Size};
+use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tracing::{info, warn};
 
 use super::client::{
     ClientDeadlines, ClientError, ConnectError, Gone, HostConnection, HostEvent, InputCounts,
-    InputTicket, Unavailable,
+    InputTicket, SnapshotReply, Unavailable,
 };
 use super::process::HostProcess;
 use crate::procs::{self, PaneAnchor, ProcessIdentity, ProcessState};
@@ -185,19 +277,6 @@ pub const RECONNECT_WINDOW: Duration = Duration::from_secs(60);
 /// How often a shutdown re-reads the host's process while waiting for it to
 /// end.
 const END_POLL: Duration = Duration::from_millis(20);
-
-/// What replayed output may do: the side effects of output an earlier
-/// supervisor already received. Nothing is answered or reported.
-///
-/// This is the seam for the replay policy (D-7). It treats everything
-/// journaled before adoption as seen, the conservative half of that policy:
-/// a query the program asked while no supervisor was attached goes
-/// unanswered (the program waits out its own timeout), and nothing is ever
-/// answered twice (a second answer would arrive at a shell prompt as typed
-/// garbage). Splitting the replay at the host's `delivered_end`, to answer
-/// what no supervisor saw as [`FeedMode::ReplayUnseen`], is the policy's
-/// other half.
-pub const REPLAYED: FeedMode = FeedMode::ReplaySeen;
 
 // ---- The clock -----------------------------------------------------------------
 
@@ -385,7 +464,19 @@ pub enum Unavailability {
     /// not end in time.
     #[error("the terminal host did not end after Shutdown")]
     ShutdownUnconfirmed,
+    /// A checkpoint's encode task was lost (cancelled, or failed outside
+    /// the encoder, which hands the emulator back when it panics), and the
+    /// emulator with it. The terminal's state is never guessed at, so the
+    /// runtime ends; a new adoption rebuilds it from the host.
+    #[error("the terminal's emulator was lost with a checkpoint's encode")]
+    EmulatorLost,
 }
+
+/// [`HostTerminal::read`] found the emulator lost
+/// ([`Unavailability::EmulatorLost`]): there is nothing to read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("the terminal's emulator was lost")]
+pub struct EmulatorLost;
 
 /// Everything a host terminal's handle can read without asking its task:
 /// its liveness and how far its emulator has got.
@@ -416,6 +507,19 @@ pub struct HostStatus {
     /// processed too, so a host whose only state is an initial snapshot is
     /// not caught up until the snapshot is restored.
     pub caught_up: bool,
+    /// The position of the latest snapshot the host is known to hold: one
+    /// this runtime saw accepted, or the one the host held at adoption.
+    /// `None` when there is none, or only an initial one at (0, 0). The
+    /// host may hold a later one: an orderly checkpoint whose deadline ran
+    /// out after its request was sent can still be accepted, unseen.
+    pub checkpoint: Option<Position>,
+    /// Whether the terminal's history is missing lines: after a gap in the
+    /// host's journal (for as long as this runtime runs; a snapshot cannot
+    /// carry the mark, so a later runtime that restores one taken after the
+    /// gap no longer knows), or because a snapshot it was restored from had
+    /// to leave out its oldest history (`Emulator::history_trimmed`, which
+    /// ends once the loss no longer shows). For the viewer, which says so.
+    pub history_trimmed: bool,
 }
 
 /// A host terminal's state in the three classes the supervisor's status
@@ -615,11 +719,12 @@ pub enum Adoption {
     ///
     /// The host's `delivered_end` checks the claim: a host that has sent
     /// output to some client before was read by someone, and its output up
-    /// to there is replay all the same (a retried create that adopts a host
-    /// an earlier supervisor already read, say).
+    /// to there is seen replay all the same (a retried create that adopts a
+    /// host an earlier supervisor already read, say).
     Fresh,
     /// The host ran before this runtime: what it journaled before adoption
-    /// is replay ([`REPLAYED`]), and only what follows is live.
+    /// is replay, seen below the host's `delivered_end` and unseen from
+    /// there (module docs, "Adoption"), and only what follows is live.
     Recovered,
 }
 
@@ -634,6 +739,16 @@ pub struct HostTerminalOptions {
     pub clock: Clock,
     /// Where to announce liveness changes.
     pub notifier: Option<LivenessNotifier>,
+    /// When checkpoints are due. A runtime that spawned its host with a
+    /// journal cap other than [`super::spawn::DEFAULT_JOURNAL_CAP`] passes
+    /// [`CheckpointPolicy::for_journal_cap`] of it: the host's `Info` does
+    /// not report its cap, so a runtime that did not spawn its host assumes
+    /// the default.
+    pub checkpoints: CheckpointPolicy,
+    /// Holds every snapshot encode until opened, so that a test can show
+    /// what happens while one runs.
+    #[cfg(any(test, feature = "test-seams"))]
+    pub encode_gate: Option<EncodeGate>,
 }
 
 impl Default for HostTerminalOptions {
@@ -643,7 +758,128 @@ impl Default for HostTerminalOptions {
             deadlines: ClientDeadlines::default(),
             clock: Clock::default(),
             notifier: None,
+            checkpoints: CheckpointPolicy::default(),
+            #[cfg(any(test, feature = "test-seams"))]
+            encode_gate: None,
         }
+    }
+}
+
+/// How many notices a [`NoticeSubscription`] can fall behind by before it
+/// loses the oldest. A clipboard write can carry as much as the emulator's
+/// OSC payload cap (megabytes), and a notice stays queued until every
+/// subscription open when it was sent has read it, so the backlog is
+/// short. With no subscription open, nothing is queued.
+pub const NOTICE_BACKLOG: usize = 8;
+
+/// A subscription to a host terminal's notices for the user: bells,
+/// clipboard writes (OSC 52) and title changes, from live output only,
+/// never from replayed output (module docs, "Adoption"), and only those
+/// after the subscription was taken ([`HostTerminal::subscribe_notices`]).
+/// Each viewer attachment takes its own; every subscription gets every
+/// notice.
+#[derive(Debug)]
+pub struct NoticeSubscription {
+    receiver: broadcast::Receiver<Notice>,
+    socket: PathBuf,
+}
+
+impl NoticeSubscription {
+    /// The next notice, waiting for one; `None` once the runtime has ended.
+    ///
+    /// A subscription that fell more than [`NOTICE_BACKLOG`] notices behind
+    /// has lost the oldest: that is logged, and the oldest still kept comes
+    /// next. The runtime never waits for a subscriber, so a stalled viewer
+    /// cannot stall the terminal.
+    pub async fn recv(&mut self) -> Option<Notice> {
+        loop {
+            match self.receiver.recv().await {
+                Ok(notice) => return Some(notice),
+                Err(broadcast::error::RecvError::Lagged(lost)) => {
+                    warn!(socket = %self.socket.display(), lost, "a viewer fell behind a terminal's notices and lost the oldest");
+                }
+                Err(broadcast::error::RecvError::Closed) => return None,
+            }
+        }
+    }
+
+    /// The next notice if one is waiting, without waiting (losing the
+    /// oldest as [`Self::recv`] does).
+    pub fn try_recv(&mut self) -> Option<Notice> {
+        loop {
+            match self.receiver.try_recv() {
+                Ok(notice) => return Some(notice),
+                Err(broadcast::error::TryRecvError::Lagged(lost)) => {
+                    warn!(socket = %self.socket.display(), lost, "a viewer fell behind a terminal's notices and lost the oldest");
+                }
+                Err(_) => return None,
+            }
+        }
+    }
+}
+
+/// A gate every snapshot encode waits at, on the blocking pool and holding
+/// the emulator as an encode does, until it is opened (or for at most
+/// [`EncodeGate::LIMIT`], so that a test that forgets cannot hang the
+/// pool). A test seam.
+#[cfg(any(test, feature = "test-seams"))]
+#[derive(Debug, Clone, Default)]
+pub struct EncodeGate(Arc<(StdMutex<GateState>, std::sync::Condvar)>);
+
+/// An [`EncodeGate`]'s state: whether it is open, and the fault it makes
+/// every encode past it have.
+#[cfg(any(test, feature = "test-seams"))]
+#[derive(Debug, Default)]
+struct GateState {
+    open: bool,
+    fault: Option<EncodeFault>,
+}
+
+/// A failure an [`EncodeGate`] makes an encode have, for the paths that
+/// hand the emulator back (or cannot). A test seam.
+#[cfg(any(test, feature = "test-seams"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EncodeFault {
+    /// The encoder panics: its guard hands the emulator back.
+    EncoderPanics,
+    /// The task panics outside the encoder's guard, losing the emulator,
+    /// as a cancelled task would.
+    TaskLost,
+}
+
+#[cfg(any(test, feature = "test-seams"))]
+impl EncodeGate {
+    /// The longest an encode waits at a gate never opened.
+    pub const LIMIT: Duration = Duration::from_secs(30);
+
+    /// A gate that holds encodes until [`Self::open`].
+    pub fn closed() -> Self {
+        Self::default()
+    }
+
+    /// Let every encode through, now and from now on.
+    pub fn open(&self) {
+        let (state, opened) = &*self.0;
+        state.lock().unwrap_or_else(PoisonError::into_inner).open = true;
+        opened.notify_all();
+    }
+
+    /// Make every encode past the gate have `fault`.
+    pub fn fail_with(&self, fault: EncodeFault) {
+        let (state, _) = &*self.0;
+        state.lock().unwrap_or_else(PoisonError::into_inner).fault = Some(fault);
+    }
+
+    /// Wait until the gate is open, or [`Self::LIMIT`] has passed, and
+    /// say which fault the encode is to have.
+    fn pass(&self) -> Option<EncodeFault> {
+        let (state, opened) = &*self.0;
+        let guard = state.lock().unwrap_or_else(PoisonError::into_inner);
+        let guard = opened
+            .wait_timeout_while(guard, Self::LIMIT, |state| !state.open)
+            .unwrap_or_else(PoisonError::into_inner)
+            .0;
+        guard.fault
     }
 }
 
@@ -696,7 +932,14 @@ pub struct HostTerminal {
 /// which is how the task learns that nobody holds the terminal any more.
 struct Inner {
     socket: PathBuf,
-    emulator: Arc<StdMutex<Emulator>>,
+    emulator: Arc<StdMutex<Held>>,
+    /// The runtime's notice sender, weakly: subscriptions are made through
+    /// it while the runtime runs, and it neither keeps the channel open
+    /// once the runtime ends nor, as an idle receiver would, keeps the last
+    /// notices queued for nobody.
+    notices: broadcast::WeakSender<Notice>,
+    /// Woken whenever the emulator comes back from an encode.
+    returned: Arc<tokio::sync::Notify>,
     status: watch::Receiver<HostStatus>,
     input: mpsc::Sender<InputRequest>,
     control: mpsc::Sender<Control>,
@@ -708,6 +951,133 @@ struct Inner {
     /// "Input"): a caller blocked on a full queue when input was lost is
     /// behind the hole too.
     epoch: Arc<AtomicU64>,
+}
+
+/// What the emulator's lock guards: the emulator, or the view of it left
+/// while it is away, and what a reader must see consistently with it.
+struct Held {
+    slot: Slot,
+    /// How many times the runtime replaced the emulator with another (a
+    /// restored snapshot, the one at adoption included). Every replacement
+    /// goes through `Runtime::rebuild`; an encode hands back the same
+    /// emulator and is not one.
+    rebuilds: u64,
+    /// Whether a gap left the history short, a mark the emulator does not
+    /// carry: kept for as long as this runtime runs (a snapshot cannot
+    /// carry it either, so a later runtime that restores one taken after
+    /// the gap no longer knows).
+    history_gap: bool,
+}
+
+impl Held {
+    fn new(emulator: Emulator) -> Self {
+        Self {
+            slot: Slot::Live(Box::new(emulator)),
+            rebuilds: 0,
+            history_gap: false,
+        }
+    }
+
+    /// Whether the history is short: a gap, or the emulator's own trimming
+    /// (`HostStatus::history_trimmed`).
+    fn history_trimmed(&self) -> bool {
+        self.history_gap
+            || match &self.slot {
+                Slot::Live(emulator) => emulator.history_trimmed(),
+                Slot::Encoding(view) | Slot::Lost(view) => view.history_trimmed,
+            }
+    }
+}
+
+/// The emulator as [`HostTerminal::read`] and [`HostTerminal::try_read`]
+/// hand it out, under its lock, with what the runtime knows about it beyond
+/// its own state. Derefs to the [`Emulator`].
+pub struct EmulatorRef<'a> {
+    emulator: &'a Emulator,
+    held: &'a Held,
+}
+
+impl EmulatorRef<'_> {
+    /// How many times the runtime replaced the emulator with another (a
+    /// restored snapshot). A reader that keeps something derived from the
+    /// emulator's history (a viewer's grid stream) starts over when this
+    /// changes: the new emulator's history is not the old one's.
+    pub fn rebuilds(&self) -> u64 {
+        self.held.rebuilds
+    }
+
+    /// Whether the history is short, by a gap in the host's output or by
+    /// the emulator's own trimming. Shadows [`Emulator::history_trimmed`],
+    /// which knows only the second.
+    pub fn history_trimmed(&self) -> bool {
+        self.held.history_trimmed()
+    }
+}
+
+impl std::ops::Deref for EmulatorRef<'_> {
+    type Target = Emulator;
+
+    fn deref(&self) -> &Emulator {
+        self.emulator
+    }
+}
+
+/// Where a host terminal's emulator is: home, or away being encoded, with
+/// a `View` of it left behind (module docs, "Checkpoints"). Holding the
+/// emulator in an enum makes "nothing changes the emulator during an
+/// encode" structural: there is no emulator to change.
+enum Slot {
+    /// Boxed, so that sending it away for an encode moves a pointer.
+    Live(Box<Emulator>),
+    Encoding(View),
+    /// The encode's task was lost, and the emulator with it
+    /// ([`Unavailability::EmulatorLost`]); the views keep reading the last
+    /// view, and `read` fails.
+    Lost(View),
+}
+
+/// What the views read of an emulator: taken just before it leaves for an
+/// encode, and current until it comes back, since nothing changes it while
+/// it is away.
+#[derive(Debug, Clone)]
+struct View {
+    screen_text: String,
+    title: String,
+    modes: Modes,
+    size: Size,
+    history_trimmed: bool,
+}
+
+impl View {
+    /// The view of `emulator` now.
+    fn of(emulator: &Emulator) -> Self {
+        let size = emulator.size();
+        Self {
+            screen_text: emulator.screen_text(),
+            title: emulator.title().to_owned(),
+            modes: emulator.modes(),
+            size: Size {
+                cols: size.columns,
+                rows: size.lines,
+            },
+            history_trimmed: emulator.history_trimmed(),
+        }
+    }
+}
+
+/// The last `max_bytes` of `screen_text` with trailing whitespace trimmed,
+/// as `Emulator::screen_tail` cuts it (and must keep cutting it: a view
+/// and the emulator give the same tail).
+fn screen_tail_of(screen_text: &str, max_bytes: usize) -> String {
+    let trimmed = screen_text.trim_end();
+    if trimmed.len() <= max_bytes {
+        return trimmed.to_owned();
+    }
+    let mut start = trimmed.len() - max_bytes;
+    while !trimmed.is_char_boundary(start) {
+        start += 1;
+    }
+    trimmed[start..].to_owned()
 }
 
 impl PartialEq for HostTerminal {
@@ -834,6 +1204,10 @@ struct InputRequest {
 /// A request to the task that is never held back behind input.
 enum Control {
     Shutdown(oneshot::Sender<ShutdownReport>),
+    Checkpoint {
+        deadline: tokio::time::Instant,
+        reply: oneshot::Sender<CheckpointOutcome>,
+    },
 }
 
 impl HostTerminal {
@@ -913,20 +1287,25 @@ impl HostTerminal {
                     socket = %socket.display(),
                     delivered_end = info.delivered_end,
                     "a terminal host adopted as fresh has sent output to a client before; \
-                     replaying that output without answers"
+                     replaying that output without side effects"
                 );
-                Replay::until(Position {
+                let seen = Position {
                     offset: info.delivered_end,
                     resizes: 0,
-                })
+                };
+                Replay::until(info.delivered_end, seen)
             }
             Adoption::Fresh => Replay::finished(),
-            Adoption::Recovered => Replay::until(adopted_end),
+            Adoption::Recovered => Replay::until(info.delivered_end, adopted_end),
         };
-        let emulator = Arc::new(StdMutex::new(Emulator::new(
+        let checkpoints = Checkpoints::new(options.checkpoints, info.snapshot);
+        let emulator = Arc::new(StdMutex::new(Held::new(Emulator::new(
             emulator_size(info.initial_size),
             options.scrollback_lines,
-        )));
+        ))));
+        let (notices, _) = broadcast::channel(NOTICE_BACKLOG);
+        let weak_notices = notices.downgrade();
+        let returned = Arc::new(tokio::sync::Notify::new());
         let initial = HostStatus {
             liveness: liveness.clone(),
             child_pid: info.child_pid,
@@ -934,6 +1313,8 @@ impl HostTerminal {
             position: Position::default(),
             revision: 0,
             caught_up: fence == 0 && adopted_end == Position::default(),
+            checkpoint: checkpoints.accepted(),
+            history_trimmed: false,
         };
         let (status_tx, status_rx) = watch::channel(initial);
         let (input_tx, input_rx) = mpsc::channel(INPUT_QUEUE);
@@ -967,6 +1348,15 @@ impl HostTerminal {
             reconnects: VecDeque::new(),
             fence,
             epoch: epoch.clone(),
+            checkpoints,
+            redraw_wanted: false,
+            notices,
+            #[cfg(any(test, feature = "test-seams"))]
+            encode_gate: options.encode_gate,
+            returned: returned.clone(),
+            encoding: None,
+            lost: false,
+            deferred: None,
         };
         if fence > 0 {
             // Queued already, so this does not wait.
@@ -974,7 +1364,7 @@ impl HostTerminal {
                 .next_event()
                 .await
                 .map_err(|error| unavailable(Unavailability::Request(error)))?;
-            if let Turn::Unavailable(reason) = runtime.on_event(first) {
+            if let Turn::Unavailable(reason) = runtime.on_event(first).await {
                 return Err(unavailable(reason));
             }
         }
@@ -983,11 +1373,13 @@ impl HostTerminal {
             inner: Arc::new(Inner {
                 socket: socket.to_path_buf(),
                 emulator,
+                notices: weak_notices,
                 status: status_rx,
                 input: input_tx,
                 control: control_tx,
                 size: size_tx,
                 epoch,
+                returned,
             }),
         })
     }
@@ -1013,43 +1405,138 @@ impl HostTerminal {
     }
 
     /// Read the emulator: for what the accessors below do not cover (the
-    /// grid and its history, a Restart seed). `read` holds the emulator's
-    /// lock, which the task needs to feed output, so it must be quick.
-    pub fn read<R>(&self, read: impl FnOnce(&Emulator) -> R) -> R {
-        let emulator = self
+    /// grid and its history, a Restart seed). Waits, without blocking, while
+    /// the emulator is away being encoded (seconds at full scrollback); the
+    /// accessors below never wait. Fails only when the encode's task was
+    /// lost with the emulator ([`Unavailability::EmulatorLost`]), which
+    /// ends the runtime. `read` runs under the emulator's lock, which the
+    /// task needs to feed output, so it must be quick.
+    pub async fn read<R>(
+        &self,
+        read: impl FnOnce(&EmulatorRef<'_>) -> R,
+    ) -> Result<R, EmulatorLost> {
+        let mut read = Some(read);
+        loop {
+            // Registered before the slot is looked at, so that a return in
+            // between is not missed.
+            let returned = self.inner.returned.notified();
+            tokio::pin!(returned);
+            returned.as_mut().enable();
+            {
+                let held = self
+                    .inner
+                    .emulator
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner);
+                match &held.slot {
+                    Slot::Live(emulator) => {
+                        let read = read.take().expect("read once");
+                        return Ok(read(&EmulatorRef {
+                            emulator,
+                            held: &held,
+                        }));
+                    }
+                    Slot::Lost(_) => return Err(EmulatorLost),
+                    Slot::Encoding(_) => {}
+                }
+            }
+            returned.await;
+        }
+    }
+
+    /// Read the emulator if it is home, without waiting: `None` while it
+    /// is away being encoded, or lost ([`Unavailability::EmulatorLost`],
+    /// which the status says).
+    ///
+    /// The emulator's return changes the status ([`Self::subscribe`]), so a
+    /// reader that got `None` tries again then. It must mark the status
+    /// seen (`borrow_and_update`) before calling `try_read`, not after a
+    /// `None`: marking it after can swallow the change the return made,
+    /// and a quiet terminal makes no other. Like [`Self::read`], it runs
+    /// under the emulator's lock and must be quick.
+    pub fn try_read<R>(&self, read: impl FnOnce(&EmulatorRef<'_>) -> R) -> Option<R> {
+        let held = self
             .inner
             .emulator
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        read(&emulator)
+        match &held.slot {
+            Slot::Live(emulator) => Some(read(&EmulatorRef {
+                emulator,
+                held: &held,
+            })),
+            Slot::Encoding(_) | Slot::Lost(_) => None,
+        }
+    }
+
+    /// Subscribe to the terminal's notices from now on (bells, clipboard
+    /// writes, title changes, from live output only); see
+    /// [`NoticeSubscription`].
+    pub fn subscribe_notices(&self) -> NoticeSubscription {
+        let receiver = match self.inner.notices.upgrade() {
+            Some(sender) => sender.subscribe(),
+            // The runtime has ended: a channel already closed, so that the
+            // subscription reads `None` at once.
+            None => broadcast::channel(1).1,
+        };
+        NoticeSubscription {
+            receiver,
+            socket: self.inner.socket.clone(),
+        }
     }
 
     /// The last `max_bytes` of the visible screen as plain text, shaped
     /// like tmux's capture (`Emulator::screen_tail`): what status detection
     /// reads.
     pub fn screen_tail(&self, max_bytes: usize) -> String {
-        self.read(|emulator| emulator.screen_tail(max_bytes))
+        self.view(
+            |view| screen_tail_of(&view.screen_text, max_bytes),
+            |emulator| emulator.screen_tail(max_bytes),
+        )
     }
 
     /// The title the program last set.
     pub fn title(&self) -> String {
-        self.read(|emulator| emulator.title().to_owned())
+        self.view(
+            |view| view.title.clone(),
+            |emulator| emulator.title().to_owned(),
+        )
     }
 
     /// The program's terminal modes now: what input encoding and prompt
     /// delivery need (bracketed paste, mouse, cursor keys).
     pub fn modes(&self) -> Modes {
-        self.read(Emulator::modes)
+        self.view(|view| view.modes, Emulator::modes)
     }
 
     /// The terminal's size as its emulator has it: the size of the latest
     /// resize record processed, which a resize just asked for may not have
     /// reached yet.
     pub fn size(&self) -> Size {
-        let size = self.read(Emulator::size);
-        Size {
-            cols: size.columns,
-            rows: size.lines,
+        self.view(
+            |view| view.size,
+            |emulator| {
+                let size = emulator.size();
+                Size {
+                    cols: size.columns,
+                    rows: size.lines,
+                }
+            },
+        )
+    }
+
+    /// Read the emulator's state with `live`, or, while the emulator is
+    /// away being encoded, the view left in its place with `away`. The lock
+    /// is held only for that read, never across an encode.
+    fn view<R>(&self, away: impl FnOnce(&View) -> R, live: impl FnOnce(&Emulator) -> R) -> R {
+        let held = self
+            .inner
+            .emulator
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        match &held.slot {
+            Slot::Live(emulator) => live(emulator),
+            Slot::Encoding(view) | Slot::Lost(view) => away(view),
         }
     }
 
@@ -1146,6 +1633,42 @@ impl HostTerminal {
         report.await.map_err(|_| self.liveness())
     }
 
+    /// Snapshot the terminal for its host now, for an orderly stop, and
+    /// wait for the host's answer, all by `deadline`.
+    ///
+    /// It takes the snapshot where the terminal is if the emulator is clean
+    /// there; otherwise the host keeps its last accepted snapshot and the
+    /// tail after it, which a recovery then replays ([`CheckpointOutcome`]).
+    /// It never waits for a clean boundary: a program can stay mid-sequence
+    /// for good. The task takes the request up once it is done with what it
+    /// is doing (an automatic checkpoint's encode included: the deadline
+    /// bounds the wait for it, too); whatever is left of the deadline then
+    /// bounds the encode
+    /// (which runs on the blocking pool, so even a current-thread runtime
+    /// keeps the deadline) and the host's answer. An encode the deadline
+    /// cuts short is finished anyway and sent as an ordinary checkpoint. A
+    /// runtime that has ended answers with its final liveness.
+    pub async fn checkpoint_now(
+        &self,
+        deadline: tokio::time::Instant,
+    ) -> Result<CheckpointOutcome, Liveness> {
+        let (reply, outcome) = oneshot::channel();
+        let asked = tokio::time::timeout_at(deadline, async {
+            self.inner
+                .control
+                .send(Control::Checkpoint { deadline, reply })
+                .await
+                .map_err(|_| ())?;
+            outcome.await.map_err(|_| ())
+        })
+        .await;
+        match asked {
+            Ok(Ok(outcome)) => Ok(outcome),
+            Ok(Err(())) => Err(self.liveness()),
+            Err(_) => Ok(CheckpointOutcome::Kept(NotTaken::TimedOut)),
+        }
+    }
+
     // ---- Adapters, from the state now (see `HostStatus`) ----
 
     /// See [`HostStatus::child_root`].
@@ -1236,38 +1759,65 @@ async fn pin_child(conn: &mut HostConnection) -> Result<(Child, Info), ClientErr
 
 // ---- The runtime task ------------------------------------------------------------
 
-/// What of the journal is replay: everything before `end`, until it has all
-/// been processed. The replay policy's seam: it splits the replay again at
-/// the host's `delivered_end`, read with the adoption's `Info`.
+/// The replay policy (module docs, "Adoption"; the plan's D-7): everything
+/// before `end` is replay, until it has all been processed; of it, the
+/// output below `seen_end` (the host's `delivered_end`) was seen by an
+/// earlier supervisor, and the rest was not.
 #[derive(Debug, Clone, Copy)]
 struct Replay {
+    seen_end: u64,
     end: Position,
     finished: bool,
+    /// Whether the replay has crossed `seen_end`, drawing any update open
+    /// there with seen effects (module docs, "Adoption").
+    crossed: bool,
 }
 
 impl Replay {
     /// No replay: everything is live.
     fn finished() -> Self {
         Self {
+            seen_end: 0,
             end: Position::default(),
             finished: true,
+            crossed: true,
         }
     }
 
-    /// Everything before `end` is replay.
-    fn until(end: Position) -> Self {
+    /// Everything before `end` is replay, seen below `seen_end`.
+    fn until(seen_end: u64, end: Position) -> Self {
+        let seen_end = seen_end.min(end.offset);
         Self {
+            seen_end,
             end,
             finished: end == Position::default(),
+            crossed: seen_end == 0,
         }
     }
 
-    /// The mode for the effects of processing a record now.
-    fn mode(&self) -> FeedMode {
+    /// The mode for feeding output bytes at `offset`.
+    fn bytes_mode(&self, offset: u64) -> FeedMode {
         if self.finished {
             FeedMode::Live
+        } else if offset < self.seen_end {
+            FeedMode::ReplaySeen
         } else {
-            REPLAYED
+            FeedMode::ReplayUnseen
+        }
+    }
+
+    /// The mode for something that may draw an open update (a resize, its
+    /// deadline, a gap, the child's exit, the replay's end) with the
+    /// position at `offset`: the mode of the bytes the update can hold.
+    /// Up to `seen_end` those are seen; past it they are unseen, since the
+    /// replay drew any update open at `seen_end` there.
+    fn flush_mode(&self, offset: u64) -> FeedMode {
+        if self.finished {
+            FeedMode::Live
+        } else if offset <= self.seen_end {
+            FeedMode::ReplaySeen
+        } else {
+            FeedMode::ReplayUnseen
         }
     }
 }
@@ -1283,17 +1833,22 @@ fn after(a: Position, b: Position) -> bool {
     a.offset > b.offset || (a.offset == b.offset && a.resizes > b.resizes)
 }
 
-/// Collects a feed's answers, one entry per answer, and drops its notices
-/// (see the module docs for why).
+/// Collects what feeding output made the emulator do, as its feed mode
+/// allowed: the answers, one entry per answer, and the notices.
 #[derive(Default)]
-struct Answers(Vec<Vec<u8>>);
+struct FedEffects {
+    answers: Vec<Vec<u8>>,
+    notices: Vec<Notice>,
+}
 
-impl Effects for Answers {
+impl Effects for FedEffects {
     fn reply(&mut self, bytes: &[u8]) {
-        self.0.push(bytes.to_vec());
+        self.answers.push(bytes.to_vec());
     }
 
-    fn notice(&mut self, _notice: Notice) {}
+    fn notice(&mut self, notice: Notice) {
+        self.notices.push(notice);
+    }
 }
 
 /// Input waiting for room in the window: a caller's, or the terminal's own
@@ -1345,7 +1900,9 @@ struct Runtime {
     clock: Clock,
     notifier: Option<LivenessNotifier>,
     scrollback_lines: usize,
-    emulator: Arc<StdMutex<Emulator>>,
+    emulator: Arc<StdMutex<Held>>,
+    /// Woken when the emulator comes back from an encode (`Inner::returned`).
+    returned: Arc<tokio::sync::Notify>,
     status: watch::Sender<HostStatus>,
     input_rx: mpsc::Receiver<InputRequest>,
     control_rx: mpsc::Receiver<Control>,
@@ -1380,6 +1937,65 @@ struct Runtime {
     /// How many of the adoption's first events, read before its fence
     /// `Info` reply, are still to be processed; caught up only at 0.
     fence: usize,
+    /// When checkpoints are due, and the snapshots taken.
+    checkpoints: Checkpoints,
+    /// Whether the program is to be asked to redraw, once the replay is
+    /// over.
+    redraw_wanted: bool,
+    /// Where live notices go, to every subscription open at the time.
+    notices: broadcast::Sender<Notice>,
+    #[cfg(any(test, feature = "test-seams"))]
+    encode_gate: Option<EncodeGate>,
+    /// The snapshot encode in progress, if one is: the emulator is away.
+    encoding: Option<Encoding>,
+    /// An encode's task was lost with the emulator (`Slot::Lost`): the
+    /// runtime ends at its next chance, unavailable.
+    lost: bool,
+    /// The rest of a read whose feeding stopped at its split candidate for
+    /// an encode, and its offset: fed once the encode is done, before
+    /// anything else, since the encode must see the emulator at the split.
+    deferred: Option<(u64, Vec<u8>)>,
+}
+
+/// A snapshot encode on the blocking pool, of the emulator at `position`.
+struct Encoding {
+    position: Position,
+    task: tokio::task::JoinHandle<Encoded>,
+}
+
+/// What an encode hands back: the emulator, and the snapshot, if it made
+/// one (`None` when the encoder panicked, which keeps the emulator).
+struct Encoded {
+    emulator: Box<Emulator>,
+    snapshot: Option<Snapshot>,
+}
+
+/// The emulator while it is home, for the runtime, which touches it only
+/// then: every turn brings it back from an encode before anything else.
+struct LiveGuard<'a>(std::sync::MutexGuard<'a, Held>);
+
+impl std::ops::Deref for LiveGuard<'_> {
+    type Target = Emulator;
+
+    fn deref(&self) -> &Emulator {
+        match &self.0.slot {
+            Slot::Live(emulator) => emulator,
+            Slot::Encoding(_) | Slot::Lost(_) => {
+                unreachable!("the runtime touched the emulator while it was away")
+            }
+        }
+    }
+}
+
+impl std::ops::DerefMut for LiveGuard<'_> {
+    fn deref_mut(&mut self) -> &mut Emulator {
+        match &mut self.0.slot {
+            Slot::Live(emulator) => emulator,
+            Slot::Encoding(_) | Slot::Lost(_) => {
+                unreachable!("the runtime touched the emulator while it was away")
+            }
+        }
+    }
 }
 
 impl Runtime {
@@ -1405,6 +2021,8 @@ impl Runtime {
                 },
             }
         }
+        // So that the emulator is home for `read` once the runtime ends.
+        self.settle_encoding().await;
         self.finish();
     }
 
@@ -1414,7 +2032,26 @@ impl Runtime {
     /// `select!`, so that none is ever dropped halfway (the client's module
     /// docs on cancellation); the `select!` holds only cancel-safe waits.
     async fn turn(&mut self, conn: &mut HostConnection) -> Result<Turn, ClientError> {
+        // An encode in progress, then the rest of the read it interrupted:
+        // nothing else touches the emulator first.
+        loop {
+            self.settle_encoding().await;
+            if self.lost {
+                return Ok(Turn::Unavailable(Unavailability::EmulatorLost));
+            }
+            match self.deferred.take() {
+                Some((offset, data)) => self.on_output(offset, &data),
+                None => break,
+            }
+        }
         self.send_pending(conn).await?;
+        if let Some((position, blob)) = self.checkpoints.take_ready() {
+            let reply = conn.snapshot(position, blob).await?;
+            self.on_snapshot_reply(reply);
+        }
+        if self.redraw_wanted && self.replay.finished {
+            self.ask_for_redraw(conn).await?;
+        }
         if let Some(size) = self.size_wanted {
             match conn.resize(size).await {
                 // Sizes are checked by the handle; one the client refuses
@@ -1444,7 +2081,7 @@ impl Runtime {
             () = sync_due => Wake::SyncDue,
         };
         Ok(match wake {
-            Wake::Event(event) => self.on_event(event?),
+            Wake::Event(event) => self.on_event(event?).await,
             Wake::Input(Some(request)) if request.epoch < self.epoch.load(Ordering::SeqCst) => {
                 // Made before caller input was lost: behind the hole.
                 let _ = request.fate.send(InputFate::NotSent);
@@ -1468,13 +2105,27 @@ impl Runtime {
                 Turn::Continue
             }
             Wake::Control(Some(Control::Shutdown(reply))) => Turn::Shutdown(reply),
+            Wake::Control(Some(Control::Checkpoint { deadline, reply })) => {
+                let (outcome, failed) = self.checkpoint_now(conn, deadline).await;
+                let _ = reply.send(outcome);
+                if self.lost {
+                    return Ok(Turn::Unavailable(Unavailability::EmulatorLost));
+                }
+                if let Some(error) = failed {
+                    return Err(error);
+                }
+                Turn::Continue
+            }
             Wake::SyncDue => {
                 let now = self.clock.now();
-                let mode = self.replay.mode();
-                let mut answers = Answers::default();
+                let mode = self.replay.flush_mode(self.position.offset);
+                let mut answers = FedEffects::default();
                 let flushed = self.lock().flush_sync_if_due(now, mode, &mut answers);
                 if flushed {
-                    self.queue_answers(answers);
+                    self.act_on_effects(answers);
+                    // Drawn, the emulator may be clean for the first time
+                    // since output made a checkpoint due.
+                    self.checkpoint_if_due();
                     self.publish();
                 }
                 Turn::Continue
@@ -1538,12 +2189,14 @@ impl Runtime {
         next
     }
 
-    /// Queue a feed's answers, packed into as few `Input`s as fit
-    /// `MAX_INPUT` without cutting an answer (only an answer longer than
-    /// that is cut), within [`MAX_PENDING_ANSWERS`].
-    fn queue_answers(&mut self, answers: Answers) {
+    /// Act on what a feed made the emulator do: queue its answers, packed
+    /// into as few `Input`s as fit `MAX_INPUT` without cutting an answer
+    /// (only an answer longer than that is cut), within
+    /// [`MAX_PENDING_ANSWERS`]; and send its notices to the subscriptions.
+    fn act_on_effects(&mut self, effects: FedEffects) {
+        self.deliver_notices(effects.notices);
         let mut dropped = 0usize;
-        for answer in answers.0 {
+        for answer in effects.answers {
             if self.pending_answer_bytes + answer.len() > MAX_PENDING_ANSWERS {
                 dropped += 1;
                 continue;
@@ -1572,8 +2225,17 @@ impl Runtime {
         }
     }
 
+    /// Send notices to every subscription open. The emulator reports
+    /// notices only for live output, so these are all live. With nobody
+    /// subscribed they go nowhere: nobody is watching.
+    fn deliver_notices(&self, notices: Vec<Notice>) {
+        for notice in notices {
+            let _ = self.notices.send(notice);
+        }
+    }
+
     /// Act on one record or acknowledgement from the host.
-    fn on_event(&mut self, event: HostEvent) -> Turn {
+    async fn on_event(&mut self, event: HostEvent) -> Turn {
         self.fence = self.fence.saturating_sub(1);
         // Acknowledgements are not records: they say nothing about the
         // emulator's state, so only a record ends the first stream's start.
@@ -1583,7 +2245,7 @@ impl Runtime {
         }
         match event {
             HostEvent::Snapshot { position, blob } => {
-                if let Err(error) = self.on_snapshot(first, position, &blob) {
+                if let Err(error) = self.on_snapshot(first, position, blob).await {
                     return Turn::Unavailable(Unavailability::Snapshot(error));
                 }
             }
@@ -1610,19 +2272,26 @@ impl Runtime {
     /// the record again when its position cannot be continued from
     /// (`crates/terminal-host/SPEC.md`, "Reading"), and what follows it then
     /// continues from the emulator's own position.
-    fn on_snapshot(
+    ///
+    /// The restore runs on the blocking pool (it takes up to about half a
+    /// second at full scrollback), and the task waits for it.
+    async fn on_snapshot(
         &mut self,
         first: bool,
         position: Position,
-        blob: &[u8],
+        blob: Vec<u8>,
     ) -> Result<(), SnapshotError> {
         if !first && !after(position, self.position) {
             return Ok(());
         }
-        let restored = Emulator::restore(blob, self.scrollback_lines)?;
+        self.checkpoints.restored(blob.len());
+        let scrollback = self.scrollback_lines;
+        let restored = tokio::task::spawn_blocking(move || Emulator::restore(&blob, scrollback))
+            .await
+            .map_err(|error| SnapshotError::Malformed(format!("the restore failed: {error}")))??;
         if restored.screens_dropped || restored.width_table_changed.is_some() {
-            // The program should be asked to redraw, as after a gap; that
-            // request belongs with the gap handling, which is not here yet.
+            // What the snapshot could not carry, the program draws again.
+            self.redraw_wanted = true;
             info!(
                 socket = %self.socket.display(),
                 screens_dropped = restored.screens_dropped,
@@ -1630,10 +2299,19 @@ impl Runtime {
                 "restored a terminal snapshot that needs a redraw"
             );
         }
-        *self.lock() = restored.emulator;
+        self.rebuild(restored.emulator);
         self.position = position;
         self.after_record();
         Ok(())
+    }
+
+    /// Replace the emulator with another (a restored snapshot's): the one
+    /// place the runtime does, so that `Held::rebuilds` counts every
+    /// replacement for the readers that start over on one.
+    fn rebuild(&mut self, emulator: Emulator) {
+        let mut held = self.emulator.lock().unwrap_or_else(PoisonError::into_inner);
+        held.slot = Slot::Live(Box::new(emulator));
+        held.rebuilds += 1;
     }
 
     /// Feed output, skipping what was already processed, with the part
@@ -1661,34 +2339,360 @@ impl Runtime {
                 "terminal output resumed past where it was processed"
             );
         }
-        let replayed = if self.replay.finished {
-            0
-        } else {
-            usize::try_from(self.replay.end.offset.saturating_sub(offset))
-                .unwrap_or(usize::MAX)
-                .min(data.len())
-        };
-        let (before, live) = data.split_at(replayed);
-        // The checkpoint seam: a snapshot is taken here, where the emulator
-        // is clean after a read's split candidate or its end
-        // (`farhelm_terminal_emulator::snapshot_split_candidate`), at the
-        // position processed so far.
         let now = self.clock.now();
-        let mut answers = Answers::default();
-        if !before.is_empty() {
-            self.lock().feed(before, now, REPLAYED, &mut answers);
-            self.position.offset = offset + before.len() as u64;
-            self.finish_replay_if_reached(&mut answers);
-        }
-        if !live.is_empty() {
-            // Output past the replay's end was journaled after adoption, so
-            // the replay is over even if a record before it is missing.
-            self.finish_replay(&mut answers);
-            self.lock().feed(live, now, FeedMode::Live, &mut answers);
+        let mut answers = FedEffects::default();
+        // The read in parts by the replay's zones: seen, unseen, live.
+        let mut at = offset;
+        let mut rest = data;
+        while !rest.is_empty() {
+            let limit = if self.replay.finished {
+                None
+            } else if at < self.replay.seen_end {
+                Some(self.replay.seen_end)
+            } else if at < self.replay.end.offset {
+                Some(self.replay.end.offset)
+            } else {
+                // Output past the replay's end was journaled after adoption,
+                // so the replay is over even if a record before it is
+                // missing.
+                self.finish_replay(&mut answers);
+                if self.checkpoint_if_due() {
+                    self.defer(at, rest.to_vec(), answers);
+                    return;
+                }
+                continue;
+            };
+            let take = limit.map_or(rest.len(), |limit| {
+                usize::try_from(limit - at)
+                    .unwrap_or(usize::MAX)
+                    .min(rest.len())
+            });
+            let (part, after_part) = rest.split_at(take);
+            if self.replay.finished {
+                if let Some(fed) = self.feed_live(at, part, now, &mut answers) {
+                    // Stopped at the split candidate for an encode: the
+                    // rest of the read waits for it.
+                    let mut remainder = part[fed..].to_vec();
+                    remainder.extend_from_slice(after_part);
+                    self.defer(at + fed as u64, remainder, answers);
+                    return;
+                }
+            } else {
+                let mode = self.replay.bytes_mode(at);
+                self.lock().feed(part, now, mode, &mut answers);
+                self.position.offset = at + part.len() as u64;
+                self.cross_seen_end(&mut answers);
+                self.finish_replay_if_reached(&mut answers);
+                // The replay just finished: a checkpoint its output made
+                // due is taken here, where no live read would check it.
+                if self.replay.finished && self.checkpoint_if_due() {
+                    self.defer(self.position.offset, after_part.to_vec(), answers);
+                    return;
+                }
+            }
+            at += part.len() as u64;
+            rest = after_part;
         }
         self.position.offset = offset + data.len() as u64;
-        self.queue_answers(answers);
+        self.act_on_effects(answers);
         self.after_record();
+    }
+
+    /// Stop feeding a read for the encode just started: the rest, at
+    /// `offset`, is fed once the emulator is back (`turn`), and what was fed
+    /// so far is acted on now.
+    fn defer(&mut self, offset: u64, rest: Vec<u8>, effects: FedEffects) {
+        self.position.offset = offset;
+        self.deferred = Some((offset, rest));
+        self.act_on_effects(effects);
+        self.after_record();
+    }
+
+    /// Where the replay reaches `seen_end`, draw any update still open with
+    /// seen effects: everything it holds is seen output (module docs,
+    /// "Adoption").
+    fn cross_seen_end(&mut self, effects: &mut FedEffects) {
+        if !self.replay.finished
+            && !self.replay.crossed
+            && self.position.offset >= self.replay.seen_end
+        {
+            self.lock().flush_sync(FeedMode::ReplaySeen, effects);
+            self.replay.crossed = true;
+        }
+    }
+
+    /// Feed live output that starts at `start`, and start a checkpoint
+    /// within it if one is due: after the read's split candidate if the
+    /// emulator is clean there, else at its end if it is clean there. An
+    /// encode started at the split candidate stops the feeding there: the
+    /// emulator must not change while it is encoded, so the rest of the
+    /// read waits. Returns how much of `data` was fed when it stopped
+    /// early, `None` when all of it was.
+    fn feed_live(
+        &mut self,
+        start: u64,
+        data: &[u8],
+        now: Instant,
+        effects: &mut FedEffects,
+    ) -> Option<usize> {
+        let end = Position {
+            offset: start + data.len() as u64,
+            resizes: self.position.resizes,
+        };
+        if self.checkpoints.due(end)
+            && let Some(split) = snapshot_split_candidate(data)
+        {
+            self.lock()
+                .feed(&data[..split], now, FeedMode::Live, effects);
+            self.position.offset = start + split as u64;
+            // Due at the read's end, perhaps not yet at the split: only
+            // after enough output.
+            if self.checkpoints.due(self.position) && self.try_checkpoint() {
+                return Some(split);
+            }
+            self.lock()
+                .feed(&data[split..], now, FeedMode::Live, effects);
+        } else {
+            self.lock().feed(data, now, FeedMode::Live, effects);
+        }
+        self.position.offset = end.offset;
+        if self.checkpoints.due(end) {
+            self.try_checkpoint();
+        }
+        None
+    }
+
+    /// Start a checkpoint here, if something changed since the previous
+    /// attempt and [`Self::start_encode`] can. Says whether it started one.
+    fn try_checkpoint(&mut self) -> bool {
+        self.checkpoints.changed(self.position) && self.start_encode()
+    }
+
+    /// Start a checkpoint here if output has made one due (where no read
+    /// will check it: a synchronized update's deadline drew it, the replay
+    /// finished). Says whether it started one.
+    fn checkpoint_if_due(&mut self) -> bool {
+        self.replay.finished && self.checkpoints.due(self.position) && self.try_checkpoint()
+    }
+
+    /// Start encoding a snapshot of the emulator here, on the blocking
+    /// pool, if the replay is over, no snapshot waits to be sent or is
+    /// being encoded, and the emulator is clean; even where the previous
+    /// attempt was made (an orderly stop retries one the host did not
+    /// accept). Says whether it started one. The emulator leaves its slot
+    /// for the encode, with a [`View`] of it left behind for the views.
+    fn start_encode(&mut self) -> bool {
+        if !self.replay.finished || self.checkpoints.has_ready() || self.encoding.is_some() {
+            return false;
+        }
+        let emulator = {
+            let mut held = self.emulator.lock().unwrap_or_else(PoisonError::into_inner);
+            let Slot::Live(emulator) = &held.slot else {
+                unreachable!("an encode started while one was in progress");
+            };
+            if !emulator.is_clean() {
+                return false;
+            }
+            let view = View::of(emulator);
+            match std::mem::replace(&mut held.slot, Slot::Encoding(view)) {
+                Slot::Live(emulator) => emulator,
+                Slot::Encoding(_) | Slot::Lost(_) => unreachable!("just looked"),
+            }
+        };
+        #[cfg(any(test, feature = "test-seams"))]
+        let gate = self.encode_gate.clone();
+        let task = tokio::task::spawn_blocking(move || {
+            #[cfg(any(test, feature = "test-seams"))]
+            let fault = gate.as_ref().and_then(EncodeGate::pass);
+            #[cfg(any(test, feature = "test-seams"))]
+            if fault == Some(EncodeFault::TaskLost) {
+                panic!("test seam: an encode task lost with its emulator");
+            }
+            // A panic in the encoder must not take the emulator with it.
+            let snapshot = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                #[cfg(any(test, feature = "test-seams"))]
+                if fault == Some(EncodeFault::EncoderPanics) {
+                    panic!("test seam: an encoder panic");
+                }
+                emulator.snapshot(MAX_SNAPSHOT)
+            }))
+            .ok()
+            .and_then(Result::ok);
+            Encoded { emulator, snapshot }
+        });
+        self.checkpoints.attempted(self.position);
+        self.encoding = Some(Encoding {
+            position: self.position,
+            task,
+        });
+        true
+    }
+
+    /// Wait, without blocking, for the encode in progress, if there is one:
+    /// bring the emulator home and keep the snapshot to be sent, or, if
+    /// the task was lost with the emulator, mark it lost (`Self::lose`).
+    async fn settle_encoding(&mut self) {
+        let Some(encoding) = self.encoding.take() else {
+            return;
+        };
+        match encoding.task.await {
+            Ok(encoded) => {
+                if let Some(snapshot) = self.home(encoded) {
+                    self.encoded(encoding.position, snapshot);
+                }
+            }
+            Err(error) => self.lose(&error),
+        }
+    }
+
+    /// The encode's task was lost (a tokio runtime shutting down cancels
+    /// it; a panic outside the encoder's own guard fails it), and the
+    /// emulator went with it: keep the last view for the views, release
+    /// every `read` waiting with an error, and have the runtime end.
+    fn lose(&mut self, error: &tokio::task::JoinError) {
+        warn!(socket = %self.socket.display(), %error, "a terminal checkpoint's encode was lost, and the emulator with it");
+        let mut held = self.emulator.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Slot::Encoding(view) = &held.slot {
+            held.slot = Slot::Lost(view.clone());
+        }
+        drop(held);
+        self.lost = true;
+        self.returned.notify_waiters();
+        self.publish();
+    }
+
+    /// Bring the emulator home from an encode, wake whoever waits for it
+    /// (a `read`, and through the status a `try_read` that found it away),
+    /// and give back the snapshot, if the encode made one.
+    fn home(&mut self, encoded: Encoded) -> Option<Snapshot> {
+        self.emulator
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .slot = Slot::Live(encoded.emulator);
+        self.returned.notify_waiters();
+        self.publish();
+        if encoded.snapshot.is_none() {
+            warn!(socket = %self.socket.display(), "a terminal checkpoint's encode failed");
+        }
+        encoded.snapshot
+    }
+
+    /// An encode finished: keep its snapshot to be sent.
+    fn encoded(&mut self, position: Position, snapshot: Snapshot) {
+        if snapshot.dropped_history_lines > 0 || snapshot.dropped_screens {
+            info!(
+                socket = %self.socket.display(),
+                dropped_history_lines = snapshot.dropped_history_lines,
+                dropped_screens = snapshot.dropped_screens,
+                "a terminal checkpoint left out state to fit the host's limit"
+            );
+        }
+        self.checkpoints.encoded(position, snapshot.blob);
+    }
+
+    /// Act on the host's answer to a checkpoint. A rejected one leaves the
+    /// host its previous snapshot; the next is due as for any attempt.
+    fn on_snapshot_reply(&mut self, reply: SnapshotReply) {
+        match reply {
+            SnapshotReply::Accepted(position) => {
+                self.checkpoints.accept(position);
+                self.publish();
+            }
+            SnapshotReply::Rejected { position, reason } => {
+                warn!(
+                    socket = %self.socket.display(),
+                    ?position,
+                    ?reason,
+                    "the terminal host rejected a checkpoint"
+                );
+            }
+        }
+    }
+
+    /// [`HostTerminal::checkpoint_now`]'s work: the outcome, and the error
+    /// that ended the connection, if one did.
+    async fn checkpoint_now(
+        &mut self,
+        conn: &mut HostConnection,
+        deadline: tokio::time::Instant,
+    ) -> (CheckpointOutcome, Option<ClientError>) {
+        if tokio::time::Instant::now() >= deadline {
+            return (CheckpointOutcome::Kept(NotTaken::TimedOut), None);
+        }
+        if !self.replay.finished {
+            return (CheckpointOutcome::Kept(NotTaken::Replaying), None);
+        }
+        if self.checkpoints.accepted() == Some(self.position) {
+            return (CheckpointOutcome::Current(self.position), None);
+        }
+        // `turn` settles every encode and sends every finished snapshot
+        // before it takes a request up, so neither is pending here.
+        if !self.start_encode() {
+            return (CheckpointOutcome::Kept(NotTaken::NotClean), None);
+        }
+        let mut encoding = self.encoding.take().expect("just started");
+        let snapshot = match tokio::time::timeout_at(deadline, &mut encoding.task).await {
+            Ok(Ok(encoded)) => match self.home(encoded) {
+                Some(snapshot) => snapshot,
+                None => return (CheckpointOutcome::Kept(NotTaken::EncodeFailed), None),
+            },
+            Ok(Err(error)) => {
+                self.lose(&error);
+                return (CheckpointOutcome::Kept(NotTaken::EncodeFailed), None);
+            }
+            Err(_) => {
+                // Finished in the background and sent as an ordinary
+                // checkpoint (`turn` settles it first).
+                self.encoding = Some(encoding);
+                return (CheckpointOutcome::Kept(NotTaken::TimedOut), None);
+            }
+        };
+        let position = encoding.position;
+        self.checkpoints.encoded_now(snapshot.blob.len());
+        let blob = snapshot.blob;
+        // Dropping the request at the deadline is safe: sent, its reply is
+        // skipped; not sent, it left nothing (the client's module docs).
+        match tokio::time::timeout_at(deadline, conn.snapshot(position, blob)).await {
+            Err(_) => (CheckpointOutcome::Kept(NotTaken::TimedOut), None),
+            Ok(Ok(SnapshotReply::Accepted(position))) => {
+                self.checkpoints.accept(position);
+                self.publish();
+                (CheckpointOutcome::Accepted(position), None)
+            }
+            Ok(Ok(SnapshotReply::Rejected { reason, .. })) => {
+                (CheckpointOutcome::Kept(NotTaken::Rejected(reason)), None)
+            }
+            Ok(Err(error)) => (
+                CheckpointOutcome::Kept(NotTaken::Failed(error.clone())),
+                Some(error),
+            ),
+        }
+    }
+
+    /// Ask the program to redraw (module docs, "Gaps"): resize the terminal
+    /// one row smaller (larger, at one row) and back to the size it should
+    /// have, the size last asked for or else the emulator's. Both resizes
+    /// reach the emulator as resize records, like any other.
+    async fn ask_for_redraw(&mut self, conn: &mut HostConnection) -> Result<(), ClientError> {
+        let size = self.size_requested.unwrap_or_else(|| {
+            let size = self.lock().size();
+            Size {
+                cols: size.columns,
+                rows: size.lines,
+            }
+        });
+        let nudge = Size {
+            rows: if size.rows > 1 {
+                size.rows - 1
+            } else {
+                size.rows + 1
+            },
+            ..size
+        };
+        conn.resize(nudge).await?;
+        conn.resize(size).await?;
+        self.redraw_wanted = false;
+        Ok(())
     }
 
     /// Apply a resize record, unless it was already applied.
@@ -1696,14 +2700,14 @@ impl Runtime {
         if index < self.position.resizes {
             return;
         }
-        let mode = self.replay.mode();
-        let mut answers = Answers::default();
+        let mode = self.replay.flush_mode(self.position.offset);
+        let mut answers = FedEffects::default();
         self.lock().resize(emulator_size(size), mode, &mut answers);
         self.position = Position {
             offset: offset.max(self.position.offset),
             resizes: index + 1,
         };
-        self.queue_answers(answers);
+        self.act_on_effects(answers);
         self.after_record();
     }
 
@@ -1718,14 +2722,24 @@ impl Runtime {
         if !after(resumes, self.position) {
             return;
         }
-        // Asking the program to redraw, and telling the viewer that history
-        // was lost, belong here once the journal is checkpointed.
         warn!(
             socket = %self.socket.display(),
             from, to, "terminal output was trimmed before it was processed"
         );
-        let mode = self.replay.mode();
-        let mut answers = Answers::default();
+        self.emulator
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .history_gap = true;
+        self.redraw_wanted = true;
+        let mut answers = FedEffects::default();
+        // An update open from before the gap holds bytes up to where the
+        // gap starts: if the gap carries the replay past `seen_end`, they
+        // are seen.
+        if !self.replay.finished && !self.replay.crossed && to >= self.replay.seen_end {
+            self.lock().flush_sync(FeedMode::ReplaySeen, &mut answers);
+            self.replay.crossed = true;
+        }
+        let mode = self.replay.flush_mode(self.position.offset);
         {
             let mut emulator = self.lock();
             if emulator.size() != emulator_size(size) {
@@ -1736,7 +2750,7 @@ impl Runtime {
             offset: to.max(self.position.offset),
             resizes: resizes.max(self.position.resizes),
         };
-        self.queue_answers(answers);
+        self.act_on_effects(answers);
         self.after_record();
     }
 
@@ -1744,10 +2758,10 @@ impl Runtime {
     /// it), and record the exit. Output after it (from descendants that keep
     /// the pty) is fed as before.
     fn on_exited(&mut self, offset: u64, exit: ChildExit) {
-        let mode = self.replay.mode();
-        let mut answers = Answers::default();
+        let mode = self.replay.flush_mode(self.position.offset);
+        let mut answers = FedEffects::default();
         self.lock().flush_sync(mode, &mut answers);
-        self.queue_answers(answers);
+        self.act_on_effects(answers);
         self.publish();
         info!(socket = %self.socket.display(), offset, ?exit, "a host terminal's program exited");
         // The host sends the record once per stream, so a resumed stream
@@ -1779,28 +2793,37 @@ impl Runtime {
     }
 
     /// End the replay if its last record has been processed.
-    fn finish_replay_if_reached(&mut self, answers: &mut Answers) {
+    fn finish_replay_if_reached(&mut self, answers: &mut FedEffects) {
         if !self.replay.finished && reached(self.position, self.replay.end) {
             self.finish_replay(answers);
         }
     }
 
-    /// End the replay: draw an update it left open, with replay's effects,
-    /// so that the first live feed does not end it with live ones (the
-    /// emulator's `FeedMode` docs).
-    fn finish_replay(&mut self, answers: &mut Answers) {
+    /// End the replay: draw an update it left open, with the effects of the
+    /// bytes it holds, so that the first live feed does not draw it with
+    /// live ones (the emulator's `FeedMode` docs).
+    fn finish_replay(&mut self, answers: &mut FedEffects) {
         if self.replay.finished {
             return;
         }
-        self.lock().flush_sync(REPLAYED, answers);
+        self.cross_seen_end(answers);
+        let mode = self.replay.flush_mode(self.position.offset);
+        self.lock().flush_sync(mode, answers);
         self.replay.finished = true;
     }
 
     /// Bookkeeping after any record that moved the position.
     fn after_record(&mut self) {
-        let mut answers = Answers::default();
+        let mut answers = FedEffects::default();
+        self.cross_seen_end(&mut answers);
+        let replaying = !self.replay.finished;
         self.finish_replay_if_reached(&mut answers);
-        self.queue_answers(answers);
+        if replaying && self.replay.finished {
+            // A record other than output ended the replay (output ending
+            // it checks in `on_output`).
+            self.checkpoint_if_due();
+        }
+        self.act_on_effects(answers);
         self.publish();
     }
 
@@ -1808,10 +2831,18 @@ impl Runtime {
     fn publish(&self) {
         let position = self.position;
         let caught_up = self.fence == 0 && reached(position, self.adopted_end);
+        let checkpoint = self.checkpoints.accepted();
+        let history_trimmed = self
+            .emulator
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .history_trimmed();
         self.status.send_modify(|status| {
             status.position = position;
             status.revision += 1;
             status.caught_up = caught_up;
+            status.checkpoint = checkpoint;
+            status.history_trimmed = history_trimmed;
         });
     }
 
@@ -1846,8 +2877,9 @@ impl Runtime {
         }
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, Emulator> {
-        self.emulator.lock().unwrap_or_else(PoisonError::into_inner)
+    /// The emulator, home (see `LiveGuard`).
+    fn lock(&self) -> LiveGuard<'_> {
+        LiveGuard(self.emulator.lock().unwrap_or_else(PoisonError::into_inner))
     }
 
     /// The connection ended with `error`: learn what became of the host by
@@ -1867,6 +2899,10 @@ impl Runtime {
             resolve(lost.fate, InputFate::Unknown);
         }
         self.counts = InputCounts::default();
+        // The rest of an interrupted read is read again from the position
+        // processed, on the new connection.
+        self.settle_encoding().await;
+        self.deferred = None;
         let mut error = error;
         loop {
             // A runtime nobody holds does not take its host back: the
@@ -1989,6 +3025,8 @@ impl Runtime {
     /// Shut the host down and confirm that it ended (see
     /// [`HostTerminal::shutdown`]).
     async fn shut_down(mut self, conn: HostConnection, reply: oneshot::Sender<ShutdownReport>) {
+        // So that the emulator is home for `read` once the runtime ends.
+        self.settle_encoding().await;
         let mut peer = conn.peer().or(self.peer);
         // The host discards pending input at `Shutdown` without saying.
         for lost in self.in_flight.drain(..) {
@@ -2126,6 +3164,11 @@ async fn wait_for_end(socket: &Path, peer: Option<HostProcess>, limit: Duration)
         tokio::time::sleep(END_POLL).await;
     }
 }
+
+mod checkpoint;
+
+use checkpoint::Checkpoints;
+pub use checkpoint::{CHECKPOINT_MIN_BYTES, CheckpointOutcome, CheckpointPolicy, NotTaken};
 
 #[cfg(test)]
 mod tests;

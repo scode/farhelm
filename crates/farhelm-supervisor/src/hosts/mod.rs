@@ -65,14 +65,17 @@ pub use registry::{
     ScanOptions, SessionTabs, Skipped, SkippedEntry, SocketRemoval, UnavailableHost,
     WhyUnavailable,
 };
-pub use spawn::{ChildSpec, SpawnError, SpawnedHost, own_host_program, spawn_host};
+pub use spawn::{
+    ChildSpec, DEFAULT_JOURNAL_CAP, SpawnError, SpawnedHost, own_host_program, spawn_host,
+};
 pub use stop::{
     HostOutcome, HostReport, StopLimits, StopReport, Stopped, stop_terminal_hosts,
     write_lines_within,
 };
 pub use tag::{HostRole, HostTag, TagError, UnreadableTag};
 pub use terminal::{
-    AdoptError, Adoption, Clock, HostEvidence, HostStatus, HostTerminal, HostTerminalOptions,
-    InputFate, InputReceipt, InputRefused, InputSequence, Liveness, LivenessChange,
-    LivenessNotifier, ProcessRoot, ResizeRefused, ShutdownReport, Unavailability,
+    AdoptError, Adoption, CheckpointOutcome, CheckpointPolicy, Clock, EmulatorRef, HostEvidence,
+    HostStatus, HostTerminal, HostTerminalOptions, InputFate, InputReceipt, InputRefused,
+    InputSequence, Liveness, LivenessChange, LivenessNotifier, NotTaken, NoticeSubscription,
+    ProcessRoot, ResizeRefused, ShutdownReport, Unavailability,
 };
