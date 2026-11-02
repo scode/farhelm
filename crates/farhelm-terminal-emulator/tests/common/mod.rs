@@ -6,7 +6,11 @@
 
 #![allow(dead_code)]
 
+pub mod compare;
+pub mod describe;
 pub mod output;
+pub mod roundtrip;
+pub mod synthetic;
 
 use std::sync::OnceLock;
 use std::time::Instant;

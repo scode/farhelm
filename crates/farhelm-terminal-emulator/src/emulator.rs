@@ -4,8 +4,9 @@
 use std::time::Instant;
 
 use alacritty_terminal::Term;
-use alacritty_terminal::grid::Dimensions;
-use alacritty_terminal::term::{Config, Osc52};
+use alacritty_terminal::grid::{Dimensions, Grid};
+use alacritty_terminal::term::cell::Cell;
+use alacritty_terminal::term::{Config, Osc52, TermMode};
 use alacritty_terminal::vte::ansi::{Processor, Timeout};
 
 use crate::effects::{self, Effects, FeedMode, Listener};
@@ -61,15 +62,47 @@ impl Dimensions for Size {
 /// It does no I/O and owns no timer. Its owner feeds it the program's output,
 /// writes the answers it produces to the program, wakes it at
 /// [`Emulator::sync_deadline`], and reads the screen, title and modes from it.
+/// To survive a supervisor restart it is snapshotted and restored (the
+/// `snapshot` module, which reaches into the fields below).
 pub struct Emulator {
-    term: Term<Listener>,
-    parser: Processor<SyncClock>,
+    pub(crate) term: Term<Listener>,
+    pub(crate) parser: Processor<SyncClock>,
     /// The same queue `term` reports into (see `effects`).
-    listener: Listener,
+    pub(crate) listener: Listener,
     /// Whether a synchronized update is open as far as the handler has seen,
     /// for DECRQM 2026 (see `QueryHandler::sync_open`). Always false when the
     /// emulator is clean, so a snapshot need not record it.
-    sync_open: bool,
+    pub(crate) sync_open: bool,
+    /// The most lines of history this emulator keeps, as created.
+    pub(crate) scrollback_lines: usize,
+    /// Set when this emulator was restored from a snapshot whose history had
+    /// been cut short to fit the size limit; see
+    /// [`Emulator::history_trimmed`].
+    pub(crate) trimmed: Option<TrimMark>,
+}
+
+/// Where the primary screen's history counters stood when an emulator was
+/// restored from a trimmed snapshot, and how many more lines had to enter
+/// history then before the loss stopped showing, so that
+/// [`Emulator::history_trimmed`] can tell when the trimmed history no longer
+/// matters. A snapshot carries the distance left, so that it survives any
+/// number of restores.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct TrimMark {
+    pub(crate) history_clears: u64,
+    pub(crate) lines_scrolled: u64,
+    pub(crate) remaining: u64,
+}
+
+/// The emulator's alacritty configuration, keeping `scrollback_lines` lines of
+/// history (see [`Emulator::new`] for why the rest is fixed).
+fn config(scrollback_lines: usize) -> Config {
+    Config {
+        scrolling_history: scrollback_lines,
+        kitty_keyboard: false,
+        osc52: Osc52::OnlyCopy,
+        ..Config::default()
+    }
 }
 
 impl Emulator {
@@ -82,18 +115,18 @@ impl Emulator {
     /// never answered). Both are alacritty's defaults; they are spelled out so
     /// that a change of default upstream cannot change them.
     pub fn new(size: Size, scrollback_lines: usize) -> Emulator {
-        let config = Config {
-            scrolling_history: scrollback_lines,
-            kitty_keyboard: false,
-            osc52: Osc52::OnlyCopy,
-            ..Config::default()
-        };
         let listener = Listener::default();
         Emulator {
-            term: Term::new(config, &size.at_least_one_cell(), listener.clone()),
+            term: Term::new(
+                config(scrollback_lines),
+                &size.at_least_one_cell(),
+                listener.clone(),
+            ),
             parser: Processor::new(),
             listener,
             sync_open: false,
+            scrollback_lines,
+            trimmed: None,
         }
     }
 
@@ -266,5 +299,73 @@ impl Emulator {
     /// not cover: the grid and its history, cursor, colors.
     pub fn term(&self) -> &Term<Listener> {
         &self.term
+    }
+
+    /// The character `CSI Ps b` (REP) would repeat: the last one printed, or
+    /// `None` before any. Parser state rather than terminal state, but a
+    /// snapshot carries it, since a program may rely on it after a restore.
+    pub fn preceding_char(&self) -> Option<char> {
+        self.parser.preceding_char()
+    }
+
+    /// Whether this terminal's history is shorter than it should be because a
+    /// snapshot it was restored from had to drop its oldest lines to fit the
+    /// host's size limit (`snapshot` module docs, "Size"), so that the viewer
+    /// can say history was trimmed.
+    ///
+    /// It stays true across further snapshots and restores, and turns false
+    /// once the loss no longer shows: when the program clears its history
+    /// (`CSI 3 J`, a full reset), or once as many lines as the history held
+    /// when it was trimmed have entered it since, counted across restores,
+    /// which would have pushed the lost lines out anyway. A Restart seed made
+    /// from more lines than the scrollback holds is trimmed the same way.
+    pub fn history_trimmed(&self) -> bool {
+        self.trim_remaining().is_some()
+    }
+
+    /// While [`Emulator::history_trimmed`], how many more lines must enter
+    /// history before it no longer is; `None` when it is not trimmed. A
+    /// snapshot carries this count, so it goes on counting down across
+    /// restores.
+    pub fn trim_remaining(&self) -> Option<u64> {
+        let mark = self.trimmed?;
+        let primary = self.primary_grid();
+        let scrolled = primary
+            .lines_scrolled_into_history()
+            .saturating_sub(mark.lines_scrolled);
+        (primary.history_clears() == mark.history_clears && scrolled < mark.remaining)
+            .then(|| mark.remaining - scrolled)
+    }
+
+    /// Mark this emulator's history trimmed until `remaining` more lines have
+    /// entered it (or it is cleared); a `remaining` of 0 clears the mark.
+    pub(crate) fn mark_trimmed(&mut self, remaining: u64) {
+        let primary = self.primary_grid();
+        self.trimmed = (remaining > 0).then(|| TrimMark {
+            history_clears: primary.history_clears(),
+            lines_scrolled: primary.lines_scrolled_into_history(),
+            remaining,
+        });
+    }
+
+    /// Keep up to `scrollback_lines` lines of history from now on, dropping
+    /// the oldest beyond that. A restore starts with only as much as its
+    /// snapshot holds, so that a blob cannot make it allocate more, and then
+    /// gives the emulator its real scrollback.
+    pub(crate) fn set_scrollback(&mut self, scrollback_lines: usize) {
+        self.term.set_options(config(scrollback_lines));
+        // `set_options` reports the title again; nobody needs to hear it.
+        self.listener.take();
+        self.scrollback_lines = scrollback_lines;
+    }
+
+    /// The primary screen's grid, the one with the history, whichever screen
+    /// shows.
+    pub(crate) fn primary_grid(&self) -> &Grid<Cell> {
+        if self.term.mode().contains(TermMode::ALT_SCREEN) {
+            self.term.inactive_grid()
+        } else {
+            self.term.grid()
+        }
     }
 }

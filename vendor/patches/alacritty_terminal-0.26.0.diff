@@ -127,18 +127,51 @@ index 37f9369..db73526 100644
                  // Insert spacer if a wide char would be wrapped into the last column.
                  if row.len() >= columns
                      && row[Column(columns - 1)].flags().contains(Flags::WIDE_CHAR)
+diff --git a/alacritty_terminal/src/grid/row.rs b/alacritty_terminal/src/grid/row.rs
+index 040f724..f1b2dc1 100644
+--- a/alacritty_terminal/src/grid/row.rs
++++ b/alacritty_terminal/src/grid/row.rs
+@@ -1,3 +1,6 @@
++// Modified for Farhelm: growing a row keeps its old cells within `occ`. See
++// vendor/README.md in the Farhelm repository.
++
+ //! Defines the Row type which makes up lines in the grid.
+ 
+ use std::cmp::{max, min};
+@@ -62,6 +65,14 @@ impl<T: Default> Row<T> {
+             return;
+         }
+ 
++        // Farhelm patch: `reset` skips the cells from `occ` on when the last
++        // cell already has the template's background, trusting that they hold
++        // a blank of that background. The default cells added here can make
++        // that last cell's background wrong for the old cells (after a reset
++        // with another background, say), which would let a later reset skip
++        // them and leave their old background showing; so count the old cells
++        // as occupied.
++        self.occ = max(self.occ, self.inner.len());
+         self.inner.resize_with(columns, T::default);
+     }
+ 
 diff --git a/alacritty_terminal/src/term/cell.rs b/alacritty_terminal/src/term/cell.rs
-index 484eabe..ba93315 100644
+index 484eabe..bcc1ff0 100644
 --- a/alacritty_terminal/src/term/cell.rs
 +++ b/alacritty_terminal/src/term/cell.rs
-@@ -1,3 +1,6 @@
+@@ -1,5 +1,12 @@
 +// Modified for Farhelm: caps the zero-width characters stored per cell
-+// (`MAX_ZEROWIDTH_CHARS`). See vendor/README.md in the Farhelm repository.
++// (`MAX_ZEROWIDTH_CHARS`), charges cell extras and hyperlinks to their
++// terminal's extra storage (`ExtraStorage`), and leaves a cell's extra alone
++// when a change to it changes nothing. See vendor/README.md in the Farhelm
++// repository.
 +
++use std::hash::{Hash, Hasher};
  use std::sync::Arc;
- use std::sync::atomic::{AtomicU32, Ordering};
+-use std::sync::atomic::{AtomicU32, Ordering};
++use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
  
-@@ -36,6 +39,18 @@ bitflags! {
+ use bitflags::bitflags;
+ #[cfg(feature = "serde")]
+@@ -36,6 +43,18 @@ bitflags! {
      }
  }
  
@@ -157,7 +190,216 @@ index 484eabe..ba93315 100644
  /// Counter for hyperlinks without explicit ID.
  static HYPERLINK_ID_SUFFIX: AtomicU32 = AtomicU32::new(0);
  
-@@ -162,6 +177,10 @@ impl Cell {
+@@ -72,6 +91,177 @@ impl From<Hyperlink> for VteHyperlink {
+     }
+ }
+ 
++/// Farhelm patch: the extra storage of one terminal, in bytes, shared by the
++/// cell extras and hyperlinks charged to it, and never more than
++/// `MAX_EXTRA_STORAGE_BYTES`.
++///
++/// A hyperlink made through [`ExtraStorage::link`] is charged its `id` and URI
++/// lengths plus `HYPERLINK_COST`; a cell extra (the allocation holding a
++/// cell's combining characters, underline color and hyperlink) is charged
++/// `CELL_EXTRA_COST`, and so is every copy made of a shared extra when one
++/// cell's attributes change. Each charge is given back when what it was
++/// charged for is dropped, so what is used is what the terminal's live extras
++/// cost.
++///
++/// The bound is hard: every change that would allocate a new extra goes
++/// through this type's setters, which check for room first. A change there is
++/// no room for degrades the cell instead: an added combining character or
++/// underline color is dropped, and an attribute removed from an extra other
++/// cells share (which would need a copy) takes the cell's whole extra with it,
++/// so the cell loses its other extras too. A program cannot make the storage
++/// grow past the limit, whatever it saves and restores.
++///
++/// Extras and links made by upstream's own constructors are not charged to
++/// anything; the terminal never makes one.
++#[derive(Debug, Default, Clone)]
++pub struct ExtraStorage {
++    used: Arc<AtomicUsize>,
++}
++
++impl ExtraStorage {
++    /// The bytes charged to this storage by extras and links still alive.
++    pub fn used(&self) -> usize {
++        self.used.load(Ordering::Relaxed)
++    }
++
++    /// Whether `bytes` more fit under `MAX_EXTRA_STORAGE_BYTES`.
++    pub fn has_room(&self, bytes: usize) -> bool {
++        self.used().saturating_add(bytes) <= crate::term::MAX_EXTRA_STORAGE_BYTES
++    }
++
++    /// A new link charged to this storage, or `None` if it and the cell extra
++    /// that will carry it would take the storage past
++    /// `MAX_EXTRA_STORAGE_BYTES`.
++    pub fn link(&self, link: VteHyperlink) -> Option<Hyperlink> {
++        let mut inner = HyperlinkInner::new(link.id, link.uri);
++        let bytes = inner.id.len() + inner.uri.len() + crate::term::HYPERLINK_COST;
++        if !self.has_room(bytes + crate::term::CELL_EXTRA_COST) {
++            return None;
++        }
++        inner.charge = Some(self.charge(bytes));
++        Some(Hyperlink { inner: Arc::new(inner) })
++    }
++
++    /// Add `character` to `cell`'s combining characters, or drop it if that
++    /// needs a new extra and there is no room for one.
++    pub fn push_zerowidth(&self, cell: &mut Cell, character: char) {
++        if !Self::change_allocates(cell) || self.has_room(crate::term::CELL_EXTRA_COST) {
++            cell.push_zerowidth(character);
++            self.adopt(cell);
++        }
++    }
++
++    /// Set `cell`'s underline color. Without room for the extra the change
++    /// needs, the color falls back to the default; and when that removal
++    /// would itself need a copy of a shared extra, the cell's whole extra is
++    /// dropped (see the type docs).
++    pub fn set_underline_color(&self, cell: &mut Cell, color: Option<Color>) {
++        if cell.underline_color() == color {
++            return;
++        }
++        let drops = color.is_none()
++            && cell.extra.as_ref().is_none_or(|extra| {
++                extra.zerowidth.is_empty() && extra.hyperlink.is_none()
++            });
++        if drops || !Self::change_allocates(cell) || self.has_room(crate::term::CELL_EXTRA_COST)
++        {
++            cell.set_underline_color(color);
++            self.adopt(cell);
++        } else {
++            cell.extra = None;
++        }
++    }
++
++    /// Set `cell`'s hyperlink (made with [`ExtraStorage::link`], or `None`).
++    /// Without room for the extra the change needs, the cell's whole extra
++    /// is dropped, the link with it (see the type docs).
++    pub fn set_hyperlink(&self, cell: &mut Cell, hyperlink: Option<Hyperlink>) {
++        if cell.hyperlink() == hyperlink {
++            return;
++        }
++        let drops = hyperlink.is_none()
++            && cell.extra.as_ref().is_none_or(|extra| {
++                extra.zerowidth.is_empty() && extra.underline_color.is_none()
++            });
++        if drops || !Self::change_allocates(cell) || self.has_room(crate::term::CELL_EXTRA_COST)
++        {
++            cell.set_hyperlink(hyperlink);
++            self.adopt(cell);
++        } else {
++            cell.extra = None;
++        }
++    }
++
++    /// [`Cell::clear_wide`], dropping the cell's whole extra when clearing its
++    /// combining characters would need a copy of a shared extra and there is
++    /// no room for one.
++    pub fn clear_wide(&self, cell: &mut Cell) {
++        let clears = cell.zerowidth().is_some_and(|zerowidth| !zerowidth.is_empty());
++        if clears && Self::change_allocates(cell) && !self.has_room(crate::term::CELL_EXTRA_COST) {
++            cell.extra = None;
++        }
++        cell.clear_wide();
++        self.adopt(cell);
++    }
++
++    /// Whether changing `cell`'s extra makes a new one: it has none, or
++    /// shares it with other cells (and copies it on write).
++    fn change_allocates(cell: &Cell) -> bool {
++        cell.extra.as_ref().is_none_or(|extra| Arc::strong_count(extra) > 1)
++    }
++
++    /// Charge `cell`'s extra to this storage if nothing is charged for it yet
++    /// and no other cell shares it: a fresh extra that one of [`Cell`]'s
++    /// setters made, after its caller checked for room.
++    fn adopt(&self, cell: &mut Cell) {
++        if let Some(extra) = cell.extra.as_mut().and_then(Arc::get_mut) {
++            if extra.charge.is_none() {
++                extra.charge = Some(self.charge(crate::term::CELL_EXTRA_COST));
++            }
++        }
++    }
++
++    fn charge(&self, bytes: usize) -> StorageCharge {
++        self.used.fetch_add(bytes, Ordering::Relaxed);
++        StorageCharge { bytes, used: self.used.clone() }
++    }
++}
++
++/// Farhelm patch: one extra's or link's charge to an [`ExtraStorage`], given
++/// back on drop. A copy is charged again, to the same storage.
++#[derive(Debug)]
++struct StorageCharge {
++    bytes: usize,
++    used: Arc<AtomicUsize>,
++}
++
++impl Clone for StorageCharge {
++    fn clone(&self) -> Self {
++        self.used.fetch_add(self.bytes, Ordering::Relaxed);
++        StorageCharge { bytes: self.bytes, used: self.used.clone() }
++    }
++}
++
++impl Drop for StorageCharge {
++    fn drop(&mut self) {
++        self.used.fetch_sub(self.bytes, Ordering::Relaxed);
++    }
++}
++
++// The charge is bookkeeping, not part of a link's or extra's identity: they
++// stay equal (and hash alike) whatever they are charged to.
++impl PartialEq for StorageCharge {
++    fn eq(&self, _: &Self) -> bool {
++        true
++    }
++}
++
++impl Eq for StorageCharge {}
++
++impl Hash for StorageCharge {
++    fn hash<H: Hasher>(&self, _: &mut H) {}
++}
++
+ #[derive(Debug, PartialEq, Eq, Hash)]
+ #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+ struct HyperlinkInner {
+@@ -80,6 +270,10 @@ struct HyperlinkInner {
+ 
+     /// Resource identifier of the hyperlink.
+     uri: String,
++
++    /// Farhelm patch: what this link is charged to, if anything.
++    #[cfg_attr(feature = "serde", serde(skip))]
++    charge: Option<StorageCharge>,
+ }
+ 
+ impl HyperlinkInner {
+@@ -93,7 +287,7 @@ impl HyperlinkInner {
+             },
+         };
+ 
+-        Self { id, uri }
++        Self { id, uri, charge: None }
+     }
+ }
+ 
+@@ -126,6 +320,10 @@ pub struct CellExtra {
+     zerowidth: Vec<char>,
+     underline_color: Option<Color>,
+     hyperlink: Option<Hyperlink>,
++
++    /// Farhelm patch: what this extra is charged to, if anything.
++    #[cfg_attr(feature = "serde", serde(skip))]
++    charge: Option<StorageCharge>,
+ }
+ 
+ /// Content and attributes of a single cell in the terminal grid.
+@@ -162,6 +360,10 @@ impl Cell {
      /// Write a new zerowidth character to this cell.
      #[inline]
      pub fn push_zerowidth(&mut self, character: char) {
@@ -168,24 +410,69 @@ index 484eabe..ba93315 100644
          let extra = self.extra.get_or_insert(Default::default());
          Arc::make_mut(extra).zerowidth.push(character);
      }
+@@ -170,7 +372,9 @@ impl Cell {
+     #[inline(never)]
+     pub fn clear_wide(&mut self) {
+         self.flags.remove(Flags::WIDE_CHAR);
+-        if let Some(extra) = self.extra.as_mut() {
++        // Farhelm patch: only with combining characters to clear, so that an
++        // extra shared with other cells is not copied for nothing.
++        if let Some(extra) = self.extra.as_mut().filter(|extra| !extra.zerowidth.is_empty()) {
+             Arc::make_mut(extra).zerowidth = Vec::new();
+         }
+         self.c = ' ';
+@@ -186,7 +390,10 @@ impl Cell {
+                 .is_none_or(|extra| extra.zerowidth.is_empty() && extra.hyperlink.is_none())
+         {
+             self.extra = None;
+-        } else {
++        } else if self.underline_color() != color {
++            // Farhelm patch: the `if`. Setting the color it has already would
++            // copy an extra shared with other cells for nothing, once per
++            // repeat.
+             let extra = self.extra.get_or_insert(Default::default());
+             Arc::make_mut(extra).underline_color = color;
+         }
+@@ -208,7 +415,9 @@ impl Cell {
+ 
+         if should_drop {
+             self.extra = None;
+-        } else {
++        } else if self.extra.as_ref().is_none_or(|extra| extra.hyperlink != hyperlink) {
++            // Farhelm patch: the condition, for the reason in
++            // `set_underline_color`.
+             let extra = self.extra.get_or_insert(Default::default());
+             Arc::make_mut(extra).hyperlink = hyperlink;
+         }
 diff --git a/alacritty_terminal/src/term/mod.rs b/alacritty_terminal/src/term/mod.rs
-index 8eb6797..f3b3b50 100644
+index 8eb6797..9834fb0 100644
 --- a/alacritty_terminal/src/term/mod.rs
 +++ b/alacritty_terminal/src/term/mod.rs
-@@ -1,3 +1,12 @@
+@@ -1,3 +1,14 @@
 +// Modified for Farhelm: adds snapshot accessors to `Term`, caps hyperlink and
 +// title lengths, reuses the active hyperlink when an identical one is sent
 +// again, drops a wide character a one-column grid cannot hold, raises the
 +// pending-wrap flag only while autowrap is on, makes `CSI 1 J` on the second
 +// line clear the first and `CSI J` with a wrap pending keep the last column,
 +// stops relative vertical cursor moves at the scroll margins, keeps CHA on the
-+// cursor's line in origin mode, and homes the cursor when origin mode is
-+// reset. See vendor/README.md in the Farhelm repository.
++// cursor's line in origin mode, homes the cursor when origin mode is reset,
++// and bounds the storage one terminal's cell extras (combining characters,
++// underline colors, hyperlinks) take. See vendor/README.md in the Farhelm
++// repository.
 +
  //! Exports the `Term` type which is a high-level API for the Grid.
  
  use std::ops::{Index, IndexMut, Range};
-@@ -41,6 +50,32 @@ pub const MIN_SCREEN_LINES: usize = 1;
+@@ -17,7 +28,7 @@ use crate::event::{Event, EventListener};
+ use crate::grid::{Dimensions, Grid, GridIterator, Scroll};
+ use crate::index::{self, Boundary, Column, Direction, Line, Point, Side};
+ use crate::selection::{Selection, SelectionRange, SelectionType};
+-use crate::term::cell::{Cell, Flags, LineLength};
++use crate::term::cell::{Cell, ExtraStorage, Flags, LineLength};
+ use crate::term::color::Colors;
+ use crate::vi_mode::{ViModeCursor, ViMotion};
+ use crate::vte::ansi::{
+@@ -41,6 +52,63 @@ pub const MIN_SCREEN_LINES: usize = 1;
  /// Max size of the window title stack.
  const TITLE_STACK_MAX_DEPTH: usize = 4096;
  
@@ -205,6 +492,37 @@ index 8eb6797..f3b3b50 100644
 +/// `id` to 250 bytes. A longer `id` ends the current hyperlink.
 +pub const MAX_HYPERLINK_ID_BYTES: usize = 250;
 +
++/// Farhelm patch: the most extra storage one terminal's cells may take, in
++/// bytes, as [`ExtraStorage`] counts it: the cell extras that hold combining
++/// characters, underline colors and hyperlinks, and the hyperlinks themselves.
++///
++/// A cell keeps those in a separate allocation, shared by the cells printed
++/// with one cursor template but made anew whenever a program varies them from
++/// cell to cell: a combining mark on every cell, an underline color changed
++/// before every character, or a new hyperlink before every character. Without
++/// a bound such output takes about 390 MiB per terminal at 12,000 lines of 200
++/// columns, and about 6 GB with the longest hyperlinks. Once the storage is
++/// full, a combining character is dropped, an underline color falls back to
++/// the default, an OSC 8 ends the active hyperlink, and a removal that would
++/// copy a shared extra drops the cell's extra whole, until enough of the
++/// terminal's extras are gone (their cells overwritten, cleared or dropped
++/// from history). The storage never exceeds this. 64 MiB holds an extra for
++/// about 400,000 cells, a sixth of that scrollback, or about 25,000
++/// hyperlinks of the longest kind; text with combining marks on a third of
++/// its cells fills it only past 6,000 such lines.
++pub const MAX_EXTRA_STORAGE_BYTES: usize = 64 * 1024 * 1024;
++
++/// Farhelm patch: what one cell extra costs [`ExtraStorage`]: its shared
++/// allocation and the most its combining characters can take
++/// (`MAX_ZEROWIDTH_CHARS`), as 64-bit glibc rounds them (about 80 bytes
++/// each).
++pub const CELL_EXTRA_COST: usize = 160;
++
++/// Farhelm patch: what one hyperlink costs [`ExtraStorage`] beyond its `id`
++/// and URI bytes: an estimate of the link's own allocation and the rounding
++/// of its `id`'s and URI's. It makes links with short URIs count too.
++pub const HYPERLINK_COST: usize = 128;
++
 +/// Farhelm patch: the longest window title (OSC 0 and 2) kept, in bytes; a
 +/// longer title is cut at the last character boundary that fits.
 +///
@@ -218,7 +536,26 @@ index 8eb6797..f3b3b50 100644
  /// Default semantic escape characters.
  pub const SEMANTIC_ESCAPE_CHARS: &str = ",│`|:\"' ()[]{}<>\t";
  
-@@ -953,6 +988,58 @@ impl<T> Term<T> {
+@@ -327,6 +395,10 @@ pub struct Term<T> {
+ 
+     /// Config directly for the terminal.
+     config: Config,
++
++    /// Farhelm patch: what this terminal's cell extras and hyperlinks take;
++    /// see `MAX_EXTRA_STORAGE_BYTES`.
++    extra_storage: ExtraStorage,
+ }
+ 
+ /// Configuration options for the [`Term`].
+@@ -441,6 +513,7 @@ impl<T> Term<T> {
+             selection: Default::default(),
+             title: Default::default(),
+             mode: Default::default(),
++            extra_storage: Default::default(),
+         }
+     }
+ 
+@@ -953,6 +1026,67 @@ impl<T> Term<T> {
          &self.colors
      }
  
@@ -274,10 +611,30 @@ index 8eb6797..f3b3b50 100644
 +        (&self.keyboard_mode_stack, &self.inactive_keyboard_mode_stack)
 +    }
 +
++    /// Farhelm patch: this terminal's extra storage (see
++    /// `MAX_EXTRA_STORAGE_BYTES`). An embedder that writes cells with extras
++    /// itself, as a restore does, gives them their extras through its setters
++    /// (or shares an extra another cell of this terminal already has), so
++    /// that they count and stay within the limit.
++    pub fn extra_storage(&self) -> &ExtraStorage {
++        &self.extra_storage
++    }
++
      /// Insert a linebreak at the current cursor position.
      #[inline]
      fn wrapline(&mut self)
-@@ -1017,6 +1104,36 @@ impl<T> Term<T> {
+@@ -998,7 +1132,9 @@ impl<T> Term<T> {
+             if wide && point.column < self.last_column() {
+                 self.grid[point.line][point.column + 1].flags.remove(Flags::WIDE_CHAR_SPACER);
+             } else if point.column > 0 {
+-                self.grid[point.line][point.column - 1].clear_wide();
++                // Farhelm patch: through the extra storage
++                // (`MAX_EXTRA_STORAGE_BYTES`).
++                self.extra_storage.clear_wide(&mut self.grid[point.line][point.column - 1]);
+             }
+ 
+             // Remove leading spacers.
+@@ -1017,6 +1153,36 @@ impl<T> Term<T> {
          cursor_cell.extra = extra;
      }
  
@@ -314,22 +671,26 @@ index 8eb6797..f3b3b50 100644
      #[inline]
      fn damage_cursor(&mut self) {
          // The normal cursor coordinates are always in viewport.
-@@ -1084,6 +1201,14 @@ impl<T: EventListener> Handler for Term<T> {
-             return;
-         }
+@@ -1080,7 +1246,17 @@ impl<T: EventListener> Handler for Term<T> {
+                 column.0 = column.saturating_sub(1);
+             }
  
+-            self.grid[line][column].push_zerowidth(c);
++            // Farhelm patch: through the extra storage, which drops the
++            // character when it is full (`MAX_EXTRA_STORAGE_BYTES`).
++            self.extra_storage.push_zerowidth(&mut self.grid[line][column], c);
++            return;
++        }
++
 +        // Farhelm patch: a wide character needs two cells, and a grid one
 +        // column wide has only one even after wrapping. Upstream would write
 +        // the spacer cell past the end of the row and panic. Drop the
 +        // character instead; the cursor does not move.
 +        if width > 1 && self.columns() < 2 {
-+            return;
-+        }
-+
-         // Move cursor to next line.
-         if self.grid.cursor.input_needs_wrap {
-             self.wrapline();
-@@ -1112,8 +1237,12 @@ impl<T: EventListener> Handler for Term<T> {
+             return;
+         }
+ 
+@@ -1112,8 +1288,12 @@ impl<T: EventListener> Handler for Term<T> {
                      self.grid.cursor.template.flags.remove(Flags::LEADING_WIDE_CHAR_SPACER);
                      self.wrapline();
                  } else {
@@ -344,7 +705,7 @@ index 8eb6797..f3b3b50 100644
                      return;
                  }
              }
-@@ -1130,9 +1259,13 @@ impl<T: EventListener> Handler for Term<T> {
+@@ -1130,9 +1310,13 @@ impl<T: EventListener> Handler for Term<T> {
              self.grid.cursor.template.flags.remove(Flags::WIDE_CHAR_SPACER);
          }
  
@@ -359,7 +720,7 @@ index 8eb6797..f3b3b50 100644
              self.grid.cursor.input_needs_wrap = true;
          }
      }
-@@ -1180,7 +1313,9 @@ impl<T: EventListener> Handler for Term<T> {
+@@ -1180,7 +1364,9 @@ impl<T: EventListener> Handler for Term<T> {
      #[inline]
      fn goto_col(&mut self, col: usize) {
          trace!("Going to column: {col}");
@@ -370,7 +731,7 @@ index 8eb6797..f3b3b50 100644
      }
  
      #[inline]
-@@ -1215,18 +1350,18 @@ impl<T: EventListener> Handler for Term<T> {
+@@ -1215,18 +1401,18 @@ impl<T: EventListener> Handler for Term<T> {
      fn move_up(&mut self, lines: usize) {
          trace!("Moving up: {lines}");
  
@@ -393,7 +754,7 @@ index 8eb6797..f3b3b50 100644
      }
  
      #[inline]
-@@ -1349,16 +1484,16 @@ impl<T: EventListener> Handler for Term<T> {
+@@ -1349,16 +1535,16 @@ impl<T: EventListener> Handler for Term<T> {
      fn move_down_and_cr(&mut self, lines: usize) {
          trace!("Moving down and cr: {lines}");
  
@@ -414,7 +775,7 @@ index 8eb6797..f3b3b50 100644
      }
  
      /// Insert tab at cursor position.
-@@ -1757,8 +1892,10 @@ impl<T: EventListener> Handler for Term<T> {
+@@ -1757,8 +1943,10 @@ impl<T: EventListener> Handler for Term<T> {
              ansi::ClearMode::Above => {
                  let cursor = self.grid.cursor.point;
  
@@ -427,7 +788,7 @@ index 8eb6797..f3b3b50 100644
                      // Fully clear all lines before the current line.
                      self.grid.reset_region(..cursor.line);
                  }
-@@ -1774,7 +1911,15 @@ impl<T: EventListener> Handler for Term<T> {
+@@ -1774,7 +1962,15 @@ impl<T: EventListener> Handler for Term<T> {
              },
              ansi::ClearMode::Below => {
                  let cursor = self.grid.cursor.point;
@@ -444,10 +805,11 @@ index 8eb6797..f3b3b50 100644
                      *cell = bg.into();
                  }
  
-@@ -1873,6 +2018,22 @@ impl<T: EventListener> Handler for Term<T> {
+@@ -1873,7 +2069,26 @@ impl<T: EventListener> Handler for Term<T> {
      #[inline]
      fn set_hyperlink(&mut self, hyperlink: Option<Hyperlink>) {
          trace!("Setting hyperlink: {hyperlink:?}");
+-        self.grid.cursor.template.set_hyperlink(hyperlink.map(|e| e.into()));
 +        // Farhelm patch: see `MAX_HYPERLINK_URI_BYTES`.
 +        let hyperlink = hyperlink.filter(|link| {
 +            link.uri.len() <= MAX_HYPERLINK_URI_BYTES
@@ -464,10 +826,36 @@ index 8eb6797..f3b3b50 100644
 +                return;
 +            }
 +        }
-         self.grid.cursor.template.set_hyperlink(hyperlink.map(|e| e.into()));
++        // Farhelm patch: see `MAX_EXTRA_STORAGE_BYTES`. A link the storage has
++        // no room for ends the active one, like a link over the length caps.
++        let hyperlink = hyperlink.and_then(|link| self.extra_storage.link(link));
++        self.extra_storage.set_hyperlink(&mut self.grid.cursor.template, hyperlink);
      }
  
-@@ -2031,7 +2192,12 @@ impl<T: EventListener> Handler for Term<T> {
+     /// Set a terminal attribute.
+@@ -1881,15 +2096,19 @@ impl<T: EventListener> Handler for Term<T> {
+     fn terminal_attribute(&mut self, attr: Attr) {
+         trace!("Setting attribute: {attr:?}");
+         let cursor = &mut self.grid.cursor;
++        // Farhelm patch: underline colors go through the extra storage, which
++        // falls back to the default color when it is full
++        // (`MAX_EXTRA_STORAGE_BYTES`).
++        let storage = &self.extra_storage;
+         match attr {
+             Attr::Foreground(color) => cursor.template.fg = color,
+             Attr::Background(color) => cursor.template.bg = color,
+-            Attr::UnderlineColor(color) => cursor.template.set_underline_color(color),
++            Attr::UnderlineColor(color) => storage.set_underline_color(&mut cursor.template, color),
+             Attr::Reset => {
+                 cursor.template.fg = Color::Named(NamedColor::Foreground);
+                 cursor.template.bg = Color::Named(NamedColor::Background);
+                 cursor.template.flags = Flags::empty();
+-                cursor.template.set_underline_color(None);
++                storage.set_underline_color(&mut cursor.template, None);
+             },
+             Attr::Reverse => cursor.template.flags.insert(Flags::INVERSE),
+             Attr::CancelReverse => cursor.template.flags.remove(Flags::INVERSE),
+@@ -2031,7 +2250,12 @@ impl<T: EventListener> Handler for Term<T> {
              NamedPrivateMode::Utf8Mouse => self.mode.remove(TermMode::UTF8_MOUSE),
              NamedPrivateMode::AlternateScroll => self.mode.remove(TermMode::ALTERNATE_SCROLL),
              NamedPrivateMode::LineWrap => self.mode.remove(TermMode::LINE_WRAP),
@@ -481,7 +869,7 @@ index 8eb6797..f3b3b50 100644
              NamedPrivateMode::ColumnMode => self.deccolm(),
              NamedPrivateMode::BlinkingCursor => {
                  let style = self.cursor_style.get_or_insert(self.config.default_cursor_style);
-@@ -2221,6 +2387,20 @@ impl<T: EventListener> Handler for Term<T> {
+@@ -2221,6 +2445,20 @@ impl<T: EventListener> Handler for Term<T> {
      fn set_title(&mut self, title: Option<String>) {
          trace!("Setting title to '{title:?}'");
  
@@ -502,7 +890,7 @@ index 8eb6797..f3b3b50 100644
          self.title.clone_from(&title);
  
          let title_event = match title {
-@@ -3299,4 +3479,459 @@ mod tests {
+@@ -3299,4 +3537,605 @@ mod tests {
          assert_eq!(version_number("1.2.3-dev"), 1_02_03);
          assert_eq!(version_number("999.99.99"), 9_99_99_99);
      }
@@ -837,6 +1225,152 @@ index 8eb6797..f3b3b50 100644
 +            assert_eq!(Arc::ptr_eq(x, y), shared, "{first:?} then {second:?}");
 +            let links = cells.map(|cell| cell.hyperlink().expect("cell is linked"));
 +            assert_eq!(links[0] == links[1], shared, "{first:?} then {second:?}");
++        }
++    }
++
++    /// Spec: hyperlinks are made only while the terminal's extra storage has
++    /// room for one and the cell extra that carries it (its `id` and URI
++    /// lengths plus `HYPERLINK_COST`, and `CELL_EXTRA_COST`), up to
++    /// `MAX_EXTRA_STORAGE_BYTES`; an OSC 8 past that ends the active link, and
++    /// the text after it is unlinked. Clearing the cells that hold links gives
++    /// their storage back, and links attach again.
++    ///
++    /// Why: the length caps bound one link, but a program that starts a new
++    /// link before every character would still give every cell its own,
++    /// several gigabytes over a full scrollback.
++    #[test]
++    fn hyperlinks_are_bounded_by_the_extra_storage() {
++        let uri = format!("http://e/{}", "u".repeat(MAX_HYPERLINK_URI_BYTES - 9));
++        let cost = |id: &str| id.len() + uri.len() + HYPERLINK_COST + CELL_EXTRA_COST;
++        let fits = MAX_EXTRA_STORAGE_BYTES / cost("00000");
++        let mut input = String::new();
++        for n in 0..fits + 10 {
++            input.push_str(&format!("\x1b]8;id={n:05};{uri}\x1b\\x"));
++        }
++        let lines = (fits + 10).div_ceil(100);
++        let mut term = fed_term(100, lines, 0, input.as_bytes());
++
++        // Every link and its extra cost the same, so exactly the first `fits`
++        // are made.
++        let linked = (0..fits + 10)
++            .map(|n| Point::new(Line((n / 100) as i32), Column(n % 100)))
++            .map(|point| term.grid()[point].hyperlink().is_some())
++            .collect::<Vec<_>>();
++        assert!(linked[..fits].iter().all(|&linked| linked));
++        assert!(linked[fits..].iter().all(|&linked| !linked));
++        assert_eq!(term.extra_storage().used(), fits * cost("00000"));
++
++        let mut parser: ansi::Processor = ansi::Processor::new();
++        parser.advance(&mut term, b"\x1b[H\x1b[2J");
++        assert_eq!(term.extra_storage().used(), 0, "clearing gives the storage back");
++        parser.advance(&mut term, format!("\x1b]8;id=new;{uri}\x1b\\y").as_bytes());
++        let link = term.grid()[Line(0)][Column(0)].hyperlink().expect("links attach again");
++        assert_eq!(link.id(), "new");
++        drop(link);
++        assert_eq!(term.extra_storage().used(), cost("new"));
++    }
++
++    /// Spec: a combining character, or an underline color, that needs a cell
++    /// extra the storage has no room for (`MAX_EXTRA_STORAGE_BYTES`, each
++    /// extra costing `CELL_EXTRA_COST`) is dropped, the color falling back to
++    /// the default; the cells before keep theirs, and clearing them makes
++    /// room again.
++    ///
++    /// Why: a combining mark or an underline color varied before every
++    /// character gives every cell an extra of its own, about 390 MiB over a
++    /// full scrollback, which one terminal must not be able to make the shared
++    /// supervisor hold.
++    #[test]
++    fn combining_characters_and_underline_colors_are_bounded() {
++        let fits = MAX_EXTRA_STORAGE_BYTES / CELL_EXTRA_COST;
++        let cells = fits + 10;
++        let lines = cells.div_ceil(1000);
++        let column = |n: usize| Point::new(Line((n / 1000) as i32), Column(n % 1000));
++
++        let term = fed_term(1000, lines, 0, "e\u{301}".repeat(cells).as_bytes());
++        let marked = |term: &Term<VoidListener>, n| term.grid()[column(n)].zerowidth().is_some();
++        assert!((0..fits).all(|n| marked(&term, n)));
++        assert!((fits..cells).all(|n| !marked(&term, n)));
++        assert_eq!(term.extra_storage().used(), fits * CELL_EXTRA_COST);
++
++        let colors: String = (0..cells).map(|n| format!("\x1b[58;5;{}mx", n % 256)).collect();
++        let mut term = fed_term(1000, lines, 0, colors.as_bytes());
++        let colored = |term: &Term<VoidListener>, n| term.grid()[column(n)].underline_color();
++        assert!((0..fits).all(|n| colored(&term, n) == Some(Color::Indexed((n % 256) as u8))));
++        assert!((fits + 1..cells).all(|n| colored(&term, n).is_none()));
++        assert!(term.extra_storage().used() <= MAX_EXTRA_STORAGE_BYTES);
++
++        let mut parser: ansi::Processor = ansi::Processor::new();
++        parser.advance(&mut term, b"\x1b[0m\x1b[H\x1b[2J\x1b[58;5;7mz");
++        assert_eq!(colored(&term, 0), Some(Color::Indexed(7)));
++        assert_eq!(term.extra_storage().used(), CELL_EXTRA_COST);
++    }
++
++    /// Spec: setting a cell's underline color or hyperlink to the value it
++    /// has already leaves its extra as it is, rather than copying it.
++    ///
++    /// Why: the cursor template's extra is shared with every cell printed
++    /// from it, so a program that repeats `SGR 59` (or `SGR 0`) before every
++    /// character while a link is active made a copy for every cell, past any
++    /// check for room.
++    #[test]
++    fn repeating_an_unchanged_attribute_copies_nothing() {
++        let input = format!("\x1b]8;id=a;http://e/\x1b\\{}", "\x1b[59m\x1b[0mx".repeat(1000));
++        let term = fed_term(100, 20, 0, input.as_bytes());
++        let one = "a".len() + "http://e/".len() + HYPERLINK_COST + CELL_EXTRA_COST;
++        assert_eq!(term.extra_storage().used(), one);
++    }
++
++    /// Spec: restoring a saved cursor whose template's extra is shared with
++    /// the cells printed from it, then removing an attribute from it, never
++    /// takes the extra storage past `MAX_EXTRA_STORAGE_BYTES`: once the
++    /// storage is full, the removal drops the template's whole extra.
++    ///
++    /// Why: each removal copies the shared extra, and a program repeating
++    /// `ESC 8`, `SGR 59`, print once per cell would otherwise give every cell
++    /// its own extra past any check (a review measured 122 MiB after 4,000
++    /// rows, growing linearly), the unbounded growth the storage exists to
++    /// prevent.
++    #[test]
++    fn restoring_a_saved_cursor_cannot_grow_the_storage_past_the_limit() {
++        let start = "\x1b]8;id=keep;http://k/\x1b\\\x1b[58;5;3m\x1b7\x1b[59m\x1b]8;;\x1b\\";
++        let row: String =
++            (1..=200).map(|column| format!("\x1b8\x1b[60;{column}H\x1b[59mx")).collect();
++        let mut input = start.to_owned();
++        let rows = MAX_EXTRA_STORAGE_BYTES / CELL_EXTRA_COST / 200 + 100;
++        for _ in 0..rows {
++            input.push_str(&row);
++            input.push_str("\x1b[60;1H\n");
++        }
++        let term = fed_term(200, 60, rows, input.as_bytes());
++        assert!(term.extra_storage().used() <= MAX_EXTRA_STORAGE_BYTES);
++        assert!(
++            term.extra_storage().used() > MAX_EXTRA_STORAGE_BYTES - 200 * CELL_EXTRA_COST,
++            "the loop filled the storage"
++        );
++    }
++
++    /// Spec: an alternate screen (which resizes without reflowing) cleared
++    /// with a background color, narrowed and widened again, and cleared with
++    /// the default background holds no cell of the old color.
++    ///
++    /// Why: a row reset skips the cells from `occ` on when its last cell has
++    /// the template's background, and growing a row used to append default
++    /// cells without counting the old ones, so the second clear left them
++    /// colored. Besides showing stale color, that made a terminal's state
++    /// depend on how its rows came to be, which a snapshot cannot reproduce.
++    #[test]
++    fn clearing_after_a_resize_clears_every_cell() {
++        let mut term = fed_term(10, 3, 0, b"\x1b[?1049h\x1b[44m\x1b[2J");
++        term.resize(TermSize::new(4, 3));
++        term.resize(TermSize::new(10, 3));
++        let mut parser: ansi::Processor = ansi::Processor::new();
++        parser.advance(&mut term, b"\x1b[0m\x1b[2J");
++        for line in 0..3 {
++            for column in 0..10 {
++                let cell = &term.grid()[Line(line)][Column(column)];
++                assert_eq!(cell.bg, Color::Named(NamedColor::Background), "{line},{column}");
++            }
 +        }
 +    }
 +

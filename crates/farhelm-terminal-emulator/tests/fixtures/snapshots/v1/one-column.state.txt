@@ -1,0 +1,33 @@
+screens dropped false
+size 1x4
+mode TermMode(SHOW_CURSOR | LINE_WRAP | ALTERNATE_SCROLL | URGENCY_HINTS)
+scroll region 0..4
+tab stops 0
+active charset G0
+title None
+title stack []
+cursor style CursorStyle { shape: Block, blinking: false }
+REP character Some('q')
+clean true
+history trimmed no
+primary saved cursor 0,0 template ' ' fg Foreground bg Background charsets Ascii Ascii Ascii Ascii
+primary cursor 0,0 wrap pending template ' ' fg Foreground bg Blue charsets Ascii Ascii Ascii Ascii
+primary history 5
+primary   -5 |a|
+primary   -5,0: 'a' fg Foreground bg Background flags Flags(WRAPLINE)
+primary   -4 |b|
+primary   -4,0: 'b' fg Foreground bg Background flags Flags(WRAPLINE)
+primary   -3 | |
+primary   -3,0: ' ' fg Foreground bg Background flags Flags(WRAPLINE)
+primary   -2 | |
+primary   -2,0: ' ' fg Foreground bg Background flags Flags(WRAPLINE)
+primary   -1 |c|
+primary   -1,0: 'c' fg Foreground bg Background flags Flags(WRAPLINE)
+primary    0 |q|
+primary    0,0: 'q' fg Foreground bg Blue
+primary    1 |x|
+primary    1,0: 'x' fg Foreground bg Background flags Flags(WRAPLINE)
+primary    2 |y|
+primary    2,0: 'y' fg Foreground bg Background flags Flags(WRAPLINE)
+primary    3 |z|
+alternate saved cursor 0,0 template ' ' fg Foreground bg Background charsets Ascii Ascii Ascii Ascii
