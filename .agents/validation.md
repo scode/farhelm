@@ -204,7 +204,7 @@ that its required systemd or SSH substrate ran.
   orderly checkpoint and ending in a gap; a sequence longer than the cap written while away ending in a gap; the FIFO
   helpers giving up within their bound when nobody is at the other end; a resize; and a shutdown confirmed by the host's
   process. Seconds, part of the workspace nextest run; the focused macOS CI job runs it too, in the terminal host step.
-- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'host terminal switch points' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(/core::tests::host_terminals::/) | test(/a_failed_tmux_probe_still_samples_and_observes_host_terminals/) | test(/^host_terminals::/)'`
+- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'host terminal switch points' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(/core::tests::host_terminals::/) | test(/a_failed_tmux_probe_still_samples_and_observes_host_terminals/) | test(/^service::session_hosts::/) | test(sweep_launch_dir_keeps_every_host_record) | test(/^host_terminals::/)'`
   — the supervisor's terminal switch points with a terminal host behind a session's agent (`Terminal::Host` in
   `crates/farhelm-supervisor/src/service/terminals.rs`). The unit tests (`service::core::tests::host_terminals`, and one
   in `service::ticker::tests`) use a stand-in host in the test process (`hosts::terminal::test_host`) whose child is a
@@ -215,13 +215,33 @@ that its required systemd or SSH substrate ran.
   a root that its earlier probe authorized refused, refused verbs and prompt), the ticker recording a host exit on the
   liveness notifier's wake with the tick far away, a failed tmux probe that still samples a live host and records a gone
   one's exit, the hook anchor (and the publication gap's retry), the orderly stop's hold wait, and prompt delivery gated
-  on the emulator's paste mode, at one part and at the prompt cap's two. The e2e tests
-  (`crates/farhelm/tests/e2e/host_terminals.rs`) move a created session's agent into a real host started from the built
-  `farhelm` (`Supervisor::install_host_agent_for_test`) and check the exit stored with its code, Stop and Delete killing
-  an unmarked process tree from the host's child (Stop leaving the host's process running with its final screen),
-  Restart refused before anything stops, the delete guard, and the attach refusals. Linux only (the e2e suite), a minute
-  or two; part of the workspace nextest run. Run it when a switch point, the host runtime's adapters or the status
-  evidence change.
+  on the emulator's paste mode, at one part and at the prompt cap's two. Delete's handling of hosts
+  (`service::session_hosts`) against stand-ins, some in the state directory's socket directory named by a launch record
+  the test writes: an unconditional Delete of an unreadable agent host killing its child from the identity pinned at
+  adoption and keeping the session when its adopted process cannot be confirmed ended (the stand-in's process is the
+  test runner, which the verified signal never signals); a recorded host that answers only with a foreign protocol
+  refused by the agent guard and signalled, never reconnected to, by an unconditional Delete (the stand-in counts two
+  connections, one per settling); a record naming another session's host refusing and touching nothing; the record of
+  the host the agent's runtime holds left to the runtime (the stand-in counts only the adoption's connection); a gone
+  record's leftover socket file removed with the session deleted; and the overall deadline for settling and ending hosts
+  (a gate holding each end before it starts, not a stuck process read, and a one-second budget) returning a retryable
+  refusal and releasing the directory admission and the lifecycle claim. Pure unit tests cover the bounded join and the
+  startup sweep keeping every launch host record. The e2e tests (`crates/farhelm/tests/e2e/host_terminals.rs`) move a
+  created session's agent into a real host started from the built `farhelm` (`Supervisor::install_host_agent_for_test`)
+  and check the exit stored with its code, Stop and Delete killing an unmarked process tree from the host's child (Stop
+  leaving the host's process running with its final screen), Restart refused before anything stops, the delete guard,
+  and the attach refusals; and Delete ending hosts, every test's grandchild ignoring SIGHUP (it publishes its pid only
+  after its trap; disposition and ancestry checked first) so that only a sweep rooted at the host's child reaches it: a
+  host agent guarded and then ended (gone at Delete's return) beside a record naming the host its runtime holds, a
+  recorded host of another generation refused by the agent guard beside an ended tmux agent and then ended while another
+  session's recorded host is never touched, a terminal-less session's recorded agent host, a SIGSTOPped host agent ended
+  by the verified signal, a SIGSTOPped recorded host refused by the guard and then signalled, and a host renamed over
+  the agent's socket neither shut down nor signalled while Delete ends the host the runtime adopted and deletes the
+  session. In `host_creates.rs` (the selection below): the unbound recorded start an interrupted create leaves fenced by
+  an unconditional Delete, and Delete of a session whose runtime is held in a snapshot encode ending the adopted host by
+  its process after another host was renamed over its socket, which is left running. Linux only (the e2e suite), a few
+  minutes (several tests wait out a stopped host's connect deadline); part of the workspace nextest run. Run it when a
+  switch point, the host runtime's adapters, the status evidence or Delete's handling of hosts change.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'creating agents in terminal hosts' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(/core::host_launch::/) | test(/a_retry_finds_the_sessions_own_published_host|restart_refuses_a_terminal_less_session/) | test(/^hosts::spawn::/) | test(/^host_creates::/)'`
   — a create starting its agent in a terminal host under the supervisor's internal switch
   (`SupervisorSeams::new_terminals`, `crates/farhelm-supervisor/src/service/core/host_launch.rs`). The unit tests pin
@@ -238,18 +258,19 @@ that its required systemd or SSH substrate ran.
   and a startup file's tmux autostart held back in both; a wrapper prefix running in the host; a create interrupted
   after its host started retried without a second agent; a first stage that outlived an interrupted create (holding its
   spec, before binding) waited for by the retry, which then finds its host, or ended by the verified signal when it does
-  not finish, with one host and one agent either way; a process the interrupted first stage forked that still names the
-  socket (a stand-in second stage) leaving the retry unresolved while it stays, and letting the same retry relaunch when
-  it ends during the retry's wait; a launch error's cleanup after a restart keeping the host record of a host that still
-  runs; a cleanup whose runtime is held by a snapshot encode (an encode gate) falling back to ending the host by its
-  socket after the runtime's 15 s bound, while the encode is still held (the gate shows no encode passed or expired); a
-  create that lost to Delete ending its host; a start whose first stage dies after readiness leaving nothing, and one
-  the spawn reports may have left a host, which the create ends and removes the socket of; stand-in hosts that cannot be
-  used, ended by the verified signal and rolled back, or kept as a launching record when the signal must not touch them;
-  a retry keeping its row's kind with the switch flipped either way across a restart; and Restart and tabs refused for a
-  created host agent. Needs the pinned tmux first on `PATH` and Python 3 at `/usr/bin/python3` (the stand-in hosts).
-  Linux only, two or three minutes (several tests wait out client deadlines); part of the workspace nextest run. The
-  container launch kind's test is in the containerized suite above
+  not finish, with one host and one agent either way, and fenced the same way by an unconditional Delete of that session
+  after a restart, which then leaves no host and no agent; a process the interrupted first stage forked that still names
+  the socket (a stand-in second stage) leaving the retry unresolved while it stays, and letting the same retry relaunch
+  when it ends during the retry's wait; a launch error's cleanup after a restart keeping the host record of a host that
+  still runs; a cleanup whose runtime is held by a snapshot encode (an encode gate) falling back to ending the host by
+  its socket after the runtime's 15 s bound, while the encode is still held (the gate shows no encode passed or
+  expired); a create that lost to Delete ending its host; a start whose first stage dies after readiness leaving
+  nothing, and one the spawn reports may have left a host, which the create ends and removes the socket of; stand-in
+  hosts that cannot be used, ended by the verified signal and rolled back, or kept as a launching record when the signal
+  must not touch them; a retry keeping its row's kind with the switch flipped either way across a restart; and Restart
+  and tabs refused for a created host agent. Needs the pinned tmux first on `PATH` and Python 3 at `/usr/bin/python3`
+  (the stand-in hosts). Linux only, two or three minutes (several tests wait out client deadlines); part of the
+  workspace nextest run. The container launch kind's test is in the containerized suite above
   (`containerized_sessions::podman_agent_runs_from_a_terminal_host`). Run it when the create path, the launch spec's
   composition, the host spawn or the launch identity's rollback or evidence changes.
 - Terminal host coverage, when the crate changes:

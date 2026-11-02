@@ -581,6 +581,39 @@ impl HostStatus {
         }
     }
 
+    /// The child as pinned at adoption, if the process table still shows it
+    /// running under that identity, whatever the host now says: the root
+    /// Delete sweeps from, since it ends the terminal for good and must not
+    /// leave the child's tree behind because its host went quiet.
+    ///
+    /// Unlike [`Self::live_root`], an unavailable or ended host does not
+    /// stop this: the identity was pinned while the host was readable (a pid
+    /// is not reused before the host reaps it), and a process that still has
+    /// that pid and that start identity is the child itself, so rooting at
+    /// it needs nothing from the host. That covers a host that is stopped,
+    /// wedged or no longer readable, and a child that outlived its host
+    /// (one that ignored the hangup of a host killed outright). A child
+    /// reaped since, or a zombie, gives `None`, never a pid that may have
+    /// passed to another process; so does a child that had exited before the
+    /// runtime could pin it. `Err` when the process table cannot be read: a
+    /// root must be certain, and the caller refuses rather than sweep
+    /// without one.
+    pub fn pinned_child_root(&self) -> Result<Option<ProcessRoot>, String> {
+        let Some(start) = self.child_start else {
+            return Ok(None);
+        };
+        if self.child_pid <= 1 {
+            return Ok(None);
+        }
+        Ok(match procs::read_process(self.child_pid)? {
+            Some((_, current, ProcessState::Running)) if current == start => Some(ProcessRoot {
+                pid: self.child_pid,
+                start,
+            }),
+            Some(_) | None => None,
+        })
+    }
+
     /// The pinned child checked against the process table: `Ok` while it
     /// still runs, `Err` with why the check could not be made, `None` when
     /// there is no running child to check (none pinned, reaped, or no
@@ -1014,6 +1047,9 @@ struct Inner {
     epoch: Arc<AtomicU64>,
     /// Ends the runtime's task where it waits, for [`HostTerminal::abort`].
     task: tokio::task::AbortHandle,
+    /// The host process this runtime adopted, from the adoption's
+    /// connection: see [`HostTerminal::adopted_process`].
+    adopted: Option<HostProcess>,
 }
 
 /// What the emulator's lock guards: the emulator, or the view of it left
@@ -1444,6 +1480,7 @@ impl HostTerminal {
                 epoch,
                 returned,
                 task,
+                adopted: peer,
             }),
         })
     }
@@ -1716,6 +1753,20 @@ impl HostTerminal {
         self.inner.task.abort();
     }
 
+    /// The host process this runtime adopted, pinned to its start identity
+    /// from the adoption's connection (its peer credentials), or `None`
+    /// where the platform named no peer.
+    ///
+    /// Fixed for the handle's whole life, whatever the runtime's liveness
+    /// says since and whether or not its task still runs: it is what ends
+    /// the host when the protocol cannot (the verified signal, which checks
+    /// the identity and the command line again), and it never becomes a
+    /// process that later answered at the host's socket, which a new
+    /// connection could reach instead (`Unavailability::Replaced`).
+    pub fn adopted_process(&self) -> Option<HostProcess> {
+        self.inner.adopted
+    }
+
     /// Snapshot the terminal for its host now, for an orderly stop, and
     /// wait for the host's answer, all by `deadline`.
     ///
@@ -1793,8 +1844,10 @@ fn emulator_size(size: Size) -> farhelm_terminal_emulator::Size {
     }
 }
 
-/// What reading the host's child found.
-enum Child {
+/// What reading the host's child found. Also how Delete pins the child of a
+/// host its launch record names and no runtime adopted
+/// (`service::session_hosts`).
+pub(crate) enum Child {
     /// It runs, pinned.
     Running(ProcessRoot),
     /// The host reaped it. How it ended is the exit record's to say, after
@@ -1808,7 +1861,7 @@ enum Child {
 /// again. An identity read between two answers that both say the child runs
 /// is the child's own, since its pid cannot be reused until the host reaps
 /// it. Returns the last `Info` read.
-async fn pin_child(conn: &mut HostConnection) -> Result<(Child, Info), ClientError> {
+pub(crate) async fn pin_child(conn: &mut HostConnection) -> Result<(Child, Info), ClientError> {
     let mut info = conn.info().await?;
     for _ in 0..PIN_ATTEMPTS {
         if info.child_exit.is_some() {

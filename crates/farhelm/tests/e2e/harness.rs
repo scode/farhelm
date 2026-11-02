@@ -2083,16 +2083,44 @@ pub(crate) fn extract_pid(transcript: &[u8], marker: &str) -> u32 {
 /// exactly which ancestor ends up reaping an orphan once its own parent
 /// dies to the same tree-kill.
 pub(crate) fn process_is_gone(pid: u32) -> bool {
-    let Ok(content) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
-        return true;
-    };
-    let Some(after_comm) = content.rfind(')') else {
-        return true;
-    };
+    process_state(pid).is_none_or(|state| state == 'Z')
+}
+
+/// The state letter `/proc/<pid>/stat` gives a process (`R`, `S`, `T`,
+/// `Z`, ...), or `None` when there is no such process. The one parser of
+/// that file's state field in this suite.
+pub(crate) fn process_state(pid: u32) -> Option<char> {
+    let content = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let after_comm = content.rfind(')')?;
     content[after_comm + 1..]
         .split_whitespace()
+        .next()?
+        .chars()
         .next()
-        .is_none_or(|state| state == "Z")
+}
+
+/// Poll until `pid` is in `state` (see [`process_state`]), failing the test
+/// with the last state seen if it is not within `secs`, or if the process
+/// is gone: what a test that stops a process with a signal waits on, since
+/// a successful `kill` only says the signal was sent.
+pub(crate) async fn wait_for_process_state(pid: u32, state: char, secs: u64) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
+    loop {
+        let seen = process_state(pid);
+        if seen == Some(state) {
+            return;
+        }
+        assert!(
+            seen.is_some_and(|seen| seen != 'Z'),
+            "pid {pid} went while waiting for state {state}"
+        );
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "pid {pid} was in state {seen:?}, not {state}, after {secs}s"
+        );
+        // sleep-ok: a signal's effect on the target's state is asynchronous; recheck the owned PID until the caller's deadline.
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
 }
 
 /// Poll until `pid` is gone (see `process_is_gone`), failing the test if

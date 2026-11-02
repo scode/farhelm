@@ -509,9 +509,15 @@ fn finish(target: Target, outcome: HostOutcome) -> HostReport {
     }
 }
 
-/// `Shutdown` over a connection, falling back to the verified signal when
-/// it fails or the host does not end within the limits' end wait.
-async fn shut_down(connection: HostConnection, socket: &Path, limits: StopLimits) -> HostOutcome {
+/// `Shutdown` over a connection to the host on `socket`, falling back to the
+/// verified signal when it fails or the host does not end within the
+/// limits' end wait. Delete uses it for the hosts its session's launch
+/// records name, over the connection that settled each record.
+pub(crate) async fn shut_down(
+    connection: HostConnection,
+    socket: &Path,
+    limits: StopLimits,
+) -> HostOutcome {
     let peer = connection.peer();
     let shutdown = connection.shutdown().await;
     let why = match shutdown {
@@ -558,8 +564,8 @@ async fn ended(peer: Option<HostProcess>, socket: &Path, wait: Duration) -> bool
 }
 
 /// End `peer` with the verified signal, which checks that its command line
-/// names the socket path `socket` exactly; `why` says why the protocol did
-/// not.
+/// names the `socket` path exactly; `why` says why the protocol did not.
+/// Delete uses it too, for a host whose runtime's `Shutdown` did not end it.
 ///
 /// `AlreadyGone` (the pinned process no longer runs) confirms nothing by
 /// itself. `peer` may not be the host at all: when no connection named
@@ -569,7 +575,7 @@ async fn ended(peer: Option<HostProcess>, socket: &Path, wait: Duration) -> bool
 /// about the host. So the socket is looked at again, by the client's own
 /// rules, and only a socket judged gone (no file, or refusals with no
 /// process serving it) confirms the stop.
-async fn signal(
+pub(crate) async fn signal(
     peer: &HostProcess,
     socket: &Path,
     why: &str,

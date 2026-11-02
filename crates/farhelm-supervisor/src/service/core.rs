@@ -25,6 +25,7 @@ mod vendor;
 /// Starting a create's agent in a terminal host, behind
 /// [`SupervisorSeams::new_terminals`] (see its own docs).
 mod host_launch;
+pub(crate) use host_launch::{AtRecordedSocket, read_launch_record};
 use host_launch::{HostLeft, HostSpawnFailure, SpawnedInHost};
 
 /// The tracing target every event from this module and its `vendor` children
@@ -43,6 +44,7 @@ use super::launch_artifacts::{
     cleanup_launch_artifacts, clear_launch_artifacts_fail_closed, read_launch_sentinel,
     sentinel_could_still_apply, sweep_launch_dir, wrapper_failure_detail,
 };
+use super::session_hosts::SessionHosts;
 use super::sweep::{
     ScopeKillFailure, ScopeUnits, StopFailure, SweepTarget, TabReapAnchor, launch_scope_unit,
     reap_process_tree, stop_live_agent,
@@ -412,6 +414,13 @@ pub struct SupervisorTimeouts {
     /// runtime is otherwise idle, so an unreachable value is an
     /// indefinitely parked test rather than a slow one.
     pub agent_fence_retain: Duration,
+    /// See [`super::session_hosts::DELETE_HOST_END_BUDGET`]: how long Delete
+    /// spends settling a session's launch records, and then, separately,
+    /// ending its terminal hosts, before it reports the ones not yet settled
+    /// or confirmed ended and keeps the session. Here so a test can reach
+    /// that bound with a host held on purpose instead of waiting out the
+    /// production budget.
+    pub delete_host_end: Duration,
 }
 
 impl Default for SupervisorTimeouts {
@@ -429,6 +438,7 @@ impl Default for SupervisorTimeouts {
             agent_approval_wait: farhelm_proto::approvals::APPROVAL_WAIT,
             agent_deliver: AGENT_DELIVER_TIMEOUT,
             agent_fence_retain: AGENT_FENCE_RETAIN_TIMEOUT,
+            delete_host_end: super::session_hosts::DELETE_HOST_END_BUDGET,
         }
     }
 }
@@ -850,6 +860,11 @@ fault_hooks! {
     /// checkpoint policy that holds a snapshot encode in progress, so a test
     /// can show what ending the host does meanwhile. `None` in production.
     host_terminal_options: Arc<dyn Fn(&mut crate::hosts::HostTerminalOptions) + Send + Sync>,
+    /// Awaited by Delete before it ends each of the session's terminal
+    /// hosts (`service::session_hosts`), so a test can hold one host's end
+    /// past Delete's deadline for ending them and show what the deadline
+    /// does. `None` in production.
+    delete_host_end_gate: SinkReservationGate,
 }
 
 /// The injectable seams a `Supervisor` is built with. All default to
@@ -4628,10 +4643,11 @@ pub(crate) fn notification_cell()
 ///   the host's entry is inserted into `sessions`, or until it gives the
 ///   host up (it releases it before ending the host). It is taken
 ///   exclusively, with nothing else of this table taken while it is held,
-///   to remove the socket file of a host a create has just ended; a later
-///   scan of the socket directory inside the supervisor takes it the same
-///   way and may take `sessions` under it to learn which hosts to skip.
-///   Never held across a lifecycle claim, `attachments`, or a tmux call.
+///   to remove the socket file of a host just ended (by a create, or by
+///   Delete under its lifecycle claim); a later scan of the socket
+///   directory inside the supervisor takes it the same way and may take
+///   `sessions` under it to learn which hosts to skip. Never held while a
+///   lifecycle claim, `attachments`, or a tmux call is acquired.
 /// - `sessions` before `restarting_rows` and `last_listed`: the restart
 ///   window swaps a session for its held row, and a listing reads the held
 ///   rows, under `sessions`. Both are std mutexes held only for a map
@@ -11137,14 +11153,13 @@ impl Supervisor {
                     let left = match left {
                         HostLeft::Nothing => None,
                         HostLeft::MayRemain { socket } => {
-                            match self.end_launch_host(None, &socket).await {
+                            match self.end_launch_host(None, &socket, &id).await {
                                 Ok(()) => None,
                                 Err(why) => Some(format!(
                                     "a terminal host may still be running at {} ({why}), so \
                                      session {id} is kept as a launching record rather than \
-                                     deleted; stop or delete it to reap the agent's processes \
-                                     (this supervisor does not end the terminal host itself on \
-                                     Delete yet)",
+                                     deleted; delete it to end the host and reap the agent's \
+                                     processes",
                                     socket.display()
                                 )),
                             }
@@ -11442,7 +11457,7 @@ impl Supervisor {
             // Released before the host is given up: ending it may take the
             // lock exclusively (`Self::end_launch_host`).
             drop(spawning.take());
-            let ended = self.end_unpublished_terminal(&terminal).await;
+            let ended = self.end_unpublished_terminal(&terminal, &id).await;
             if ended.is_ok() {
                 artifacts.remove_host_record_best_effort().await;
             }
@@ -11496,7 +11511,7 @@ impl Supervisor {
             }
             // Released before the host is given up, as above.
             drop(spawning.take());
-            let killed = self.end_unpublished_terminal(&terminal).await;
+            let killed = self.end_unpublished_terminal(&terminal, &id).await;
             if killed.is_ok() {
                 // Only once nothing of the launch runs: a kept launching
                 // record keeps its host record, which a retry fences by.
@@ -13826,45 +13841,86 @@ impl Supervisor {
     /// session) or fails (a tmux query error): the question exists to avoid
     /// killing something nobody agreed to kill, so uncertainty must never
     /// read as "safe".
+    ///
+    /// The session's recorded terminal hosts that no runtime here holds
+    /// count too, since Delete ends them (`session_hosts`), so every guarded
+    /// delete settles them once the recorded terminal's own probe has not
+    /// already refused: an agent host of any launch generation still
+    /// running its program is a live agent (a leftover of an earlier
+    /// generation included, which a delete whose confirmation said the agent
+    /// had ended must not kill), a tab host still running its program is an
+    /// open tab beside the tmux ones, and a recorded host that does not
+    /// answer usefully is "cannot tell". A record that cannot be settled
+    /// (one that does not decode, a socket serving another terminal's host,
+    /// a first stage that could not be fenced) fails the check.
+    ///
+    /// Returns the settled hosts with a `None` answer only, for the teardown
+    /// to use as the delete goes ahead
+    /// (`Supervisor::teardown_session_with_hosts`), so that one delete
+    /// settles each record once and its budget runs from that settling;
+    /// `None` with a refusal, or when nothing was settled.
     pub(crate) async fn still_alive_for_delete(
         &self,
         entry: &SessionEntry,
         guard: farhelm_proto::DeleteGuard,
-    ) -> anyhow::Result<Option<String>> {
+    ) -> anyhow::Result<(Option<String>, Option<SessionHosts>)> {
         if guard == farhelm_proto::DeleteGuard::Unconditional {
-            return Ok(None);
+            return Ok((None, None));
         }
         if terminal_less_launch_may_be_live(entry) {
-            return Ok(Some(
-                "this session's launch was never confirmed and it has no known terminal, so its \
-                 agent may still be running"
-                    .to_string(),
+            return Ok((
+                Some(
+                    "this session's launch was never confirmed and it has no known terminal, so \
+                     its agent may still be running"
+                        .to_string(),
+                ),
+                None,
             ));
         }
-        let Some(terminal) = entry.terminal.as_ref() else {
-            return Ok(None);
-        };
-        match terminal
-            .probe_process(self)
-            .await
-            .context("checking whether this session's agent is still running")?
-        {
-            PaneProbe::Owned(pane) if !pane.dead => {
-                return Ok(Some("this session's agent is still running".to_string()));
-            }
-            PaneProbe::Owned(_) | PaneProbe::Gone => {}
-            PaneProbe::ForeignOwner { owner } => {
-                if !self.known_session_tmux_name(&owner).await {
-                    return Ok(Some(
-                        "this session's recorded terminal now belongs to an unrecognized tmux \
-                         session, so whether its agent is running cannot be told"
-                            .to_string(),
+        if let Some(terminal) = entry.terminal.as_ref() {
+            match terminal
+                .probe_process(self)
+                .await
+                .context("checking whether this session's agent is still running")?
+            {
+                PaneProbe::Owned(pane) if !pane.dead => {
+                    return Ok((
+                        Some("this session's agent is still running".to_string()),
+                        None,
                     ));
+                }
+                PaneProbe::Owned(_) | PaneProbe::Gone => {}
+                PaneProbe::ForeignOwner { owner } => {
+                    if !self.known_session_tmux_name(&owner).await {
+                        return Ok((
+                            Some(
+                                "this session's recorded terminal now belongs to an \
+                                 unrecognized tmux session, so whether its agent is running \
+                                 cannot be told"
+                                    .to_string(),
+                            ),
+                            None,
+                        ));
+                    }
                 }
             }
         }
+        let hosts = self
+            .session_hosts(
+                &entry.info.id,
+                entry.terminal.as_ref(),
+                self.timeouts.delete_host_end,
+            )
+            .await
+            .context("settling this session's recorded terminal hosts")?;
+        if let Some(untold) = hosts.untold() {
+            return Ok((Some(untold), None));
+        }
+        if let Some(alive) = hosts.agent_alive() {
+            return Ok((Some(alive), None));
+        }
         if guard == farhelm_proto::DeleteGuard::AgentEnded {
-            return Ok(None);
+            return Ok((None, Some(hosts)));
         }
         // Markers read unconditionally, not through `session_tabs`: that
         // listing skips the marker read when no session has more than one
@@ -13872,21 +13928,33 @@ impl Supervisor {
         // can be the session's only window (see `pane_states_with_markers`).
         // Missing it here would let an "unconfirmed" delete kill that tab.
         // Tmux tabs are windows in the session's tmux session, whatever the
-        // agent's kind (`tmux_tab_home`).
-        let (tmux_name, agent_pane) = tmux_tab_home(&entry.info.id, terminal);
-        let states = self
-            .tmux
-            .pane_states_with_markers()
-            .await
-            .context("listing this session's terminal tabs")?;
-        let tabs: Vec<_> = tabs_from_pane_states(states.values(), &tmux_name, agent_pane)
-            .into_iter()
-            .filter(|tab| !tab.dead)
-            .collect();
-        Ok(match tabs.len() {
-            0 => None,
-            1 => Some("this session has 1 terminal tab open".to_string()),
-            n => Some(format!("this session has {n} terminal tabs open")),
+        // agent's kind (`tmux_tab_home`); a session with no agent terminal
+        // has no tmux session recorded to look in, as before hosts.
+        let tmux_tabs = match entry.terminal.as_ref() {
+            Some(terminal) => {
+                let (tmux_name, agent_pane) = tmux_tab_home(&entry.info.id, terminal);
+                let states = self
+                    .tmux
+                    .pane_states_with_markers()
+                    .await
+                    .context("listing this session's terminal tabs")?;
+                tabs_from_pane_states(states.values(), &tmux_name, agent_pane)
+                    .into_iter()
+                    .filter(|tab| !tab.dead)
+                    .count()
+            }
+            None => 0,
+        };
+        Ok(match tmux_tabs + hosts.live_tabs() {
+            0 => (None, Some(hosts)),
+            1 => (
+                Some("this session has 1 terminal tab open".to_string()),
+                None,
+            ),
+            n => (
+                Some(format!("this session has {n} terminal tabs open")),
+                None,
+            ),
         })
     }
 
@@ -15615,11 +15683,15 @@ impl Supervisor {
     /// still run, which the callers turn into a retained launching record
     /// (or, with the row already gone, a warning that something may run
     /// unlisted).
-    async fn end_unpublished_terminal(&self, terminal: &Terminal) -> anyhow::Result<()> {
+    async fn end_unpublished_terminal(
+        &self,
+        terminal: &Terminal,
+        session_id: &str,
+    ) -> anyhow::Result<()> {
         match terminal {
             Terminal::Tmux(tmux) => self.tmux.kill_session(&tmux.tmux_name).await,
             Terminal::Host(host) => self
-                .end_launch_host(Some(host), host.socket())
+                .end_launch_host(Some(host), host.socket(), session_id)
                 .await
                 .map_err(|why| anyhow::anyhow!(why)),
         }
@@ -17188,6 +17260,40 @@ impl Supervisor {
             Some(Terminal::Host(host)) => Some(host.clone()),
             Some(Terminal::Tmux(_)) | None => None,
         }
+    }
+
+    /// Leave session `id` without an agent terminal, as a reload that has
+    /// not found its terminal yet leaves a session, and change nothing else
+    /// (its row included).
+    ///
+    /// For tests of what Delete does with a session whose agent's host is
+    /// not held by any runtime here: after this, the session's entry holds
+    /// no handle to the terminal it had, and a host agent's runtime ends
+    /// once the test drops its own handles (the test waits for that, since
+    /// a runtime still connected would fight Delete's connection to the host
+    /// when Delete settles the session's launch record).
+    /// Compiled only for tests and the `test-seams` feature.
+    #[cfg(any(test, feature = "test-seams"))]
+    pub async fn forget_agent_terminal_for_test(&self, id: &str) -> anyhow::Result<()> {
+        let mut sessions = self.sessions.lock().await;
+        let entry = sessions
+            .get(id)
+            .cloned()
+            .with_context(|| format!("no session {id} to forget the terminal of"))?;
+        sessions.insert(
+            id.to_string(),
+            Arc::new(SessionEntry {
+                info: entry.info.clone(),
+                terminal: None,
+                run: entry.run.clone(),
+                session: entry.session.clone(),
+                snapshot: entry.snapshot.clone(),
+                canonical_cwd: entry.canonical_cwd.clone(),
+                generation: entry.generation,
+                scope: entry.scope.clone(),
+            }),
+        );
+        Ok(())
     }
 
     /// Step 4b (write-result handling) and step 5 (the current-generation
@@ -21724,7 +21830,7 @@ pub(crate) mod tests {
             "fixture premise: the ordinary listing misses the lone tab"
         );
 
-        let alive = sup
+        let (alive, _) = sup
             .still_alive_for_delete(&entry, farhelm_proto::DeleteGuard::NothingAlive)
             .await
             .expect("guard check");
@@ -21739,7 +21845,8 @@ pub(crate) mod tests {
             assert_eq!(
                 sup.still_alive_for_delete(&entry, guard)
                     .await
-                    .expect("guard check"),
+                    .expect("guard check")
+                    .0,
                 None,
                 "{guard:?} covers a lone tab beside an ended agent"
             );

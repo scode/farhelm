@@ -20,6 +20,7 @@
 //! (`crates/farhelm/tests/e2e/host_terminals.rs`).
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -59,8 +60,15 @@ pub(crate) struct TestHost {
     /// Every input byte the host acknowledged as written, in order.
     received: Arc<Mutex<Vec<u8>>>,
     commands: mpsc::UnboundedSender<Command>,
+    /// Whether the host answers every connection with a protocol version no
+    /// supervisor speaks; shared with its task.
+    unreadable: Arc<AtomicBool>,
+    /// How many connections the host has accepted.
+    accepted: Arc<AtomicUsize>,
     task: tokio::task::JoinHandle<()>,
-    _dir: tempfile::TempDir,
+    /// The socket's own directory, for a host started outside any state
+    /// directory; `None` for one placed where the test asked.
+    _dir: Option<tempfile::TempDir>,
 }
 
 impl Drop for TestHost {
@@ -115,7 +123,14 @@ impl TestHost {
     /// makes the terminal unavailable (`Liveness::Unavailable`) while the
     /// host, as far as anyone can tell, may still run.
     pub(crate) fn become_unreadable(&self) {
+        self.unreadable.store(true, Ordering::SeqCst);
         let _ = self.commands.send(Command::BecomeUnreadable);
+    }
+
+    /// How many connections the host has accepted so far: what shows that
+    /// a caller did, or did not, connect to it.
+    pub(crate) fn connections(&self) -> usize {
+        self.accepted.load(Ordering::SeqCst)
     }
 }
 
@@ -127,21 +142,20 @@ pub(crate) async fn adopt_test_host(
 ) -> (HostTerminal, TestHost) {
     let dir = tempfile::tempdir().expect("a directory for the test host's socket");
     let socket = dir.path().join("h");
-    let listener = UnixListener::bind(&socket).expect("bind the test host's socket");
-    // Bounded, so that a test process killed before its drop leaves the
-    // child behind for a minute at most; every test using a test host
-    // finishes well within that.
-    let child = std::process::Command::new("sleep")
-        .arg("60")
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .expect("start the test host's child");
-    let child_pid = child.id();
-    let (commands, receiver) = mpsc::unbounded_channel();
-    let received = Arc::new(Mutex::new(Vec::new()));
-    let task = tokio::spawn(serve(listener, receiver, Arc::clone(&received), child_pid));
+    let (terminal, mut host) = adopt_test_host_at(&socket, Vec::new(), notifier).await;
+    host._dir = Some(dir);
+    (terminal, host)
+}
+
+/// [`adopt_test_host`] with the stand-in serving `socket`, a path the test
+/// chose (inside a state directory's socket directory, where a launch
+/// record can name it), and carrying `tag` in its `Info`.
+pub(crate) async fn adopt_test_host_at(
+    socket: &Path,
+    tag: Vec<u8>,
+    notifier: Option<LivenessNotifier>,
+) -> (HostTerminal, TestHost) {
+    let host = start(socket, tag, false);
     let options = HostTerminalOptions {
         notifier,
         // A reconnect to an unreadable host is judged in about a second.
@@ -156,29 +170,69 @@ pub(crate) async fn adopt_test_host(
     };
     let adopted = tokio::time::timeout(
         ADOPT_WAIT,
-        HostTerminal::adopt(&socket, Adoption::Fresh, options),
+        HostTerminal::adopt(socket, Adoption::Fresh, options),
     )
     .await;
-    let mut child = child;
-    let terminal = match adopted {
-        Ok(Ok(terminal)) => terminal,
-        failed => {
-            // The child is the test's to end, whatever went wrong.
-            let _ = child.kill();
-            let _ = child.wait();
-            panic!("the test host was not adopted: {failed:?}");
-        }
+    match adopted {
+        // The child is the test's to end, whatever went wrong: dropping the
+        // host does that.
+        Ok(Ok(terminal)) => (terminal, host),
+        failed => panic!("the test host was not adopted: {failed:?}"),
+    }
+}
+
+/// Start a stand-in host serving `socket` (a path the test chose, such as
+/// one inside a state directory's socket directory, where a launch record
+/// can name it) and carrying `tag` in its `Info`, adopted by nothing. With
+/// `unreadable` it answers every connection from the start with a protocol
+/// version no supervisor speaks, as a host of a newer release, or one this
+/// build cannot read, would.
+pub(crate) fn start_test_host_at(socket: &Path, tag: Vec<u8>, unreadable: bool) -> TestHost {
+    start(socket, tag, unreadable)
+}
+
+/// Bind `socket`, start the host's child and serve the socket.
+fn start(socket: &Path, tag: Vec<u8>, unreadable: bool) -> TestHost {
+    let listener = UnixListener::bind(socket).expect("bind the test host's socket");
+    // Bounded, so that a test process killed before its drop leaves the
+    // child behind for a minute at most; every test using a test host
+    // finishes well within that.
+    let child = std::process::Command::new("sleep")
+        .arg("60")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("start the test host's child");
+    let child_pid = child.id();
+    let (commands, receiver) = mpsc::unbounded_channel();
+    let received = Arc::new(Mutex::new(Vec::new()));
+    let unreadable = Arc::new(AtomicBool::new(unreadable));
+    let accepted = Arc::new(AtomicUsize::new(0));
+    let journal = Journal {
+        child_pid,
+        tag,
+        unreadable: Arc::clone(&unreadable),
+        ..Journal::default()
     };
-    let host = TestHost {
-        socket,
+    let task = tokio::spawn(serve(
+        listener,
+        receiver,
+        Arc::clone(&received),
+        journal,
+        Arc::clone(&accepted),
+    ));
+    TestHost {
+        socket: socket.to_path_buf(),
         child: Mutex::new(Some(child)),
         child_pid,
         received,
         commands,
+        unreadable,
+        accepted,
         task,
-        _dir: dir,
-    };
-    (terminal, host)
+        _dir: None,
+    }
 }
 
 /// The host's side of its connections: one at a time, each served until it
@@ -187,17 +241,15 @@ async fn serve(
     listener: UnixListener,
     mut commands: mpsc::UnboundedReceiver<Command>,
     received: Arc<Mutex<Vec<u8>>>,
-    child_pid: u32,
+    mut journal: Journal,
+    accepted: Arc<AtomicUsize>,
 ) {
-    let mut journal = Journal {
-        child_pid,
-        ..Journal::default()
-    };
     loop {
         let Ok((stream, _)) = listener.accept().await else {
             return;
         };
-        if journal.unreadable {
+        accepted.fetch_add(1, Ordering::SeqCst);
+        if journal.unreadable.load(Ordering::SeqCst) {
             refuse(stream).await;
             continue;
         }
@@ -217,7 +269,11 @@ struct Journal {
     child_pid: u32,
     end: u64,
     exit: Option<ChildExit>,
-    unreadable: bool,
+    /// Shared with the [`TestHost`], so the test can make the host
+    /// unreadable while no connection is being served.
+    unreadable: Arc<AtomicBool>,
+    /// The client tag `Info` reports.
+    tag: Vec<u8>,
     /// Input bytes acknowledged as written, in all.
     written: u64,
 }
@@ -237,7 +293,7 @@ impl Journal {
             resizes: 0,
             gap: false,
             delivered_end: 0,
-            tag: Vec::new(),
+            tag: self.tag.clone(),
         }
     }
 }
@@ -304,7 +360,7 @@ async fn serve_one(
                         }
                     }
                     Command::BecomeUnreadable => {
-                        journal.unreadable = true;
+                        journal.unreadable.store(true, Ordering::SeqCst);
                         return Ok(());
                     }
                 };

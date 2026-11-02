@@ -1,6 +1,6 @@
 //! The supervisor's terminal switch points with a real terminal host behind
 //! a session's agent: exit recording, Stop, Restart's refusal, Delete (its
-//! guard and its process root) and attach.
+//! guard, its process roots and ending the session's hosts) and attach.
 //!
 //! Each test here wants a host child of its own choosing rather than an
 //! agent's launch chain, so it creates an ordinary session and moves its
@@ -23,6 +23,12 @@
 //! and Delete's marker sweep cannot find its processes, so only a sweep
 //! rooted at the host's child reaches them.
 //!
+//! Delete's tests also start hosts that no runtime holds, tagged as a
+//! session's agent of some launch generation and named by a launch record
+//! the test writes, the way a host left behind by a crash looks to Delete,
+//! which acts only on what the session records. Tab hosts come with the
+//! change that opens tabs in hosts.
+//!
 //! What needs a host to behave on cue (status, the never-started excerpt,
 //! Stop before the host's exit record, an unreadable host, the ticker's
 //! wake and a failed tmux probe, the hook anchor, the hold wait, prompts) is
@@ -31,9 +37,9 @@
 
 use crate::harness::*;
 use farhelm_supervisor::hosts::{
-    ChildSpec, HostRole, HostTag, HostTerminal, InputFate, Liveness, spawn_host,
+    ChildSpec, HostConnection, HostRole, HostTag, HostTerminal, InputFate, Liveness, spawn_host,
 };
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use terminal_host::protocol::Size;
 
 /// How long a test waits for a process to go or a host to report a change.
@@ -58,11 +64,20 @@ struct Installed {
     /// The host's pid, from the process table: the process serving the
     /// host's socket by its command line.
     pid: u32,
+    socket: PathBuf,
+}
+
+/// A host this test started that no runtime holds: its socket, and its
+/// process, found by its command line.
+struct Started {
+    socket: PathBuf,
+    pid: u32,
 }
 
 /// Start a host in `h`'s state directory running `script` under `/bin/sh`,
-/// tagged as `session_id`'s agent, and make it the session's agent terminal.
-async fn install_host(h: &Harness, session_id: &str, script: &str) -> Installed {
+/// with no session markers in its child's environment, tagged as
+/// `session_id`'s `role`.
+async fn start_host(h: &Harness, session_id: &str, role: HostRole, script: &str) -> Started {
     let child = ChildSpec {
         argv: vec!["/bin/sh".into(), "-c".into(), script.into()],
         cwd: "/".into(),
@@ -74,18 +89,29 @@ async fn install_host(h: &Harness, session_id: &str, script: &str) -> Installed 
     let tag = HostTag {
         session_id: session_id.to_string(),
         created_ns: farhelm_supervisor::hosts::tag::creation_stamp(),
-        role: HostRole::Agent { generation: 0 },
+        role,
     };
     let spawned = spawn_host(Path::new(farhelm_bin()), h.state.path(), child, &tag)
         .await
         .expect("the host starts");
     let pid = host_process(&spawned.socket).expect("the host's process serves its socket");
+    Started {
+        socket: spawned.socket,
+        pid,
+    }
+}
+
+/// Start a host running `script`, tagged as `session_id`'s agent, and make
+/// it the session's agent terminal.
+async fn install_host(h: &Harness, session_id: &str, script: &str) -> Installed {
+    let Started { socket, pid } =
+        start_host(h, session_id, HostRole::Agent { generation: 0 }, script).await;
     let host = h
         .sup
-        .install_host_agent_for_test(session_id, &spawned.socket)
+        .install_host_agent_for_test(session_id, &socket)
         .await
         .expect("the host becomes the session's agent terminal");
-    Installed { host, pid }
+    Installed { host, pid, socket }
 }
 
 /// The process whose command line carries `--socket <socket>`, as a host's
@@ -340,23 +366,128 @@ async fn restart_of_a_host_agent_is_refused_before_anything_stops() {
     end_host(&installed).await;
 }
 
+// ---- Delete --------------------------------------------------------------------------
+
+/// A script like [`tree_script`] whose grandchild ignores the terminal's
+/// hangup: what makes a Delete test tell a sweep rooted at the host's
+/// child from the hangup that ending the host gives its pty's processes.
+/// Ending a host closes its pty, and an ordinary background `sleep` dies of
+/// that hangup with or without any root; this one dies only of a sweep
+/// that reached it from the child. The grandchild publishes its pid only
+/// once its trap is set, so a test that has read the pid can rely on the
+/// disposition.
+fn hangup_immune_tree_script(dir: &Path) -> String {
+    format!(
+        "echo $$ > {child}; \
+         /bin/sh -c 'trap \"\" HUP; echo $$ > \"$1\"; exec sleep 1000' sh {grand} & \
+         printf 'host child ready\\n'; wait",
+        child = shell_words::quote(dir.join("child.pid").to_str().unwrap()),
+        grand = shell_words::quote(dir.join("grand.pid").to_str().unwrap()),
+    )
+}
+
+/// The processes [`hangup_immune_tree_script`] started, with a guard that
+/// kills the grandchild should the test fail before something else does
+/// (it outlives its host's hangup by design).
+struct ImmuneTree {
+    child: u32,
+    grand: u32,
+    _grand_guard: PidKillGuard,
+}
+
+/// Wait for [`hangup_immune_tree_script`]'s processes and check the
+/// premise the Delete tests rest on: both run, the grandchild's parent is
+/// the child, and the grandchild ignores `SIGHUP`.
+async fn hangup_immune_tree(dir: &Path) -> ImmuneTree {
+    let (child, grand) = tree_pids(dir).await;
+    let guard = PidKillGuard::arm(grand);
+    let status = std::fs::read_to_string(format!("/proc/{grand}/status"))
+        .expect("read the grandchild's status");
+    let field = |name: &str| {
+        status
+            .lines()
+            .find_map(|line| line.strip_prefix(name))
+            .map(str::trim)
+            .unwrap_or_else(|| panic!("no {name} in the grandchild's status"))
+            .to_string()
+    };
+    assert_eq!(
+        field("PPid:"),
+        child.to_string(),
+        "premise: the grandchild is the host child's own child"
+    );
+    let ignored = u64::from_str_radix(&field("SigIgn:"), 16).expect("a signal mask");
+    assert_ne!(
+        ignored & (1 << (libc::SIGHUP - 1)),
+        0,
+        "premise: the grandchild ignores SIGHUP"
+    );
+    ImmuneTree {
+        child,
+        grand,
+        _grand_guard: guard,
+    }
+}
+
+/// Write `session_id`'s launch record for `generation`, naming `socket` and
+/// a first stage that has already ended, as a create leaves it once its
+/// host started (`service::core::host_launch`'s record format, version 1).
+/// What makes a host started by the test the session's to Delete, which
+/// acts only on what the session records.
+fn write_launch_record(h: &Harness, session_id: &str, generation: i64, socket: &Path) {
+    let mut ended = std::process::Command::new("true")
+        .spawn()
+        .expect("start a process to end");
+    let pid = ended.id();
+    ended.wait().expect("reap it");
+    let launch = h.state.path().join("launch");
+    std::fs::create_dir_all(&launch).expect("the launch directory");
+    std::fs::write(
+        launch.join(format!("{session_id}.{generation}.host")),
+        format!(
+            "farhelm launch host 1\nsocket {}\nstarter {pid} 0\n",
+            socket.file_name().unwrap().to_str().unwrap()
+        ),
+    )
+    .expect("write the launch record");
+}
+
+/// Stop `pid` with `SIGSTOP` and wait until it is stopped.
+async fn stop_process(pid: u32) {
+    let stopped = std::process::Command::new("kill")
+        .args(["-STOP", &pid.to_string()])
+        .status()
+        .expect("run kill");
+    assert!(stopped.success(), "send SIGSTOP to {pid}");
+    wait_for_process_state(pid, 'T', WAIT_SECS).await;
+}
+
 /// Delete's guard refuses while a host agent runs, and Delete kills the
-/// agent's whole tree from the host's child.
+/// agent's whole tree from the host's child and then ends the host.
 ///
 /// Why: a guard that read a running host agent as ended would let a guarded
 /// delete kill it without the consent prompt (the inventory's top risk 8),
-/// and a delete without the child as its root would leave an unmarked
-/// descendant running (top risk 7). Spec: with the host's child and an
-/// unmarked grandchild running, a delete guarded on the agent having ended
-/// is refused because the agent is still running, and nothing dies; an
-/// unconditional delete succeeds, both processes go, and the session is no
+/// a delete without the child as its root would leave an unmarked
+/// descendant running, and one that left the host running would leak it
+/// for good, since nothing else ends a host whose session is gone (top
+/// risk 7). The grandchild ignores the hangup ending the host gives it, so
+/// only the sweep's root reaches it. Spec: with the host's child and an
+/// unmarked grandchild that ignores SIGHUP running (premises checked), and
+/// a launch record naming the host the runtime holds, a
+/// delete guarded on the agent having ended is refused because the agent
+/// is still running, and nothing dies; an unconditional delete succeeds,
+/// both processes go, the host's process is gone when it returns and its
+/// socket file with it, its runtime saw it end, and the session is no
 /// longer listed.
 #[farhelm_testtrace::test]
-async fn delete_guards_and_roots_a_host_agent() {
+async fn delete_guards_roots_and_ends_a_host_agent() {
     let h = harness().await;
     let (session, work) = basic_session(&h).await;
-    let installed = install_host(&h, &session.id, &tree_script(work.path())).await;
-    let (child, grand) = tree_pids(work.path()).await;
+    let installed = install_host(&h, &session.id, &hangup_immune_tree_script(work.path())).await;
+    // As a create leaves it: a record naming the very host the runtime
+    // holds, which Delete must leave to the runtime rather than connect to.
+    write_launch_record(&h, &session.id, 0, &installed.socket);
+    let tree = hangup_immune_tree(work.path()).await;
 
     let refused = h
         .client
@@ -368,21 +499,345 @@ async fn delete_guards_and_roots_a_host_agent() {
         "{refused:#}"
     );
     assert!(
-        !process_is_gone(child) && !process_is_gone(grand),
+        !process_is_gone(tree.child)
+            && !process_is_gone(tree.grand)
+            && !process_is_gone(installed.pid),
         "a refused delete kills nothing"
     );
 
     h.client.delete_session(&session.id).await.expect("delete");
-    wait_until_pid_gone(child, WAIT_SECS).await;
-    wait_until_pid_gone(grand, WAIT_SECS).await;
-    let listing = h.client.list_sessions().await.expect("list");
     assert!(
-        listing.sessions.iter().all(|info| info.id != session.id),
-        "the session is deleted"
+        process_is_gone(installed.pid),
+        "the host is gone when Delete returns"
     );
-    // Ending the host itself is a later step of Delete's; until then it is
-    // left running, as here.
-    end_host(&installed).await;
+    wait_until_pid_gone(tree.child, WAIT_SECS).await;
+    wait_until_pid_gone(tree.grand, WAIT_SECS).await;
+    assert!(
+        !installed.socket.exists(),
+        "the host was shut down, removing its socket"
+    );
+    wait_for_liveness(
+        &installed.host,
+        "the runtime seeing its host end",
+        |liveness| matches!(liveness, Liveness::Gone),
+    )
+    .await;
+    assert!(!is_listed(&h, &session.id).await, "the session is deleted");
+}
+
+/// Whether the list still reports `session_id`.
+async fn is_listed(h: &Harness, session_id: &str) -> bool {
+    h.client
+        .list_sessions()
+        .await
+        .expect("list")
+        .sessions
+        .iter()
+        .any(|info| info.id == session_id)
+}
+
+/// End a host no runtime holds through its protocol, after checking that it
+/// still answers as the `session_id` host it was started as, and wait for
+/// its process to go: how a test cleans up a host it expects Delete to have
+/// left alone.
+async fn end_unheld_host(started: &Started, session_id: &str) {
+    let mut connection = HostConnection::connect(&started.socket)
+        .await
+        .expect("the host still answers");
+    let info = connection.info().await.expect("the host reports its state");
+    let tag = HostTag::decode(&info.tag).expect("the host's tag reads");
+    assert_eq!(tag.session_id, session_id, "the host is the one started");
+    connection
+        .shutdown()
+        .await
+        .expect("the host takes Shutdown");
+    wait_until_pid_gone(started.pid, WAIT_SECS).await;
+}
+
+/// Delete finds the host of a session that has no agent terminal by the
+/// session's id, guards on it, and ends it with its whole tree.
+///
+/// Why: a session can be without a terminal while its agent's host runs on
+/// (a restart gap, or a reload that has not found it yet); the host is then
+/// held by no runtime, and only the session's launch record finds it. A
+/// delete that missed it would leave a live agent and its host running with
+/// no session to show them. Spec: with a host agent's child and an unmarked
+/// grandchild that ignores SIGHUP running, the session's entry made
+/// terminal-less and the runtime that held the host ended (premises
+/// checked), a delete guarded on the agent having ended is refused because
+/// the agent still runs in a terminal host, and nothing dies; an
+/// unconditional delete succeeds, the host is gone when it returns, the
+/// child and grandchild go, and the session is no longer listed.
+#[farhelm_testtrace::test]
+async fn delete_finds_the_host_of_a_session_without_a_terminal() {
+    let h = harness().await;
+    let (session, work) = basic_session(&h).await;
+    let Installed { host, pid, socket } =
+        install_host(&h, &session.id, &hangup_immune_tree_script(work.path())).await;
+    let tree = hangup_immune_tree(work.path()).await;
+    write_launch_record(&h, &session.id, 0, &socket);
+    h.sup
+        .forget_agent_terminal_for_test(&session.id)
+        .await
+        .expect("forget the session's terminal");
+    // The runtime ends once its last handle goes, closing its connection;
+    // until then it would take the host back from the connection Delete
+    // makes when it settles the session's launch record.
+    let mut status = host.subscribe();
+    drop(host);
+    let ended = tokio::time::timeout(Duration::from_secs(WAIT_SECS), async {
+        while status.changed().await.is_ok() {}
+    })
+    .await;
+    assert!(
+        ended.is_ok(),
+        "premise: the runtime ends without its handles"
+    );
+    assert!(!process_is_gone(pid), "premise: the host runs on");
+
+    let refused = h
+        .client
+        .delete_session_with(&session.id, farhelm_proto::DeleteGuard::AgentEnded)
+        .await
+        .expect_err("the agent still runs in its host");
+    assert!(
+        format!("{refused:#}").contains("still running in a terminal host"),
+        "{refused:#}"
+    );
+    assert!(
+        !process_is_gone(tree.child) && !process_is_gone(tree.grand) && !process_is_gone(pid),
+        "a refused delete kills nothing"
+    );
+
+    h.client.delete_session(&session.id).await.expect("delete");
+    assert!(process_is_gone(pid), "the host is gone when Delete returns");
+    wait_until_pid_gone(tree.child, WAIT_SECS).await;
+    wait_until_pid_gone(tree.grand, WAIT_SECS).await;
+    assert!(!socket.exists(), "the host removed its socket");
+    assert!(!is_listed(&h, &session.id).await, "the session is deleted");
+}
+
+/// Delete ends a host agent that is stopped, and so cannot take `Shutdown`,
+/// with the verified signal.
+///
+/// Why: a host that is wedged or stopped never answers its protocol, and
+/// Delete is the last thing that would ever end it; leaving it would leak
+/// the host for good, while reporting the session deleted. Spec: with the
+/// host's child and an unmarked grandchild that ignores SIGHUP running and
+/// the host's process stopped with SIGSTOP (premises checked), an
+/// unconditional delete succeeds, the host's process is gone when it
+/// returns, and the child and grandchild go.
+#[farhelm_testtrace::test]
+async fn delete_ends_a_stopped_host_agent_with_the_verified_signal() {
+    let h = harness().await;
+    let (session, work) = basic_session(&h).await;
+    let installed = install_host(&h, &session.id, &hangup_immune_tree_script(work.path())).await;
+    let tree = hangup_immune_tree(work.path()).await;
+    // Ends the host should the test fail with it stopped.
+    let _guard = PidKillGuard::arm(installed.pid);
+    stop_process(installed.pid).await;
+
+    h.client.delete_session(&session.id).await.expect("delete");
+    assert!(
+        process_is_gone(installed.pid),
+        "the host is gone when Delete returns"
+    );
+    wait_until_pid_gone(tree.child, WAIT_SECS).await;
+    wait_until_pid_gone(tree.grand, WAIT_SECS).await;
+    assert!(!is_listed(&h, &session.id).await, "the session is deleted");
+}
+
+/// Delete's guard sees a live agent in a recorded host of another launch
+/// generation beside a recorded agent terminal that has ended, and Delete
+/// ends that host while another session's host is never touched.
+///
+/// Why: Delete ends every recorded host of the session, of any generation
+/// (a leftover a crash left between a restart's new launch and the old
+/// host's end). A delete whose confirmation said the agent had ended must
+/// not kill one still running there, which the recorded terminal's probe
+/// alone cannot see; and only the session's own records may lead Delete to
+/// a host, so another session's host in the same state directory is never
+/// touched. Spec: with the session's tmux agent stopped, a host tagged and
+/// recorded as the session's agent of generation 3 running a child and an
+/// unmarked grandchild that ignores SIGHUP (premises checked), and a host
+/// tagged and recorded as another session's agent: a delete guarded on the
+/// agent having ended is refused because the agent still runs in a terminal
+/// host, and nothing dies; an unconditional delete ends the leftover host
+/// (gone when it returns), its child and its grandchild, and the other
+/// session's host still runs and answers with its tag.
+#[farhelm_testtrace::test]
+async fn delete_ends_another_generations_recorded_host_and_no_other_sessions() {
+    let h = harness().await;
+    let (session, work) = basic_session(&h).await;
+    h.client.stop_session(&session.id).await.expect("stop");
+    wait_for_non_live_status(&h.client, &session.id, WAIT_SECS).await;
+    let leftover = start_host(
+        &h,
+        &session.id,
+        HostRole::Agent { generation: 3 },
+        &hangup_immune_tree_script(work.path()),
+    )
+    .await;
+    write_launch_record(&h, &session.id, 3, &leftover.socket);
+    let tree = hangup_immune_tree(work.path()).await;
+    let other_session = uuid::Uuid::new_v4().to_string();
+    let other = start_host(
+        &h,
+        &other_session,
+        HostRole::Agent { generation: 0 },
+        "sleep 1000",
+    )
+    .await;
+    write_launch_record(&h, &other_session, 0, &other.socket);
+
+    let refused = h
+        .client
+        .delete_session_with(&session.id, farhelm_proto::DeleteGuard::AgentEnded)
+        .await
+        .expect_err("an earlier generation's agent still runs");
+    assert!(
+        format!("{refused:#}").contains("still running in a terminal host"),
+        "{refused:#}"
+    );
+    assert!(
+        !process_is_gone(tree.child)
+            && !process_is_gone(tree.grand)
+            && !process_is_gone(leftover.pid),
+        "a refused delete kills nothing"
+    );
+
+    h.client.delete_session(&session.id).await.expect("delete");
+    assert!(process_is_gone(leftover.pid), "the leftover host is gone");
+    wait_until_pid_gone(tree.child, WAIT_SECS).await;
+    wait_until_pid_gone(tree.grand, WAIT_SECS).await;
+    assert!(!is_listed(&h, &session.id).await, "the session is deleted");
+    assert!(
+        !process_is_gone(other.pid),
+        "another session's host is never touched"
+    );
+    end_unheld_host(&other, &other_session).await;
+}
+
+/// A recorded host of the session that is stopped makes a guarded Delete
+/// refuse, and an unconditional Delete ends it with the verified signal.
+///
+/// Why: a stopped host answers nothing, so whether its program runs cannot
+/// be told (a guarded Delete must not kill what nobody agreed to), and it is
+/// still the session's by its launch record, so an unconditional Delete
+/// must end it, by the process its connection named, or keep the session.
+/// Spec: with the session's tmux agent stopped and a host tagged and
+/// recorded as the session's agent of generation 2, stopped with SIGSTOP
+/// (premise checked), a delete guarded on the agent having ended is refused
+/// because the recorded host cannot be read, and the host is still there,
+/// stopped; an unconditional delete succeeds and the host is gone when it
+/// returns.
+#[farhelm_testtrace::test]
+async fn a_stopped_recorded_host_is_guarded_and_then_signalled() {
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+    h.client.stop_session(&session.id).await.expect("stop");
+    wait_for_non_live_status(&h.client, &session.id, WAIT_SECS).await;
+    let leftover = start_host(
+        &h,
+        &session.id,
+        HostRole::Agent { generation: 2 },
+        "sleep 1000",
+    )
+    .await;
+    write_launch_record(&h, &session.id, 2, &leftover.socket);
+    // Ends the host should the test fail with it stopped.
+    let _guard = PidKillGuard::arm(leftover.pid);
+    stop_process(leftover.pid).await;
+
+    let refused = h
+        .client
+        .delete_session_with(&session.id, farhelm_proto::DeleteGuard::AgentEnded)
+        .await
+        .expect_err("the stopped host cannot be read");
+    assert!(
+        format!("{refused:#}").contains("cannot be read"),
+        "{refused:#}"
+    );
+    assert_eq!(
+        process_state(leftover.pid),
+        Some('T'),
+        "a refused delete leaves the host as it was"
+    );
+
+    h.client.delete_session(&session.id).await.expect("delete");
+    assert!(
+        process_is_gone(leftover.pid),
+        "the stopped host is gone when Delete returns"
+    );
+    assert!(!is_listed(&h, &session.id).await, "the session is deleted");
+}
+
+/// Delete ends the host a runtime adopted, by its process, after another
+/// host was renamed over its socket and the runtime saw the replacement,
+/// and neither shuts down nor signals that replacement.
+///
+/// Why: the runtime gave the replacement up rather than name it the host,
+/// and so must Delete: one that connected to the socket again and shut down
+/// whatever answers would end a process that is not this session's
+/// terminal. The process the runtime adopted is still known, pinned at
+/// adoption, and ending it (here: confirming it already ended) is what lets
+/// Delete finish rather than keep the session until a restart. Spec: with
+/// the session's agent in a host whose socket file is replaced by another
+/// session's host (renamed over it) before the agent's host is killed with
+/// SIGKILL, and the runtime reporting the socket replaced (premise
+/// checked), an unconditional delete succeeds and the session is no longer
+/// listed; the replacement still runs and answers at that socket with its
+/// own tag.
+#[farhelm_testtrace::test]
+async fn delete_ends_the_adopted_host_and_never_one_that_replaced_it() {
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+    let installed = install_host(&h, &session.id, "printf 'ready\\n'; exec sleep 1000").await;
+    let other_session = uuid::Uuid::new_v4().to_string();
+    let replacement = start_host(
+        &h,
+        &other_session,
+        HostRole::Agent { generation: 0 },
+        "sleep 1000",
+    )
+    .await;
+    let _replacement_guard = PidKillGuard::arm(replacement.pid);
+    std::fs::rename(&replacement.socket, &installed.socket)
+        .expect("put the replacement's socket in the agent host's place");
+    let killed = std::process::Command::new("kill")
+        .args(["-KILL", &installed.pid.to_string()])
+        .status()
+        .expect("run kill");
+    assert!(killed.success(), "kill the agent's host");
+    wait_for_liveness(
+        &installed.host,
+        "the runtime finding its host replaced",
+        |liveness| {
+            matches!(
+                liveness,
+                Liveness::Unavailable {
+                    reason: farhelm_supervisor::hosts::Unavailability::Replaced,
+                    ..
+                }
+            )
+        },
+    )
+    .await;
+
+    h.client.delete_session(&session.id).await.expect("delete");
+    assert!(!is_listed(&h, &session.id).await, "the session is deleted");
+    assert!(
+        !process_is_gone(replacement.pid),
+        "the replacement was neither shut down nor signalled"
+    );
+    end_unheld_host(
+        &Started {
+            socket: installed.socket.clone(),
+            pid: replacement.pid,
+        },
+        &other_session,
+    )
+    .await;
 }
 
 /// Attaching a host agent is refused, with the grid client's refusal for a

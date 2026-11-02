@@ -452,7 +452,7 @@ async fn terminate_within(
         pid: host.pid,
         reason: format!("resolving {}: {error}", socket.display()),
     })?;
-    if !verify(host, &socket)? || !signal(host, libc::SIGTERM)? {
+    if !verify_off_worker(host, &socket).await? || !signal(host, libc::SIGTERM)? {
         return Ok(Termination::AlreadyGone);
     }
     let pid = host.pid as libc::pid_t;
@@ -463,7 +463,7 @@ async fn terminate_within(
     if wait_gone(host, term_grace).await? {
         return Ok(Termination::Terminated);
     }
-    if !verify(host, &socket)? || !signal(host, libc::SIGKILL)? {
+    if !verify_off_worker(host, &socket).await? || !signal(host, libc::SIGKILL)? {
         // It went between the grace and the check.
         return Ok(Termination::Terminated);
     }
@@ -472,6 +472,32 @@ async fn terminate_within(
     } else {
         Termination::StillRunning
     })
+}
+
+/// [`verify`] off the async runtime's threads, through the same gate as
+/// the process-table walks ([`WalkGate`]), given at most
+/// [`PROCESS_SEARCH_DEADLINE`].
+///
+/// Reading a command line takes the process's memory-map lock on Linux,
+/// which a process stuck in the kernel can hold for as long as it stays
+/// stuck. On an async worker such a read would stall every task sharing
+/// the worker, a caller's own deadline included. Through the gate, a read
+/// that does not return in time fails this check (never "gone", never
+/// "the host"), keeps its one blocking thread until it returns, and makes
+/// every later walk or check fail at once while it is still stuck, so that
+/// retries do not strand a thread each.
+async fn verify_off_worker(host: &HostProcess, socket: &Path) -> Result<bool, TerminateError> {
+    let (pinned, path) = (*host, socket.to_path_buf());
+    match WalkGate::process()
+        .run(PROCESS_SEARCH_DEADLINE, move || Ok(verify(&pinned, &path)))
+        .await
+    {
+        Ok(verified) => verified,
+        Err(reason) => Err(TerminateError::Unreadable {
+            pid: host.pid,
+            reason: format!("checking its command line: {reason}"),
+        }),
+    }
 }
 
 /// Whether `host` is still that process and still the host on `socket`.

@@ -1,0 +1,616 @@
+//! A session's terminal hosts as Delete sees them: which hosts are the
+//! session's, the roots their programs give the process sweep, what
+//! Delete's guard must count, and ending every one of them once the sweep
+//! is done.
+//!
+//! A host outlives its program (it keeps the final screen until it is shut
+//! down, the plan's D-17) and carries no session marker, so neither the
+//! marker sweep nor the end of the session's tmux session ends it. Delete is
+//! the one verb that ends a session for good, so it ends the hosts on
+//! purpose (the inventory's top risk 7).
+//!
+//! # Which hosts
+//!
+//! Delete acts only on what the session itself records, never on a scan of
+//! the socket directory (a host found there could be anyone's, and telling
+//! whose takes machinery a record makes unnecessary):
+//!
+//! - **The agent's runtime**, when the session's agent terminal is a host
+//!   (`Terminal::Host`). The caller roots the sweep at its child as pinned
+//!   at adoption (`hosts::HostStatus::pinned_child_root`) and hands the
+//!   runtime to [`SessionHosts::end`].
+//! - **The session's launch records** (`<state>/launch/<id>.<generation>.host`,
+//!   `service::core::host_launch`), written before every host start the
+//!   supervisor makes for the session and kept until that host is confirmed
+//!   ended (the startup sweep of the launch directory keeps them too). Each
+//!   one no runtime holds (an agent host of a session with no terminal right
+//!   now, an earlier generation's host left by a crash, a start a crashed
+//!   supervisor left half done) is settled the way a retried create settles
+//!   its own ([`Supervisor::settle_launch_record`]): its recorded first
+//!   stage is fenced first, so that nothing can start a host there once
+//!   Delete has looked, and then its socket is looked at.
+//!
+//! What a record's socket holds decides what Delete does with it:
+//!
+//! - **nothing** (and no process names it): nothing to end; a socket file a
+//!   killed host left is removed, judged gone again first;
+//! - **a host whose tag names this session**: the guard counts it (its
+//!   program running is a live agent, or an open tab once tabs are hosts),
+//!   its child is pinned over the connection as a sweep root, and it is
+//!   ended over that same connection;
+//! - **a host whose tag names anything else**: Delete refuses and keeps the
+//!   session, touching nothing (this session's record names a socket now
+//!   serving someone else's host, which only a person can sort out);
+//! - **something that does not answer usefully** (stopped, wedged, busy,
+//!   another protocol, a tag this build cannot read) but whose process is
+//!   known (the connection's peer credentials, or the process naming the
+//!   socket): a guarded Delete cannot tell what runs there and refuses; an
+//!   unconditional one, after the sweep, ends that process with the
+//!   verified signal, without connecting again. It has no sweep root: its
+//!   program is reached by the marker sweep, the scope kill and its hangup.
+//!   A host that answers with a valid `Info` but a tag this build cannot
+//!   read is treated the same way rather than shut down over the
+//!   connection: nothing but the socket's name would tie it to the record,
+//!   and that is exactly what a process renamed over the path shares;
+//! - **anything else** (no process known, a first stage that could not be
+//!   fenced, a record that cannot be read or decoded, such as a newer
+//!   release's format): Delete refuses and keeps the session.
+//!
+//! # Ending them
+//!
+//! [`SessionHosts::end`] ends every host of the session at once: the
+//! agent's runtime the way a failed create ends its own host
+//! (`Supervisor::end_launch_host`: its `Shutdown`, else the verified signal
+//! to the process the runtime adopted, never whatever serves the socket
+//! now, so a process renamed over the socket is left alone while the host
+//! it replaced is still ended), the others as above, and then the socket
+//! file a signal leaves is removed. Settling the records (every record at
+//! once) gets [`DELETE_HOST_END_BUDGET`], and ending the hosts gets another
+//! such budget of its own, counted from when the ending starts, so that the
+//! sweep and the rest of the teardown between the two count against
+//! neither; a record not settled, or a host not confirmed ended, within its
+//! budget or at all, keeps the session (and its launch records) for a
+//! retry, so Delete never reports a session gone while one of its hosts may
+//! still run.
+//!
+//! What keeps a session undeletable until a person deals with it: a record
+//! that cannot be read or decoded; a record whose socket serves another
+//! terminal's host; a recorded host whose process is not known, whose
+//! command line the verified signal rejects (it does not end with
+//! `--socket` and this socket's path), or that survives SIGKILL; and a
+//! recorded host whose child runs but cannot be read to pin it as a root.
+//!
+//! # What keeps the connections Delete holds
+//!
+//! Between settling a record and [`SessionHosts::end`], Delete holds the
+//! connection to each answering host of the session, which owns that host
+//! until it is dropped. Nothing else connects to a session's recorded hosts
+//! meanwhile: the session's lifecycle claim excludes its own create, Restart
+//! and tab operations, and the only other code that settles a record (a
+//! retried create) settles its own session's.
+
+use std::future::Future;
+use std::path::PathBuf;
+use std::pin::Pin;
+use std::task::Poll;
+use std::time::Duration;
+
+use anyhow::Context as _;
+use tracing::debug;
+
+use super::core::{AtRecordedSocket, Supervisor, read_launch_record};
+use super::terminals::Terminal;
+use crate::hosts::stop::{HostOutcome, StopLimits, shut_down, signal};
+use crate::hosts::terminal::{Child, pin_child};
+use crate::hosts::{ConnectError, HostConnection, HostProcess, HostRole, HostTag, HostTerminal};
+use terminal_host::protocol::Info;
+
+/// How long Delete spends settling a session's launch records, all of them
+/// together, and then, separately, ending its terminal hosts, all of them
+/// together, before it reports the ones not yet settled or confirmed ended
+/// and keeps the session. Each budget counts only its own phase: the process
+/// sweep, scope, upload and container work between them count against
+/// neither, so a slow sweep never cuts the ending short.
+///
+/// The slowest single end the steps can describe: its runtime's `Shutdown`
+/// within the 15 seconds a failed create gives it, then the verified signal
+/// to its process (its command line read within one process-table deadline,
+/// then SIGTERM's and SIGKILL's graces, 10 seconds), and the removal of the
+/// socket file a signal leaves (the refusal window and one process-table
+/// walk). Settling one record takes at most its first stage's wait (5
+/// seconds) and the verified signal, the stray wait (5 seconds) and a
+/// connect. Records and hosts are each handled at once, so each budget
+/// bounds the slowest of its phase, not their sum.
+pub(crate) const DELETE_HOST_END_BUDGET: Duration = Duration::from_secs(60);
+
+/// One recorded host of the session that no runtime holds, as settling its
+/// record found it.
+#[derive(Debug)]
+enum RecordedHost {
+    /// Nothing serves the socket; a file a killed host left may remain.
+    Gone { socket: PathBuf },
+    /// A host whose tag names this session, with the connection that owns
+    /// it (boxed, being much the largest variant) and its `Info` from that
+    /// connection.
+    Ours {
+        socket: PathBuf,
+        connection: Box<HostConnection>,
+        tag: HostTag,
+        info: Info,
+    },
+    /// Something that did not answer usefully, and the process serving the
+    /// socket, which the verified signal may end.
+    Unreadable {
+        socket: PathBuf,
+        peer: HostProcess,
+        why: String,
+    },
+}
+
+/// The terminal hosts of one session that no runtime in this supervisor
+/// holds, as settling the session's launch records found them (module
+/// docs). The agent's runtime, when it has one, is not in here: the caller
+/// passes it to [`Self::end`].
+///
+/// Holding one holds the connection to each answering host of the
+/// session, which owns that host until this is dropped (which leaves the
+/// hosts as they were) or [`Self::end`] consumes it.
+#[derive(Debug)]
+pub(crate) struct SessionHosts {
+    session_id: String,
+    hosts: Vec<RecordedHost>,
+    /// The budget [`Self::end`] gets for ending the hosts, counted from
+    /// when it starts: the same length as settling's own, which it does not
+    /// share, so that the sweep and the rest of the teardown between the
+    /// two are never charged to either.
+    budget: Duration,
+}
+
+impl Supervisor {
+    /// Settle every launch record of `session_id` whose socket no runtime
+    /// here holds (module docs, "Which hosts").
+    ///
+    /// Called under the session's lifecycle claim and directory admission,
+    /// so nothing starts a host for this session meanwhile. A session with
+    /// no launch records costs one directory listing. An error is a refusal
+    /// that changed nothing beyond fencing recorded first stages: a record
+    /// that cannot be read or decoded, a first stage that could not be
+    /// fenced, a socket serving another terminal's host, or one that does
+    /// not answer and whose process is not known.
+    pub(crate) async fn session_hosts(
+        &self,
+        session_id: &str,
+        agent: Option<&Terminal>,
+        budget: Duration,
+    ) -> anyhow::Result<SessionHosts> {
+        let deadline = tokio::time::Instant::now() + budget;
+        let held = match agent {
+            Some(Terminal::Host(host)) => host.socket().file_name().map(ToOwned::to_owned),
+            Some(Terminal::Tmux(_)) | None => None,
+        };
+        let mut records = Vec::new();
+        for path in self.launch_records_of(session_id).await? {
+            let record = read_launch_record(&path)
+                .await?
+                .with_context(|| format!("the launch host record {} went away", path.display()))?;
+            let socket = self.recorded_socket(&record)?;
+            if socket.file_name() != held.as_deref() {
+                records.push((path, record, socket));
+            }
+        }
+        // Every record at once, within settling's own budget: each can
+        // wait for its first stage and for a stray second stage.
+        type Settling<'a> = Pin<Box<dyn Future<Output = anyhow::Result<RecordedHost>> + Send + 'a>>;
+        let settlings: Vec<Settling<'_>> = records
+            .iter()
+            .map(|(path, record, socket)| {
+                Box::pin(async move {
+                    let settled =
+                        self.settle_launch_record(record, socket)
+                            .await
+                            .map_err(|why| {
+                                anyhow::anyhow!(
+                                    "a start of this session's terminal host recorded in {} \
+                                 (process {}) could not be confirmed ended: {why}",
+                                    path.display(),
+                                    record.starter.pid
+                                )
+                            })?;
+                    classify(session_id, socket.clone(), settled)
+                }) as Settling<'_>
+            })
+            .collect();
+        let mut hosts = Vec::new();
+        for ((path, _, _), settled) in records.iter().zip(join_until(settlings, deadline).await) {
+            match settled {
+                Some(host) => hosts.push(host?),
+                None => anyhow::bail!(
+                    "the terminal host recorded in {} could not be settled within {budget:?}",
+                    path.display()
+                ),
+            }
+        }
+        Ok(SessionHosts {
+            session_id: session_id.to_owned(),
+            hosts,
+            budget,
+        })
+    }
+
+    /// The paths of `session_id`'s launch records, in the launch directory.
+    async fn launch_records_of(&self, session_id: &str) -> anyhow::Result<Vec<PathBuf>> {
+        let launch_dir = self.state_dir.join("launch");
+        let mut entries = match tokio::fs::read_dir(&launch_dir).await {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => {
+                return Err(anyhow::Error::new(error).context(format!(
+                    "listing {} for launch records",
+                    launch_dir.display()
+                )));
+            }
+        };
+        let mut records = Vec::new();
+        while let Some(entry) = entries
+            .next_entry()
+            .await
+            .with_context(|| format!("listing {} for launch records", launch_dir.display()))?
+        {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.ends_with(".host")
+                && crate::launch::parse_launch_file_name(&name)
+                    .is_some_and(|(id, _)| id == session_id)
+            {
+                records.push(entry.path());
+            }
+        }
+        records.sort();
+        Ok(records)
+    }
+}
+
+/// What Delete does with one settled record (module docs): `Err` for every
+/// case that refuses.
+fn classify(
+    session_id: &str,
+    socket: PathBuf,
+    settled: AtRecordedSocket,
+) -> anyhow::Result<RecordedHost> {
+    let unreadable = |socket: PathBuf, peer: Option<HostProcess>, why: String| match peer {
+        Some(peer) => Ok(RecordedHost::Unreadable { socket, peer, why }),
+        None => Err(anyhow::anyhow!(
+            "this session's terminal host at {} cannot be read ({why}) and its process is not \
+             known, so it cannot be told ended",
+            socket.display()
+        )),
+    };
+    match settled {
+        AtRecordedSocket::Gone => Ok(RecordedHost::Gone { socket }),
+        AtRecordedSocket::Answered { connection, info } => match HostTag::decode(&info.tag) {
+            Ok(tag) if tag.session_id == session_id => Ok(RecordedHost::Ours {
+                socket,
+                connection,
+                tag,
+                info,
+            }),
+            Ok(tag) => Err(anyhow::anyhow!(
+                "this session's launch record names the terminal host socket {}, which now \
+                 serves a host for another terminal ({tag:?}); nothing was touched",
+                socket.display()
+            )),
+            Err(unreadable_tag) => {
+                let peer = connection.peer();
+                unreadable(socket, peer, unreadable_tag.to_string())
+            }
+        },
+        AtRecordedSocket::NoAnswer(error) => {
+            let peer = match &error {
+                ConnectError::Busy { peer } | ConnectError::Unavailable { peer, .. } => *peer,
+                ConnectError::Gone(_) => None,
+            };
+            unreadable(socket, peer, error.to_string())
+        }
+        AtRecordedSocket::NoInfo { error, peer } => unreadable(socket, peer, error.to_string()),
+    }
+}
+
+impl SessionHosts {
+    /// The sweep's roots: the program of every answering host of the
+    /// session that still runs it, pinned to its start identity over the
+    /// connection (two `Info`s around reading the process,
+    /// `hosts::terminal::pin_child`), so the sweep reaches the program's
+    /// whole tree even where no process in it carries a marker. A host
+    /// whose child has been reaped gives no root, never its old pid; an
+    /// unreadable host gives none (module docs).
+    ///
+    /// An error when a host stops answering, or says its child runs while
+    /// the child cannot be read: a child that may still run without a root
+    /// is unexamined, and the caller refuses rather than sweep without it.
+    pub(crate) async fn sweep_roots(&mut self) -> anyhow::Result<Vec<(u32, u64)>> {
+        let mut roots = Vec::new();
+        for host in &mut self.hosts {
+            let RecordedHost::Ours {
+                socket, connection, ..
+            } = host
+            else {
+                continue;
+            };
+            let (child, info) = pin_child(connection).await.with_context(|| {
+                format!(
+                    "reading the terminal host at {} before deleting",
+                    socket.display()
+                )
+            })?;
+            match child {
+                Child::Running(root) => roots.push((root.pid, root.start)),
+                Child::Reaped => {}
+                Child::Unpinned => anyhow::bail!(
+                    "the terminal host at {} says its child {} runs, but the child could not \
+                     be read; refusing to sweep without it",
+                    socket.display(),
+                    info.child_pid
+                ),
+            }
+        }
+        Ok(roots)
+    }
+
+    /// The scope units of the session's tab hosts whose tags say their
+    /// program runs in a scope of its own: named this way since a tab in a
+    /// host has no tmux window to read its id from. None before tabs can be
+    /// hosts.
+    pub(crate) fn scoped_tab_units(&self, session_id: &str) -> Vec<String> {
+        self.hosts
+            .iter()
+            .filter_map(|host| match host {
+                RecordedHost::Ours {
+                    tag:
+                        HostTag {
+                            role:
+                                HostRole::Tab {
+                                    tab_id,
+                                    scoped: true,
+                                },
+                            ..
+                        },
+                    ..
+                } => crate::scope::tab_unit_name(session_id, tab_id),
+                RecordedHost::Ours { .. }
+                | RecordedHost::Gone { .. }
+                | RecordedHost::Unreadable { .. } => None,
+            })
+            .collect()
+    }
+
+    /// Why Delete's guard cannot let anything through, if it cannot: a
+    /// recorded host of the session that does not answer usefully, so that
+    /// whether its program runs cannot be told.
+    pub(crate) fn untold(&self) -> Option<String> {
+        self.hosts.iter().find_map(|host| match host {
+            RecordedHost::Unreadable { socket, why, .. } => Some(format!(
+                "this session's terminal host at {} cannot be read ({why}), so whether its \
+                 program is still running cannot be told",
+                socket.display()
+            )),
+            RecordedHost::Gone { .. } | RecordedHost::Ours { .. } => None,
+        })
+    }
+
+    /// Why the session's agent counts as alive for Delete's guard, if it
+    /// does: an agent host of the session, of any launch generation, whose
+    /// program still runs as its `Info` said. Only hosts no runtime holds
+    /// are here; the agent terminal's own runtime answers through its probe.
+    pub(crate) fn agent_alive(&self) -> Option<String> {
+        self.hosts
+            .iter()
+            .any(|host| {
+                matches!(
+                    host,
+                    RecordedHost::Ours {
+                        tag: HostTag {
+                            role: HostRole::Agent { .. },
+                            ..
+                        },
+                        info: Info {
+                            child_exit: None,
+                            ..
+                        },
+                        ..
+                    }
+                )
+            })
+            .then(|| "this session's agent is still running in a terminal host".to_string())
+    }
+
+    /// How many of the session's tab hosts still run their program, as
+    /// their `Info` said: open tabs, for Delete's guard. None before tabs
+    /// can be hosts.
+    pub(crate) fn live_tabs(&self) -> usize {
+        self.hosts
+            .iter()
+            .filter(|host| {
+                matches!(
+                    host,
+                    RecordedHost::Ours {
+                        tag: HostTag {
+                            role: HostRole::Tab { .. },
+                            ..
+                        },
+                        info: Info {
+                            child_exit: None,
+                            ..
+                        },
+                        ..
+                    }
+                )
+            })
+            .count()
+    }
+
+    /// End every host here, and `agent` (the agent terminal's runtime, when
+    /// the session has one), at once, and confirm each ended, all within the
+    /// budget counted from this call (module docs, "Ending them").
+    ///
+    /// `Err` lists every host that could not be confirmed ended, or was not
+    /// within the budget, which may still run; the caller keeps the session
+    /// for a retry. The agent's runtime may have been stopped by then
+    /// (`HostTerminal::abort`, so that it does not take its host back
+    /// mid-end), in which case the kept session's agent reads as
+    /// unreachable until the retry, which ends the process the runtime
+    /// adopted (`HostTerminal::adopted_process`, which an abort does not
+    /// change) with the verified signal.
+    pub(crate) async fn end(
+        self,
+        sup: &Supervisor,
+        agent: Option<HostTerminal>,
+    ) -> Result<(), String> {
+        let deadline = tokio::time::Instant::now() + self.budget;
+        let session_id = self.session_id.as_str();
+        // Held here by tests, standing in for an end that does not finish.
+        let gate = || async move {
+            if let Some(gate) = sup.seams.faults.delete_host_end_gate() {
+                gate().await;
+            }
+        };
+        type Ending<'a> = Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>>;
+        let mut sockets: Vec<PathBuf> = Vec::new();
+        let mut endings: Vec<Ending<'_>> = Vec::new();
+        if let Some(agent) = agent {
+            let socket = agent.socket().to_path_buf();
+            sockets.push(socket.clone());
+            endings.push(Box::pin(async move {
+                gate().await;
+                sup.end_launch_host(Some(&agent), &socket, session_id).await
+            }));
+        }
+        let limits = StopLimits::default();
+        for host in self.hosts {
+            match host {
+                RecordedHost::Gone { socket } => {
+                    sockets.push(socket.clone());
+                    endings.push(Box::pin(async move {
+                        sup.remove_ended_socket(&socket).await;
+                        Ok(())
+                    }));
+                }
+                RecordedHost::Ours {
+                    socket, connection, ..
+                } => {
+                    sockets.push(socket.clone());
+                    endings.push(Box::pin(async move {
+                        gate().await;
+                        confirmed(sup, &socket, shut_down(*connection, &socket, limits).await).await
+                    }));
+                }
+                RecordedHost::Unreadable { socket, peer, why } => {
+                    sockets.push(socket.clone());
+                    endings.push(Box::pin(async move {
+                        gate().await;
+                        let outcome = signal(&peer, &socket, &why, limits.client).await;
+                        confirmed(sup, &socket, outcome).await
+                    }));
+                }
+            }
+        }
+        let outcomes = join_until(endings, deadline).await;
+        let unconfirmed: Vec<String> = sockets
+            .iter()
+            .zip(outcomes)
+            .filter_map(|(socket, outcome)| match outcome {
+                Some(Ok(())) => None,
+                Some(Err(why)) => Some(format!(
+                    "the terminal host at {} may still run: {why}",
+                    socket.display()
+                )),
+                None => Some(format!(
+                    "the terminal host at {} was not confirmed ended within Delete's budget for \
+                     its terminal hosts",
+                    socket.display()
+                )),
+            })
+            .collect();
+        if unconfirmed.is_empty() {
+            Ok(())
+        } else {
+            Err(unconfirmed.join("; "))
+        }
+    }
+}
+
+/// A host's end as confirmed or not, removing the socket file a confirmed
+/// end by signal leaves.
+async fn confirmed(
+    sup: &Supervisor,
+    socket: &std::path::Path,
+    outcome: HostOutcome,
+) -> Result<(), String> {
+    match outcome {
+        HostOutcome::Stopped(how) => {
+            debug!(socket = %socket.display(), how = %how, "ended a deleted session's terminal host");
+            sup.remove_ended_socket(socket).await;
+            Ok(())
+        }
+        HostOutcome::Unconfirmed(why) => Err(why),
+    }
+}
+
+/// Drive every future in `futures` at once, on the caller's task, until all
+/// are done or `deadline` passes, and return each one's output in order:
+/// `None` for one still running at the deadline, which is dropped there.
+/// On the caller's task rather than spawned, so the futures may borrow (the
+/// supervisor, here), which a spawned task cannot.
+async fn join_until<'a, T>(
+    futures: Vec<Pin<Box<dyn Future<Output = T> + Send + 'a>>>,
+    deadline: tokio::time::Instant,
+) -> Vec<Option<T>> {
+    let mut pending: Vec<Option<_>> = futures.into_iter().map(Some).collect();
+    let mut outputs: Vec<Option<T>> = pending.iter().map(|_| None).collect();
+    let all = std::future::poll_fn(|cx| {
+        let mut done = true;
+        for (slot, output) in pending.iter_mut().zip(outputs.iter_mut()) {
+            if let Some(future) = slot {
+                match future.as_mut().poll(cx) {
+                    Poll::Ready(value) => {
+                        *output = Some(value);
+                        *slot = None;
+                    }
+                    Poll::Pending => done = false,
+                }
+            }
+        }
+        if done { Poll::Ready(()) } else { Poll::Pending }
+    });
+    let _ = tokio::time::timeout_at(deadline, all).await;
+    drop(pending);
+    outputs
+}
+
+#[cfg(test)]
+mod tests {
+    //! The bounded join. Everything that needs hosts is in
+    //! `service::core::tests::host_terminals` (stand-in hosts) and
+    //! `crates/farhelm/tests/e2e/host_terminals.rs` and `host_creates.rs`
+    //! (real ones).
+
+    use super::*;
+
+    /// The bounded join reports what finished and gives up on the rest at
+    /// its deadline.
+    ///
+    /// Why: Delete's host ending must return within its budget even when
+    /// one host's end never finishes, and must still report the ones that
+    /// did. Spec: of a future that finishes at once and one that never does,
+    /// joined until a deadline 50 ms away, the first's output is `Some` and
+    /// the second's `None`, and the join returns.
+    #[farhelm_testtrace::test]
+    async fn the_bounded_join_gives_up_at_its_deadline() {
+        let futures: Vec<Pin<Box<dyn Future<Output = u8> + Send>>> =
+            vec![Box::pin(async { 1 }), Box::pin(std::future::pending())];
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(50);
+        let outputs = tokio::time::timeout(Duration::from_secs(10), join_until(futures, deadline))
+            .await
+            .expect("the join returns at its deadline");
+        assert_eq!(outputs, vec![Some(1), None]);
+    }
+}

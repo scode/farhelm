@@ -653,6 +653,9 @@ impl LaunchArtifacts {
 /// `sessions` maps each session still on record to its current launch
 /// generation, so a live session's superseded specs are removed too.
 ///
+/// A launch's host record (`.host`) is kept whatever its session and
+/// generation: it names a terminal host that may still run.
+///
 /// The version-hold marks (`.held`, `.launched`; `crate::session_hold`)
 /// follow the spec rather than the sentinel: they are evidence of nothing
 /// once their launch is over, so an unknown session's marks go with its
@@ -732,9 +735,22 @@ impl LaunchArtifacts {
                 //   registry question, not a guess from the directory listing.
                 //   The CURRENT launch's files are kept even unread: its shim may
                 //   still be mid-flight.
-                match sessions.get(id) {
-                    None => !name.ends_with(".status"),
-                    Some(current) => generation < *current,
+                //
+                // A host record (`.host`) is never removed here, whoever owns
+                // it: it names a terminal host that may still run, and it is
+                // how Delete finds every host of its session that no runtime
+                // holds (`service::session_hosts`). It goes with its
+                // session's Delete, or with a confirmed end of its host. A
+                // record of a session no longer on record stays until a
+                // startup reclaim (a later change) ends its host and then
+                // removes it.
+                if name.ends_with(".host") {
+                    false
+                } else {
+                    match sessions.get(id) {
+                        None => !name.ends_with(".status"),
+                        Some(current) => generation < *current,
+                    }
                 }
             } else {
                 false
@@ -966,6 +982,43 @@ mod tests {
         assert!(launch_dir.join("live.2.waypoint").exists());
         assert!(!launch_dir.join("live.1.waypoint").exists());
         assert!(!launch_dir.join("orphan.0.waypoint").exists());
+    }
+
+    /// The startup sweep keeps every host record, whoever owns it.
+    ///
+    /// Why: a host record names a terminal host that may still run, and it
+    /// is how Delete finds every host of its session that no runtime holds
+    /// (`service::session_hosts`); one removed before
+    /// its host ends could let a Delete report a session gone while its
+    /// host runs on. Spec: with host records of a superseded launch, the
+    /// current launch and a session no longer on record, beside a
+    /// superseded spec and an unknown session's spec, the sweep removes both
+    /// specs and keeps all three host records.
+    #[farhelm_testtrace::test]
+    async fn sweep_launch_dir_keeps_every_host_record() {
+        let tmp = tempfile::tempdir().unwrap();
+        let launch_dir = tmp.path().join("launch");
+        std::fs::create_dir(&launch_dir).unwrap();
+        for name in [
+            "live.1.host",
+            "live.1.json",
+            "live.2.host",
+            "gone.0.host",
+            "gone.0.json",
+        ] {
+            std::fs::write(launch_dir.join(name), b"x").unwrap();
+        }
+        let sessions = std::collections::HashMap::from([("live".to_string(), 2)]);
+        sweep_launch_dir(&launch_dir, &sessions).await;
+        for (name, kept) in [
+            ("live.1.host", true),
+            ("live.2.host", true),
+            ("gone.0.host", true),
+            ("live.1.json", false),
+            ("gone.0.json", false),
+        ] {
+            assert_eq!(launch_dir.join(name).exists(), kept, "{name}");
+        }
     }
 
     /// The version-hold marks follow their launch's spec through every
