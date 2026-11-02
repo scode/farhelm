@@ -6,8 +6,9 @@ patch file together.
 
 The supervisor's terminal emulator (`crates/farhelm-terminal-emulator/`) runs on `alacritty_terminal` 0.26.0 and its
 parser `vte` 0.15.0. Both are used as published on crates.io except for a few small patches: accessors that snapshot and
-restore need, caps on what hostile program output can make them store, two history counters for the grid stream, and two
-bug fixes. The root `Cargo.toml` swaps these trees in for the crates.io versions with `[patch.crates-io]`.
+restore need, caps on what hostile program output can make them store, two history counters for the grid stream, one
+more query for the handler to answer, and eight bug fixes. The root `Cargo.toml` swaps these trees in for the crates.io
+versions with `[patch.crates-io]`.
 
 ## What is here
 
@@ -45,7 +46,8 @@ files to say so, so every patched file starts with a `Modified for Farhelm` comm
 
 ## The patches
 
-Here's what each one changes and why. None changes behavior except the caps and the bug fixes.
+Here's what each one changes and why. None changes behavior except the caps and the bug fixes, and the XTVERSION hook
+changes it only for a handler that implements the new method.
 
 ### Snapshot accessors
 
@@ -127,7 +129,8 @@ code touched, the tests that pin it, and its upstream status. Sizes are columns 
 1.682, `util.c` 1.1032); the tmux source is the 3.7c release Farhelm pins (`scripts/build-pinned-tmux-ci.sh`,
 `.github/release/source-pins.env`). xterm.js, which renders Farhelm's terminals today, was checked in its vendored copy
 (`crates/farhelm-ui/assets/vendor/xterm.js`). The "observed" results were produced by feeding the bytes to the
-published, unpatched crates.
+published, unpatched crates. The fixes that keep the emulator's screen where tmux keeps it were found, and are pinned,
+by the supervisor's comparison with a live tmux 3.7c (`crates/farhelm-supervisor/src/emulator_parity/`).
 
 #### vte: whether the parser is between sequences
 
@@ -390,6 +393,161 @@ published, unpatched crates.
   today's behavior.
 - Upstream status: not yet reported. Upstreamable as the one-line change above, if Farhelm or upstream wants it.
 
+#### vte: XTVERSION reaches the handler
+
+- Upstream today: `CSI > q` and `CSI > 0 q` (XTVERSION, a program asking for the terminal's name and version) fall
+  through `csi_dispatch` as unhandled, so no `Handler` can answer them.
+- Reproduction: feed `ESC [ > 0 q` to `ansi::Processor` with any handler. Observed: no handler method is called.
+  Expected: a call the handler can answer with `DCS > | name ST`.
+- xterm answers `DCS > | XTerm(version) ST` for a parameter of 0 or none (`charproc.c`, `CASE_REPORT_VERSION`). tmux
+  3.7c answers `DCS > | tmux 3.7c ST` for 0 (`input.c`, `INPUT_CSI_XDA`). xterm.js was not checked for this one.
+- Fix: a `Handler::report_version` method with an empty default, called for `CSI > q` and `CSI > 0 q` only. A handler
+  that does not implement it behaves as before.
+- Why Farhelm needs it: Claude Code asks XTVERSION first, and with no answer asks nothing further, including whether the
+  terminal supports synchronized output (DECRQM 2026), and then draws without it (read from Claude Code 2.1.316's
+  startup code). The emulator answers `Farhelm <version>` (`farhelm-terminal-emulator`, `src/queries.rs`).
+- Upstream code: `vte/src/ansi.rs`, `trait Handler` and `Performer::csi_dispatch`.
+- Tests: `ansi::tests::xtversion_reaches_the_handler` (vte); `identification_status_and_window_queries`
+  (`farhelm-terminal-emulator`, `tests/queries.rs`); `emulator_parity::queries::recorded_agent_probes_get_tmux_answers`.
+- Upstream status: not yet reported. Upstreamable as an additive API; the method name is Farhelm's choice.
+
+#### alacritty_terminal: `CSI 1 J` from the second line keeps the first
+
+- Upstream today: `Term::clear_screen(ClearMode::Above)` clears the lines above the cursor only `if cursor.line > 1`, so
+  with the cursor on the second line the first line stays.
+- Reproduction (4x3): `abcd CR LF efgh CR LF ijkl ESC [ 2 ; 2 H ESC [ 1 J`. Observed rows: `abcd`, `  gh`, `ijkl`.
+  Expected: `    `, `  gh`, `ijkl`.
+- xterm clears every row above the cursor's (`util.c`, `ClearAbove`); tmux clears rows `0..cy` whenever `cy > 0`
+  (`screen-write.c`, `screen_write_clearstartofscreen`); xterm.js does the same.
+- Fix: the condition is `cursor.line > 0`. An off-by-one; Farhelm needs it because it reads agents' screens from this
+  grid and stale text would stay there.
+- Upstream code: `alacritty_terminal/src/term/mod.rs`, `Term::clear_screen`.
+- Tests: `term::tests::erase_above_from_the_second_line_clears_the_first` (vendored);
+  `emulator_parity::generated::hand_picked_screens_match_tmux`, scenario "erase operations".
+- Upstream status: not yet reported. Upstreamable as is.
+
+#### alacritty_terminal: the wrap flag only while autowrap is on
+
+- Upstream today: `Term::input` sets `Cursor::input_needs_wrap` after writing the last column whether autowrap is on or
+  off, and also when it drops a wide character that does not fit with autowrap off. The crate documents the flag as
+  "Tracks if the next call to input will need to first handle wrapping", and with autowrap off nothing wraps
+  (`Term::wrapline` returns at once). Every reader of the flag then takes a cursor on the last column for one past it:
+  `CSI K` keeps the last character, the next character after autowrap is turned back on wraps, so the corner-cell idiom
+  (autowrap off, write the bottom-right cell, autowrap on) scrolls the screen, a resize moves the cursor one column too
+  far, and a combining mark joins the last column, not the cell before the cursor.
+- Reproduction (4x2), observed with the published crate:
+  - `ESC [ ? 7 l abcd ESC [ K ESC [ ? 7 h`, and `ESC [ ? 7 l abcd ESC [ ? 7 h ESC [ K`. Observed first row in both:
+    `abcd`. Expected (tmux): `abc `.
+  - `ESC [ ? 7 l abcd ESC [ ? 7 h x`. Observed rows `abcd`, `x   `, cursor (1, 1). Expected: `abcx`, `    `, with a wrap
+    pending on line 0.
+  - `ESC [ ? 7 l abc 一 ESC [ ? 7 h x` (the wide character does not fit at the last column and is dropped). Observed
+    rows `abc `, `x   `, cursor (1, 1). Expected (tmux): `abcx`, `    `.
+  - The corner-cell idiom: `ESC [ 2 ; 1 H wxyz ESC [ 1 ; 1 H ESC [ ? 7 l ESC [ 2 ; 4 H q ESC [ ? 7 h r`. Observed rows
+    `wxyq`, `r   ` (scrolled). Expected: `    `, `wxyr`.
+  - `ESC [ ? 7 l abcd ESC [ ? 7 h`, then a resize to 6x2. Observed cursor (0, 4). Expected (0, 3).
+  - `ESC [ ? 7 l abcd ESC [ ? 7 h` U+0301. Observed: the mark on `d`. Expected (tmux): on `c`.
+- tmux keeps the cursor on the last column when it is written with autowrap off and one past it (`cx == sx`) when it is
+  written with autowrap on (`screen-write.c`, `screen_write_cell`, `sx - not_wrap`); turning autowrap on or off later
+  only flips the mode and does not move the cursor (`input.c`, the DECAWM cases of `input_csi_dispatch_sm_private` and
+  `input_csi_dispatch_rm_private`). From there `CSI K` skips only for `cx > sx - 1` (`screen_write_clearendofline`), the
+  next character wraps only for `cx > sx - width` (`screen_write_cell`), a combining mark joins the cell at `cx - 1`
+  (`screen_write_combine`), and a wide character dropped with autowrap off leaves the cursor where it is. xterm and
+  xterm.js were not checked for these.
+- Fix: `Term::input` raises the flag at the end of a last-column write only while autowrap is on, and returns without
+  raising it when it drops a wide character with autowrap off (a flag already raised stays raised, since nothing moves).
+  Every other reader of the flag (except `CSI J`, under its own record below) keeps upstream's code; with the flag
+  meaning what its documentation says, they behave as tmux does in the cases above. Farhelm's cursor report
+  (`farhelm-terminal-emulator`, `src/queries.rs`) and its parity harness read the flag as tmux's cursor one past the
+  last column.
+- Why Farhelm needs it: the status readers were written against tmux's captures, and a kept last-column character or an
+  extra scroll changes the screen they read and viewers see. The recorded Claude Code and Codex sessions never turn
+  autowrap off, so this matters for other programs in a session's terminal.
+- Upstream code: `alacritty_terminal/src/term/mod.rs`, `Term::input`.
+- Tests: `term::tests::writing_the_last_column_with_autowrap_off_raises_no_wrap` (vendored);
+  `emulator_parity::generated::hand_picked_screens_match_tmux`, scenarios "autowrap off at the last column: reports and
+  erases", "autowrap off at the last column, then a resize" and "autowrap off at the last column of the alternate
+  screen, then a wider screen", against a live tmux 3.7c; the cursor-report rows of
+  `identification_status_and_window_queries` (`farhelm-terminal-emulator`, `tests/queries.rs`) and of
+  `emulator_parity::queries::the_answer_table_matches_tmux`. What still differs from tmux at a pending wrap (a tab, a
+  wider alternate screen, a wide character after the corner-cell idiom, writing after autowrap is turned off) is pinned
+  in `emulator_parity::generated::known_differences_stay_as_documented`.
+- Upstream status: not yet reported. Upstreamable as is: it makes the flag mean what the crate documents.
+
+#### alacritty_terminal: `CSI J` with a wrap pending keeps the last column
+
+- Upstream today: after a program writes the last column with autowrap on (a wrap is pending), `CSI J`
+  (`ClearMode::Below`) erases from the cursor's column, which is the character just written. Upstream's own `CSI K`
+  (`clear_line`, `Right`) already leaves it when a wrap is pending.
+- Reproduction (4x2): `ESC [ 2 ; 1 H zzzz ESC [ 1 ; 1 H abcd ESC [ J`. Observed rows: `abc `, `    `. Expected (tmux):
+  `abcd`, `    `. The same holds when autowrap is turned off after the write: `abcd ESC [ ? 7 l ESC [ J ESC [ ? 7 h`,
+  observed `abc `, expected `abcd`.
+- tmux keeps the cursor one past the last column (`cx == sx`) when the last column is written with autowrap on
+  (`screen-write.c`, `screen_write_cell`), and later DECAWM changes do not move it (`input.c`). `CSI J` clears the
+  cursor's line only `if (s->cx <= sx - 1)` (`screen_write_clearendofscreen`). xterm.js erases from its pending position
+  `x == cols` and so keeps the character too. xterm erases it: it keeps the cursor on the last column and `ClearRight`
+  (`util.c`) erases from `cur_col`, for `CSI J` and `CSI K` alike.
+- Fix: erasing below starts after the cursor's column when `input_needs_wrap` is set. With the wrap-flag fix above, the
+  flag is set only for a column written with autowrap on (or by a reflowing resize, which upstream code leaves as it
+  is), so a column written with autowrap off is erased, as tmux erases it.
+- Why Farhelm needs it: the status readers were written against tmux's captures, and the erased character changes them.
+- Upstream code: `alacritty_terminal/src/term/mod.rs`, `Term::clear_screen`.
+- Tests: `term::tests::erase_below_with_a_wrap_pending_keeps_the_last_column` (vendored: written with autowrap on, off,
+  off then on, on then off, and on then a wide character dropped with autowrap off);
+  `emulator_parity::generated::hand_picked_screens_match_tmux`, scenarios "erase operations" and "autowrap off at the
+  last column: reports and erases", against a live tmux 3.7c.
+- Upstream status: not yet reported. Arguable upstream: it makes `CSI J` agree with alacritty's own `CSI K`, but xterm
+  does the opposite for both, so upstream may prefer xterm's behavior. On its own, without the wrap-flag fix, it would
+  also keep a character written with autowrap off, which tmux erases.
+
+#### alacritty_terminal: relative vertical moves stop at the scroll margins
+
+- Upstream today: `move_up`, `move_down`, `move_up_and_cr` and `move_down_and_cr` (CUU, CUD, CPL, CNL) compute the
+  target line and call `goto`, which clamps to the screen only, so a move from inside the scroll region passes its
+  margin; in origin mode `goto` adds the region's offset to the already absolute line.
+- Reproduction (4x6, region lines 2 to 4): `ESC [ 2 ; 4 r ESC [ 3 ; 2 H ESC [ 9 A`. Observed cursor (0, 1). Expected (1,
+  1), the top margin. In origin mode: `ESC [ 2 ; 4 r ESC [ ? 6 h ESC [ 1 B`. Observed (3, 0). Expected (2, 0).
+- xterm stops at the margin when the cursor starts inside it, else at the screen's edge (`cursor.c`, `CursorUp`,
+  `CursorDown`), and moves from the absolute row in origin mode; tmux does the same (`screen-write.c`,
+  `screen_write_cursorup`, `screen_write_cursordown`). xterm.js stops at the margins too, but in origin mode adds the
+  offset a second time, as upstream does.
+- Fix: a `vertical_move` helper that applies those limits and sets the cursor directly. The count is clamped to the
+  screen's height first, so the addition cannot overflow.
+- Why Farhelm needs it: programs that move relative to the cursor inside a scroll region would draw in the wrong place
+  on the screen agents' status is read from and viewers see.
+- Upstream code: `alacritty_terminal/src/term/mod.rs`, `Term::move_up`, `move_down`, `move_up_and_cr`,
+  `move_down_and_cr`.
+- Tests: `term::tests::relative_vertical_moves_stop_at_the_scroll_margins` (vendored);
+  `emulator_parity::generated::hand_picked_screens_match_tmux`, scenario "scroll regions";
+  `emulator_parity::generated::generated_streams_match_tmux`.
+- Upstream status: not yet reported. Upstreamable as is.
+
+#### alacritty_terminal: CHA in origin mode keeps the cursor's line
+
+- Upstream today: `goto_col` (CHA, `CSI Ps G`) calls `goto` with the cursor's absolute line, which in origin mode adds
+  the region's offset again and moves the cursor down.
+- Reproduction (4x6): `ESC [ 2 ; 4 r ESC [ ? 6 h ESC [ 2 ; 1 H ESC [ 3 G`. Observed cursor (3, 2). Expected (2, 2).
+- xterm keeps the line (`charproc.c`, `CASE_HPA`, which passes `CursorRow`, the line relative to the region, to
+  `CursorSet`); tmux leaves the line alone (`input.c`, `INPUT_CSI_HPA`, `screen_write_cursormove` with `py = -1`).
+  xterm.js adds the offset a second time, as upstream does.
+- Fix: `goto_col` moves through `vertical_move` with no lines to move.
+- Upstream code: `alacritty_terminal/src/term/mod.rs`, `Term::goto_col`.
+- Tests: `term::tests::cha_in_origin_mode_keeps_the_line` (vendored);
+  `emulator_parity::generated::hand_picked_screens_match_tmux`, scenario "scroll regions".
+- Upstream status: not yet reported. Upstreamable as is.
+
+#### alacritty_terminal: resetting origin mode homes the cursor
+
+- Upstream today: setting origin mode (`CSI ? 6 h`) homes the cursor, resetting it (`CSI ? 6 l`) leaves the cursor where
+  it is.
+- Reproduction (4x6): `ESC [ 2 ; 4 r ESC [ ? 6 h ESC [ 2 ; 2 H ESC [ ? 6 l`. Observed cursor (2, 1). Expected (0, 0).
+- xterm homes it on both (`charproc.c`, `srm_DECOM` in `dpmodes`, `CursorSet(screen, 0, 0, ...)`); so does tmux
+  (`input.c`, `input_csi_dispatch_rm_private`, mode 6) and xterm.js.
+- Fix: the reset calls `goto(0, 0)` as the set does.
+- Upstream code: `alacritty_terminal/src/term/mod.rs`, `Term::unset_private_mode`.
+- Tests: `term::tests::resetting_origin_mode_homes_the_cursor` (vendored);
+  `emulator_parity::generated::generated_streams_match_tmux`.
+- Upstream status: not yet reported. Upstreamable as is.
+
 ### History counters
 
 The grid stream sends scrollback to viewers as appended ranges and needs to know how many lines entered history since it
@@ -401,7 +559,9 @@ skipped by serde and left out of `Grid`'s `PartialEq`, so serialized grids and g
 
 ### Bug fixes
 
-Two upstream bugs that ordinary program output reaches. Each fix is a few lines in the place the bug is.
+Two of the eight upstream bugs the patches fix, the two that ordinary program output reaches on a one-column terminal or
+across reads; each fix is a few lines in the place the bug is. The other six are described only in their per-patch
+records above (the two erase fixes, the wrap-flag fix, and the cursor-movement, CHA and origin-mode fixes).
 
 - A wide character on a grid one column wide. A wide character needs two cells, and upstream's `Term::input` writes its
   spacer cell into the second column even when there is none, which panics with an index out of bounds; and
@@ -485,10 +645,11 @@ To check that a tree is upstream plus its patch:
 To upgrade to a new version:
 
 - Read upstream's changelog and the diff between the two versions for anything touching the patched code: the OSC buffer
-  and its dispatch and `advance_partial_utf8` in `vte/src/lib.rs`, `Processor` in `vte/src/ansi.rs`,
-  `Cell::push_zerowidth`, `Term::input`, `Term::set_hyperlink`, `Term::set_title`, `Grid::scroll_up`,
-  `Grid::shrink_columns` and `Grid::clear_history`. A cap that upstream now enforces itself may make a hunk unnecessary;
-  a moved field may need the hunk rewritten.
+  and its dispatch and `advance_partial_utf8` in `vte/src/lib.rs`, `Processor` and the CSI dispatch in
+  `vte/src/ansi.rs`, `Cell::push_zerowidth`, `Term::input` (and every reader of `Cursor::input_needs_wrap`, whose
+  upstream code the wrap-flag fix relies on), `Term::clear_screen`, `Term::unset_private_mode`, the `Term` cursor moves,
+  `Term::set_hyperlink`, `Term::set_title`, `Grid::scroll_up`, `Grid::shrink_columns` and `Grid::clear_history`. A cap
+  that upstream now enforces itself may make a hunk unnecessary; a moved field may need the hunk rewritten.
 - Unpack the new crate twice in the scratch directory, as `a/<name>` (left as published, minus `tests/` for
   `alacritty_terminal`) and `b/<name>`, and apply the old patch to `b` with `patch -p1 -d b`. Fix rejected hunks by
   hand, keeping each hunk small and marked `Farhelm patch`.

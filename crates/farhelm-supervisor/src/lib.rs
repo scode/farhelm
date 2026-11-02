@@ -48,6 +48,8 @@ mod checkout_trash;
 pub mod container;
 /// The SQLite plumbing the supervisor's and the helm's stores share.
 pub mod db;
+#[cfg(test)]
+mod emulator_parity;
 pub mod files;
 /// Conversation reports a hook drops as files for the supervisor to apply.
 pub mod hook_report;

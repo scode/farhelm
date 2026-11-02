@@ -5,12 +5,14 @@
 //! bytes written in one write), beside what this emulator answers, so that a
 //! row where the two differ is visibly deliberate (`src/queries.rs` gives
 //! each reason).
-//! The exhaustive replay against a live tmux is a separate test that follows
-//! this crate; these tests are the table itself.
+//! The replay against a live tmux, of these queries and of those recorded
+//! agents sent, is the supervisor's `emulator_parity`; these tests are the
+//! table itself.
 
 mod common;
 
 use common::{answer, answer_from, emulator, feed, resize};
+use farhelm_terminal_emulator::VERSION_REPORT;
 
 /// One row: a query, this emulator's answer, and tmux 3.7c's.
 struct Row {
@@ -58,10 +60,38 @@ fn identification_status_and_window_queries() {
         // alacritty's own DA2 rather than tmux's claim to be tmux.
         row("\x1b[>c", "\x1b[>0;2600;1c", "\x1b[>84;0;0c"),
         row("\x1b[=c", "", ""),
-        // vte does not parse XTVERSION.
-        row("\x1b[>q", "", "\x1bP>|tmux 3.7c\x1b\\"),
+        // Farhelm rather than tmux, through the vendored vte patch.
+        row("\x1b[>q", VERSION_REPORT, "\x1bP>|tmux 3.7c\x1b\\"),
+        row("\x1b[>0q", VERSION_REPORT, "\x1bP>|tmux 3.7c\x1b\\"),
+        row("\x1b[>1q", "", ""),
         row("\x1b[5n", "\x1b[0n", "\x1b[0n"),
         row("\x1b[3;5H\x1b[6n", "\x1b[3;5R", "\x1b[3;5R"),
+        // A pending wrap reports the column after the last, as tmux does.
+        row("\x1b[2;80Hx\x1b[6n", "\x1b[2;81R", "\x1b[2;81R"),
+        row("\x1b[2;79Hx\x1b[6n", "\x1b[2;80R", "\x1b[2;80R"),
+        // With autowrap off nothing is pending: the last column itself.
+        row(
+            "\x1b[?7l\x1b[2;80Hx\x1b[6n\x1b[?7h",
+            "\x1b[2;80R",
+            "\x1b[2;80R",
+        ),
+        // What counts is autowrap when the column was written, not now.
+        row(
+            "\x1b[?7l\x1b[2;80Hx\x1b[?7h\x1b[6n",
+            "\x1b[2;80R",
+            "\x1b[2;80R",
+        ),
+        row(
+            "\x1b[2;80Hx\x1b[?7l\x1b[6n\x1b[?7h",
+            "\x1b[2;81R",
+            "\x1b[2;81R",
+        ),
+        // A wide character dropped with autowrap off moves nothing.
+        row(
+            "\x1b[2;80Hx\x1b[?7l\u{4e00}\x1b[?7h\x1b[6n",
+            "\x1b[2;81R",
+            "\x1b[2;81R",
+        ),
         row("\x1b[?6n", "", ""),
         // vte does not parse the color scheme query.
         row("\x1b[?996n", "", "\x1b[?997;1n"),

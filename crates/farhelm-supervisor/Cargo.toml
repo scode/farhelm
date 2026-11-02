@@ -48,6 +48,9 @@ tracing.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+# Only `emulator_parity` uses it for now, comparing the emulator with tmux; it
+# becomes a regular dependency when the supervisor runs host terminals.
+farhelm-terminal-emulator.workspace = true
 # Scratch servers share bounded cleanup and diagnostic ownership with e2e fixtures.
 farhelm-teststate.workspace = true
 # Per-test capture owns each test's dispatcher and Tokio runtime without

@@ -51,3 +51,8 @@ pub use effects::{ClipboardTarget, Collected, Effects, FeedMode, Listener, Notic
 pub use emulator::{Emulator, Size};
 pub use modes::{Modes, MouseEncoding, MouseReporting};
 pub use split::snapshot_split_candidate;
+
+/// The answer to XTVERSION (`CSI > q`): `DCS > | Farhelm <version> ST`, the
+/// version being the workspace's, which is `0.0.0-unreleased` outside a
+/// release build. See `queries` for why the emulator answers as Farhelm.
+pub const VERSION_REPORT: &str = concat!("\x1bP>|Farhelm ", env!("CARGO_PKG_VERSION"), "\x1b\\");

@@ -5,8 +5,9 @@
 // project (https://github.com/alacritty/alacritty).
 //
 // Modified for Farhelm: adds `Processor::is_ground()`, `preceding_char()` and
-// `set_preceding_char()`, and ends the active hyperlink when an OSC 8 is
-// dropped for its length. See vendor/README.md in the Farhelm repository.
+// `set_preceding_char()`, ends the active hyperlink when an OSC 8 is dropped
+// for its length, and reports XTVERSION queries to the handler. See
+// vendor/README.md in the Farhelm repository.
 
 //! ANSI Terminal Stream Parsing.
 
@@ -556,6 +557,12 @@ pub trait Handler {
 
     /// Identify the terminal (should write back to the pty stream).
     fn identify_terminal(&mut self, _intermediate: Option<char>) {}
+
+    // Farhelm patch: XTVERSION.
+
+    /// Report the terminal's name and version (XTVERSION, `CSI > q` or
+    /// `CSI > 0 q`; should write back to the pty stream as `DCS > | text ST`).
+    fn report_version(&mut self) {}
 
     /// Report device status.
     fn device_status(&mut self, _: usize) {}
@@ -1751,6 +1758,8 @@ where
                 let mode = next_param_or(0);
                 handler.report_private_mode(PrivateMode::new(mode));
             },
+            // Farhelm patch: XTVERSION.
+            ('q', [b'>']) if next_param_or(0) == 0 => handler.report_version(),
             ('q', [b' ']) => {
                 // DECSCUSR (CSI Ps SP q) -- Set Cursor Style.
                 let cursor_style_id = next_param_or(0);
@@ -2514,6 +2523,41 @@ mod tests {
 
             let expected = if ends { vec![None] } else { vec![] };
             assert_eq!(handler.links, expected, "after {:?}", String::from_utf8_lossy(prefix));
+        }
+    }
+
+    /// Farhelm patch test. Spec: `CSI > q` and `CSI > 0 q` (XTVERSION) reach
+    /// `Handler::report_version` once each; another parameter, and the
+    /// cursor style sequence that shares the final byte, do not.
+    ///
+    /// Why: programs ask XTVERSION to learn which terminal they run in, and
+    /// at least one agent asks nothing further of a terminal that does not
+    /// answer it (vendor/README.md).
+    #[test]
+    fn xtversion_reaches_the_handler() {
+        #[derive(Default)]
+        struct VersionHandler {
+            reports: usize,
+        }
+
+        impl Handler for VersionHandler {
+            fn report_version(&mut self) {
+                self.reports += 1;
+            }
+        }
+
+        let cases: [(&[u8], usize); 5] = [
+            (b"\x1b[>q", 1),
+            (b"\x1b[>0q", 1),
+            (b"\x1b[>1q", 0),
+            (b"\x1b[2 q", 0),
+            (b"\x1b[q", 0),
+        ];
+        for (bytes, reports) in cases {
+            let mut parser = Processor::<TestSyncHandler>::new();
+            let mut handler = VersionHandler::default();
+            parser.advance(&mut handler, bytes);
+            assert_eq!(handler.reports, reports, "after {:?}", String::from_utf8_lossy(bytes));
         }
     }
 

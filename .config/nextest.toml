@@ -38,7 +38,9 @@ supervisor-tmux = { max-threads = 2 }
 # ScratchServer's process-local semaphore cannot coordinate nextest children.
 # Cover its modules rather than enumerating today's consumers, so new fixture
 # users inherit the two-server allowance. Pure tests in these modules share it.
-filter = "package(farhelm-supervisor) & (test(tmux::tests::) | test(tmux::stream::tests::) | test(tmux::sink::tests::))"
+# `emulator_parity` starts its own private servers without ScratchServer and
+# shares the same allowance.
+filter = "package(farhelm-supervisor) & (test(tmux::tests::) | test(tmux::stream::tests::) | test(tmux::sink::tests::) | test(emulator_parity::))"
 test-group = "supervisor-tmux"
 
 [[profile.default.overrides]]
