@@ -231,6 +231,14 @@ snapshot dropped (a client that snapshots past what it has been sent): it receiv
 The host never blocks on a slow client. It writes as much as the socket accepts and keeps the rest in the journal; a
 client that falls behind far enough to have its next records trimmed receives the gap and continues after it.
 
+Replies and stream records keep one order a client can rely on, in one exchange. Suppose a client that has received
+every reply and acknowledgement the host owed it sends `Read` and then one `Info`, sends nothing more until that
+`Info`'s reply arrives, and then sends one more `Info`. If the stream holds a record when the host acts on the `Read`,
+the client receives the stream's first record before the reply to that last `Info`; the reply to the first `Info` may
+come before the record. If the stream holds no record then, a record that arrives later may come before or after either
+reply. Nothing is promised about other patterns of traffic. A client that must have the stream's first record before it
+goes on (a snapshot record it must restore before it uses the terminal) follows exactly this exchange.
+
 Where one `Output` ends and the next begins carries no meaning: it falls where the host's storage, a resize or the exit
 happens to divide the output, not where the program's writes or the host's reads did.
 

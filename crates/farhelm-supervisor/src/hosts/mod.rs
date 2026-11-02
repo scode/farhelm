@@ -29,14 +29,18 @@
 //! - [`stop`]: ending every host of a state directory with no supervisor
 //!   involved, behind `farhelm internal stop-terminal-hosts`, a command
 //!   line every later release keeps accepting.
+//! - [`terminal`]: a host terminal's runtime, the one task per host that
+//!   owns its connection and the terminal's emulator: output fed and
+//!   queries answered, the child's liveness, input, resizes and shutdown,
+//!   and adapters to the types the supervisor decides with for tmux panes.
 //!
 //! Nothing in the supervisor calls this yet; the switch that creates new
 //! terminals in hosts comes later, and so does running discovery at startup.
 //! The module is public, rather than crate-private, because the tests that
 //! start real hosts live beside the real `farhelm` binary
-//! (`crates/farhelm/tests/terminal_host_spawn.rs`, `terminal_host_client.rs`
-//! and `terminal_host_registry.rs`): a host forks, so it is never started
-//! inside a test process.
+//! (`crates/farhelm/tests/terminal_host_spawn.rs`, `terminal_host_client.rs`,
+//! `terminal_host_registry.rs` and `terminal_host_runtime.rs`): a host forks,
+//! so it is never started inside a test process.
 
 pub mod client;
 pub mod dir;
@@ -46,6 +50,7 @@ pub mod registry;
 pub mod spawn;
 pub mod stop;
 pub mod tag;
+pub mod terminal;
 
 pub use client::{
     ClientDeadlines, ClientError, ConnectError, Gone, HostConnection, HostEvent, InputCounts,
@@ -66,3 +71,8 @@ pub use stop::{
     write_lines_within,
 };
 pub use tag::{HostRole, HostTag, TagError, UnreadableTag};
+pub use terminal::{
+    AdoptError, Adoption, Clock, HostEvidence, HostStatus, HostTerminal, HostTerminalOptions,
+    InputFate, InputReceipt, InputRefused, InputSequence, Liveness, LivenessChange,
+    LivenessNotifier, ProcessRoot, ResizeRefused, ShutdownReport, Unavailability,
+};

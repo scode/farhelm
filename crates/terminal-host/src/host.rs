@@ -2906,6 +2906,80 @@ mod tests {
         assert_eq!(ended, Ended::Shutdown);
     }
 
+    /// In the exchange SPEC.md ("Reading") promises an order for (`Read`,
+    /// one `Info`, its reply, one more `Info`), the reply to the last `Info`
+    /// comes behind the stream's first record, though the first reply may
+    /// come before it.
+    ///
+    /// Why: a client relies on this order to know that the stream's first
+    /// record (a snapshot record it must restore) has arrived: the
+    /// supervisor's adoption follows exactly that exchange and takes the
+    /// second reply as that fence. The promise covers only that exchange,
+    /// in which the client is owed nothing else when it sends `Read`, so the
+    /// host's queue holds at most the first reply when it next queues
+    /// records, far below `OUTGOING_HIGH_WATER`; a queue near that mark at
+    /// the `Read` is outside the promise, and not tested here. A
+    /// host that queued the stream's records only once nothing waited
+    /// unsent for the client, or not until after it acted on the client's
+    /// next request, would put the second reply first and break every
+    /// client that relies on the SPEC. Spec: with output journaled, a client
+    /// sends `Read` and `Info` in one write; after the pass that reads them,
+    /// the queue holds the `Info` reply ahead of the first output record
+    /// (the "may come before" case a client must allow for). The client then
+    /// sends a second `Info` before the host's next pass writes that queue,
+    /// which is the fastest a client that waits for the first reply can be:
+    /// the host writes the first reply and acts on the second `Info` in that
+    /// next pass. The client receives the first reply, then the record at
+    /// offset 0, and only then the second reply.
+    #[test]
+    fn a_reply_after_a_reply_follows_the_streams_first_record() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut host = stepped(
+            dir,
+            &["/bin/sh", "-c", "echo first; exec /bin/sleep 600"],
+            1 << 20,
+        );
+        host.step_until("output journaled", |host| host.journal.end() > 0);
+        let mut peer = host.connect(false);
+        let both = [
+            encode_client(&ClientMessage::Read(Position::default())),
+            encode_client(&ClientMessage::Info),
+        ]
+        .concat();
+        peer.write(&mut host, &both);
+        host.step_until("the Read and the Info to be acted on", |host| {
+            host.client
+                .as_ref()
+                .is_some_and(|client| client.cursor.is_some() && client.buf.is_empty())
+        });
+        let queued = host.queued();
+        assert!(
+            matches!(
+                queued.as_slice(),
+                [
+                    HostMessage::InfoReply(_),
+                    HostMessage::Output { offset: 0, .. },
+                    ..
+                ]
+            ),
+            "premise: the first reply queued ahead of the first record, and the record queued \
+             by the end of the pass: {queued:?}"
+        );
+        peer.send(&mut host, &ClientMessage::Info);
+        let mut order = Vec::new();
+        while order.iter().filter(|kind| **kind == "reply").count() < 2 {
+            order.push(
+                match peer.recv(&mut host).expect("the connection stays open") {
+                    HostMessage::InfoReply(_) => "reply",
+                    HostMessage::Output { offset: 0, .. } => "first record",
+                    _ => "other",
+                },
+            );
+        }
+        let order: Vec<_> = order.into_iter().filter(|kind| *kind != "other").collect();
+        assert_eq!(order, ["reply", "first record", "reply"]);
+    }
+
     /// Frames the input bound held back in the host's buffer are acted on
     /// once the input drains, without the client sending anything more.
     ///
