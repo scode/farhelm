@@ -1706,13 +1706,33 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   `crates/farhelm-supervisor/tests/fixtures/host-tag/`, and a supervisor that cannot read a tag (another version, not
   Farhelm's, malformed) keeps the host and shows it as unavailable, never reclaiming it as an orphan. The layout is in
   `hosts/tag.rs`.
+- **Connecting** (`hosts/client.rs`) always takes over the host's connection: the supervisor holds its state directory's
+  lock, so any other client is a stale one, and refusing would lock a restarted supervisor out of its own terminals. A
+  connection ends in one of three classes. A missing socket file is gone; a socket that refuses every connection is gone
+  only after three seconds of refusals (on macOS a live host with a full backlog refuses too). `Busy` is retried and is
+  never gone. Anything else that cannot be used (a protocol version the supervisor does not speak, a malformed answer,
+  no answer within five seconds) is unavailable: the host may be running, so it is left alone. The host's pid comes from
+  the connection's peer credentials, pinned to its process start identity. A socket is never judged gone, and an
+  unavailable host never lacks a pid, while a live process of the same user has a command line ending with
+  `--socket <that socket>`: a stopped or wedged host stops accepting, the connections that time out against it fill its
+  backlog, and from then on Linux answers `EAGAIN` and macOS refuses, as if nothing listened. Each host has one owning
+  connection inside the supervisor, since a second connection takes the host over from the first without notice.
+  Unacknowledged input stays within 256 KiB, a quarter of what the host holds before it stops reading its client, so a
+  program that stops reading never holds back snapshots, resizes or shutdown; input whose fate a disconnect left unknown
+  is reported, never resent.
+- **Ending a host the protocol cannot end** (wedged, stopped, or speaking another version) is a SIGTERM, followed by a
+  SIGCONT so that a stopped host acts on it, and after five seconds a SIGKILL, since a host only notes SIGTERM for its
+  event loop and a wedged loop never looks. Each signal goes only to the pid from the connection (or the process table)
+  after its start identity has been re-read and its command line still ends with `--socket <that socket>`
+  (`hosts/process.rs`).
 
 Test harnesses end the hosts they leave behind: `farhelm-teststate` ends every host whose socket is in a `hosts`
 directory within an owned run directory (its dead-run sweep, and every `TestDir` drop) through a small blocking client
 (take over, `Shutdown`, then wait for the end of the connection and for the host's socket file to go), and keeps the
 directory for a later sweep when it cannot confirm a host ended or could not read the whole tree. A socket that only
 refuses connections counts as left by a killed host after three seconds of refusals, never sooner, since on macOS a live
-host with a full backlog refuses too.
+host with a full backlog refuses too, and then only when no process of the same user still serves that socket by its
+command line.
 
 ### Terminal snapshots
 

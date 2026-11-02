@@ -16,18 +16,33 @@
 //!   tag across updates.
 //! - [`spawn`]: starting a host from the supervisor's own program and waiting
 //!   for its readiness.
+//! - [`client`]: connecting to a host (what a socket holds: a usable host,
+//!   nothing, or a host that cannot be used) and the requests a host
+//!   terminal's runtime drives over the connection.
+//! - [`process`]: the host as a process, pinned by pid and start identity
+//!   from the connection's peer credentials, and the verified SIGTERM for a
+//!   host the protocol cannot end.
 //!
 //! Nothing in the product calls this yet; the switch that creates new
-//! terminals in hosts comes later. Connecting to hosts and discovering them
-//! after a restart are not here either. The module is public, rather than
-//! crate-private, because the tests that start real hosts live beside the real
-//! `farhelm` binary (`crates/farhelm/tests/terminal_host_spawn.rs`): a host
-//! forks, so it is never started inside a test process.
+//! terminals in hosts comes later, and so does discovering hosts after a
+//! restart. The module is public, rather than crate-private, because the
+//! tests that start real hosts live beside the real `farhelm` binary
+//! (`crates/farhelm/tests/terminal_host_spawn.rs` and
+//! `terminal_host_client.rs`): a host forks, so it is never started inside a
+//! test process.
 
+pub mod client;
 pub mod dir;
 pub mod names;
+pub mod process;
 pub mod spawn;
 pub mod tag;
+
+pub use client::{
+    ClientDeadlines, ClientError, ConnectError, Gone, HostConnection, HostEvent, InputCounts,
+    InputTicket, ShutdownOutcome, SnapshotReply, Unavailable,
+};
+pub use process::{HostProcess, TerminateError, Termination, terminate_verified};
 
 pub use dir::{HOSTS_DIR_NAME, HostsDirError, ensure_hosts_dir, hosts_dir};
 pub use names::HostName;
