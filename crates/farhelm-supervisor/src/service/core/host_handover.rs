@@ -46,6 +46,14 @@
 //! at a crash). Output written after the close is unseen, and its queries
 //! are answered.
 //!
+//! The runtimes are gathered from the session map, plus the host tabs of
+//! every session a Restart has taken off it for its window
+//! (`Supervisor::restarting_tabs`): those tabs keep running across the
+//! Restart, and the map alone would miss them. A Restart that puts a
+//! session back after the stop began stops its tab runtimes and its new
+//! agent runtime instead of publishing them connected
+//! (`Supervisor::fence_republished_tabs`, `Supervisor::publishable`).
+//!
 //! ## Finding the hosts again
 //!
 //! A host outlives the supervisor that started it, and the supervisor keeps
@@ -64,9 +72,31 @@
 //!   launch that never reached its confirmation (an empty `pane`) is found
 //!   again, as tmux's agent-window marker finds an unconfirmed pane.
 //! - **The socket the row names**: its `pane` once the launch was confirmed,
-//!   else the socket the launch record names (`<state>/launch/<id>.<gen>.host`,
-//!   `host_launch`'s "The launch record"). What is there when no live host
-//!   carries the row's tag decides between "unavailable" and "absent".
+//!   else the socket the launch record of the row's own generation names
+//!   (`<state>/launch/<id>.<gen>.host`, `host_launch`'s "The launch
+//!   record"), never an earlier generation's record. What is there when no
+//!   live host carries the row's tag decides between "unavailable" and
+//!   "absent". One host there is the row's although its tag names an
+//!   earlier generation: an agent host of the same session at the socket the
+//!   row's `pane` names. Only a confirmation writes `pane`, and a Restart
+//!   empties it as it opens a generation, so a `pane` naming such a host is
+//!   one a Restart that failed definitively put back with the previous run's
+//!   record: that host is still the session's terminal (`host_restart`).
+//! - **A Restart that never started its replacement.** A Restart empties
+//!   `pane` as it claims the new generation, before its replacement host has
+//!   a launch record. A supervisor that dies in between leaves a row whose
+//!   own generation has no host, no `pane` and no record, and the previous
+//!   host, which still holds the session's history. Only then (never when the
+//!   row's generation has a record, readable or not, or a host) the host of
+//!   the newest earlier generation that has a launch record is the row's
+//!   terminal, when the scan read it at the record's socket. A record whose
+//!   host the scan found gone is passed over for the next older one; any
+//!   other record whose host was not read there (and a launch directory that
+//!   cannot be listed in full) leaves the row with none, and the next start
+//!   tries again ([`newest_recorded_earlier`]). Reconciliation records the
+//!   socket of a host it takes in `pane` as for any found host (the row then
+//!   lists the previous run's exit, or running if its program still runs),
+//!   and the next Restart seeds from it and ends it.
 //!
 //! Each row ends in one of three classes ([`RowHost`]), and the reload treats
 //! them as it treats a found, an unattributed and an absent pane, except that
@@ -97,14 +127,43 @@
 //! keeps the constructor's runtimes and placeholders, and skips the sockets
 //! the constructor found gone (socket names are never reused, so a gone one
 //! stays gone). Hosts the scan finds that no row claims (a tab's, an
-//! orphan's, an older generation's) are left as they were: their
-//! connections close with the registry. A session's tab hosts are adopted
-//! beside this, from its tab records (`host_tabs`, "After a restart");
-//! reclaiming orphans is a later change's.
+//! orphan's) are left as they were: their
+//! connections close with the registry, except an earlier generation's
+//! agent host (below). A session's tab hosts are adopted beside this, from
+//! its tab records (`host_tabs`, "After a restart"); reclaiming orphans is
+//! a later change's.
 //!
 //! The orderly stop's checkpoints and closes cover the sessions' tab hosts
 //! too: they outlive the supervisor the same way, and a runtime left open
 //! would keep its encodes running past the stop.
+//!
+//! ## Superseded agent hosts
+//!
+//! A Restart of a host agent starts a new host and ends the old one once the
+//! new launch is confirmed (`host_restart`). A supervisor that dies in
+//! between leaves the old host running with nothing in memory to end it, and
+//! it is no orphan: its session exists. So the reload ends it, with the
+//! plan's D-25 rule ([`superseded`]): a live agent host that no row claimed,
+//! whose tag names a session whose row is a host row at a later launch
+//! generation, and whose row's later launch is confirmed (its `pane` names a
+//! socket, and not this host's). The decision is taken after the reload's
+//! own reconciliation has committed, on the row as it then stands, so a
+//! restart interrupted before its confirmation converges in one start: the
+//! reload finds the new host by its tag and confirms it, and then the old
+//! host is superseded. Until a row's later launch is confirmed, its earlier
+//! host is kept (a definitive failure may still make it the session's
+//! terminal, and an unconfirmed launch may have started nothing).
+//!
+//! It is ended over the scan's own connection (`Shutdown`, then the
+//! verified signal to the connection's peer), never by connecting to its
+//! socket again, and its launch record goes once it is confirmed ended. The
+//! current generation's host is never superseded (it is claimed, or kept
+//! as unavailable), nor is a host this build cannot read: only live hosts,
+//! whose tags were read, are looked at. Nor is a tab's host: its tag names
+//! a tab, not a launch generation, and the agent's Restart leaves the
+//! session's tabs as they are. Ending the host hangs up its program, whose
+//! own Restart stopped it before the new launch began; a descendant that
+//! survives a hangup is left to the session's next marker sweep.
 //!
 //! ## Adopting again
 //!
@@ -125,8 +184,10 @@
 //! 3. looks at the one socket the placeholder names, and nothing else: a
 //!    scan restricted to that name, which a launch drew for itself, so no
 //!    host another runtime of this supervisor holds or is starting can be
-//!    taken over; a host whose tag names the session's launch is adopted as
-//!    recovered, and anything else is classified as at startup;
+//!    taken over; a host whose tag names the session's launch (or, as at
+//!    startup, an earlier launch of its agent: the socket is the one the
+//!    row's `pane` names) is adopted as recovered, and anything else is
+//!    classified as at startup;
 //! 4. under [`Supervisor::host_adoption`] and the session map, checks the
 //!    entry and the stop again and swaps the outcome in (a runtime, a new
 //!    placeholder, or no terminal for a host that has ended), keeping the
@@ -153,14 +214,15 @@ use tokio::task::JoinSet;
 use tracing::{debug, info, warn};
 
 use super::Supervisor;
-use super::host_launch::read_launch_record;
+use super::host_launch::{read_launch_record, remove_ended_socket_file};
 use crate::hosts::{
-    AdoptError, Adoption, CheckpointOutcome, HostRegistry, HostTerminal, HostTerminalOptions,
-    Liveness, NamedHost, NotTaken, ScanOptions, Unavailability, WhyUnavailable,
+    AdoptError, Adoption, CheckpointOutcome, HostRegistry, HostRole, HostTag, HostTerminal,
+    HostTerminalOptions, LiveHost, Liveness, NamedHost, NotTaken, ScanOptions, Unavailability,
+    WhyUnavailable,
 };
 use crate::launch::LaunchArtifacts;
 use crate::service::terminals::Terminal;
-use crate::store::{LastOutcome, StoredSession, TerminalKind, Transition};
+use crate::store::{LastOutcome, SessionStore, StoredSession, TerminalKind, Transition};
 
 // ---- Stopping ------------------------------------------------------------------------
 
@@ -198,7 +260,7 @@ impl Supervisor {
             let sessions = self.sessions.lock().await;
             self.stopping
                 .store(true, std::sync::atomic::Ordering::SeqCst);
-            gather_host_terminals(&sessions)
+            gather_host_terminals(&sessions, &self.restarting_tabs)
         })
         .await;
         self.stopping
@@ -296,7 +358,8 @@ impl Supervisor {
         all_current
     }
 
-    /// Stop every host terminal now in the session map and wait, until
+    /// Stop every host terminal now in the session map (and every host tab
+    /// of a session a Restart has off it) and wait, until
     /// `deadline`, for the encodes they started to end: what an orderly
     /// stop does last ([`super::Supervisor::stop_in_order`]), after its
     /// pending-hold wait. It matters only after the stop's gather timed out
@@ -307,7 +370,7 @@ impl Supervisor {
     pub(crate) async fn close_host_terminals(&self, deadline: tokio::time::Instant) {
         let gathered = tokio::time::timeout_at(deadline, async {
             let sessions = self.sessions.lock().await;
-            gather_host_terminals(&sessions)
+            gather_host_terminals(&sessions, &self.restarting_tabs)
         })
         .await;
         match gathered {
@@ -344,6 +407,27 @@ impl Supervisor {
             other => other,
         }
     }
+
+    /// Stop the runtimes of the host tabs in `tabs`, a session's tab cell
+    /// that a Restart puts back on the session map (or drops with a session
+    /// deleted meanwhile), if an orderly stop has begun gathering the host
+    /// terminals it closes ([`Self::stopping`]); otherwise leave them
+    /// running, as a Restart does. Called under [`Self::sessions`], which
+    /// the caller holds. The stop gathered these runtimes from
+    /// [`Self::restarting_tabs`] and stops them itself; this is the
+    /// publication's own fence, as [`Self::publishable`] is for the agent's
+    /// runtime, so no tab runtime is put back connected after the stop.
+    /// Unlike the agent's, a tab's runtime stays in its cell, stopped: it
+    /// keeps answering from its last status, as every runtime in the map
+    /// does once the stop has closed it.
+    pub(crate) fn fence_republished_tabs(&self, tabs: &super::HostTabs) {
+        if !self.hosts_stopping() {
+            return;
+        }
+        for tab in super::host_tabs_of(tabs) {
+            tab.host.abort();
+        }
+    }
 }
 
 impl Supervisor {
@@ -360,9 +444,15 @@ impl Supervisor {
 /// Every host terminal runtime the session map holds, each once: the
 /// sessions' agent terminals that are hosts, and their tabs in hosts
 /// (`host_tabs`), whose hosts outlive the supervisor the same way and need
-/// the same checkpoint and the same close.
+/// the same checkpoint and the same close; and the tabs of every session a
+/// Restart has off the map (`restarting`, [`Supervisor::restarting_tabs`]),
+/// which keep running across it. A restarting session's agent runtime is
+/// not among them: the Restart itself settles it (a seed refused, a
+/// publication fenced, [`Supervisor::publishable`]). The caller holds
+/// [`Supervisor::sessions`], under which `restarting` is written.
 fn gather_host_terminals(
     sessions: &HashMap<String, Arc<super::SessionEntry>>,
+    restarting: &std::sync::Mutex<HashMap<String, super::HostTabs>>,
 ) -> Vec<HostTerminal> {
     let mut all: Vec<HostTerminal> = Vec::new();
     for entry in sessions.values() {
@@ -374,6 +464,12 @@ fn gather_host_terminals(
     for host in super::host_tabs::tab_runtimes(sessions.values()) {
         if !all.contains(&host) {
             all.push(host);
+        }
+    }
+    let restarting = restarting.lock().unwrap_or_else(|e| e.into_inner());
+    for tab in restarting.values().flat_map(super::host_tabs_of) {
+        if !all.contains(&tab.host) {
+            all.push(tab.host);
         }
     }
     all
@@ -471,11 +567,17 @@ pub(super) struct HostDiscovery {
 /// within the client's deadlines and the restore of its snapshot (on the
 /// blocking pool); none waits for its terminal to catch up with the
 /// journal, which the runtime then replays on its own.
+///
+/// Also returns the live agent hosts of the rows' earlier launch
+/// generations that no row claimed, with the scan's connections to them,
+/// for [`end_superseded_hosts`] to judge once the reload has committed
+/// (module docs, "Superseded agent hosts"); dropping them leaves those
+/// hosts as they were.
 pub(super) async fn attribute_host_rows(
     state_dir: &Path,
     discovery: HostDiscovery,
     rows: &[StoredSession],
-) -> HashMap<String, RowHost> {
+) -> (HashMap<String, RowHost>, EarlierAgentHosts) {
     let HostDiscovery {
         owns_state_dir,
         options,
@@ -485,6 +587,7 @@ pub(super) async fn attribute_host_rows(
         tabs,
     } = discovery;
     let mut found = HashMap::new();
+    let none_earlier = EarlierAgentHosts(Vec::new());
     let host_rows: Vec<&StoredSession> = rows
         .iter()
         .filter(|row| match row.terminal_kind {
@@ -493,7 +596,7 @@ pub(super) async fn attribute_host_rows(
         })
         .collect();
     if host_rows.is_empty() {
-        return found;
+        return (found, none_earlier);
     }
     let hosts_dir = absolute_hosts_dir(state_dir);
 
@@ -522,7 +625,7 @@ pub(super) async fn attribute_host_rows(
         }
     }
     if pending.is_empty() {
-        return found;
+        return (found, none_earlier);
     }
 
     let mut named = HashMap::new();
@@ -540,7 +643,7 @@ pub(super) async fn attribute_host_rows(
             );
             found.insert(row.id.clone(), host);
         }
-        return found;
+        return (found, none_earlier);
     }
     let scan = ScanOptions {
         deadlines: options.deadlines,
@@ -574,7 +677,7 @@ pub(super) async fn attribute_host_rows(
                 );
                 found.insert(row.id.clone(), host);
             }
-            return found;
+            return (found, none_earlier);
         }
     };
     {
@@ -586,9 +689,26 @@ pub(super) async fn attribute_host_rows(
 
     let mut adopting = JoinSet::new();
     for row in pending {
-        let host = match registry.agent(&row.id, row.generation) {
-            Ok(Some(host)) => {
-                let name = host.name.clone();
+        // The row's host: the one its tag names for the row's generation,
+        // else an earlier generation's at the socket the row's `pane`
+        // names (module docs).
+        let claimed = match registry.agent(&row.id, row.generation) {
+            Ok(Some(host)) => Ok(Some(host.name.clone())),
+            Ok(None) => match earlier_at_pane(&registry, row) {
+                Some(name) => Ok(Some(name)),
+                // Nothing of the row's own generation ever started (no host
+                // carries its tag, its `pane` is empty and it has no launch
+                // record): a Restart claimed the generation and died before
+                // its replacement got a record (module docs).
+                None if matches!(named[&row.id], NamedSocket::NoHostStarted) => {
+                    Ok(newest_recorded_earlier(&registry, state_dir, row).await)
+                }
+                None => Ok(None),
+            },
+            Err(duplicate) => Err(duplicate),
+        };
+        let host = match claimed {
+            Ok(Some(name)) => {
                 let host = registry
                     .take(&name)
                     .expect("a host the lookup just found is still in the registry");
@@ -645,7 +765,284 @@ pub(super) async fn attribute_host_rows(
         };
         found.insert(id, host);
     }
-    found
+    // What is left live of the rows' earlier agent generations, taken out
+    // with its connection so that it outlives the registry.
+    let generations: HashMap<&str, i64> = rows
+        .iter()
+        .map(|row| (row.id.as_str(), row.generation))
+        .collect();
+    let earlier_names: Vec<OsString> = registry
+        .live()
+        .iter()
+        .filter(|host| {
+            match (
+                &host.tag.role,
+                generations.get(host.tag.session_id.as_str()),
+            ) {
+                (HostRole::Agent { generation }, Some(current)) => generation < current,
+                (HostRole::Agent { .. } | HostRole::Tab { .. }, _) => false,
+            }
+        })
+        .map(|host| host.name.clone())
+        .collect();
+    let earlier = earlier_names
+        .iter()
+        .filter_map(|name| registry.take(name))
+        .collect();
+    (found, EarlierAgentHosts(earlier))
+}
+
+/// The live agent hosts of sessions' earlier launch generations that no row
+/// claimed at a reload, with the scan's connections to them
+/// ([`attribute_host_rows`]): the candidates of the superseded-host rule
+/// ([`end_superseded_hosts`]). Dropping it closes the connections, which
+/// leaves those hosts as they were.
+pub(super) struct EarlierAgentHosts(Vec<LiveHost>);
+
+/// The name of a live host at the socket `row`'s `pane` names whose tag
+/// names `row`'s session's agent at an earlier launch generation, if there
+/// is one: the row's own host after a Restart that failed definitively
+/// (module docs, "What identifies a row's host").
+fn earlier_at_pane(registry: &HostRegistry, row: &StoredSession) -> Option<OsString> {
+    if row.pane.is_empty() {
+        return None;
+    }
+    match registry.by_name(std::ffi::OsStr::new(&row.pane)) {
+        Some(NamedHost::Live(host)) if earlier_agent_of(&host.tag, &row.id, row.generation) => {
+            Some(host.name.clone())
+        }
+        Some(NamedHost::Live(_) | NamedHost::Unavailable(_) | NamedHost::Gone(_)) | None => None,
+    }
+}
+
+/// The name of the host of `row`'s newest earlier launch generation whose
+/// host may still hold history, when the scan read that host at the
+/// record's socket, tagged for that very launch: the row's terminal when
+/// nothing of the row's own generation ever started (module docs, "What
+/// identifies a row's host").
+///
+/// Chosen by the launch records, newest generation first, not by the hosts
+/// the scan could read. A record whose host the scan found gone (its socket
+/// file left by a host that ended) is passed over for the next older one:
+/// that host has no history to keep and nothing to supersede. Any other
+/// record that does not name a readable host of its launch ends the search
+/// with nothing adopted: a host the scan could not read (busy, stopped), a
+/// socket it did not see (whose first stage may still bind it), a host with
+/// another tag, or a record that cannot be read. Adopting an older host
+/// there would leave a newer one that a later start, reading it, would end
+/// as superseded with the newer history; the next start tries again. `None`
+/// too when the records cannot be listed in full, since a listing cut short
+/// may have missed the newest record.
+async fn newest_recorded_earlier(
+    registry: &HostRegistry,
+    state_dir: &Path,
+    row: &StoredSession,
+) -> Option<OsString> {
+    let launch_dir = state_dir.join("launch");
+    let mut entries = tokio::fs::read_dir(&launch_dir).await.ok()?;
+    let mut listing = Vec::new();
+    loop {
+        match entries.next_entry().await {
+            Ok(Some(entry)) => listing.push(Ok(entry.file_name())),
+            Ok(None) => break,
+            Err(error) => {
+                listing.push(Err(error));
+                break;
+            }
+        }
+    }
+    for generation in earlier_recorded_generations(listing, row)? {
+        let record = LaunchArtifacts::for_launch(state_dir, &row.id, generation);
+        let recorded = read_launch_record(record.host()).await.ok()??;
+        let name = OsString::from(recorded.socket.to_string());
+        match registry.by_name(&name) {
+            Some(NamedHost::Live(host))
+                if host.tag.session_id == row.id
+                    && host.tag.role == (HostRole::Agent { generation }) =>
+            {
+                return Some(name);
+            }
+            Some(NamedHost::Gone(_)) => {}
+            Some(NamedHost::Live(_) | NamedHost::Unavailable(_)) | None => return None,
+        }
+    }
+    None
+}
+
+/// The earlier launch generations of `row`'s session that have a launch
+/// host record, newest first, from the launch directory's `listing` as it
+/// was read: `None` when the listing holds an error, since a listing cut
+/// short may have missed the newest record, and the fallback must then not
+/// choose by what it did see ([`newest_recorded_earlier`]).
+fn earlier_recorded_generations(
+    listing: impl IntoIterator<Item = std::io::Result<OsString>>,
+    row: &StoredSession,
+) -> Option<Vec<i64>> {
+    let mut generations = Vec::new();
+    for name in listing {
+        let name = name.ok()?;
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if !name.ends_with(".host") {
+            continue;
+        }
+        // A tab's host record (`LaunchFileOf::Tab`) names a tab host, never
+        // the agent's terminal, so only the agent's launch records count.
+        if let Some((id, crate::launch::LaunchFileOf::Launch(generation))) =
+            crate::launch::parse_launch_file_name(name)
+            && id == row.id
+            && generation < row.generation
+        {
+            generations.push(generation);
+        }
+    }
+    generations.sort_unstable_by(|a, b| b.cmp(a));
+    Some(generations)
+}
+
+/// Whether `tag` names session `session_id`'s agent at a launch generation
+/// before `generation`.
+fn earlier_agent_of(tag: &HostTag, session_id: &str, generation: i64) -> bool {
+    tag.session_id == session_id
+        && match tag.role {
+            HostRole::Agent { generation: tagged } => tagged < generation,
+            HostRole::Tab { .. } => false,
+        }
+}
+
+/// Whether the live agent host tagged `tag`, at the socket called `name`,
+/// is superseded (the plan's D-25, module docs): `row` is its session's row
+/// as it stands after the reload, and it must be a host row at a later
+/// launch generation than the tag's whose launch is confirmed, which is
+/// what a non-empty `pane` naming another socket says (only a confirmation
+/// writes `pane`; a Restart empties it as it opens a generation, and one
+/// that failed definitively puts back the `pane` of the host that stays the
+/// session's terminal). A session with no row is an orphan, which is not
+/// this rule's to end; a tab host is not an agent's.
+pub(super) fn superseded(
+    tag: &HostTag,
+    name: &std::ffi::OsStr,
+    row: Option<&StoredSession>,
+) -> bool {
+    let Some(row) = row else {
+        return false;
+    };
+    row.terminal_kind == TerminalKind::Host
+        && earlier_agent_of(tag, &row.id, row.generation)
+        && row.outcome != LastOutcome::Launching
+        && !row.pane.is_empty()
+        && std::ffi::OsStr::new(&row.pane) != name
+}
+
+/// End the superseded hosts among `earlier` (module docs, "Superseded agent
+/// hosts"), deciding each against its session's row as `store` holds it
+/// now, after the reload's reconciliation: over the scan's connection
+/// (`Shutdown`, then the verified signal to the connection's peer when the
+/// host does not end), then the socket file a signal leaves is removed and
+/// the host's launch record goes. Every host not superseded is left as it
+/// was. The hosts are ended at once, all within one stop budget
+/// (`hosts::stop::STOP_BUDGET`, the most one host's end can take), so that a
+/// start with several superseded hosts is delayed by the slowest, not their
+/// sum; one not confirmed ended within it, or at all, keeps its record,
+/// which the session's Delete settles, and the next start tries again.
+///
+/// `no_spawns` is the supervisor's `host_scan` lock when a supervisor
+/// exists (`serve`'s second reload), taken exclusively around each socket
+/// removal as that removal requires; the constructor's reload has none,
+/// since nothing can spawn a host before the supervisor exists.
+pub(super) async fn end_superseded_hosts(
+    state_dir: &Path,
+    store: &SessionStore,
+    earlier: EarlierAgentHosts,
+    no_spawns: Option<Arc<tokio::sync::RwLock<()>>>,
+) {
+    let mut ending = JoinSet::new();
+    for host in earlier.0 {
+        let row = match store.session(&host.tag.session_id).await {
+            Ok(row) => row,
+            Err(error) => {
+                warn!(session = %host.tag.session_id, error = %format!("{error:#}"),
+                    "could not read the session of an earlier launch's terminal host; leaving it");
+                continue;
+            }
+        };
+        if !superseded(&host.tag, &host.name, row.as_ref()) {
+            continue;
+        }
+        let HostRole::Agent { generation } = host.tag.role else {
+            continue;
+        };
+        let session_id = host.tag.session_id.clone();
+        ending.spawn(async move {
+            let socket = host.socket.clone();
+            let outcome = crate::hosts::stop::shut_down(
+                host.connection,
+                &socket,
+                crate::hosts::StopLimits::default(),
+            )
+            .await;
+            (session_id, generation, socket, outcome)
+        });
+    }
+    let deadline = tokio::time::Instant::now() + crate::hosts::stop::STOP_BUDGET;
+    loop {
+        let joined = match tokio::time::timeout_at(deadline, ending.join_next()).await {
+            Ok(Some(joined)) => joined,
+            Ok(None) => break,
+            Err(_) => {
+                warn!(
+                    left = ending.len(),
+                    "terminal hosts that restarts had replaced were not all ended within the \
+                     stop budget; the session's Delete or the next start ends them"
+                );
+                // Dropping the set aborts the ends still running, closing
+                // their connections, which leaves those hosts as they are.
+                break;
+            }
+        };
+        // The tasks are this function's own and never aborted before here;
+        // a panic in one is a bug, surfaced where reload was called.
+        let (session_id, generation, socket, outcome) = match joined {
+            Ok(ended) => ended,
+            Err(error) => std::panic::resume_unwind(error.into_panic()),
+        };
+        match outcome {
+            crate::hosts::HostOutcome::Stopped(how) => {
+                info!(session = %session_id, socket = %socket.display(), generation, how = %how,
+                    "ended a terminal host its session's restart had replaced");
+                {
+                    let _no_spawns = match &no_spawns {
+                        Some(lock) => Some(lock.write().await),
+                        None => None,
+                    };
+                    remove_ended_socket_file(&socket).await;
+                }
+                let record = LaunchArtifacts::for_launch(state_dir, &session_id, generation);
+                match read_launch_record(record.host()).await {
+                    Ok(Some(recorded))
+                        if Some(recorded.socket.to_string().as_str())
+                            == socket.file_name().and_then(|name| name.to_str()) =>
+                    {
+                        if let Err(error) = tokio::fs::remove_file(record.host()).await
+                            && error.kind() != std::io::ErrorKind::NotFound
+                        {
+                            warn!(path = %record.host().display(), %error,
+                                "could not remove an ended terminal host's launch record");
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(error) => warn!(error = %format!("{error:#}"),
+                        "could not read an ended terminal host's launch record"),
+                }
+            }
+            crate::hosts::HostOutcome::Unconfirmed(why) => {
+                warn!(session = %session_id, socket = %socket.display(), %why,
+                    "a terminal host its session's restart had replaced may still run; the \
+                     session's Delete or the next start ends it");
+            }
+        }
+    }
 }
 
 /// Whether a host of `row`'s own launch may still run, for a session whose
@@ -991,7 +1388,8 @@ impl Supervisor {
 
     /// What is at the one socket placeholder `old` names now, for session
     /// `id`'s launch `generation`: its host adopted as recovered when its
-    /// tag names that launch, as at startup; a fresh placeholder when it
+    /// tag names that launch or an earlier one of the session's agent, as
+    /// at startup; a fresh placeholder when it
     /// still cannot be used; absent when nothing is there. Contacts only
     /// that socket, which a launch drew for itself, so no other runtime's
     /// host is ever taken over.
@@ -1028,8 +1426,18 @@ impl Supervisor {
                 .insert(name.clone());
         }
         let hosts_dir = absolute_hosts_dir(&self.state_dir);
-        match registry.agent(id, generation) {
-            Ok(Some(_)) => {
+        // A placeholder's socket is the one its row names (its `pane`, or
+        // its generation's launch record), so a host there tagged for the
+        // session's agent at an earlier generation is the row's own, as at
+        // startup (module docs, "What identifies a row's host").
+        let earlier_here = matches!(registry.by_name(&name),
+            Some(NamedHost::Live(host)) if earlier_agent_of(&host.tag, id, generation));
+        let ours = match registry.agent(id, generation) {
+            Ok(found) => Ok(found.is_some() || earlier_here),
+            Err(duplicate) => Err(duplicate),
+        };
+        match ours {
+            Ok(true) => {
                 let host = registry
                     .take(&name)
                     .expect("the one host scanned is the one found");
@@ -1047,7 +1455,7 @@ impl Supervisor {
                 Unavailability::Unidentified(duplicate.to_string()),
                 None,
             )),
-            Ok(None) => by_named_socket(
+            Ok(false) => by_named_socket(
                 &registry,
                 &hosts_dir,
                 &NamedSocket::Name(name.to_string_lossy().into_owned()),
@@ -1142,5 +1550,169 @@ impl Supervisor {
             RowHost::Unavailable(_) => {}
         }
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! The superseded-host rule as a pure function of a host's tag and its
+    //! session's row, and the claim-window fallback's reading of the launch
+    //! directory. That a reload ends a superseded host over the scan's
+    //! connection, after confirming the restart's new host, and leaves the
+    //! current host and an unreadable one alone, is shown against real hosts
+    //! in `crates/farhelm/tests/e2e/host_relaunches.rs`.
+
+    use super::*;
+    use crate::service::core::tests::host_terminals::host_row;
+    use std::ffi::OsStr;
+
+    /// The tag of `session`'s agent at launch `generation`.
+    fn agent_tag(session: &str, generation: i64) -> HostTag {
+        HostTag {
+            session_id: session.to_string(),
+            created_ns: 1,
+            role: HostRole::Agent { generation },
+        }
+    }
+
+    /// A host row for `s1` at `generation`, naming socket `pane`, with
+    /// `outcome`.
+    fn row(generation: i64, pane: &str, outcome: LastOutcome) -> StoredSession {
+        let mut row = host_row("s1", Path::new("/state/hosts/placeholder"));
+        row.generation = generation;
+        row.pane = pane.to_string();
+        row.outcome = outcome;
+        row
+    }
+
+    /// An earlier generation's agent host is superseded once its session's
+    /// later launch is confirmed in another host, and only then.
+    ///
+    /// Why: the rule ends hosts at startup, so every case where it must not
+    /// is a running program or a session's only terminal lost. Spec: the
+    /// generation-0 agent host `OLDHOST1` of `s1` is superseded by a running
+    /// (or exited) host row at generation 1 naming `NEWHOST1`; it is not
+    /// when the row is still launching with no `pane` (the restart is
+    /// unconfirmed), when the row's `pane` names `OLDHOST1` itself (a
+    /// restart that failed definitively put it back), when the row is at
+    /// generation 0 (it is the current host), when the row is a tmux row,
+    /// when the tag names another session or a tab, or when no row exists
+    /// (an orphan, not this rule's).
+    #[test]
+    fn an_earlier_agent_host_is_superseded_only_by_a_confirmed_later_launch() {
+        let old = OsStr::new("OLDHOST1");
+        let tag = agent_tag("s1", 0);
+        let exited = LastOutcome::Exited {
+            exit_code: Some(0),
+            annotation: None,
+        };
+        assert!(superseded(
+            &tag,
+            old,
+            Some(&row(1, "NEWHOST1", LastOutcome::Running))
+        ));
+        assert!(superseded(&tag, old, Some(&row(1, "NEWHOST1", exited))));
+
+        assert!(!superseded(
+            &tag,
+            old,
+            Some(&row(1, "", LastOutcome::Launching))
+        ));
+        assert!(!superseded(
+            &tag,
+            old,
+            Some(&row(1, "OLDHOST1", LastOutcome::Running))
+        ));
+        assert!(!superseded(
+            &tag,
+            old,
+            Some(&row(0, "NEWHOST1", LastOutcome::Running))
+        ));
+        let mut tmux = row(1, "%3", LastOutcome::Running);
+        tmux.terminal_kind = TerminalKind::Tmux;
+        assert!(!superseded(&tag, old, Some(&tmux)));
+        assert!(!superseded(
+            &agent_tag("s2", 0),
+            old,
+            Some(&row(1, "NEWHOST1", LastOutcome::Running))
+        ));
+        let tab = HostTag {
+            role: HostRole::Tab {
+                tab_id: "t1".to_string(),
+                scoped: false,
+            },
+            ..agent_tag("s1", 0)
+        };
+        assert!(!superseded(
+            &tab,
+            old,
+            Some(&row(1, "NEWHOST1", LastOutcome::Running))
+        ));
+        assert!(!superseded(&tag, old, None));
+    }
+
+    /// Only an agent host of the same session at an earlier generation counts
+    /// as the row's own at the socket its `pane` names.
+    ///
+    /// Why: the row's `pane` is what lets a reload keep a session's terminal
+    /// after a restart that failed definitively; a host of another session,
+    /// a tab, or a later generation there is not the row's and must stay
+    /// unavailable rather than be adopted. Spec: for `s1` at generation 2,
+    /// `s1`'s agent at generations 0 and 1 counts, at 2 and 3 it does not,
+    /// nor does `s2`'s agent at 0 or `s1`'s tab.
+    #[test]
+    fn an_earlier_agent_of_the_same_session_is_the_rows_own_at_its_pane() {
+        assert!(earlier_agent_of(&agent_tag("s1", 0), "s1", 2));
+        assert!(earlier_agent_of(&agent_tag("s1", 1), "s1", 2));
+        assert!(!earlier_agent_of(&agent_tag("s1", 2), "s1", 2));
+        assert!(!earlier_agent_of(&agent_tag("s1", 3), "s1", 2));
+        assert!(!earlier_agent_of(&agent_tag("s2", 0), "s1", 2));
+        let tab = HostTag {
+            role: HostRole::Tab {
+                tab_id: "t1".to_string(),
+                scoped: true,
+            },
+            ..agent_tag("s1", 0)
+        };
+        assert!(!earlier_agent_of(&tab, "s1", 2));
+    }
+
+    /// The claim-window fallback chooses among the session's earlier launch
+    /// records, newest first, only from a launch directory listed in full.
+    ///
+    /// Why: the sol review's third-round finding. A listing that fails
+    /// partway may have yielded an older record and missed a newer one, and
+    /// the fallback would then adopt the older host, after which a later
+    /// start would end the newer one as superseded with the latest history.
+    /// Spec: for `s1`'s row at generation 3, a listing of `s1`'s host
+    /// records for generations 0, 2 and 1, its generation-3 record, another
+    /// session's record, a spec file, a name that is no launch file and one
+    /// of `s1`'s tab records (a tab host is never the agent's terminal)
+    /// yields generations 2, 1, 0; the same listing with an error after the
+    /// generation-0 record yields nothing.
+    #[test]
+    fn the_fallback_chooses_only_from_a_whole_listing_of_earlier_records() {
+        let row = row(3, "", LastOutcome::Launching);
+        let names = |names: &[&str]| -> Vec<std::io::Result<OsString>> {
+            names.iter().map(|name| Ok(OsString::from(name))).collect()
+        };
+        let mut listing = names(&[
+            "s1.0.host",
+            "s1.2.host",
+            "s2.1.host",
+            "s1.2.json",
+            "s1.3.host",
+            "README",
+            "s1.tab-7d2e9f40-1c3b-4a5d-8e6f-0a1b2c3d4e5f.host",
+            "s1.1.host",
+        ]);
+        assert_eq!(
+            earlier_recorded_generations(listing, &row),
+            Some(vec![2, 1, 0])
+        );
+
+        listing = names(&["s1.0.host"]);
+        listing.push(Err(std::io::Error::other("the listing failed")));
+        assert_eq!(earlier_recorded_generations(listing, &row), None);
     }
 }

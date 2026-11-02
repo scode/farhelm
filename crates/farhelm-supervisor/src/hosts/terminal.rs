@@ -303,6 +303,7 @@ use super::client::{
     InputTicket, SnapshotReply, Unavailable,
 };
 use super::process::HostProcess;
+use super::tag::HostTag;
 use crate::grid_input::PASTE_END;
 use crate::procs::{self, PaneAnchor, ProcessIdentity, ProcessState};
 use crate::tmux::{PaneProbe, PaneProcess};
@@ -1240,6 +1241,9 @@ struct Inner {
     adopted: Option<HostProcess>,
     /// Made by [`HostTerminal::unavailable`]: no runtime ever ran.
     placeholder: bool,
+    /// The host's client tag, as its `Info` gave it at adoption, when this
+    /// build reads it: what a host is for (`HostTerminal::tag`).
+    tag: Option<HostTag>,
 }
 
 /// A runtime's snapshot encodes, as a handle sees them: how many run on the
@@ -1670,6 +1674,35 @@ enum Control {
         deadline: tokio::time::Instant,
         reply: oneshot::Sender<CheckpointOutcome>,
     },
+    /// [`HostTerminal::history_seed`]: encode a Restart seed of the
+    /// emulator, at most `max_bytes`, on the blocking pool.
+    Seed {
+        max_bytes: usize,
+        reply: oneshot::Sender<Option<Snapshot>>,
+    },
+}
+
+/// Take the emulator out of `held` for an encode on the blocking pool,
+/// leaving a [`View`] of it for the views, or `None` when it is not home
+/// (away in another encode, or lost). The runtime's task brings it back
+/// with [`bring_home`]; only one encode has it at a time.
+fn take_for_encode(held: &StdMutex<Held>) -> Option<Box<Emulator>> {
+    let mut held = held.lock().unwrap_or_else(PoisonError::into_inner);
+    let view = match &held.slot {
+        Slot::Live(emulator) => View::of(emulator),
+        Slot::Encoding(_) | Slot::Lost(_) => return None,
+    };
+    match std::mem::replace(&mut held.slot, Slot::Encoding(view)) {
+        Slot::Live(emulator) => Some(emulator),
+        Slot::Encoding(_) | Slot::Lost(_) => unreachable!("just looked"),
+    }
+}
+
+/// Put `emulator` back in `held` after an encode [`take_for_encode`] started,
+/// and wake whoever waits for it (`HostTerminal::read`).
+fn bring_home(held: &StdMutex<Held>, returned: &tokio::sync::Notify, emulator: Box<Emulator>) {
+    held.lock().unwrap_or_else(PoisonError::into_inner).slot = Slot::Live(emulator);
+    returned.notify_waiters();
 }
 
 impl HostTerminal {
@@ -1891,6 +1924,7 @@ impl HostTerminal {
                 task,
                 adopted: peer,
                 placeholder: false,
+                tag: HostTag::decode(&info.tag).ok(),
             }),
         })
     }
@@ -1960,6 +1994,7 @@ impl HostTerminal {
                 task: tokio::spawn(async {}).abort_handle(),
                 adopted: None,
                 placeholder: true,
+                tag: None,
             }),
         }
     }
@@ -1983,6 +2018,13 @@ impl HostTerminal {
     /// again"), and nothing else.
     pub fn is_placeholder(&self) -> bool {
         self.inner.placeholder
+    }
+
+    /// The host's client tag (what the host is for: a session's agent at a
+    /// launch generation, or a tab), as read at adoption; `None` for a
+    /// placeholder and for a tag this build cannot read.
+    pub fn tag(&self) -> Option<&HostTag> {
+        self.inner.tag.as_ref()
     }
 
     /// The host's socket, which names the host.
@@ -2252,9 +2294,15 @@ impl HostTerminal {
     /// it is: the connection closes and nothing more is sent, read or
     /// announced. The host keeps running (ending it is the caller's next
     /// step), and every clone of this handle keeps reading the last status
-    /// the runtime published. An emulator away in an encode when the
-    /// runtime stops is never brought home, so reads of it then report it
-    /// lost.
+    /// the runtime published. An emulator away in an encode (a checkpoint's
+    /// or a Restart seed's) when the runtime stops is never brought home:
+    /// the encode gives up at its cancel and its result is dropped, so a
+    /// [`Self::read`] then waits for good and [`Self::try_read`] finds it
+    /// away, while the views keep answering from what it left behind. A
+    /// runtime is stopped only where its host is given up: by a stopping
+    /// supervisor, or by a caller ending or dropping the host (a create's,
+    /// a Restart's or a reload's cleanup, the end of a superseded host), so
+    /// nothing reads it afterwards in practice.
     ///
     /// For a caller that must end the host some other way after
     /// [`Self::shutdown`] did not confirm it within the caller's bound (a
@@ -2274,6 +2322,37 @@ impl HostTerminal {
             .cancel
             .store(true, std::sync::atomic::Ordering::Relaxed);
         self.inner.task.abort();
+    }
+
+    /// A Restart seed of the terminal: its emulator's history above a blank
+    /// screen in default modes, at most `max_bytes`
+    /// (`farhelm_terminal_emulator::Emulator::history_seed`), or `None`.
+    ///
+    /// The runtime's task takes the request up between its other work (as
+    /// a checkpoint), after any checkpoint it was encoding, and encodes on
+    /// the blocking pool, never on the caller's worker or under the
+    /// emulator's lock (which [`Self::read`] holds only for quick reads): the
+    /// emulator leaves its slot for the encode, the views answer from what
+    /// it left behind, a `read` waits for it, and the task processes no
+    /// output until the seed is done and the emulator is back. The task, not
+    /// the caller, owns the encode, so a caller that stops waiting leaves the
+    /// emulator to come back as usual. The encode is counted with the
+    /// checkpoints' and gives up when they are cancelled ([`Self::abort`],
+    /// which an orderly stop calls on every runtime in the session map).
+    ///
+    /// `None` when there is no seed to give: the runtime has ended (a host
+    /// that is gone; nothing encodes from the handle), or ends before it
+    /// answers (an abort), the encode was cancelled, the encoder panicked
+    /// (the emulator is kept), or the emulator was lost. Callers tell a
+    /// stopping supervisor from the rest themselves.
+    pub async fn history_seed(&self, max_bytes: usize) -> Option<Snapshot> {
+        let (reply, answer) = oneshot::channel();
+        self.inner
+            .control
+            .send(Control::Seed { max_bytes, reply })
+            .await
+            .ok()?;
+        answer.await.ok().flatten()
     }
 
     /// The host process this runtime adopted, pinned to its start identity
@@ -2873,6 +2952,14 @@ impl Runtime {
                 }
                 Turn::Continue
             }
+            Wake::Control(Some(Control::Seed { max_bytes, reply })) => {
+                let seed = self.seed_now(max_bytes).await;
+                let _ = reply.send(seed);
+                if self.lost {
+                    return Ok(Turn::Unavailable(Unavailability::EmulatorLost));
+                }
+                Turn::Continue
+            }
             Wake::SyncDue => {
                 let now = self.clock.now();
                 let mode = self.replay.flush_mode(self.position.offset);
@@ -3432,6 +3519,50 @@ impl Runtime {
                     ?reason,
                     "the terminal host rejected a checkpoint"
                 );
+            }
+        }
+    }
+
+    /// [`HostTerminal::history_seed`]'s work in the task: `turn` has
+    /// settled every encode, so the emulator is home (or lost, `None`).
+    /// Waits for the seed's encode on the blocking pool, processing nothing
+    /// meanwhile, as a checkpoint taken now does, and brings the emulator
+    /// back. The checkpoints' encode gate holds it too, for tests. `None`
+    /// when cancelled or when the encoder panicked (the emulator kept); a
+    /// task lost with the emulator marks it lost (`Self::lose`).
+    async fn seed_now(&mut self, max_bytes: usize) -> Option<Snapshot> {
+        let emulator = take_for_encode(&self.emulator)?;
+        #[cfg(any(test, feature = "test-seams"))]
+        let gate = self.encode_gate.clone();
+        let cancel = Cancel::new(Arc::clone(&self.encodes.cancel), None);
+        let running = RunningEncode::start(&self.encodes);
+        let task = tokio::task::spawn_blocking(move || {
+            let _running = running;
+            #[cfg(any(test, feature = "test-seams"))]
+            let fault = gate.as_ref().and_then(|gate| gate.pass(&cancel));
+            #[cfg(any(test, feature = "test-seams"))]
+            if fault == Some(EncodeFault::TaskLost) {
+                panic!("test seam: a seed's encode task lost with its emulator");
+            }
+            // A panic in the encoder must not take the emulator with it.
+            let seed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                #[cfg(any(test, feature = "test-seams"))]
+                if fault == Some(EncodeFault::EncoderPanics) {
+                    panic!("test seam: a seed's encoder panic");
+                }
+                emulator.history_seed_until(max_bytes, &cancel)
+            }));
+            (emulator, seed.ok().and_then(Result::ok))
+        });
+        match task.await {
+            Ok((emulator, seed)) => {
+                bring_home(&self.emulator, &self.returned, emulator);
+                self.publish();
+                seed
+            }
+            Err(error) => {
+                self.lose(&error);
+                None
             }
         }
     }

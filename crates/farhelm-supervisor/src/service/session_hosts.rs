@@ -346,8 +346,15 @@ impl Supervisor {
         self.named_socket(&name)
     }
 
-    /// The paths of `session_id`'s launch records, in the launch directory.
-    async fn launch_records_of(&self, session_id: &str) -> anyhow::Result<Vec<PathBuf>> {
+    /// The paths of `session_id`'s launch records, in the launch directory:
+    /// every agent launch's (every generation's) and every host tab's
+    /// (`launch::LaunchFileOf::Tab`, `<id>.tab-<tab id>.host`). Delete
+    /// settles both kinds, and a restart that ended a host reads them all to
+    /// remove the ones naming it. A caller acting on the agent's launches
+    /// alone must skip the tab records, as a Restart's
+    /// `settle_outstanding_launches` does: a tab record names a tab host,
+    /// whose shell is not the agent's.
+    pub(crate) async fn launch_records_of(&self, session_id: &str) -> anyhow::Result<Vec<PathBuf>> {
         let launch_dir = self.state_dir.join("launch");
         let mut entries = match tokio::fs::read_dir(&launch_dir).await {
             Ok(entries) => entries,

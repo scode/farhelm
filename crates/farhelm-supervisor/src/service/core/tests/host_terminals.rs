@@ -807,52 +807,72 @@ async fn a_stop_before_the_exit_record_still_records_the_shims_report() {
     );
 }
 
-/// A Restart of a session with no terminal is refused, before anything
-/// changes, when its row says the agent was started in a host.
+/// A Restart of a session with no terminal whose row says its agent was
+/// started in a host relaunches it in a new host, never in tmux.
 ///
-/// Why: a create under the terminal-host switch can be kept as a launching
-/// record with no terminal (its host could not be confirmed ended), and
-/// every relaunch target is tmux's while a relaunch keeps the row's kind:
-/// relaunching it would leave a host row whose `pane` holds a tmux pane id,
-/// which a later reader looks for as a host's socket. Restart into a new
-/// host comes with a later change. Spec: with a host row for `s1` and its
-/// published entry holding no terminal, a consented Restart fails with the
-/// host-agent refusal, and the row's generation, outcome, kind and `pane`
-/// are as they were.
+/// Why: a relaunch keeps the row's kind, and a host row with no terminal
+/// (its host was found gone, or a create was kept as a launching record)
+/// relaunched in tmux would leave a host row whose `pane` holds a tmux pane
+/// id, which every later reader looks for as a host's socket. Spec: with a
+/// resumable session's row turned into a host row naming socket `ABCDEFGH`
+/// and its entry holding no terminal, under a supervisor whose host program
+/// does not exist, a consented Restart fails starting the session's
+/// terminal host (not tmux) definitively: the row is still a host row with
+/// `pane` `ABCDEFGH` and its earlier outcome, at the next generation, and
+/// the failed launch left no launch spec or host record behind.
 #[farhelm_testtrace::test]
-async fn restart_refuses_a_terminal_less_session_whose_row_is_a_host_row() {
+async fn a_terminal_less_host_row_restarts_in_a_host_never_in_tmux() {
     let state = StateDir::new();
-    let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-        .await
-        .expect("supervisor");
-    let row = host_row("s1", Path::new("/nonexistent/hosts/ABCDEFGH"));
+    let sup = Supervisor::new_with_seams(
+        state.path(),
+        dummy_exe(),
+        SupervisorTimeouts::default(),
+        SupervisorSeams {
+            host_program: Some(PathBuf::from("/nonexistent/farhelm-host")),
+            ..SupervisorSeams::default()
+        },
+    )
+    .await
+    .expect("supervisor");
+    let created = create_resumable_session(&sup, "/tmp", "sleep 300").await;
+    let id = created.id.clone();
     sup.store
-        .insert_session(row.clone(), None)
+        .set_terminal_for_test(&id, crate::store::TerminalKind::Host, "ABCDEFGH")
         .await
-        .expect("insert the host row");
-    sup.sessions.lock().await.insert(
-        "s1".to_string(),
-        Arc::new(entry_with(None, LastOutcome::Running)),
-    );
+        .expect("make the row a host row");
+    sup.forget_agent_terminal_for_test(&id)
+        .await
+        .expect("leave the session with no terminal");
+    let before = sup.store.session(&id).await.expect("read").expect("row");
 
-    let refused = sup
-        .restart_session("s1", true, None, None)
+    let failed = sup
+        .restart_session(&id, true, None, None)
         .await
-        .expect_err("a terminal-less host agent is not relaunched into tmux");
-    assert!(
-        format!("{refused:#}").contains(HOST_RESTART_UNAVAILABLE),
-        "{refused:#}"
-    );
-    let after = sup.store.session("s1").await.expect("read").expect("row");
+        .expect_err("no host can start from a program that does not exist");
+    let failed = format!("{failed:#}");
+    assert!(failed.contains("terminal host"), "{failed}");
+    assert!(!failed.contains("tmux"), "{failed}");
+    let after = sup.store.session(&id).await.expect("read").expect("row");
     assert_eq!(
         (
-            after.generation,
-            after.outcome,
             after.terminal_kind,
-            after.pane
+            after.pane.as_str(),
+            &after.outcome,
+            after.generation
         ),
-        (row.generation, row.outcome, row.terminal_kind, row.pane)
+        (
+            crate::store::TerminalKind::Host,
+            "ABCDEFGH",
+            &before.outcome,
+            before.generation + 1
+        )
     );
+    let artifacts = LaunchArtifacts::for_launch(state.path(), &id, after.generation);
+    assert!(
+        !artifacts.spec().exists(),
+        "the failed launch's spec is gone"
+    );
+    assert!(!artifacts.host().exists(), "no host record is left");
 }
 
 /// A retried create whose launch kept and published its host, with no
@@ -2688,4 +2708,749 @@ async fn closing_a_tab_whose_runtime_reads_gone_confirms_its_process_first() {
         "the tab is kept and marked for a retry: {kept:?}"
     );
     assert!(record.exists(), "the tab's record is kept");
+}
+
+// ---- Restart seeds -------------------------------------------------------------------
+
+/// The text of `emulator`'s history (above its screen), oldest first.
+fn history_text(emulator: &farhelm_terminal_emulator::Emulator) -> String {
+    use farhelm_terminal_emulator::alacritty_terminal::grid::Dimensions as _;
+    use farhelm_terminal_emulator::alacritty_terminal::index::{Column, Line};
+    let grid = emulator.term().grid();
+    let mut text = String::new();
+    for back in (1..=grid.history_size()).rev() {
+        let row = &grid[Line(-(back as i32))];
+        for column in 0..grid.columns() {
+            text.push(row[Column(column)].c);
+        }
+        text.push('\n');
+    }
+    text
+}
+
+/// A host terminal that has printed 60 numbered lines on a 24-row screen,
+/// once its screen shows the last one.
+async fn host_with_history() -> (HostTerminal, TestHost) {
+    let (host, test_host) = adopt_test_host(None).await;
+    let mut output = Vec::new();
+    for n in 1..=60 {
+        output.extend_from_slice(format!("seed line {n:02}\r\n").as_bytes());
+    }
+    test_host.output(&output);
+    wait_for(&host, "the output", |host| {
+        host.screen_tail(4096).contains("seed line 60")
+    })
+    .await;
+    (host, test_host)
+}
+
+/// A Restart seed of a running host terminal holds its history, and the
+/// runtime goes on driving the host afterwards.
+///
+/// Why: the seed is encoded on the blocking pool with the emulator taken
+/// out of its slot (the reviews' finding against encoding under the
+/// emulator's lock on an async worker); the emulator must come back, or
+/// every later read and the runtime's own feed would find it away. Spec:
+/// after 60 lines, `history_seed` gives a seed whose restored emulator's
+/// history holds `seed line 01` and not `seed line 60` (on the screen); the
+/// runtime is still running, a `read` answers, and output after the seed
+/// reaches the screen.
+#[farhelm_testtrace::test]
+async fn a_restart_seed_holds_the_history_and_gives_the_emulator_back() {
+    let (host, test_host) = host_with_history().await;
+    let seed = host
+        .history_seed(terminal_host::protocol::MAX_SNAPSHOT)
+        .await
+        .expect("a running runtime gives a seed");
+    let restored = farhelm_terminal_emulator::Emulator::restore(&seed.blob, 1000)
+        .expect("the seed restores")
+        .emulator;
+    let history = history_text(&restored);
+    assert!(history.contains("seed line 01"), "{history}");
+    assert!(!history.contains("seed line 60"), "{history}");
+    assert!(restored.screen_text().trim().is_empty(), "a blank screen");
+    assert!(matches!(host.liveness(), Liveness::Running { .. }));
+    assert!(host.read(|_| ()).await.is_ok(), "the emulator came home");
+    test_host.output(b"after the seed\r\n");
+    wait_for(&host, "output after the seed", |host| {
+        host.screen_tail(4096).contains("after the seed")
+    })
+    .await;
+}
+
+/// A tokio runtime with one blocking thread, for the tests that hold a seed's
+/// encode between the emulator leaving its slot and the encode starting, by
+/// keeping that one thread busy: the in-flight boundary at which a caller or
+/// a runtime that goes away must not strand the emulator.
+fn one_blocking_thread() -> tokio::runtime::Runtime {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .max_blocking_threads(1)
+        .build()
+        .expect("a test runtime")
+}
+
+/// Keep the runtime's one blocking thread busy until the returned sender is
+/// used (or dropped), and return once it is.
+async fn occupy_the_blocking_thread() -> (std::sync::mpsc::Sender<()>, tokio::task::JoinHandle<()>)
+{
+    let (release, released) = std::sync::mpsc::channel::<()>();
+    let (busy_tx, busy) = tokio::sync::oneshot::channel();
+    let occupier = tokio::task::spawn_blocking(move || {
+        let _ = busy_tx.send(());
+        let _ = released.recv_timeout(Duration::from_secs(60));
+    });
+    busy.await.expect("the blocking thread is taken");
+    (release, occupier)
+}
+
+/// Wait until the emulator is away (`try_read` finds nothing) or `done`
+/// holds, whichever comes first.
+async fn wait_away_or(host: &HostTerminal, done: impl Fn() -> bool) {
+    let waited = tokio::time::timeout(WAIT, async {
+        while host.try_read(|_| ()).is_some() && !done() {
+            // sleep-ok: polls the emulator's slot, which no event announces when it leaves.
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await;
+    assert!(
+        waited.is_ok(),
+        "the seed neither took the emulator nor answered"
+    );
+}
+
+/// A seed whose runtime is stopped while its encode is in flight answers at
+/// once, and the encode ends.
+///
+/// Why: the sol review's first reproduced stranding. An orderly stop aborts
+/// every runtime, also one whose task is waiting for a seed's encode; the
+/// Restart waiting for the seed must get its answer (and so the "supervisor
+/// is stopping" refusal) rather than wait for an emulator nothing will bring
+/// back, and the stop must not wait for the encode longer than its cancel
+/// takes. Spec: on a runtime with one blocking thread, held busy, a seed is
+/// asked for; once the emulator has left its slot (the encode queued), the
+/// runtime is stopped (`abort`) and the thread released; the seed's request
+/// returns within the test's bound, and the runtime's encodes end.
+#[test]
+fn a_seed_whose_runtime_is_stopped_mid_encode_answers_and_ends() {
+    one_blocking_thread().block_on(async {
+        let (host, _test_host) = host_with_history().await;
+        let (release, occupier) = occupy_the_blocking_thread().await;
+        let seeding = tokio::spawn({
+            let host = host.clone();
+            async move {
+                let _ = host
+                    .history_seed(terminal_host::protocol::MAX_SNAPSHOT)
+                    .await;
+            }
+        });
+        wait_away_or(&host, || seeding.is_finished()).await;
+        assert!(!seeding.is_finished(), "premise: the seed is in flight");
+        host.abort();
+        let _ = release.send(());
+        tokio::time::timeout(WAIT, seeding)
+            .await
+            .expect("the seed answers once its runtime is stopped")
+            .expect("the seed task");
+        tokio::time::timeout(WAIT, host.encodes_ended())
+            .await
+            .expect("the cancelled encode ends");
+        occupier.await.expect("the occupier");
+    });
+}
+
+/// A caller that stops waiting for a seed of a runtime that has ended leaves
+/// the emulator readable.
+///
+/// Why: the sol review's second reproduced stranding: an encode the caller
+/// owned (of a runtime already ended) lost the emulator when the caller was
+/// cancelled, and every later read waited for good. Only a running runtime's
+/// task encodes a seed now; an ended one gives none. Spec: on a runtime with
+/// one blocking thread, for a stand-in host that went away (its runtime
+/// ended), with the thread held busy, a seed is asked for and its caller is
+/// cancelled once the emulator is away or the request answered; once the
+/// thread is released and every encode ended, a `read` answers within the
+/// bound.
+#[test]
+fn a_cancelled_seed_of_an_ended_runtime_leaves_the_emulator_readable() {
+    one_blocking_thread().block_on(async {
+        let (host, test_host) = host_with_history().await;
+        drop(test_host);
+        wait_for(&host, "the runtime's end", |host| {
+            matches!(
+                host.liveness(),
+                Liveness::Gone | Liveness::Unavailable { .. }
+            )
+        })
+        .await;
+        let (release, occupier) = occupy_the_blocking_thread().await;
+        let seeding = tokio::spawn({
+            let host = host.clone();
+            async move {
+                let _ = host
+                    .history_seed(terminal_host::protocol::MAX_SNAPSHOT)
+                    .await;
+            }
+        });
+        wait_away_or(&host, || seeding.is_finished()).await;
+        seeding.abort();
+        let _ = release.send(());
+        occupier.await.expect("the occupier");
+        tokio::time::timeout(WAIT, host.encodes_ended())
+            .await
+            .expect("no encode runs");
+        assert!(
+            tokio::time::timeout(WAIT, host.read(|_| ())).await.is_ok(),
+            "the emulator is readable"
+        );
+    });
+}
+
+/// A caller that stops waiting for a seed of a running runtime leaves the
+/// emulator to come back, and the runtime driving its host.
+///
+/// Why: a Restart's request handler can be cancelled while the seed is
+/// encoded (its client went away); the runtime's task owns the encode, so
+/// the emulator must come back and later reads and seeds work. Spec: with
+/// the runtime's encodes held at an encode gate, a seed is asked for; once
+/// the encode reached the gate its caller is cancelled and the gate opened;
+/// a `read` answers within the bound, a second seed is given, and output
+/// still reaches the screen.
+#[farhelm_testtrace::test(flavor = "multi_thread")]
+async fn a_cancelled_seed_of_a_running_runtime_gives_the_emulator_back() {
+    let gate = crate::hosts::terminal::EncodeGate::closed();
+    let (host, test_host) = adopt_test_host_with(
+        TestHostSpec {
+            options: Some(crate::hosts::HostTerminalOptions {
+                encode_gate: Some(gate.clone()),
+                ..test_host_options(None)
+            }),
+            ..TestHostSpec::default()
+        },
+        crate::hosts::Adoption::Fresh,
+    )
+    .await;
+    test_host.output(b"seed line 01\r\n");
+    wait_for(&host, "the output", |host| {
+        host.screen_tail(4096).contains("seed line 01")
+    })
+    .await;
+    let seeding = tokio::spawn({
+        let host = host.clone();
+        async move {
+            host.history_seed(terminal_host::protocol::MAX_SNAPSHOT)
+                .await
+        }
+    });
+    let entered = {
+        let gate = gate.clone();
+        tokio::task::spawn_blocking(move || gate.wait_entered(WAIT))
+            .await
+            .expect("the wait")
+    };
+    assert!(entered, "premise: the seed's encode reached the gate");
+    seeding.abort();
+    gate.open();
+    assert!(
+        tokio::time::timeout(WAIT, host.read(|_| ())).await.is_ok(),
+        "the emulator came back"
+    );
+    assert!(
+        host.history_seed(terminal_host::protocol::MAX_SNAPSHOT)
+            .await
+            .is_some(),
+        "a later seed is given"
+    );
+    test_host.output(b"after the seed\r\n");
+    wait_for(&host, "output after the seed", |host| {
+        host.screen_tail(4096).contains("after the seed")
+    })
+    .await;
+}
+
+/// A supervisor with dummy launches, whose host program does not exist and
+/// whose Restart can be held at its window by `window`, and a resumable
+/// session of it made a host session: its agent terminal is a stand-in host,
+/// adopted with `options`, whose child has exited (so a Restart stops
+/// nothing and needs no consent). Returns the supervisor, the session's id,
+/// the stand-in's runtime and the stand-in, and the state directory.
+async fn host_session_with(
+    options: crate::hosts::HostTerminalOptions,
+    window: Option<RestartWindowGate>,
+) -> (Arc<Supervisor>, String, HostTerminal, TestHost, StateDir) {
+    let mut seams = SupervisorSeams {
+        host_program: Some(PathBuf::from("/nonexistent/farhelm-host")),
+        ..SupervisorSeams::default()
+    };
+    seams.faults.restart_window_gate = window;
+    let state = StateDir::new();
+    let sup = Supervisor::new_with_seams(
+        state.path(),
+        dummy_exe(),
+        SupervisorTimeouts::default(),
+        seams,
+    )
+    .await
+    .expect("supervisor");
+    let created = create_resumable_session(&sup, "/tmp", "sleep 300").await;
+    let id = created.id.clone();
+    let (old, test_host) = adopt_test_host_with(
+        TestHostSpec {
+            options: Some(options),
+            ..TestHostSpec::default()
+        },
+        crate::hosts::Adoption::Fresh,
+    )
+    .await;
+    test_host.output(b"seed line 01\r\n");
+    test_host.exit(0);
+    wait_for(&old, "the stand-in's exit", |host| {
+        matches!(host.liveness(), Liveness::Exited { .. })
+    })
+    .await;
+    sup.store
+        .set_terminal_for_test(
+            &id,
+            crate::store::TerminalKind::Host,
+            Terminal::Host(old.clone()).recorded_pane(),
+        )
+        .await
+        .expect("make the row a host row");
+    {
+        let mut sessions = sup.sessions.lock().await;
+        let entry = sessions.get(&id).cloned().expect("the created session");
+        sessions.insert(
+            id.clone(),
+            Arc::new(SessionEntry {
+                terminal: Some(Terminal::Host(old.clone())),
+                info: entry.info.clone(),
+                run: entry.run.clone(),
+                session: entry.session.clone(),
+                snapshot: entry.snapshot.clone(),
+                canonical_cwd: entry.canonical_cwd.clone(),
+                generation: entry.generation,
+                scope: entry.scope.clone(),
+            }),
+        );
+    }
+    (sup, id, old, test_host, state)
+}
+
+/// An orderly stop that begins while a Restart's seed is encoded refuses
+/// the Restart promptly, with the generation unclaimed, and the stop does not
+/// hang.
+///
+/// Why: the seed is read before the generation is claimed so that a stop
+/// meanwhile leaves the session as it was; the stop cancels the encode as it
+/// closes the old runtime (still on the session map then), and the Restart
+/// must turn the missing seed into the "supervisor is stopping" refusal
+/// rather than wait or start an empty terminal. Spec: with the old runtime's
+/// encodes held at an encode gate, a consented Restart's seed reaches the
+/// gate; the host side of an orderly stop (one-second budget) returns within
+/// the test's bound; the Restart fails within it saying the supervisor is
+/// stopping; the gate saw the encode cancelled; the runtime's encodes ended;
+/// the row is still at generation 0.
+#[farhelm_testtrace::test(flavor = "multi_thread")]
+async fn a_stop_during_a_restarts_seed_refuses_it_promptly() {
+    let gate = crate::hosts::terminal::EncodeGate::closed();
+    let (sup, id, old, _test_host, _state) = host_session_with(
+        crate::hosts::HostTerminalOptions {
+            encode_gate: Some(gate.clone()),
+            ..test_host_options(None)
+        },
+        None,
+    )
+    .await;
+    let restart = tokio::spawn({
+        let sup = Arc::clone(&sup);
+        let id = id.clone();
+        async move { sup.restart_session(&id, true, None, None).await }
+    });
+    let entered = {
+        let gate = gate.clone();
+        tokio::task::spawn_blocking(move || gate.wait_entered(WAIT))
+            .await
+            .expect("the wait")
+    };
+    assert!(entered, "premise: the seed's encode reached the gate");
+    tokio::time::timeout(WAIT, sup.checkpoint_hosts_for_test(Duration::from_secs(1)))
+        .await
+        .expect("the stop's host side does not hang");
+    let refused = tokio::time::timeout(WAIT, restart)
+        .await
+        .expect("the restart answers")
+        .expect("the restart task")
+        .expect_err("a stop during the seed refuses the restart");
+    assert!(
+        format!("{refused:#}").contains("supervisor is stopping"),
+        "{refused:#}"
+    );
+    assert!(gate.cancelled(), "the stop cancelled the seed's encode");
+    tokio::time::timeout(WAIT, old.encodes_ended())
+        .await
+        .expect("the encode ended");
+    let row = sup.store.session(&id).await.expect("read").expect("row");
+    assert_eq!(row.generation, 0, "no generation was claimed");
+}
+
+/// A host restart that fails definitively after an orderly stop gathered the
+/// host terminals puts back a placeholder, never the old runtime, whose
+/// encode in progress the stop then cancels.
+///
+/// Why: the reviews' finding against the failure path's republication: the
+/// old runtime is off the session map while the restart runs, so the stop's
+/// gather misses it, and restoring it afterwards would leave a connected
+/// runtime and its encodes running past the stop that should have closed
+/// them. Spec: a host session (its stand-in's child has exited, so nothing
+/// is stopped), restarted under a supervisor whose host program does not
+/// exist, with the restart held at its window (the session off the map); a
+/// checkpoint of the old runtime started there is held at its encode gate
+/// (the emulator away); the host side of an orderly stop runs, and the
+/// restart is released: it fails; the session's terminal is a host
+/// placeholder; the old runtime has ended (its status channel closed), the
+/// gate saw the held encode cancelled, and the runtime's encodes ended.
+#[farhelm_testtrace::test(flavor = "multi_thread")]
+async fn a_failed_host_restart_after_a_stop_began_restores_a_placeholder() {
+    let (reached_tx, reached_rx) = tokio::sync::oneshot::channel::<()>();
+    let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
+    let reached = Arc::new(std::sync::Mutex::new(Some(reached_tx)));
+    let release = Arc::new(tokio::sync::Mutex::new(Some(release_rx)));
+    let window: RestartWindowGate = Arc::new(move || {
+        let reached = Arc::clone(&reached);
+        let release = Arc::clone(&release);
+        Box::pin(async move {
+            if let Some(tx) = reached.lock().expect("gate mutex").take() {
+                let _ = tx.send(());
+            }
+            if let Some(rx) = release.lock().await.take() {
+                let _ = rx.await;
+            }
+        })
+    });
+    let encodes = crate::hosts::terminal::EncodeGate::closed();
+    encodes.open();
+    let (sup, id, old, test_host, _state) = host_session_with(
+        crate::hosts::HostTerminalOptions {
+            encode_gate: Some(encodes.clone()),
+            ..test_host_options(None)
+        },
+        Some(window),
+    )
+    .await;
+
+    let mut restart = tokio::spawn({
+        let sup = Arc::clone(&sup);
+        let id = id.clone();
+        async move { sup.restart_session(&id, true, None, None).await }
+    });
+    tokio::time::timeout(WAIT, async {
+        tokio::select! {
+            reached = reached_rx => reached.expect("the gate reports arrival"),
+            done = &mut restart => panic!("the restart ended before its window: {done:?}"),
+        }
+    })
+    .await
+    .expect("the restart reaches its window");
+    // An encode the stop will have to cancel: a checkpoint of the old
+    // runtime, of output it has not checkpointed, held at the gate.
+    encodes.close();
+    test_host.output(b"more output\r\n");
+    wait_for(&old, "the new output", |host| {
+        host.screen_tail(4096).contains("more output")
+    })
+    .await;
+    let checkpoint = tokio::spawn({
+        let old = old.clone();
+        async move { old.checkpoint_now(tokio::time::Instant::now() + WAIT).await }
+    });
+    wait_away_or(&old, || checkpoint.is_finished()).await;
+    assert!(
+        old.try_read(|_| ()).is_none(),
+        "premise: the checkpoint's encode holds the emulator"
+    );
+    sup.checkpoint_hosts_for_test(Duration::from_secs(1)).await;
+    let _ = release_tx.send(());
+    let restarted = tokio::time::timeout(WAIT, restart)
+        .await
+        .expect("the restart finishes")
+        .expect("the restart task");
+    restarted.expect_err("no host can start from a program that does not exist");
+
+    let entry = sup
+        .sessions
+        .lock()
+        .await
+        .get(&id)
+        .cloned()
+        .expect("the entry");
+    match &entry.terminal {
+        Some(Terminal::Host(host)) => assert!(host.is_placeholder(), "a placeholder"),
+        other => panic!("not a host placeholder: {other:?}"),
+    }
+    let mut status = old.subscribe();
+    let ended = tokio::time::timeout(WAIT, async { while status.changed().await.is_ok() {} }).await;
+    assert!(ended.is_ok(), "the old runtime was stopped");
+    tokio::time::timeout(WAIT, old.encodes_ended())
+        .await
+        .expect("no encode of the old runtime runs");
+    assert!(
+        encodes.cancelled() && !encodes.expired(),
+        "the held encode was cancelled, not let through"
+    );
+    drop(checkpoint);
+}
+
+/// Whether process `pid` runs: it exists and is not a zombie (a stand-in
+/// host's child, killed, stays a zombie until the stand-in reaps it).
+fn program_runs(pid: u32) -> bool {
+    std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|stat| {
+        stat.rsplit_once(')')
+            .and_then(|(_, rest)| rest.split_whitespace().next())
+            .is_some_and(|state| state != "Z")
+    })
+}
+
+/// A host agent session with an earlier host start outstanding, as
+/// [`host_agent_with_an_earlier_start`] makes it.
+struct HostAgentWithEarlierStart {
+    id: String,
+    /// The session's entry as installed, whose activity reading a test
+    /// can change while a Restart runs.
+    entry: Arc<SessionEntry>,
+    /// The session's agent terminal: the stand-in host tagged as its
+    /// generation-0 agent, its program running.
+    current_host: TestHost,
+    /// The stand-in host tagged as its generation-1 agent, named by a
+    /// launch record, its program running.
+    earlier_host: TestHost,
+    _current: HostTerminal,
+}
+
+/// Make a resumable session of `sup` (on `state`) a host agent session
+/// whose agent terminal is a stand-in host tagged as its generation-0 agent
+/// with its program running and the session reading `reading`, beside a
+/// second stand-in host tagged as its generation-1 agent with its program
+/// running, which a launch record names with `starter` as its first stage:
+/// a Restart has a launch to settle after the held host's, whose program it
+/// would root into its stop.
+async fn host_agent_with_an_earlier_start(
+    sup: &Arc<Supervisor>,
+    state: &StateDir,
+    starter: crate::hosts::HostProcess,
+    reading: crate::agent_kind::screen_reader::ScreenState,
+) -> HostAgentWithEarlierStart {
+    let created = create_resumable_session(sup, "/tmp", "sleep 300").await;
+    let id = created.id.clone();
+    let hosts = crate::hosts::ensure_hosts_dir(&std::path::absolute(state.path()).unwrap())
+        .expect("the socket directory");
+    let tag = |generation| {
+        crate::hosts::HostTag {
+            session_id: id.clone(),
+            created_ns: 1,
+            role: crate::hosts::HostRole::Agent { generation },
+        }
+        .encode()
+        .expect("a tag")
+    };
+    let current_name = crate::hosts::free_host_name(state.path()).expect("a name");
+    let (current, current_host) =
+        adopt_test_host_at(&current_name.socket_in(&hosts), tag(0), None).await;
+    let earlier_name = crate::hosts::free_host_name(state.path()).expect("a name");
+    let earlier_host = start_test_host_at(&earlier_name.socket_in(&hosts), tag(1), false);
+    let record = super::host_launch::LaunchHostRecord {
+        socket: earlier_name,
+        starter,
+    };
+    std::fs::write(
+        LaunchArtifacts::for_launch(state.path(), &id, 1).host(),
+        record.encode(),
+    )
+    .expect("write the launch record");
+    sup.store
+        .set_terminal_for_test(
+            &id,
+            crate::store::TerminalKind::Host,
+            Terminal::Host(current.clone()).recorded_pane(),
+        )
+        .await
+        .expect("make the row a host row");
+    let installed = {
+        let mut sessions = sup.sessions.lock().await;
+        let entry = sessions.get(&id).cloned().expect("the created session");
+        let installed = Arc::new(SessionEntry {
+            terminal: Some(Terminal::Host(current.clone())),
+            info: entry.info.clone(),
+            run: entry.run.clone(),
+            session: entry.session.clone(),
+            snapshot: entry.snapshot.clone(),
+            canonical_cwd: entry.canonical_cwd.clone(),
+            generation: entry.generation,
+            scope: entry.scope.clone(),
+        });
+        {
+            let mut activity = installed.run.activity.lock().unwrap();
+            activity.reading.state = reading;
+            activity.startup_provisional = false;
+        }
+        sessions.insert(id.clone(), Arc::clone(&installed));
+        installed
+    };
+    assert!(
+        program_runs(current_host.child_pid()) && program_runs(earlier_host.child_pid()),
+        "premise: both programs run"
+    );
+    HostAgentWithEarlierStart {
+        id,
+        entry: installed,
+        current_host,
+        earlier_host,
+        _current: current,
+    }
+}
+
+/// A Restart without consent of a working host agent is refused before
+/// anything is touched, also a program an earlier host start of the session
+/// left running.
+///
+/// Why: the sol review's second-round finding. Settling the session's
+/// earlier host starts roots their running programs into a sweep that also
+/// takes every process carrying the session's marker, so a sweep run before
+/// the consent check stopped the working agent the check exists to protect,
+/// and the refusal came after the damage. Spec: a session whose agent
+/// terminal is a stand-in host tagged as its generation-0 agent, with its
+/// program running and the session reading as working, and a second
+/// stand-in host tagged as its generation-1 agent, named by a launch record
+/// whose first stage has ended, with its program running: a Restart without
+/// consent fails as a conflict, and both programs still run.
+#[farhelm_testtrace::test(flavor = "multi_thread")]
+async fn a_restart_without_consent_touches_no_program_of_a_working_host_agent() {
+    let state = StateDir::new();
+    let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        .await
+        .expect("supervisor");
+    let mut ended = std::process::Command::new("true")
+        .spawn()
+        .expect("a process");
+    let starter = crate::hosts::HostProcess {
+        pid: ended.id(),
+        start: 0,
+    };
+    ended.wait().expect("reap it");
+    let session = host_agent_with_an_earlier_start(
+        &sup,
+        &state,
+        starter,
+        crate::agent_kind::screen_reader::ScreenState::Working,
+    )
+    .await;
+
+    let refused = sup
+        .restart_session(&session.id, false, None, None)
+        .await
+        .expect_err("a working agent is not restarted without consent");
+    assert_eq!(error_kind(&refused), ErrorKind::Conflict, "{refused:#}");
+    assert!(
+        program_runs(session.current_host.child_pid()),
+        "the working agent's program still runs"
+    );
+    assert!(
+        program_runs(session.earlier_host.child_pid()),
+        "the earlier start's program still runs"
+    );
+}
+
+/// A Restart without consent asks again after it settled the session's
+/// earlier host starts, and refuses an agent that started working while it
+/// waited.
+///
+/// Why: the reviews' third-round finding. The consent check moved before
+/// the settle so that a refusal touches nothing, but the settle can wait
+/// seconds on an earlier start's first stage, and the agent's input is not
+/// held by the lifecycle claim: an agent idle at the first reading and
+/// working by the stop would be stopped without the consent SPEC.md
+/// requires. Spec: the session of [`host_agent_with_an_earlier_start`],
+/// reading idle, whose earlier launch record names a first stage that
+/// still runs; while the settle waits for that first stage (its waiting
+/// seam), the session's reading turns to working and the first stage ends;
+/// the Restart without consent fails as a conflict, the seam fired, and
+/// both programs still run.
+#[farhelm_testtrace::test(flavor = "multi_thread")]
+async fn a_restart_asks_again_for_consent_after_settling_earlier_starts() {
+    use crate::agent_kind::screen_reader::ScreenState;
+    let entry: Arc<std::sync::OnceLock<Arc<SessionEntry>>> = Arc::default();
+    let first_stage = std::process::Command::new("sleep")
+        .arg("300")
+        .spawn()
+        .expect("a stand-in first stage");
+    let starter =
+        crate::hosts::HostProcess::current(first_stage.id()).expect("the first stage runs");
+    let first_stage = Arc::new(std::sync::Mutex::new(Some(first_stage)));
+    let _first_stage_ends = EndsChildOnDrop(Arc::clone(&first_stage));
+    let waited = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let mut seams = SupervisorSeams::default();
+    seams.faults.launch_starter_waiting = Some(Arc::new({
+        let entry = Arc::clone(&entry);
+        let first_stage = Arc::clone(&first_stage);
+        let waited = Arc::clone(&waited);
+        move || {
+            waited.store(true, std::sync::atomic::Ordering::SeqCst);
+            if let Some(entry) = entry.get() {
+                entry.run.activity.lock().unwrap().reading.state = ScreenState::Working;
+            }
+            end_child(&first_stage);
+        }
+    }));
+    let state = StateDir::new();
+    let sup = Supervisor::new_with_seams(
+        state.path(),
+        dummy_exe(),
+        SupervisorTimeouts::default(),
+        seams,
+    )
+    .await
+    .expect("supervisor");
+    let session = host_agent_with_an_earlier_start(&sup, &state, starter, ScreenState::Idle).await;
+    let _ = entry.set(Arc::clone(&session.entry));
+    assert_eq!(
+        crate::service::status::live_status(&session.entry),
+        SessionStatus::Idle,
+        "premise: the agent reads idle at the first check"
+    );
+
+    let refused = sup
+        .restart_session(&session.id, false, None, None)
+        .await
+        .expect_err("an agent working by the stop is not restarted without consent");
+    assert!(
+        waited.load(std::sync::atomic::Ordering::SeqCst),
+        "premise: the settle waited for the first stage"
+    );
+    assert_eq!(error_kind(&refused), ErrorKind::Conflict, "{refused:#}");
+    assert!(
+        program_runs(session.current_host.child_pid()),
+        "the working agent's program still runs"
+    );
+    assert!(
+        program_runs(session.earlier_host.child_pid()),
+        "the earlier start's program still runs"
+    );
+}
+
+/// Kill and reap the child in `slot`, if it is still there.
+fn end_child(slot: &std::sync::Mutex<Option<std::process::Child>>) {
+    if let Some(mut child) = slot.lock().unwrap_or_else(|e| e.into_inner()).take() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+}
+
+/// Ends the stand-in child in its slot when dropped, so a test that fails
+/// before its seam ended the child leaves no process behind.
+struct EndsChildOnDrop(Arc<std::sync::Mutex<Option<std::process::Child>>>);
+
+impl Drop for EndsChildOnDrop {
+    fn drop(&mut self) {
+        end_child(&self.0);
+    }
 }

@@ -1938,14 +1938,17 @@ impl StopFailure {
 /// query costs the code, not the annotation, and a later tick's observation
 /// can still enrich the record (the store's transitions are monotonic).
 ///
-/// `root_identity` is the `(pid, start time)` pair the caller captured at its
-/// own liveness check. It is passed in rather than re-derived here so the
-/// sweep validates the exact process the liveness decision authorized.
+/// `roots` are the `(pid, start time)` pairs the caller captured at its own
+/// liveness check: the agent's, and for a Restart also the programs that
+/// earlier host starts of the session left running
+/// (`Supervisor::settle_outstanding_launches`). They are passed in rather
+/// than re-derived here so the sweep validates the exact processes the
+/// liveness decision authorized.
 pub(crate) async fn stop_live_agent(
     sup: &Supervisor,
     session_id: &str,
     entry: &SessionEntry,
-    root_identity: Option<(u32, u64)>,
+    roots: impl IntoIterator<Item = (u32, u64)>,
 ) -> Result<(), StopFailure> {
     let runtime = crate::container::ContainerRuntime::for_session(
         &sup.state_dir,
@@ -1973,7 +1976,7 @@ pub(crate) async fn stop_live_agent(
     reap_process_tree(
         &sup.seams.scopes,
         ScopeUnits::recorded(entry.scope.clone()),
-        root_identity,
+        roots,
         session_id,
         &SweepTarget::AgentOnly,
         // Refuse, like Delete: a scope that cannot be confirmed collected may

@@ -41,6 +41,10 @@ pub(crate) use host_tabs::{
     HostTab, HostTabs, NewTab, find_host_tab, host_tab_cell, host_tabs_of, listed_host_tabs,
     reap_due_host_tabs,
 };
+/// Restarting a host agent into a new terminal host that keeps the old
+/// one's history (see its own docs).
+mod host_restart;
+pub use host_restart::{HostRestartFault, HostRestartStage};
 
 /// The tracing target every event from this module and its `vendor` children
 /// uses: this module's own path.
@@ -885,6 +889,8 @@ fault_hooks! {
     /// its signals, a process table that cannot be read), so a test can show
     /// what the reap does with such a tab. `None` in production.
     tab_host_end_fault: Arc<dyn Fn() -> Result<(), String> + Send + Sync>,
+    /// See [`HostRestartFault`]. `None` in production.
+    host_restart_fault: HostRestartFault,
 }
 
 /// The injectable seams a `Supervisor` is built with. All default to
@@ -1115,14 +1121,15 @@ pub struct SupervisorSeams {
 /// what it does then too.
 ///
 /// A new create and a new tab consult it; a retried create launches in the
-/// kind its launching row already records. A terminal never changes kind
-/// while it lives, and nothing here moves one: a Restart of a tmux session
-/// stays in tmux under either setting until Restart learns to move a session
-/// into a host (the plan's D-23), and a Restart of a host agent is refused
-/// until Restart can start a new host. Under `Host` every new tab is a host,
-/// beside a tmux agent too (a mixed session, whose old tmux tabs stay where
-/// they are); under `Tmux` a host agent's session cannot get a tab, since it
-/// has no tmux session to open one in.
+/// kind its launching row already records, and so does a Restart, whatever
+/// this says then. A terminal never changes kind while it lives, and nothing
+/// here moves one: a Restart of a tmux session stays in tmux under either
+/// setting until Restart learns to move a session into a host (the plan's
+/// D-23), and a Restart of a host agent starts a new host (`host_restart`).
+/// Under `Host` every new tab is a host, beside a tmux agent too (a mixed
+/// session, whose old tmux tabs stay where they are); under `Tmux` a host
+/// agent's session cannot get a tab, since it has no tmux session to open
+/// one in.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum NewTerminals {
     /// A pane in the supervisor's private tmux server, as every terminal was
@@ -2177,16 +2184,6 @@ struct SessionIdentity {
     session_id: String,
     tmux_name: String,
 }
-
-/// The refusal of a Restart whose agent runs in a terminal host.
-///
-/// A host runs one child for its whole life, so a restarted agent needs a
-/// new host, seeded with the old terminal's history; until the supervisor
-/// can start one, Restart of a host agent is refused before anything is
-/// stopped or changed. `Conflict`, as for the other Restart refusals that
-/// depend on the session's state rather than on the request.
-const HOST_RESTART_UNAVAILABLE: &str = "this session's agent runs in a terminal host, and this \
-     supervisor cannot restart an agent into a new terminal host yet; nothing was stopped";
 
 /// How long delivering one prompt into a host terminal may take, from the
 /// first part queued to the submit's acknowledgement: the same budget a tmux
@@ -3301,6 +3298,13 @@ fn same_launch_entry(
 /// unasked. No terminal instead puts the entry under the existing
 /// terminal-less guard (`terminal_less_launch_may_be_live`) until a reload
 /// rediscovers the pane.
+///
+/// A host agent never survives (`terminal_survives` is false for it), so
+/// the same rule holds: a definitive failure puts the previous host back as
+/// the session's terminal, and an ambiguous one (a replacement host that
+/// could not be confirmed ended) names none, since the previous host's
+/// exited child would otherwise be read as the new generation's exit; the
+/// hosts of both generations stay reachable by their launch records.
 fn republished_terminal(
     definitive: bool,
     terminal_survives: bool,
@@ -3654,6 +3658,34 @@ fn restart_with_refusal(stored: &SessionLaunch, replacement: &SessionLaunch) -> 
         );
     }
     None
+}
+
+/// Refuses a Restart that would stop an agent this supervisor reads as
+/// working, when the request carries no consent to stop it.
+///
+/// Consent is asked for only while the agent is working (SPEC.md, Lifecycle
+/// operations): an idle agent, one waiting for input, or one whose status is
+/// unknown restarts without it. Asking on every live agent taught people to
+/// click through the prompt. The reading is this supervisor's own, taken at
+/// the call, so a client whose cached status said idle while the agent
+/// started working is refused and can ask the user then. Harnesses with weak
+/// activity detection may restart a busy agent unasked; that is the accepted
+/// cost of not asking every time. `alive` is whether the agent's terminal
+/// still runs it: with nothing running there is nothing to protect.
+fn refuse_unconsented_stop(
+    alive: bool,
+    stop_if_running: bool,
+    entry: &SessionEntry,
+) -> Result<(), RequestError> {
+    if alive && !stop_if_running && super::status::live_status(entry) == SessionStatus::Running {
+        return Err(RequestError::new(
+            ErrorKind::Conflict,
+            "this session's agent is working; restarting it stops the agent and its whole \
+             process tree first, so confirm stopping it and send the restart again with that \
+             consent",
+        ));
+    }
+    Ok(())
 }
 
 /// The command a restart runs: the session's resume command filled with its
@@ -4135,6 +4167,9 @@ struct RelaunchPlan {
     launch_cwd: String,
     terminal_survives: bool,
     restart_with: Option<RestartWithBundle>,
+    /// A host agent's history seed for its new host, read before the
+    /// generation was claimed; `None` for tmux and a terminal-less host row.
+    seed: Option<host_restart::RestartSeed>,
 }
 
 /// Delete the `<state_dir>/snapshots/` directory an OLDER build left
@@ -4716,11 +4751,12 @@ pub(crate) fn notification_cell()
 ///   `serve`'s reload takes it, with no claim, from collecting the
 ///   terminals it keeps until its map replaces the old one. Never held
 ///   across a connection to a host.
-/// - `sessions` before `restarting_rows` and `last_listed`: the restart
-///   window swaps a session for its held row, and a listing reads the held
-///   rows, under `sessions`. Both are std mutexes held only for a map
-///   operation, never across an await and never together; `last_listed` is
-///   also written with nothing else held.
+/// - `sessions` before `restarting_rows`, `restarting_tabs` and
+///   `last_listed`: the restart window swaps a session for its held row and
+///   its tab cell, and a listing reads the held rows and an orderly stop the
+///   held tab cells, under `sessions`. All are std mutexes held only for a
+///   map operation, never across an await and never together;
+///   `last_listed` is also written with nothing else held.
 ///
 /// Known coarseness, acceptable in M1 and revisit at M2: the map-wide
 /// mutex serializes input for EVERY session behind any in-flight attach
@@ -4776,6 +4812,22 @@ pub struct Supervisor {
     /// listing sees each restarting session exactly once: in this map or in
     /// `sessions`, never in neither and never in both.
     pub(crate) restarting_rows: std::sync::Mutex<HashMap<String, SessionInfo>>,
+    /// The host tab cells of every session a Restart has taken off the
+    /// session map, by session id, for as long as it is off it: the same
+    /// window as [`Self::restarting_rows`], and written beside it.
+    ///
+    /// An orderly stop gathers the host terminals it checkpoints and closes
+    /// from the session map (`host_handover`, "Stopping"), and a session's
+    /// tab runtimes ride in its session cells, so without this the stop
+    /// would never see a restarting session's tabs, and the Restart's
+    /// republication would bring them back connected after the stop
+    /// returned. Only ever read or written while [`Self::sessions`] is
+    /// locked, which is also where the stop sets [`Self::stopping`]: a
+    /// restarting session's tabs are in exactly one of the two maps when
+    /// the stop gathers, and the republication after it finds the flag set
+    /// and stops them ([`Self::fence_republished_tabs`]). Holds the cells,
+    /// not copies, so a tab closed meanwhile is not gathered.
+    pub(crate) restarting_tabs: std::sync::Mutex<HashMap<String, HostTabs>>,
     /// Every row of the most recent `ListSessions` reply, by session id: the
     /// source of [`Self::restarting_rows`]. Replaced wholesale by each reply,
     /// so a deleted session's row lasts only until the next listing.
@@ -4928,8 +4980,9 @@ pub struct Supervisor {
     /// Today every create also holds directory admission
     /// (`working_copy_operations`) across its launch, so two creates never
     /// overlap here anyway; this lock is what keeps that true now that tab
-    /// opens (`host_tabs`) spawn hosts without it, and once Restart does. An `Arc` so the spawn's guard can be
-    /// owned by the value it returns.
+    /// opens (`host_tabs`) and a host agent's Restart (`host_restart`) spawn
+    /// hosts without it. An `Arc` so the spawn's guard can be owned by the
+    /// value it returns.
     pub(crate) host_scan: Arc<tokio::sync::RwLock<()>>,
     /// Held by what puts adopted hosts into the session map, apart from a
     /// create: `serve`'s reload, from collecting the terminals it keeps
@@ -6310,6 +6363,7 @@ impl Supervisor {
             host_identity,
             sessions: Mutex::new(sessions),
             restarting_rows: std::sync::Mutex::new(HashMap::new()),
+            restarting_tabs: std::sync::Mutex::new(HashMap::new()),
             last_listed: std::sync::Mutex::new(HashMap::new()),
             attachments: Mutex::new(HashMap::new()),
             helm_links: Mutex::new(Vec::new()),
@@ -6729,10 +6783,15 @@ impl Supervisor {
             gone: Arc::clone(&hosts.gone),
             faults: seams.faults.clone(),
         };
-        let mut row_hosts = host_handover::attribute_host_rows(state_dir, hosts, &rows).await;
+        // The spawn lock, kept for ending superseded hosts after the commit
+        // below (`host_handover::end_superseded_hosts`).
+        let no_spawns = hosts.no_spawns.clone();
+        let (mut row_hosts, earlier_hosts) =
+            host_handover::attribute_host_rows(state_dir, hosts, &rows).await;
         // And every session's tabs in terminal hosts, whatever its agent's
         // kind: a tmux session can have them too (`host_tabs`, "After a
-        // restart"). Each goes into its session's cell below.
+        // restart"). Each goes into its session's cell below. Tab hosts are
+        // never superseded: the rule looks at agent hosts only.
         let mut tab_hosts = host_tabs::adopt_tab_hosts(
             state_dir,
             tab_discovery,
@@ -7186,6 +7245,16 @@ impl Supervisor {
         } else {
             HashMap::new()
         };
+        // Agent hosts a Restart replaced, which a crash left running (the
+        // plan's D-25, `host_handover`'s "Superseded agent hosts"): judged on
+        // the rows as just committed, so a restart this pass confirmed by its
+        // new host's tag supersedes its old host now. Only a supervisor that
+        // may write ends anything; one that may not leaves them as they are.
+        if may_write {
+            host_handover::end_superseded_hosts(state_dir, store, earlier_hosts, no_spawns).await;
+        } else {
+            drop(earlier_hosts);
+        }
 
         let mut sessions = HashMap::new();
         // Sessions this pass can say REACHED tmux at some point; the
@@ -12513,41 +12582,6 @@ impl Supervisor {
                 .is_none_or(|selection| selection.container.is_none()),
             "Restart and Restart with are unavailable for containerized sessions; replace the session instead"
         );
-        // A host runs one child and cannot start another, so a host agent
-        // restarts into a new host seeded with the old one's history, which
-        // this supervisor cannot start yet. Refused here, with the other
-        // refusals, before the agent is stopped or anything else changes.
-        match &entry.terminal {
-            Some(Terminal::Host(_)) => {
-                return Err(RequestError::new(
-                    ErrorKind::Conflict,
-                    HOST_RESTART_UNAVAILABLE.to_string(),
-                )
-                .into());
-            }
-            Some(Terminal::Tmux(_)) => {}
-            // A session with no terminal is still a host agent's when its
-            // row says its agent was started in a host (a create kept as a
-            // launching record, say). Every relaunch target below is tmux's,
-            // and a relaunch keeps the row's kind, so relaunching it would
-            // leave a host row whose `pane` holds a tmux pane id, which a
-            // later reader would look for as a host's socket.
-            None => match self
-                .store
-                .session(session_id)
-                .await?
-                .map(|row| row.terminal_kind)
-            {
-                Some(TerminalKind::Host) => {
-                    return Err(RequestError::new(
-                        ErrorKind::Conflict,
-                        HOST_RESTART_UNAVAILABLE.to_string(),
-                    )
-                    .into());
-                }
-                Some(TerminalKind::Tmux) | None => {}
-            },
-        }
         if let Some(expected) = &expected_launch
             && *expected != entry.info.launch
         {
@@ -12733,6 +12767,33 @@ impl Supervisor {
             })?,
             (None, _) | (_, None) => None,
         };
+        // Asked first, before anything below touches a process, so that a
+        // refusal in the common case changes nothing; asked again after the
+        // settle, which can take seconds (see `refuse_unconsented_stop`).
+        refuse_unconsented_stop(alive_pane.is_some(), stop_if_running, &entry)?;
+        // A host start an earlier request (or supervisor) left behind can
+        // still start an agent nothing below would reach: settled here, under
+        // the claim and before anything is stopped, and any program found
+        // running in such a host is rooted into the stop (or the leftover
+        // reap) below, before the new launch (`host_restart`,
+        // "settle_outstanding_launches"). Refused when one cannot be settled,
+        // with nothing stopped. Only a host agent's launches start hosts, so
+        // a tmux session has none to settle.
+        let host_agent = match &entry.terminal {
+            Some(Terminal::Host(_)) => true,
+            Some(Terminal::Tmux(_)) => false,
+            None => self
+                .store
+                .session(session_id)
+                .await?
+                .is_some_and(|row| row.terminal_kind == TerminalKind::Host),
+        };
+        let outstanding = if host_agent {
+            self.settle_outstanding_launches(session_id, entry.terminal.as_ref())
+                .await?
+        } else {
+            Vec::new()
+        };
         // No pane to probe is not proof of no agent: an ambiguous create
         // (`terminal_less_launch_may_be_live`) may have left one running.
         // Restart no longer asks about it, though. Its status reads unknown,
@@ -12740,26 +12801,17 @@ impl Supervisor {
         // Lifecycle operations), so the else-branch below reaps whatever
         // carries this session's marker either way. Delete still treats
         // that row as possibly alive; see `still_alive_for_delete`.
+        // The settle above may have waited seconds on an earlier start's
+        // first stage or host, and the agent may have started working
+        // meanwhile (its input is not held by the lifecycle claim), so the
+        // reading the early check used is stale. Asked again right before
+        // the stop. A refusal here leaves what the settle did: first stages
+        // ended and records of starts that left nothing removed, which are
+        // strays either way; the programs it found running are not swept.
+        refuse_unconsented_stop(alive_pane.is_some(), stop_if_running, &entry)?;
         if alive_pane.is_some() {
-            // Consent is asked for only while the agent is working (SPEC.md,
-            // Lifecycle operations): an idle agent, one waiting for input,
-            // or one whose status is unknown restarts without it. Asking on
-            // every live agent taught people to click through the prompt.
-            // The reading is this supervisor's own, taken now, so a client
-            // whose cached status said idle while the agent started working
-            // is refused here and can ask the user then. Harnesses with weak
-            // activity detection may restart a busy agent unasked; that is
-            // the accepted cost of not asking every time.
-            if !stop_if_running && super::status::live_status(&entry) == SessionStatus::Running {
-                return Err(RequestError::new(
-                    ErrorKind::Conflict,
-                    "this session's agent is working; restarting it stops the agent and its \
-                     whole process tree first, so confirm stopping it and send the restart again \
-                     with that consent",
-                )
-                .into());
-            }
-            if let Err(failure) = stop_live_agent(self, session_id, &entry, alive_identity).await {
+            let roots = alive_identity.into_iter().chain(outstanding);
+            if let Err(failure) = stop_live_agent(self, session_id, &entry, roots).await {
                 match failure {
                     // The tree IS stopped and only the bookkeeping is
                     // behind — and the outcome it failed to write is one
@@ -12796,10 +12848,12 @@ impl Supervisor {
             // SPEC.md says restart touches the agent terminal only, so a
             // hunt for the PRIOR run's survivors must not reap a tab's
             // shell that has been happily running across the restart.
+            // The programs of earlier host starts the settle above found
+            // running are rooted into the same sweep.
             reap_process_tree(
                 &self.seams.scopes,
                 ScopeUnits::recorded(entry.scope.clone()),
-                None,
+                outstanding,
                 session_id,
                 &SweepTarget::AgentOnly,
                 // Refuse: relaunching while the prior scope may still hold
@@ -12809,6 +12863,15 @@ impl Supervisor {
             .await
             .context("reaping the prior run's leftover descendants before relaunching")?;
         }
+
+        // A host agent's new host starts from the old one's history, read
+        // here, before the generation is claimed, so that a crash or an
+        // orderly stop while it is read leaves the session as it was
+        // (`host_restart`, "restart_seed").
+        let seed = match entry.terminal.as_ref() {
+            Some(Terminal::Host(old)) => Some(self.restart_seed(session_id, old).await?),
+            Some(Terminal::Tmux(_)) | None => None,
+        };
 
         // Everything from here on is destructive, and runs on a task this
         // SUPERVISOR owns rather than the connection's. See
@@ -12879,6 +12942,7 @@ impl Supervisor {
                     launch_cwd,
                     terminal_survives,
                     restart_with,
+                    seed,
                 },
             )
             .await
@@ -12941,6 +13005,7 @@ impl Supervisor {
             launch_cwd,
             terminal_survives,
             restart_with,
+            seed,
         } = plan;
         let id = entry.info.id.clone();
         // Ordinary resumes keep capture; a named non-reporting start clears
@@ -13043,6 +13108,13 @@ impl Supervisor {
                 .lock()
                 .expect("restarting-rows mutex poisoned")
                 .insert(id.clone(), held);
+            // The session's host tabs keep running across the Restart, so
+            // an orderly stop in the window must still reach them
+            // (`Self::restarting_tabs`).
+            self.restarting_tabs
+                .lock()
+                .expect("restarting-tabs mutex poisoned")
+                .insert(id.clone(), entry.session.host_tabs.clone());
             sessions.remove(&id);
         }
         if let Some(gate) = self.seams.faults.restart_window_gate() {
@@ -13067,6 +13139,7 @@ impl Supervisor {
                     argv,
                     launch_cwd,
                     terminal_survives,
+                    seed,
                 )
                 .await
             }
@@ -13239,10 +13312,43 @@ impl Supervisor {
                     .lock()
                     .expect("restarting-rows mutex poisoned")
                     .remove(&id);
+                self.restarting_tabs
+                    .lock()
+                    .expect("restarting-tabs mutex poisoned")
+                    .remove(&id);
+                // Back on the map, or gone with its session: either way an
+                // orderly stop that began meanwhile has gathered the tabs
+                // from the held cell, and nothing closes a runtime brought
+                // back after it.
+                self.fence_republished_tabs(&entry.session.host_tabs);
+                // Restored only while the row exists, and, for a host
+                // runtime, only before an orderly stop gathers the host
+                // terminals it closes (`Self::publishable`, as for a
+                // successful relaunch): the runtime was off the map while the
+                // stop gathered, so nothing else would close it.
+                let terminal = if still_exists {
+                    self.publishable(republished_terminal(
+                        definitive,
+                        terminal_survives,
+                        entry.terminal.clone(),
+                    ))
+                } else {
+                    None
+                };
+                // A host runtime the restored entry does not hold (an
+                // ambiguous host restart's previous host, or one whose
+                // session is gone) is stopped, leaving its host running:
+                // nothing would end the runtime otherwise while a clone of the
+                // handle lives, and a runtime still connected would take the
+                // host back from whatever settles it next (Delete, by its
+                // launch record). `publishable` stops one it replaces itself.
+                if let Some(Terminal::Host(previous)) = &entry.terminal
+                    && !matches!(&terminal, Some(Terminal::Host(kept)) if kept == previous)
+                {
+                    previous.abort();
+                }
                 if still_exists {
                     let recovered_info = entry.info.clone();
-                    let terminal =
-                        republished_terminal(definitive, terminal_survives, entry.terminal.clone());
                     sessions.insert(
                         id.clone(),
                         relaunched_entry(
@@ -13274,7 +13380,9 @@ impl Supervisor {
     /// The launch itself, once the generation is claimed and the session is
     /// off the map: publish this launch's spec, hand it to tmux (into the
     /// surviving pane, or a fresh session), confirm it durably, and
-    /// republish the entry.
+    /// republish the entry. A host agent (a host terminal, or a host row with
+    /// none) goes to a new terminal host instead
+    /// ([`Supervisor::relaunch_into_host`]).
     ///
     /// `launch` and `snapshot` describe the selected execution, including
     /// Restart with's replacement before it is durably published. Reading
@@ -13309,6 +13417,7 @@ impl Supervisor {
         argv: Vec<String>,
         launch_cwd: String,
         terminal_survives: bool,
+        seed: Option<host_restart::RestartSeed>,
     ) -> Result<SessionInfo, RelaunchFailure> {
         let id = entry.info.id.clone();
         let terminal = entry.terminal.as_ref();
@@ -13325,19 +13434,26 @@ impl Supervisor {
         })?;
         // Every target below is tmux's: the surviving pane, a replacement
         // window beside the session's tabs, or a fresh tmux session. A host
-        // terminal is never one of them: its host runs one child. The
-        // restart's own admission refuses a host agent before anything is
-        // stopped (`HOST_RESTART_UNAVAILABLE`); this arm keeps that true for
-        // any other way here, definitively, so the previous run's record is
-        // restored as it was.
+        // agent restarts into a new host instead (its host runs one child),
+        // and a relaunch keeps the row's kind, so a host row goes there
+        // whether or not its session still holds the old host's runtime.
         let terminal = match terminal {
             Some(Terminal::Tmux(terminal)) => Some(terminal),
-            Some(Terminal::Host(_)) => {
-                return Err(RelaunchFailure::definitive(anyhow::anyhow!(
-                    "session {} runs in a terminal host, and this supervisor cannot restart an \
-                     agent into a new terminal host yet",
-                    truncate_for_error(&id)
-                )));
+            Some(Terminal::Host(old)) => {
+                return self
+                    .relaunch_into_host(
+                        entry,
+                        Some(old),
+                        launch,
+                        snapshot,
+                        generation,
+                        scope,
+                        argv,
+                        launch_cwd,
+                        tabs,
+                        seed,
+                    )
+                    .await;
             }
             None => None,
         };
@@ -13348,7 +13464,21 @@ impl Supervisor {
             // because the name is part of the session's durable identity
             // (create reservations reconcile against exactly this string)
             // and a relaunch is the same session, not a new one.
+            //
+            // A host row with no terminal (its host was found gone, or a
+            // create was kept as a launching record) restarts in a new,
+            // empty host: relaunching it in tmux would leave a host row
+            // whose `pane` holds a tmux pane id, which every later reader
+            // would look for as a host's socket.
             None => match self.store.session(&id).await {
+                Ok(Some(row)) if row.terminal_kind == TerminalKind::Host => {
+                    return self
+                        .relaunch_into_host(
+                            entry, None, launch, snapshot, generation, scope, argv, launch_cwd,
+                            tabs, None,
+                        )
+                        .await;
+                }
                 Ok(Some(row)) => row.tmux_name,
                 Ok(None) => {
                     return Err(RelaunchFailure::definitive(anyhow::anyhow!(
@@ -14051,45 +14181,58 @@ impl Supervisor {
             working_copy: None,
             notifications: Vec::new(),
         };
-        let published = relaunched_entry(
-            entry,
-            info.clone(),
-            Some(terminal),
-            generation,
-            scope,
-            outcome,
-            false,
-        );
-        // The new entry is not observable until map insertion below. Install
-        // only this spawn's boundary while late writers still hold the old
-        // generation's separate cell.
-        *published
-            .run
-            .launch_excerpt
-            .lock()
-            .expect("launch excerpt mutex poisoned") = launch_excerpt;
-        // Raised on the NEW entry, whose cell `relaunched_entry` has just
-        // minted `false` — this launch's own injection is the ONLY thing
-        // that may raise it, whatever the previous launch did. The
-        // conditional is therefore not a merge with an inherited value; it
-        // simply leaves an un-injected launch's cell alone. Raising it on
-        // `entry` instead would arm the tripwire on the abandoned
-        // generation, which nothing evaluates any more.
-        if hooked {
-            published
-                .run
-                .hooked
-                .store(true, std::sync::atomic::Ordering::Relaxed);
-        }
         {
             // The held row is dropped in the same lock scope the entry comes
             // back in (see the restart window in `Supervisor::relaunch`).
             let mut sessions = self.sessions.lock().await;
+            // A new host runtime is published only before an orderly stop
+            // gathers the host terminals it closes, as a create's is
+            // (`Self::publishable`); after, the confirmed launch is the next
+            // supervisor's to adopt by its tag.
+            let terminal = self.publishable(Some(terminal));
+            let published = relaunched_entry(
+                entry,
+                info.clone(),
+                terminal,
+                generation,
+                scope,
+                outcome,
+                false,
+            );
+            // The new entry is not observable until map insertion below.
+            // Install only this spawn's boundary while late writers still
+            // hold the old generation's separate cell.
+            *published
+                .run
+                .launch_excerpt
+                .lock()
+                .expect("launch excerpt mutex poisoned") = launch_excerpt;
+            // Raised on the NEW entry, whose cell `relaunched_entry` has just
+            // minted `false` — this launch's own injection is the ONLY thing
+            // that may raise it, whatever the previous launch did. The
+            // conditional is therefore not a merge with an inherited value;
+            // it simply leaves an un-injected launch's cell alone. Raising it
+            // on `entry` instead would arm the tripwire on the abandoned
+            // generation, which nothing evaluates any more.
+            if hooked {
+                published
+                    .run
+                    .hooked
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
+            }
             sessions.insert(entry.info.id.clone(), published);
             self.restarting_rows
                 .lock()
                 .expect("restarting-rows mutex poisoned")
                 .remove(&entry.info.id);
+            self.restarting_tabs
+                .lock()
+                .expect("restarting-tabs mutex poisoned")
+                .remove(&entry.info.id);
+            // The tabs come back with the session cells the new entry
+            // shares; after an orderly stop began they are stopped as the
+            // new agent runtime is (`Self::publishable`).
+            self.fence_republished_tabs(&entry.session.host_tabs);
         }
         // The relaunch's spawn may have recorded a notification while the
         // session was out of the map (a hook it could not add), which
@@ -40138,6 +40281,7 @@ exit 0
                     launch_cwd: "/tmp".into(),
                     terminal_survives: false,
                     restart_with: None,
+                    seed: None,
                 },
             )
             .await;
