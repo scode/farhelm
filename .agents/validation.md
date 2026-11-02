@@ -96,7 +96,7 @@ that its required systemd or SSH substrate ran.
   one test forks holds every descriptor of the test process until it execs, and on macOS, which cannot open a pty or
   socket close-on-exec in one call, it can keep another test's for good; that test then waits for an end of output or a
   close that never comes (`crates/terminal-host/TESTING.md`).
-- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'terminal host spawning, client and cleanup' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p farhelm-supervisor -p farhelm-teststate -p farhelm --lib --test terminal_host_spawn --test terminal_host_client -E 'test(/^hosts::/) | binary(terminal_host_spawn) | binary(terminal_host_client)'`
+- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'terminal host spawning, client and cleanup' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p farhelm-supervisor -p farhelm-teststate -p farhelm --lib --test terminal_host_spawn --test terminal_host_client --test terminal_host_stop -E 'test(/^hosts::/) | binary(terminal_host_spawn) | binary(terminal_host_client) | binary(terminal_host_stop)'`
   — the supervisor's side of terminal hosts and the harnesses' cleanup of them. The supervisor's `hosts::` unit tests
   cover the private socket directory, the socket path bound against macOS's 104-byte limit, the client tag's golden
   fixtures (`crates/farhelm-supervisor/tests/fixtures/host-tag/`, which must never change for a shipped version) and
@@ -108,19 +108,30 @@ that its required systemd or SSH substrate ran.
   dropped half-written frame, events before an ending frame, the event queue's bound and what `shutdown` reports, and
   the verified termination against stand-in processes (a stopped match ended by SIGTERM with SIGCONT, one that does not
   act on SIGTERM killed, another socket or start identity never signalled, an exited process already gone, the serving
-  process found by its command line); `farhelm-teststate`'s `hosts::` tests cover its blocking shutdown client against
-  stand-in listeners (refusals believed only over its stale window, an incomplete scan kept).
-  `crates/farhelm/tests/terminal_host_spawn.rs` starts real hosts from the built `farhelm` (never inside a test process,
-  since a host forks): readiness and no zombie, a failed start leaving nothing, no `FARHELM_*` marker or credential on
-  the host while its child has them, and the test-state cleanup for a normal run, a dead run, nested `remote/` state,
-  and a stopped host that keeps its run (a sweep, a `TestDir` drop and `close`) for a retry, plus, on Linux only, a
-  stopped host with a full backlog. `crates/farhelm/tests/terminal_host_client.rs` drives the supervisor's client
-  against real hosts the same way: take-over and the peer process, a stopped host timing out and then ended by the
-  verified SIGTERM, a stopped host with a full backlog found by its process rather than judged gone, a killed host's
+  process found by its command line, and under another spelling of its directory found by its socket's name but never
+  signalled), and the stop of a state directory's hosts against stand-ins (a missing directory with nothing to stop,
+  only sockets directly inside counted, a symlinked or unreadable socket directory failing, a listener that is not a
+  host never signalled, a `Goodbye` or a closed connection without an end unconfirmed, a signal candidate already gone
+  confirming nothing while the socket is still served, a stalled search and slow hosts cut off by the time budget, a
+  failed host task reported as failed, a report nobody reads given up on); `farhelm-teststate`'s `hosts::` tests cover
+  its blocking shutdown client against stand-in listeners (refusals believed only over its stale window, an incomplete
+  scan kept). `crates/farhelm/tests/terminal_host_spawn.rs` starts real hosts from the built `farhelm` (never inside a
+  test process, since a host forks): readiness and no zombie, a failed start leaving nothing, no `FARHELM_*` marker or
+  credential on the host while its child has them, and the test-state cleanup for a normal run, a dead run, nested
+  `remote/` state, and a stopped host that keeps its run (a sweep, a `TestDir` drop and `close`) for a retry, plus, on
+  Linux only, a stopped host with a full backlog. `crates/farhelm/tests/terminal_host_client.rs` drives the supervisor's
+  client against real hosts the same way: take-over and the peer process, a stopped host timing out and then ended by
+  the verified SIGTERM, a stopped host with a full backlog found by its process rather than judged gone, a killed host's
   socket judged gone, a read decoding the snapshot record, a gap and the exit, resizes and snapshot replies, input
-  acknowledged in order, Shift+Enter in one read, no resend after a takeover mid-input, and `Shutdown`. Under a minute,
-  part of the workspace nextest run; the focused macOS CI job runs it too, in the terminal host step. Portable to macOS
-  except where it reads `/proc`.
+  acknowledged in order, Shift+Enter in one read, no resend after a takeover mid-input, and `Shutdown`.
+  `crates/farhelm/tests/terminal_host_stop.rs` runs `farhelm internal stop-terminal-hosts` against real hosts, each
+  success checked against the host processes when the command returns: live hosts shut down with their programs hung up,
+  a killed host's socket file removed, a stopped host ended by the verified SIGTERM, a state directory given through a
+  symlink stopping its live host and leaving a stopped one unconfirmed and unsignalled, a `hosts` symlink whose target's
+  host is left running, a missing directory succeeding at once, a socket that cannot be confirmed failing the run while
+  a host beside it still stops, a `Goodbye` without an end failing it, a relative or empty state directory refused as a
+  usage error, and a full, unread stderr not holding the exit back. Under a minute, part of the workspace nextest run;
+  the focused macOS CI job runs it too, in the terminal host step. Portable to macOS except where it reads `/proc`.
 - Terminal host coverage, when the crate changes:
   `cargo +nightly llvm-cov -p terminal-host --branch --summary-only -- --test-threads=1`, with cargo-llvm-cov 0.9.1
   installed in your scratch directory (`cargo install --locked --root <scratch>/tools cargo-llvm-cov --version 0.9.1`,
@@ -302,8 +313,9 @@ that its required systemd or SSH substrate ran.
   uninstall stop's own tests are part of `uninstall::` above). After the uninstall acceptance, in a step of its own that
   runs whatever the steps before it did (so that a host failure cannot hide that gate), it runs the terminal host's
   whole test suite, `cargo nextest run -p terminal-host`, the host's entry test in the CLI,
-  `cargo nextest run -p farhelm --test terminal_host_entry`, and the supervisor's spawning, its client and the
-  test-state cleanup (the `terminal host spawning, client and cleanup` selection above).
+  `cargo nextest run -p farhelm --test terminal_host_entry`, and the supervisor's spawning, its client, the test-state
+  cleanup and the command that stops a state directory's hosts (the `terminal host spawning, client and cleanup`
+  selection above).
 - `scripts/test-provision-centos.sh` — the x86_64 Linux release gate boots a systemd CentOS Stream 9 container and makes
   the helm provision it over ssh, which is the only coverage of a helm installing onto a distribution other than its
   own. Needs docker and `musl-tools`: the payloads it pushes are the release's musl-static `farhelm` and static tmux,

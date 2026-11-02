@@ -22,8 +22,11 @@
 //! - [`process`]: the host as a process, pinned by pid and start identity
 //!   from the connection's peer credentials, and the verified SIGTERM for a
 //!   host the protocol cannot end.
+//! - [`stop`]: ending every host of a state directory with no supervisor
+//!   involved, behind `farhelm internal stop-terminal-hosts`, a command
+//!   line every later release keeps accepting.
 //!
-//! Nothing in the product calls this yet; the switch that creates new
+//! Nothing in the supervisor calls this yet; the switch that creates new
 //! terminals in hosts comes later, and so does discovering hosts after a
 //! restart. The module is public, rather than crate-private, because the
 //! tests that start real hosts live beside the real `farhelm` binary
@@ -36,6 +39,7 @@ pub mod dir;
 pub mod names;
 pub mod process;
 pub mod spawn;
+pub mod stop;
 pub mod tag;
 
 pub use client::{
@@ -47,4 +51,8 @@ pub use process::{HostProcess, TerminateError, Termination, terminate_verified};
 pub use dir::{HOSTS_DIR_NAME, HostsDirError, ensure_hosts_dir, hosts_dir};
 pub use names::HostName;
 pub use spawn::{ChildSpec, SpawnError, SpawnedHost, own_host_program, spawn_host};
+pub use stop::{
+    HostOutcome, HostReport, StopLimits, StopReport, Stopped, stop_terminal_hosts,
+    write_lines_within,
+};
 pub use tag::{HostRole, HostTag, TagError, UnreadableTag};
