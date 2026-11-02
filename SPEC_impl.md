@@ -4909,6 +4909,11 @@ confirmed gone is removed. Only then does uninstall take the supervisor locks; a
 usually a supervisor uninstall did not stop, with an `lsof` command that shows which. A refusal after the stop says the
 supervisor was stopped and that opening Farhelm starts it again.
 
+Uninstall ends no terminal. The private tmux server and any terminal hosts (see "Terminal host") outlive the supervisor
+by design, including the supervisor uninstall stops on macOS, and keep running with their sessions; stopping sessions
+first is the operator's prerequisite (SPEC.md, "Operator prerequisites and failure behavior"). The preview says so:
+sessions and their terminals keep running without the desktop app or the supervisor, and uninstall does not end them.
+
 The confirmation preview is flushed before mutation, and subsequent progress is buffered so an output-pipe failure does
 not interrupt removal midway. Filesystem and service failures retain the CLI, report concrete paths and operation
 errors, and ask the user to resolve the failure and retry. Tests inject failures at deletion boundaries and run the
@@ -5644,26 +5649,41 @@ never installs a unit on the helm's own machine.
 UNINSTALL is the third operation on the same machinery: `POST /api/hosts/{id}/uninstall` plans without a body and
 consumes the plan's id from a body, like update's route, but the user sees and confirms the same numbered plan as setup,
 with the kept-data note outside the action rail. Its actions disable the supervisor unit, remove the unit file, reload
-the user manager, stop the unit, remove the lib directory, and finally forget the host. Removing the file before
-stopping keeps the supervisor answering until nothing can start it again: up to the unit file's removal the host stays
-connected and the ordinary checks apply, and after it a retry may proceed without a connection. Reloading after the file
-is gone makes systemd forget the unit's `KillMode=process` and use its default `control-group`: the stop ends the
-supervisor and the private tmux server, including any ended sessions' retained panes (this default behavior was verified
-on a real user manager when uninstall was built). The same stop action then ends any server still reachable at this
-host's private state-directory socket. That covers an inactive supervisor whose process-only policy left tmux alive
-before systemd forgot its removed unit. The tmux client is the accepted host executable when available, otherwise the
-private lib-directory executable; both it and the socket are frozen in the plan before confirmation. An absent server
-skips this cleanup, including a retry after the lib directory was removed; any other tmux failure leaves the host listed
-so uninstall can be retried. The socket cleanup reaches the named server even outside the unit's control group; it does
-not scan for other processes or servers. The disable command may reload implicitly; the explicit reload after file
-removal ensures the same stop behavior on every retry, including one whose preceding stop failed. Only the removals
-still outstanding are planned (the unit file's two steps when it exists, the lib directory's when it exists), and each
-host command treats work already done as a skip, so a failed run continues from wherever it stopped with no
-process-local memory of how far it got, which would not survive a helm restart. Every path comes from the plan, frozen
-from the same layout and overrides an install uses, never re-derived at run time. A retry without a connection also
-needs the unit no longer running (`inactive` or `failed` in the uninstall inspection): the probe reads a custom command
-name that stopped resolving as no supervisor answering, so its evidence alone would let a retry stop a supervisor whose
-sessions were never checked.
+the user manager, stop the unit with its terminal hosts and tmux server, remove the lib directory, and finally forget
+the host. Removing the file before stopping keeps the supervisor answering until nothing can start it again: up to the
+unit file's removal the host stays connected and the ordinary checks apply, and after it a retry may proceed without a
+connection. Reloading after the file is gone makes systemd forget the unit's `KillMode=process` and use its default
+`control-group`: the stop ends the supervisor and the private tmux server, including any ended sessions' retained panes
+(this default behavior was verified on a real user manager when uninstall was built), and the terminal hosts in the
+unit's group (see "Terminal host"). The same stop action then ends the terminal hosts of the host's state directory, and
+after them any server still reachable at this host's private state-directory socket. That covers an inactive supervisor
+whose process-only policy left hosts or tmux alive before systemd forgot its removed unit. The hosts are ended by the
+installed `farhelm internal stop-terminal-hosts --state-dir <state dir>`, run with the binary the plan names, which is
+still in place because the lib directory goes after this step. The command runs whenever the state directory's `hosts`
+exists, whatever it holds (the command's contract has callers decide by that, and judges what is there) and whatever
+kind of entry it is (the command refuses one that is not a real directory); only a missing `hosts`, an install from
+before terminal hosts, skips it. Only its exit status 0 counts; any other status, including the 2 of a `farhelm` from
+before the command, fails the step with the command's lines and leaves the host listed for a retry. After a 0 the step
+removes the socket files left in `hosts` (the command only notes one it could not remove) and then `hosts` itself, so
+that the retry after the lib directory's removal, which has no `farhelm` to run, finds no `hosts` and skips. Anything
+else in `hosts` (a file, a symlink, a directory), or a removal or listing that fails, fails the step while the `farhelm`
+is still there, naming what is left. A `hosts` whose `farhelm` is already gone, which only a removal from outside
+uninstall leaves, fails the step with how to end the hosts by hand. This helm allows the command 30 seconds, plus room
+for starting it, on top of the bound of the step's other commands; that figure is this build's own bound for the
+command, not a promise every release's `farhelm` keeps. The command accepts only an absolute state directory, so
+planning refuses a host whose state directory is not one. The tmux client is the accepted host executable when
+available, otherwise the private lib-directory executable; the `farhelm` binary, the state directory, the client and the
+socket are all frozen in the plan before confirmation. An absent server skips the tmux cleanup, including a retry after
+the lib directory was removed; any other tmux failure leaves the host listed so uninstall can be retried. The socket
+cleanup reaches the named server even outside the unit's control group; it does not scan for other processes or servers.
+The disable command may reload implicitly; the explicit reload after file removal ensures the same stop behavior on
+every retry, including one whose preceding stop failed. Only the removals still outstanding are planned (the unit file's
+two steps when it exists, the lib directory's when it exists), and each host command treats work already done as a skip,
+so a failed run continues from wherever it stopped with no process-local memory of how far it got, which would not
+survive a helm restart. Every path comes from the plan, frozen from the same layout and overrides an install uses, never
+re-derived at run time. A retry without a connection also needs the unit no longer running (`inactive` or `failed` in
+the uninstall inspection): the probe reads a custom command name that stopped resolving as no supervisor answering, so
+its evidence alone would let a retry stop a supervisor whose sessions were never checked.
 
 The checks run at planning and again under the run's lock at confirmation, by planning again and requiring the same
 plan, so one piece of code decides every fact the plan rests on. A connected host needs a fresh session list (a live

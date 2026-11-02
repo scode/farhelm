@@ -16,6 +16,24 @@ use tracing::warn;
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(15);
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
+/// The uninstall stop step's bound: [`COMMAND_TIMEOUT`] for its systemd,
+/// tmux and cleanup commands, plus the time this build's
+/// `farhelm internal stop-terminal-hosts` takes at most between them, and ten
+/// seconds for starting that program and its runtime on a loaded host. The
+/// remote `farhelm` may come from another release, whose bound is not part of
+/// the command's stable contract; the ten seconds are also the margin for
+/// that.
+const STOP_SUPERVISOR_TIMEOUT: Duration = COMMAND_TIMEOUT
+    .saturating_add(farhelm_supervisor::hosts::stop::COMMAND_BUDGET)
+    .saturating_add(Duration::from_secs(10));
+/// `case` patterns, for a remote shell, matching exactly the diagnostics the
+/// supported `stat` implementations (GNU, uutils, BusyBox) print in the C
+/// locale for a path that does not exist. Only these excuse treating a lookup
+/// as absence: every other failure, permission and I/O errors included, says
+/// nothing about whether the path is there.
+const STAT_MISSING_PATH_PATTERNS: &str = "'stat: cannot stat'*': No such file or directory'|\
+     'stat: cannot stat'*': No such file or directory (os error 2)'|\
+     'stat: can'\"'\"'t stat'*': No such file or directory'";
 // A transfer has no observable byte progress until the remote temporary exists.
 // Once it does, only verified growth of that file renews the idle deadline.
 const TRANSFER_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
@@ -364,14 +382,18 @@ pub(super) trait ProvisioningBackend: Send + Sync {
         target: &ProvisioningTarget,
         destination: &Path,
     ) -> Result<ActionOutcome, BackendFailure>;
-    /// Stop the supervisor, then end its private tmux server at the frozen
-    /// socket. Planning removes and reloads the unit first; an inactive unit
-    /// skips only the systemd command, since its private server may survive.
-    /// Failure to end a reachable server fails the step and permits retry.
+    /// Stop the supervisor, then end the terminal hosts of `state_dir` with
+    /// the installed `farhelm_program`, then its private tmux server at the
+    /// frozen socket. Planning removes and reloads the unit first; an
+    /// inactive unit skips only the systemd command, since its hosts and its
+    /// private server may survive. Failure to confirm every host stopped, or
+    /// to end a reachable server, fails the step and permits retry.
     async fn stop(
         &self,
         target: &ProvisioningTarget,
         unit: &str,
+        farhelm_program: &Path,
+        state_dir: &Path,
         tmux_program: &Path,
         tmux_socket: &Path,
     ) -> Result<ActionOutcome, BackendFailure>;
@@ -705,7 +727,20 @@ impl SystemBackend {
         script: &str,
         context: &str,
     ) -> Result<CommandResult, BackendFailure> {
-        let output = self.run_shell(target, script, COMMAND_TIMEOUT).await?;
+        self.require_shell_within(target, script, context, COMMAND_TIMEOUT)
+            .await
+    }
+
+    /// [`Self::require_shell`] for a script that runs a command with its own,
+    /// longer bound than [`COMMAND_TIMEOUT`].
+    async fn require_shell_within(
+        &self,
+        target: &ProvisioningTarget,
+        script: &str,
+        context: &str,
+        timeout: Duration,
+    ) -> Result<CommandResult, BackendFailure> {
+        let output = self.run_shell(target, script, timeout).await?;
         if output.code == Some(0) {
             Ok(output)
         } else {
@@ -2675,44 +2710,104 @@ resolve() {
         })
     }
 
-    /// End both the service and any server that outlived its process-only
-    /// policy. A retry may find the unit forgotten but its tmux still alive,
-    /// or both gone and the private client binary already removed.
+    /// End the service, the state directory's terminal hosts and any tmux
+    /// server that outlived its process-only policy. A retry may find the
+    /// unit forgotten but its hosts or its tmux still alive, or all of them
+    /// gone and the lib directory, with the installed `farhelm` and any
+    /// private tmux client in it, already removed.
     async fn stop(
         &self,
         target: &ProvisioningTarget,
         unit: &str,
+        farhelm_program: &Path,
+        state_dir: &Path,
         tmux_program: &Path,
         tmux_socket: &Path,
     ) -> Result<ActionOutcome, BackendFailure> {
-        require_remote(target, "stopping the supervisor and private tmux server")?;
-        // Stop the supervisor before ending its tmux server directly. The
-        // daemon-reload before this step has already dropped the removed
-        // unit's process-only stop policy, so this stop signals the
-        // supervisor and the private tmux server in its group together; the
-        // orderly terminal shutdown no longer runs ahead of tmux here. The
-        // kill-server below ends a private server that outlived the
-        // supervisor, such as one already stopped under the old policy.
+        const CONTEXT: &str = "stopping the supervisor, its terminal hosts and private tmux server";
+        require_remote(target, CONTEXT)?;
+        // Stop the supervisor before ending its hosts and its tmux server
+        // directly. The daemon-reload before this step has already dropped
+        // the removed unit's process-only stop policy, so this stop signals
+        // the supervisor, its terminal hosts and the private tmux server in
+        // its group together; the orderly terminal shutdown no longer runs
+        // ahead of tmux here. The steps after it end what outlived the
+        // supervisor, such as hosts and a server left running by a stop
+        // under the old policy.
+        //
+        // Terminal hosts come first of those, through the installed
+        // farhelm's `internal stop-terminal-hosts`, whose command line and
+        // the meaning of its exit status 0 every release keeps (SPEC_impl.md,
+        // "Terminal host"). That 0 is the only proof that every host is
+        // stopped, so any other status, 2 included (a farhelm from before the
+        // command), fails the step and leaves the host listed for a retry.
+        // The command runs whenever the state directory has a `hosts`, of any
+        // kind and whatever it holds: the command's contract has callers
+        // decide by whether `hosts` exists and leaves judging its contents to
+        // the command. Only a missing `hosts` (an install from before
+        // terminal hosts, or one that never started any) skips it.
+        //
+        // That makes the retry after the lib removal, which deletes this
+        // farhelm, depend on `hosts` being gone. So once the command has
+        // confirmed every host stopped, the step removes what the hosts left
+        // (socket files the command could not remove, which it reports only
+        // as a note) and then `hosts` itself, and fails, while the farhelm is
+        // still there to run again, if anything else is in it or the removal
+        // fails. A `hosts` whose farhelm is already gone can only follow a
+        // removal from outside; it fails the step with a way to end the hosts
+        // by hand, never reading as success. The state directory is absolute,
+        // as the command requires: planning refuses any other.
+        //
         // Only exact socket-bound absence diagnostics excuse a failed tmux
         // command; permission, executable and protocol failures retain the host.
         // stat reports the lookup failure instead of collapsing all errors
         // into false, as shell existence predicates do. It receives one path
         // in the C locale: only the known GNU, uutils and BusyBox missing-path
-        // diagnostics excuse bypassing a client that may already have been
-        // removed on a lib-gone retry. Other lookup errors retain the host.
+        // diagnostics excuse bypassing a client (or a farhelm) that may already
+        // have been removed on a lib-gone retry. Other lookup errors retain the host.
         // tmux leaves its socket behind on exit. Remove it while the frozen
         // client is still available, so a retry after lib removal can prove
         // absence without trying to execute that now-missing client.
         let script = format!(
-            "export LC_ALL=C; socket={socket}; tmux={tmux}; changed=no; \
+            "export LC_ALL=C; socket={socket}; tmux={tmux}; farhelm={farhelm}; \
+             data={data}; hosts=$data/{hosts}; changed=no; \
              state=$(systemctl --user show -p ActiveState --value -- {unit}) || exit 1; \
              case \"$state\" in inactive|failed) ;; \
                *) systemctl --user stop -- {unit} || exit 1; changed=yes ;; esac; \
+             if inspection=$(stat -c '%F' -- \"$hosts\" 2>&1); then \
+               if program=$(stat -L -c '%F' -- \"$farhelm\" 2>&1); then :; else status=$?; \
+                 case \"$program\" in \
+                   {missing}) printf '%s\\n' \"terminal hosts may still be running: $hosts exists, \
+             but $farhelm, which would stop them, is gone; end every process whose command line \
+             names a socket in $hosts, remove $hosts, and run uninstall again\" >&2; exit 1 ;; \
+                   *) printf '%s\\n' \"$program\" >&2; exit \"$status\" ;; esac; fi; \
+               if error=$(\"$farhelm\" internal stop-terminal-hosts --state-dir \"$data\" 2>&1); \
+               then changed=yes; else status=$?; \
+                 if [ -n \"$error\" ]; then printf '%s\\n' \"$error\" >&2; fi; \
+                 printf '%s\\n' \"$farhelm internal stop-terminal-hosts exited with status $status; \
+             terminal hosts in $hosts may still be running\" >&2; \
+                 exit \"$status\"; fi; \
+               others=$(find \"$hosts\" -mindepth 1 -maxdepth 1 ! -type s -print 2>&1) || {{ \
+                 printf '%s\\n' \"$others\" \"cannot list $hosts to remove what its stopped terminal \
+             hosts left\" >&2; exit 1; }}; \
+               if [ -n \"$others\" ]; then \
+                 printf '%s\\n' \"the terminal hosts stopped, but $hosts holds entries that are not \
+             terminal host sockets, which uninstall does not remove; remove them and run uninstall \
+             again:\" \"$others\" >&2; exit 1; fi; \
+               removal=$(find \"$hosts\" -mindepth 1 -maxdepth 1 -type s \
+             -exec rm -f -- {{}} \\; 2>&1); \
+               if error=$(rmdir -- \"$hosts\" 2>&1); then :; else \
+                 left=$(ls -A -- \"$hosts\" 2>&1); \
+                 for line in \"$removal\" \"$error\"; do \
+                   if [ -n \"$line\" ]; then printf '%s\\n' \"$line\" >&2; fi; done; \
+                 printf '%s\\n' \"the terminal hosts stopped, but $hosts could not be removed; \
+             left in it:\" \"$left\" >&2; exit 1; fi; \
+             else status=$?; case \"$inspection\" in \
+                 {missing}) ;; \
+                 *) printf '%s\\n' \"$inspection\" >&2; exit \"$status\" ;; esac; fi; \
              if inspection=$(stat -L -c '%F' -- \"$socket\" 2>&1); then :; \
                else status=$?; case \"$inspection\" in \
-                 'stat: cannot stat'*': No such file or directory'|\
-                 'stat: cannot stat'*': No such file or directory (os error 2)'|\
-                 'stat: can'\"'\"'t stat'*': No such file or directory') \
+                 {missing}) \
                    if [ \"$changed\" = no ]; then printf absent; fi; exit 0 ;; \
                  *) printf '%s\\n' \"$inspection\" >&2; exit \"$status\" ;; esac; fi; \
              if error=$(\"$tmux\" -S \"$socket\" kill-server 2>&1); then :; else status=$?; \
@@ -2722,19 +2817,20 @@ resolve() {
                *) printf '%s\\n' \"$error\" >&2; exit \"$status\" ;; esac; fi; \
              rm -f -- \"$socket\" || exit 1",
             unit = crate::ssh::shell_quote(unit),
+            farhelm = shell_path(farhelm_program)?,
+            data = shell_path(state_dir)?,
+            hosts = farhelm_supervisor::hosts::HOSTS_DIR_NAME,
+            missing = STAT_MISSING_PATH_PATTERNS,
             tmux = shell_path(tmux_program)?,
             socket = shell_path(tmux_socket)?,
         );
         let output = self
-            .require_shell(
-                target,
-                &script,
-                "stopping the supervisor and private tmux server",
-            )
+            .require_shell_within(target, &script, CONTEXT, STOP_SUPERVISOR_TIMEOUT)
             .await?;
         Ok(if output.stdout == b"absent" {
             ActionOutcome::Skipped(
-                "the supervisor and private tmux server were already gone".to_string(),
+                "the supervisor, its terminal hosts and private tmux server were already gone"
+                    .to_string(),
             )
         } else {
             ActionOutcome::Completed

@@ -412,6 +412,8 @@ impl ProvisioningBackend for E2eProvisioningBackend {
         &self,
         target: &ProvisioningTarget,
         _unit: &str,
+        _farhelm_program: &Path,
+        _state_dir: &Path,
         _tmux_program: &Path,
         _tmux_socket: &Path,
     ) -> Result<ActionOutcome, BackendFailure> {

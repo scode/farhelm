@@ -111,7 +111,7 @@ fn run_with_inputs(
         ownership::OwnershipPlan::App(_) => None,
     };
     let mut preview = String::from(
-        "Stop local sessions and additional terminals, quit Farhelm Desktop, and stop manually started Farhelm processes before continuing. Uninstall does not check whether sessions or manually started processes are running.\n\n",
+        "Stop local sessions and additional terminals, quit Farhelm Desktop, and stop manually started Farhelm processes before continuing. Sessions and their terminals keep running without Farhelm Desktop or the supervisor, and uninstall does not end them. Uninstall does not check whether sessions or manually started processes are running.\n\n",
     );
     if let Some(services) = &services {
         for service in services.selected() {

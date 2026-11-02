@@ -176,11 +176,18 @@ pub(crate) enum ProvisioningAction {
         destination: PathBuf,
     },
     /// Stop the supervisor and its unit's remaining processes, including
-    /// the private tmux server. The exact socket cleanup also reaches a server
-    /// left behind after systemd has forgotten an inactive unit. Both client
-    /// and socket are frozen before confirmation, like the removal paths.
+    /// the private tmux server, then end the state directory's terminal
+    /// hosts and the server at the private socket. Those two explicit steps
+    /// reach what outlived the unit: hosts, and a server left behind after
+    /// systemd has forgotten an inactive unit. Every path is frozen before
+    /// confirmation, like the removal paths: the `farhelm` that stops the
+    /// hosts (the plan's binary, still in place because the lib directory
+    /// goes after this step), the state directory whose hosts it ends, and
+    /// the tmux client and socket.
     StopSupervisor {
         unit: String,
+        farhelm_program: PathBuf,
+        state_dir: PathBuf,
         tmux_program: PathBuf,
         tmux_socket: PathBuf,
     },
@@ -304,9 +311,11 @@ impl ProvisioningAction {
             Self::RemoveUnit { destination, .. } => {
                 ("Remove the systemd user unit", vec![destination], None)
             }
-            Self::StopSupervisor { .. } => {
-                ("Stop the supervisor and its tmux server", vec![], None)
-            }
+            Self::StopSupervisor { .. } => (
+                "Stop the supervisor, its terminal hosts and its tmux server",
+                vec![],
+                None,
+            ),
             Self::RemoveDirectory { path } => (
                 "Remove the install directory",
                 vec![path],
@@ -784,9 +793,10 @@ impl PlanLayout {
     /// nor by the host's file-identity check of the folders above it, so
     /// data is never removed with it. And no mount point may lie at or
     /// below it, so `rm -rf` cannot reach into another folder. The kept
-    /// state path must also pass the remote command-line text check, so a
-    /// path the stop step could not name refuses here, before confirmation,
-    /// instead of failing the run after the unit is gone.
+    /// state path must also pass the remote command-line text check and be
+    /// absolute, so a path the stop step could not name (to the shell, or to
+    /// the terminal-host stop) refuses here, before confirmation, instead of
+    /// failing the run after the unit is gone.
     pub(super) fn plan_uninstall(
         &self,
         target: ProvisioningTarget,
@@ -832,6 +842,21 @@ impl PlanLayout {
                 "the host's Farhelm data directory has a path uninstall cannot pass to the host \
                  unchanged ({error:#}); uninstall keeps that data and names it in its steps and its \
                  notice, so it does not run on this layout"
+            )));
+        }
+        // The stop step also names the directory to
+        // `farhelm internal stop-terminal-hosts`, which takes only an
+        // absolute path. Registration refuses a relative one, and the host
+        // reports its default from an absolute `XDG_STATE_HOME` or from
+        // `HOME`, so this refuses only an unusual host environment (a
+        // relative `HOME`), and does so before confirmation instead of
+        // failing the run after the unit is gone.
+        if !facts.state_dir.named.is_absolute() {
+            return Err(refused(format!(
+                "the host's Farhelm data directory {} is not an absolute path, which uninstall \
+                 needs to stop the terminals kept there; uninstall keeps that data, so it does \
+                 not run on this layout",
+                facts.state_dir.named.display()
             )));
         }
         // The same home normalization makes an aliased state path inside
@@ -901,9 +926,16 @@ impl PlanLayout {
                 destination: paths.unit_path.clone(),
             });
         }
+        let farhelm_path = facts
+            .farhelm
+            .as_ref()
+            .map(|binary| binary.named.clone())
+            .unwrap_or_else(|| paths.lib_dir.join("farhelm"));
         actions.push(ProvisioningAction::DaemonReload);
         actions.push(ProvisioningAction::StopSupervisor {
             unit: self.unit_name.clone(),
+            farhelm_program: farhelm_path.clone(),
+            state_dir: facts.state_dir.named.clone(),
             tmux_program: reach
                 .host_tmux
                 .clone()
@@ -919,11 +951,7 @@ impl PlanLayout {
         Ok(ProvisioningPlan {
             operation: ProvisioningOperation::Uninstall,
             target,
-            farhelm_path: facts
-                .farhelm
-                .as_ref()
-                .map(|binary| binary.named.clone())
-                .unwrap_or_else(|| paths.lib_dir.join("farhelm")),
+            farhelm_path,
             state_dir: facts.state_dir.named.clone(),
             actions,
             host_home: reach.home.clone(),

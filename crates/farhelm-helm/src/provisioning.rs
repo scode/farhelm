@@ -801,6 +801,8 @@ mod tests {
             &self,
             _target: &ProvisioningTarget,
             _unit: &str,
+            _farhelm_program: &Path,
+            _state_dir: &Path,
             _tmux_program: &Path,
             _tmux_socket: &Path,
         ) -> Result<ActionOutcome, BackendFailure> {
@@ -4863,10 +4865,12 @@ mod tests {
     ///
     /// Spec: a connected host with no running sessions plans, in order,
     /// disabling the unit, removing its unit file, reloading the user manager
-    /// so the stop ends the private tmux server too, stopping the unit and
-    /// any server retained at the private socket, removing the lib directory,
-    /// and forgetting the host. Cleanup freezes the accepted host tmux client,
-    /// or the private fallback when none is available, and the host's socket. The confirmation names the unit, the unit file
+    /// so the stop ends the private tmux server too, stopping the unit, the
+    /// state directory's terminal hosts and any server retained at the
+    /// private socket, removing the lib directory, and forgetting the host.
+    /// Cleanup freezes the dialed `farhelm` and the state directory for the
+    /// hosts, and the accepted host tmux client, or the private fallback when
+    /// none is available, and the host's socket. The confirmation names the unit, the unit file
     /// and the lib directory by their concrete paths, says it is an
     /// uninstall from that destination, and ends by naming the kept state
     /// directory. The plan and progress entries also name the same ordered
@@ -4895,10 +4899,15 @@ mod tests {
         assert!(
             matches!(
                 &preview.plan.actions[3],
-                ProvisioningAction::StopSupervisor { tmux_program, tmux_socket, .. }
-                    if tmux_program == Path::new("/usr/bin/tmux") && tmux_socket == &state.join("tmux.sock")
+                ProvisioningAction::StopSupervisor {
+                    farhelm_program, state_dir, tmux_program, tmux_socket, ..
+                } if farhelm_program == &lib.join("farhelm")
+                    && state_dir == &state
+                    && tmux_program == Path::new("/usr/bin/tmux")
+                    && tmux_socket == &state.join("tmux.sock")
             ),
-            "the cleanup uses the accepted client and this host's frozen state socket"
+            "the cleanup uses the dialed farhelm for the hosts of this host's frozen state \
+             directory, and the accepted client and the frozen state socket for tmux"
         );
         let ProvisioningAction::RemoveUnit {
             destination: unit, ..
@@ -4915,7 +4924,7 @@ mod tests {
                     "- Remove the systemd user unit\n",
                     "  {}\n",
                     "- Reload systemd user units\n",
-                    "- Stop the supervisor and its tmux server\n",
+                    "- Stop the supervisor, its terminal hosts and its tmux server\n",
                     "- Remove the install directory\n",
                     "  {}\n",
                     "  The Farhelm binary and any private tmux in it are removed.\n",
@@ -5269,6 +5278,47 @@ mod tests {
         *backend.default_state_dir.lock().unwrap() = ordinary_default.clone();
         let ordinary = service.plan_uninstall(host).await.unwrap();
         assert_eq!(ordinary.plan.state_dir, ordinary_default);
+    }
+
+    /// Why this matters: the stop step ends the terminal hosts kept in the
+    /// state directory with `farhelm internal stop-terminal-hosts`, which
+    /// refuses a relative `--state-dir`. A relative path would plan, be
+    /// confirmed, and fail the run after the unit was already disabled and
+    /// removed.
+    ///
+    /// Spec: with no registered or overridden state path, a host-reported
+    /// default that is relative refuses planning with a 409 naming the path
+    /// and saying it is not absolute, and nothing beyond the inspection runs
+    /// on the host.
+    #[farhelm_testtrace::test]
+    async fn uninstall_refuses_a_kept_state_path_that_is_not_absolute() {
+        let (harness, host, root, backend, _) = uninstall_fixture(Vec::new(), false).await;
+        let mut layout = layout(root.path());
+        layout.override_state_dir = None;
+        let service = ProvisioningService::injected(
+            harness.store.clone(),
+            Arc::clone(&harness.manager),
+            backend.clone(),
+            Arc::new(FixedPayloads(root.path().join("payload"))),
+            layout,
+            PathBuf::from("/test/farhelm"),
+        );
+        backend
+            .repeat_probe
+            .lock()
+            .unwrap()
+            .as_mut()
+            .unwrap()
+            .dial_state_dir = None;
+        *backend.default_state_dir.lock().unwrap() = PathBuf::from("relative/state");
+
+        let refusal = refusal_text(service.plan_uninstall(host).await.unwrap_err());
+        assert!(
+            refusal.contains("data directory relative/state"),
+            "{refusal}"
+        );
+        assert!(refusal.contains("not an absolute path"), "{refusal}");
+        assert_eq!(*backend.operations.lock().unwrap(), ["inspect-uninstall"]);
     }
 
     /// Why this matters: with Farhelm's lib directory replaced by a
@@ -7339,13 +7389,17 @@ mod tests {
         );
     }
 
-    /// A removed private socket must let uninstall finish without a tmux
-    /// client, regardless of the host's supported stat implementation.
-    /// Permission and I/O diagnostics must still retain the host: a failed
-    /// lookup does not establish that its server is gone. Execute the real
-    /// stop script with controlled stat output and a deliberately absent
-    /// client, so neither a real socket nor an installed tmux can hide a
-    /// mistaken refusal or an overly broad absence match.
+    /// A removed private socket, and a state directory with no terminal
+    /// hosts, must let uninstall finish without a tmux client or a `farhelm`,
+    /// regardless of the host's supported stat implementation. Permission
+    /// and I/O diagnostics must still retain the host: a failed lookup does
+    /// not establish that its server or its hosts are gone. Execute the real
+    /// stop script with controlled stat output, a deliberately absent client
+    /// and a deliberately absent `farhelm`, so neither a real socket, a real
+    /// `hosts` directory nor an installed program can hide a mistaken refusal
+    /// or an overly broad absence match. Each diagnostic is given to one
+    /// lookup at a time while the other reports its path missing, so a
+    /// refusal is pinned to the lookup that saw the diagnostic.
     #[cfg(target_os = "linux")]
     #[farhelm_testtrace::test]
     async fn uninstall_stop_accepts_only_known_missing_socket_diagnostics() {
@@ -7368,12 +7422,15 @@ mod tests {
         let target = ProvisioningTarget::Ssh {
             destination: "scripted.example".into(),
         };
+        let state = root.path().join("missing-state");
         let socket = root.path().join("missing.sock");
         let tmux = root.path().join("removed-tmux");
+        let farhelm = root.path().join("removed-farhelm");
         assert!(
-            !socket.exists() && !tmux.exists(),
-            "fixture starts without socket or client"
+            !state.exists() && !socket.exists() && !tmux.exists() && !farhelm.exists(),
+            "fixture starts without state, socket, client or farhelm"
         );
+        const MISSING: &str = "stat: cannot statx 'fixture': No such file or directory";
         for (diagnostic, absent) in [
             (
                 "stat: cannot stat 'missing.sock': No such file or directory",
@@ -7396,31 +7453,518 @@ mod tests {
                 false,
             ),
         ] {
-            write_fake_tool(
-                &bin,
-                "stat",
-                &format!(
-                    "printf '%s\\n' {} >&2; exit 1",
-                    shell_words::quote(diagnostic)
-                ),
+            for at_hosts in [true, false] {
+                let (hosts_answer, socket_answer) = if at_hosts {
+                    (diagnostic, MISSING)
+                } else {
+                    (MISSING, diagnostic)
+                };
+                write_fake_tool(&bin, "stat", &fake_stat(hosts_answer, socket_answer)).await;
+                let result = system
+                    .stop(
+                        &target,
+                        "farhelm-supervisor.service",
+                        &farhelm,
+                        &state,
+                        &tmux,
+                        &socket,
+                    )
+                    .await;
+                if absent {
+                    assert!(
+                        matches!(result.unwrap(), ActionOutcome::Skipped(_)),
+                        "{diagnostic} (at the hosts lookup: {at_hosts})"
+                    );
+                } else {
+                    let failure = result.expect_err("non-absence lookup failure must refuse");
+                    assert!(
+                        failure.rendered().contains(diagnostic),
+                        "{} (at the hosts lookup: {at_hosts})",
+                        failure.rendered()
+                    );
+                }
+            }
+        }
+    }
+
+    /// A stand-in `stat` for the stop script, which looks up two paths: the
+    /// state directory's `hosts` (whose path ends in `/hosts`) and the tmux
+    /// socket. Each lookup fails with its own diagnostic.
+    #[cfg(target_os = "linux")]
+    fn fake_stat(hosts_answer: &str, socket_answer: &str) -> String {
+        format!(
+            "for last; do :; done\n\
+             case \"$last\" in */hosts) printf '%s\\n' {hosts} >&2 ;; \
+             *) printf '%s\\n' {socket} >&2 ;; esac\n\
+             exit 1",
+            hosts = shell_words::quote(hosts_answer),
+            socket = shell_words::quote(socket_answer),
+        )
+    }
+
+    /// Why this matters: terminal hosts outlive their supervisor by design,
+    /// so a remote uninstall must end them itself, the way it ends the
+    /// private tmux server. It must never pass over hosts it could not
+    /// confirm stopped, and a retry after the lib removal, which deletes the
+    /// `farhelm` that stops them, must still finish. The step runs the
+    /// installed `farhelm`'s stop command, whose exit status 0 is the only
+    /// proof (SPEC_impl.md, "Terminal host"); an older `farhelm` that lacks
+    /// the command answers 2, which must not read as success. An empty
+    /// `hosts` still runs the command: the command's contract has callers
+    /// decide by whether `hosts` exists and judges its contents itself.
+    ///
+    /// Spec, on the real stop script with stand-in `systemctl`, `farhelm`
+    /// and tmux:
+    /// - With no `hosts` in the state directory, `farhelm` never runs.
+    /// - Whenever `hosts` exists, empty included,
+    ///   `farhelm internal stop-terminal-hosts --state-dir <state>` runs,
+    ///   after the unit stop and before tmux.
+    /// - After its exit status 0 the step removes the socket files left in
+    ///   `hosts` and then `hosts`, so a retry, with or without the `farhelm`,
+    ///   finds nothing and skips.
+    /// - Any other status (1, 2) fails the step with the command's own
+    ///   lines and a summary naming the socket directory, before tmux.
+    /// - After a 0, an entry in `hosts` that is not a socket (a file, a
+    ///   symlink), a socket that cannot be removed, or a `hosts` that cannot
+    ///   be listed fails the step, naming what is left, with `hosts` kept.
+    /// - A `hosts` whose `farhelm` is gone fails with a way to end the hosts
+    ///   by hand, and a `hosts` that is not a directory (a symlink) is left
+    ///   to the command to judge.
+    #[cfg(target_os = "linux")]
+    #[farhelm_testtrace::test]
+    async fn uninstall_stop_runs_the_host_stop_whenever_hosts_exists() {
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path().join("home");
+        let bin = root.path().join("bin");
+        let lib = root.path().join("lib");
+        let state = root.path().join("state");
+        for dir in [&home, &bin, &lib, &state] {
+            tokio::fs::create_dir_all(dir).await.unwrap();
+        }
+        let log = root.path().join("calls.log");
+        let quoted_log = shell_words::quote(log.to_str().unwrap()).into_owned();
+        // The stand-in systemctl reports the unit's state from a file, and a
+        // stop logs itself and makes the unit inactive, so the log shows
+        // whether the hosts were stopped after the unit.
+        let unit_state = root.path().join("unit-state");
+        write_fake_tool(
+            &bin,
+            "systemctl",
+            &format!(
+                "case \"$*\" in *'show -p ActiveState'*) cat {unit_state} ;; \
+                 *' stop '*) printf 'systemctl stop\\n' >> {quoted_log}; \
+                 printf 'inactive\\n' > {unit_state} ;; esac",
+                unit_state = shell_words::quote(unit_state.to_str().unwrap()),
+            ),
+        )
+        .await;
+        tokio::fs::write(&unit_state, "inactive\n").await.unwrap();
+        // The stand-in farhelm logs its arguments, prints what the fixture
+        // gives it on stderr, and exits with the fixture's status.
+        let answer = root.path().join("farhelm-answer");
+        let status = root.path().join("farhelm-status");
+        write_fake_tool(
+            &lib,
+            "farhelm",
+            &format!(
+                "printf 'farhelm %s\\n' \"$*\" >> {quoted_log}\n\
+                 cat {answer} >&2\n\
+                 exit \"$(cat {status})\"",
+                answer = shell_words::quote(answer.to_str().unwrap()),
+                status = shell_words::quote(status.to_str().unwrap()),
+            ),
+        )
+        .await;
+        write_fake_tool(
+            &lib,
+            "tmux",
+            &format!("printf 'tmux %s\\n' \"$*\" >> {quoted_log}"),
+        )
+        .await;
+        let farhelm = lib.join("farhelm");
+        let removed_farhelm = root.path().join("removed-farhelm");
+        let tmux = lib.join("tmux");
+        let socket = state.join("tmux.sock");
+        let system = SystemBackend {
+            control_dir: root.path().to_path_buf(),
+            linger: LingerBehavior::Simulated(Ok(())),
+            launcher: Arc::new(FixtureHomeLauncher { home, bin }),
+            runtime_units: false,
+            fail_before_rename: false,
+        };
+        let target = ProvisioningTarget::Ssh {
+            destination: "scripted.example".into(),
+        };
+        let stop = |farhelm: &Path| {
+            let (system, target, state, tmux, socket) = (&system, &target, &state, &tmux, &socket);
+            let farhelm = farhelm.to_path_buf();
+            async move {
+                system
+                    .stop(
+                        target,
+                        "farhelm-supervisor.service",
+                        &farhelm,
+                        state,
+                        tmux,
+                        socket,
+                    )
+                    .await
+            }
+        };
+        let calls = || async {
+            let calls = tokio::fs::read_to_string(&log).await.unwrap_or_default();
+            tokio::fs::remove_file(&log).await.ok();
+            calls
+        };
+        let answer_with = |code: i32, stderr: &'static str| {
+            let (answer, status) = (&answer, &status);
+            async move {
+                tokio::fs::write(status, code.to_string()).await.unwrap();
+                tokio::fs::write(answer, stderr).await.unwrap();
+            }
+        };
+        let hosts = state.join("hosts");
+        let dead_socket = hosts.join("a1b2c3d4");
+        // A socket file nothing serves, as a host that is gone leaves.
+        let bind_dead_socket = || {
+            drop(std::os::unix::net::UnixListener::bind(&dead_socket).unwrap());
+        };
+        let host_stop = format!(
+            "farhelm internal stop-terminal-hosts --state-dir {}\n",
+            state.display()
+        );
+        let tmux_kill = format!("tmux -S {} kill-server\n", socket.display());
+        // Root reads and writes directories whatever their mode, so the
+        // permission cases cannot establish their premise there.
+        // SAFETY: geteuid has no preconditions and cannot fail.
+        let root_user = unsafe { libc::geteuid() } == 0;
+
+        // No `hosts`: nothing runs and the step is already done.
+        answer_with(0, "").await;
+        assert!(matches!(
+            stop(&farhelm).await.unwrap(),
+            ActionOutcome::Skipped(_)
+        ));
+        assert_eq!(calls().await, "", "no hosts directory runs no farhelm");
+
+        // An empty `hosts` under a running unit: the unit stops first, then
+        // the command runs, then tmux, and `hosts` is gone afterwards.
+        tokio::fs::create_dir(&hosts).await.unwrap();
+        tokio::fs::write(&unit_state, "active\n").await.unwrap();
+        tokio::fs::write(&socket, b"fixture socket placeholder")
+            .await
+            .unwrap();
+        assert!(matches!(
+            stop(&farhelm).await.unwrap(),
+            ActionOutcome::Completed
+        ));
+        assert_eq!(
+            calls().await,
+            format!("systemctl stop\n{host_stop}{tmux_kill}"),
+            "the hosts are stopped after the unit and before the tmux server"
+        );
+        assert!(!hosts.exists(), "a confirmed stop removes the empty hosts");
+        // The retry after the lib removal, and one before it, find nothing.
+        for retry in [&farhelm, &removed_farhelm] {
+            assert!(matches!(
+                stop(retry).await.unwrap(),
+                ActionOutcome::Skipped(_)
+            ));
+        }
+        assert_eq!(calls().await, "", "a retry with no hosts runs nothing");
+
+        // A socket file the command left: removed after its 0, with `hosts`.
+        tokio::fs::create_dir(&hosts).await.unwrap();
+        bind_dead_socket();
+        assert!(matches!(
+            stop(&farhelm).await.unwrap(),
+            ActionOutcome::Completed
+        ));
+        assert_eq!(calls().await, host_stop);
+        assert!(!hosts.exists(), "the leftover socket and hosts are removed");
+
+        // Only 0 counts: 1 and 2 fail the step before tmux, keeping `hosts`.
+        tokio::fs::create_dir(&hosts).await.unwrap();
+        bind_dead_socket();
+        for code in [1, 2] {
+            tokio::fs::write(&socket, b"fixture socket placeholder")
+                .await
+                .unwrap();
+            answer_with(
+                code,
+                "farhelm internal stop-terminal-hosts: terminal host a1b2c3d4: could not confirm it stopped\n",
             )
             .await;
-            let result = system
-                .stop(&target, "farhelm-supervisor.service", &tmux, &socket)
-                .await;
-            if absent {
-                assert!(
-                    matches!(result.unwrap(), ActionOutcome::Skipped(_)),
-                    "{diagnostic}"
-                );
-            } else {
-                let failure = result.expect_err("non-absence lookup failure must refuse");
-                assert!(
-                    failure.rendered().contains(diagnostic),
-                    "{}",
-                    failure.rendered()
-                );
+            let failure = stop(&farhelm)
+                .await
+                .expect_err("only exit status 0 confirms the hosts stopped");
+            let rendered = failure.rendered();
+            assert!(
+                rendered.contains("could not confirm it stopped"),
+                "{rendered}"
+            );
+            assert!(
+                rendered.contains(&format!(
+                    "exited with status {code}; terminal hosts in {} may still be running",
+                    hosts.display()
+                )),
+                "{rendered}"
+            );
+            assert_eq!(calls().await, host_stop, "a failed host stop ends the step");
+            assert!(
+                socket.exists(),
+                "tmux is not reached after a failed host stop"
+            );
+            assert!(dead_socket.exists(), "a failed stop leaves hosts as it was");
+        }
+        tokio::fs::remove_file(&socket).await.unwrap();
+        answer_with(0, "").await;
+
+        // After a 0, what is not a socket is not removed, and fails the step
+        // naming it, while the farhelm is still there for the retry.
+        let stray_file = hosts.join("not-a-socket");
+        let stray_link = hosts.join("a-link");
+        tokio::fs::write(&stray_file, b"").await.unwrap();
+        tokio::fs::symlink(&state, &stray_link).await.unwrap();
+        let failure = stop(&farhelm)
+            .await
+            .expect_err("entries that are not sockets keep hosts");
+        let rendered = failure.rendered();
+        assert!(rendered.contains("not terminal host sockets"), "{rendered}");
+        assert!(
+            rendered.contains(stray_file.to_str().unwrap())
+                && rendered.contains(stray_link.to_str().unwrap()),
+            "{rendered}"
+        );
+        assert_eq!(calls().await, host_stop);
+        assert!(stray_file.exists() && dead_socket.exists());
+        tokio::fs::remove_file(&stray_file).await.unwrap();
+        tokio::fs::remove_file(&stray_link).await.unwrap();
+
+        if root_user {
+            eprintln!(
+                "SKIPPED unremovable and unreadable hosts subcases: root bypasses directory modes"
+            );
+        } else {
+            // A socket that cannot be removed fails the step, naming it.
+            set_mode(&hosts, 0o500).await.unwrap();
+            let failure = stop(&farhelm)
+                .await
+                .expect_err("a socket that cannot be removed keeps hosts");
+            set_mode(&hosts, 0o700).await.unwrap();
+            let rendered = failure.rendered();
+            assert!(rendered.contains("could not be removed"), "{rendered}");
+            assert!(rendered.contains("a1b2c3d4"), "{rendered}");
+            assert_eq!(calls().await, host_stop);
+            assert!(dead_socket.exists());
+
+            // A `hosts` that cannot be listed is never read as empty.
+            tokio::fs::write(&socket, b"fixture socket placeholder")
+                .await
+                .unwrap();
+            set_mode(&hosts, 0o000).await.unwrap();
+            let result = stop(&farhelm).await;
+            set_mode(&hosts, 0o700).await.unwrap();
+            let failure = result.expect_err("an unreadable hosts keeps the host listed");
+            assert!(
+                failure.rendered().contains("Permission denied"),
+                "{}",
+                failure.rendered()
+            );
+            assert_eq!(calls().await, host_stop, "tmux is not reached");
+            assert!(dead_socket.exists());
+            tokio::fs::remove_file(&socket).await.unwrap();
+        }
+
+        // `hosts` with its farhelm gone: hosts may run, and the step says how
+        // to end them by hand.
+        let failure = stop(&removed_farhelm)
+            .await
+            .expect_err("a missing farhelm cannot confirm a host stopped");
+        let rendered = failure.rendered();
+        assert!(
+            rendered.contains("terminal hosts may still be running")
+                && rendered.contains("end every process whose command line names a socket in")
+                && rendered.contains(hosts.to_str().unwrap()),
+            "{rendered}"
+        );
+        assert_eq!(calls().await, "", "the missing farhelm is not run");
+
+        // A `hosts` that is a symlink is not judged here: the command, which
+        // refuses one, is asked.
+        tokio::fs::remove_dir_all(&hosts).await.unwrap();
+        let elsewhere = root.path().join("elsewhere");
+        tokio::fs::create_dir(&elsewhere).await.unwrap();
+        tokio::fs::symlink(&elsewhere, &hosts).await.unwrap();
+        answer_with(1, "farhelm internal stop-terminal-hosts: not a directory\n").await;
+        stop(&farhelm)
+            .await
+            .expect_err("the command's refusal fails the step");
+        assert_eq!(calls().await, host_stop);
+    }
+
+    /// Ends, on drop, every terminal host whose socket is in `hosts`, so a
+    /// failing test never leaves a host behind, including a start that
+    /// failed midway or a host that never answered. It is made before the
+    /// spawn and needs no pid from the host: it finds the processes whose
+    /// command line is `... internal terminal-host --socket <hosts>/<name>`,
+    /// which only this test's hosts can have, since `hosts` is in the test's
+    /// own temporary directory.
+    #[cfg(target_os = "linux")]
+    struct RealHostsGuard {
+        hosts: PathBuf,
+    }
+
+    #[cfg(target_os = "linux")]
+    impl RealHostsGuard {
+        /// The pids of live processes serving a socket in `hosts`.
+        fn hosts_running(&self) -> Vec<i32> {
+            let prefix = format!("{}/", self.hosts.display());
+            let Ok(entries) = std::fs::read_dir("/proc") else {
+                return Vec::new();
+            };
+            entries
+                .filter_map(|entry| entry.ok()?.file_name().to_str()?.parse::<i32>().ok())
+                .filter(|pid| {
+                    std::fs::read(format!("/proc/{pid}/cmdline")).is_ok_and(|cmdline| {
+                        let args: Vec<&[u8]> = cmdline.split(|byte| *byte == 0).collect();
+                        args.windows(3).any(|window| {
+                            window[0] == b"terminal-host"
+                                && window[1] == b"--socket"
+                                && window[2].starts_with(prefix.as_bytes())
+                        })
+                    })
+                })
+                .collect()
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    impl Drop for RealHostsGuard {
+        fn drop(&mut self) {
+            for pid in self.hosts_running() {
+                // SAFETY: signalling a host of this test's own socket
+                // directory, found by its command line just above.
+                unsafe {
+                    libc::kill(pid, libc::SIGCONT);
+                    libc::kill(pid, libc::SIGKILL);
+                }
+                eprintln!("fixture: killed the terminal host {pid} the test left");
             }
+        }
+    }
+
+    /// Why this matters: the stop step's host stop is only worth anything if
+    /// the real command, run the way the script runs it, ends a real host,
+    /// and the step leaves the state directory such that a retry, including
+    /// one after the lib removal deleted `farhelm`, completes without it.
+    ///
+    /// Spec: a live host started from the built `farhelm` in the state
+    /// directory is ended by the stop step (its process gone, its socket file
+    /// and `hosts` gone) and the step completes; a retry skips as already
+    /// done, and so does a retry whose `farhelm` no longer exists.
+    ///
+    /// Needs the workspace's built `farhelm` (or `FARHELM_TEST_BINARY`), as
+    /// the real provisioning tests do, and says `SKIPPED` without it; a
+    /// stale build from before the command fails the step with exit
+    /// status 2.
+    #[cfg(target_os = "linux")]
+    #[farhelm_testtrace::test]
+    async fn uninstall_stop_ends_a_live_terminal_host() {
+        let Some(farhelm) = debug_farhelm() else {
+            eprintln!(
+                "SKIPPED uninstall_stop_ends_a_live_terminal_host: no Farhelm binary exists at the workspace debug path; build it first or set FARHELM_TEST_BINARY"
+            );
+            return;
+        };
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path().join("home");
+        let bin = root.path().join("bin");
+        let state = root.path().join("state");
+        for dir in [&home, &bin, &state] {
+            tokio::fs::create_dir_all(dir).await.unwrap();
+        }
+        write_fake_tool(&bin, "systemctl", "printf 'inactive\\n'").await;
+        let guard = RealHostsGuard {
+            hosts: state.join("hosts"),
+        };
+        let spawned = farhelm_supervisor::hosts::spawn_host(
+            &farhelm,
+            &state,
+            farhelm_supervisor::hosts::ChildSpec {
+                argv: vec!["/bin/sh".into(), "-c".into(), "exec sleep 600".into()],
+                cwd: "/".into(),
+                env: vec![("PATH".into(), "/usr/bin:/bin".into())],
+                size: terminal_host::protocol::Size { cols: 80, rows: 24 },
+                journal_cap: 1024 * 1024,
+                initial_snapshot: None,
+            },
+            &farhelm_supervisor::hosts::HostTag {
+                session_id: "0f8e2b9c-4c1d-4e7a-9a53-7d2f61c0b8e4".into(),
+                created_ns: farhelm_supervisor::hosts::tag::creation_stamp(),
+                role: farhelm_supervisor::hosts::HostRole::Agent { generation: 1 },
+            },
+        )
+        .await
+        .expect("the host starts");
+        let running = guard.hosts_running();
+        assert_eq!(
+            running.len(),
+            1,
+            "fixture premise: exactly the one host runs before the stop"
+        );
+        let pid = running[0];
+
+        let system = SystemBackend {
+            control_dir: root.path().to_path_buf(),
+            linger: LingerBehavior::Simulated(Ok(())),
+            launcher: Arc::new(FixtureHomeLauncher { home, bin }),
+            runtime_units: false,
+            fail_before_rename: false,
+        };
+        let target = ProvisioningTarget::Ssh {
+            destination: "scripted.example".into(),
+        };
+        let tmux = root.path().join("no-tmux");
+        let socket = state.join("tmux.sock");
+        let outcome = system
+            .stop(
+                &target,
+                "farhelm-supervisor.service",
+                &farhelm,
+                &state,
+                &tmux,
+                &socket,
+            )
+            .await;
+        assert!(
+            matches!(outcome, Ok(ActionOutcome::Completed)),
+            "the stop must end the host: {outcome:?}"
+        );
+        wait_for_exit(pid, "the stop step must end the live terminal host").await;
+        assert!(
+            !spawned.socket.exists() && !guard.hosts.exists(),
+            "an ended host leaves no socket file, and the step removes hosts"
+        );
+        for retry_farhelm in [farhelm.clone(), root.path().join("removed-farhelm")] {
+            assert!(
+                matches!(
+                    system
+                        .stop(
+                            &target,
+                            "farhelm-supervisor.service",
+                            &retry_farhelm,
+                            &state,
+                            &tmux,
+                            &socket,
+                        )
+                        .await
+                        .unwrap(),
+                    ActionOutcome::Skipped(_)
+                ),
+                "a retry with {} finds nothing left",
+                retry_farhelm.display()
+            );
         }
     }
 
@@ -8071,6 +8615,10 @@ mod tests {
             runtime_units,
             fail_before_rename: false,
         };
+        // The stop step's state directory is the fixture root, which has no
+        // `hosts`, and its farhelm does not exist: this test's stops have no
+        // terminal hosts to end, and running that farhelm would fail them.
+        let no_farhelm = root.path().join("no-farhelm");
         let system = backend(false);
         let target = ProvisioningTarget::Ssh {
             destination: "scripted.example".to_string(),
@@ -8238,6 +8786,8 @@ mod tests {
                 .stop(
                     &target,
                     "farhelm-supervisor.service",
+                    &no_farhelm,
+                    root.path(),
                     &lib.join("tmux"),
                     &root.path().join("tmux.sock")
                 )
@@ -8251,6 +8801,8 @@ mod tests {
                 .stop(
                     &target,
                     "farhelm-supervisor.service",
+                    &no_farhelm,
+                    root.path(),
                     &lib.join("tmux"),
                     &root.path().join("tmux.sock")
                 )
@@ -8316,7 +8868,14 @@ mod tests {
             )
             .await;
             let result = system
-                .stop(&target, "farhelm-supervisor.service", &tmux, &socket)
+                .stop(
+                    &target,
+                    "farhelm-supervisor.service",
+                    &no_farhelm,
+                    root.path(),
+                    &tmux,
+                    &socket,
+                )
                 .await;
             if absent {
                 assert!(matches!(result.unwrap(), ActionOutcome::Skipped(_)));
@@ -8345,7 +8904,14 @@ mod tests {
         .await;
         assert!(matches!(
             system
-                .stop(&target, "farhelm-supervisor.service", &tmux, &socket)
+                .stop(
+                    &target,
+                    "farhelm-supervisor.service",
+                    &no_farhelm,
+                    root.path(),
+                    &tmux,
+                    &socket
+                )
                 .await
                 .unwrap(),
             ActionOutcome::Completed
@@ -8368,7 +8934,14 @@ mod tests {
         assert!(
             matches!(
                 system
-                    .stop(&target, "farhelm-supervisor.service", &tmux, &socket)
+                    .stop(
+                        &target,
+                        "farhelm-supervisor.service",
+                        &no_farhelm,
+                        root.path(),
+                        &tmux,
+                        &socket
+                    )
                     .await
                     .unwrap(),
                 ActionOutcome::Skipped(_)
@@ -8407,6 +8980,8 @@ mod tests {
                 .stop(
                     &target,
                     "farhelm-supervisor.service",
+                    &no_farhelm,
+                    root.path(),
                     &tmux,
                     &blocked.join("tmux.sock"),
                 )
@@ -8422,9 +8997,24 @@ mod tests {
         // A searchable filesystem can still refuse a child lookup. Inject
         // that diagnostic at the existing stat boundary: an I/O failure is
         // not the missing-path evidence a no-client retry needs.
-        write_fake_tool(&bin, "stat", "printf '%s\\n' \"stat: cannot statx 'fixture No such file or directory': Input/output error\" >&2; exit 1").await;
+        write_fake_tool(
+            &bin,
+            "stat",
+            &fake_stat(
+                "stat: cannot statx 'hosts': No such file or directory",
+                "stat: cannot statx 'fixture No such file or directory': Input/output error",
+            ),
+        )
+        .await;
         let failure = system
-            .stop(&target, "farhelm-supervisor.service", &tmux, &socket)
+            .stop(
+                &target,
+                "farhelm-supervisor.service",
+                &no_farhelm,
+                root.path(),
+                &tmux,
+                &socket,
+            )
             .await
             .expect_err("lookup errors must keep the host listed");
         assert!(failure.rendered().contains("Input/output error"));
@@ -8493,6 +9083,8 @@ mod tests {
                 .stop(
                     &local,
                     "farhelm-supervisor.service",
+                    &no_farhelm,
+                    root.path(),
                     &lib.join("tmux"),
                     &root.path().join("tmux.sock")
                 )
@@ -11245,6 +11837,9 @@ mod tests {
         let target = ProvisioningTarget::Ssh {
             destination: "localhost".to_string(),
         };
+        // The fixture root, the stop's state directory, has no `hosts`, so
+        // the farhelm the stop would run for terminal hosts is never needed.
+        let no_farhelm = root.path().join("no-farhelm");
         backend.remove_unit(&target, &unit_path).await.unwrap();
         backend.daemon_reload(&target).await.unwrap();
         let state = backend
@@ -11291,7 +11886,10 @@ mod tests {
             "fixture server must still be alive before stop"
         );
         assert!(matches!(
-            backend.stop(&target, &unit, &tmux, &socket).await.unwrap(),
+            backend
+                .stop(&target, &unit, &no_farhelm, root.path(), &tmux, &socket)
+                .await
+                .unwrap(),
             ActionOutcome::Completed
         ));
         wait_for_exit(pid, "uninstall must end its owned private tmux process").await;
@@ -11302,12 +11900,22 @@ mod tests {
         // No manual socket removal: a retry must work after the step which
         // deletes the private client, even if the helm restarted in between.
         assert!(matches!(
-            backend.stop(&target, &unit, &tmux, &socket).await.unwrap(),
+            backend
+                .stop(&target, &unit, &no_farhelm, root.path(), &tmux, &socket)
+                .await
+                .unwrap(),
             ActionOutcome::Skipped(_)
         ));
         assert!(matches!(
             backend
-                .stop(&target, &unit, &root.path().join("removed-tmux"), &socket)
+                .stop(
+                    &target,
+                    &unit,
+                    &no_farhelm,
+                    root.path(),
+                    &root.path().join("removed-tmux"),
+                    &socket
+                )
                 .await
                 .unwrap(),
             ActionOutcome::Skipped(_)
