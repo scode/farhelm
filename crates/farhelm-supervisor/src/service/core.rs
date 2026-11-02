@@ -10001,6 +10001,8 @@ impl Supervisor {
                 launch: launch.clone(),
                 tmux_name: tmux_name.clone(),
                 pane: String::new(),
+                // Every create starts its agent in a tmux pane.
+                terminal_kind: crate::store::TerminalKind::Tmux,
                 outcome: LastOutcome::Launching,
                 canonical_cwd: canonical_cwd.clone(),
                 captured_conversation: None,
@@ -10140,6 +10142,8 @@ impl Supervisor {
                 // Not known until tmux has created the session —
                 // see `StoredSession::pane`.
                 pane: String::new(),
+                // Every create starts its agent in a tmux pane.
+                terminal_kind: crate::store::TerminalKind::Tmux,
                 outcome: LastOutcome::Launching,
                 // For a FRESH checkout this is deliberately None:
                 // no directory has been accepted yet (see
@@ -17416,6 +17420,7 @@ pub(crate) mod tests {
                     launch: ordinary.clone(),
                     tmux_name: "fh-named".into(),
                     pane: String::new(),
+                    terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Launching,
                     canonical_cwd: Some(cwd.clone()),
                     captured_conversation: None,
@@ -18521,6 +18526,7 @@ pub(crate) mod tests {
                         },
                         tmux_name: format!("fh-{id}"),
                         pane: String::new(),
+                        terminal_kind: crate::store::TerminalKind::Tmux,
                         outcome: outcome.clone(),
                         canonical_cwd: Some(canonical.clone()),
                         captured_conversation: captured.clone(),
@@ -18629,6 +18635,7 @@ pub(crate) mod tests {
                     },
                     tmux_name: format!("fh-{id}"),
                     pane: String::new(),
+                    terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Launching,
                     // Restart only resumes, so the row carries a captured
                     // conversation and the resume command to enter it.
@@ -18731,6 +18738,7 @@ pub(crate) mod tests {
                     },
                     tmux_name: format!("fh-{id}"),
                     pane: String::new(),
+                    terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Exited {
                         exit_code: Some(0),
                         annotation: None,
@@ -20176,6 +20184,7 @@ pub(crate) mod tests {
                     },
                     tmux_name: "fh-rename-fixture".to_string(),
                     pane: String::new(),
+                    terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Running,
                     canonical_cwd: None,
                     captured_conversation: None,
@@ -22335,6 +22344,7 @@ pub(crate) mod tests {
                     },
                     tmux_name: "fh-renamed".to_string(),
                     pane: pane.clone(),
+                    terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Running,
                     canonical_cwd: None,
                     captured_conversation: None,
@@ -22448,6 +22458,7 @@ pub(crate) mod tests {
                         },
                         tmux_name: tmux_name.to_string(),
                         pane: String::new(),
+                        terminal_kind: crate::store::TerminalKind::Tmux,
                         outcome: LastOutcome::Launching,
                         canonical_cwd: None,
                         captured_conversation: None,
@@ -22603,6 +22614,7 @@ pub(crate) mod tests {
                     },
                     tmux_name: tmux_name.to_string(),
                     pane: pane.clone(),
+                    terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Error {
                         detail: "exec failed".to_string(),
                     },
@@ -22761,6 +22773,7 @@ pub(crate) mod tests {
                     },
                     tmux_name: "fh-scoped".to_string(),
                     pane: String::new(),
+                    terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Launching,
                     canonical_cwd: None,
                     captured_conversation: None,
@@ -22893,6 +22906,7 @@ pub(crate) mod tests {
                     },
                     tmux_name: "fh-kind-gone".to_string(),
                     pane: String::new(),
+                    terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Interrupted,
                     // An integrated kind must carry a conversation-bearing
                     // template, or reload refuses the row outright.
@@ -22957,6 +22971,7 @@ pub(crate) mod tests {
                     },
                     tmux_name: format!("fh-{id}"),
                     pane: String::new(),
+                    terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Exited {
                         exit_code: Some(0),
                         annotation: None,
@@ -23347,6 +23362,7 @@ pub(crate) mod tests {
                     },
                     tmux_name: format!("fh-{id}"),
                     pane: String::new(),
+                    terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Exited {
                         exit_code: Some(0),
                         annotation: None,
@@ -23401,6 +23417,7 @@ pub(crate) mod tests {
                     },
                     tmux_name: format!("fh-{id}"),
                     pane: String::new(),
+                    terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Exited {
                         exit_code: Some(0),
                         annotation: None,
@@ -23549,6 +23566,7 @@ pub(crate) mod tests {
                     },
                     tmux_name: format!("fh-{id}"),
                     pane: "%0".into(),
+                    terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Running,
                     canonical_cwd: None,
                     captured_conversation: None,
@@ -24373,6 +24391,7 @@ pub(crate) mod tests {
                         },
                         tmux_name: format!("fh-{id}"),
                         pane: String::new(),
+                        terminal_kind: crate::store::TerminalKind::Tmux,
                         outcome: LastOutcome::Exited {
                             exit_code: Some(0),
                             annotation: None,
@@ -24473,6 +24492,7 @@ pub(crate) mod tests {
                     },
                     tmux_name: format!("fh-{id}"),
                     pane: String::new(),
+                    terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Exited {
                         exit_code: Some(0),
                         annotation: None,
@@ -25120,6 +25140,7 @@ exit 0
                         },
                         tmux_name: format!("fh-{id}"),
                         pane: pane.into(),
+                        terminal_kind: crate::store::TerminalKind::Tmux,
                         outcome: LastOutcome::Exited {
                             exit_code: Some(0),
                             annotation: None,
@@ -26564,6 +26585,7 @@ exit 0
                     },
                     tmux_name: format!("fh-{id}"),
                     pane: String::new(),
+                    terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Launching,
                     canonical_cwd: None,
                     captured_conversation: None,
@@ -26791,6 +26813,7 @@ exit 0
                     },
                     tmux_name: format!("fh-{doomed}"),
                     pane: String::new(),
+                    terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Exited {
                         exit_code: Some(0),
                         annotation: None,
@@ -26886,6 +26909,7 @@ exit 0
                     },
                     tmux_name: format!("fh-{id}"),
                     pane: String::new(),
+                    terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Exited {
                         exit_code: Some(0),
                         annotation: None,
@@ -26967,6 +26991,7 @@ exit 0
                         },
                         tmux_name,
                         pane: pane.clone(),
+                        terminal_kind: crate::store::TerminalKind::Tmux,
                         outcome: LastOutcome::Running,
                         canonical_cwd: None,
                         captured_conversation: None,
@@ -27062,6 +27087,7 @@ exit 0
                     },
                     tmux_name: "fh-1".to_string(),
                     pane: "%0".to_string(),
+                    terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Running,
                     canonical_cwd: None,
                     captured_conversation: None,
@@ -27183,6 +27209,7 @@ exit 0
                     },
                     tmux_name: tmux_name.into(),
                     pane: pane.clone(),
+                    terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Running,
                     canonical_cwd: None,
                     captured_conversation: None,
@@ -27282,6 +27309,7 @@ exit 0
                     },
                     tmux_name: "fh-1".to_string(),
                     pane: "%0".to_string(),
+                    terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Running,
                     canonical_cwd: None,
                     captured_conversation: None,
@@ -27657,6 +27685,7 @@ exit 0
                     },
                     tmux_name: "fh-does-not-exist".to_string(),
                     pane: "%0".to_string(),
+                    terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Running,
                     canonical_cwd: None,
                     captured_conversation: None,
@@ -28890,11 +28919,21 @@ exit 0
             assert_eq!(
                 conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
                     .unwrap(),
-                31,
+                32,
                 "the v17 fixture migrates through scan-column, profile-snapshot, launch-kind, \
-                 session-notification, notification-resolution, launch-hook, boot-finality and \
-                 Codex-pin changes too"
+                 session-notification, notification-resolution, launch-hook, boot-finality, \
+                 Codex-pin and terminal-kind changes too"
             );
+            // Every historical session ran in tmux, so the upgrade records
+            // each of them as a tmux session.
+            let kinds: Vec<String> = conn
+                .prepare("SELECT terminal_kind FROM sessions ORDER BY id")
+                .unwrap()
+                .query_map([], |row| row.get(0))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap();
+            assert_eq!(kinds, vec!["tmux"; 4]);
             assert_eq!(
                 conn.query_row(
                     "SELECT COUNT(*) FROM sessions WHERE fresh_checkout_id IS NOT NULL",
@@ -29103,6 +29142,7 @@ exit 0
                     },
                     tmux_name: "fh-stranded".to_string(),
                     pane: String::new(),
+                    terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Launching,
                     canonical_cwd: None,
                     captured_conversation: None,
@@ -29803,6 +29843,7 @@ exit 0
                     launch: SessionLaunch::plain_command("agent"),
                     tmux_name: "fh-refused".into(),
                     pane: String::new(),
+                    terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Launching,
                     conversation_source: None,
                     capture_ownership_version: 0,
@@ -30447,6 +30488,7 @@ exit 0
                     },
                     tmux_name: "fh-stranded".to_string(),
                     pane: String::new(),
+                    terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Launching,
                     canonical_cwd: None,
                     captured_conversation: None,
@@ -30535,6 +30577,7 @@ exit 0
                     },
                     tmux_name: "fh-ended".to_string(),
                     pane: String::new(),
+                    terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Launching,
                     canonical_cwd: None,
                     captured_conversation: None,
@@ -31305,6 +31348,7 @@ exit 0
                     },
                     tmux_name: "fh-stranded".to_string(),
                     pane: String::new(),
+                    terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Launching,
                     canonical_cwd: None,
                     captured_conversation: None,
@@ -31402,6 +31446,7 @@ exit 0
                     },
                     tmux_name: "fh-stranded".to_string(),
                     pane: String::new(),
+                    terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Launching,
                     canonical_cwd: None,
                     captured_conversation: None,
@@ -31835,6 +31880,7 @@ exit 0
                         launch: SessionLaunch::plain_command("agent --as-first-resolved"),
                         tmux_name: format!("fh-{id}"),
                         pane: String::new(),
+                        terminal_kind: crate::store::TerminalKind::Tmux,
                         outcome: LastOutcome::Launching,
                         canonical_cwd: Some(
                             std::fs::canonicalize(&recorded)
@@ -31994,6 +32040,7 @@ exit 0
                     },
                     tmux_name: "fh-stranded".to_string(),
                     pane: String::new(),
+                    terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Launching,
                     // What the crashed attempt resolved, and what capture
                     // would still identify as the authorized directory.
@@ -32141,6 +32188,7 @@ exit 0
             },
             tmux_name: "fh-stranded".to_string(),
             pane: String::new(),
+            terminal_kind: crate::store::TerminalKind::Tmux,
             outcome: LastOutcome::Launching,
             canonical_cwd: Some(cwd.clone()),
             captured_conversation: None,
@@ -32288,6 +32336,7 @@ exit 0
                     },
                     tmux_name: "fh-stranded".to_string(),
                     pane: String::new(),
+                    terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Launching,
                     canonical_cwd: Some(cwd.clone()),
                     captured_conversation: None,
@@ -32583,6 +32632,7 @@ exit 0
                     },
                     tmux_name: "fh-stranded".to_string(),
                     pane: String::new(),
+                    terminal_kind: crate::store::TerminalKind::Tmux,
                     outcome: LastOutcome::Launching,
                     canonical_cwd: Some(canonical_original.clone()),
                     captured_conversation: None,
