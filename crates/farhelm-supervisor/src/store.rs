@@ -4728,11 +4728,11 @@ impl SessionStore {
     /// `kind`, with `pane` in the `pane` column as that kind reads it (a tmux
     /// pane id, or a host's socket name).
     ///
-    /// Production writes the kind with the launch that creates the
-    /// terminal; until terminals are created in hosts, the tests of the
-    /// host arms install a host-backed session over a created one
-    /// (`Supervisor::install_host_agent_for_test`) and need its row to say
-    /// so. Compiled only for tests and the `test-seams` feature so it cannot
+    /// Production writes the kind with the launching row of the create
+    /// that starts the terminal; the tests of the host arms that install a
+    /// host-backed session over a created tmux one
+    /// (`Supervisor::install_host_agent_for_test`) need its row to say so
+    /// too. Compiled only for tests and the `test-seams` feature so it cannot
     /// become a production way to change a row's kind.
     #[cfg(any(test, feature = "test-seams"))]
     pub async fn set_terminal_for_test(
@@ -7766,9 +7766,9 @@ mod tests {
 
     /// A host row must come back as a host row, with its socket name in
     /// `pane`, through every read path and across a restart that is aborted.
-    /// Nothing in production writes `host` yet, so this round trip is the
-    /// only evidence that the later change which does will find the kind
-    /// where it put it.
+    /// Only a create under the internal switch writes `host`, and its own
+    /// tests read the row back through the service; this round trip pins
+    /// the store's half of that on its own.
     ///
     /// Specified: a [`TerminalKind::Host`] row inserted with a socket name
     /// for `pane` reads back unchanged through `session` and `load_all`; a

@@ -107,11 +107,11 @@ pub(crate) struct TmuxTerminal {
 /// Two host terminals are equal when they share one runtime
 /// ([`crate::hosts::HostTerminal`]'s own equality).
 ///
-/// Nothing in production makes a [`Terminal::Host`] yet: the switch that
-/// creates agent terminals in hosts, and the startup discovery that finds
-/// them again, come later. Every arm for it here and at the decision points
-/// is the final one all the same, so those later changes only add the
-/// constructors.
+/// A create makes a [`Terminal::Host`] when the supervisor's internal
+/// switch says so (`SupervisorSeams::new_terminals`, off in every shipped
+/// supervisor); the startup discovery that finds such terminals again comes
+/// later. Every arm for it here and at the decision points is the final one,
+/// so those later changes only add constructors.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Terminal {
     /// A tmux pane in the session's tmux session: every terminal before
@@ -129,14 +129,6 @@ pub(crate) enum Terminal {
     /// here as "could not tell": an error from the probes, no evidence for
     /// status ([`super::status::PaneEvidence::Unattributed`]), and nothing
     /// done to it (the plan's D-16).
-    #[cfg_attr(
-        not(any(test, feature = "test-seams")),
-        expect(
-            dead_code,
-            reason = "creating agents in hosts and discovering them at startup construct it; \
-                      until then only the test seams do"
-        )
-    )]
     Host(crate::hosts::HostTerminal),
 }
 

@@ -25,6 +25,16 @@
 //! - **Nothing secret is on the command line**: only the socket path, which
 //!   is all the host's command line may carry.
 //!
+//! The first stage starts nothing until it has read the whole spec. A spawn
+//! is therefore two steps for a caller that needs it: [`start_host`] runs the
+//! first stage at a socket name the caller chose ([`free_host_name`]) and
+//! pins its process, and [`StartingHost::finish`] writes the spec and waits.
+//! In between the caller can record durably which process may start a host
+//! at which socket, so that a crash after the record leaves something a
+//! later supervisor can fence, and a crash before it leaves a first stage
+//! that sees its stdin end without a spec and starts nothing.
+//! [`spawn_host`] does both steps with a name it draws itself.
+//!
 //! A start whose first stage did not exit normally (the deadline passed, a
 //! signal killed it, or waiting for it failed) has no known outcome: the
 //! host may have reported ready just before. Such a start is never reported
@@ -227,6 +237,11 @@ impl Default for Deadlines {
 /// without the cleanup [`SpawnError::Abandoned`] and
 /// [`SpawnError::MayRemain`] describe; a host may then be left at the
 /// socket.
+///
+/// The name is drawn here. A caller that must know the name, and the first
+/// stage's process, before the first stage can start anything (to record
+/// them durably first) uses [`free_host_name`], [`start_host`] and
+/// [`StartingHost::finish`] instead, which this is made of.
 pub async fn spawn_host(
     program: &Path,
     state_dir: &Path,
@@ -244,12 +259,94 @@ async fn spawn_host_within(
     tag: &HostTag,
     deadlines: Deadlines,
 ) -> Result<SpawnedHost, SpawnError> {
+    let name = free_host_name(state_dir)?;
+    start_host_within(program, state_dir, name, child, tag, deadlines)?
+        .finish()
+        .await
+}
+
+/// A socket name free in `state_dir`'s socket directory, creating the
+/// directory if it is missing (and refusing one in the wrong shape).
+///
+/// Free when drawn only: a caller that records the name before starting
+/// the host relies on the host's own refusal of an existing path, never on
+/// the name staying free.
+pub fn free_host_name(state_dir: &Path) -> Result<HostName, SpawnError> {
+    let state_dir = std::path::absolute(state_dir).map_err(SpawnError::StateDir)?;
+    let hosts = ensure_hosts_dir(&state_dir)?;
+    free_name(&hosts).map(|(name, _)| name)
+}
+
+/// A host whose first stage is running but has not been given its spec:
+/// [`start_host`]'s result.
+///
+/// Nothing can start yet. The first stage starts the host only once it has
+/// read the whole spec from its stdin, which [`Self::finish`] writes; a first
+/// stage whose stdin closes first (this value dropped, or its starter's
+/// process gone) refuses and leaves nothing. So between the two calls a
+/// caller can record durably which process may go on to start a host at
+/// which socket ([`Self::starter`], [`Self::socket`]), and know that a crash
+/// before the record leaves nothing to find.
+///
+/// Dropping it kills the first stage.
+pub struct StartingHost {
+    first: tokio::process::Child,
+    stdin: tokio::process::ChildStdin,
+    stderr: tokio::process::ChildStderr,
+    spec: Vec<u8>,
+    name: HostName,
+    socket: PathBuf,
+    starter: Option<super::process::HostProcess>,
+    deadlines: Deadlines,
+}
+
+impl std::fmt::Debug for StartingHost {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StartingHost")
+            .field("socket", &self.socket)
+            .field("starter", &self.starter)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Run the first stage of a host for `child`, tagged `tag`, at the socket
+/// `name` names in `state_dir`'s socket directory, without giving it its
+/// spec yet (see [`StartingHost`]). `name` comes from [`free_host_name`];
+/// a name whose path is taken fails here with [`SpawnError::Name`].
+pub fn start_host(
+    program: &Path,
+    state_dir: &Path,
+    name: HostName,
+    child: ChildSpec,
+    tag: &HostTag,
+) -> Result<StartingHost, SpawnError> {
+    start_host_within(program, state_dir, name, child, tag, Deadlines::default())
+}
+
+/// [`start_host`] with its deadlines injected.
+fn start_host_within(
+    program: &Path,
+    state_dir: &Path,
+    name: HostName,
+    child: ChildSpec,
+    tag: &HostTag,
+    deadlines: Deadlines,
+) -> Result<StartingHost, SpawnError> {
     let tag = tag.encode()?;
     let state_dir = std::path::absolute(state_dir).map_err(SpawnError::StateDir)?;
     let hosts = ensure_hosts_dir(&state_dir)?;
-    let (name, socket) = free_name(&hosts)?;
+    let socket = name.socket_in(&hosts);
+    match std::fs::symlink_metadata(&socket) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(SpawnError::Name(error)),
+        Ok(_) => {
+            return Err(SpawnError::Name(io::Error::other(format!(
+                "the terminal host socket {} is taken",
+                socket.display()
+            ))));
+        }
+    }
     let spec = encode_child(child, tag);
-
     let mut first = tokio::process::Command::new(program)
         .args(["internal", "terminal-host", "--socket"])
         .arg(&socket)
@@ -265,75 +362,145 @@ async fn spawn_host_within(
             program: program.to_path_buf(),
             source,
         })?;
-    let mut stdin = first.stdin.take().expect("stdin is piped");
-    let mut stderr = first.stderr.take().expect("stderr is piped");
-    let mut message = Vec::new();
-    let mut stderr_open = true;
-    // The spec is written, stderr read and the exit awaited all at once, and
-    // only the exit decides: a first stage that refuses early stops reading
-    // its stdin, and one that fails writes its line before it exits.
-    let waited = tokio::time::timeout(deadlines.start, async {
-        let write = async move {
-            // A write error means the first stage stopped reading (it
-            // refused, or died); its exit says why. Dropping stdin here is
-            // the end of file the first stage waits for.
-            let _ = stdin.write_all(&spec).await;
-        };
-        tokio::pin!(write);
-        let mut written = false;
-        let mut chunk = [0u8; 1024];
-        loop {
-            tokio::select! {
-                () = &mut write, if !written => written = true,
-                read = stderr.read(&mut chunk), if stderr_open => match read {
-                    Ok(n) if n > 0 => keep_stderr(&mut message, &chunk[..n], &mut stderr_open),
-                    _ => stderr_open = false,
-                },
-                status = first.wait() => break status,
-            }
-        }
+    let stdin = first.stdin.take().expect("stdin is piped");
+    let stderr = first.stderr.take().expect("stderr is piped");
+    // Read before the spec is written, so the identity is the first
+    // stage's own: it cannot have exited yet, short of failing on its own.
+    let starter = first.id().and_then(super::process::HostProcess::current);
+    Ok(StartingHost {
+        first,
+        stdin,
+        stderr,
+        spec,
+        name,
+        socket,
+        starter,
+        deadlines,
     })
-    .await;
+}
 
-    let reason = match waited {
-        Ok(Ok(status)) if status.success() => return Ok(SpawnedHost { name, socket }),
-        Ok(Ok(status)) => match status.code() {
-            Some(code) => {
-                if stderr_open {
-                    drain_stderr(&mut stderr, &mut message).await;
-                }
-                let message = String::from_utf8_lossy(&message);
-                return Err(SpawnError::Refused {
-                    status: code,
-                    message: message.lines().next().unwrap_or("").trim().to_string(),
-                });
-            }
-            None => format!(
-                "its first stage was killed by signal {}",
-                status.signal().unwrap_or(0)
-            ),
-        },
-        Ok(Err(error)) => format!("waiting for its first stage failed: {error}"),
-        Err(_) => format!("it did not report readiness within {:?}", deadlines.start),
-    };
-    // The first stage must be gone before the socket is judged: only then
-    // does a second stage that has not reported yet find its report unread
-    // and end itself. SIGKILL, then reap, bounded: a killed process exits at
-    // once, and if even that wait fails, kill_on_drop still has it.
-    let _ = first.start_kill();
-    if !matches!(
-        tokio::time::timeout(deadlines.cleanup, first.wait()).await,
-        Ok(Ok(_))
-    ) {
-        return Err(SpawnError::MayRemain {
-            reason: format!("{reason}; its first stage could not be reaped"),
-            socket,
-        });
+impl StartingHost {
+    /// The socket's name in the socket directory.
+    pub fn name(&self) -> &HostName {
+        &self.name
     }
-    if end_unreported_host(&socket, deadlines.cleanup).await {
-        Err(SpawnError::Abandoned { reason })
-    } else {
-        Err(SpawnError::MayRemain { reason, socket })
+
+    /// The socket's full path, always absolute.
+    pub fn socket(&self) -> &Path {
+        &self.socket
+    }
+
+    /// The first stage's process, pinned to its start identity: the one
+    /// process that may go on to start a host at [`Self::socket`] once given
+    /// the spec. `None` when it could not be read (it may already have
+    /// failed); a caller that needs it ends the start by dropping this value.
+    pub fn starter(&self) -> Option<super::process::HostProcess> {
+        self.starter
+    }
+
+    /// Give the first stage its spec and wait until the host is ready, as
+    /// [`spawn_host`] does after drawing its name.
+    pub async fn finish(self) -> Result<SpawnedHost, SpawnError> {
+        let StartingHost {
+            mut first,
+            mut stdin,
+            mut stderr,
+            spec,
+            name,
+            socket,
+            starter: _,
+            deadlines,
+        } = self;
+        let mut message = Vec::new();
+        let mut stderr_open = true;
+        // The spec is written, stderr read and the exit awaited all at once,
+        // and only the exit decides: a first stage that refuses early stops
+        // reading its stdin, and one that fails writes its line before it
+        // exits.
+        let waited = tokio::time::timeout(deadlines.start, async {
+            let write = async move {
+                // A write error means the first stage stopped reading (it
+                // refused, or died); its exit says why. Dropping stdin here
+                // is the end of file the first stage waits for.
+                let _ = stdin.write_all(&spec).await;
+            };
+            tokio::pin!(write);
+            let mut written = false;
+            let mut chunk = [0u8; 1024];
+            loop {
+                tokio::select! {
+                    () = &mut write, if !written => written = true,
+                    read = stderr.read(&mut chunk), if stderr_open => match read {
+                        Ok(n) if n > 0 => keep_stderr(&mut message, &chunk[..n], &mut stderr_open),
+                        _ => stderr_open = false,
+                    },
+                    status = first.wait() => break status,
+                }
+            }
+        })
+        .await;
+
+        let reason = match waited {
+            Ok(Ok(status)) if status.success() => return Ok(SpawnedHost { name, socket }),
+            Ok(Ok(status)) => match status.code() {
+                Some(code) => {
+                    if stderr_open {
+                        drain_stderr(&mut stderr, &mut message).await;
+                    }
+                    let message = String::from_utf8_lossy(&message);
+                    return Err(SpawnError::Refused {
+                        status: code,
+                        message: message.lines().next().unwrap_or("").trim().to_string(),
+                    });
+                }
+                None => format!(
+                    "its first stage was killed by signal {}",
+                    status.signal().unwrap_or(0)
+                ),
+            },
+            Ok(Err(error)) => format!("waiting for its first stage failed: {error}"),
+            Err(_) => format!("it did not report readiness within {:?}", deadlines.start),
+        };
+        // The first stage must be gone before the socket is judged: only
+        // then does a second stage that has not reported yet find its report
+        // unread and end itself. SIGKILL, then reap, bounded: a killed
+        // process exits at once, and if even that wait fails, kill_on_drop
+        // still has it.
+        let _ = first.start_kill();
+        if !matches!(
+            tokio::time::timeout(deadlines.cleanup, first.wait()).await,
+            Ok(Ok(_))
+        ) {
+            return Err(SpawnError::MayRemain {
+                reason: format!("{reason}; its first stage could not be reaped"),
+                socket,
+            });
+        }
+        if end_unreported_host(&socket, deadlines.cleanup).await {
+            Err(SpawnError::Abandoned { reason })
+        } else {
+            Err(SpawnError::MayRemain { reason, socket })
+        }
+    }
+
+    /// Give the first stage its spec and then let go of it without waiting
+    /// or killing it, as if the supervisor holding it died there: the
+    /// interruption a crash leaves, for the tests of what a later
+    /// supervisor does about a starter that outlived its supervisor. The
+    /// first stage is never reaped by this process.
+    #[cfg(any(test, feature = "test-seams"))]
+    pub async fn deliver_and_abandon_for_test(self) -> io::Result<()> {
+        let StartingHost {
+            first,
+            mut stdin,
+            spec,
+            ..
+        } = self;
+        let written = stdin.write_all(&spec).await;
+        drop(stdin);
+        // Forgotten, not dropped: dropping would kill it (`kill_on_drop`).
+        std::mem::forget(first);
+        written
     }
 }
 
@@ -967,6 +1134,75 @@ mod tests {
             Err(SpawnError::MayRemain { socket: named, .. }) => assert_eq!(named, socket),
             other => panic!("expected MayRemain, got {other:?}"),
         }
+    }
+
+    /// A started first stage is pinned and given nothing until it is
+    /// finished; one dropped before that is killed having read no spec.
+    ///
+    /// Why: a caller records the first stage's process and the socket
+    /// between starting and finishing it, so that a supervisor crash after
+    /// the record leaves something it can fence; that only works if the
+    /// first stage can start nothing before it has the spec, and if a start
+    /// given up before the record leaves nothing. Spec: `start_host` with a
+    /// caller-chosen name gives that name's socket path in `<state>/hosts`
+    /// and a starter whose pid is the stand-in's own (it records `$$`) and
+    /// that runs; the stand-in has read nothing (it records what it reads,
+    /// and the record stays empty); after the start is dropped, the stand-in
+    /// is gone and still read nothing. A second start with the same name,
+    /// once a file is at its path, is refused before anything runs.
+    #[farhelm_testtrace::test]
+    async fn a_started_first_stage_is_pinned_and_given_nothing_until_finished() {
+        let state = tempfile::tempdir().unwrap();
+        let bin = tempfile::tempdir().unwrap();
+        let o = bin.path().display();
+        let program = starter(
+            bin.path(),
+            "farhelm",
+            &format!(": > {o}/read\necho $$ > {o}/pid\n/bin/cat > {o}/read\nexec /bin/sleep 600"),
+        );
+        let name = free_host_name(state.path()).expect("a free name");
+        let starting = start_host(&program, state.path(), name.clone(), child(), &tag())
+            .expect("the first stage starts");
+        assert_eq!(
+            starting.socket(),
+            state.path().join("hosts").join(name.as_str())
+        );
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        let pid: u32 = loop {
+            if let Ok(text) = std::fs::read_to_string(bin.path().join("pid"))
+                && let Ok(pid) = text.trim().parse()
+            {
+                break pid;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the stand-in never ran"
+            );
+            // sleep-ok: polling interval for a file the test's own stand-in writes.
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        let starter = starting.starter().expect("the first stage is pinned");
+        assert_eq!(starter.pid, pid);
+        assert_eq!(starter.is_running(), Ok(true));
+        assert_eq!(std::fs::read(bin.path().join("read")).unwrap(), b"");
+
+        drop(starting);
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while starter.is_running() != Ok(false) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the dropped first stage runs on"
+            );
+            // sleep-ok: polling interval for the killed stand-in to be reaped.
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(std::fs::read(bin.path().join("read")).unwrap(), b"");
+
+        std::fs::write(state.path().join("hosts").join(name.as_str()), b"").unwrap();
+        assert!(matches!(
+            start_host(&program, state.path(), name, child(), &tag()),
+            Err(SpawnError::Name(_))
+        ));
     }
 
     /// A production supervisor starts hosts from the file it is running on

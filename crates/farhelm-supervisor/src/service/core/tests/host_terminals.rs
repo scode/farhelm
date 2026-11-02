@@ -801,3 +801,116 @@ async fn a_stop_before_the_exit_record_still_records_the_shims_report() {
         }
     );
 }
+
+/// A Restart of a session with no terminal is refused, before anything
+/// changes, when its row says the agent was started in a host.
+///
+/// Why: a create under the terminal-host switch can be kept as a launching
+/// record with no terminal (its host could not be confirmed ended), and
+/// every relaunch target is tmux's while a relaunch keeps the row's kind:
+/// relaunching it would leave a host row whose `pane` holds a tmux pane id,
+/// which a later reader looks for as a host's socket. Restart into a new
+/// host comes with a later change. Spec: with a host row for `s1` and its
+/// published entry holding no terminal, a consented Restart fails with the
+/// host-agent refusal, and the row's generation, outcome, kind and `pane`
+/// are as they were.
+#[farhelm_testtrace::test]
+async fn restart_refuses_a_terminal_less_session_whose_row_is_a_host_row() {
+    let state = StateDir::new();
+    let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        .await
+        .expect("supervisor");
+    let row = host_row("s1", Path::new("/nonexistent/hosts/ABCDEFGH"));
+    sup.store
+        .insert_session(row.clone(), None)
+        .await
+        .expect("insert the host row");
+    sup.sessions.lock().await.insert(
+        "s1".to_string(),
+        Arc::new(entry_with(None, LastOutcome::Running)),
+    );
+
+    let refused = sup
+        .restart_session("s1", true, None, None)
+        .await
+        .expect_err("a terminal-less host agent is not relaunched into tmux");
+    assert!(
+        format!("{refused:#}").contains(HOST_RESTART_UNAVAILABLE),
+        "{refused:#}"
+    );
+    let after = sup.store.session("s1").await.expect("read").expect("row");
+    assert_eq!(
+        (
+            after.generation,
+            after.outcome,
+            after.terminal_kind,
+            after.pane
+        ),
+        (row.generation, row.outcome, row.terminal_kind, row.pane)
+    );
+}
+
+/// A retried create whose launch kept and published its host, with no
+/// other evidence of the launch, replays the session and starts nothing.
+///
+/// Why: both reviews' finding. A create whose confirmation failed and
+/// whose host could not be confirmed ended keeps its launching row (with no
+/// `pane`) and publishes that host; nothing else may show the launch (no
+/// scope on a machine without a user manager, no sentinel, no report). A
+/// retry that looked only at hosts it does not drive would find nothing
+/// and relaunch beside the running agent. Spec: with a pending reservation
+/// for `s1`, its launching host row with an empty `pane`, a published entry
+/// holding a stand-in host, no user manager and no sentinel, a create with
+/// the same key answers with `s1`; the reservation is settled as created;
+/// the entry still holds the same host, and the host was sent nothing.
+#[farhelm_testtrace::test]
+async fn a_retry_finds_the_sessions_own_published_host() {
+    let state = StateDir::new();
+    let sup = Supervisor::new_with_seams(
+        state.path(),
+        dummy_exe(),
+        SupervisorTimeouts::default(),
+        SupervisorSeams {
+            scopes: Arc::new(crate::scope::ScopeManager::disabled()),
+            ..SupervisorSeams::default()
+        },
+    )
+    .await
+    .expect("supervisor");
+    let (host, test_host) = adopt_test_host(Some(sup.host_liveness.clone())).await;
+    let claim = IntentClaim {
+        intent_key: "kept".to_string(),
+        fingerprint: command_fingerprint("/tmp", "agent", None),
+        dedup_scope: DedupScope::SessionLifetime,
+    };
+    let mut row = host_row("s1", test_host.socket());
+    row.pane = String::new();
+    row.outcome = LastOutcome::Launching;
+    sup.store
+        .insert_session(row, Some(claim.clone()))
+        .await
+        .expect("the launching row and its reservation");
+    sup.sessions.lock().await.insert(
+        "s1".to_string(),
+        Arc::new(entry_with(
+            Some(Terminal::Host(host.clone())),
+            LastOutcome::Launching,
+        )),
+    );
+
+    let replayed = sup
+        .create_session_without_overrides("/tmp", "agent", None, 80, 24, Some(claim))
+        .await
+        .expect("the retry answers");
+    assert_eq!(replayed.id, "s1");
+    let reservation = sup
+        .store
+        .reservation("kept")
+        .await
+        .expect("read")
+        .expect("the reservation");
+    assert_eq!(reservation.outcome, ReservationOutcome::Created);
+    let entry = sup.sessions.lock().await.get("s1").cloned().expect("entry");
+    assert_eq!(entry.terminal, Some(Terminal::Host(host)));
+    assert_eq!(test_host.received(), b"");
+}

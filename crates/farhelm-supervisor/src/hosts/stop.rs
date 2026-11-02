@@ -466,17 +466,34 @@ fn list_sockets(dir: &Path, problems: &mut Vec<String>) -> Listing {
 /// Stop the host at `target`'s socket, and remove its socket file if one is
 /// left once it is confirmed stopped.
 async fn stop_host(target: Target, limits: StopLimits) -> HostReport {
-    let outcome = match HostConnection::connect_with(&target.path, limits.client).await {
-        Ok(connection) => shut_down(connection, &target, limits).await,
+    let outcome = end_host_at(&target.path, limits).await;
+    finish(target, outcome)
+}
+
+/// End the one host at `socket` the way this module ends each host of a
+/// state directory (the module docs, phase 2): `Shutdown` with take-over,
+/// the verified signal for a host the protocol cannot end, and "stopped"
+/// only once confirmed. Leaves any socket file a stopped host left behind.
+///
+/// For a caller that knows which host it means rather than finding hosts
+/// by place: the supervisor ending a host it started for a launch that did
+/// not go through (a start that did not finish, a host it cannot use, a
+/// create that lost to Delete). `socket` is spelled as the host was started
+/// with it, which the verified signal compares byte for byte. Like the rest
+/// of this module it takes no lock: a host owned by a running supervisor
+/// loses its connection, so a supervisor calls it only for a host no runtime
+/// of its own holds.
+pub async fn end_host_at(socket: &Path, limits: StopLimits) -> HostOutcome {
+    match HostConnection::connect_with(socket, limits.client).await {
+        Ok(connection) => shut_down(connection, socket, limits).await,
         Err(ConnectError::Gone(gone)) => HostOutcome::Stopped(Stopped::Gone(gone)),
         Err(error @ (ConnectError::Busy { peer } | ConnectError::Unavailable { peer, .. })) => {
             match peer {
-                Some(peer) => signal(&peer, &target, &error.to_string(), limits.client).await,
+                Some(peer) => signal(&peer, socket, &error.to_string(), limits.client).await,
                 None => HostOutcome::Unconfirmed(format!("{error}, and its process is unknown")),
             }
         }
-    };
-    finish(target, outcome)
+    }
 }
 
 /// The report for one host, removing the socket file a stopped host left.
@@ -494,7 +511,7 @@ fn finish(target: Target, outcome: HostOutcome) -> HostReport {
 
 /// `Shutdown` over a connection, falling back to the verified signal when
 /// it fails or the host does not end within the limits' end wait.
-async fn shut_down(connection: HostConnection, target: &Target, limits: StopLimits) -> HostOutcome {
+async fn shut_down(connection: HostConnection, socket: &Path, limits: StopLimits) -> HostOutcome {
     let peer = connection.peer();
     let shutdown = connection.shutdown().await;
     let why = match shutdown {
@@ -502,7 +519,7 @@ async fn shut_down(connection: HostConnection, target: &Target, limits: StopLimi
         // written whole: neither is a confirmation (see `ShutdownOutcome`);
         // the process (or the socket file) going is.
         Ok(_) => {
-            if ended(peer, &target.path, limits.end_wait).await {
+            if ended(peer, socket, limits.end_wait).await {
                 return HostOutcome::Stopped(Stopped::ShutDown);
             }
             "it took Shutdown but did not end".to_string()
@@ -510,7 +527,7 @@ async fn shut_down(connection: HostConnection, target: &Target, limits: StopLimi
         Err(error) => format!("Shutdown failed: {error}"),
     };
     match peer {
-        Some(peer) => signal(&peer, target, &why, limits.client).await,
+        Some(peer) => signal(&peer, socket, &why, limits.client).await,
         None => HostOutcome::Unconfirmed(format!("{why}, and its process is unknown")),
     }
 }
@@ -541,7 +558,7 @@ async fn ended(peer: Option<HostProcess>, socket: &Path, wait: Duration) -> bool
 }
 
 /// End `peer` with the verified signal, which checks that its command line
-/// names `target`'s socket path exactly; `why` says why the protocol did
+/// names the socket path `socket` exactly; `why` says why the protocol did
 /// not.
 ///
 /// `AlreadyGone` (the pinned process no longer runs) confirms nothing by
@@ -554,30 +571,28 @@ async fn ended(peer: Option<HostProcess>, socket: &Path, wait: Duration) -> bool
 /// process serving it) confirms the stop.
 async fn signal(
     peer: &HostProcess,
-    target: &Target,
+    socket: &Path,
     why: &str,
     client: ClientDeadlines,
 ) -> HostOutcome {
-    match terminate_verified(peer, &target.path).await {
+    match terminate_verified(peer, socket).await {
         Ok(Termination::StillRunning) => HostOutcome::Unconfirmed(format!(
             "{why}; process {} survived SIGTERM and SIGKILL",
             peer.pid
         )),
-        Ok(Termination::AlreadyGone) => {
-            match HostConnection::connect_with(&target.path, client).await {
-                Err(ConnectError::Gone(_)) => {
-                    HostOutcome::Stopped(Stopped::Signalled(Termination::AlreadyGone))
-                }
-                Ok(_) => HostOutcome::Unconfirmed(format!(
-                    "{why}; process {} ended by itself, but something still answers at the socket",
-                    peer.pid
-                )),
-                Err(error) => HostOutcome::Unconfirmed(format!(
-                    "{why}; process {} ended by itself, but the socket is not gone: {error}",
-                    peer.pid
-                )),
+        Ok(Termination::AlreadyGone) => match HostConnection::connect_with(socket, client).await {
+            Err(ConnectError::Gone(_)) => {
+                HostOutcome::Stopped(Stopped::Signalled(Termination::AlreadyGone))
             }
-        }
+            Ok(_) => HostOutcome::Unconfirmed(format!(
+                "{why}; process {} ended by itself, but something still answers at the socket",
+                peer.pid
+            )),
+            Err(error) => HostOutcome::Unconfirmed(format!(
+                "{why}; process {} ended by itself, but the socket is not gone: {error}",
+                peer.pid
+            )),
+        },
         Ok(termination) => HostOutcome::Stopped(Stopped::Signalled(termination)),
         Err(error) => HostOutcome::Unconfirmed(format!("{why}; {error}")),
     }
@@ -1206,7 +1221,7 @@ mod tests {
 
         let served = target_in(&hosts, &name);
         let _listener = UnixListener::bind(&served.path).unwrap();
-        let outcome = signal(&candidate, &served, "stand-in", short().client).await;
+        let outcome = signal(&candidate, &served.path, "stand-in", short().client).await;
         match &outcome {
             HostOutcome::Unconfirmed(why) => assert!(why.contains("ended by itself"), "{why}"),
             other => panic!("expected unconfirmed, got {other:?}"),
@@ -1224,7 +1239,7 @@ mod tests {
         let candidate = ended_candidate(elsewhere.path(), OsStr::new(&stale_name));
         let stale = target_in(&hosts, &stale_name);
         drop(UnixListener::bind(&stale.path).unwrap());
-        let outcome = signal(&candidate, &stale, "stand-in", short().client).await;
+        let outcome = signal(&candidate, &stale.path, "stand-in", short().client).await;
         assert_eq!(
             outcome,
             HostOutcome::Stopped(Stopped::Signalled(Termination::AlreadyGone))

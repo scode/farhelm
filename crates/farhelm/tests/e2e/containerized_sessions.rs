@@ -1392,3 +1392,122 @@ async fn wait_for_exit(h: &Harness, id: &str) {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }
+
+/// A containerized agent created under the supervisor's terminal-host switch
+/// runs in its container from a terminal host, and Stop and Delete end the
+/// container as they do for a pane.
+///
+/// Why: a container launch is the one launch kind whose shim does not exec
+/// the agent itself but Podman, so it is the kind most likely to differ
+/// between a pane and a host's child (the plan's PR 16 tests every launch
+/// kind in a host). Spec: with the switch on (hosts started from the built
+/// `farhelm`), a containerized fake Claude behind a wrapper prefix starts;
+/// its ready line reaches the host's screen, the row is a host row and the
+/// container runs; Stop leaves the container exited and the host process
+/// running; Delete removes the container. The test then ends the host,
+/// which Delete does not yet do.
+#[farhelm_testtrace::test]
+async fn podman_agent_runs_from_a_terminal_host() {
+    use std::os::unix::fs::PermissionsExt;
+    if !available() {
+        return;
+    }
+    let root = farhelm_teststate::tempdir().unwrap();
+    let image = "docker.io/library/ubuntu:24.04";
+    let host_account = HostAccount {
+        name: format!("fh{}", &uuid::Uuid::new_v4().simple().to_string()[..20]),
+        uid: 1000,
+        gid: 1000,
+        home: root.path().to_path_buf(),
+    };
+    assert_image_account_premise(image, &host_account, AccountRule::Uid);
+    let h = harness_with_seams(
+        SupervisorTimeouts::default(),
+        SupervisorSeams {
+            container_host_account: Some(host_account),
+            scopes: Arc::new(farhelm_supervisor::scope::ScopeManager::disabled()),
+            new_terminals: farhelm_supervisor::service::NewTerminals::Host,
+            host_program: Some(farhelm_bin().into()),
+            ..Default::default()
+        },
+    )
+    .await;
+    let checkout = managed_checkout(&h, root.path());
+    let executable = checkout.join("claude");
+    std::fs::write(
+        &executable,
+        "#!/bin/bash\nprintf 'CONTAINER HOST READY\\n'\nread -r finish\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let (port, server) = listener().await;
+    let selection = LaunchSelection {
+        harness: LaunchHarness::Claude,
+        model: None,
+        effort: None,
+        permissions: Some(farhelm_proto::LaunchPermission::Guarded),
+        permission_flags: None,
+        wrapper_prefix: Some(vec!["env".into(), "PATH=\"$PWD:$PATH\"".into()]),
+        container: Some(ContainerConfig {
+            engine: ContainerEngine::Podman,
+            image: image.into(),
+            api_proxy_port: port,
+            github_token_file: None,
+        }),
+        workspace_trust: None,
+    };
+    let launch = farhelm_helm::compile_agent_launch(selection).unwrap();
+    let session = h
+        .client
+        .create_session_with_extras(
+            checkout.to_str().unwrap(),
+            launch,
+            None,
+            120,
+            30,
+            farhelm_helm::CreateExtras::default(),
+        )
+        .await
+        .unwrap();
+    let name = format!("farhelm-{}", session.id);
+    let _cleanup = ContainerCleanup(name.clone());
+    let host = h
+        .sup
+        .agent_host_for_test(&session.id)
+        .await
+        .expect("the agent runs in a host");
+    crate::host_terminals::wait_for_screen(&host, "CONTAINER HOST READY").await;
+    assert_eq!(state(&name), "running");
+    let row = SessionStore::open(&h.state.path().join("supervisor.db"), false)
+        .await
+        .unwrap()
+        .session(&session.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        row.terminal_kind,
+        farhelm_supervisor::store::TerminalKind::Host
+    );
+    let host_pid = crate::host_terminals::host_process(host.socket())
+        .expect("the host's process serves its socket");
+
+    h.client.stop_session(&session.id).await.unwrap();
+    assert_eq!(state(&name), "exited");
+    assert!(!process_is_gone(host_pid), "Stop left the host running");
+    h.client.delete_session(&session.id).await.unwrap();
+    assert_eq!(
+        Command::new("podman")
+            .args(["container", "exists", &name])
+            .status()
+            .unwrap()
+            .code(),
+        Some(1)
+    );
+    let report = tokio::time::timeout(Duration::from_secs(15), host.shutdown())
+        .await
+        .expect("the host's shutdown finishes in time")
+        .expect("the runtime was still running the host");
+    assert!(report.ended, "the host ended: {report:?}");
+    server.abort();
+}

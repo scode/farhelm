@@ -384,6 +384,11 @@ impl LaunchArtifacts {
         {
             error = error.context(cleanup);
         }
+        if let Err(cleanup) =
+            Self::remove_file_fail_closed(self.host(), "the failed create's host record").await
+        {
+            error = error.context(cleanup);
+        }
         error
     }
 
@@ -397,6 +402,16 @@ impl LaunchArtifacts {
         let waypoint_removed =
             Self::remove_file_best_effort(self.waypoint(), "launch waypoint").await;
         spec_removed && status_removed && waypoint_removed
+    }
+
+    /// Remove a launch's host record once its host is confirmed ended.
+    ///
+    /// Kept apart from [`Self::remove_failed_create_best_effort`], which also
+    /// runs before a failed create knows whether its terminal ended: the
+    /// record is what a later retry fences a host that may still run by, so
+    /// it goes only once nothing at its socket can run.
+    pub(super) async fn remove_host_record_best_effort(&self) -> bool {
+        Self::remove_file_best_effort(self.host(), "launch host record").await
     }
 
     /// Retain every cleanup error when Delete has removed a relaunch's row.
@@ -446,6 +461,11 @@ impl LaunchArtifacts {
         let spec_removed = Self::remove_file_best_effort(self.spec(), "leftover launch spec").await;
         let waypoint_removed =
             Self::remove_file_best_effort(self.waypoint(), "launch waypoint").await;
+        // Not the host record: an error settles the agent, not its terminal
+        // host, which may still run (holding the failed launch's final
+        // screen) with nothing else naming its socket while the row's `pane`
+        // is empty. It goes only with a confirmed end of that host, or with
+        // the retry that found nothing left of the launch.
         status_removed && spec_removed && waypoint_removed
     }
 
@@ -460,6 +480,9 @@ impl LaunchArtifacts {
         Self::remove_file_fail_closed(self.status(), "the previous launch's sentinel").await?;
         Self::remove_file_fail_closed(self.waypoint(), "the previous launch's waypoint").await?;
         Self::remove_file_fail_closed(self.spec(), "the previous launch's spec").await?;
+        // Only reached once the retry's evidence found the old record's
+        // starter gone and nothing at its socket.
+        Self::remove_file_fail_closed(self.host(), "the previous launch's host record").await?;
         Self::remove_file_fail_closed(
             &crate::session_hold::held_mark_path(self.spec()),
             "the previous launch's held mark",
@@ -690,7 +713,7 @@ impl LaunchArtifacts {
                         .keys()
                         .any(|session_id| staged_name_belongs_to(&name, session_id))
             } else if let Some((id, generation)) = crate::launch::parse_launch_file_name(&name) {
-                // Names are `<id>.<generation>.json|status|waypoint|held|launched`:
+                // Names are `<id>.<generation>.json|status|waypoint|held|launched|host`:
                 // launch files are per-LAUNCH (`launch::spec_path_for_launch`), the
                 // last two the session hold's marks. Two rules:
                 //

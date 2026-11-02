@@ -90,6 +90,8 @@ mod file_downloads;
 mod tcp_relays;
 
 #[cfg(target_os = "linux")]
+mod host_creates;
+#[cfg(target_os = "linux")]
 mod host_terminals;
 #[cfg(target_os = "linux")]
 mod replay_marker;
