@@ -1,0 +1,426 @@
+diff --git a/vte/src/ansi.rs b/vte/src/ansi.rs
+index 592266e..b288439 100644
+--- a/vte/src/ansi.rs
++++ b/vte/src/ansi.rs
+@@ -3,6 +3,10 @@
+ // This module was originally part of the `alacritty_terminal` crate, which is
+ // licensed under the Apache License, Version 2.0 and is part of the Alacritty
+ // project (https://github.com/alacritty/alacritty).
++//
++// Modified for Farhelm: adds `Processor::is_ground()`, `preceding_char()` and
++// `set_preceding_char()`, and ends the active hyperlink when an OSC 8 is
++// dropped for its length. See vendor/README.md in the Farhelm repository.
+ 
+ //! ANSI Terminal Stream Parsing.
+ 
+@@ -363,6 +367,33 @@ impl<T: Timeout> Processor<T> {
+         self.state.sync_state.buffer.len()
+     }
+ 
++    // Farhelm patch: snapshot support. None of these change behavior.
++
++    /// Whether the underlying parser is between sequences (see
++    /// [`crate::Parser::is_ground`]).
++    ///
++    /// This does not cover a pending synchronized update; check
++    /// `sync_timeout()` for that.
++    #[inline]
++    pub fn is_ground(&self) -> bool {
++        self.parser.is_ground()
++    }
++
++    /// The character `CSI Ps b` (REP) would repeat: the last one printed.
++    ///
++    /// This survives every other sequence, so it is part of the state a
++    /// snapshot has to carry.
++    #[inline]
++    pub fn preceding_char(&self) -> Option<char> {
++        self.state.preceding_char
++    }
++
++    /// Restore the REP character after rebuilding an emulator from a snapshot.
++    #[inline]
++    pub fn set_preceding_char(&mut self, c: Option<char>) {
++        self.state.preceding_char = c;
++    }
++
+     /// Process a new byte during a synchronized update.
+     ///
+     /// Returns the number of bytes processed.
+@@ -1325,6 +1356,18 @@ where
+         debug!("[unhandled unhook]");
+     }
+ 
++    // Farhelm patch: an OSC 8 dropped for its length (see
++    // `Perform::osc_overflow`) ends the active hyperlink. The dropped command
++    // was meant to replace that link, so keeping it would attribute the text
++    // that follows to a link the program already moved away from. Any other
++    // dropped OSC is ignored, as before.
++    #[inline]
++    fn osc_overflow(&mut self, params: &[&[u8]], _bell_terminated: bool) {
++        if params.first() == Some(&&b"8"[..]) {
++            self.handler.set_hyperlink(None);
++        }
++    }
++
+     #[inline]
+     fn osc_dispatch(&mut self, params: &[&[u8]], bell_terminated: bool) {
+         let terminator = if bell_terminated { "\x07" } else { "\x1b\\" };
+@@ -2437,6 +2480,43 @@ mod tests {
+         assert_eq!(handler.attr.take(), Some(Attr::Underline));
+     }
+ 
++    /// Farhelm patch test. Spec: when the parser drops an OSC 8 for going
++    /// over `OSC_PAYLOAD_LIMIT`, in its URI or in its `id`, the processor ends
++    /// the active hyperlink; dropping any other OSC leaves it alone.
++    ///
++    /// Why: a terminal that keeps the previous link after a dropped OSC 8
++    /// attributes the text that follows to a URI it never had, and a program
++    /// only has to make its link long enough to get there.
++    #[test]
++    #[cfg(feature = "std")]
++    fn dropped_osc8_ends_hyperlink() {
++        #[derive(Default)]
++        struct LinkHandler {
++            links: Vec<Option<Hyperlink>>,
++        }
++
++        impl Handler for LinkHandler {
++            fn set_hyperlink(&mut self, link: Option<Hyperlink>) {
++                self.links.push(link);
++            }
++        }
++
++        let filler = vec![b'u'; crate::OSC_PAYLOAD_LIMIT];
++        // (bytes before the filler, whether the active link ends)
++        let cases =
++            [(&b"\x1b]8;;https://e/"[..], true), (b"\x1b]8;id=", true), (b"\x1b]52;c;", false)];
++        for (prefix, ends) in cases {
++            let mut parser = Processor::<TestSyncHandler>::new();
++            let mut handler = LinkHandler::default();
++            parser.advance(&mut handler, prefix);
++            parser.advance(&mut handler, &filler);
++            parser.advance(&mut handler, b"\x07");
++
++            let expected = if ends { vec![None] } else { vec![] };
++            assert_eq!(handler.links, expected, "after {:?}", String::from_utf8_lossy(prefix));
++        }
++    }
++
+     #[test]
+     #[cfg(feature = "std")]
+     fn contrast() {
+diff --git a/vte/src/lib.rs b/vte/src/lib.rs
+index 1c69123..39725e5 100644
+--- a/vte/src/lib.rs
++++ b/vte/src/lib.rs
+@@ -1,3 +1,7 @@
++// Modified for Farhelm: adds `is_ground()`, caps the buffered OSC payload
++// (`OSC_PAYLOAD_LIMIT`) and reports a dropped OSC (`Perform::osc_overflow`).
++// See vendor/README.md in the Farhelm repository.
++
+ //! Parser for implementing virtual terminal emulators
+ //!
+ //! [`Parser`] is implemented according to [Paul Williams' ANSI parser state
+@@ -45,6 +49,23 @@ const MAX_INTERMEDIATES: usize = 2;
+ const MAX_OSC_PARAMS: usize = 16;
+ const MAX_OSC_RAW: usize = 1024;
+ 
++/// Farhelm patch: the most OSC payload bytes the `std` parser buffers for one
++/// sequence, counting every byte it buffers: those between `ESC ]` and the
++/// terminator, except the `;` separators and the C0 controls it ignores.
++///
++/// Upstream buffers an OSC string in a `Vec` with no limit, so one huge or
++/// unterminated sequence grows the embedder's memory by whatever the program
++/// sends. Once a sequence reaches this many bytes the parser stops buffering
++/// it, and when it ends the whole sequence is dropped rather than dispatched
++/// truncated (a truncated OSC 52 would put corrupt data on the clipboard). The
++/// performer hears of the drop through [`Perform::osc_overflow`] instead.
++///
++/// The value sits just above xterm.js's limit of 10,000,000 payload characters,
++/// so every OSC 52 clipboard write that xterm.js accepted still works. The
++/// `no_std` parser keeps its own fixed-size buffer and is not affected.
++#[cfg(feature = "std")]
++pub const OSC_PAYLOAD_LIMIT: usize = 10 * 1024 * 1024;
++
+ /// Parser for raw _VTE_ protocol which delegates actions to a [`Perform`]
+ ///
+ /// [`Perform`]: trait.Perform.html
+@@ -64,6 +85,13 @@ pub struct Parser<const OSC_RAW_BUF_SIZE: usize = MAX_OSC_RAW> {
+     osc_raw: Vec<u8>,
+     osc_params: [(usize, usize); MAX_OSC_PARAMS],
+     osc_num_params: usize,
++    /// Farhelm patch: `Some(n)` once the current OSC sequence hit
++    /// `OSC_PAYLOAD_LIMIT`, where `n` is how many of its parameters were
++    /// complete (ended by a `;`) before it did. Such a sequence is dropped when
++    /// it ends, and only those `n` parameters reach `Perform::osc_overflow`.
++    /// Every way out of `State::OscString` goes through `osc_end`, which
++    /// clears it.
++    osc_overflow: Option<usize>,
+     ignoring: bool,
+     partial_utf8: [u8; 4],
+     partial_utf8_len: usize,
+@@ -90,6 +118,18 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
+         Default::default()
+     }
+ 
++    /// Farhelm patch: whether the parser sits between sequences: in the ground
++    /// state with no partially received UTF-8 code point.
++    ///
++    /// Only at such a point does the parser carry no state that the next bytes
++    /// depend on (apart from the processor's REP character), so an embedder can
++    /// rebuild an emulator from a snapshot taken here plus the bytes that
++    /// follow.
++    #[inline]
++    pub fn is_ground(&self) -> bool {
++        self.state == State::Ground && self.partial_utf8_len == 0
++    }
++
+     #[inline]
+     fn params(&self) -> &Params {
+         &self.params
+@@ -548,14 +588,32 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
+                 return;
+             }
+         }
++        // Farhelm patch: see `OSC_PAYLOAD_LIMIT`.
++        #[cfg(feature = "std")]
++        {
++            if self.osc_raw.len() >= OSC_PAYLOAD_LIMIT {
++                self.osc_overflow.get_or_insert(self.osc_num_params);
++                return;
++            }
++        }
+         self.osc_raw.push(byte);
+     }
+ 
+     fn osc_end<P: Perform>(&mut self, performer: &mut P, byte: u8) {
+         self.action_osc_put_param();
+-        self.osc_dispatch(performer, byte);
++        // Farhelm patch: an oversized sequence is dropped whole (the performer
++        // only hears that it was, see `Perform::osc_overflow`), and a large
++        // buffer is given back so one big OSC 52 does not stay allocated for
++        // the parser's lifetime (`shrink_to` is a no-op below the bound).
++        match self.osc_overflow {
++            None => self.osc_dispatch(performer, byte),
++            Some(complete) => self.osc_overflow_dispatch(performer, complete, byte),
++        }
+         self.osc_raw.clear();
+         self.osc_num_params = 0;
++        self.osc_overflow = None;
++        #[cfg(feature = "std")]
++        self.osc_raw.shrink_to(MAX_OSC_RAW);
+     }
+ 
+     /// Reset escape sequence parameters and intermediates.
+@@ -588,6 +646,17 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
+         }
+     }
+ 
++    /// Farhelm patch: report a dropped OSC with its first `complete`
++    /// parameters, the ones that ended before the payload limit was hit, so
++    /// that no truncated parameter ever reaches the performer.
++    fn osc_overflow_dispatch<P: Perform>(&self, performer: &mut P, complete: usize, byte: u8) {
++        let mut params: [&[u8]; MAX_OSC_PARAMS] = [&[]; MAX_OSC_PARAMS];
++        for (param, &(start, end)) in params.iter_mut().zip(&self.osc_params[..complete]) {
++            *param = &self.osc_raw[start..end];
++        }
++        performer.osc_overflow(&params[..complete], byte == 0x07);
++    }
++
+     /// Advance the parser state from ground.
+     ///
+     /// The ground state is handled separately since it can only be left using
+@@ -791,6 +860,19 @@ pub trait Perform {
+     /// Dispatch an operating system command.
+     fn osc_dispatch(&mut self, _params: &[&[u8]], _bell_terminated: bool) {}
+ 
++    /// Farhelm patch: an operating system command was dropped, instead of
++    /// dispatched, because its payload went over `OSC_PAYLOAD_LIMIT`.
++    ///
++    /// `params` holds only the parameters that were complete (ended by a `;`)
++    /// before the limit was hit, so it never carries truncated data, and it is
++    /// empty when the first parameter itself was too long. A performer uses it
++    /// to undo state the dropped command would have replaced: an OSC 8 that is
++    /// too long has to end the active hyperlink as a rejected one does,
++    /// rather than leave the previous link on the text that follows. The
++    /// default does nothing, which keeps upstream's drop-whole behavior. Only
++    /// the `std` parser calls it; the `no_std` one has no payload limit.
++    fn osc_overflow(&mut self, _params: &[&[u8]], _bell_terminated: bool) {}
++
+     /// A final character has arrived for a CSI sequence
+     ///
+     /// The `ignore` flag indicates that either more than two intermediates
+@@ -850,6 +932,8 @@ mod tests {
+     #[derive(Debug, PartialEq, Eq)]
+     enum Sequence {
+         Osc(Vec<Vec<u8>>, bool),
++        // Farhelm patch: `Perform::osc_overflow`.
++        OscOverflow(Vec<Vec<u8>>, bool),
+         Csi(Vec<Vec<u16>>, Vec<u8>, bool, char),
+         Esc(Vec<u8>, bool, u8),
+         DcsHook(Vec<Vec<u16>>, Vec<u8>, bool, char),
+@@ -865,6 +949,12 @@ mod tests {
+             self.dispatched.push(Sequence::Osc(params, bell_terminated));
+         }
+ 
++        // Farhelm patch: record dropped OSCs too.
++        fn osc_overflow(&mut self, params: &[&[u8]], bell_terminated: bool) {
++            let params = params.iter().map(|p| p.to_vec()).collect();
++            self.dispatched.push(Sequence::OscOverflow(params, bell_terminated));
++        }
++
+         fn csi_dispatch(&mut self, params: &Params, intermediates: &[u8], ignore: bool, c: char) {
+             let params = params.iter().map(|subparam| subparam.to_vec()).collect();
+             let intermediates = intermediates.to_vec();
+@@ -1539,4 +1629,150 @@ mod tests {
+         assert_eq!(dispatcher.dispatched[0], Sequence::Execute(0x18));
+         assert_eq!(dispatcher.dispatched[1], Sequence::Execute(0x1A));
+     }
++
++    // Farhelm patch tests. They run with `cargo test --manifest-path
++    // vendor/vte/Cargo.toml` (vendor/README.md). The emulator's own tests in
++    // the supervisor cover the same caps through the public API.
++
++    /// Spec: `is_ground()` is true exactly between sequences: not inside an
++    /// escape, CSI, OSC or DCS sequence, and not between the bytes of one
++    /// UTF-8 code point.
++    ///
++    /// Why: the supervisor only snapshots an emulator where this holds; a
++    /// snapshot taken anywhere else would lose the parser state the next
++    /// bytes depend on.
++    #[test]
++    fn is_ground_only_between_sequences() {
++        let mut dispatcher = Dispatcher::default();
++        let mut parser = Parser::new();
++        assert!(parser.is_ground());
++
++        // Each step feeds bytes and states whether the parser is now between
++        // sequences.
++        let steps: &[(&[u8], bool)] = &[
++            (b"text", true),
++            (b"\x1b", false),
++            (b"[3", false),
++            (b"1m", true),
++            (b"\xc3", false),
++            (b"\xa9", true),
++            (b"\x1b]2;title", false),
++            (b"\x07", true),
++            (b"\x1bPq", false),
++            (b"#0\x1b\\", true),
++        ];
++        for (bytes, ground) in steps {
++            parser.advance(&mut dispatcher, bytes);
++            assert_eq!(parser.is_ground(), *ground, "after {bytes:?}");
++        }
++    }
++
++    /// Spec: an OSC whose payload is exactly `OSC_PAYLOAD_LIMIT` bytes is
++    /// dispatched whole.
++    ///
++    /// Why: the limit is chosen so that the largest clipboard write xterm.js
++    /// accepted still works; an off-by-one here would break exactly those.
++    #[cfg(feature = "std")]
++    #[test]
++    fn osc_at_payload_limit_is_dispatched() {
++        // `52` and `c` count toward the limit; the `;` separators do not.
++        let data_len = OSC_PAYLOAD_LIMIT - 3;
++        let mut input = b"\x1b]52;c;".to_vec();
++        input.resize(input.len() + data_len, b'A');
++        input.push(0x07);
++
++        let mut dispatcher = Dispatcher::default();
++        let mut parser = Parser::new();
++        parser.advance(&mut dispatcher, &input);
++
++        assert_eq!(dispatcher.dispatched.len(), 1);
++        match &dispatcher.dispatched[0] {
++            Sequence::Osc(params, true) => {
++                assert_eq!(params.len(), 3);
++                assert_eq!(params[2].len(), data_len);
++            },
++            other => panic!("expected an OSC dispatch, got {other:?}"),
++        }
++    }
++
++    /// Spec: an OSC longer than `OSC_PAYLOAD_LIMIT` is never dispatched;
++    /// instead the performer gets one `osc_overflow` with the parameters
++    /// that were complete before the limit. The parser stores no more than
++    /// the limit while the sequence arrives, gives the buffer back as soon as
++    /// it ends, and parses the next sequence as usual. That holds for each
++    /// way an OSC can end (BEL, ST, CAN).
++    ///
++    /// Why: this is the bound that keeps one program's output from growing
++    /// the shared supervisor's memory without limit, and a truncated dispatch
++    /// would hand the embedder corrupt data (half a base64 clipboard payload).
++    #[cfg(feature = "std")]
++    #[test]
++    fn osc_over_payload_limit_is_dropped() {
++        for terminator in [&b"\x07"[..], b"\x1b\\", b"\x18"] {
++            let mut dispatcher = Dispatcher::default();
++            let mut parser = Parser::new();
++
++            parser.advance(&mut dispatcher, b"\x1b]52;c;");
++            parser.advance(&mut dispatcher, &vec![b'A'; OSC_PAYLOAD_LIMIT + 1]);
++            assert_eq!(parser.osc_raw.len(), OSC_PAYLOAD_LIMIT);
++            parser.advance(&mut dispatcher, terminator);
++            assert!(parser.osc_raw.capacity() <= MAX_OSC_RAW, "buffer kept after {terminator:?}");
++            parser.advance(&mut dispatcher, b"\x1b]2;next\x07");
++
++            let oscs: Vec<_> = dispatcher
++                .dispatched
++                .iter()
++                .filter(|seq| matches!(seq, Sequence::Osc(..) | Sequence::OscOverflow(..)))
++                .collect();
++            let bell = terminator == b"\x07";
++            let dropped = Sequence::OscOverflow(vec![b"52".to_vec(), b"c".to_vec()], bell);
++            let next = Sequence::Osc(vec![b"2".to_vec(), b"next".to_vec()], true);
++            assert_eq!(oscs, [&dropped, &next], "after {terminator:?}");
++            assert!(parser.is_ground());
++        }
++    }
++
++    /// Spec: `osc_overflow` carries exactly the parameters that a `;` ended
++    /// before the payload reached `OSC_PAYLOAD_LIMIT`: none when the first
++    /// parameter itself is too long, and never the parameter that was being
++    /// received at the limit or any after it, even ones that end later.
++    ///
++    /// Why: the terminal ends an active hyperlink when it hears that an OSC 8
++    /// was dropped, so the command number has to arrive whenever it was
++    /// complete; and any parameter cut off at the limit is truncated data,
++    /// which must never reach the performer.
++    #[cfg(feature = "std")]
++    #[test]
++    fn osc_overflow_reports_only_complete_params() {
++        let filler = vec![b'u'; OSC_PAYLOAD_LIMIT];
++        // Each case: the bytes after `ESC ]` before `filler`, those after it,
++        // and the params `osc_overflow` must carry. `filler` alone is the
++        // whole limit, so the limit is hit inside it, or, in the first case,
++        // at the `u` right after it.
++        let cases: [(&[u8], &[u8], &[&[u8]]); 4] = [
++            (b"", b"u;x", &[]),
++            (b"8;", b"", &[b"8"]),
++            (b"8;id=a;", b";more", &[b"8", b"id=a"]),
++            (b"8;id=a;https://e/", b"", &[b"8", b"id=a"]),
++        ];
++        for (before, after, expected) in cases {
++            let mut input = b"\x1b]".to_vec();
++            input.extend_from_slice(before);
++            input.extend_from_slice(&filler);
++            input.extend_from_slice(after);
++            input.extend_from_slice(b"\x1b\\");
++
++            let mut dispatcher = Dispatcher::default();
++            let mut parser = Parser::new();
++            parser.advance(&mut dispatcher, &input);
++
++            let expected = expected.iter().map(|p| p.to_vec()).collect();
++            assert_eq!(
++                dispatcher.dispatched.first(),
++                Some(&Sequence::OscOverflow(expected, false)),
++                "for {:?}",
++                String::from_utf8_lossy(before)
++            );
++        }
++    }
+ }

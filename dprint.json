@@ -13,7 +13,9 @@
     "plans/queue/INDEX.md",
     "plans/REPORTS.md",
     "CHANGELOG.md",
-    "releasing/changelog.d/*.md"
+    "releasing/changelog.d/*.md",
+    "vendor/alacritty_terminal/**",
+    "vendor/vte/**"
   ],
   "plugins": [
     "npm:@dprint/json@0.25.2",

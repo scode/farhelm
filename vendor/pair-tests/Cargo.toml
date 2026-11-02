@@ -1,0 +1,20 @@
+# Tests of the vendored terminal crates' patches working together (vendor/README.md). Neither crate's own test build
+# can run them: `alacritty_terminal` built alone uses crates.io's `vte`.
+[package]
+name = "vendor-pair-tests"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+alacritty_terminal = { path = "../alacritty_terminal" }
+
+# The swap Farhelm's workspace makes once a crate depends on these trees: every `vte` in the graph, including the one
+# `alacritty_terminal` depends on, becomes the vendored one.
+[patch.crates-io]
+vte = { path = "../vte" }
+
+# A workspace of its own, so that cargo does not look upward and find Farhelm's, which does not list this crate. Its
+# `Cargo.lock` started as `alacritty_terminal`'s published one, so the tests run on the versions that crate was
+# published with.
+[workspace]

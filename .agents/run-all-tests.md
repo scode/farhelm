@@ -114,6 +114,9 @@ Generic recorder wrapping is fine but not required for these; record each result
   `shellcheck scripts/tensorlake/bootstrap.sh scripts/tensorlake/run-shard.sh` (the Tensorlake harness's own checks;
   running the harness is only on the maintainer's request, `.agents/tensorlake.md`)
 - `python3 scripts/test-record-test-run.py` and `python3 scripts/test-test-run-traces.py`
+- The vendored terminal crates' three recorded test commands from `.agents/validation.md` (`vendor/vte`,
+  `vendor/alacritty_terminal`, and both together in `vendor/pair-tests`), which the sweep's workspace batteries never
+  reach
 - The recorded portable brick-test helper suite from `.agents/validation.md`, with process-group inspection available;
   this exercises compiled task contracts, fixed operations, structured native actions, restart handoff failures and
   calibrated window-trace and bonus gesture-readiness gates. The guest-only Swift helper separately needs SDK type-check
