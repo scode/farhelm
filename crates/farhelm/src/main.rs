@@ -1304,6 +1304,15 @@ enum InternalCmd {
         #[arg(long)]
         state_dir: Option<PathBuf>,
     },
+    /// Run a terminal host (the `terminal-host` crate's entry point): the
+    /// child spec on stdin, `--socket` on the command line, nothing else.
+    /// Started from the supervisor's own program, never through a forwarder,
+    /// and it holds no version of Farhelm: a host lives for weeks and must
+    /// keep neither pruning nor uninstall from proceeding.
+    TerminalHost {
+        #[arg(long)]
+        socket: PathBuf,
+    },
     /// The launch shim: exec a LaunchSpec's argv, recording exec failure
     /// to the spec's status file. See farhelm_supervisor::launch for why
     /// this exists (zsh terminates on failed exec; a shell-side sentinel
@@ -1534,11 +1543,15 @@ fn hold_own_version(command: &Cmd) -> anyhow::Result<()> {
     if matches!(
         command,
         Cmd::Internal {
-            command: InternalCmd::VersionLock { .. }
+            command: InternalCmd::VersionLock { .. } | InternalCmd::TerminalHost { .. }
         }
     ) {
         // The helper locks the forwarder's descriptor itself; it takes no
-        // second lock of its own.
+        // second lock of its own. A terminal host holds none at all, like a
+        // running agent: it lives for weeks and must keep neither pruning
+        // nor uninstall's exclusive lock from proceeding (its second stage
+        // also closes any descriptor it inherited, a forwarder's lock
+        // included). The lock variable is already cleared above.
         return Ok(());
     }
     let Ok(exe) = std::env::current_exe() else {
@@ -1810,6 +1823,14 @@ fn main() -> anyhow::Result<()> {
                 launched,
             } => farhelm_supervisor::session_hold::run_keeper(watch, &launched, ready_fd),
             InternalCmd::Install(args) => run_install(args),
+            InternalCmd::TerminalHost { socket } => {
+                // First thing after argument parsing, with no thread or
+                // runtime started: the host forks.
+                std::process::exit(terminal_host::main_entry([
+                    std::ffi::OsString::from("--socket"),
+                    socket.into_os_string(),
+                ]))
+            }
             InternalCmd::VersionLock { fd } => {
                 // Silent by contract: the forwarder runs this with every
                 // stream pointed at /dev/null and reads only the status.

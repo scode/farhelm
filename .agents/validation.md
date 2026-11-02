@@ -82,12 +82,35 @@ that its required systemd or SSH substrate ran.
   test process with its own recorded nextest report. Keep this explicit release subset while the full e2e target remains
   excluded there. A successful local workspace nextest run already covers these tests on the same pinned substrate; do
   not duplicate them merely because this script is listed. A distro tmux loses the affected-version coverage.
-- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'terminal host' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p terminal-host`
-  — the terminal host crate's wire protocol and journal (`crates/terminal-host/`, contract in its `SPEC.md`): golden
-  fixtures of every version-1 frame (`tests/golden/v1/`, which a test holds to exactly the fixture list, with at least
-  one fixture per message kind), property tests of the codec and of the journal against a model, fixed journal cases,
-  and a check that `SPEC.md`'s resource-bounds table is the code's (`tests/spec_bounds.rs`). Pure: no pty, process or
-  socket. Seconds. Part of the workspace nextest run.
+- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'terminal host' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run -p terminal-host`
+  — the terminal host crate (`crates/terminal-host/`, contract in its `SPEC.md`): real-pty tests of the built
+  `terminal-host` binary (lifecycle, input, resizes, busy and takeover, shutdown, SIGTERM and SIGKILL, the exit while a
+  descendant holds the pty, stuck input on the client's own connection, malformed peers, snapshots and trimming, the
+  child's signals, environment and descriptors, the host's own signal mask, descriptors and command line, terminal
+  settings byte-equal to a tmux 3.7c pane's when that tmux is first on `PATH`, else said as `SKIPPED`), in-process tests
+  of its event loop, golden fixtures of every version-1 frame (`tests/golden/v1/`), and property tests of the codec and
+  of the journal against a model. Seconds. Part of the workspace nextest run; the focused macOS CI job runs it too, in a
+  step of its own after the uninstall acceptance. Nextest runs each test in a process of its own, which these fixtures
+  need: under libtest (`cargo test`, and the coverage and mutation runs below) run them with one test thread
+  (`RUST_TEST_THREADS=1` or `-- --test-threads=1`). Plain parallel `cargo test` is not supported for this crate: a child
+  one test forks holds every descriptor of the test process until it execs, and on macOS, which cannot open a pty or
+  socket close-on-exec in one call, it can keep another test's for good; that test then waits for an end of output or a
+  close that never comes (`crates/terminal-host/TESTING.md`).
+- Terminal host coverage, when the crate changes:
+  `cargo +nightly llvm-cov -p terminal-host --branch --summary-only -- --test-threads=1`, with cargo-llvm-cov 0.9.1
+  installed in your scratch directory (`cargo install --locked --root <scratch>/tools cargo-llvm-cov --version 0.9.1`,
+  then that `bin` on `PATH`) and `rustup component add llvm-tools-preview --toolchain nightly`. The bar is 95% of lines;
+  branches are reported, and the uncovered ones are system-call failure paths the maintainer accepted leaving uncovered
+  rather than adding fault injection (2026-10-31). Code between a fork and its exec is excluded with `coverage(off)`.
+  `crates/terminal-host/TESTING.md` has the current numbers and what is uncovered.
+- Terminal host mutation testing, when the crate changes:
+  `RUST_TEST_THREADS=1 cargo mutants -p terminal-host --timeout 120 --jobs 2` with cargo-mutants 27.1.0 installed the
+  same way (about two hours per 300 mutants with two jobs, since most of the event loop's mutants hang a test until the
+  timeout, and the crate has about 650; restrict a rerun to the functions a change touched with `--file` and `--re`),
+  Linux only, run inside its own CPU-capped `systemd-run --user --scope` as `crates/terminal-host/TESTING.md`, "Running
+  it without disturbing a shared machine", shows: loop-breaking mutants spin every test thread, and the hosts their
+  tests start outlive the killed tests. Every surviving mutant is killed by a test or listed with its reason in that
+  file.
 - `cd crates/farhelm-ui/js-tests && node --test` — the JS unit harness for the asset-JS layer's pure functions
   (PLAN_M6_5.md item 1); node is already a CI requirement for Playwright below, so this adds no dependency. Run from
   inside the directory rather than as a glob from the repo root: node's no-argument default discovery (every `*.test.js`
@@ -172,7 +195,10 @@ that its required systemd or SSH substrate ran.
   `cargo nextest run -p farhelm --test session_hold --test version_lock_forwarder`), each through the recorder with four
   slots and `--tmux none`. The focused macOS CI job (not the release gate) also runs the desktop app's supervisor record
   and stop tests the same way: `cargo nextest run -p farhelm-supervisor --lib -E 'test(managed_supervisor::)'` (the
-  uninstall stop's own tests are part of `uninstall::` above).
+  uninstall stop's own tests are part of `uninstall::` above). After the uninstall acceptance, in a step of its own that
+  runs whatever the steps before it did (so that a host failure cannot hide that gate), it runs the terminal host's
+  whole test suite, `cargo nextest run -p terminal-host`, and the host's entry test in the CLI,
+  `cargo nextest run -p farhelm --test terminal_host_entry`.
 - `scripts/test-provision-centos.sh` — the x86_64 Linux release gate boots a systemd CentOS Stream 9 container and makes
   the helm provision it over ssh, which is the only coverage of a helm installing onto a distribution other than its
   own. Needs docker and `musl-tools`: the payloads it pushes are the release's musl-static `farhelm` and static tmux,

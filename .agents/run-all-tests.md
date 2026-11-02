@@ -119,6 +119,11 @@ Generic recorder wrapping is fine but not required for these; record each result
   calibrated window-trace and bonus gesture-readiness gates. The guest-only Swift helper separately needs SDK type-check
   and read-only runtime validation in an owned disposable guest. Neither establishes live release product checks. Report
   platform skips.
+- Terminal host coverage and mutation testing from `.agents/validation.md`
+  (`cargo +nightly llvm-cov -p terminal-host --branch -- --test-threads=1`, and
+  `RUST_TEST_THREADS=1 cargo mutants -p terminal-host` run the contained way that entry gives; both on one test thread,
+  since the crate's fixtures do not support parallel libtest threads), compared with the baseline in
+  `crates/terminal-host/TESTING.md`: a drop in line coverage below 95% or a new surviving mutant is a finding.
 
 Deliberately not here: everything the sweep runs (workspace nextest including the tmux e2e suite, the browser suite on
 both engines, desktop nextest, both doctest runs, the two JS harnesses, `test-install-sh.sh`, CentOS provisioning,

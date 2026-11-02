@@ -257,6 +257,7 @@ farhelm-testtrace-macros = { path = "crates/farhelm-testtrace-macros" }
 # above for why the dependency is deliberately unreachable from the default
 # workspace battery.
 farhelm-ui = { path = "crates/farhelm-ui" }
+terminal-host = { path = "crates/terminal-host" }
 
 # SHA-256 is compiled optimized even in debug builds. Tests hash real debug
 # binaries, which are hundreds of megabytes, and unoptimized `sha2` takes
