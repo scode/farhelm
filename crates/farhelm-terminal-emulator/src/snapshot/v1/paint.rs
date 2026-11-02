@@ -57,6 +57,12 @@ use unicode_width::UnicodeWidthChar;
 use super::wire;
 use super::{CELL_FIXUP_HEADER_BYTES, CursorFixup, Fixups, GridSel, grid_number};
 use crate::effects::Listener;
+use crate::snapshot::Cancel;
+
+/// How many rows are painted between two looks at the [`Cancel`]: a look is
+/// an atomic load and a clock read, and a row of a wide terminal takes
+/// microseconds, so a cancelled encode stops within about a millisecond.
+const ROWS_PER_CANCEL_CHECK: usize = 64;
 
 /// The cell flags SGR sets on the cursor's template, and so on a printed cell.
 const SGR_FLAGS: Flags = Flags::BOLD
@@ -145,6 +151,9 @@ pub(super) struct Painted {
     /// fixup bytes before it: leaving out the lines before line `k` saves
     /// about `history_costs[k] - history_costs[0]` bytes.
     pub(super) history_costs: Vec<usize>,
+    /// Painting stopped part way because its [`Cancel`] said so: nothing
+    /// else here describes a whole state, and nothing may be made of it.
+    pub(super) cancelled: bool,
 }
 
 /// Paint `term`'s whole state, with `content` deciding how much of the grids,
@@ -159,6 +168,7 @@ pub(super) fn paint(
     content: Content,
     skip_titles: usize,
     painting: Mode,
+    cancel: &Cancel,
 ) -> Painted {
     let columns = term.columns();
     let lines = term.screen_lines();
@@ -169,7 +179,13 @@ pub(super) fn paint(
     } else {
         (term.grid(), term.inactive_grid())
     };
-    let mut painter = Painter::new(columns, lines, content != Content::Nothing, painting);
+    let mut painter = Painter::new(
+        columns,
+        lines,
+        content != Content::Nothing,
+        painting,
+        cancel.clone(),
+    );
     let blank = Row::new(columns);
     let skip_history = match content {
         Content::Cells { skip_history } => skip_history,
@@ -198,12 +214,18 @@ pub(super) fn paint(
         }
         let rows = grid_rows(primary, skip_history, &blank, painter.cells);
         painter.paint_rows(&rows, GridSel::Active, history_len(primary, skip_history));
+        if painter.cancelled {
+            return painter.finish();
+        }
         painter.set_cursor(&primary.saved_cursor, primary, GridSel::Active, true, None);
         painter.w.raw("\x1b7");
         painter.w.ascii_charsets();
     } else {
         let rows = grid_rows(primary, skip_history, &blank, painter.cells);
         painter.paint_rows(&rows, GridSel::Inactive, history_len(primary, skip_history));
+        if painter.cancelled {
+            return painter.finish();
+        }
         let fixed_before = painter.fixups.cursors.len();
         painter.set_cursor(&primary.cursor, primary, GridSel::Inactive, false, None);
         let cursor_fixed = painter.fixups.cursors.len() > fixed_before;
@@ -225,6 +247,9 @@ pub(super) fn paint(
         painter.w.pos = None;
         let rows = grid_rows(alternate_grid, 0, &blank, painter.cells);
         painter.paint_rows(&rows, GridSel::Active, 0);
+        if painter.cancelled {
+            return painter.finish();
+        }
         painter.set_cursor(
             &alternate_grid.saved_cursor,
             alternate_grid,
@@ -388,7 +413,12 @@ pub(super) fn paint(
 /// Paint only the primary screen's history, without its `skip_history`
 /// oldest lines, above a blank screen, leaving everything else as a fresh
 /// terminal has it: the Restart seed (`Emulator::history_seed`).
-pub(super) fn paint_history(term: &Term<Listener>, skip_history: usize, mode: Mode) -> Painted {
+pub(super) fn paint_history(
+    term: &Term<Listener>,
+    skip_history: usize,
+    mode: Mode,
+    cancel: &Cancel,
+) -> Painted {
     let columns = term.columns();
     let lines = term.screen_lines();
     let primary = if term.mode().contains(TermMode::ALT_SCREEN) {
@@ -396,7 +426,7 @@ pub(super) fn paint_history(term: &Term<Listener>, skip_history: usize, mode: Mo
     } else {
         term.grid()
     };
-    let mut painter = Painter::new(columns, lines, true, mode);
+    let mut painter = Painter::new(columns, lines, true, mode, cancel.clone());
     let blank = Row::new(columns);
     let history = history_len(primary, skip_history);
     let mut rows = grid_rows(primary, skip_history, &blank, true);
@@ -404,6 +434,9 @@ pub(super) fn paint_history(term: &Term<Listener>, skip_history: usize, mode: Mo
     rows.truncate(history);
     rows.extend((0..lines).map(|line| (line as i32, &blank)));
     painter.paint_rows(&rows, GridSel::Active, history);
+    if painter.cancelled {
+        return painter.finish();
+    }
     // Painting moved the cursor, saved it (for wrapped lines) and printed:
     // put the cursor, the saved cursor and the REP character back to a fresh
     // terminal's.
@@ -956,10 +989,14 @@ struct Painter {
     cell_fixup_bytes: usize,
     cell_fixup_count: usize,
     history_costs: Vec<usize>,
+    /// Looked at every [`ROWS_PER_CANCEL_CHECK`] rows.
+    cancel: Cancel,
+    /// Set when the cancel was seen: painting stopped there.
+    cancelled: bool,
 }
 
 impl Painter {
-    fn new(columns: usize, lines: usize, cells: bool, mode: Mode) -> Painter {
+    fn new(columns: usize, lines: usize, cells: bool, mode: Mode, cancel: Cancel) -> Painter {
         let (stream, cell_fixups) = match mode {
             Mode::Keep {
                 stream,
@@ -988,6 +1025,8 @@ impl Painter {
             cell_fixup_bytes: 0,
             cell_fixup_count: 0,
             history_costs: Vec::new(),
+            cancel,
+            cancelled: false,
         }
     }
 
@@ -1003,6 +1042,7 @@ impl Painter {
             cell_fixup_bytes: self.cell_fixup_bytes,
             cell_fixup_count: self.cell_fixup_count,
             history_costs: self.history_costs,
+            cancelled: self.cancelled,
         }
     }
 
@@ -1045,6 +1085,10 @@ impl Painter {
         // Whether the last row's wrap already scrolled the screen.
         let mut scrolled = false;
         for (index, &(source_line, row)) in rows.iter().enumerate() {
+            if index % ROWS_PER_CANCEL_CHECK == 0 && self.cancel.is_cancelled() {
+                self.cancelled = true;
+                return;
+            }
             self.drop_measured();
             if index < history {
                 self.history_costs

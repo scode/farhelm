@@ -35,7 +35,7 @@ use std::path::{Path, PathBuf};
 
 /// Seams that turn the switch on for an in-process supervisor: new agents
 /// start in hosts, started from the built `farhelm`, with no user manager.
-fn host_seams() -> SupervisorSeams {
+pub(crate) fn host_seams() -> SupervisorSeams {
     SupervisorSeams {
         new_terminals: NewTerminals::Host,
         host_program: Some(farhelm_bin().into()),
@@ -212,7 +212,7 @@ async fn end_host_at(socket: &Path) {
 /// End a published host through its runtime, so that the harness's cleanup
 /// does not race the runtime for the host's connection, and require that
 /// its process is gone.
-async fn end_runtime(host: &HostTerminal, pid: u32) {
+pub(crate) async fn end_runtime(host: &HostTerminal, pid: u32) {
     let report = tokio::time::timeout(Duration::from_secs(WAIT_SECS), host.shutdown())
         .await
         .expect("the host's shutdown finishes in time")
@@ -1865,10 +1865,12 @@ async fn a_retry_waits_out_a_forked_second_stage_before_relaunching() {
 /// and a checkpoint due after any output, and the create-lifecycle seam
 /// deleting the row at `DuringLaunch` once an encode has reached the gate,
 /// the create fails as having lost to Delete without saying the host could
-/// not be ended, and it does so while the encode is still held: the gate
-/// has let no encode past (it neither was opened nor ran out, which would
-/// show a cleanup that waited for the encode, as one without the bound
-/// would); it took at least the runtime's 15 s bound (so the fallback ran);
+/// not be ended, and it does so without waiting for the encode: the gate
+/// has let no encode past but by its cancel (it neither was opened nor ran
+/// out, which would show a cleanup that waited for the encode, as one
+/// without the bound would; stopping the runtime for the fallback cancels
+/// the encode it holds); it took at least the runtime's 15 s bound (so the
+/// fallback ran);
 /// no host process remains in the state directory. Only then is the gate
 /// opened, and it never ran out.
 #[farhelm_testtrace::test(flavor = "multi_thread")]
@@ -1935,10 +1937,17 @@ async fn ending_a_host_whose_runtime_is_encoding_falls_back_in_bounded_time() {
         .await
         .expect_err("the create lost to Delete");
     let took = started.elapsed();
+    // Unopened, the gate lets an encode past only when it runs out, which a
+    // cleanup that waited for the encode would show, or when the encode is
+    // cancelled, which stopping the runtime for the fallback does.
     assert!(
-        !gate.passed(),
+        !gate.passed() || gate.cancelled(),
         "the cleanup finished only after the held encode went on (expired: {}), after {took:?}",
         gate.expired()
+    );
+    assert!(
+        !gate.expired(),
+        "the held encode's gate ran out, after {took:?}"
     );
     let message = format!("{error:#}");
     assert!(
@@ -1980,9 +1989,11 @@ async fn ending_a_host_whose_runtime_is_encoding_falls_back_in_bounded_time() {
 /// while both run (premise), an unconditional delete succeeds; when it
 /// returns the agent's host is gone, the other host still runs and answers
 /// at that socket with its own tag, and the session is no longer listed;
-/// and it does so while the encode is still held (the gate has let no
-/// encode past, which a Delete that waited for the encode would show) and
-/// only after the runtime's 15 s bound ran out (so the fallback ran). The
+/// and it does so without waiting for the encode (the gate has let no
+/// encode past but by its cancel, which stopping the runtime for the
+/// fallback sends; a Delete that waited for the encode would show the gate
+/// opened or run out) and only after the runtime's 15 s bound ran out (so
+/// the fallback ran). The
 /// gate is opened at the end.
 #[farhelm_testtrace::test(flavor = "multi_thread")]
 async fn delete_ends_an_encoding_runtimes_host_by_its_process_after_a_rename() {
@@ -2057,10 +2068,17 @@ async fn delete_ends_an_encoding_runtimes_host_by_its_process_after_a_rename() {
     let started = tokio::time::Instant::now();
     h.client.delete_session(&session.id).await.expect("delete");
     let took = started.elapsed();
+    // Unopened, the gate lets an encode past only when it runs out, which a
+    // Delete that waited for the encode would show, or when the encode is
+    // cancelled, which stopping the runtime for the fallback does.
     assert!(
-        !gate.passed(),
+        !gate.passed() || gate.cancelled(),
         "the Delete finished only after the held encode went on (expired: {}), after {took:?}",
         gate.expired()
+    );
+    assert!(
+        !gate.expired(),
+        "the held encode's gate ran out, after {took:?}"
     );
     assert!(
         took >= Duration::from_secs(15),

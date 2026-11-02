@@ -13,7 +13,8 @@
 
 use super::*;
 use crate::hosts::terminal::test_host::{
-    TestHost, adopt_test_host, adopt_test_host_at, start_test_host_at,
+    TestHost, TestHostSpec, adopt_test_host, adopt_test_host_at, adopt_test_host_recovering,
+    adopt_test_host_with, start_test_host, start_test_host_at, test_host_options,
 };
 use crate::hosts::{HostTerminal, Liveness};
 use crate::procs::ProcessIdentity;
@@ -1338,4 +1339,887 @@ async fn delete_removes_the_socket_file_a_killed_recorded_host_left() {
         sup.store.session("s1").await.expect("read").is_none(),
         "the row is gone"
     );
+}
+
+// ---- Across supervisor restarts ---------------------------------------------------
+
+/// A prompt to a host agent whose runtime is still replaying its host's
+/// journal after a restart is refused, even with paste mode on, and is
+/// delivered once the runtime has caught up.
+///
+/// Why: the prompt's bracketed-paste check reads the emulator's modes, and
+/// after a recovered adoption those are a past screen's until the replay
+/// ends (PR 15's review, tracked for this change): a program that has
+/// since turned paste mode off would read the prompt's newlines as submits.
+/// The status sampler waits for the same. Spec: a stand-in host that
+/// journaled paste mode on and more output before its recovered adoption
+/// streams only the first part; the runtime shows paste mode on and is not
+/// caught up; a prompt is refused as still being restored and nothing
+/// reaches the host. Once the rest is streamed and the runtime has caught
+/// up, the same prompt reaches the host whole, with Claude's submit key.
+#[farhelm_testtrace::test]
+async fn a_prompt_waits_for_a_recovered_host_terminal_to_catch_up() {
+    let state = StateDir::new();
+    let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        .await
+        .expect("supervisor");
+    let paste_on = b"\x1b[?2004h";
+    let mut journaled = paste_on.to_vec();
+    journaled.extend_from_slice(b"output from before the restart\r\n");
+    let (host, test_host) = adopt_test_host_recovering(None, journaled.clone()).await;
+    let mut entry = entry_with(Some(Terminal::Host(host.clone())), LastOutcome::Running);
+    entry.snapshot.kind = AgentKind::Claude;
+    entry.info.agent_kind = AgentKind::Claude;
+    entry.run.activity.lock().unwrap().reading.state =
+        crate::agent_kind::screen_reader::ScreenState::Idle;
+    sup.sessions
+        .lock()
+        .await
+        .insert("s1".to_string(), Arc::new(entry));
+
+    test_host.replay_journaled(paste_on.len());
+    wait_for(&host, "paste mode from the replay", |host| {
+        host.modes().bracketed_paste
+    })
+    .await;
+    assert!(
+        !host.status().caught_up,
+        "premise: the runtime has not caught up with the journal: {:?}",
+        host.status()
+    );
+    let refused = sup
+        .prompt_session("s1", "hello")
+        .await
+        .expect_err("a terminal still replaying takes no prompt");
+    assert!(
+        format!("{refused:#}").contains("still being restored"),
+        "refused for the replay, not for its status or paste mode: {refused:#}"
+    );
+    assert_eq!(test_host.received(), b"");
+
+    test_host.replay_journaled(journaled.len());
+    wait_for(&host, "the runtime catching up", |host| {
+        host.status().caught_up
+    })
+    .await;
+    assert!(
+        host.modes().bracketed_paste,
+        "premise: paste mode is still on"
+    );
+    sup.prompt_session("s1", "hello")
+        .await
+        .expect("the prompt is delivered once caught up");
+    assert_eq!(test_host.received(), b"\x1b[200~hello\x1b[201~\r");
+}
+
+/// `entry` with its agent terminal replaced by `terminal`, everything else
+/// shared.
+fn with_terminal(entry: &SessionEntry, terminal: Option<Terminal>) -> SessionEntry {
+    SessionEntry {
+        info: entry.info.clone(),
+        terminal,
+        run: entry.run.clone(),
+        session: entry.session.clone(),
+        snapshot: entry.snapshot.clone(),
+        canonical_cwd: entry.canonical_cwd.clone(),
+        generation: entry.generation,
+        scope: entry.scope.clone(),
+    }
+}
+
+/// The spare-checkout claims at startup protect a host session's clone
+/// while its launch's host may still run, read from the host itself and
+/// never from tmux.
+///
+/// Why: the inventory's top risk 3. A clone claim that reads as abandoned
+/// is reclaimed by the repository-cache sweep at startup, deleting a
+/// checkout an agent is still filling; a host row's `pane` names a socket,
+/// which tmux's pane lookup reads as a pane that does not exist, so every
+/// host session would read as abandoned. Spec: for a session whose clone is
+/// in progress and whose row is a host row naming its host's socket, the
+/// claim is protected while its runtime runs and while its runtime cannot
+/// read the host (unavailable is never gone); for the same session with no
+/// terminal on its entry, the claim is released only while no socket file
+/// is at the path its row names, and protected once one is there; and a
+/// host whose child has exited releases it, as a dead pane does.
+#[farhelm_testtrace::test(flavor = "multi_thread")]
+async fn spare_claims_read_a_host_rows_own_host() {
+    let state = StateDir::new();
+    let root = state.path().join("checkouts");
+    std::fs::create_dir(&root).unwrap();
+    let sup = Supervisor::new_with_seams(
+        state.path(),
+        dummy_exe(),
+        SupervisorTimeouts::default(),
+        scopeless_seams(),
+    )
+    .await
+    .unwrap();
+    let origin = fresh_create(&sup, &checkout_fixture(&root), None)
+        .await
+        .unwrap();
+    let generation = sup
+        .store
+        .session(&origin.id)
+        .await
+        .unwrap()
+        .unwrap()
+        .generation;
+    let plan = sup
+        .store
+        .preparation_origin(&origin.id, generation)
+        .await
+        .unwrap()
+        .expect("the create's preparation");
+    crate::launch::write_preparation_state(
+        &crate::launch::preparation_state_path(state.path(), &plan.id),
+        &plan.id,
+        &crate::launch::PreparationState::CloneStarted,
+        &crate::files::RealFs,
+    )
+    .unwrap();
+    let claim = (origin.id.clone(), generation);
+    let protected = || async { sup.spare_claims_from_panes(&HashMap::new()).await.protected };
+
+    // The runtime of a host that runs: live, protected.
+    let (_, test_host) = adopt_test_host(None).await;
+    let host = sup
+        .install_host_agent_for_test(&origin.id, test_host.socket())
+        .await
+        .expect("the session's agent moves into the stand-in host");
+    let row = sup.store.session(&origin.id).await.unwrap().unwrap();
+    assert_eq!(row.terminal_kind, crate::store::TerminalKind::Host);
+    assert_eq!(
+        row.pane, "h",
+        "premise: the row names the stand-in's socket"
+    );
+    assert!(
+        protected().await.contains(&claim),
+        "a running host protects"
+    );
+
+    // No terminal on the entry: the socket the row names decides.
+    let entry = sup.sessions.lock().await.get(&origin.id).cloned().unwrap();
+    sup.sessions
+        .lock()
+        .await
+        .insert(origin.id.clone(), Arc::new(with_terminal(&entry, None)));
+    let named = crate::hosts::hosts_dir(state.path()).join(&row.pane);
+    assert!(
+        !named.exists(),
+        "premise: nothing at the named socket's path"
+    );
+    assert!(
+        !protected().await.contains(&claim),
+        "no host at the row's socket releases the claim"
+    );
+    std::fs::create_dir_all(named.parent().unwrap()).unwrap();
+    std::fs::write(&named, b"").unwrap();
+    assert!(
+        protected().await.contains(&claim),
+        "something at the row's socket may be its host"
+    );
+    std::fs::remove_file(&named).unwrap();
+
+    // A runtime that cannot read its host: unavailable, never gone.
+    sup.sessions.lock().await.insert(
+        origin.id.clone(),
+        Arc::new(with_terminal(&entry, Some(Terminal::Host(host.clone())))),
+    );
+    test_host.become_unreadable();
+    wait_for(&host, "the host becoming unreadable", |host| {
+        matches!(host.liveness(), Liveness::Unavailable { .. })
+    })
+    .await;
+    assert!(
+        protected().await.contains(&claim),
+        "an unreadable host protects"
+    );
+
+    // A host whose child exited: dead, as a dead pane.
+    let (exited, exiting_host) = adopt_test_host(None).await;
+    sup.sessions.lock().await.insert(
+        origin.id.clone(),
+        Arc::new(with_terminal(&entry, Some(Terminal::Host(exited.clone())))),
+    );
+    exiting_host.exit(0);
+    wait_for(&exited, "the child's exit", |host| {
+        matches!(host.liveness(), Liveness::Exited { .. })
+    })
+    .await;
+    assert!(
+        !protected().await.contains(&claim),
+        "a host whose child exited releases the claim"
+    );
+}
+
+/// A stand-in host for `id`'s agent, launch generation 0, bound in
+/// `state`'s socket directory where a reload's scan finds it, with `spec`
+/// otherwise; and the socket's name.
+fn discoverable_host(state: &StateDir, id: &str, spec: TestHostSpec) -> (TestHost, String) {
+    let dir = crate::hosts::ensure_hosts_dir(state.path()).expect("the socket directory");
+    let name = crate::hosts::HostName::random().expect("a socket name");
+    let tag = crate::hosts::HostTag {
+        session_id: id.to_string(),
+        created_ns: crate::hosts::tag::creation_stamp(),
+        role: crate::hosts::HostRole::Agent { generation: 0 },
+    }
+    .encode()
+    .expect("a tag");
+    let host = start_test_host(TestHostSpec {
+        socket: Some(name.socket_in(&dir)),
+        tag: if spec.tag.is_empty() { tag } else { spec.tag },
+        ..spec
+    });
+    (host, name.to_string())
+}
+
+/// End a stand-in host started in a state directory's socket directory and
+/// remove its socket file, which a stand-in leaves behind, so that the
+/// state directory's own cleanup does not wait out the refusal window for
+/// it.
+fn end_discoverable(host: TestHost) {
+    let socket = host.socket().to_path_buf();
+    drop(host);
+    let _ = std::fs::remove_file(socket);
+}
+
+/// A durable Stop request survives a restart whose replay of the host's
+/// journal has not reached the child's exit record yet, and becomes an exit
+/// annotated as stopped once it has.
+///
+/// Why: a recovered host whose child the host already reaped reads as
+/// running until its runtime replays the exit record, and reload does not
+/// wait for the replay; if reload took that for proof that the stop's kill
+/// missed, it would clear the stop intent, and the exit would then be
+/// recorded as a plain exit, losing "stopped by user" (the review's
+/// finding on provisional replay liveness). Spec: a host row `s1` at
+/// `StopRequested` whose stand-in host reports its child reaped with
+/// status 3 and holds its journal and exit record back: after a reload the
+/// session's terminal is that host, running with no child to root, and
+/// the row is still `StopRequested`, also after an observation pass; once
+/// the journal and the exit record are streamed and processed, an
+/// observation records `Exited` with code 3 and the stop annotation.
+#[farhelm_testtrace::test]
+async fn a_stop_request_survives_a_restart_whose_replay_has_not_reached_the_exit() {
+    let state = StateDir::new();
+    let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        .await
+        .expect("supervisor");
+    let (test_host, name) = discoverable_host(
+        &state,
+        "s1",
+        TestHostSpec {
+            journaled: b"bye\r\n".to_vec(),
+            exited: Some(3),
+            ..TestHostSpec::default()
+        },
+    );
+    let mut row = host_row("s1", test_host.socket());
+    row.pane = name;
+    row.outcome = LastOutcome::StopRequested;
+    sup.store.insert_session(row, None).await.expect("the row");
+
+    let seams = SupervisorSeams::default();
+    let (mut sessions, _) =
+        Supervisor::reload_sessions(state.path(), &sup.store, &sup.tmux, &seams, true)
+            .await
+            .expect("reload");
+    let entry = sessions.remove("s1").expect("the session");
+    let Some(Terminal::Host(host)) = entry.terminal.clone() else {
+        panic!("the session's terminal is its host: {:?}", entry.terminal);
+    };
+    assert_eq!(host.liveness(), Liveness::Running { child: None });
+    let stored = || async { sup.store.session("s1").await.unwrap().unwrap().outcome };
+    assert_eq!(stored().await, LastOutcome::StopRequested);
+    sup.sessions.lock().await.insert("s1".to_string(), entry);
+    sup.reconcile_for_test().await;
+    assert_eq!(stored().await, LastOutcome::StopRequested);
+
+    test_host.replay_journaled(5);
+    test_host.exit(3);
+    wait_for(&host, "the exit record", |host| {
+        matches!(host.liveness(), Liveness::Exited { .. })
+    })
+    .await;
+    sup.reconcile_for_test().await;
+    assert_eq!(
+        stored().await,
+        LastOutcome::Exited {
+            exit_code: Some(3),
+            annotation: Some(farhelm_proto::STOP_ANNOTATION.to_string()),
+        }
+    );
+    drop(host);
+    end_discoverable(test_host);
+}
+
+/// A host session whose launch record cannot be read, beside a host whose
+/// tag cannot be read, keeps an unavailable terminal through reload and
+/// later observations, which record nothing and remove nothing, its launch
+/// sentinel included.
+///
+/// Why: the plan's D-16. The unreadable record may name a host that still
+/// runs (here, perhaps the one with the unreadable tag), so the session
+/// must not read as having no terminal: no terminal reads as gone, and an
+/// observation would then record the sentinel's launch error and clean the
+/// launch's artifacts up, the very inference reload refused to draw.
+/// Spec: a launching host row `s1` with an empty `pane`, a launch record
+/// that is not one, a launch sentinel, and a stand-in host in the socket
+/// directory with a tag no build reads: after a reload the session holds a
+/// host terminal that is unavailable; after an observation pass the row is
+/// still `Launching`, the session lists as unknown, and the sentinel and
+/// the launch record are still there.
+#[farhelm_testtrace::test]
+async fn an_unreadable_launch_record_leaves_its_session_unavailable() {
+    let state = StateDir::new();
+    let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        .await
+        .expect("supervisor");
+    let (stranger, _) = discoverable_host(
+        &state,
+        "s1",
+        TestHostSpec {
+            tag: b"not a tag any build reads".to_vec(),
+            ..TestHostSpec::default()
+        },
+    );
+    let mut row = host_row("s1", stranger.socket());
+    row.pane = String::new();
+    row.outcome = LastOutcome::Launching;
+    sup.store.insert_session(row, None).await.expect("the row");
+    let artifacts = crate::launch::LaunchArtifacts::for_launch(state.path(), "s1", 0);
+    std::fs::create_dir_all(artifacts.host().parent().unwrap()).unwrap();
+    std::fs::write(artifacts.host(), b"not a launch record").unwrap();
+    std::fs::write(artifacts.status(), "exec failed: no such file").unwrap();
+
+    let seams = SupervisorSeams::default();
+    let (mut sessions, _) =
+        Supervisor::reload_sessions(state.path(), &sup.store, &sup.tmux, &seams, true)
+            .await
+            .expect("reload");
+    let entry = sessions.remove("s1").expect("the session");
+    let Some(Terminal::Host(host)) = entry.terminal.clone() else {
+        panic!("the session holds a host terminal: {:?}", entry.terminal);
+    };
+    assert!(
+        matches!(host.liveness(), Liveness::Unavailable { .. }),
+        "{:?}",
+        host.liveness()
+    );
+    sup.sessions
+        .lock()
+        .await
+        .insert("s1".to_string(), Arc::clone(&entry));
+    sup.reconcile_for_test().await;
+    assert_eq!(
+        sup.store.session("s1").await.unwrap().unwrap().outcome,
+        LastOutcome::Launching
+    );
+    let no_panes = HashMap::new();
+    let known = crate::service::status::KnownTmuxNames::default();
+    assert_eq!(
+        session_status(&entry, &no_panes, &known).0,
+        SessionStatus::Unknown
+    );
+    assert!(artifacts.status().exists(), "the sentinel is left alone");
+    assert!(artifacts.host().exists(), "the launch record is left alone");
+    end_discoverable(stranger);
+}
+
+/// An orderly stop's checkpoints end within its budget even when an encode
+/// would run far longer, and leave no encode behind on the blocking pool,
+/// so the runtime that owns the supervisor drops at once and its state
+/// directory's claim comes free.
+///
+/// Why: the review's finding on the bounded stop. An encode runs on the
+/// blocking pool, which nothing interrupts from outside, and the runtime
+/// `farhelm supervisor run` owns waits for it as it drops, holding the
+/// state directory's claim: an encode left running past the stop's deadline
+/// held up the exit, and a successor's start, for as long as it took.
+/// Spec: on a runtime the test owns, a supervisor whose host terminal's
+/// every encode is held by a closed gate (as a very long encode would hold
+/// it) is checkpointed for exit with a 500 ms budget: that returns within
+/// 1.5 s, reports a host left without a fresh snapshot, and the held encode
+/// was released by its cancel, not by the gate's own time limit; dropping
+/// the runtime then takes under 2 s (the gate's limit is 30 s), and the
+/// state directory can be claimed again.
+#[farhelm_testtrace::test]
+fn an_orderly_stop_ends_its_encodes_before_its_runtime_drops() {
+    let state = StateDir::new();
+    let gate = crate::hosts::terminal::EncodeGate::closed();
+    let runtime = tokio::runtime::Runtime::new().expect("a runtime");
+    let budget = Duration::from_millis(500);
+    runtime.block_on(async {
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let (host, test_host) = adopt_test_host_with(
+            TestHostSpec {
+                options: Some(crate::hosts::HostTerminalOptions {
+                    encode_gate: Some(gate.clone()),
+                    ..test_host_options(None)
+                }),
+                ..TestHostSpec::default()
+            },
+            crate::hosts::Adoption::Fresh,
+        )
+        .await;
+        test_host.output(b"some output\r\n");
+        wait_for(&host, "the output", |host| {
+            host.screen_tail(4096).contains("some output")
+        })
+        .await;
+        sup.sessions.lock().await.insert(
+            "s1".to_string(),
+            Arc::new(entry_with(
+                Some(Terminal::Host(host.clone())),
+                LastOutcome::Running,
+            )),
+        );
+        let started = std::time::Instant::now();
+        let current = sup.checkpoint_hosts_for_exit(budget).await;
+        let took = started.elapsed();
+        assert!(!current, "the held encode left the host no fresh snapshot");
+        assert!(
+            took < budget + Duration::from_secs(1),
+            "the stop kept its budget: {took:?}"
+        );
+        assert!(gate.passed(), "premise: an encode reached the gate");
+        assert!(gate.cancelled(), "the encode was released by its cancel");
+        assert!(!gate.expired(), "not by the gate's own limit");
+        drop(test_host);
+    });
+    let dropping = std::time::Instant::now();
+    drop(runtime);
+    assert!(
+        dropping.elapsed() < Duration::from_secs(2),
+        "no encode outlived the stop: the runtime took {:?} to drop",
+        dropping.elapsed()
+    );
+    assert!(
+        StateDirOwnership::claim(state.path())
+            .expect("claim")
+            .is_some(),
+        "the state directory's claim came free"
+    );
+}
+
+/// A placeholder in session `s1`'s entry for the stand-in host `test_host`
+/// (a startup that timed out), with `s1`'s row naming its socket.
+async fn placeholder_session(sup: &Supervisor, test_host: &TestHost, name: &str) -> HostTerminal {
+    let placeholder = HostTerminal::unavailable(
+        test_host.socket(),
+        crate::hosts::Unavailability::Connect(crate::hosts::Unavailable::Timeout),
+        None,
+    );
+    let mut row = host_row("s1", test_host.socket());
+    row.pane = name.to_string();
+    sup.store.insert_session(row, None).await.expect("the row");
+    sup.sessions.lock().await.insert(
+        "s1".to_string(),
+        Arc::new(entry_with(
+            Some(Terminal::Host(placeholder.clone())),
+            LastOutcome::Running,
+        )),
+    );
+    placeholder
+}
+
+/// The terminal session `s1`'s entry holds.
+async fn s1_terminal(sup: &Supervisor) -> Option<Terminal> {
+    sup.sessions
+        .lock()
+        .await
+        .get("s1")
+        .and_then(|entry| entry.terminal.clone())
+}
+
+/// Wait until `host`'s runtime has ended (its status channel closes).
+async fn wait_until_ended(host: &HostTerminal) {
+    let mut status = host.subscribe();
+    let ended = tokio::time::timeout(WAIT, async { while status.changed().await.is_ok() {} }).await;
+    assert!(ended.is_ok(), "the runtime still runs: {:?}", host.status());
+}
+
+/// A re-adoption whose session's entry changed while it reached the host,
+/// or during which an orderly stop began, installs nothing and stops the
+/// runtime it made.
+///
+/// Why: the re-adoption fence. A retry connects to the host before it
+/// swaps; a Restart, Delete or a newer handle that replaced the entry
+/// meanwhile must win, and a runtime installed after the orderly stop
+/// gathered its hosts would never be checkpointed, closed or have its
+/// encodes cancelled, holding the process's exit (the review's finding on
+/// re-adoption through a stop). Spec: with session `s1` holding a
+/// placeholder for a stand-in host whose tag names its launch, a probe of
+/// the placeholder adopts the host; with the entry then replaced by
+/// another handle, installing the outcome is refused, the entry still holds
+/// that other handle and the probe's runtime ends. With the placeholder put
+/// back and probed again, an orderly stop that runs before the install
+/// makes the install refuse as well: the entry keeps the placeholder, the
+/// runtime ends, and a re-adoption pass then does nothing.
+#[farhelm_testtrace::test]
+async fn a_readoption_that_loses_its_fence_installs_nothing() {
+    let state = StateDir::new();
+    let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        .await
+        .expect("supervisor");
+    let (test_host, name) = discoverable_host(&state, "s1", TestHostSpec::default());
+    let placeholder = placeholder_session(&sup, &test_host, &name).await;
+    // The session's claim keeps the supervisor's own re-adoption task away.
+    let _claim = sup.lifecycle_locks.claim("s1").await;
+
+    let outcome = sup.probe_placeholder("s1", 0, &placeholder).await;
+    let RowHost::Adopted(adopted) = &outcome else {
+        panic!("premise: the probe adopts the host");
+    };
+    let adopted = adopted.clone();
+    let other =
+        HostTerminal::unavailable(test_host.socket(), crate::hosts::Unavailability::Busy, None);
+    sup.sessions.lock().await.insert(
+        "s1".to_string(),
+        Arc::new(entry_with(
+            Some(Terminal::Host(other.clone())),
+            LastOutcome::Running,
+        )),
+    );
+    assert!(
+        !sup.install_readopted("s1", 0, &placeholder, outcome).await,
+        "a changed entry refuses the swap"
+    );
+    assert_eq!(s1_terminal(&sup).await, Some(Terminal::Host(other)));
+    wait_until_ended(&adopted).await;
+
+    sup.sessions.lock().await.insert(
+        "s1".to_string(),
+        Arc::new(entry_with(
+            Some(Terminal::Host(placeholder.clone())),
+            LastOutcome::Running,
+        )),
+    );
+    let outcome = sup.probe_placeholder("s1", 0, &placeholder).await;
+    let RowHost::Adopted(adopted) = &outcome else {
+        panic!("premise: the probe adopts the host again");
+    };
+    let adopted = adopted.clone();
+    sup.checkpoint_hosts_for_exit(Duration::from_secs(2)).await;
+    assert!(
+        !sup.install_readopted("s1", 0, &placeholder, outcome).await,
+        "a stop that has begun refuses the swap"
+    );
+    assert_eq!(
+        s1_terminal(&sup).await,
+        Some(Terminal::Host(placeholder.clone()))
+    );
+    wait_until_ended(&adopted).await;
+    let mut schedule = super::super::host_handover::ReadoptSchedule::default();
+    assert_eq!(sup.readopt_pass(&mut schedule).await, None);
+    end_discoverable(test_host);
+}
+
+/// Re-adoption backs off: a placeholder is first tried a second after it is
+/// seen, every try schedules the next one later before it is made, and a
+/// try that cannot be made (the session is busy) is not repeated before
+/// then.
+///
+/// Why: the review found re-adoption spinning: a retry that produced no
+/// outcome stayed due at once, so the task went round without pause,
+/// rereading the store and taking locks for as long as the cause lasted.
+/// Spec: with session `s1` holding a placeholder and its lifecycle claim
+/// held by the test, a pass schedules it (no try) and says the next is
+/// due in the future; a second pass at once makes no try; once that time
+/// has passed, a pass makes one try (busy, so the entry keeps its
+/// placeholder) and says the next is due later; a pass straight after
+/// makes no further try.
+#[farhelm_testtrace::test]
+async fn readoption_backs_off_without_spinning() {
+    let state = StateDir::new();
+    let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        .await
+        .expect("supervisor");
+    let (test_host, name) = discoverable_host(&state, "s1", TestHostSpec::default());
+    let placeholder = placeholder_session(&sup, &test_host, &name).await;
+    let _busy = sup.lifecycle_locks.claim("s1").await;
+    let mut schedule = super::super::host_handover::ReadoptSchedule::default();
+
+    let first = sup
+        .readopt_pass(&mut schedule)
+        .await
+        .expect("the placeholder is scheduled");
+    assert!(first > tokio::time::Instant::now(), "not due at once");
+    assert_eq!(schedule.attempts("s1", 0), Some(0));
+    assert_eq!(sup.readopt_pass(&mut schedule).await, Some(first));
+    assert_eq!(
+        schedule.attempts("s1", 0),
+        Some(0),
+        "no try before it is due"
+    );
+
+    // sleep-ok: waits out the first backoff, the boundary this test is about.
+    tokio::time::sleep_until(first).await;
+    let second = sup
+        .readopt_pass(&mut schedule)
+        .await
+        .expect("still scheduled");
+    assert_eq!(schedule.attempts("s1", 0), Some(1), "one try once due");
+    assert!(
+        second > tokio::time::Instant::now() + Duration::from_secs(1),
+        "the next try is later than the first was"
+    );
+    assert_eq!(sup.readopt_pass(&mut schedule).await, Some(second));
+    assert_eq!(schedule.attempts("s1", 0), Some(1), "no spin");
+    assert_eq!(s1_terminal(&sup).await, Some(Terminal::Host(placeholder)));
+    end_discoverable(test_host);
+}
+
+/// A host runtime that nothing stops explicitly still cancels its encode
+/// when the tokio runtime that owns it drops, so that drop finishes at once.
+///
+/// Why: a runtime no stop reaches (one a re-adoption made and had not yet
+/// installed when the process stopped, or every runtime when the stop could
+/// not take the session map's lock in time) is ended only by the process's
+/// tokio runtime dropping its task, and that drop waits for the blocking
+/// pool: an encode the runtime started would otherwise hold the exit, and
+/// the state directory's claim, for as long as it takes. Spec: on a runtime
+/// the test owns, a stand-in host's runtime whose every encode is held at a
+/// closed gate, with a checkpoint due after any output, starts an encode
+/// once it is sent output (premise: the encode reached the gate); with the
+/// terminal's handle still held and no abort, dropping the tokio runtime
+/// takes under 2 s (the gate's own limit is 30 s), and the encode left the
+/// gate by its cancel.
+#[farhelm_testtrace::test]
+fn a_runtime_dropped_with_its_tokio_runtime_cancels_its_encode() {
+    let gate = crate::hosts::terminal::EncodeGate::closed();
+    let runtime = tokio::runtime::Runtime::new().expect("a runtime");
+    let (host, test_host) = runtime.block_on(async {
+        let (host, test_host) = adopt_test_host_with(
+            TestHostSpec {
+                options: Some(crate::hosts::HostTerminalOptions {
+                    encode_gate: Some(gate.clone()),
+                    checkpoints: crate::hosts::CheckpointPolicy {
+                        min_bytes: 1,
+                        max_bytes: 1,
+                    },
+                    ..test_host_options(None)
+                }),
+                ..TestHostSpec::default()
+            },
+            crate::hosts::Adoption::Fresh,
+        )
+        .await;
+        test_host.output(b"output for a checkpoint\r\n");
+        let held = gate.clone();
+        let entered = tokio::task::spawn_blocking(move || held.wait_entered(WAIT))
+            .await
+            .expect("the wait");
+        assert!(entered, "premise: an encode reached the gate");
+        (host, test_host)
+    });
+    let dropping = std::time::Instant::now();
+    drop(runtime);
+    assert!(
+        dropping.elapsed() < Duration::from_secs(2),
+        "the encode held the runtime's drop for {:?}",
+        dropping.elapsed()
+    );
+    assert!(gate.cancelled(), "the encode left the gate by its cancel");
+    assert!(!gate.expired());
+    drop(host);
+    drop(test_host);
+}
+
+/// Delete of a session whose agent terminal is a startup placeholder settles
+/// the launch record naming its socket, as for a session with no runtime,
+/// rather than taking the placeholder for a runtime that holds the host.
+///
+/// Why: a placeholder (a host a restarted supervisor could not adopt) holds
+/// no connection and adopted no process. Delete leaves the record of a
+/// socket a runtime holds to that runtime; doing so for a placeholder would
+/// skip the record's settling, whose first-stage fence keeps a recorded
+/// start from binding the socket after Delete looked, and would reach the
+/// host over a new connection instead. Spec: with `s1`'s entry holding a
+/// placeholder for a socket served by a stand-in tagged as `s1`'s agent, and
+/// a launch record naming that socket whose recorded first stage is a live
+/// process that is not a host (a `sleep`, which the verified signal never
+/// signals), an unconditional Delete is refused for the recorded start
+/// (naming its process) without having connected to the stand-in at all;
+/// the recorded process still runs and the row is kept.
+#[farhelm_testtrace::test]
+async fn delete_settles_the_record_of_a_startup_placeholders_socket() {
+    let state = StateDir::new();
+    let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        .await
+        .expect("supervisor");
+    let socket = socket_in_state(&state);
+    let test_host = start_test_host_at(&socket, agent_tag("s1"), false);
+    let placeholder = HostTerminal::unavailable(
+        &socket,
+        crate::hosts::Unavailability::Connect(crate::hosts::Unavailable::Timeout),
+        None,
+    );
+    sup.store
+        .insert_session(host_row("s1", &socket), None)
+        .await
+        .expect("insert the session's row");
+    sup.sessions.lock().await.insert(
+        "s1".to_string(),
+        Arc::new(entry_with(
+            Some(Terminal::Host(placeholder)),
+            LastOutcome::Running,
+        )),
+    );
+    let starter = OwnedChild(
+        std::process::Command::new("sleep")
+            .arg("60")
+            .spawn()
+            .expect("start a stand-in first stage"),
+    );
+    let identity =
+        ProcessIdentity::read(starter.0.id()).expect("the stand-in first stage's identity");
+    assert!(
+        runs(identity.pid),
+        "premise: the stand-in first stage runs before Delete"
+    );
+    let record = super::super::host_launch::LaunchHostRecord {
+        socket: crate::hosts::HostName::parse(socket.file_name().unwrap().to_str().unwrap())
+            .expect("a socket name this supervisor makes"),
+        starter: crate::hosts::HostProcess {
+            pid: identity.pid,
+            start: identity.start,
+        },
+    };
+    let artifacts = crate::launch::LaunchArtifacts::for_launch(state.path(), "s1", 0);
+    std::fs::create_dir_all(artifacts.host().parent().unwrap()).expect("launch dir");
+    std::fs::write(artifacts.host(), record.encode()).expect("write the launch record");
+
+    let refused = refusal(
+        delete_s1(&sup, farhelm_proto::DeleteGuard::Unconditional).await,
+        "a recorded start that cannot be fenced keeps the session",
+    );
+    assert!(
+        refused.contains(&format!("process {}", identity.pid)),
+        "refused for the recorded start: {refused}"
+    );
+    assert_eq!(
+        test_host.connections(),
+        0,
+        "the placeholder's host was reached only through its record"
+    );
+    assert!(runs(identity.pid), "the recorded process was not signalled");
+    assert!(
+        sup.store.session("s1").await.expect("read").is_some(),
+        "the row is kept"
+    );
+    drop(starter);
+    drop(test_host);
+    let _ = std::fs::remove_file(&socket);
+}
+
+/// A child process of this test that is killed and reaped when dropped, so
+/// that a failed assertion (which unwinds past the test's own cleanup)
+/// leaves no stray process behind.
+struct OwnedChild(std::process::Child);
+
+impl Drop for OwnedChild {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+/// A live process whose command line ends with `--socket <socket>`, as a
+/// host's does, while it serves nothing: a shell waiting on its input,
+/// returned once its command line reads that way.
+fn process_naming(socket: &Path) -> OwnedChild {
+    let child = OwnedChild(
+        std::process::Command::new("/bin/sh")
+            // `read` waits on the piped input, which stays open until the
+            // guard kills the shell.
+            .args(["-c", "read line; exit 0"])
+            .arg("--socket")
+            .arg(socket)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("fixture: starting a process that names the socket"),
+    );
+    let deadline = std::time::Instant::now() + WAIT;
+    loop {
+        let argv = crate::procs::read_process_argv(child.0.id()).unwrap_or_default();
+        if argv.last().map(Vec::as_slice)
+            == Some(std::os::unix::ffi::OsStrExt::as_bytes(socket.as_os_str()))
+        {
+            return child;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "fixture: the process never ran its own command line"
+        );
+        // sleep-ok: polling interval for the shell's exec.
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// Delete of a session whose startup placeholder no launch record names
+/// refuses, and signals nothing, when the placeholder's socket is served by
+/// a process that cannot be read as a host tagged for the session.
+///
+/// Why: with no record there is nothing to tie the socket to the session
+/// but the host's own tag. A process that merely names the socket on its
+/// command line (which is all the verified signal checks) may be anyone's,
+/// renamed over the path, so ending it on the strength of the placeholder
+/// would kill a process Delete has no claim to (the port review's finding
+/// on unrecorded placeholders). Spec: with `s1`'s entry holding a
+/// placeholder for a socket in the state's socket directory, no launch
+/// record for `s1`, the socket file left by a listener that is gone, and a
+/// live process whose command line ends with `--socket` and that socket's
+/// path (premise: it runs), an unconditional Delete is refused saying the
+/// host has no launch record; that process still runs, and the row is kept.
+#[farhelm_testtrace::test]
+async fn delete_never_signals_an_unrecorded_placeholders_unreadable_socket() {
+    let state = StateDir::new();
+    let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        .await
+        .expect("supervisor");
+    let socket = socket_in_state(&state);
+    // A socket file nothing listens on: connecting to it is refused, and
+    // the process naming it is the connection's only candidate peer.
+    drop(std::os::unix::net::UnixListener::bind(&socket).expect("bind the socket file"));
+    let foreign = process_naming(&socket);
+    let pid = foreign.0.id();
+    assert!(runs(pid), "premise: the process naming the socket runs");
+    let placeholder = HostTerminal::unavailable(
+        &socket,
+        crate::hosts::Unavailability::Connect(crate::hosts::Unavailable::Timeout),
+        None,
+    );
+    sup.store
+        .insert_session(host_row("s1", &socket), None)
+        .await
+        .expect("insert the session's row");
+    sup.sessions.lock().await.insert(
+        "s1".to_string(),
+        Arc::new(entry_with(
+            Some(Terminal::Host(placeholder)),
+            LastOutcome::Running,
+        )),
+    );
+
+    let refused = refusal(
+        delete_s1(&sup, farhelm_proto::DeleteGuard::Unconditional).await,
+        "an unrecorded placeholder over an unreadable socket keeps the session",
+    );
+    assert!(
+        refused.contains("has no launch record"),
+        "refused for the unproven host: {refused}"
+    );
+    assert!(runs(pid), "the process naming the socket was not signalled");
+    assert!(
+        sup.store.session("s1").await.expect("read").is_some(),
+        "the row is kept"
+    );
+    drop(foreign);
+    let _ = std::fs::remove_file(&socket);
 }

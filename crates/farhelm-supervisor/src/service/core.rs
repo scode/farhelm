@@ -28,6 +28,12 @@ mod host_launch;
 pub(crate) use host_launch::{AtRecordedSocket, read_launch_record};
 use host_launch::{HostLeft, HostSpawnFailure, SpawnedInHost};
 
+/// Keeping host terminals across a supervisor restart: the stopping
+/// supervisor's checkpoints, and the starting one finding and adopting the
+/// hosts again (see its own docs).
+mod host_handover;
+use host_handover::{GoneHosts, HostDiscovery, RowHost};
+
 /// The tracing target every event from this module and its `vendor` children
 /// uses: this module's own path.
 ///
@@ -855,10 +861,11 @@ fault_hooks! {
     /// host_launch_evidence`). Tests end that stand-in from here, so the
     /// wait is observed rather than raced. `None` in production.
     launch_stray_waiting: Arc<dyn Fn() + Send + Sync>,
-    /// Adjusts the options a create's new host runtime is adopted with
-    /// (`Supervisor::spawn_agent_in_host`), such as an encode gate and a
-    /// checkpoint policy that holds a snapshot encode in progress, so a test
-    /// can show what ending the host does meanwhile. `None` in production.
+    /// Adjusts the options a host runtime is adopted with: a create's new
+    /// host (`Supervisor::spawn_agent_in_host`) and a reload's recovered
+    /// ones (`host_handover`). Such as an encode gate and a checkpoint
+    /// policy that holds a snapshot encode in progress, so a test can show
+    /// what ending the host does meanwhile. `None` in production.
     host_terminal_options: Arc<dyn Fn(&mut crate::hosts::HostTerminalOptions) + Send + Sync>,
     /// Awaited by Delete before it ends each of the session's terminal
     /// hosts (`service::session_hosts`), so a test can hold one host's end
@@ -4644,10 +4651,18 @@ pub(crate) fn notification_cell()
 ///   host up (it releases it before ending the host). It is taken
 ///   exclusively, with nothing else of this table taken while it is held,
 ///   to remove the socket file of a host just ended (by a create, or by
-///   Delete under its lifecycle claim); a later scan of the socket
-///   directory inside the supervisor takes it the same way and may take
-///   `sessions` under it to learn which hosts to skip. Never held while a
-///   lifecycle claim, `attachments`, or a tmux call is acquired.
+///   Delete under its lifecycle claim), and by `serve`'s reload around its
+///   scan of the socket directory and the adoptions that follow (which
+///   learns the hosts to skip from `sessions` before taking it).
+///   Re-adoption does not take it: it contacts only the one socket a launch
+///   recorded, which no spawn can be starting. Never held while a lifecycle
+///   claim, `attachments`, or a tmux call is acquired.
+/// - `host_adoption`, after a lifecycle claim and before `host_scan` and
+///   `sessions`: a re-adoption takes it, holding the session's claim (taken
+///   without waiting), only around swapping its outcome into `sessions`;
+///   `serve`'s reload takes it, with no claim, from collecting the
+///   terminals it keeps until its map replaces the old one. Never held
+///   across a connection to a host.
 /// - `sessions` before `restarting_rows` and `last_listed`: the restart
 ///   window swaps a session for its held row, and a listing reads the held
 ///   rows, under `sessions`. Both are std mutexes held only for a map
@@ -4844,16 +4859,18 @@ pub struct Supervisor {
     /// is on [`Self::sessions`] or it gives the host up. Anything else that
     /// comes to spawn hosts takes it the same way.
     ///
-    /// The exclusive side, today: removing the socket file a host ended by
-    /// a signal leaves (`Self::end_launch_host`), whose re-verifying removal
+    /// The exclusive side: removing the socket file a host ended by a
+    /// signal leaves (`Self::end_launch_host`), whose re-verifying removal
     /// (`hosts::registry::GoneHost::remove_socket`) requires that nothing
-    /// binds sockets in the directory meanwhile. Later, any scan of the
-    /// socket directory inside a running supervisor: discovery takes over
-    /// every host it reaches, so it must skip every host this supervisor
-    /// drives, and a host between its spawn and its publication is on no
-    /// map yet while its socket already answers. Serializing the two,
-    /// rather than reserving each spawn's socket name, is the simpler of
-    /// the two ways the registry's docs allow.
+    /// binds sockets in the directory meanwhile; and any scan of the socket
+    /// directory inside a running supervisor (today `serve`'s reload, which
+    /// runs before any connection is accepted): discovery takes over every
+    /// host it reaches, so it must skip every host this supervisor drives,
+    /// and a host between its spawn and its publication is on no map yet
+    /// while its socket already answers. Serializing the two, rather than
+    /// reserving each spawn's socket name, is the simpler of the two ways
+    /// the registry's docs allow. The constructor's reload scans without it,
+    /// before the supervisor (and so any spawn) exists.
     ///
     /// Today every create also holds directory admission
     /// (`working_copy_operations`) across its launch, so two creates never
@@ -4861,6 +4878,28 @@ pub struct Supervisor {
     /// Restart spawn hosts without it. An `Arc` so the spawn's guard can be
     /// owned by the value it returns.
     pub(crate) host_scan: Arc<tokio::sync::RwLock<()>>,
+    /// Held by what puts adopted hosts into the session map, apart from a
+    /// create: `serve`'s reload, from collecting the terminals it keeps
+    /// until the map it builds replaces the old one, and a re-adoption, only
+    /// around its swap (`host_handover`, "Adopting again"). Without it a
+    /// re-adoption could swap a terminal into a map the reload is about to
+    /// replace. See the lock-order table for where it nests.
+    pub(crate) host_adoption: tokio::sync::Mutex<()>,
+    /// Sockets the reloads found gone (`host_handover::GoneHosts`), so that
+    /// `serve`'s second reload and the spare-claim check agree with the
+    /// first reload without asking again.
+    pub(crate) gone_hosts: GoneHosts,
+    /// Wakes the re-adoption task early: after `serve`'s reload, which may
+    /// have left placeholders, and when an orderly stop begins.
+    pub(crate) readoption_wake: Arc<tokio::sync::Notify>,
+    /// Set once an orderly stop has begun gathering the host terminals it
+    /// checkpoints and closes (`Self::checkpoint_hosts_for_exit`), under
+    /// [`Self::sessions`]: from then on nothing publishes a host runtime
+    /// into the map (a re-adoption stops the runtime it made, and a create
+    /// stops its new one and publishes a placeholder, `Self::publishable`),
+    /// and the re-adoption task returns. So every runtime in the map when
+    /// the stop gathers is one the stop closes, and none is added after.
+    pub(crate) stopping: std::sync::atomic::AtomicBool,
     /// Launches in the versioned layout between starting their tmux window
     /// and being added to [`Self::pending_holds`] (or failing). The shutdown
     /// wait keeps going while any are in flight, so a window created just as
@@ -6180,15 +6219,36 @@ impl Supervisor {
             .clone()
             .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
             .filter(|home| !home.as_os_str().is_empty());
-        let (sessions, may_record) =
-            Self::reload_sessions(&state_dir, &store, &tmux, &seams, ownership.is_some()).await?;
+        // Made before the reload, which adopts the hosts of host rows and
+        // gives each runtime this notifier, so their exits reach the ticker.
+        let (host_liveness, host_liveness_receiver) = crate::hosts::LivenessNotifier::channel();
+        let gone_hosts = GoneHosts::default();
+        // The database was opened, and its schema checked, above: a
+        // database this build cannot read refuses startup before discovery
+        // contacts any host (the plan's ordering for downgrades, where an
+        // older build must never misread host rows).
+        let (sessions, may_record) = Self::reload_sessions_with_hosts(
+            &state_dir,
+            &store,
+            &tmux,
+            &seams,
+            ownership.is_some(),
+            HostDiscovery {
+                owns_state_dir: ownership.is_some(),
+                options: Self::host_reload_options(&seams, &host_liveness),
+                adopted: HashMap::new(),
+                // No supervisor exists yet, so nothing can spawn a host.
+                no_spawns: None,
+                gone: Arc::clone(&gone_hosts),
+            },
+        )
+        .await?;
 
         let work_start_seed = sessions
             .values()
             .map(|entry| entry.info.effective_work_started_at())
             .max()
             .unwrap_or(0);
-        let (host_liveness, host_liveness_receiver) = crate::hosts::LivenessNotifier::channel();
         let supervisor = Arc::new(Supervisor {
             state_dir,
             tmux,
@@ -6210,6 +6270,10 @@ impl Supervisor {
             host_liveness,
             host_liveness_receiver: std::sync::Mutex::new(Some(host_liveness_receiver)),
             host_scan: Arc::new(tokio::sync::RwLock::new(())),
+            host_adoption: tokio::sync::Mutex::new(()),
+            gone_hosts,
+            readoption_wake: Arc::new(tokio::sync::Notify::new()),
+            stopping: std::sync::atomic::AtomicBool::new(false),
             starting_launches: Default::default(),
             launches_closed: Default::default(),
             session_farhelm_exe,
@@ -6242,6 +6306,11 @@ impl Supervisor {
         // Reconcile reports and exact-file readiness before serving the
         // reloaded sessions. This needs the completed supervisor and its claims.
         supervisor.capture_now().await;
+        // Only a supervisor that holds its state directory adopts hosts; one
+        // that does not leaves them to the one that does.
+        if supervisor.ownership.is_some() {
+            supervisor.start_readoption();
+        }
         Ok(supervisor)
     }
 
@@ -6346,12 +6415,31 @@ impl Supervisor {
     /// to be reattaching. A failed boot-id write IS fatal — continuing
     /// would mean serving a reboot classification this process knows it
     /// could not record, which the next startup would then contradict.
-    async fn reload_sessions(
+    ///
+    /// ## Host rows
+    ///
+    /// A row whose agent runs in a terminal host is never looked up in
+    /// tmux: its `pane` column holds a socket name, which tmux's pane
+    /// lookup would read as a pane that does not exist, and so as an agent
+    /// that exited. Its terminal comes from discovery instead
+    /// ([`host_handover::attribute_host_rows`], given `hosts`), after the
+    /// rows are loaded and the boot classified: a host found again is
+    /// adopted and taken as tmux takes a found pane (an unconfirmed launch
+    /// found by its tag is confirmed, as a pane found by its marker is); a
+    /// host that may run and cannot be read is held aside like an
+    /// unattributed pane, except that it records nothing durable at all,
+    /// sentinel included (the plan's D-16); and one proven absent is taken
+    /// as a pane that no longer exists. A host whose child has exited
+    /// while no supervisor was attached reads as running until its runtime
+    /// has replayed the exit record, and the ticker records that exit
+    /// (with any never-started classification) once it has.
+    async fn reload_sessions_with_hosts(
         state_dir: &Path,
         store: &SessionStore,
         tmux: &TmuxDriver,
         seams: &SupervisorSeams,
         may_write: bool,
+        hosts: HostDiscovery,
     ) -> anyhow::Result<(HashMap<String, Arc<SessionEntry>>, bool)> {
         // Startup-exclusive archive reconciliation (Design E): this runs
         // BEFORE any session is reloaded, so no runtime mutex — and in
@@ -6576,12 +6664,16 @@ impl Supervisor {
             }
         }
 
+        // Host rows' terminals, from discovery (the docs' "Host rows"). After
+        // the boot classification, so a row a reboot interrupted is matched
+        // with what it now is.
+        let mut row_hosts = host_handover::attribute_host_rows(state_dir, hosts, &rows).await;
         let pane_states = tmux.pane_states().await?;
         // Two passes over the rows: decide every transition against the
         // freshly loaded outcomes, commit them together, then build the
         // map from what was COMMITTED (which may differ from what this
         // pass proposed — see `SessionStore::transition_many`).
-        let mut found_panes: HashMap<String, (String, PaneState)> = HashMap::new();
+        let mut found_panes: HashMap<String, FoundTerminal> = HashMap::new();
         let mut transitions = Vec::new();
         // Sentinels this pass itself proposes as `Error` (as opposed to a
         // row the boot-conversion branch above already resolved, whose
@@ -6603,45 +6695,98 @@ impl Supervisor {
             // reconciliation: it keeps its recorded terminal (so later passes
             // classify it the same way instead of reading a terminal-less
             // entry as exited), and no failure or exit is inferred from it.
-            let mut unattributed: Option<(String, PaneState)> = None;
+            let mut unattributed: Option<FoundTerminal> = None;
+            // A host row's host that may run and cannot be read (the docs'
+            // "Host rows"): like an unattributed pane, but nothing durable at
+            // all is recorded for it, sentinel included. Its handle, when
+            // there is one, rides in `unattributed`.
+            let mut unreadable_host = false;
             // Deterministic pane lookup, computed ONCE and reused by every
             // reconciliation branch below. Error rows need the same lookup
             // even though their durable outcome skips reconciliation: an
             // existing pane must remain reachable for Attach and for
             // DeleteSession's tmux kill sweep.
-            let found = if row.pane.is_empty() {
-                // Marker-led, not positional (PLAN_M4.md item 2): with tabs
-                // on the same tmux session, "the lowest pane id" could hand
-                // this row a TAB's pane. See `agent_pane_from_states` for the
-                // preference ladder and its legacy fallback.
-                agent_pane_from_states(&pane_states, &row.tmux_name, &row.id)
-            } else {
-                // The evidence classifies; the pane's tmux state, which the
-                // rebuilt terminal and the reconciliation below read, is
-                // looked up beside it (the evidence carries only what status
-                // decides with).
-                let state = || pane_states.get(&row.pane).cloned();
-                match super::status::pane_evidence(&row.pane, &row.tmux_name, &pane_states, &known)
-                {
-                    super::status::PaneEvidence::Owned(_) => {
-                        state().map(|state| (row.pane.clone(), state))
-                    }
-                    super::status::PaneEvidence::Absent => None,
-                    // An Error row is settled already: it takes no terminal
-                    // from a pane it cannot claim, and still gets the
-                    // idempotent artifact cleanup below.
-                    super::status::PaneEvidence::Unattributed
-                        if matches!(row.outcome, LastOutcome::Error { .. }) =>
-                    {
-                        None
-                    }
-                    // Possibly this session's own agent, renamed or moved out
-                    // of band: held aside below rather than treated as found.
-                    super::status::PaneEvidence::Unattributed => {
-                        unattributed = state().map(|state| (row.pane.clone(), state));
-                        None
+            let found = match row.terminal_kind {
+                TerminalKind::Tmux if row.pane.is_empty() => {
+                    // Marker-led, not positional (PLAN_M4.md item 2): with
+                    // tabs on the same tmux session, "the lowest pane id"
+                    // could hand this row a TAB's pane. See
+                    // `agent_pane_from_states` for the preference ladder and
+                    // its legacy fallback.
+                    agent_pane_from_states(&pane_states, &row.tmux_name, &row.id)
+                        .map(|(pane, state)| FoundTerminal::tmux(row, pane, &state))
+                }
+                TerminalKind::Tmux => {
+                    // The evidence classifies; the pane's tmux state, which the
+                    // rebuilt terminal and the reconciliation below read, is
+                    // looked up beside it (the evidence carries only what
+                    // status decides with).
+                    let state = || {
+                        pane_states
+                            .get(&row.pane)
+                            .map(|state| FoundTerminal::tmux(row, row.pane.clone(), state))
+                    };
+                    match super::status::pane_evidence(
+                        &row.pane,
+                        &row.tmux_name,
+                        &pane_states,
+                        &known,
+                    ) {
+                        super::status::PaneEvidence::Owned(_) => state(),
+                        super::status::PaneEvidence::Absent => None,
+                        // An Error row is settled already: it takes no
+                        // terminal from a pane it cannot claim, and still gets
+                        // the idempotent artifact cleanup below.
+                        super::status::PaneEvidence::Unattributed
+                            if matches!(row.outcome, LastOutcome::Error { .. }) =>
+                        {
+                            None
+                        }
+                        // Possibly this session's own agent, renamed or moved
+                        // out of band: held aside below rather than treated as
+                        // found.
+                        super::status::PaneEvidence::Unattributed => {
+                            unattributed = state();
+                            None
+                        }
                     }
                 }
+                // Every host row has an answer; a missing one would be a bug,
+                // and is taken the way that records nothing.
+                TerminalKind::Host => match row_hosts.remove(&row.id).unwrap_or_else(|| {
+                    RowHost::Unavailable(crate::hosts::HostTerminal::unavailable(
+                        &crate::hosts::hosts_dir(state_dir),
+                        crate::hosts::Unavailability::Unidentified(
+                            "discovery gave no answer for this session".into(),
+                        ),
+                        None,
+                    ))
+                }) {
+                    // One read of the runtime's status decides everything
+                    // below: its replay goes on meanwhile, and two reads
+                    // could straddle the exit record.
+                    RowHost::Adopted(host) => {
+                        let status = host.status();
+                        match status.evidence() {
+                            crate::hosts::HostEvidence::Owned { .. } => {
+                                Some(FoundTerminal::host(host, &status))
+                            }
+                            crate::hosts::HostEvidence::Absent => None,
+                            crate::hosts::HostEvidence::Unattributed => {
+                                unreadable_host = true;
+                                unattributed = Some(FoundTerminal::host(host, &status));
+                                None
+                            }
+                        }
+                    }
+                    RowHost::Unavailable(host) => {
+                        unreadable_host = true;
+                        let status = host.status();
+                        unattributed = Some(FoundTerminal::host(host, &status));
+                        None
+                    }
+                    RowHost::Absent => None,
+                },
             };
 
             // Idempotent cleanup (item 4 of the review-swarm fix batch): a
@@ -6660,8 +6805,27 @@ impl Supervisor {
                 {
                     cleaned_launches.insert(row.id.clone());
                 }
-                if let Some((pane, state)) = found {
-                    found_panes.insert(row.id.clone(), (pane, state));
+                // A host that cannot be read is still the row's own (it is
+                // at the socket the row names, or carries its tag), so the
+                // settled row keeps it, as it keeps a found pane; tmux sets
+                // `unattributed` only for rows that are not `Error`.
+                if let Some(found) = found.or(unattributed) {
+                    found_panes.insert(row.id.clone(), found);
+                }
+                continue;
+            }
+
+            // An unreadable host records nothing, sentinel included: it may
+            // belong to a supervisor that can read it, which classifies the
+            // launch itself (the plan's D-16, as the ticker's observer
+            // applies it).
+            if unreadable_host {
+                info!(
+                    session = %row.id,
+                    "session's terminal host cannot be read; leaving its recorded outcome alone"
+                );
+                if let Some(found) = unattributed {
+                    found_panes.insert(row.id.clone(), found);
                 }
                 continue;
             }
@@ -6690,7 +6854,7 @@ impl Supervisor {
                             row.generation,
                             Transition::SentinelError {
                                 detail: detail.clone(),
-                                pane: found.as_ref().map(|(pane, _)| pane.clone()),
+                                pane: found.as_ref().map(|found| found.pane.clone()),
                             },
                         ));
                         sentinel_hits.insert(row.id.clone(), detail);
@@ -6703,8 +6867,8 @@ impl Supervisor {
                         // pane genuinely exists in tmux right now
                         // regardless of which durable outcome this pass
                         // assigns the row.
-                        if let Some((pane, state)) = found {
-                            found_panes.insert(row.id.clone(), (pane, state));
+                        if let Some(found) = found {
+                            found_panes.insert(row.id.clone(), found);
                         }
                         continue;
                     }
@@ -6712,7 +6876,7 @@ impl Supervisor {
                         // No sentinel, and a pane that is present and
                         // DEAD: the shape a launch that never reached the
                         // shim leaves behind.
-                        let pane_dead = found.as_ref().is_some_and(|(_, state)| state.dead);
+                        let pane_dead = found.as_ref().is_some_and(|found| found.state.dead);
                         // Both inferences below read the pane, which an
                         // unattributed row cannot claim.
                         let mut failure = if unattributed.is_some() {
@@ -6724,7 +6888,7 @@ impl Supervisor {
                                 row.generation,
                                 row.launch_scoped,
                                 pane_dead,
-                                found.as_ref().and_then(|(_, state)| state.exit_code),
+                                found.as_ref().and_then(|found| found.state.exit_code),
                             )
                             .await
                             .ok()
@@ -6735,7 +6899,7 @@ impl Supervisor {
                         // A pending preterminal create remains recoverable.
                         if failure.is_none()
                             && unattributed.is_none()
-                            && found.as_ref().is_none_or(|(_, state)| state.dead)
+                            && found.as_ref().is_none_or(|found| found.state.dead)
                         {
                             match super::status::interrupted_preparation_detail(
                                 state_dir,
@@ -6748,8 +6912,8 @@ impl Supervisor {
                                 Ok(detail) => failure = detail,
                                 Err(error) => {
                                     warn!(session = %row.id, error = %error, "could not inspect checkout preparation; deferring reconciliation");
-                                    if let Some((pane, state)) = found {
-                                        found_panes.insert(row.id.clone(), (pane, state));
+                                    if let Some(found) = found {
+                                        found_panes.insert(row.id.clone(), found);
                                     }
                                     continue;
                                 }
@@ -6761,12 +6925,12 @@ impl Supervisor {
                                 row.generation,
                                 Transition::SentinelError {
                                     detail: detail.clone(),
-                                    pane: found.as_ref().map(|(pane, _)| pane.clone()),
+                                    pane: found.as_ref().map(|found| found.pane.clone()),
                                 },
                             ));
                             sentinel_hits.insert(row.id.clone(), detail);
-                            if let Some((pane, state)) = found {
-                                found_panes.insert(row.id.clone(), (pane, state));
+                            if let Some(found) = found {
+                                found_panes.insert(row.id.clone(), found);
                             }
                             continue;
                         }
@@ -6789,27 +6953,28 @@ impl Supervisor {
                              reconciliation this pass rather than risking a durable \
                              misclassification from pane state alone"
                         );
-                        if let Some((pane, state)) = found.or(unattributed) {
-                            found_panes.insert(row.id.clone(), (pane, state));
+                        if let Some(found) = found.or(unattributed) {
+                            found_panes.insert(row.id.clone(), found);
                         }
                         continue;
                     }
                 }
             }
-            if let Some((pane, state)) = unattributed {
+            if let Some(found) = unattributed {
                 info!(
                     session = %row.id,
-                    pane = %pane,
+                    pane = %found.pane,
                     "session's tmux pane is now under a session name farhelm does not \
                      recognize; leaving its recorded outcome alone"
                 );
-                found_panes.insert(row.id.clone(), (pane, state));
+                found_panes.insert(row.id.clone(), found);
                 continue;
             }
-            let Some((pane, state)) = found else {
+            let Some(found) = found else {
                 info!(
                     session = %row.id,
-                    "session's tmux pane no longer exists; listing without a terminal"
+                    kind = ?row.terminal_kind,
+                    "session's terminal no longer exists; listing without a terminal"
                 );
                 // Nothing to ask. A terminal outcome is left alone (it
                 // already knows more than this), and so is a LAUNCHING
@@ -6830,6 +6995,7 @@ impl Supervisor {
                 }
                 continue;
             };
+            let (pane, state) = (&found.pane, found.state);
             if !row.outcome.is_terminal() {
                 if state.dead {
                     // A dead pane found BY NAME (the row has none of its
@@ -6845,7 +7011,13 @@ impl Supervisor {
                     // as `Unknown`) for a retried restart to resolve, which
                     // is the same "no side effects found is not evidence
                     // the agent ran" rule the no-pane branch above applies.
-                    let stale_pane = row.pane.is_empty() && row.generation > 0;
+                    //
+                    // A host found by its tag has no such doubt: the tag
+                    // names the launch generation it was started for.
+                    let stale_pane = match row.terminal_kind {
+                        TerminalKind::Tmux => row.pane.is_empty() && row.generation > 0,
+                        TerminalKind::Host => false,
+                    };
                     if !stale_pane {
                         // The pane outlived its process (remain-on-exit)
                         // and still holds the code — "exited with the code
@@ -6868,7 +7040,14 @@ impl Supervisor {
                             },
                         ));
                     }
-                } else if row.outcome != LastOutcome::Running || row.pane != pane {
+                } else if row.outcome == LastOutcome::StopRequested && found.reaped {
+                    // A host that has reaped its child reads as running
+                    // until its runtime replays the exit record, which this
+                    // pass does not wait for. That is no evidence that the
+                    // stop's kill missed: the stop intent stays, and the
+                    // observer records the exit, annotated as stopped,
+                    // once the record is replayed.
+                } else if row.outcome != LastOutcome::Running || row.pane != *pane {
                     // Live, and either not yet confirmed, confirmed
                     // against a different pane, or carrying a stop intent
                     // whose kill sweep evidently never landed — the last
@@ -6885,7 +7064,7 @@ impl Supervisor {
                     ));
                 }
             }
-            found_panes.insert(row.id.clone(), (pane, state));
+            found_panes.insert(row.id.clone(), found);
         }
 
         // Sentinel lifecycle (PLAN_M3.md item 3): once an `Error` this
@@ -6944,12 +7123,7 @@ impl Supervisor {
         // settlement's own comment for what each source proves.
         let mut launched: HashSet<String> = HashSet::new();
         for row in rows {
-            let terminal = found_panes.remove(&row.id).map(|(pane, _)| {
-                Terminal::Tmux(TmuxTerminal {
-                    tmux_name: row.tmux_name.clone(),
-                    pane,
-                })
-            });
+            let terminal = found_panes.remove(&row.id).map(|found| found.terminal);
             let outcome = committed.get(&row.id).cloned().unwrap_or(row.outcome);
             if terminal.is_some() || !row.pane.is_empty() {
                 // Pane provenance only (R1.2): an `Error` outcome is no
@@ -7216,6 +7390,47 @@ impl Supervisor {
             }
         }
         Ok((sessions, may_write))
+    }
+
+    /// [`Self::reload_sessions_with_hosts`] as the tests that drive a reload
+    /// by hand call it, beside a supervisor that already owns the state
+    /// directory: host rows are attributed when `may_write` says the caller
+    /// may scan, with runtimes that report to no notifier, and no runtime
+    /// counts as already adopted. The tests that use it have no hosts.
+    #[cfg(test)]
+    async fn reload_sessions(
+        state_dir: &Path,
+        store: &SessionStore,
+        tmux: &TmuxDriver,
+        seams: &SupervisorSeams,
+        may_write: bool,
+    ) -> anyhow::Result<(HashMap<String, Arc<SessionEntry>>, bool)> {
+        let hosts = HostDiscovery {
+            owns_state_dir: may_write,
+            options: crate::hosts::HostTerminalOptions::default(),
+            adopted: HashMap::new(),
+            no_spawns: None,
+            gone: GoneHosts::default(),
+        };
+        Self::reload_sessions_with_hosts(state_dir, store, tmux, seams, may_write, hosts).await
+    }
+
+    /// The options a reload adopts a host row's host with: reporting to the
+    /// supervisor's liveness notifier, as a create's new host does, so the
+    /// ticker learns of its exit, adjusted as the test seam for host runtimes
+    /// says (`FaultHooks::host_terminal_options`).
+    fn host_reload_options(
+        seams: &SupervisorSeams,
+        notifier: &crate::hosts::LivenessNotifier,
+    ) -> crate::hosts::HostTerminalOptions {
+        let mut options = crate::hosts::HostTerminalOptions {
+            notifier: Some(notifier.clone()),
+            ..Default::default()
+        };
+        if let Some(adjust) = seams.faults.host_terminal_options() {
+            adjust(&mut options);
+        }
+        options
     }
 
     /// One session's DURABLE integration snapshot and captured
@@ -7666,11 +7881,12 @@ impl Supervisor {
                 // than interpreting an empty in-memory terminal as abandonment.
                 match self.store.session(&entry.info.id).await {
                     Ok(Some(row)) if row.generation == entry.generation => {
-                        if row.pane.is_empty() {
-                            agent_pane_from_states(states, &row.tmux_name, &row.id)
-                                .is_some_and(|(_, pane)| !pane.dead)
-                        } else {
-                            match super::status::pane_evidence(
+                        match row.terminal_kind {
+                            TerminalKind::Tmux if row.pane.is_empty() => {
+                                agent_pane_from_states(states, &row.tmux_name, &row.id)
+                                    .is_some_and(|(_, pane)| !pane.dead)
+                            }
+                            TerminalKind::Tmux => match super::status::pane_evidence(
                                 &row.pane,
                                 &row.tmux_name,
                                 states,
@@ -7679,6 +7895,19 @@ impl Supervisor {
                                 super::status::PaneEvidence::Owned(pane) => !pane.dead,
                                 super::status::PaneEvidence::Absent => false,
                                 super::status::PaneEvidence::Unattributed => true,
+                            },
+                            // A host row's `pane` is a socket name, which no pane
+                            // lookup may read: every such row would read as
+                            // abandoned. The host of the row's own launch decides,
+                            // found by the socket the row (or, unconfirmed, its
+                            // launch record for this generation) names.
+                            TerminalKind::Host => {
+                                host_handover::host_may_remain(
+                                    &self.state_dir,
+                                    &row,
+                                    &self.gone_hosts,
+                                )
+                                .await
                             }
                         }
                     }
@@ -7774,9 +8003,47 @@ impl Supervisor {
         // missing from `sessions` for this process's entire lifetime.
         // Safe to replace outright here: no connection has been accepted
         // yet, so no attachment can exist against any entry this replaces.
-        let (sessions, may_record) =
-            Self::reload_sessions(&self.state_dir, &self.store, &self.tmux, &self.seams, true)
-                .await?;
+        //
+        // The host terminals the constructor's reload made keep their hosts:
+        // a second scan would take each host over from its runtime, which
+        // would take it back, and would only pay again for what the first
+        // found gone or unreadable (re-adoption retries those). The scan
+        // runs under `host_scan` held exclusively (nothing spawns hosts
+        // before connections are accepted, so this is the lock's rule
+        // rather than a wait), and the whole reload, through the map's
+        // replacement, under `host_adoption`, so that re-adoption neither
+        // swaps a terminal in the map this replaces nor scans a host this
+        // reload is adopting.
+        let adoption = self.host_adoption.lock().await;
+        let (sessions, may_record) = {
+            let adopted = self
+                .sessions
+                .lock()
+                .await
+                .iter()
+                .filter_map(|(id, entry)| match &entry.terminal {
+                    Some(Terminal::Host(host)) => {
+                        Some((id.clone(), (entry.generation, host.clone())))
+                    }
+                    Some(Terminal::Tmux(_)) | None => None,
+                })
+                .collect();
+            Self::reload_sessions_with_hosts(
+                &self.state_dir,
+                &self.store,
+                &self.tmux,
+                &self.seams,
+                true,
+                HostDiscovery {
+                    owns_state_dir: true,
+                    options: Self::host_reload_options(&self.seams, &self.host_liveness),
+                    adopted,
+                    no_spawns: Some(Arc::clone(&self.host_scan)),
+                    gone: Arc::clone(&self.gone_hosts),
+                },
+            )
+            .await?
+        };
         if let Some(seed) = sessions
             .values()
             .map(|entry| entry.info.effective_work_started_at())
@@ -7785,6 +8052,9 @@ impl Supervisor {
             self.seed_work_start_allocator(seed);
         }
         *self.sessions.lock().await = sessions;
+        drop(adoption);
+        // The reload may have left placeholders for hosts it could not use.
+        self.readoption_wake.notify_one();
         self.may_record
             .store(may_record, std::sync::atomic::Ordering::SeqCst);
         // The freshly loaded map's own capture pass; see `capture_now`.
@@ -10076,7 +10346,11 @@ impl Supervisor {
             warn!(session = %info.id, error = %format!("{error:#}"),
                 "could not clear the retained launch's hook diagnostic");
         }
-        self.sessions.lock().await.insert(
+        // A host runtime is published only before an orderly stop gathers
+        // the host terminals it closes (`Self::publishable`).
+        let mut sessions = self.sessions.lock().await;
+        let terminal = self.publishable(terminal);
+        sessions.insert(
             info.id.clone(),
             Arc::new(SessionEntry {
                 info: info.clone(),
@@ -10109,6 +10383,7 @@ impl Supervisor {
                 scope,
             }),
         );
+        drop(sessions);
         // The launch's own spawn may have recorded a notification before
         // this entry existed (a hook it could not add).
         self.reload_notification_cell(&info.id).await;
@@ -11594,11 +11869,16 @@ impl Supervisor {
             self.spare_builder.register(trigger);
         }
         info!(session = %id, tmux = %tmux_name, %pane, kind = ?terminal_kind, "session created");
-        self.sessions.lock().await.insert(
+        // A host runtime is published only before an orderly stop gathers
+        // the host terminals it closes (`Self::publishable`); after, its
+        // launch stays recorded for the next supervisor.
+        let mut sessions = self.sessions.lock().await;
+        let terminal = self.publishable(Some(terminal));
+        sessions.insert(
             id,
             Arc::new(SessionEntry {
                 info: info.clone(),
-                terminal: Some(terminal),
+                terminal,
                 run: RunCells {
                     launch_boot_ended: false,
                     launch_reads_settled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -11640,6 +11920,7 @@ impl Supervisor {
                 scope: launch_scope,
             }),
         );
+        drop(sessions);
         // The host is on the session map now, where anything that must not
         // take it over finds it.
         drop(spawning);
@@ -11876,6 +12157,20 @@ impl Supervisor {
                     .context("submitting the prompt; delivery may be partial")?;
             }
             Terminal::Host(host) => {
+                // The emulator's modes are the program's only once the
+                // runtime has caught up with its host's journal: a
+                // recovered adoption replays it after adoption returns, and
+                // until then the modes are those of a past screen (the
+                // snapshot's, say), which the rest of the replay may change.
+                // The status sampler waits for the same.
+                if !host.status().caught_up {
+                    return Err(RequestError::new(
+                        ErrorKind::Conflict,
+                        "cannot send a prompt yet: the target agent's terminal is still being \
+                         restored after a supervisor restart",
+                    )
+                    .into());
+                }
                 if !host.modes().bracketed_paste {
                     return Err(paste_mode_off().into());
                 }
@@ -17597,6 +17892,23 @@ fn tab_close_cleanup_result(
 /// exits, having done what it could.
 pub const SHUTDOWN_OUTPUT_BUDGET: Duration = Duration::from_secs(10);
 
+/// How long a stopping supervisor spends checkpointing its terminal hosts
+/// (`Supervisor::checkpoint_hosts_for_exit`) before it exits anyway.
+///
+/// The same as [`SHUTDOWN_OUTPUT_BUDGET`], with which it runs side by side,
+/// so a stop is no longer than it was before terminal hosts, and every wait
+/// sized against that budget still covers it. A host whose checkpoint does
+/// not finish in it keeps its previous snapshot and the output since, which
+/// the next supervisor replays. A full terminal's encode takes up to about
+/// two seconds of a core, so this leaves room for several at once.
+pub const HOST_CHECKPOINT_BUDGET: Duration = SHUTDOWN_OUTPUT_BUDGET;
+
+/// How long an orderly stop's final close of its host terminals
+/// (`Supervisor::close_host_terminals`) waits, for the map's lock and for
+/// the encodes it cancels to end. A cancelled encode ends within about a
+/// millisecond; this bounds a pathological one.
+const HOST_CLOSE_WAIT: Duration = Duration::from_secs(1);
+
 /// How long `farhelm supervisor run` waits for a predecessor that holds the
 /// state directory without serving it (see
 /// [`StateDirOwnership::claim_waiting`]).
@@ -17730,18 +18042,65 @@ async fn serve_until_stopped(
         _ = hangup_received => ("SIGHUP", Ok(())),
         result = &mut stop => ("the stop tether", result),
     };
+    // The wording is pinned by `supervisor_stop.rs`, which reads it as the
+    // evidence that a stop reached the orderly shutdown; the host
+    // checkpoints that run beside it log on their own.
     tracing::info!(
         reason,
         "stopping: closing terminal-output clients in order before exit"
     );
-    if !sup.shutdown_output_clients(SHUTDOWN_OUTPUT_BUDGET).await {
-        tracing::warn!(
-            budget = ?SHUTDOWN_OUTPUT_BUDGET,
-            "some terminal-output clients did not finish closing in time; exiting anyway"
-        );
-    }
-    sup.wait_for_pending_holds(PENDING_HOLD_WAIT).await;
+    sup.stop_in_order().await;
     stopped
+}
+
+impl Supervisor {
+    /// What an orderly stop does before the process exits, once serving has
+    /// stopped: close every terminal-output client in order
+    /// ([`Self::shutdown_output_clients`], within [`SHUTDOWN_OUTPUT_BUDGET`])
+    /// and, at the same time, checkpoint every host terminal and close its
+    /// connection ([`Self::checkpoint_hosts_for_exit`], within
+    /// [`HOST_CHECKPOINT_BUDGET`]); then wait for new sessions' windows to
+    /// hold their version ([`Self::wait_for_pending_holds`]).
+    ///
+    /// The first two run side by side because they are independent (tmux's
+    /// clients and the hosts' connections) and each can take its whole
+    /// budget: one after the other they would lengthen every stop, and
+    /// every wait sized against a stop's length ([`STATE_DIR_CLAIM_WAIT`],
+    /// the desktop app's grace before it kills its supervisor) assumes the
+    /// output clients' budget alone, plus the holds' wait.
+    pub(crate) async fn stop_in_order(&self) {
+        let (closed, checkpointed) = tokio::join!(
+            self.shutdown_output_clients(SHUTDOWN_OUTPUT_BUDGET),
+            self.checkpoint_hosts_for_exit(HOST_CHECKPOINT_BUDGET),
+        );
+        if !closed {
+            tracing::warn!(
+                budget = ?SHUTDOWN_OUTPUT_BUDGET,
+                "some terminal-output clients did not finish closing in time; exiting anyway"
+            );
+        }
+        if !checkpointed {
+            tracing::info!(
+                budget = ?HOST_CHECKPOINT_BUDGET,
+                "some terminal hosts kept an earlier snapshot; the next supervisor replays more \
+                 of their output"
+            );
+        }
+        self.wait_for_pending_holds(PENDING_HOLD_WAIT).await;
+        // Last, close every host terminal the map holds now, waiting briefly
+        // for their encodes: whatever reached the map while the stop ran.
+        self.close_host_terminals(tokio::time::Instant::now() + HOST_CLOSE_WAIT)
+            .await;
+    }
+
+    /// [`Self::stop_in_order`], for the in-process harnesses, which never
+    /// run the signal-driven loop that calls it: an orderly stop of a
+    /// supervisor a test then drops, as a restart's predecessor. Compiled
+    /// only for tests and the `test-seams` feature.
+    #[cfg(any(test, feature = "test-seams"))]
+    pub async fn stop_in_order_for_test(&self) {
+        self.stop_in_order().await;
+    }
 }
 
 /// How long an orderly stop waits for the windows of sessions it just
@@ -17775,6 +18134,73 @@ impl Drop for StartingLaunch {
 struct PendingHold {
     held: PathBuf,
     terminal: Terminal,
+}
+
+/// A terminal [`Supervisor::reload_sessions_with_hosts`] found for a row,
+/// of either kind: what its reconciliation decides with, and what the
+/// rebuilt entry holds.
+struct FoundTerminal {
+    /// What the row's `pane` column holds for this terminal: a tmux pane
+    /// id, or a host's socket name (the plan's D-14). A transition that
+    /// records the terminal (`ConfirmRunning`, `RediscoveredExit`,
+    /// `SentinelError`) writes this.
+    pane: String,
+    /// Whether its program has exited, and how, as status reads it. For a
+    /// host, from its runtime's processed exit record, so a child that
+    /// exited while no supervisor was attached reads as running until the
+    /// runtime has replayed the record.
+    state: super::status::OwnedTerminal,
+    /// The entry's terminal.
+    terminal: Terminal,
+    /// A host terminal whose host reported its child reaped while the
+    /// runtime has not yet replayed the exit record: `state` says running,
+    /// provisionally. Never for tmux.
+    reaped: bool,
+}
+
+impl FoundTerminal {
+    /// The tmux pane `pane` of `row`'s tmux session, as `state` describes it.
+    fn tmux(row: &StoredSession, pane: String, state: &PaneState) -> Self {
+        FoundTerminal {
+            terminal: Terminal::Tmux(TmuxTerminal {
+                tmux_name: row.tmux_name.clone(),
+                pane: pane.clone(),
+            }),
+            pane,
+            state: state.into(),
+            reaped: false,
+        }
+    }
+
+    /// The host `host` drives, as one read of its runtime's status (`status`)
+    /// says: whether its program is dead, how, and whether the host has
+    /// reaped it before the runtime replayed the exit record. Taken from one
+    /// read, since the runtime's replay moves on meanwhile. A host that
+    /// cannot be read counts as running, which is only ever held aside.
+    fn host(host: crate::hosts::HostTerminal, status: &crate::hosts::HostStatus) -> Self {
+        let state = match status.evidence() {
+            crate::hosts::HostEvidence::Owned { dead, exit_code } => {
+                super::status::OwnedTerminal { dead, exit_code }
+            }
+            crate::hosts::HostEvidence::Absent | crate::hosts::HostEvidence::Unattributed => {
+                super::status::OwnedTerminal {
+                    dead: false,
+                    exit_code: None,
+                }
+            }
+        };
+        let reaped = matches!(
+            status.liveness,
+            crate::hosts::Liveness::Running { child: None }
+        );
+        let terminal = Terminal::Host(host);
+        FoundTerminal {
+            pane: terminal.recorded_pane().to_string(),
+            state,
+            terminal,
+            reaped,
+        }
+    }
 }
 
 /// Whether SIGHUP's disposition is currently "ignore", as `nohup` leaves it

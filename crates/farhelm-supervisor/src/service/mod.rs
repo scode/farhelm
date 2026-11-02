@@ -130,4 +130,7 @@ pub use core::{
     SupervisorTimeouts, TabOpenFault, TabOpenStage, TabSettleGate, UPLOAD_DISK_STAGE_TIMEOUT,
     UPLOAD_PROGRESS_TIMEOUT, WRITER_STALL_TIMEOUT, hook_log_path,
 };
-pub use core::{SHUTDOWN_OUTPUT_BUDGET, STATE_DIR_CLAIM_WAIT, SupervisorStartup, connect, run};
+pub use core::{
+    HOST_CHECKPOINT_BUDGET, SHUTDOWN_OUTPUT_BUDGET, STATE_DIR_CLAIM_WAIT, SupervisorStartup,
+    connect, run,
+};

@@ -18,9 +18,11 @@ use farhelm_terminal_emulator::alacritty_terminal::term::TermMode;
 use farhelm_terminal_emulator::alacritty_terminal::term::cell::Flags;
 use farhelm_terminal_emulator::alacritty_terminal::vte::ansi::{Color, NamedColor};
 use farhelm_terminal_emulator::{
-    Emulator, FORMAT_VERSION, MAX_RESTORE_CELLS, MIN_SNAPSHOT_LIMIT, MouseEncoding, NotClean, Size,
-    SnapshotError, WidthTable, history_seed_from_lines,
+    Cancel, Emulator, FORMAT_VERSION, MAX_RESTORE_CELLS, MIN_SNAPSHOT_LIMIT, MouseEncoding,
+    NotClean, Size, SnapshotError, SnapshotStopped, WidthTable, history_seed_from_lines,
 };
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Version 1's limits on a fixup cell: the longest hyperlink URI and `id`,
 /// in bytes, and the most combining characters. Part of the format, so
@@ -624,6 +626,72 @@ fn malformed_v1_blobs_are_refused() {
             "{name}"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// Cancelling an encode.
+
+/// An encode given a cancel that does not fire yields the snapshot
+/// `snapshot` does; one whose cancel has already fired, by its flag or its
+/// deadline, yields nothing, on the main screen and the alternate one, at
+/// two size limits.
+///
+/// Why: a supervisor's orderly stop cannot exit while an encode's thread
+/// runs, and an encode of a full terminal takes seconds, so the encoder must
+/// give up on its own once the stop cancels it, and a cancelled encode must
+/// never pass for a snapshot. A cancel that lands part way through painting,
+/// and in the size ladder's later steps, is shown by the crate's own
+/// `snapshot::cancel_tests`, which can count the encoder's looks at it. This
+/// test compares `snapshot_until` with `snapshot`, which delegates to it, so
+/// it is no guard of the bytes: the version 1 golden fixtures
+/// (`snapshot_golden.rs`) are. Spec: `Cancel` and `Emulator::snapshot_until`.
+#[test]
+fn an_encode_stops_once_its_cancel_fires_and_is_unchanged_until_then() {
+    let mut on_alternate = colorful_history(500);
+    feed(&mut on_alternate, b"\x1b[?1049hfull screen app");
+    for emulator in [colorful_history(500), on_alternate] {
+        let flag = Arc::new(AtomicBool::new(false));
+        let far = std::time::Instant::now() + std::time::Duration::from_secs(3600);
+        let kept = Cancel::new(Arc::clone(&flag), Some(far));
+        assert_eq!(
+            emulator
+                .snapshot_until(MAX, &kept)
+                .expect("not cancelled")
+                .blob,
+            emulator.snapshot(MAX).expect("clean").blob,
+        );
+        // A limit small enough that the history is measured again, smaller.
+        assert_eq!(
+            emulator
+                .snapshot_until(4096, &kept)
+                .expect("not cancelled")
+                .blob,
+            emulator.snapshot(4096).expect("clean").blob,
+        );
+        flag.store(true, Ordering::Relaxed);
+        assert_eq!(
+            emulator.snapshot_until(MAX, &kept).map(|_| ()),
+            Err(SnapshotStopped::Cancelled)
+        );
+        assert_eq!(
+            emulator.snapshot_until(4096, &kept).map(|_| ()),
+            Err(SnapshotStopped::Cancelled)
+        );
+        let passed = Cancel::new(
+            Arc::new(AtomicBool::new(false)),
+            Some(std::time::Instant::now()),
+        );
+        assert_eq!(
+            emulator.snapshot_until(MAX, &passed).map(|_| ()),
+            Err(SnapshotStopped::Cancelled)
+        );
+    }
+    let mut open = emulator(20, 4);
+    feed(&mut open, b"text\x1b[3");
+    assert_eq!(
+        open.snapshot_until(MAX, &Cancel::never()).map(|_| ()),
+        Err(SnapshotStopped::NotClean)
+    );
 }
 
 // ---------------------------------------------------------------------------

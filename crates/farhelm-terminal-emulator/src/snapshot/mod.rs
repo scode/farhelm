@@ -133,7 +133,8 @@
 mod v1;
 
 use std::fmt;
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
 use alacritty_terminal::grid::Dimensions;
@@ -301,6 +302,94 @@ impl fmt::Display for NotClean {
 
 impl std::error::Error for NotClean {}
 
+/// When an encode ([`Emulator::snapshot_until`]) is to give up: once its
+/// flag is set, or once its deadline has passed, whichever comes first.
+///
+/// Encoding a full terminal takes seconds, on a thread that cannot be
+/// interrupted from outside, so a caller that must be done by a deadline
+/// (a supervisor's orderly stop, whose process cannot exit while the
+/// encode's thread runs) needs the encoder to stop on its own. The encoder
+/// looks at this between rows, often enough that a cancelled encode ends
+/// within about a millisecond, and a cancelled encode yields nothing: what
+/// an encode that is not cancelled yields is exactly [`Emulator::snapshot`]'s.
+#[derive(Debug, Clone, Default)]
+pub struct Cancel {
+    flag: Option<Arc<AtomicBool>>,
+    deadline: Option<Instant>,
+    /// For this crate's tests: how many looks have been taken, and after
+    /// how many the cancel fires, so a test can land it part way through
+    /// painting.
+    #[cfg(test)]
+    looks: Option<(Arc<std::sync::atomic::AtomicUsize>, usize)>,
+}
+
+impl Cancel {
+    /// A cancel that never fires.
+    pub fn never() -> Self {
+        Self::default()
+    }
+
+    /// A cancel that fires once `flag` is set, and, with a `deadline`, once
+    /// the clock reaches it.
+    pub fn new(flag: Arc<AtomicBool>, deadline: Option<Instant>) -> Self {
+        Self {
+            flag: Some(flag),
+            deadline,
+            #[cfg(test)]
+            looks: None,
+        }
+    }
+
+    /// A cancel that counts the encoder's looks at it in `count`, and fires
+    /// on the one after the first `fire_after`.
+    #[cfg(test)]
+    fn after_looks(count: Arc<std::sync::atomic::AtomicUsize>, fire_after: usize) -> Self {
+        Self {
+            looks: Some((count, fire_after)),
+            ..Self::default()
+        }
+    }
+
+    /// Whether the encode is to give up now.
+    pub fn is_cancelled(&self) -> bool {
+        #[cfg(test)]
+        if let Some((count, fire_after)) = &self.looks
+            && count.fetch_add(1, Ordering::Relaxed) >= *fire_after
+        {
+            return true;
+        }
+        self.flag
+            .as_ref()
+            .is_some_and(|flag| flag.load(Ordering::Relaxed))
+            || self
+                .deadline
+                .is_some_and(|deadline| Instant::now() >= deadline)
+    }
+}
+
+/// Why [`Emulator::snapshot_until`] made no snapshot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SnapshotStopped {
+    /// See [`NotClean`].
+    NotClean,
+    /// Its [`Cancel`] fired before the snapshot was done; nothing was kept.
+    Cancelled,
+}
+
+impl fmt::Display for SnapshotStopped {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SnapshotStopped::NotClean => NotClean.fmt(f),
+            SnapshotStopped::Cancelled => write!(f, "the snapshot was cancelled"),
+        }
+    }
+}
+
+impl std::error::Error for SnapshotStopped {}
+
+/// An encode stopped by its [`Cancel`], within the size ladder.
+struct CancelledEncode;
+
 impl Emulator {
     /// This emulator's state as a snapshot blob of at most `max_bytes` (the
     /// host's `MAX_SNAPSHOT`), or [`NotClean`] away from a clean boundary.
@@ -315,8 +404,23 @@ impl Emulator {
     /// out the oldest title stack entries first, then the oldest history
     /// (module docs, "Size").
     pub fn snapshot(&self, max_bytes: usize) -> Result<Snapshot, NotClean> {
+        match self.snapshot_until(max_bytes, &Cancel::never()) {
+            Ok(snapshot) => Ok(snapshot),
+            Err(SnapshotStopped::NotClean) => Err(NotClean),
+            Err(SnapshotStopped::Cancelled) => unreachable!("a cancel that never fires"),
+        }
+    }
+
+    /// [`Self::snapshot`], giving up once `cancel` fires
+    /// ([`SnapshotStopped::Cancelled`], with nothing kept). Not cancelled, it
+    /// yields exactly what [`Self::snapshot`] does.
+    pub fn snapshot_until(
+        &self,
+        max_bytes: usize,
+        cancel: &Cancel,
+    ) -> Result<Snapshot, SnapshotStopped> {
         if !self.is_clean() {
-            return Err(NotClean);
+            return Err(SnapshotStopped::NotClean);
         }
         let history = self.primary_grid().history_size();
         let titles = title_costs(self);
@@ -330,8 +434,11 @@ impl Emulator {
         };
         let trimmed_for = self.trimmed_for(min_skip > 0);
         let with_titles =
-            |skip_titles, mode| v1::encode(self, screens, skip_titles, trimmed_for, mode);
-        if let Some((blob, dropped_titles)) = fit_titles(&titles, max_bytes, with_titles) {
+            |skip_titles, mode| v1::encode(self, screens, skip_titles, trimmed_for, mode, cancel);
+        let cancelled = |_: CancelledEncode| SnapshotStopped::Cancelled;
+        if let Some((blob, dropped_titles)) =
+            fit_titles(&titles, max_bytes, with_titles).map_err(cancelled)?
+        {
             return Ok(Snapshot {
                 blob,
                 dropped_history_lines: min_skip,
@@ -343,9 +450,18 @@ impl Emulator {
         // Step 2: no titles, and the oldest history.
         let with_history = |skip, mode| {
             let content = v1::Content::Cells { skip_history: skip };
-            v1::encode(self, content, all_titles, self.trimmed_for(skip > 0), mode)
+            v1::encode(
+                self,
+                content,
+                all_titles,
+                self.trimmed_for(skip > 0),
+                mode,
+                cancel,
+            )
         };
-        if let Some(mut snapshot) = fit_history(min_skip, history, max_bytes, with_history) {
+        if let Some(mut snapshot) =
+            fit_history(min_skip, history, max_bytes, with_history).map_err(cancelled)?
+        {
             snapshot.dropped_titles = all_titles;
             return Ok(snapshot);
         }
@@ -354,11 +470,20 @@ impl Emulator {
         let nothing = v1::Content::Nothing;
         let trimmed_for = self.trimmed_for(history > 0);
         let without_screens =
-            |skip_titles, mode| v1::encode(self, nothing, skip_titles, trimmed_for, mode);
+            |skip_titles, mode| v1::encode(self, nothing, skip_titles, trimmed_for, mode, cancel);
         // Without screens or titles, what is left fits `MIN_SNAPSHOT_LIMIT`;
         // below that it is returned even if it does not fit.
-        let (blob, dropped_titles) = fit_titles(&titles, max_bytes, without_screens)
-            .unwrap_or_else(|| (without_screens(all_titles, v1::Mode::KEEP).blob, all_titles));
+        let (blob, dropped_titles) =
+            match fit_titles(&titles, max_bytes, without_screens).map_err(cancelled)? {
+                Some(fitted) => fitted,
+                None => {
+                    let last_resort = without_screens(all_titles, v1::Mode::KEEP);
+                    if last_resort.cancelled {
+                        return Err(SnapshotStopped::Cancelled);
+                    }
+                    (last_resort.blob, all_titles)
+                }
+            };
         Ok(Snapshot {
             blob,
             dropped_history_lines: history,
@@ -380,12 +505,17 @@ impl Emulator {
     pub fn history_seed(&self, max_bytes: usize) -> Snapshot {
         let history = self.primary_grid().history_size();
         let min_skip = history.saturating_sub(self.restorable_history());
+        let never = Cancel::never();
         let with_history =
-            |skip, mode| v1::encode_history(self, skip, self.trimmed_for(skip > 0), mode);
+            |skip, mode| v1::encode_history(self, skip, self.trimmed_for(skip > 0), mode, &never);
         // Without history a seed is a few dozen bytes, which only a
         // `max_bytes` far below `MIN_SNAPSHOT_LIMIT` refuses; it is returned
-        // even then.
-        fit_history(min_skip, history, max_bytes, with_history).unwrap_or_else(|| Snapshot {
+        // even then. A cancel that never fires never stops it.
+        let fitted = match fit_history(min_skip, history, max_bytes, with_history) {
+            Ok(fitted) => fitted,
+            Err(CancelledEncode) => unreachable!("a cancel that never fires"),
+        };
+        fitted.unwrap_or_else(|| Snapshot {
             blob: with_history(history, v1::Mode::KEEP).blob,
             dropped_history_lines: history,
             dropped_screens: false,
@@ -511,16 +641,23 @@ fn fit_titles(
     costs: &[usize],
     max_bytes: usize,
     encode: impl Fn(usize, v1::Mode) -> v1::Encoded,
-) -> Option<(Vec<u8>, usize)> {
+) -> Result<Option<(Vec<u8>, usize)>, CancelledEncode> {
     let mut skip = 0;
     loop {
         let measurement = encode(skip, v1::Mode::Measure);
+        if measurement.cancelled {
+            return Err(CancelledEncode);
+        }
         let measured = measurement.len;
         if measured <= max_bytes {
-            return Some((encode(skip, measurement.keep()).blob, skip));
+            let encoded = encode(skip, measurement.keep());
+            if encoded.cancelled {
+                return Err(CancelledEncode);
+            }
+            return Ok(Some((encoded.blob, skip)));
         }
         if skip >= costs.len() {
-            return None;
+            return Ok(None);
         }
         // Leave out the fewest further entries whose sequences add up to the
         // excess; each costs exactly what `title_costs` says, so one more
@@ -553,23 +690,29 @@ fn fit_history(
     history: usize,
     max_bytes: usize,
     with_history: impl Fn(usize, v1::Mode) -> v1::Encoded,
-) -> Option<Snapshot> {
+) -> Result<Option<Snapshot>, CancelledEncode> {
     let mut skip = min_skip.min(history);
     loop {
         let measured = with_history(skip, v1::Mode::Measure);
+        if measured.cancelled {
+            return Err(CancelledEncode);
+        }
         let excess = measured.len.saturating_sub(max_bytes);
         if excess == 0 {
             let encoded = with_history(skip, measured.keep());
+            if encoded.cancelled {
+                return Err(CancelledEncode);
+            }
             debug_assert_eq!(encoded.blob.len(), measured.len);
-            return Some(Snapshot {
+            return Ok(Some(Snapshot {
                 blob: encoded.blob,
                 dropped_history_lines: skip,
                 dropped_screens: false,
                 dropped_titles: 0,
-            });
+            }));
         }
         if skip >= history {
-            return None;
+            return Ok(None);
         }
         // Leave out the fewest further lines whose painting took at least
         // the excess. Painting from a later line can shift a few bytes (the
@@ -582,5 +725,84 @@ fn fit_history(
             .unwrap_or(costs.len())
             .max(1);
         skip = (skip + more).min(history);
+    }
+}
+
+#[cfg(test)]
+mod cancel_tests {
+    use super::*;
+    use crate::effects::Collected;
+    use std::sync::atomic::AtomicUsize;
+
+    /// An emulator with `lines` lines of colorful history in a 40x5 terminal.
+    fn with_history(lines: usize) -> Emulator {
+        let mut emulator = Emulator::new(
+            Size {
+                columns: 40,
+                lines: 5,
+            },
+            10_000,
+        );
+        for n in 0..lines {
+            let line = format!("\x1b[38;5;{}mline {n:05} of history\r\n", n % 256);
+            emulator.feed(
+                line.as_bytes(),
+                Instant::now(),
+                FeedMode::Live,
+                &mut Collected::default(),
+            );
+        }
+        emulator
+    }
+
+    /// A cancel that fires at any one of the encoder's looks stops the encode
+    /// there with nothing kept, at the first look and at every later one,
+    /// part way through painting and in the size ladder's later steps alike;
+    /// one that never fires changes nothing.
+    ///
+    /// Why: the encoder looks at its cancel every 64 rows, and only that
+    /// keeps a supervisor's orderly stop from waiting out an encode of a
+    /// full terminal (seconds); a cancel only seen before painting starts
+    /// would let one already under way run on. Spec: for 500 lines of
+    /// history, at the full limit and at a limit that makes the encoder
+    /// measure the history again, an encode whose cancel fires on look `k`,
+    /// for each `k` an uncancelled encode takes, yields
+    /// `SnapshotStopped::Cancelled` having looked exactly `k` times, so it
+    /// stopped there rather than painting on; at the limit that measures again, that
+    /// is more looks than one painting takes; a cancel that fires only after
+    /// all of them yields the same blob as `snapshot`.
+    #[test]
+    fn a_cancel_landing_at_any_look_stops_the_encode() {
+        let emulator = with_history(500);
+        let rows_per_paint = (500 + 5usize).div_ceil(64);
+        for limit in [16 * 1024 * 1024, 4096] {
+            let count = Arc::new(AtomicUsize::new(0));
+            let uncancelled = emulator
+                .snapshot_until(limit, &Cancel::after_looks(Arc::clone(&count), usize::MAX))
+                .expect("clean");
+            let looks = count.load(Ordering::Relaxed);
+            assert!(looks >= rows_per_paint, "{limit}: {looks} looks");
+            if limit == 4096 {
+                assert!(
+                    looks > 2 * rows_per_paint,
+                    "premise: the limit makes the encoder measure again ({looks} looks)"
+                );
+            }
+            assert_eq!(uncancelled.blob, emulator.snapshot(limit).unwrap().blob);
+            for fire_after in 0..looks {
+                let count = Arc::new(AtomicUsize::new(0));
+                let cancel = Cancel::after_looks(Arc::clone(&count), fire_after);
+                assert_eq!(
+                    emulator.snapshot_until(limit, &cancel).map(|_| ()),
+                    Err(SnapshotStopped::Cancelled),
+                    "{limit}: a cancel on look {fire_after} of {looks}"
+                );
+                assert_eq!(
+                    count.load(Ordering::Relaxed),
+                    fire_after + 1,
+                    "{limit}: the encode stopped at the look that fired, looking no more"
+                );
+            }
+        }
     }
 }
