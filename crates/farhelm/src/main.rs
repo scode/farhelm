@@ -1262,7 +1262,41 @@ enum SupervisorCmd {
         /// a file that never changes would never classify a genuine reboot.
         #[arg(long, hide = true, value_name = "PATH")]
         boot_id_file: Option<PathBuf>,
+        /// HARNESS SEAM: create new agent terminals in this kind of
+        /// terminal: `tmux` (a pane in the private tmux server, the
+        /// default) or `host` (a terminal host per terminal).
+        ///
+        /// Hidden because it is not a user setting: which kind new
+        /// terminals are is decided by the release, and this exists for
+        /// test harnesses that run a real supervisor process, today to turn
+        /// terminal hosts on before they are the default, later to keep
+        /// tmux where a harness still needs it. A flag and never an
+        /// environment variable, for `--boot-id-file`'s reasons: tests
+        /// never change their own process's environment, and a variable is
+        /// one more thing a systemd unit could inherit by accident.
+        #[arg(long, hide = true, value_enum, value_name = "KIND", default_value_t = NewTerminalsArg::Tmux)]
+        new_terminals: NewTerminalsArg,
     },
+}
+
+/// The `--new-terminals` flag's spelling: the supervisor's
+/// [`farhelm_supervisor::service::NewTerminals`], one value per kind, so
+/// the mapping is total and a new kind is a compile error here rather than
+/// a value the flag silently cannot name.
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum NewTerminalsArg {
+    Tmux,
+    Host,
+}
+
+impl NewTerminalsArg {
+    /// The supervisor's value for this spelling.
+    fn kind(self) -> farhelm_supervisor::service::NewTerminals {
+        match self {
+            NewTerminalsArg::Tmux => farhelm_supervisor::service::NewTerminals::Tmux,
+            NewTerminalsArg::Host => farhelm_supervisor::service::NewTerminals::Host,
+        }
+    }
 }
 
 /// The `--vendor` flag's spelling: exactly the wire enum's adapters,
@@ -1713,6 +1747,7 @@ fn main() -> anyhow::Result<()> {
                     tmux,
                     exit_on_stdin_close,
                     boot_id_file,
+                    new_terminals,
                 },
         } => {
             init_tracing();
@@ -1790,6 +1825,7 @@ fn main() -> anyhow::Result<()> {
                 agent_hooks,
                 agent_instructions,
                 boot_id_file,
+                new_terminals: new_terminals.kind(),
             };
             run_supervisor(&dir, startup, exit_on_stdin_close)
         }

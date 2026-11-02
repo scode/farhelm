@@ -1121,13 +1121,15 @@ pub struct SupervisorSeams {
     /// opens in: a pane in the private tmux server, or a terminal host of
     /// its own ([`NewTerminals`]).
     ///
-    /// The internal switch the terminal-host stack lands behind, off
-    /// ([`NewTerminals::Tmux`]) by default. Nothing a user or the
-    /// environment controls reaches it: `farhelm supervisor run` builds its
-    /// seams from `..SupervisorSeams::default()`, so no shipped supervisor
-    /// can turn it on, and a test sets it here, never through its own
-    /// process environment. A later change gives the supervisor's command
-    /// line a flag for it, built like `--boot-id-file`.
+    /// The switch terminal hosts land behind, off ([`NewTerminals::Tmux`])
+    /// by default. This field is the one place a running supervisor keeps
+    /// it, and everything that asks reads it here (through
+    /// [`Supervisor::new_terminals`] from outside this module). Two things
+    /// set it, and neither is a user setting or the environment: a real
+    /// supervisor process takes it from `farhelm supervisor run`'s hidden
+    /// `--new-terminals` flag ([`SupervisorStartup::new_terminals`]), and
+    /// the in-process harnesses set it here, never through their own
+    /// process environment.
     pub new_terminals: NewTerminals,
     /// The program terminal hosts are started from, in place of the
     /// supervisor's own executable
@@ -1144,7 +1146,8 @@ pub struct SupervisorSeams {
 }
 
 /// Which kind of terminal a supervisor creates new agent terminals in (the
-/// plan's D-2): [`SupervisorSeams::new_terminals`].
+/// plan's D-2): [`SupervisorSeams::new_terminals`], set for a real
+/// supervisor process by `farhelm supervisor run --new-terminals`.
 ///
 /// Named for the two kinds rather than on and off, because once terminal
 /// hosts are the default the old kind stays selectable for the tests and
@@ -5464,6 +5467,25 @@ pub struct SupervisorStartup {
     /// variable would also be one more thing a systemd unit could inherit
     /// by accident.
     pub boot_id_file: Option<PathBuf>,
+    /// Which kind of terminal this supervisor creates new agent terminals
+    /// in: `farhelm supervisor run --new-terminals <tmux|host>`, a hidden
+    /// harness seam. Callers with no opinion pass [`NewTerminals::Tmux`],
+    /// the default, which is what every production launch gets today.
+    ///
+    /// It lands in [`SupervisorSeams::new_terminals`], the one value the
+    /// rest of the supervisor reads, so a real supervisor process and an
+    /// in-process harness turn terminal hosts on through the same field.
+    /// It exists so that tests can run a real `farhelm supervisor run` with
+    /// terminal hosts on (a restart or a kill of the process itself, the
+    /// browser suite's stack) before they are the default, and, once they
+    /// are, so that the tests and harnesses that keep using tmux can still
+    /// ask for it. A command-line option and never an environment
+    /// variable, for `boot_id_file`'s reasons: tests never change their
+    /// own process's environment, and a variable is one more thing a
+    /// systemd unit or an agent's shell could inherit by accident. Not a
+    /// user setting either: which kind new terminals are is decided by the
+    /// release, not by each install.
+    pub new_terminals: NewTerminals,
 }
 
 /// Remove a socket left by a supervisor that no longer holds the state-dir
@@ -6048,6 +6070,7 @@ impl Supervisor {
                 agent_hooks: crate::agent_kind::AgentHooks::default(),
                 agent_instructions: crate::agent_kind::AgentInstructions::default(),
                 boot_id_file: None,
+                new_terminals: NewTerminals::Tmux,
             },
         )
         .await
@@ -6079,6 +6102,7 @@ impl Supervisor {
             agent_hooks,
             agent_instructions,
             boot_id_file,
+            new_terminals,
         } = startup;
         let exe = std::env::current_exe().context("resolving own binary path")?;
         let defaults = SupervisorSeams::default();
@@ -6101,6 +6125,7 @@ impl Supervisor {
                 agent_instructions,
                 boot_id,
                 state_dir_claim_wait: STATE_DIR_CLAIM_WAIT,
+                new_terminals,
                 ..defaults
             },
             claim,
@@ -7788,6 +7813,19 @@ impl Supervisor {
     /// for the wrong reason. Also honest diagnostics for an embedder.
     pub fn owns_state_dir(&self) -> bool {
         self.ownership.is_some()
+    }
+
+    /// Which kind of terminal this supervisor creates new agent terminals
+    /// in, as it was started ([`SupervisorSeams::new_terminals`]).
+    ///
+    /// The one reading of the switch for code outside the constructor: a
+    /// create decides its kind from the same field, and anything that must
+    /// agree with that decision (whether to tell the user that a session
+    /// still runs in an old terminal, say) asks here rather than keeping a
+    /// copy. Fixed for the supervisor's lifetime; a new value takes a
+    /// restart.
+    pub fn new_terminals(&self) -> NewTerminals {
+        self.seams.new_terminals
     }
 
     /// The supervisor's unix socket path within a state dir. Shared with
@@ -14909,8 +14947,8 @@ impl Supervisor {
     }
 
     /// Open a terminal tab: a new tmux window on the session's tmux
-    /// session, or under the internal switch (`SupervisorSeams::
-    /// new_terminals`) a terminal host of its own (`host_tabs`), running the
+    /// session, or under the switch (`SupervisorSeams::new_terminals`,
+    /// `--new-terminals host`) a terminal host of its own (`host_tabs`), running the
     /// user's login shell in the session's working directory (PLAN_M4.md
     /// item 2, `ControlMsg::OpenTab`'s contract). The steps below are the
     /// tmux window's; a host tab's are the same in kind, and its own module
@@ -15045,8 +15083,9 @@ impl Supervisor {
         // so a tmux agent gets host tabs beside its old tmux ones once the
         // switch is on (a mixed session). Under the old setting a host
         // agent's session has no tmux session to add a window to, so it is
-        // refused before anything is created; no shipped supervisor can
-        // reach that, since only the switch makes host agents.
+        // refused before anything is created. Only a supervisor that made
+        // host agents and was then restarted with tmux reaches that, which
+        // no shipped launch does: none passes `--new-terminals host`.
         let target = match (self.seams.new_terminals, &agent) {
             (NewTerminals::Tmux, Terminal::Tmux(tmux)) => NewTab::Window(tmux.clone()),
             (NewTerminals::Host, Terminal::Tmux(_) | Terminal::Host(_)) => NewTab::Host,
@@ -17852,11 +17891,13 @@ impl Supervisor {
     /// the tmux terminal its create made, and return the runtime it now
     /// runs through.
     ///
-    /// A create starts its agent in a host only under the internal switch
-    /// ([`SupervisorSeams::new_terminals`]); this is how tests reach the
-    /// switch points' host arms with a host whose child they choose (started
-    /// by the test from the real `farhelm` binary, never inside the test
-    /// process, since a host forks) rather than an agent's launch chain.
+    /// A create starts its agent in a host only under the switch
+    /// ([`SupervisorSeams::new_terminals`], which a test harness or the
+    /// hidden `--new-terminals host` turns on and no shipped launch
+    /// passes); this is how tests reach the switch points' host arms with a
+    /// host whose child they choose (started by the test from the real
+    /// `farhelm` binary, never inside the test process, since a host forks)
+    /// rather than an agent's launch chain.
     /// It adopts the host as freshly spawned, with this supervisor's
     /// liveness notifier, publishes an entry that keeps the created one's
     /// run and session cells, generation and scope and differs only in its
@@ -29384,6 +29425,7 @@ exit 0
                 agent_hooks: crate::agent_kind::AgentHooks::default(),
                 agent_instructions: crate::agent_kind::AgentInstructions::default(),
                 boot_id_file: None,
+                new_terminals: NewTerminals::Tmux,
             },
         )
         .await
@@ -30721,10 +30763,10 @@ exit 0
             assert_eq!(
                 conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
                     .unwrap(),
-                32,
+                33,
                 "the v17 fixture migrates through scan-column, profile-snapshot, launch-kind, \
                  session-notification, notification-resolution, launch-hook, boot-finality, \
-                 Codex-pin and terminal-kind changes too"
+                 Codex-pin and terminal-kind changes and the terminal-host marker bump too"
             );
             // Every historical session ran in tmux, so the upgrade records
             // each of them as a tmux session.
@@ -36069,6 +36111,7 @@ exit 0
             agent_hooks,
             agent_instructions: crate::agent_kind::AgentInstructions::default(),
             boot_id_file: None,
+            new_terminals: NewTerminals::Tmux,
         };
         let argv = vec!["claude".to_string()];
 
@@ -36127,6 +36170,7 @@ exit 0
             agent_hooks: crate::agent_kind::AgentHooks::default(),
             agent_instructions,
             boot_id_file: None,
+            new_terminals: NewTerminals::Tmux,
         };
         let argv = vec!["claude".to_string()];
 
@@ -36189,6 +36233,7 @@ exit 0
             agent_hooks: crate::agent_kind::AgentHooks::default(),
             agent_instructions: crate::agent_kind::AgentInstructions::default(),
             boot_id_file: Some(boot_file.clone()),
+            new_terminals: NewTerminals::Tmux,
         };
 
         std::fs::write(&boot_file, "boot-first\n").expect("write boot id");
@@ -36222,6 +36267,47 @@ exit 0
             "a rewritten file must be seen by the next construction, or the harness's reboot \
              is a no-op"
         );
+    }
+
+    /// The terminal kind a supervisor was STARTED with is the switch it
+    /// runs with, and the one its accessor reports.
+    ///
+    /// Why: `farhelm supervisor run --new-terminals` is the only way a real
+    /// supervisor process turns terminal hosts on, and anything that must
+    /// agree with a create's choice (the migration notice, for one) reads
+    /// [`Supervisor::new_terminals`]. A startup value dropped on the way to
+    /// [`SupervisorSeams::new_terminals`] would leave a harness believing it
+    /// tests terminal hosts while every create lands in tmux. Spec: a
+    /// supervisor built through `new_for_startup` with `Host` reports
+    /// `Host` and holds it in its seams, and one built with `Tmux` on the
+    /// same state directory afterwards reports `Tmux`, so the value is the
+    /// startup's and not left over from the directory or a default.
+    /// (Lib tests cannot run a create in a host: a supervisor here has the
+    /// test binary as its own program, which starts no host. The process
+    /// tests in `crates/farhelm/tests/e2e/host_processes.rs` show the flag
+    /// reaching a real create.)
+    #[farhelm_testtrace::test]
+    async fn a_startup_terminal_kind_is_the_switch_the_supervisor_runs_with() {
+        let state = StateDir::new();
+        let startup = |new_terminals| SupervisorStartup {
+            tmux_program: PathBuf::from(crate::tmux::DEFAULT_TMUX_PROGRAM),
+            agent_hooks: crate::agent_kind::AgentHooks::default(),
+            agent_instructions: crate::agent_kind::AgentInstructions::default(),
+            boot_id_file: None,
+            new_terminals,
+        };
+
+        let hosts = Supervisor::new_for_startup(state.path(), startup(NewTerminals::Host))
+            .await
+            .expect("supervisor");
+        assert_eq!(hosts.new_terminals(), NewTerminals::Host);
+        assert_eq!(hosts.seams.new_terminals, NewTerminals::Host);
+        drop(hosts);
+
+        let tmux = Supervisor::new_for_startup(state.path(), startup(NewTerminals::Tmux))
+            .await
+            .expect("supervisor");
+        assert_eq!(tmux.new_terminals(), NewTerminals::Tmux);
     }
 
     /// End to end through a real create: a Claude session's launch spec on

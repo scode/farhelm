@@ -623,7 +623,7 @@ fn marked_rows(output: &str) -> Vec<&str> {
 /// an unrelated one three steps later.
 /// The readiness deadline includes each HTTP response and its body, so a stuck
 /// request cannot bypass the loop's time budget.
-async fn await_local_host(client: &reqwest::Client, base: &str) {
+pub(crate) async fn await_local_host(client: &reqwest::Client, base: &str) {
     let deadline = tokio::time::Instant::now() + REAL_STACK_SETTLE;
     let mut last_completed = None;
     loop {

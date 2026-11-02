@@ -251,33 +251,33 @@ that its required systemd or SSH substrate ran.
   run. Run it when a switch point, the host runtime's adapters, the status evidence, the grid attach path or Delete's
   handling of hosts change.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'creating agents in terminal hosts' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(/core::host_launch::/) | test(/a_retry_finds_the_sessions_own_published_host/) | test(/^hosts::spawn::/) | test(/^host_creates::/)'`
-  — a create starting its agent in a terminal host under the supervisor's internal switch
-  (`SupervisorSeams::new_terminals`, `crates/farhelm-supervisor/src/service/core/host_launch.rs`). The unit tests pin
-  the host child's environment as a function of its inputs (what tmux gives a pane's command, `TERM_PROGRAM` and its
-  version, the `TMUX` placeholder, where the launch environment applies, the default `PATH`), the launch record's
-  encoding and its refusals, a first stage started apart from its spec (pinned, given nothing until finished, killed
-  having read nothing when dropped, a taken name refused), a retry that finds the session's own published host with no
-  other evidence. The e2e tests (`crates/farhelm/tests/e2e/host_creates.rs`) run in-process supervisors with the switch
-  on, starting hosts from the built `farhelm`: the row recorded as a host row with the socket's name, no tmux session,
-  Stop ending the agent and sparing the host; the host's command line and empty environment holding no credential or
-  marker while its child has the markers; the agent in its launch scope with the host outside it (with a user manager,
-  else `SKIPPED`); the login shell's environment compared with a real tmux pane's under the same command (equal but for
-  `TMUX` and `TMUX_PANE`), and a startup file's tmux autostart held back in both; a wrapper prefix running in the host;
-  a create interrupted after its host started retried without a second agent; a first stage that outlived an interrupted
-  create (holding its spec, before binding) waited for by the retry, which then finds its host, or ended by the verified
-  signal when it does not finish, with one host and one agent either way, and fenced the same way by an unconditional
-  Delete of that session after a restart, which then leaves no host and no agent; a process the interrupted first stage
-  forked that still names the socket (a stand-in second stage) leaving the retry unresolved while it stays, and letting
-  the same retry relaunch when it ends during the retry's wait; a launch error's cleanup after a restart keeping the
-  host record of a host that still runs; a cleanup whose runtime is held by a snapshot encode (an encode gate) falling
-  back to ending the host by its socket after the runtime's 15 s bound, while the encode is still held (the gate shows
-  no encode passed or expired); a create that lost to Delete ending its host; a start whose first stage dies after
-  readiness leaving nothing, and one the spawn reports may have left a host, which the create ends and removes the
-  socket of; stand-in hosts that cannot be used, ended by the verified signal and rolled back, or kept as a launching
-  record when the signal must not touch them; and a retry keeping its row's kind with the switch flipped either way
-  across a restart. Needs the pinned tmux first on `PATH` and Python 3 at `/usr/bin/python3` (the stand-in hosts). Linux
-  only, two or three minutes (several tests wait out client deadlines); part of the workspace nextest run. The container
-  launch kind's test is in the containerized suite above
+  — a create starting its agent in a terminal host under the supervisor's switch (`SupervisorSeams::new_terminals`,
+  `crates/farhelm-supervisor/src/service/core/host_launch.rs`; a hidden harness flag, `--new-terminals host`, that no
+  shipped launch passes). The unit tests pin the host child's environment as a function of its inputs (what tmux gives a
+  pane's command, `TERM_PROGRAM` and its version, the `TMUX` placeholder, where the launch environment applies, the
+  default `PATH`), the launch record's encoding and its refusals, a first stage started apart from its spec (pinned,
+  given nothing until finished, killed having read nothing when dropped, a taken name refused), a retry that finds the
+  session's own published host with no other evidence. The e2e tests (`crates/farhelm/tests/e2e/host_creates.rs`) run
+  in-process supervisors with the switch on, starting hosts from the built `farhelm`: the row recorded as a host row
+  with the socket's name, no tmux session, Stop ending the agent and sparing the host; the host's command line and empty
+  environment holding no credential or marker while its child has the markers; the agent in its launch scope with the
+  host outside it (with a user manager, else `SKIPPED`); the login shell's environment compared with a real tmux pane's
+  under the same command (equal but for `TMUX` and `TMUX_PANE`), and a startup file's tmux autostart held back in both;
+  a wrapper prefix running in the host; a create interrupted after its host started retried without a second agent; a
+  first stage that outlived an interrupted create (holding its spec, before binding) waited for by the retry, which then
+  finds its host, or ended by the verified signal when it does not finish, with one host and one agent either way, and
+  fenced the same way by an unconditional Delete of that session after a restart, which then leaves no host and no
+  agent; a process the interrupted first stage forked that still names the socket (a stand-in second stage) leaving the
+  retry unresolved while it stays, and letting the same retry relaunch when it ends during the retry's wait; a launch
+  error's cleanup after a restart keeping the host record of a host that still runs; a cleanup whose runtime is held by
+  a snapshot encode (an encode gate) falling back to ending the host by its socket after the runtime's 15 s bound, while
+  the encode is still held (the gate shows no encode passed or expired); a create that lost to Delete ending its host; a
+  start whose first stage dies after readiness leaving nothing, and one the spawn reports may have left a host, which
+  the create ends and removes the socket of; stand-in hosts that cannot be used, ended by the verified signal and rolled
+  back, or kept as a launching record when the signal must not touch them; and a retry keeping its row's kind with the
+  switch flipped either way across a restart. Needs the pinned tmux first on `PATH` and Python 3 at `/usr/bin/python3`
+  (the stand-in hosts). Linux only, two or three minutes (several tests wait out client deadlines); part of the
+  workspace nextest run. The container launch kind's test is in the containerized suite above
   (`containerized_sessions::podman_agent_runs_from_a_terminal_host`). Run it when the create path, the launch spec's
   composition, the host spawn or the launch identity's rollback or evidence changes.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'restarting host agents' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(/host_handover::tests::/) | test(a_terminal_less_host_row_restarts_in_a_host_never_in_tmux) | test(/a_restart_seed_|_seed_of_an?_|a_seed_whose_runtime|a_stop_during_a_restarts_seed|a_restart_without_consent_touches_no_program|a_restart_asks_again_for_consent/) | test(a_failed_host_restart_after_a_stop_began_restores_a_placeholder) | test(restart_of_a_host_agent_stops_its_tree_before_a_new_host_starts) | test(/^host_relaunches::/)'`
@@ -357,7 +357,7 @@ that its required systemd or SSH substrate ran.
   discovery or the host runtime's adoption or encodes change. The encoder's cancel itself is in the terminal emulator
   selection below (`an_encode_stops_once_its_cancel_fires_and_is_unchanged_until_then`).
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'terminal tabs in terminal hosts' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(launch_file_names_round_trip_through_the_parser) | test(sweep_launch_dir_keeps_every_host_record) | test(/core::host_tabs::tests::/) | test(/tmux::control_codec::tests::/) | test(closing_a_tab_whose_runtime_reads_gone_confirms_its_process_first) | test(/^host_tabs::/)'`
-  — terminal tabs in terminal hosts under the supervisor's internal switch
+  — terminal tabs in terminal hosts under the supervisor's switch (`--new-terminals host`)
   (`crates/farhelm-supervisor/src/service/core/host_tabs.rs`). The unit tests pin a tab host's launch record name
   (`<id>.tab-<tab id>.host`) round-tripping through the launch-directory name parser, which accepts the tab form only
   for a `.host` record; the startup sweep keeping tab records; the tab strip's creation order against stand-in hosts (an
@@ -418,6 +418,22 @@ that its required systemd or SSH substrate ran.
   first on `PATH`. Linux only (the e2e suite), about a minute with four slots (stale sockets, a stopped host and a
   fenced first stage wait out their deadlines); part of the workspace nextest run. Run it when the reclaim, discovery,
   the launch records' settling, a host runtime's adoption, `serve`'s startup order or the store's reservations change.
+- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'host terminals under a real supervisor process' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(/^host_processes::/) | test(a_startup_terminal_kind_is_the_switch_the_supervisor_runs_with) | test(the_schema_33_marker_changes_no_table_and_keeps_every_row)'`
+  — terminal hosts turned on the way a real supervisor process turns them on: `farhelm supervisor run`'s hidden
+  `--new-terminals host` (`SupervisorStartup::new_terminals`). The unit tests check that the startup value is the switch
+  the supervisor runs with (`Supervisor::new_terminals`), and that schema 33, the marker that makes every build at 32
+  refuse a database such a supervisor opened, changes no table or row and is not taken by a process without the state
+  directory's claim. The e2e tests (`crates/farhelm/tests/e2e/host_processes.rs`) start the built `farhelm` as processes
+  and look only through what a viewer sees (a grid attachment's screen and the input it sends), the host's process by
+  its command line, and the session's row: a session created with the flag is a host row; its host agent comes through
+  an orderly restart (SIGTERM, a clean exit) and a SIGKILL of the supervisor process with the same host process, its
+  screen (the ready line and a line echoed before) and its input; a state directory whose `supervisor.sock` path is 103
+  bytes, macOS's longest, holds its host sockets (each path shorter than the supervisor's) and the terminal works; and,
+  with a real helm on the same state directory, a session created through the helm's API reaches a hand-rolled browser
+  WebSocket with `?grid=1` as a `grid` stream notice and then grid messages showing the agent's screen, and `text` and
+  `key` messages sent up the socket reach the program. Needs the pinned tmux first on `PATH`. Linux only (the e2e
+  suite), a minute or two; part of the workspace nextest run. Run it when the flag, the startup's wiring of it, the
+  schema, the orderly stop, reload, the host socket's path, or the helm's grid relay changes.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'grid streams' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p farhelm-supervisor --lib -E 'test(/^grid_output::/) | test(/^service::grid_stream::/)'`
   — how a host terminal reaches a grid viewer: the encoding (`crates/farhelm-supervisor/src/grid_output.rs`: cells to
   runs with styles, redefined palette colors, wide and combining characters and links, a row with more links than a
@@ -555,6 +571,16 @@ that its required systemd or SSH substrate ran.
   and no build: the page and the shipped assets are served through request routing. Needs `npm install` and the browsers
   from the browser suite's setup below; a few minutes. Not in CI. Run it when the grid assets, `terminal.js`'s grid
   handling or the fixtures under `crates/farhelm-ui/js-tests/fixtures/grid/` change.
+- `cd e2e && npx playwright test --config host-terminals/playwright.config.ts` — the browser specs of terminals in
+  terminal hosts (`e2e/host-terminals/`), against a real stack of their own: the config boots one `e2e/start-stack.sh`
+  with `FARHELM_E2E_NEW_TERMINALS=host`, which starts the stack's local supervisor with `--new-terminals host`, so the
+  startup session runs in a host; the main suite's stacks pass nothing and keep the supervisor's default. In Chromium
+  and WebKit, one worker: the session's terminal mounts as the grid component (never xterm.js), draws the fake agent's
+  ready line, and draws the agent's echo of a line typed into it. Needs what the browser suite needs (`cargo build`, the
+  web build, `npm install` and the browsers, the pinned tmux first on `PATH`), and runs through the recorder's generic
+  mode, since its Playwright mode pins the main config; a minute or two. Not in CI, and not part of the full browser
+  suite. Run it when the grid client's handling of a live stack, the helm's grid relay, the supervisor's grid streams or
+  the stack script's supervisor arguments change.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'helm terminal relay' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p farhelm-helm --lib -E 'test(/^terminal::tests::/) | test(/^client::tests::/)'`
   — the helm's terminal WebSocket (`crates/farhelm-helm/src/terminal.rs`) and its supervisor client
   (`crates/farhelm-helm/src/client.rs`), in-process against stand-in supervisors: attach, takeover, refusals, the stream
