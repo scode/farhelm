@@ -24,8 +24,9 @@
 //!   dies with its holder, so "is this run alive" stays answerable after a
 //!   SIGKILL — which is exactly where a PID file would lie (PID reuse,
 //!   reboots) and where the old pure age gate had to wait an hour.
-//! - A **sweep** ([`sweep`]): reaps dead runs, kills their orphaned tmux
-//!   servers, and runs from every harness entry point — the stack script
+//! - A **sweep** ([`sweep`]): reaps dead runs, ends their orphaned terminal
+//!   hosts ([`hosts`]) and tmux servers, and runs from every harness entry
+//!   point — the stack script
 //!   invokes `farhelm-fixtures sweep-test-state` at startup, and the Rust
 //!   tests sweep once per process through [`tempdir`] — so a long-lived
 //!   session cleans up after its dead predecessors instead of
@@ -43,6 +44,10 @@ pub mod process;
 
 /// Bounded ownership and cancellation for fixture worker threads.
 pub mod thread;
+
+/// Ending the terminal hosts a run leaves in its state directories, through
+/// a small blocking client over the host's own codec.
+pub mod hosts;
 
 /// Bounded private-server shutdown with Linux pidfd fallback authority.
 ///
@@ -110,13 +115,20 @@ const TMUX_SOCKET_WALK_DEPTH: usize = 3;
 /// subsequent harness startup.
 const TMUX_KILL_DEADLINE: Duration = Duration::from_secs(5);
 
-/// Ceiling on the time ONE sweep pass spends on tmux kills in total.
-/// The per-kill deadline above bounds one wedged socket; this bounds a
-/// /tmp full of them, since neither the directory count nor the socket
-/// count is otherwise limited. A pass that exhausts it still reclaims
-/// directories without tmux sockets, but keeps those whose kills could not
-/// complete. Their socket paths remain available for the next sweep.
-const TMUX_KILL_TOTAL_BUDGET: Duration = Duration::from_secs(30);
+/// Ceiling on the time ONE sweep pass spends contacting servers in total:
+/// tmux kills and terminal host shutdowns alike. The per-socket deadlines
+/// ([`TMUX_KILL_DEADLINE`], [`hosts::HOST_STOP_DEADLINE`]) bound one wedged
+/// socket; this bounds a /tmp full of them, since neither the directory
+/// count nor the socket count is otherwise limited. A pass that exhausts it
+/// still reclaims directories without sockets to contact, but keeps those
+/// whose servers could not be confirmed gone. Their socket paths remain
+/// available for the next sweep.
+const CLEANUP_TOTAL_BUDGET: Duration = Duration::from_secs(30);
+
+/// Ceiling on the time a [`TestDir`]'s own cleanup spends ending the
+/// terminal hosts in it. A test that started more hosts than this allows
+/// for wedged ones leaves its directory to the sweep.
+const TEST_DIR_HOST_BUDGET: Duration = Duration::from_secs(30);
 
 /// The sweep's time thresholds, injectable so tests can use zero instead
 /// of forging mtimes or mutating the clock.
@@ -216,13 +228,13 @@ fn sweep_as_owner(root: &Path, policy: &SweepPolicy, owner: libc::uid_t) -> Swee
         }
     };
     let now = SystemTime::now();
-    // One tmux-kill time budget for the WHOLE pass, not per socket: the
-    // per-kill deadline bounds one wedged socket, but a /tmp full of them
+    // One cleanup time budget for the WHOLE pass, not per socket: the
+    // per-socket deadlines bound one wedged server, but a /tmp full of them
     // times an unbounded directory count would still stall the sweep for
-    // minutes. Once spent, remaining reaps skip their kill attempts and
-    // keep any directory holding a tmux socket for the next sweep, while
-    // directories without one are still reclaimed.
-    let tmux_kill_budget = std::time::Instant::now() + TMUX_KILL_TOTAL_BUDGET;
+    // minutes. Once spent, remaining reaps skip their tmux kills and host
+    // shutdowns and keep any directory holding such a socket for the next
+    // sweep, while directories without one are still reclaimed.
+    let cleanup_budget = std::time::Instant::now() + CLEANUP_TOTAL_BUDGET;
     for entry in entries {
         let entry = match entry {
             Ok(entry) => entry,
@@ -277,14 +289,14 @@ fn sweep_as_owner(root: &Path, policy: &SweepPolicy, owner: libc::uid_t) -> Swee
                     // Dead — reap while holding the flock so concurrent
                     // sweeps serialize behind us instead of
                     // double-reaping.
-                    FlockResult::Acquired => reap(&path, owner, tmux_kill_budget, &mut outcome),
+                    FlockResult::Acquired => reap(&path, owner, cleanup_budget, &mut outcome),
                 }
             }
             Ok(None) => {
                 if is_younger_than(now, meta.modified().ok(), policy.backstop) {
                     continue;
                 }
-                reap(&path, owner, tmux_kill_budget, &mut outcome);
+                reap(&path, owner, cleanup_budget, &mut outcome);
             }
             Err(error) => {
                 // A lock we cannot even open (permissions, a FIFO or
@@ -428,7 +440,8 @@ fn flock_blocking(file: &File) -> io::Result<()> {
     }
 }
 
-/// Kill the dead run's tmux servers, then remove its directory.
+/// End the dead run's terminal hosts and kill its tmux servers, then remove
+/// its directory.
 ///
 /// Ownership is re-verified first: between the sweep's candidate checks
 /// and this call, a concurrent sweep may have removed the dir and the
@@ -436,29 +449,26 @@ fn flock_blocking(file: &File) -> io::Result<()> {
 /// concurrency notes). The re-check shrinks that window to the
 /// unavoidable minimum.
 ///
-/// The tmux kill comes first and covers every `tmux.sock` within the
-/// bounded walk ([`TMUX_SOCKET_WALK_DEPTH`]), not just the top-level
-/// one: the stack script nests a second supervisor's state (and its tmux
-/// server) at `remote/tmux.sock`, and a server whose socket dir is
-/// deleted out from under it lingers forever — the old shell sweep had
-/// exactly that gap. Kills are bounded; when one cannot be confirmed or
-/// the pass's budget is exhausted, keep the directory so a later sweep
-/// can retry using the socket. Removing it would strand a live server.
-fn reap(
-    dir: &Path,
-    owner: libc::uid_t,
-    tmux_kill_budget: std::time::Instant,
-    outcome: &mut SweepOutcome,
-) {
+/// The hosts and the tmux servers go first, and both cover the bounded
+/// walk ([`hosts::HOST_SOCKET_WALK_DEPTH`], [`TMUX_SOCKET_WALK_DEPTH`]),
+/// not just the top level: the stack script nests a second supervisor's
+/// state (and its tmux server and hosts) at `remote/`, and a server whose
+/// socket dir is deleted out from under it lingers forever — the old shell
+/// sweep had exactly that gap. Both are bounded; when one cannot be
+/// confirmed or the pass's budget is exhausted, keep the directory so a
+/// later sweep can retry using the socket. Removing it would strand a live
+/// server.
+fn reap(dir: &Path, owner: libc::uid_t, budget: std::time::Instant, outcome: &mut SweepOutcome) {
     match fs::symlink_metadata(dir) {
         Ok(meta) if meta.is_dir() && meta.uid() == owner => {}
         _ => return,
     }
+    let hosts_confirmed = hosts::stop_hosts_within(dir, hosts::HOST_SOCKET_WALK_DEPTH, budget);
     let mut sockets = Vec::new();
     collect_tmux_sockets(dir, TMUX_SOCKET_WALK_DEPTH, &mut sockets);
     let mut kills_confirmed = true;
     for socket in sockets {
-        if std::time::Instant::now() >= tmux_kill_budget {
+        if std::time::Instant::now() >= budget {
             diag(format!(
                 "tmux kill budget exhausted; not contacting {}",
                 socket.display()
@@ -468,9 +478,9 @@ fn reap(
         }
         kills_confirmed &= kill_tmux_server(&socket);
     }
-    if !kills_confirmed {
+    if !hosts_confirmed || !kills_confirmed {
         diag(format!(
-            "keeping {} for a later tmux kill retry",
+            "keeping {} for a later cleanup retry",
             dir.display()
         ));
         return;
@@ -508,49 +518,9 @@ fn kill_tmux_server(socket: &Path) -> bool {
     // A blocking connect can hang on a full listen backlog, before the child
     // deadline below even starts. Probe once without waiting; only a definite
     // absent listener may bypass the existing deadline-bound kill command.
-    let probe = || -> io::Result<()> {
-        use std::os::fd::FromRawFd;
-        use std::os::unix::ffi::OsStrExt;
-        use std::os::unix::net::UnixStream;
-
-        // SAFETY: sockaddr_un is plain C storage; all-zero bytes are valid.
-        let mut address: libc::sockaddr_un = unsafe { std::mem::zeroed() };
-        let bytes = socket.as_os_str().as_bytes();
-        if bytes.len() >= address.sun_path.len() || bytes.contains(&0) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "invalid socket path",
-            ));
-        }
-        address.sun_family = libc::AF_UNIX as libc::sa_family_t;
-        for (slot, byte) in address.sun_path.iter_mut().zip(bytes) {
-            *slot = *byte as libc::c_char;
-        }
-        let length = (std::mem::offset_of!(libc::sockaddr_un, sun_path) + bytes.len() + 1)
-            as libc::socklen_t;
-        // SAFETY: socket has no borrowed-pointer arguments and returns one
-        // new descriptor, transferred immediately into an owning stream.
-        let raw = unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_STREAM, 0) };
-        if raw < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        // SAFETY: raw is a fresh socket descriptor; no other owner exists.
-        let stream = unsafe { UnixStream::from_raw_fd(raw) };
-        // SAFETY: stream owns this descriptor for the duration of the call.
-        if unsafe { libc::fcntl(stream.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) } < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        stream.set_nonblocking(true)?;
-        // SAFETY: address is initialized, length stays within its storage,
-        // and stream owns a live AF_UNIX socket throughout this call.
-        if unsafe { libc::connect(stream.as_raw_fd(), (&raw const address).cast(), length) } < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        Ok(())
-    };
     // The probe's descriptor is closed on every result before spawning tmux.
     // EAGAIN/EINPROGRESS and other ambiguous errors still require that child.
-    match probe() {
+    match connect_without_waiting(socket).map(drop) {
         Err(error)
             if matches!(
                 error.kind(),
@@ -598,6 +568,55 @@ fn kill_tmux_server(socket: &Path) -> bool {
             }
         }
     }
+}
+
+/// Connect to the unix socket at `socket` without ever waiting in
+/// `connect`, returning the connected stream (still non-blocking,
+/// close-on-exec).
+///
+/// A blocking connect can hang on a listener whose backlog is full, and
+/// cleanup must never hang. Here a full backlog is an error instead: EAGAIN
+/// on Linux, and a refusal on macOS (which there looks the same as no
+/// listener at all, so a caller that acts on a refusal must allow for it).
+fn connect_without_waiting(socket: &Path) -> io::Result<std::os::unix::net::UnixStream> {
+    use std::os::fd::FromRawFd;
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::net::UnixStream;
+
+    // SAFETY: sockaddr_un is plain C storage; all-zero bytes are valid.
+    let mut address: libc::sockaddr_un = unsafe { std::mem::zeroed() };
+    let bytes = socket.as_os_str().as_bytes();
+    if bytes.len() >= address.sun_path.len() || bytes.contains(&0) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid socket path",
+        ));
+    }
+    address.sun_family = libc::AF_UNIX as libc::sa_family_t;
+    for (slot, byte) in address.sun_path.iter_mut().zip(bytes) {
+        *slot = *byte as libc::c_char;
+    }
+    let length =
+        (std::mem::offset_of!(libc::sockaddr_un, sun_path) + bytes.len() + 1) as libc::socklen_t;
+    // SAFETY: socket has no borrowed-pointer arguments and returns one
+    // new descriptor, transferred immediately into an owning stream.
+    let raw = unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_STREAM, 0) };
+    if raw < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: raw is a fresh socket descriptor; no other owner exists.
+    let stream = unsafe { UnixStream::from_raw_fd(raw) };
+    // SAFETY: stream owns this descriptor for the duration of the call.
+    if unsafe { libc::fcntl(stream.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    stream.set_nonblocking(true)?;
+    // SAFETY: address is initialized, length stays within its storage,
+    // and stream owns a live AF_UNIX socket throughout this call.
+    if unsafe { libc::connect(stream.as_raw_fd(), (&raw const address).cast(), length) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(stream)
 }
 
 /// Collect every socket named exactly `tmux.sock` under `dir`, recursing
@@ -666,13 +685,20 @@ fn collect_tmux_sockets(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
 /// interval, the kernel releases the flock only after the child's copy
 /// closes too.
 ///
-/// Field order is the drop order and it matters: the directory is removed
-/// first, while the lock is still held, so a concurrent sweep never
-/// observes this dir unlocked-but-present mid-removal.
+/// Dropping one first ends the terminal hosts in it ([`hosts`]), as the
+/// sweep does for a dead run: a test may start hosts (a supervisor under
+/// test does), and they would outlive the directory otherwise. When one
+/// cannot be confirmed ended, the directory is kept, and its lock released,
+/// so the sweep retries it later as a dead run.
+///
+/// The directory is removed in `Drop`, before the lock field is dropped, so
+/// a concurrent sweep never observes this dir unlocked-but-present
+/// mid-removal.
 pub struct TestDir {
     /// The clean inner dir handed to callers; lives inside `dir`.
     inner: PathBuf,
-    dir: tempfile::TempDir,
+    /// `None` only once [`Self::close`] or `Drop` has taken it.
+    dir: Option<tempfile::TempDir>,
     _lock: File,
 }
 
@@ -695,9 +721,47 @@ impl TestDir {
     /// would invalidate the test rather than merely leak. The lock is
     /// released afterwards, on return, so no sweep can observe the dir
     /// unlocked while it still exists.
-    pub fn close(self) -> io::Result<()> {
-        self.dir.close()
+    ///
+    /// Terminal hosts in it are ended first, as on drop; when one cannot be
+    /// confirmed ended, the directory is kept for the sweep and this fails.
+    pub fn close(mut self) -> io::Result<()> {
+        let dir = self.dir.take().expect("a live TestDir holds its directory");
+        if !end_hosts(dir.path()) {
+            let kept = dir.keep();
+            return Err(io::Error::other(format!(
+                "terminal hosts in {} could not be confirmed ended; the directory is kept for \
+                 the sweep",
+                kept.display()
+            )));
+        }
+        dir.close()
     }
+}
+
+impl Drop for TestDir {
+    fn drop(&mut self) {
+        let Some(dir) = self.dir.take() else { return };
+        if !end_hosts(dir.path()) {
+            let kept = dir.keep();
+            diag(format!(
+                "keeping {} for a later cleanup retry: its terminal hosts could not be \
+                 confirmed ended",
+                kept.display()
+            ));
+        }
+        // Otherwise `dir` drops here, removing the directory while the lock
+        // field (dropped after this body) is still held.
+    }
+}
+
+/// End the terminal hosts in a run's container `dir`, within
+/// [`TEST_DIR_HOST_BUDGET`], saying whether every one was confirmed ended.
+fn end_hosts(dir: &Path) -> bool {
+    hosts::stop_hosts_within(
+        dir,
+        hosts::HOST_SOCKET_WALK_DEPTH,
+        std::time::Instant::now() + TEST_DIR_HOST_BUDGET,
+    )
 }
 
 /// Create a `fh-it.` state dir under /tmp with its lock held — and, once
@@ -749,7 +813,7 @@ pub fn tempdir_in(root: &Path) -> io::Result<TestDir> {
     builder.create(&inner)?;
     Ok(TestDir {
         inner,
-        dir,
+        dir: Some(dir),
         _lock: lock,
     })
 }

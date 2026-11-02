@@ -96,6 +96,20 @@ that its required systemd or SSH substrate ran.
   one test forks holds every descriptor of the test process until it execs, and on macOS, which cannot open a pty or
   socket close-on-exec in one call, it can keep another test's for good; that test then waits for an end of output or a
   close that never comes (`crates/terminal-host/TESTING.md`).
+- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'terminal host spawning and cleanup' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p farhelm-supervisor -p farhelm-teststate -p farhelm --lib --test terminal_host_spawn -E 'test(/^hosts::/) | binary(terminal_host_spawn)'`
+  — the supervisor's side of terminal hosts and the harnesses' cleanup of them. The supervisor's `hosts::` unit tests
+  cover the private socket directory, the socket path bound against macOS's 104-byte limit, the client tag's golden
+  fixtures (`crates/farhelm-supervisor/tests/fixtures/host-tag/`, which must never change for a shipped version) and
+  unreadable tags, and the spawn's start protocol against stand-in first stages (readiness from the exit status alone, a
+  relative state directory, and a start that does not finish ending whatever answers at its socket or naming it);
+  `farhelm-teststate`'s `hosts::` tests cover its blocking shutdown client against stand-in listeners (refusals believed
+  only over its stale window, an incomplete scan kept). `crates/farhelm/tests/terminal_host_spawn.rs` starts real hosts
+  from the built `farhelm` (never inside a test process, since a host forks): readiness and no zombie, a failed start
+  leaving nothing, no `FARHELM_*` marker or credential on the host while its child has them, and the test-state cleanup
+  for a normal run, a dead run, nested `remote/` state, and a stopped host that keeps its run (a sweep, a `TestDir` drop
+  and `close`) for a retry, plus, on Linux only, a stopped host with a full backlog. Under a minute, part of the
+  workspace nextest run; the focused macOS CI job runs it too, in the terminal host step. Portable to macOS except where
+  it reads `/proc`.
 - Terminal host coverage, when the crate changes:
   `cargo +nightly llvm-cov -p terminal-host --branch --summary-only -- --test-threads=1`, with cargo-llvm-cov 0.9.1
   installed in your scratch directory (`cargo install --locked --root <scratch>/tools cargo-llvm-cov --version 0.9.1`,
@@ -221,8 +235,9 @@ that its required systemd or SSH substrate ran.
   and stop tests the same way: `cargo nextest run -p farhelm-supervisor --lib -E 'test(managed_supervisor::)'` (the
   uninstall stop's own tests are part of `uninstall::` above). After the uninstall acceptance, in a step of its own that
   runs whatever the steps before it did (so that a host failure cannot hide that gate), it runs the terminal host's
-  whole test suite, `cargo nextest run -p terminal-host`, and the host's entry test in the CLI,
-  `cargo nextest run -p farhelm --test terminal_host_entry`.
+  whole test suite, `cargo nextest run -p terminal-host`, the host's entry test in the CLI,
+  `cargo nextest run -p farhelm --test terminal_host_entry`, and the supervisor's spawning and the test-state cleanup
+  (the `terminal host spawning and cleanup` selection above).
 - `scripts/test-provision-centos.sh` — the x86_64 Linux release gate boots a systemd CentOS Stream 9 container and makes
   the helm provision it over ssh, which is the only coverage of a helm installing onto a distribution other than its
   own. Needs docker and `musl-tools`: the payloads it pushes are the release's musl-static `farhelm` and static tmux,

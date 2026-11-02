@@ -108,7 +108,11 @@ jobs:
       # keep that gate from running; and it runs whatever the step before
       # did. The entry test checks that a host started through `farhelm
       # internal terminal-host` holds no version lock, which exist only in
-      # the Mac app's layout.
+      # the Mac app's layout. The spawning and cleanup tests cover the
+      # supervisor's side on macOS: the 104-byte socket path limit, the host
+      # started from the real `farhelm` (peer pid, `ps`-read environment and
+      # command line), and the test-state cleanup, whose reading of refused
+      # connections differs on macOS.
       - name: macOS terminal host tests
         if: ${{ !cancelled() }}
         run: |
@@ -120,6 +124,10 @@ jobs:
             --runner nextest --kind development --selection 'macOS terminal host entry test' --concurrency '4 nextest slots; retries 0' \
             --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" \
             -- cargo nextest run -p farhelm --test terminal_host_entry || status=1
+          python3 scripts/record-test-run.py \
+            --runner nextest --kind development --selection 'macOS terminal host spawning and cleanup' --concurrency '4 nextest slots; retries 0' \
+            --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" \
+            -- cargo nextest run -p farhelm-supervisor -p farhelm-teststate -p farhelm --lib --test terminal_host_spawn -E 'test(/^hosts::/) | binary(terminal_host_spawn)' || status=1
           exit "${status:-0}"
       - name: Retain failure evidence
         if: failure()

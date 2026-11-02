@@ -132,7 +132,10 @@ Deliberately not here: everything the sweep runs (workspace nextest including th
 both engines, desktop nextest, both doctest runs, the two JS harnesses, `test-install-sh.sh`, CentOS provisioning,
 desktop smoke, including the public-to-local session identity boundary), `scripts/test-tmux-pinned-shutdown.sh` (the
 sweep's workspace nextest runs the same tests on the same pinned tmux), and the macOS-only uninstall acceptance (the
-rehearsal's macOS leg runs it in step 4).
+rehearsal's macOS leg runs it in step 4). The focused macOS CI job's terminal host step (the host crate, its entry test
+in the CLI, and the supervisor's spawning and test-state cleanup) runs only with
+`gh workflow run ci.yml --ref <branch> -f suite=uninstall-macos`; its Linux side is part of the sweep's workspace
+nextest.
 
 The workspace nextest selection includes Linux `containerized_sessions` coverage. Rootless Podman and the offline
 `docker.io/library/ubuntu:24.04` image are required; tests never pull. An intentional opt-out uses

@@ -37,6 +37,11 @@ serde_json.workspace = true
 sha2.workspace = true
 shell-words.workspace = true
 subtle.workspace = true
+# The terminal host's wire format: the child spec a spawn writes to a host's
+# stdin, and the limits (`MAX_TAG`) the client tag must keep within. Only the
+# pure `protocol` module is used; the host itself runs as `farhelm internal
+# terminal-host`, never inside the supervisor's process.
+terminal-host.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true

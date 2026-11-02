@@ -20,6 +20,10 @@ libc.workspace = true
 # tempfile's battle-tested drop-time removal; this crate only adds the
 # naming and the lock on top.
 tempfile.workspace = true
+# The terminal host's wire format, for the small blocking client that ends
+# the hosts a test run leaves in its state directories (`hosts` module). Only
+# the pure codec; this crate never starts a host.
+terminal-host.workspace = true
 # Fixture-thread lifecycle diagnostics are tracing events so tests can retain
 # bounded evidence without coupling the owner to a particular logger.
 tracing.workspace = true
