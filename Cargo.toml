@@ -7,6 +7,7 @@ members = [
   "crates/farhelm-helm",
   "crates/farhelm-proto",
   "crates/farhelm-supervisor",
+  "crates/farhelm-terminal-emulator",
   "crates/farhelm-teststate",
   "crates/farhelm-testtrace",
   "crates/farhelm-testtrace-macros",
@@ -41,6 +42,7 @@ default-members = [
   "crates/farhelm-helm",
   "crates/farhelm-proto",
   "crates/farhelm-supervisor",
+  "crates/farhelm-terminal-emulator",
   "crates/farhelm-fixtures",
   "crates/farhelm-teststate",
   "crates/farhelm-ui",
@@ -264,6 +266,21 @@ farhelm-testtrace-macros = { path = "crates/farhelm-testtrace-macros" }
 # workspace battery.
 farhelm-ui = { path = "crates/farhelm-ui" }
 terminal-host = { path = "crates/terminal-host" }
+
+# The supervisor's terminal emulator runs on patched copies of these two crates:
+# read-only accessors that snapshot and restore need, caps on what hostile
+# program output can make them store, history counters for the grid stream, and
+# fixes for upstream bugs that ordinary program output reaches (a wide character
+# on a one-column terminal, a UTF-8 character split across reads).
+# vendor/README.md lists every patch, why it exists and how to re-apply it on an
+# upgrade. A dependency still names the crates.io version, and this section
+# swaps in the vendored source only while the requested version matches the
+# vendored one: a dependency asking for another version gets crates.io's
+# unpatched crate, and cargo merely warns that the patch went unused. So depend
+# on exactly `=0.26.0`, and upgrade by re-vendoring.
+[patch.crates-io]
+alacritty_terminal = { path = "vendor/alacritty_terminal" }
+vte = { path = "vendor/vte" }
 
 # SHA-256 is compiled optimized even in debug builds. Tests hash real debug
 # binaries, which are hundreds of megabytes, and unoptimized `sha2` takes
