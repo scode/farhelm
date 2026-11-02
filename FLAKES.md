@@ -57,6 +57,63 @@ paragraphs. Classes are `readiness`, `replay-live`, `fixture-premise`, `peer-lif
 Confidence is `established`, `hypothesis`, or `unknown`; `Cause:` is the last line. These fields apply only to new
 entries. Missing historical fields are missing evidence, not an implicit cause classification.
 
+## 2026-11-02 — `restart_with_resume::named_restart_with_uses_the_requested_target_and_only_reports_capture_it` (crates/farhelm/tests/e2e/restart_with_resume.rs)
+
+Observed as the one failure among 403 tests in run `adf66a9a-4f3f-4750-8aa6-93d6bf127ebf`, a wider host and terminal
+selection on unmerged terminal-host stack commit `9741cc35e1085f7bed8a5cc7dd689878ffef15c1` (tree clean apart from an
+untracked `clippy.log` the same job wrote earlier), on a Tensorlake cloud sandbox. Run alone there it then failed 8 of
+10 at that commit (clean, runs starting `ff7488e5-1ec7-4fca-b82a-8e014c6b1bcd`) and 9 of 10 on its parent in the stack,
+`f4e93b6874cf5824b10ceecaa84c18da8a8e2c28` (clean, runs starting `6b8058a3-9321-4044-995b-e7473fefe05e`); its whole
+module failed it in 3 of 6 runs across the two (2 of 3 on `9741cc35`, 1 of 3 on `f4e93b68`), and the rest of the module
+passed every time. On clean main `ce6b55c0` it failed 5 of 5 alone on a sandbox (`0f13b410-0e79-40a9-9812-4448effe8660`,
+`cb204897-c110-4d7b-9f6f-4d6e8845b2d9`, `da8c23ab-c208-4a0a-8104-f8e2b41b6358`, `d65dc909-f76f-4455-bac7-0a605b1fd023`,
+`7bbea98e-c820-4e74-b1c0-efd3f03b6ee9`), so it predates that stack: the test has had this shape since #2012, and there
+is no earlier entry for it. Every failure ran into the 30-second wait for wrapper generation two (about 30.2 s;
+uninstrumented passes took 0.5 to 5.6 s) in the first loop iteration, the one with nothing captured. The cause is a race
+in the test, not in Restart. That iteration sends Restart straight after create returns, and create returns while the
+first launch can still be inside `farhelm internal launch`, before the fake `claude` wrapper has bumped its generation
+counter. Restart's stop then kills the first launch uncounted, the relaunch becomes generation one, and the wait for
+generation two can never succeed. Instrumented runs of the test alone on main (`8fa2093f-a6ce-473f-85dd-4ee0e6d36624`
+and `f52312cd-7c9c-4a79-bb13-5ac9f4c7f08f`, the two failures of five; the instrumentation itself shifted the timing)
+logged process trees and timestamps showing the first launch still in `farhelm internal launch` when Restart stopped it,
+its wrapper never running, and the relaunch's wrapper running as generation one with the requested `--resume` argv and
+reaching the fake agent's READY prompt. Its module, instrumented the same way on main, passed 3 of 3
+(`5d39f333-ed25-4ab7-bb3d-b602f36a3a45`, `410fcd3c-04eb-4873-a4f8-15dc6630863d`,
+`917b08c7-c9df-48b2-a438-c0f25c99476a`). In every failure the relaunch ran the requested argv and reached READY, so
+Restart itself worked and there is no product impact. The fix waits for generation one before restarting when nothing
+has been captured, as the sibling `restart_with_refuses_a_non_resume_offer_without_changing_settings` already did; an
+instrumented build with that wait passed 10 of 10 alone on a sandbox (runs starting
+`0dfcc3cb-f9d2-4089-aaa6-f32745f638b0`). Ruled out: the sandbox's missing systemd user manager, because this test's
+fixture builds its supervisor with scopes disabled, so its stop is the same process-tree sweep on every machine. Fixed
+in the PR that adds this entry. Main `ce6b55c0` with that change's final test file applied uncommitted (no
+instrumentation) passed 10 of 10 alone on a sandbox (runs starting `83f3187e-9e05-4640-b93f-ddd1e9e1e91e`) and its whole
+module once (`bfd2a39e-5f02-4ade-8045-afa4c4488622`). Why this sandbox loses the race far more often than the machines
+the test usually runs on is unknown.
+
+```text
+panicked at crates/farhelm/tests/e2e/structured_launches.rs:375:23:
+session 7ec87ee1-c7da-4048-a416-971b6263effd's generation 2 never reached its complete post-exec boundary; transcript:
+```
+
+Evidence: Tensorlake sandbox, x86_64 Linux, kernel 7.0.7, 4 CPUs, no systemd user manager, one sandbox per job and no
+other test runs on it; load average and memory pressure were not recorded. The first run's selection was
+`cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(/host_tabs/) | test(/^tmux::/) | test(/hosts::terminal::/) | test(/core::tests::host_terminals::/) | test(/session_hosts::/) | test(/host_launch::/) | test(/launch_artifacts::/) | test(/host_handover/) | test(/^host_creates::/) | test(/^host_restarts::/) | test(/^host_terminals::/) | test(/^terminal_tabs::/) | test(/^tab_lifecycle_edges::/) | test(/^restart_with_resume::/) | test(/supervisor_stop/) | test(/grid_stream::/)'`.
+The focused runs used
+`cargo nextest run -p farhelm --test e2e -E 'test(/^restart_with_resume::named_restart_with_uses_the_requested_target/)'`
+(or `test(/^restart_with_resume::/)` for the module runs). All went through the recorder with four nextest slots and
+zero retries. Tree status per group: the first run as above; the stack repetitions and stack module runs clean at the
+commits named; the baseline main runs clean `ce6b55c03dbccfd4229cff739591075c2d481aa2`; the instrumented runs main with
+an uncommitted experiment-only patch adding timestamps and process listings to the fixture (plus the wait, for the
+instrumented fix runs); the final fix runs main with this change uncommitted. cargo-nextest 0.9.148, recorded tmux 3.7c
+executable SHA256 `d85b5932c893e6176a8a4f78aeb9ecf0411381b4739bc3da050f2ba0351e6857`, locale `C.UTF-8`; the only
+`FARHELM_*` variable was the recorder-owned `FARHELM_TEST_TRACE_DIR`. Compiler version unavailable. Retained run
+directories are private to the machine that copied them back from the sandboxes and expire with its temporary-file
+cleanup.
+
+Class: fixture-premise
+
+Cause: established
+
 ## 2026-10-29 — confirming-state test status premise (e2e/tests/terminal.spec.ts)
 
 `a failed listing read while confirming does not clear the confirming state` failed in WebKit in full browser sweep

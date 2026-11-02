@@ -161,17 +161,33 @@ async fn named_restart_with_refuses_malformed_argv_without_stopping_the_old_run(
 /// capture survives until that report, and a later clone uses the ordinary
 /// fresh command. Real tmux argv distinguishes a literal selector from shell
 /// interpretation and the store checks distinguish capture from request data.
+///
+/// The test finds the restart's argv by the wrapper's generation number, and
+/// the wrapper bumps that counter only once it runs. A create returns while
+/// the first launch can still be inside `farhelm internal launch`, so a
+/// restart sent straight away may stop that launch before the wrapper ever
+/// counts it. The relaunch is then generation one, and waiting for generation
+/// two times out even though the restart itself worked. That race failed most
+/// runs on a cloud sandbox (FLAKES.md, 2026-11-02), so both premises must see
+/// generation one before restarting.
 #[farhelm_testtrace::test]
 async fn named_restart_with_uses_the_requested_target_and_only_reports_capture_it() {
     for captured in [false, true] {
         // The wrapper's counter spans sessions, so each capture premise gets
-        // its own fixture; generation two then identifies this exact restart.
+        // its own fixture. Generation two identifies this exact restart only
+        // once generation one has run, which each branch below establishes
+        // before the restart is sent.
         let (h, fixture, _accepting) =
             restart_with_fixture(fake_harness_with_script("hook-report")).await;
         let session = structured_claude_session(&h, &fixture).await;
         let old = if captured {
+            // A conversation report comes from the running fake agent, so a
+            // capture already implies the wrapper counted generation one.
             Some(captured_claude_conversation(&h, &session).await)
         } else {
+            // Nothing else here waits for the first launch to reach the
+            // wrapper; see the docstring for what goes wrong without this.
+            observed_argv(&h, &session.id, 1).await;
             None
         };
         let before = snapshot_of(&h, &session.id).await;
