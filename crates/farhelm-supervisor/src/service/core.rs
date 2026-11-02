@@ -17704,7 +17704,8 @@ pub(crate) mod tests {
     }
 
     /// A supervisor state directory that also kills the private tmux
-    /// server rooted inside it when it goes out of scope.
+    /// server rooted inside it, and ends the terminal hosts whose sockets
+    /// are in it, when it goes out of scope.
     ///
     /// Drop-based, and the drop is the whole point: a test that fails an
     /// assertion never reaches an explicit teardown, and every test here
@@ -17712,19 +17713,25 @@ pub(crate) mod tests {
     /// ever stop. Measured before this existed: one `cargo test -p
     /// farhelm-supervisor --lib` run left 24 tmux servers behind, and they
     /// accumulate across runs until the host is visibly degraded (~2,000
-    /// were found on the development machine).
+    /// were found on the development machine). A terminal host is the same
+    /// hazard and worse: it outlives the supervisor that started it by
+    /// design, and once its socket's directory is gone nothing can reach it.
     ///
-    /// Wraps the `TempDir` rather than sitting beside it so the ordering is
+    /// Wraps the directory rather than sitting beside it so the ordering is
     /// not a rule each test has to remember: the server is killed in this
-    /// type's own `Drop`, which runs before the inner `TempDir`'s and
+    /// type's own `Drop`, which runs before the inner directory's and
     /// therefore before the directory holding the server's socket is
-    /// removed. Its `path()` mirrors `TempDir::path`, so call sites read
-    /// exactly as they did.
-    pub(crate) struct StateDir(tempfile::TempDir);
+    /// removed. The directory is a [`farhelm_teststate::TestDir`] (a
+    /// `fh-it.` run directory under `/tmp`, locked while it lives), whose
+    /// own drop ends the hosts in it first and, when it cannot confirm they
+    /// all ended, keeps the directory, so that a later test process's sweep
+    /// retries them through their sockets. Its `path()` mirrors
+    /// `TempDir::path`, so call sites read exactly as they did.
+    pub(crate) struct StateDir(farhelm_teststate::TestDir);
 
     impl StateDir {
         pub(crate) fn new() -> StateDir {
-            StateDir(tempfile::tempdir().expect("state dir"))
+            StateDir(farhelm_teststate::tempdir().expect("state dir"))
         }
 
         pub(crate) fn path(&self) -> &std::path::Path {

@@ -598,7 +598,11 @@ pub(crate) const REAL_STACK_SETTLE: Duration = Duration::from_secs(90);
 ///
 /// Field order is drop order and is load-bearing, the same rule
 /// [`TmuxServerGuard`]'s own docs set out: the process first, then its tmux
-/// server, then the directory holding both their sockets.
+/// server, then the directory holding both their sockets. The directory is
+/// also the terminal hosts' guard: a host outlives the supervisor that
+/// started it, and the `TestDir`'s drop ends every host with a socket in it
+/// before removing it, keeping it for the sweep when it cannot confirm they
+/// ended (`terminal_host_cleanup` pins this).
 ///
 /// The child needs no guard of its own — every process here is spawned with
 /// `kill_on_drop(true)`, so dropping the `Child` is what kills it, and a
@@ -921,6 +925,17 @@ pub(crate) struct Harness {
     // destructors to run (SIGKILL, abort) is reclaimed by a later run's
     // sweep once the protocol's grace passes, instead of orphaned
     // forever.
+    //
+    // Its drop is also this harness's terminal-host guard, whichever
+    // constructor built the `Harness` (the guarantee comes from this
+    // field's type): it ends each host with a socket in the directory
+    // before removing it, and keeps the directory for the sweep when it
+    // cannot confirm they ended (`terminal_host_cleanup` pins this). A
+    // destructuring site that moves `state` out keeps that guarantee for as
+    // long as it holds the value. It assumes nothing starts a host after
+    // the drop's scan: the in-process supervisor can outlive the harness
+    // (its connection tasks hold their own `Arc`), so once it starts hosts
+    // on its own, it must be quiesced before this field drops.
     pub(crate) state: farhelm_teststate::TestDir,
     // Released on drop, letting the next test start its stack.
     pub(crate) _slot: tokio::sync::SemaphorePermit<'static>,

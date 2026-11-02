@@ -142,7 +142,14 @@ that its required systemd or SSH substrate ran.
   scans real hosts: the spawn's own found by their tags, a host with a foreign tag kept as unavailable, a killed host's
   socket judged gone and removed, and every other host still running after the scan. Under a minute, part of the
   workspace nextest run; the focused macOS CI job runs it too, in the terminal host step. Portable to macOS except where
-  it reads `/proc`.
+  it reads `/proc`. Outside that selection, Linux only and part of the workspace nextest run:
+  `cargo nextest run -p farhelm --test e2e -E 'test(terminal_host_cleanup::)'` shows that dropping the e2e suite's
+  in-process harness and its real supervisor process ends a host started in their state directories. The browser stack's
+  cleanup test, `scripts/test-start-stack-cleanup.sh` (by hand, after `cargo build` and the web build, a few minutes;
+  run it when `e2e/start-stack.sh`'s cleanup changes), plants a real host in both state directories of every stack it
+  boots and requires the stack's cleanup to end them, while a host in another stack's live run directory (in the sweep's
+  family, its lock held and backdated past the sweep's grace) survives every phase and a directly observed sweep pass,
+  which must reap a dead canary run beside it.
 - Terminal host coverage, when the crate changes:
   `cargo +nightly llvm-cov -p terminal-host --branch --summary-only -- --test-threads=1`, with cargo-llvm-cov 0.9.1
   installed in your scratch directory (`cargo install --locked --root <scratch>/tools cargo-llvm-cov --version 0.9.1`,
@@ -274,7 +281,8 @@ that its required systemd or SSH substrate ran.
   replaced by a launch whose program file changed, with a session surviving the replacement), a second launch with
   another program refusing beside the open app without stopping its supervisor, a replacement that would fail its tmux
   preflight stopping nothing, a frozen (SIGSTOP) supervisor being replaced with a kill after the grace, restart
-  persistence, and that every asset the window requested went through the desktop asset handler. API checks retain
+  persistence, that every asset the window requested went through the desktop asset handler, and that the teardown's
+  terminal-host stop ends a real host planted in the answering-supervisor leg's state directory. API checks retain
   host-qualified session references; tmux and scope checks use their local session IDs. The optional coordinate-driven
   leg is not part of CI.
 - `DESKTOP_SMOKE_APPEARANCE=1 scripts/desktop-smoke.sh` — optional Linux native appearance integration using the

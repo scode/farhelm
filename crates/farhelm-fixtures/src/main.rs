@@ -4,9 +4,11 @@
 //! The e2e tests and the browser suite need an "agent" that behaves
 //! deterministically (prompts, colors, terminal modes, conversation records,
 //! floods), and a sweep that reaps the state directories dead test runs
-//! leave under `/tmp`. Both used to be hidden `farhelm internal`
-//! subcommands, which shipped several thousand lines of test fixtures in
-//! every release and made the product binary depend on `farhelm-teststate`.
+//! leave under `/tmp`; the browser stack's cleanup test also starts real
+//! terminal hosts from a shell (`spawn-terminal-host`). The first two used
+//! to be hidden `farhelm internal` subcommands, which shipped several
+//! thousand lines of test fixtures in every release and made the product
+//! binary depend on `farhelm-teststate`.
 //! This package is never shipped (`dist = false`).
 //!
 //! The e2e tests find this binary next to the `farhelm` binary they test,
@@ -18,6 +20,7 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 mod fake_agent;
+mod spawn_host;
 
 #[derive(Parser)]
 #[command(
@@ -121,6 +124,24 @@ enum Cmd {
     /// reach the same sweep in-process. Best-effort and always exits 0 —
     /// a broken sweep must not block testing.
     SweepTestState,
+    /// Start one real terminal host in a state directory's socket
+    /// directory, the way the supervisor starts one, and print
+    /// `<pid> <socket>` once it is ready. For harnesses that must show
+    /// which hosts their cleanup ends and which it leaves alone
+    /// (`scripts/test-start-stack-cleanup.sh`, the desktop smoke, the e2e
+    /// suite's `terminal_host_cleanup`). The host outlives this command;
+    /// the caller ends it.
+    SpawnTerminalHost {
+        /// The `farhelm` binary the host runs as
+        /// (`farhelm internal terminal-host`). Named rather than found
+        /// beside this binary so the caller decides which build's host it
+        /// gets.
+        #[arg(long)]
+        farhelm: PathBuf,
+        /// The state directory whose `hosts` directory gets the socket.
+        #[arg(long)]
+        state_dir: PathBuf,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -164,6 +185,7 @@ fn main() -> anyhow::Result<()> {
             farhelm_teststate::report(&outcome);
             Ok(())
         }
+        Cmd::SpawnTerminalHost { farhelm, state_dir } => spawn_host::run(&farhelm, &state_dir),
     }
 }
 
@@ -179,6 +201,30 @@ mod tests {
     fn sweep_test_state_parses() {
         let cli = Cli::try_parse_from(["farhelm-fixtures", "sweep-test-state"]).unwrap();
         assert!(matches!(cli.command, Cmd::SweepTestState));
+    }
+
+    /// The host-spawning verb parses with both of its paths: the exact
+    /// invocation `scripts/test-start-stack-cleanup.sh` performs, pinned so
+    /// that a rename fails here instead of leaving that script's decoy host
+    /// unstarted.
+    #[farhelm_testtrace::test]
+    fn spawn_terminal_host_parses() {
+        let cli = Cli::try_parse_from([
+            "farhelm-fixtures",
+            "spawn-terminal-host",
+            "--farhelm",
+            "/x/farhelm",
+            "--state-dir",
+            "/x/state",
+        ])
+        .unwrap();
+        match cli.command {
+            Cmd::SpawnTerminalHost { farhelm, state_dir } => {
+                assert_eq!(farhelm, PathBuf::from("/x/farhelm"));
+                assert_eq!(state_dir, PathBuf::from("/x/state"));
+            }
+            _ => panic!("expected spawn-terminal-host"),
+        }
     }
 
     /// A supervisor that injects real-vendor hook flags past `--script`/

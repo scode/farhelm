@@ -11,8 +11,10 @@
 # now watches its spawner and runs its normal TERM trap when the spawner
 # goes away. This script proves that for spawner SIGKILL and SIGTERM, plus
 # the normal trap path and the reaping of a replacement "remote"
-# supervisor, with an unrelated tmux server, process, and state lookalike
-# standing by as the "other stacks" that must survive. A
+# supervisor, with an unrelated tmux server, process, and another stack's
+# live run dir (holding a live terminal host) standing by as the "other
+# stacks" that must survive. Every booted stack also gets a real terminal
+# host planted in each of its two state dirs, which its cleanup must end. A
 # layering guard first pins the `exec` prefix the watcher depends on: the
 # Playwright leader must direct-parent the script, not a resident shell.
 #
@@ -26,6 +28,7 @@
 # NOTE: no reliance on `set -e` — every step carries its own guard.
 
 repo="$(cd "$(dirname "$0")/.." && pwd)" || exit 1
+bin="$repo/target/debug/farhelm"
 fixtures="$repo/target/debug/farhelm-fixtures"
 stack_script="$repo/e2e/start-stack.sh"
 stack_info="$repo/e2e/.stack-info.json"
@@ -62,6 +65,7 @@ stamp() {
   printf '%s' "${EPOCHREALTIME:-$(date +%s)}"
 }
 
+test -x "$bin" || { echo "missing $bin — run cargo build first" >&2; exit 1; }
 test -x "$fixtures" || { echo "missing $fixtures — run cargo build first" >&2; exit 1; }
 test -f "$repo/target/dx/farhelm-ui/release/web/public/index.html" || {
   echo "missing web dist — run dx build first" >&2
@@ -73,22 +77,72 @@ curl -s -m 2 -o /dev/null "$port" && {
 } || true
 
 # Decoys: the "other stacks". A tmux server on its own socket (kill-server
-# scope must not escape), a plain process (no stray kills), and a state
-# lookalike dir (rm -rf scope must not escape). The lookalike's fh-e2e
-# name puts it in the sweep family on purpose; that couples this test to
-# the sweep's 60-minute backstop, which a minutes-long run never nears.
-decoy_tag="decoy-$$"
+# scope must not escape), a plain process (no stray kills), and another
+# stack's live run dir (rm -rf scope must not escape) holding a live
+# terminal host (the terminal-host stop must not escape either; started
+# below, once the trap that ends it is in place).
+#
+# The run dir is a real one in farhelm-teststate's terms: a fresh
+# `mktemp` name in the sweep family (`fh-e2e.` plus six random characters,
+# the only shape the sweep looks at) with its `fh-run.lock` flocked by this
+# script, on fd 8, for the whole test. The lock file is backdated past the
+# sweep's grace, so it is the held lock alone, not the lock's youth, that
+# keeps a sweep off; a sweep that stopped checking the lock would reap the
+# decoy and end its host. One sweep pass is observed directly below (the
+# sweep oracle), beside a dead canary run that it must reap; every boot's
+# startup sweep then passes over the decoy too, but those run unobserved
+# (`|| true`, and a sweep reports only removals), so for them the decoy's
+# survival shows only that no sweep that ran reaped it.
+# Every long-lived child is spawned with `8>&-`, so that only this
+# script holds the lock: once it exits, a decoy kept by a failed stop is a
+# dead run that a later sweep retries.
+command -v flock >/dev/null 2>&1 || { echo "flock(1) is required" >&2; exit 1; }
+decoy_dir="$(mktemp -d /tmp/fh-e2e.XXXXXX)" || exit 1
+exec 8>"$decoy_dir/fh-run.lock" || exit 1
+flock -w 10 8 || exit 1
+# Set file $1's times two hours back: past the sweep's grace for a lock.
+backdate() {
+  python3 -c '
+import os, sys, time
+then = time.time() - 2 * 3600
+os.utime(sys.argv[1], (then, then))
+' "$1"
+}
+backdate "$decoy_dir/fh-run.lock" || exit 1
+# Premises: the sweep would judge this dir (its name has the family shape)
+# and would find it locked (a second flock on the file cannot be taken).
+[[ "${decoy_dir##*/}" =~ ^fh-e2e\.[A-Za-z0-9]{6}$ ]] \
+  || { echo "the decoy $decoy_dir is not a sweep candidate" >&2; exit 1; }
+if flock -n "$decoy_dir/fh-run.lock" true 8>&-; then
+  echo "the decoy's lock is not held" >&2
+  exit 1
+fi
+decoy_tag="decoy-${decoy_dir##*.}"
 decoy_sock="/tmp/tmux-$decoy_tag.sock"
-decoy_dir="/tmp/fh-e2e.$decoy_tag"
-tmux -S "$decoy_sock" new-session -d -x 80 -y 24 || exit 1
-sleep 300 &
+tmux -S "$decoy_sock" new-session -d -x 80 -y 24 8>&- || exit 1
+sleep 300 8>&- &
 decoy_pid=$!
-mkdir -p "$decoy_dir" || exit 1
 echo "decoy" >"$decoy_dir/marker" || exit 1
 
 spawner_pid=""
 script_pid=""
+decoy_host_pid=""
+decoy_host_socket=""
+# The terminal hosts planted in the stack under test: "<pid> <socket>" per
+# line, reset by every boot.
+stack_hosts=""
 cleanup_test() {
+  local _
+  # A stack still up when the test aborts gets its own TERM first, so that
+  # its trap ends the hosts planted in it; SIGKILL, which skips that trap,
+  # is only for a stack that does not finish within the bound.
+  if test -n "$script_pid" && kill -0 "$script_pid" 2>/dev/null; then
+    kill -TERM "$script_pid" 2>/dev/null
+    for _ in $(seq 1 15); do
+      kill -0 "$script_pid" 2>/dev/null || break
+      sleep 1
+    done
+  fi
   if test -n "$spawner_pid" && kill -0 "$spawner_pid" 2>/dev/null; then
     kill -KILL "$spawner_pid" 2>/dev/null
   fi
@@ -96,12 +150,63 @@ cleanup_test() {
     kill -KILL "$script_pid" 2>/dev/null
   fi
   sleep 3
-  "$fixtures" sweep-test-state 2>/dev/null || true
+  "$fixtures" sweep-test-state 2>/dev/null 8>&- || true
   kill "$decoy_pid" 2>/dev/null
   tmux -S "$decoy_sock" kill-server 2>/dev/null
-  rm -rf "$decoy_dir"
+  # The decoy's host ends the way a stack's do. When that cannot be
+  # confirmed, the directory stays, since its socket is the only way left
+  # to reach the host, and the host is sent SIGTERM if it is still this
+  # test's; once this script exits, the dir's lock is free and a later
+  # sweep retries it as a dead run.
+  if stop_state_hosts "$decoy_dir"; then
+    rm -rf "$decoy_dir"
+  else
+    echo "the decoy's terminal host could not be confirmed stopped; keeping $decoy_dir" >&2
+    if test -n "$decoy_host_pid" && host_running "$decoy_host_pid" "$decoy_host_socket"; then
+      kill -TERM "$decoy_host_pid" 2>/dev/null
+    fi
+  fi
 }
 trap cleanup_test EXIT
+
+# End the terminal hosts in state dir $1 with the command a stack's cleanup
+# runs, and say whether none may still run. A dir with no `hosts` entry has
+# none. The command's lines go to a log in that dir, which stays with it
+# when the stop fails, and never to this script's stderr, which may be a
+# closed pipe by the time a cleanup runs.
+stop_state_hosts() {
+  [ -e "$1/hosts" ] || [ -L "$1/hosts" ] || return 0
+  "$bin" internal stop-terminal-hosts --state-dir "$1" \
+    </dev/null >/dev/null 2>>"$1/stop-terminal-hosts.log" 8>&-
+}
+
+# Start a real terminal host in state dir $1, the way a supervisor starts
+# one, and print "<pid> <socket>". Checked here, before anything relies on
+# it: the pid must be a live process whose command line names the socket,
+# which is what the host's own command line does.
+plant_host() {
+  local line pid socket
+  line="$("$fixtures" spawn-terminal-host --farhelm "$bin" --state-dir "$1" 8>&-)" || return 1
+  read -r pid socket <<<"$line"
+  host_running "$pid" "$socket" || {
+    echo "a planted terminal host is not running as one: $line" >&2
+    return 1
+  }
+  printf '%s %s\n' "$pid" "$socket"
+}
+
+# Whether $1 is a live process serving terminal host socket $2. The command
+# line check keeps a reused pid from passing for the host; `-ww` because a
+# host's command line (two absolute paths) runs past ps's default width.
+host_running() {
+  case "$(ps -ww -p "$1" -o args= 2>/dev/null)" in
+    *"internal terminal-host --socket $2") return 0 ;;
+  esac
+  return 1
+}
+
+decoy_host="$(plant_host "$decoy_dir")" || exit 1
+read -r decoy_host_pid decoy_host_socket <<<"$decoy_host"
 
 check_decoys() {
   local phase="$1"
@@ -111,7 +216,30 @@ check_decoys() {
     || fail "$phase: decoy process died"
   test "$(cat "$decoy_dir/marker" 2>/dev/null)" = "decoy" \
     || fail "$phase: decoy state dir touched"
+  host_running "$decoy_host_pid" "$decoy_host_socket" \
+    || fail "$phase: decoy terminal host died"
+  test -S "$decoy_host_socket" \
+    || fail "$phase: decoy terminal host's socket removed"
 }
+
+# The sweep oracle. A canary dead run sits beside the decoy: the same
+# shape, its lock backdated the same way but held by nobody, and no
+# sockets. One sweep pass from this script must name the canary as reaped,
+# which shows that the pass judged this family's directories rather than
+# erroring out early (it always exits 0), while the decoy and its host,
+# judged in the same pass, stay.
+canary="$(mktemp -d /tmp/fh-e2e.XXXXXX)" || exit 1
+: >"$canary/fh-run.lock" || exit 1
+backdate "$canary/fh-run.lock" || exit 1
+sweep_output="$("$fixtures" sweep-test-state 2>&1 8>&-)"
+case "$sweep_output" in
+  *"reaped stale test state $canary"*) pass "sweep oracle: a sweep pass reaps a dead run beside the live decoy" ;;
+  *)
+    fail "sweep-oracle: the sweep did not reap the dead canary $canary: $sweep_output"
+    rm -rf "$canary"
+    ;;
+esac
+check_decoys "sweep-oracle"
 
 await_stack_ready() {
   local phase="$1"
@@ -152,17 +280,28 @@ boot_stack() {
   local phase="$1"
   spawner_pid=""
   script_pid=""
+  stack_hosts=""
   rm -f "$stack_info"
   # A persisting spawner that direct-parents the script: plain
   # `bash -c 'bash ...'` would exec the script into its own pid, leaving
   # no spawner to kill. The direct-child shape is what production has
   # once the configured command's `exec` collapses Playwright's `sh -c`
   # hop (the layering guard pins that); these kill phases assume it.
-  bash -c 'bash "$0" & wait' "$stack_script" &
+  bash -c 'bash "$0" & wait' "$stack_script" 8>&- &
   spawner_pid=$!
   await_stack_ready "$phase" || return 1
   script_pid="$(pgrep -P "$spawner_pid" | head -n 1)"
   test -n "$script_pid" || { fail "$phase: no script child of spawner"; return 1; }
+  # One host in each of the stack's state dirs, the local and the nested
+  # "remote", standing in for the terminals a supervisor would have started:
+  # the stack's cleanup must end both.
+  local local_state remote_state local_host remote_host
+  local_state="$(stack_state)" || return 1
+  remote_state="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["remote_state"])' "$stack_info")" || return 1
+  local_host="$(plant_host "$local_state")" || { fail "$phase: planting a host in $local_state"; return 1; }
+  remote_host="$(plant_host "$remote_state")" || { fail "$phase: planting a host in $remote_state"; return 1; }
+  stack_hosts="$local_host
+$remote_host"
   return 0
 }
 
@@ -186,9 +325,21 @@ state_processes() {
 # itself with double quotes would expand `$*` and collapse `\\&`,
 # silently unescaping the pattern and blinding every caller.
 
+# The planted terminal hosts of the stack under test that still run, one
+# "<pid> <socket>" per line. A host's own command line names the state dir,
+# so state_processes would list it too; this names it as a host.
+running_stack_hosts() {
+  local pid socket
+  while read -r pid socket; do
+    test -n "$pid" || continue
+    host_running "$pid" "$socket" && printf '%s %s\n' "$pid" "$socket"
+  done <<<"$stack_hosts"
+}
+
 # Poll until the stack is fully gone: port closed, state dir and stack
-# info removed, and no remaining process mentioning the state dir (shell,
-# watcher, helm, supervisors, tmux clients).
+# info removed, the planted hosts ended, and no remaining process
+# mentioning the state dir (shell, watcher, helm, supervisors, tmux
+# clients, terminal hosts).
 await_gone() {
   local phase="$1" state="$2"
   local _
@@ -196,6 +347,7 @@ await_gone() {
     if ! curl -s -m 2 -o /dev/null "$port" \
       && test ! -d "$state" \
       && test ! -f "$stack_info" \
+      && test -z "$(running_stack_hosts)" \
       && test -z "$(state_processes "$state")"; then
       return 0
     fi
@@ -225,7 +377,9 @@ report_leftovers() {
   curl -s -m 2 -o /dev/null "$port" && fail "$phase: port still answers"
   test -d "$state" && fail "$phase: state dir still exists ($state)"
   test -f "$stack_info" && fail "$phase: .stack-info.json still exists"
-  local leftovers
+  local leftovers hosts
+  hosts="$(running_stack_hosts)"
+  test -n "$hosts" && fail "$phase: terminal hosts still run: $hosts"
   leftovers="$(state_processes "$state")"
   test -n "$leftovers" && fail "$phase: processes still reference state: $leftovers"
   dump_stack_state "$phase" "$state"
@@ -274,16 +428,78 @@ dump_stack_state() {
 # from a clean port and still give independent signals. The script and
 # spawner go first by pid: their command lines never mention the state
 # dir, so the pattern below would not match them. The bracket in the
-# pattern keeps pkill from matching its own command line.
+# pattern keeps pgrep from matching its own command line.
+#
+# Terminal hosts are the exception to the forcible part. A signal sent is
+# not a host confirmed gone, and removing the dir would delete the sockets
+# that are the only way left to reach one, so hosts are skipped by the
+# kill and ended through the stop command instead, and the dir goes only
+# once both of its state dirs' stops succeed. Otherwise it is kept (its
+# lock died with the stack's script) for a later sweep.
 emergency_cleanup() {
-  local state="$1"
+  local state="$1" pid args signalled=""
   test -n "$script_pid" && kill -KILL "$script_pid" 2>/dev/null || true
   test -n "$spawner_pid" && kill -KILL "$spawner_pid" 2>/dev/null || true
   local pattern="${state%?}[${state: -1}]"
-  pkill -KILL -f "$pattern" 2>/dev/null || true
-  sleep 2
-  rm -rf "$state"
+  for pid in $(pgrep -f "$pattern" 2>/dev/null); do
+    args="$(ps -ww -p "$pid" -o args= 2>/dev/null)" || args=""
+    case "$args" in
+      *" internal terminal-host --socket "*) ;;
+      # Could not be inspected: maybe a host, so not signalled, but waited
+      # for like the rest.
+      '') signalled="$signalled $pid" ;;
+      *)
+        kill -KILL "$pid" 2>/dev/null
+        signalled="$signalled $pid"
+        ;;
+    esac
+  done
+  # Signalled is not gone, and anything of the stack's still running could
+  # still start a host after the scan below; so the scan waits (bounded)
+  # until everything signalled is seen gone, and the dir is kept otherwise.
+  # shellcheck disable=SC2086 # the pid lists split into one pid per word
+  if ! processes_gone 10 ${script_pid:-} ${spawner_pid:-} $signalled; then
+    echo "emergency cleanup: processes of $state still run; keeping it" >&2
+    rm -f "$stack_info"
+    return
+  fi
+  local stopped=true
+  stop_state_hosts "$state" || stopped=false
+  stop_state_hosts "$state/remote" || stopped=false
+  if [ "$stopped" = true ]; then
+    rm -rf "$state"
+  else
+    echo "emergency cleanup: terminal hosts in $state could not be confirmed stopped; keeping it" >&2
+  fi
   rm -f "$stack_info"
+}
+
+# Whether pid $1 is confirmed gone: `kill -0` fails, or `ps` reports a
+# zombie. A `ps` that fails or prints nothing confirms nothing.
+process_gone() {
+  local stat
+  kill -0 "$1" 2>/dev/null || return 0
+  stat="$(ps -p "$1" -o stat= 2>/dev/null)" || stat=""
+  case "$stat" in
+    Z*) return 0 ;;
+  esac
+  return 1
+}
+
+# Wait about $1 seconds for every pid after it to be confirmed gone, and say
+# whether they all are.
+processes_gone() {
+  local end=$((SECONDS + $1)) pid all
+  shift
+  while :; do
+    all=true
+    for pid in "$@"; do
+      process_gone "$pid" || all=false
+    done
+    [ "$all" = true ] && return 0
+    [ "$SECONDS" -ge "$end" ] && return 1
+    sleep 0.2
+  done
 }
 
 # Phase 0: the configured webServer command must exec through the shell.
@@ -306,7 +522,7 @@ case "$configured" in
     fail "layering-phase: webServer command is '$configured', expected an exec prefix (see playwright.config.ts)"
     ;;
 esac
-/bin/sh -c "exec sleep 60" &
+/bin/sh -c "exec sleep 60" 8>&- &
 hop_pid=$!
 sleep 2
 hop_comm="$(ps -p "$hop_pid" -o comm= 2>/dev/null | tr -d ' ')"
@@ -393,7 +609,7 @@ replacement_phase() {
   if test "$record" = stand-in; then
     # `exec -a` gives a plain sleep the argv a real replacement has; it
     # cannot take the real supervisor's place, which holds the state dir.
-    bash -c 'exec -a "$0" sleep 300' "farhelm supervisor run --state-dir $remote --boot-id-file $remote/boot-id" &
+    bash -c 'exec -a "$0" sleep 300' "farhelm supervisor run --state-dir $remote --boot-id-file $remote/boot-id" 8>&- &
     replacement_pid=$!
     echo "$replacement_pid" >"$pidfile" || exit 1
     # Still signal the stack on failure, so it is torn down either way.
