@@ -77,7 +77,7 @@
 use anyhow::Context;
 use base64::Engine as _;
 use rusqlite::{Connection, OptionalExtension};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 use subtle::ConstantTimeEq;
@@ -4422,6 +4422,39 @@ impl SessionStore {
                 "session read task panicked",
                 move |conn: &mut Connection| -> anyhow::Result<Option<StoredSession>> {
                     read_session(conn, &id)
+                },
+            )
+            .await
+    }
+
+    /// Every session id this database still knows of: each session row's,
+    /// and each create reservation's, in whatever state it is.
+    ///
+    /// The startup reclaim of orphaned terminal hosts
+    /// (`service::core::host_reclaim`) ends a host only when its tag names a
+    /// session outside this set. A reservation counts on its own, without
+    /// a row, because a create claims its reservation before anything else
+    /// and a retry of it finds its host by the tag; a settled reservation
+    /// counts too, since telling which settled ones a retry could still
+    /// reach is not this reader's to decide. Reads only ids, so a row other
+    /// readers would refuse to decode still counts as a session.
+    pub async fn known_session_ids(&self) -> anyhow::Result<HashSet<String>> {
+        self.conn
+            .call(
+                "known session id read task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<HashSet<String>> {
+                    let mut stmt = conn
+                        .prepare(
+                            "SELECT id FROM sessions \
+                             UNION SELECT session_id FROM create_reservations",
+                        )
+                        .context("preparing the known session id query")?;
+                    let ids = stmt
+                        .query_map([], |row| row.get::<_, String>(0))
+                        .context("querying known session ids")?
+                        .collect::<Result<HashSet<_>, rusqlite::Error>>()
+                        .context("decoding known session ids")?;
+                    Ok(ids)
                 },
             )
             .await
@@ -11287,6 +11320,43 @@ mod tests {
             "first",
             "and must not re-point the existing intent at a new session"
         );
+    }
+
+    /// The known session ids are every row's and every reservation's,
+    /// whichever way a session is known, and a session deleted with its
+    /// reservations is not among them.
+    ///
+    /// Why: the startup reclaim of orphaned terminal hosts ends a host only
+    /// when its tag names a session outside this set, so a session missing
+    /// from it loses its running agent. A create's reservation outlives a
+    /// rollback that removed its row (`delete_session` with no settlement),
+    /// and a retry of that create finds its host by the tag. Spec: with a
+    /// row with no reservation (`plain`), a row with its reservation
+    /// (`reserved`), a reservation whose row was rolled back (`rolled-back`)
+    /// and a session deleted with its reservations (`deleted`), the set is
+    /// exactly `plain`, `reserved` and `rolled-back`.
+    #[farhelm_testtrace::test]
+    async fn known_session_ids_are_every_rows_and_every_reservations() {
+        let (_dir, store) = fresh_store().await;
+        insert_running(&store, "plain").await;
+        insert_reserved(&store, "reserved", "key-reserved", "fp").await;
+        insert_reserved(&store, "rolled-back", "key-rolled-back", "fp").await;
+        store
+            .delete_session("rolled-back", None)
+            .await
+            .expect("roll the row back, keeping its reservation");
+        insert_reserved(&store, "deleted", "key-deleted", "fp").await;
+        store
+            .delete_session_settling_reservations("deleted")
+            .await
+            .expect("delete the session with its reservations");
+
+        let known = store.known_session_ids().await.expect("read the ids");
+        let expected: HashSet<String> = ["plain", "reserved", "rolled-back"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        assert_eq!(known, expected);
     }
 
     /// Settlement is monotonic AND identity-conditioned; both guards are

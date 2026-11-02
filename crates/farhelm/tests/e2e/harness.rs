@@ -529,8 +529,16 @@ pub(crate) async fn tmux_has_format(h: &Harness, name: &str) -> bool {
 /// opening its store, and binding is not a sub-second operation on a
 /// loaded machine, and a wait four times tighter than every sibling is a
 /// flake source of its own.
+///
+/// On top of those 20 s comes the startup reclaim of orphaned terminal
+/// hosts' whole budget ([`farhelm_supervisor::service::ORPHAN_RECLAIM_BUDGET`]),
+/// since `serve()` runs that reclaim before it binds: a test that leaves the
+/// reclaim slow work (a wedged or stopped host, an interrupted start) must
+/// not read a reclaim within its bound as a supervisor that never listened.
 pub(crate) async fn wait_for_supervisor_ready(state_dir: &std::path::Path) {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    let deadline = tokio::time::Instant::now()
+        + Duration::from_secs(20)
+        + farhelm_supervisor::service::ORPHAN_RECLAIM_BUDGET;
     loop {
         match farhelm_supervisor::service::connect(state_dir).await {
             // Dropped immediately: this connection is the probe, not a

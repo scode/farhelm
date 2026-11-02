@@ -615,7 +615,7 @@ async fn a_wrapper_launch_runs_its_wrapper_in_the_host() {
 
 /// A command that records each start of the agent in `runs` and then
 /// waits: a way to count how many agents a create started.
-fn counted_agent(runs: &Path) -> String {
+pub(crate) fn counted_agent(runs: &Path) -> String {
     format!(
         "printf 'run\\n' >> {} && exec sleep 600",
         shell_words::quote(&runs.to_string_lossy())
@@ -1148,7 +1148,7 @@ fn recorded_starter(h: &Harness, session_id: &str) -> u32 {
 
 /// Seams for a create whose first host start is interrupted as a crash
 /// would interrupt it, with `gate`'s stand-in as the host program.
-fn interrupted_seams(
+pub(crate) fn interrupted_seams(
     dir: &Path,
     gate: &Path,
     waiting: Option<Arc<dyn Fn() + Send + Sync>>,

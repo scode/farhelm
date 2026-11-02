@@ -39,7 +39,7 @@ const ROWS: u16 = 30;
 /// [`host_seams`] with `/bin/sh` as every launch's shell and `home` as its
 /// `HOME`, so tab shells are quick to start and read none of the test
 /// user's startup files.
-fn tab_seams(home: &Path) -> SupervisorSeams {
+pub(crate) fn tab_seams(home: &Path) -> SupervisorSeams {
     SupervisorSeams {
         launch_shell: Some("/bin/sh".into()),
         launch_env: vec![("HOME".into(), home.to_string_lossy().into_owned())],
@@ -57,7 +57,7 @@ fn tmux_tab_seams(home: &Path) -> SupervisorSeams {
 
 /// Create a session running the fake agent in `work`, at [`COLS`] x
 /// [`ROWS`].
-async fn create(client: &SupervisorClient, work: &Path) -> SessionInfo {
+pub(crate) async fn create(client: &SupervisorClient, work: &Path) -> SessionInfo {
     client
         .create_session(
             &work.to_string_lossy(),
@@ -71,14 +71,14 @@ async fn create(client: &SupervisorClient, work: &Path) -> SessionInfo {
 }
 
 /// The runtime of `session_id`'s host tab `tab_id`.
-async fn tab_host(sup: &Supervisor, session_id: &str, tab_id: &str) -> HostTerminal {
+pub(crate) async fn tab_host(sup: &Supervisor, session_id: &str, tab_id: &str) -> HostTerminal {
     sup.tab_host_for_test(session_id, tab_id)
         .await
         .expect("the tab runs in a terminal host")
 }
 
 /// The launch record a tab host's start writes.
-fn tab_record(state: &Path, session_id: &str, tab_id: &str) -> PathBuf {
+pub(crate) fn tab_record(state: &Path, session_id: &str, tab_id: &str) -> PathBuf {
     state
         .join("launch")
         .join(format!("{session_id}.tab-{tab_id}.host"))
@@ -95,7 +95,7 @@ fn recorded_socket_name(record: &Path) -> String {
 }
 
 /// The sockets in `state`'s host socket directory, by name.
-fn host_socket_names(state: &Path) -> Vec<String> {
+pub(crate) fn host_socket_names(state: &Path) -> Vec<String> {
     use std::os::unix::fs::FileTypeExt as _;
     let Ok(entries) = std::fs::read_dir(state.join("hosts")) else {
         return Vec::new();
@@ -205,7 +205,7 @@ async fn has_tmux_session(state: &Path, session_id: &str) -> bool {
 /// Wait until `condition` answers true, failing with `what` and the last
 /// answer's `detail` after [`WAIT_SECS`]: the one poll for state no event
 /// announces (the process table, files, a listing).
-async fn wait_for_condition<F, Fut>(what: &str, mut condition: F)
+pub(crate) async fn wait_for_condition<F, Fut>(what: &str, mut condition: F)
 where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = Result<(), String>>,
