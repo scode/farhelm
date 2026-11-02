@@ -22,22 +22,27 @@
 //! - [`process`]: the host as a process, pinned by pid and start identity
 //!   from the connection's peer credentials, and the verified SIGTERM for a
 //!   host the protocol cannot end.
+//! - [`registry`]: discovery, the scan of a state directory's socket
+//!   directory that finds its hosts again after a restart, sorts them into
+//!   live, unavailable and gone, and looks them up by session, launch
+//!   generation and tab.
 //! - [`stop`]: ending every host of a state directory with no supervisor
 //!   involved, behind `farhelm internal stop-terminal-hosts`, a command
 //!   line every later release keeps accepting.
 //!
 //! Nothing in the supervisor calls this yet; the switch that creates new
-//! terminals in hosts comes later, and so does discovering hosts after a
-//! restart. The module is public, rather than crate-private, because the
-//! tests that start real hosts live beside the real `farhelm` binary
-//! (`crates/farhelm/tests/terminal_host_spawn.rs` and
-//! `terminal_host_client.rs`): a host forks, so it is never started inside a
-//! test process.
+//! terminals in hosts comes later, and so does running discovery at startup.
+//! The module is public, rather than crate-private, because the tests that
+//! start real hosts live beside the real `farhelm` binary
+//! (`crates/farhelm/tests/terminal_host_spawn.rs`, `terminal_host_client.rs`
+//! and `terminal_host_registry.rs`): a host forks, so it is never started
+//! inside a test process.
 
 pub mod client;
 pub mod dir;
 pub mod names;
 pub mod process;
+pub mod registry;
 pub mod spawn;
 pub mod stop;
 pub mod tag;
@@ -48,8 +53,13 @@ pub use client::{
 };
 pub use process::{HostProcess, TerminateError, Termination, terminate_verified};
 
-pub use dir::{HOSTS_DIR_NAME, HostsDirError, ensure_hosts_dir, hosts_dir};
+pub use dir::{HOSTS_DIR_NAME, HostsDirError, ensure_hosts_dir, existing_hosts_dir, hosts_dir};
 pub use names::HostName;
+pub use registry::{
+    DuplicateAgents, DuplicateTab, GoneHost, HostRegistry, LiveHost, NamedHost, ScanError,
+    ScanOptions, SessionTabs, Skipped, SkippedEntry, SocketRemoval, UnavailableHost,
+    WhyUnavailable,
+};
 pub use spawn::{ChildSpec, SpawnError, SpawnedHost, own_host_program, spawn_host};
 pub use stop::{
     HostOutcome, HostReport, StopLimits, StopReport, Stopped, stop_terminal_hosts,

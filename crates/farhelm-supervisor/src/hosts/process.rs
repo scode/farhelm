@@ -234,6 +234,135 @@ pub fn socket_process(socket: &Path) -> Result<Option<HostProcess>, String> {
     Ok(None)
 }
 
+/// How long [`find_socket_process`] waits, for a walk ahead of it and for its
+/// own process-table walk together. A walk
+/// reads every process's command line, and on Linux reading one takes that
+/// process's memory-map lock, so a process stuck in the kernel (in D state)
+/// can hold a read, and the walk, for as long as it stays stuck. This is far
+/// beyond a healthy walk of a busy machine.
+pub const PROCESS_SEARCH_DEADLINE: Duration = Duration::from_secs(10);
+
+/// [`socket_process`] off the async runtime's threads, given at most
+/// `within`, with at most one walk running in this process at a time.
+///
+/// A walk that does not finish in time is an error, the same as one that
+/// could not run: callers never read either as "no process serves the
+/// socket", so a timeout can only make a socket look not gone, never gone.
+///
+/// A timed-out walk cannot be cancelled: it keeps its blocking thread until
+/// the read it is stuck in returns. The process that stalls one walk (one
+/// stuck in the kernel with its memory-map lock held) stalls every later
+/// walk too, so without a limit each search would strand another thread,
+/// up to tokio's blocking-thread cap, past which every `spawn_blocking` in
+/// the supervisor queues. So walks run one at a time ([`WalkGate`]): a
+/// search waits, within `within`, for a healthy walk ahead of it (a walk
+/// takes milliseconds), and fails at once while a walk that already ran
+/// out of time is still stuck.
+pub async fn find_socket_process(
+    socket: &Path,
+    within: Duration,
+) -> Result<Option<HostProcess>, String> {
+    let path = socket.to_path_buf();
+    WalkGate::process()
+        .run(within, move || socket_process(&path))
+        .await
+}
+
+/// Lets one process-table walk run at a time, and remembers whether the
+/// running one was given up on (see [`find_socket_process`]). One per
+/// process ([`Self::process`]); tests make their own, so that a walk they
+/// hold stuck on purpose never fails another test's search.
+#[derive(Clone)]
+struct WalkGate {
+    /// One permit: held by the running walk, on its blocking thread, until
+    /// the walk returns. Never closed.
+    permit: std::sync::Arc<tokio::sync::Semaphore>,
+    /// Whether a walk runs, and whether a caller gave up waiting for it.
+    /// Both change under this lock, so a walk finishing just as its caller
+    /// times out never leaves the gate marked stuck with nothing running.
+    state: std::sync::Arc<std::sync::Mutex<WalkState>>,
+}
+
+#[derive(Default)]
+struct WalkState {
+    running: bool,
+    abandoned: bool,
+}
+
+impl WalkGate {
+    fn new() -> Self {
+        Self {
+            permit: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
+            state: std::sync::Arc::default(),
+        }
+    }
+
+    /// The gate every search in this process goes through.
+    fn process() -> &'static WalkGate {
+        static GATE: std::sync::LazyLock<WalkGate> = std::sync::LazyLock::new(WalkGate::new);
+        &GATE
+    }
+
+    fn state(&self) -> std::sync::MutexGuard<'_, WalkState> {
+        // Two flags, and nothing that can panic while the lock is held.
+        self.state
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+    }
+
+    /// Run `walk` on a blocking thread once no other walk runs, waiting and
+    /// walking within `within` in all.
+    async fn run<T: Send + 'static>(
+        &self,
+        within: Duration,
+        walk: impl FnOnce() -> Result<T, String> + Send + 'static,
+    ) -> Result<T, String> {
+        let deadline = tokio::time::Instant::now() + within;
+        {
+            let state = self.state();
+            if state.running && state.abandoned {
+                return Err(
+                    "an earlier process-table walk ran out of time and is still running".into(),
+                );
+            }
+        }
+        let permit =
+            match tokio::time::timeout_at(deadline, self.permit.clone().acquire_owned()).await {
+                Ok(permit) => permit.expect("the walk gate is never closed"),
+                Err(_) => {
+                    return Err(format!(
+                        "waiting for another process-table walk took longer than {within:?}"
+                    ));
+                }
+            };
+        self.state().running = true;
+        let gate = self.clone();
+        let handle = tokio::task::spawn_blocking(move || {
+            let found = walk();
+            {
+                let mut state = gate.state();
+                state.running = false;
+                state.abandoned = false;
+            }
+            drop(permit);
+            found
+        });
+        match tokio::time::timeout_at(deadline, handle).await {
+            Ok(Ok(found)) => found,
+            Ok(Err(join)) => Err(format!("searching the process table: {join}")),
+            Err(_) => {
+                let mut state = self.state();
+                if state.running {
+                    state.abandoned = true;
+                }
+                Err(format!(
+                    "searching the process table took longer than {within:?}"
+                ))
+            }
+        }
+    }
+}
+
 /// What [`terminate_verified`] found or did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Termination {
@@ -743,5 +872,125 @@ mod tests {
             "{outcome:?}"
         );
         assert!(stand_in.alive(), "the stand-in was signalled");
+    }
+
+    // ---- One walk at a time ------------------------------------------------------
+
+    /// How long a test's own stuck walk waits for its release before giving
+    /// up, so that a failing test never leaves its blocking thread for good.
+    const WALK_RELEASE_BOUND: Duration = Duration::from_secs(20);
+
+    /// Wait, bounded, until `gate` reports no walk running.
+    async fn until_idle(gate: &WalkGate) {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        while gate.state().running {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the walk never finished"
+            );
+            // sleep-ok: polling interval for a walk this test released.
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    /// A walk that outlives its deadline makes every later search fail at
+    /// once, without starting a walk, until it returns; after that, searches
+    /// walk again.
+    ///
+    /// Why: a timed-out walk keeps its blocking thread, and the stuck process
+    /// that held it up holds up every later walk too; starting one per
+    /// search would strand thread after thread until tokio's blocking pool
+    /// is exhausted and the whole supervisor stalls. Failing is safe: an
+    /// error never makes a socket gone. Spec: on a fresh gate, a walk held
+    /// until the test releases it, given 200 ms, gives a "took longer"
+    /// error; a search made while it is still held gives an error naming
+    /// the stuck walk and never calls its own walk; once the held walk is
+    /// released and has returned, a search runs its walk and gives its
+    /// result.
+    #[farhelm_testtrace::test]
+    async fn a_stuck_walk_fails_later_searches_at_once() {
+        let gate = WalkGate::new();
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        let stuck = gate
+            .run(Duration::from_millis(200), move || {
+                let _ = held.recv_timeout(WALK_RELEASE_BOUND);
+                Ok(1)
+            })
+            .await;
+        assert!(
+            matches!(&stuck, Err(why) if why.contains("took longer")),
+            "{stuck:?}"
+        );
+
+        let called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = called.clone();
+        let refused = gate
+            .run(Duration::from_secs(10), move || {
+                flag.store(true, std::sync::atomic::Ordering::SeqCst);
+                Ok(2)
+            })
+            .await;
+        assert!(
+            matches!(&refused, Err(why) if why.contains("still running")),
+            "{refused:?}"
+        );
+        assert!(
+            !called.load(std::sync::atomic::Ordering::SeqCst),
+            "a second walk started beside the stuck one"
+        );
+
+        release.send(()).unwrap();
+        until_idle(&gate).await;
+        assert_eq!(gate.run(Duration::from_secs(10), || Ok(3)).await, Ok(3));
+    }
+
+    /// A search made while a healthy walk runs waits for it and then walks,
+    /// rather than failing.
+    ///
+    /// Why: a discovery scan searches for several sockets at once, and a
+    /// healthy walk takes milliseconds; failing every search that overlaps
+    /// another would turn stale sockets into unavailable hosts for nothing.
+    /// Spec: with a first walk held running, a second search with a 10 s
+    /// budget starts waiting, and then the first is released; both give
+    /// their results, and the second walk ran only after the first had
+    /// returned.
+    #[farhelm_testtrace::test]
+    async fn a_search_waits_for_a_healthy_walk() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let gate = WalkGate::new();
+        let first_done = std::sync::Arc::new(AtomicBool::new(false));
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        let done = first_done.clone();
+        let first = tokio::spawn({
+            let gate = gate.clone();
+            async move {
+                gate.run(Duration::from_secs(10), move || {
+                    let _ = held.recv_timeout(WALK_RELEASE_BOUND);
+                    done.store(true, Ordering::SeqCst);
+                    Ok("first")
+                })
+                .await
+            }
+        });
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        while !gate.state().running {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "premise: the first walk runs"
+            );
+            // sleep-ok: polling interval for the walk this test started.
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let seen = first_done.clone();
+        // `join!` polls the search first, so it is already waiting for the
+        // gate when the release is sent.
+        let (second, ()) = tokio::join!(
+            gate.run(Duration::from_secs(10), move || Ok(
+                seen.load(Ordering::SeqCst)
+            )),
+            async { release.send(()).unwrap() },
+        );
+        assert_eq!(first.await.unwrap(), Ok("first"));
+        assert_eq!(second, Ok(true), "the second walk ran beside the first");
     }
 }

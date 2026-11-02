@@ -1765,6 +1765,37 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   accepting this spelling with this meaning, under the rules of "What running sessions hold across versions" (new
   spellings beside old ones, never a new meaning for an old one; a later release may make exit 0 stronger, never
   weaker).
+- **Discovery** (`hosts/registry.rs`) finds a state directory's hosts again by scanning its socket directory, never by a
+  stored list: it connects to every socket there, reads each host's `Info` and decodes its tag, and identifies hosts
+  only by their tags. A missing socket directory means no hosts; one in a refused shape fails the scan before anything
+  is contacted, since a socket others could have placed there may not be the supervisor's own. Each socket lands in one
+  class. **Live** hosts answered with a tag this build reads; the scan's connection becomes the host's owning
+  connection, so the caller adopts it rather than reconnecting. Live means attributable, not adoptable: a host whose
+  snapshot record this build cannot decode is live to the scan, and its adopter then treats it as unavailable.
+  **Unavailable** hosts may be running but cannot be used or attributed (another protocol version, no answer, busy, no
+  `Info`, a tag of an unknown version, not Farhelm's or malformed): they are left as they are, never treated as orphans
+  and never have their sockets removed, because a newer supervisor may own them and come back after a downgrade.
+  **Gone** sockets are the ones nothing listens on, by the client's rules above, and are the only ones whose files may
+  be removed. The removal does not trust the scan, nor the file's device and inode, which a socket bound after the old
+  file was unlinked can reuse: at removal it judges the socket gone again (plain connections without `Hello` refused for
+  the whole refusal window, then no live process naming the socket on its command line, which also covers a host between
+  its `bind` and its `listen`), and only then unlinks the file, if it still has the identity the scan listed. Anything
+  it cannot settle (a failed or slow process search) keeps the file. What remains is the moment between that check and
+  the unlink; it is closed by a precondition, not a mechanism: removal runs only in the supervisor holding the state
+  directory's lock, never concurrently with one of its own spawns in that directory. When to remove them is the startup
+  reclaim's policy, not discovery's. Entries that are not sockets are skipped and never touched. Lookups find a
+  session's agent host by launch generation (two live hosts claiming the same launch are an error for the caller to
+  resolve, never a guess) and its tab hosts in creation-stamp order, flagging a tab id that more than one host carries;
+  they see live hosts only, so finding nothing proves a session has no host only when nothing was unavailable. A scan
+  takes over every host it reaches, which cuts off any other client, so it is only for the process holding the state
+  directory's lock, and inside a running supervisor it must skip both the hosts the supervisor drives and every spawn in
+  flight (a spawn's socket is connectable before the spawn returns), by serializing scans with spawns or by reserving a
+  spawn's socket name before the host binds it. Up to 16 hosts are classified at once, each within the client's connect
+  and reply deadlines plus at most one process-table walk, itself bounded (ten seconds; a walk that does not finish is
+  never read as "no process"). Walks run one at a time in the supervisor: a walk that runs out of time cannot be
+  cancelled and keeps its thread, and whatever stalled it (a process stuck in the kernel) stalls later walks too, so
+  while it is still stuck every later search fails at once, which leaves sockets unavailable rather than gone, instead
+  of stranding one more thread each.
 
 Test harnesses end the hosts they leave behind: `farhelm-teststate` ends every host whose socket is in a `hosts`
 directory within an owned run directory (its dead-run sweep, and every `TestDir` drop) through a small blocking client

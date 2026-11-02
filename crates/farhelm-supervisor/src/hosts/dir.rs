@@ -77,6 +77,45 @@ fn ensure_hosts_dir_as(state_dir: &Path, owner: libc::uid_t) -> Result<PathBuf, 
     // `symlink_metadata`, so a symlink planted at the name is refused as not
     // a directory instead of being followed to wherever it points.
     let meta = fs::symlink_metadata(&path).map_err(io_error)?;
+    check_hosts_dir(path, &meta, owner)
+}
+
+/// The socket directory of `state_dir` if it exists, checked the way
+/// [`ensure_hosts_dir`] checks it; `None` when there is none. Never creates
+/// anything.
+///
+/// For readers of the directory (discovery, [`super::registry`]): a state
+/// directory in which no host was ever started has no socket directory, and
+/// that is no hosts rather than an error. One that exists in a shape
+/// [`ensure_hosts_dir`] would refuse is refused here too, since a socket in
+/// a directory others could reach may not be the supervisor's own host.
+pub fn existing_hosts_dir(state_dir: &Path) -> Result<Option<PathBuf>, HostsDirError> {
+    // SAFETY: geteuid has no preconditions and cannot fail.
+    existing_hosts_dir_as(state_dir, unsafe { libc::geteuid() })
+}
+
+/// [`existing_hosts_dir`] with the expected owner injected, like
+/// [`ensure_hosts_dir_as`].
+fn existing_hosts_dir_as(
+    state_dir: &Path,
+    owner: libc::uid_t,
+) -> Result<Option<PathBuf>, HostsDirError> {
+    let path = hosts_dir(state_dir);
+    match fs::symlink_metadata(&path) {
+        Ok(meta) => check_hosts_dir(path, &meta, owner).map(Some),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(source) => Err(HostsDirError::Io { path, source }),
+    }
+}
+
+/// Hold the socket directory at `path`, whose `symlink_metadata` is `meta`,
+/// to its required shape: a real directory owned by `owner` with mode
+/// exactly 0700. Returns the path when it passes.
+fn check_hosts_dir(
+    path: PathBuf,
+    meta: &fs::Metadata,
+    owner: libc::uid_t,
+) -> Result<PathBuf, HostsDirError> {
     if !meta.is_dir() {
         return Err(HostsDirError::NotADirectory { path });
     }
@@ -190,6 +229,52 @@ mod tests {
             Err(HostsDirError::WrongOwner { .. })
         ));
         assert!(ensure_hosts_dir_as(state.path(), euid()).is_ok());
+    }
+
+    /// Reading the socket directory without creating it: a missing one is no
+    /// directory, and an existing one is held to the same shape as at
+    /// creation.
+    ///
+    /// Why: discovery runs in state directories where no host was ever
+    /// started, which must read as no hosts and stay untouched; and a socket
+    /// in a directory others could reach may be a planted one, so a reader
+    /// must refuse what a creator would. Spec: with no `hosts` directory the
+    /// result is `None` and none is created; a 0700 directory gives its
+    /// path; mode 0755, a symlink to a 0700 directory, and (judged against
+    /// another owner) a valid directory are refused with `WrongMode`,
+    /// `NotADirectory` and `WrongOwner`.
+    #[test]
+    fn an_existing_directory_is_read_without_creating_one() {
+        let state = tempfile::tempdir().unwrap();
+        assert!(existing_hosts_dir(state.path()).unwrap().is_none());
+        assert!(
+            !state.path().join(HOSTS_DIR_NAME).exists(),
+            "reading created the directory"
+        );
+        let path = ensure_hosts_dir(state.path()).unwrap();
+        assert_eq!(
+            existing_hosts_dir(state.path()).unwrap(),
+            Some(path.clone())
+        );
+        assert!(matches!(
+            existing_hosts_dir_as(state.path(), euid().wrapping_add(1)),
+            Err(HostsDirError::WrongOwner { .. })
+        ));
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(matches!(
+            existing_hosts_dir(state.path()),
+            Err(HostsDirError::WrongMode { mode: 0o755, .. })
+        ));
+
+        let state = tempfile::tempdir().unwrap();
+        let elsewhere = state.path().join("elsewhere");
+        fs::create_dir(&elsewhere).unwrap();
+        fs::set_permissions(&elsewhere, fs::Permissions::from_mode(0o700)).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, state.path().join(HOSTS_DIR_NAME)).unwrap();
+        assert!(matches!(
+            existing_hosts_dir(state.path()),
+            Err(HostsDirError::NotADirectory { .. })
+        ));
     }
 
     /// The supervisor's directory name and the one the test-state sweep looks
