@@ -263,11 +263,11 @@
 //! between the halves of a surrogate pair encodes as a lone surrogate, which
 //! the supervisor refuses) and never between a CR and the LF after it, so
 //! line-ending conversion sees the same text it would see whole. The parts of
-//! one paste are contiguous: no other input message comes between them. If
-//! the attachment ends in the middle of a paste, the supervisor writes the
-//! closing bracketed-paste marker, so the program is not left in paste mode.
-//! The supervisor's input encoder enforces the paste rules; a single message
-//! cannot show them.
+//! one paste are contiguous: no other input message comes between them. A
+//! paste is written only once its last part has arrived; one cut short is
+//! dropped whole, so the program never sees half a paste or a paste left
+//! open. The supervisor's input encoder enforces the paste rules; a single
+//! message cannot show them.
 //!
 //! # Flow control
 //!
@@ -1486,9 +1486,9 @@ pub enum GridInput {
     /// first part through the one with `last` set, in bracketed-paste
     /// markers when the program asked for them, and converts line endings as
     /// xterm.js does. Parts split only at character boundaries and never
-    /// between a CR and its LF, arrive with no other input between them, and
-    /// a paste the attachment's end interrupts still gets its closing marker
-    /// (module docs, "Client to supervisor"). The client's classification of
+    /// between a CR and its LF, and arrive with no other input between them.
+    /// A paste is written only once its last part has arrived; one cut short
+    /// is dropped whole (module docs, "Client to supervisor"). The client's classification of
     /// pasted content stays on the client and is unchanged.
     Paste { data: String, last: bool },
     /// A mouse event in cell coordinates, 0-based, within the screen.

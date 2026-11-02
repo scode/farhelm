@@ -75,10 +75,12 @@
 //!   tokio's clock; tests advance a manual one instead of waiting 150 ms.
 //! - **Answers** to the program's queries are written to it as `Input`, in
 //!   the order it asked, within the client's input window. **Notices** for
-//!   the user (bells, clipboard writes, title changes) from live output go
-//!   to every [`NoticeSubscription`] open at the time, one per viewer
+//!   the user from live output, writes to the clipboard only (a viewer has
+//!   no use for a bell, a title change or a write to the primary selection,
+//!   which would only push clipboard writes out of its backlog), go to
+//!   every [`NoticeSubscription`] open at the time, one per viewer
 //!   attachment; the runtime never waits for a subscriber, and one that
-//!   falls behind loses the oldest. Nothing in the product subscribes yet.
+//!   falls behind loses the oldest.
 //! - **Input** from callers is sent in order with the answers, each `Input`
 //!   whole, and is never resent: input whose connection ended before the
 //!   host acknowledged it is reported as [`InputFate::Unknown`], since some
@@ -101,23 +103,77 @@
 //!     epoch when it is made, and stamps every part sent through it with
 //!     that epoch. So once any input is lost with a connection, every part
 //!     of the sequence asked for afterwards is not sent either, whether or
-//!     not the caller looked at a receipt: a paste sent through one never
-//!     arrives as a suffix with its middle missing. A caller starts a new
-//!     sequence for the next paste.
+//!     not the caller looked at a receipt: input sent in parts through
+//!     one never arrives as a suffix with its middle missing. A caller
+//!     starts a new sequence for the next such input.
 //!
 //!   Answers are not dropped this way: each is complete in itself. While the
 //!   window is full, the task stops taking input from callers, whose sends
 //!   then wait; it keeps reading the host and acting on resizes and
 //!   shutdown, so a program that stops reading its terminal holds back only
 //!   input.
+//! - **A paste goes in whole** ([`InputSequence::send_paste`]). Anything
+//!   written between the parts of a paste lands inside it: the program
+//!   reads an answer to its query as pasted text (and never gets its
+//!   answer), and another producer's input, a prompt with its own
+//!   bracketed-paste markers among them, ends the paste early or pastes
+//!   where it meant to type. So a paste reaches the task as one request,
+//!   up to [`MAX_PASTE`] bytes, which the task queues as all of its
+//!   `Input`s in one turn. Nothing can come between them: the task takes a
+//!   caller's next request only once nothing is waiting for the window, and
+//!   answers worked out meanwhile queue behind the paste. Each `Input` of a
+//!   paste carries its own receipt (the paste's receipt combines them), so
+//!   a loss drops the rest of the paste with the rest of the caller input
+//!   and never takes a piece of it for an answer to keep.
+//!
+//!   Pastes waiting for the task share one budget of [`MAX_PASTE`] bytes
+//!   per terminal, from before a paste enters the task's channel until its
+//!   last piece is sent: a paste waits for room in it, so pastes from
+//!   attachments that have since ended cannot pile up in the channel. A
+//!   runtime that ends (stopped, or aborted by [`HostTerminal::abort`])
+//!   drops what its queue and channel held, which gives their share back,
+//!   and a paste still waiting for room is then refused as ended rather
+//!   than left waiting.
+//!
+//!   A loss can cut a bracketed paste short: some of it sent (its opening
+//!   piece at least) and its closing piece not acknowledged. The program
+//!   may then be inside the paste, reading everything after as pasted
+//!   text, so the task owes it [`PASTE_END`]. It counts the bracketed
+//!   pastes begun on the connection (an opening piece sent) and not yet
+//!   closed (their closing piece acknowledged, written or discarded); a
+//!   loss while that count is above zero and anything is unacknowledged
+//!   puts the marker first on the new connection, ahead of the answers
+//!   kept. The marker is input of its own, never packed with answers, and
+//!   counts as a paste begun and closed by itself, so a loss before the
+//!   host acknowledges it owes it again on the next connection. One marker
+//!   closes any number of pastes, since bracketed paste is a mode, not a
+//!   nesting. A loss when nothing is unacknowledged owes nothing: every
+//!   piece sent was written, and the rest of the paste goes on, whole, on
+//!   the new connection.
+//!
+//!   The host discards input it had not written when a connection ends
+//!   (`crates/terminal-host/SPEC.md`, "Input"), and an unacknowledged
+//!   `Input` may have been written whole, in part, or not at all; the task
+//!   cannot tell which. So the program can read a closing marker it did
+//!   not need: alone, when none of the paste's opening piece was written
+//!   (the loss caught it unacknowledged and unwritten), or a second one,
+//!   when the lost closing piece, or a lost marker, was written after all.
+//!   Most programs ignore a closing marker outside a paste, and either was
+//!   accepted over leaving a paste open. A runtime that ends with a marker
+//!   owed closes nothing, and neither does a runtime that later adopts the
+//!   host.
 //! - **Resizes** ([`HostTerminal::resize`]) are coalesced: the latest size
 //!   asked for is sent, once. On a new connection it is sent again whenever
 //!   the host's `Info` reports another size, since a resize written to a
 //!   connection that then ended may never have been acted on (a host drops
 //!   what a displaced client sent and it had not acted on yet). A repeated
-//!   resize is harmless; a lost one leaves the program at the old size. The
-//!   emulator takes a new size only from the host's resize record, at its
-//!   offset in the output.
+//!   resize is harmless; a lost one leaves the program at the old size. A
+//!   size the host already has is not sent at all, since every viewer asks
+//!   for its size when it attaches (the redraw request after a gap resizes
+//!   on its own, and is not affected). The emulator takes a new size only
+//!   from the host's resize record, at its offset in the output; one that
+//!   changes the size is counted ([`EmulatorRef::resizes`]), since it
+//!   reflows the history a viewer was sent without being a rebuild.
 //! - **Liveness** ([`Liveness`]) follows the host's records, and only moves
 //!   forward: running, then exited, then gone or unavailable. A terminal is
 //!   exited only once the stream's exit record has been processed, which the
@@ -220,10 +276,13 @@
 //!   so until the next start of the supervisor, whose reload adopts the
 //!   host afresh.
 //!
-//! What a viewer's grid stream (a later step) builds on is here as seams:
-//! [`HostTerminal::subscribe_notices`], [`HostTerminal::try_read`] and
-//! [`EmulatorRef::rebuilds`], which tells a stream that the emulator was
-//! replaced (a restored snapshot) and its history must be sent again.
+//! What a viewer's grid stream (`service::grid_stream`) builds on:
+//! [`HostTerminal::subscribe_notices`], [`HostTerminal::try_read`],
+//! [`EmulatorRef::rebuilds`] and [`EmulatorRef::resizes`], which tell a
+//! stream that the emulator was replaced (a restored snapshot) or reflowed
+//! (a resize) and its history must be sent again, the modes and size in
+//! [`HostStatus`], which its input reads without touching the emulator,
+//! and [`InputSequence::send_paste`].
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -232,8 +291,8 @@ use std::sync::{Arc, Mutex as StdMutex, PoisonError, Weak};
 use std::time::{Duration, Instant};
 
 use farhelm_terminal_emulator::{
-    Cancel, Effects, Emulator, FeedMode, Modes, Notice, Snapshot, SnapshotError, SnapshotStopped,
-    snapshot_split_candidate,
+    Cancel, ClipboardTarget, Effects, Emulator, FeedMode, Modes, Notice, Snapshot, SnapshotError,
+    SnapshotStopped, snapshot_split_candidate,
 };
 use terminal_host::protocol::{ChildExit, Info, MAX_INPUT, MAX_SNAPSHOT, Position, Size};
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
@@ -244,6 +303,7 @@ use super::client::{
     InputTicket, SnapshotReply, Unavailable,
 };
 use super::process::HostProcess;
+use crate::grid_input::PASTE_END;
 use crate::procs::{self, PaneAnchor, ProcessIdentity, ProcessState};
 use crate::tmux::{PaneProbe, PaneProcess};
 
@@ -265,6 +325,15 @@ const INPUT_QUEUE: usize = 16;
 /// reading them, and holding them would let one program grow the shared
 /// supervisor without bound.
 pub const MAX_PENDING_ANSWERS: usize = 64 * 1024;
+
+/// The longest paste [`InputSequence::send_paste`] takes: the most a
+/// viewer's attachment collects of one paste (`service::grid_stream`,
+/// `INPUT_BACKLOG`), and far beyond any prompt. Also the terminal's budget
+/// for pastes waiting for its task, from the task's channel to the last
+/// piece sent (module docs, "A paste goes in whole"): what the runtime
+/// holds of pastes is at most this, plus the input window, and twice this
+/// for a moment while a paste is cut into pieces (`Runtime::queue_request`).
+pub const MAX_PASTE: usize = 8 * 1024 * 1024;
 
 /// How many times adoption reads the child's process while the host says it
 /// runs, before giving up on pinning it. The read fails only in the moment
@@ -581,6 +650,15 @@ pub struct HostStatus {
     /// to leave out its oldest history (`Emulator::history_trimmed`, which
     /// ends once the loss no longer shows). For the viewer, which says so.
     pub history_trimmed: bool,
+    /// The program's terminal modes as of the latest change published: what
+    /// a viewer's input is encoded from. Here, rather than read from the
+    /// emulator, so that input never waits on the emulator's lock (held
+    /// for a viewer's screen and history reads) or for an encode.
+    pub modes: Modes,
+    /// The terminal's size as the emulator has it, published with `modes`
+    /// and for the same reason (`HostTerminal::size` is the same value read
+    /// from the emulator).
+    pub size: Size,
 }
 
 /// A host terminal's state in the three classes the supervisor's status
@@ -888,10 +966,12 @@ impl Default for HostTerminalOptions {
 /// short. With no subscription open, nothing is queued.
 pub const NOTICE_BACKLOG: usize = 8;
 
-/// A subscription to a host terminal's notices for the user: bells,
-/// clipboard writes (OSC 52) and title changes, from live output only,
-/// never from replayed output (module docs, "Adoption"), and only those
-/// after the subscription was taken ([`HostTerminal::subscribe_notices`]).
+/// A subscription to a host terminal's notices for the user: writes to the
+/// clipboard (OSC 52; bells, title changes and writes to the primary
+/// selection are not sent, see `Runtime::deliver_notices`), from live
+/// output only, never from replayed output (module docs, "Adoption"), and
+/// only those after the subscription was taken
+/// ([`HostTerminal::subscribe_notices`]).
 /// Each viewer attachment takes its own; every subscription gets every
 /// notice.
 #[derive(Debug)]
@@ -1139,6 +1219,12 @@ struct Inner {
     /// "Input"): a caller blocked on a full queue when input was lost is
     /// behind the hole too.
     epoch: Arc<AtomicU64>,
+    /// Lines of history the emulator keeps, as made.
+    scrollback_lines: usize,
+    /// The terminal's budget for pastes waiting for the task, in bytes
+    /// ([`MAX_PASTE`]): taken before a paste enters the task's channel,
+    /// given back once its last piece is sent or it is dropped.
+    paste_budget: Arc<tokio::sync::Semaphore>,
     /// The runtime's snapshot encodes, shared with it: what
     /// [`HostTerminal::abort`] cancels and [`HostTerminal::encodes_ended`]
     /// waits for.
@@ -1203,6 +1289,10 @@ struct Held {
     /// goes through `Runtime::rebuild`; an encode hands back the same
     /// emulator and is not one.
     rebuilds: u64,
+    /// How many resize records changed the emulator's size: each reflows
+    /// its history and moves lines between it and the screen without being
+    /// a rebuild. Counted by `Runtime::resize_emulator`, under this lock.
+    resizes: u64,
     /// Whether a gap left the history short, a mark the emulator does not
     /// carry: kept for as long as this runtime runs (a snapshot cannot
     /// carry it either, so a later runtime that restores one taken after
@@ -1215,7 +1305,17 @@ impl Held {
         Self {
             slot: Slot::Live(Box::new(emulator)),
             rebuilds: 0,
+            resizes: 0,
             history_gap: false,
+        }
+    }
+
+    /// The emulator's modes and size now, from the emulator or the view
+    /// left while it is away (`HostStatus::modes`, `HostStatus::size`).
+    fn modes_and_size(&self) -> (Modes, Size) {
+        match &self.slot {
+            Slot::Live(emulator) => (emulator.modes(), size_of(emulator)),
+            Slot::Encoding(view) | Slot::Lost(view) => (view.modes, view.size),
         }
     }
 
@@ -1245,6 +1345,14 @@ impl EmulatorRef<'_> {
     /// changes: the new emulator's history is not the old one's.
     pub fn rebuilds(&self) -> u64 {
         self.held.rebuilds
+    }
+
+    /// How many resize records changed the emulator's size. A resize is not
+    /// a rebuild, but it reflows the history and moves lines between it and
+    /// the screen, so a reader that keeps something derived from the
+    /// history starts over when this changes too.
+    pub fn resizes(&self) -> u64 {
+        self.held.resizes
     }
 
     /// Whether the history is short, by a gap in the host's output or by
@@ -1306,6 +1414,15 @@ impl View {
     }
 }
 
+/// An emulator's size in the host's terms.
+fn size_of(emulator: &Emulator) -> Size {
+    let size = emulator.size();
+    Size {
+        cols: size.columns,
+        rows: size.lines,
+    }
+}
+
 /// The last `max_bytes` of `screen_text` with trailing whitespace trimmed,
 /// as `Emulator::screen_tail` cuts it (and must keep cutting it: a view
 /// and the emulator give the same tail).
@@ -1355,16 +1472,19 @@ pub enum InputFate {
     NotSent,
 }
 
-/// The fate of one input, once it is known.
+/// The fate of one input, once it is known: of each `Input` it went out
+/// as, combined (one for an input from [`HostTerminal::send_input`], one
+/// per `MAX_INPUT` bytes for a paste).
 #[derive(Debug)]
-pub struct InputReceipt(oneshot::Receiver<InputFate>);
+pub struct InputReceipt(Vec<oneshot::Receiver<InputFate>>);
 
-/// The parts of one multi-part input (a paste), from
-/// [`HostTerminal::input_sequence`]: every part carries the input epoch the
-/// sequence was made in, so once any input is lost with a connection, the
-/// parts asked for afterwards are [`InputFate::NotSent`] rather than written
-/// after the hole, whether or not the caller waited for a receipt in
-/// between. A sequence is for one paste; the next one starts a new sequence.
+/// The parts of one multi-part input, from [`HostTerminal::input_sequence`]:
+/// every part carries the input epoch the sequence was made in, so once any
+/// input is lost with a connection, the parts asked for afterwards are
+/// [`InputFate::NotSent`] rather than written after the hole, whether or not
+/// the caller waited for a receipt in between. A sequence is for one run of
+/// parts that belong together (a viewer's attachment, a prompt and its
+/// submit); the next one starts a new sequence.
 ///
 /// It holds the terminal weakly: a sequence kept after every
 /// [`HostTerminal`] handle is gone does not keep the runtime (and its
@@ -1379,8 +1499,54 @@ impl InputSequence {
     /// Queue one part, as [`HostTerminal::send_input`] does, in this
     /// sequence's epoch.
     pub async fn send(&self, data: &[u8]) -> Result<InputReceipt, InputRefused> {
+        if data.is_empty() || data.len() > MAX_INPUT {
+            return Err(InputRefused::Invalid);
+        }
         let inner = self.inner.upgrade().ok_or(InputRefused::Ended)?;
-        HostTerminal { inner }.send_in_epoch(data, self.epoch).await
+        HostTerminal { inner }
+            .queue_input(data.to_vec(), self.epoch, None)
+            .await
+    }
+
+    /// Queue a whole paste, 1 to [`MAX_PASTE`] bytes already encoded (its
+    /// bracketed-paste markers included when `bracketed`), in this
+    /// sequence's epoch: the task writes it as consecutive `Input`s with
+    /// nothing between them, and closes a bracketed one that a lost
+    /// connection cut short (module docs, "A paste goes in whole"). Its
+    /// receipt is [`InputFate::Written`] only once every byte was written.
+    ///
+    /// Waits, first, for room in the terminal's paste budget, then as
+    /// [`HostTerminal::send_input`] does; dropped while waiting, it sent
+    /// nothing. Takes the paste by value, so that a paste waiting here is
+    /// held once.
+    ///
+    /// `bracketed` must say whether `data` opens with the bracketed-paste
+    /// marker: the task trusts it to decide whether a paste cut short needs
+    /// closing.
+    pub async fn send_paste(
+        &self,
+        data: Vec<u8>,
+        bracketed: bool,
+    ) -> Result<InputReceipt, InputRefused> {
+        if data.is_empty() || data.len() > MAX_PASTE {
+            return Err(InputRefused::Invalid);
+        }
+        let inner = self.inner.upgrade().ok_or(InputRefused::Ended)?;
+        let len = u32::try_from(data.len()).map_err(|_| InputRefused::Invalid)?;
+        let budget = Arc::clone(&inner.paste_budget)
+            .acquire_many_owned(len)
+            .await
+            .map_err(|_| InputRefused::Ended)?;
+        HostTerminal { inner }
+            .queue_input(
+                data,
+                self.epoch,
+                Some(PasteRequest {
+                    bracketed,
+                    _budget: budget,
+                }),
+            )
+            .await
     }
 }
 
@@ -1388,22 +1554,49 @@ impl InputReceipt {
     /// Wait for the input's fate. A runtime that ended without saying is
     /// [`InputFate::Unknown`], which never invites a resend.
     ///
+    /// For a paste sent as several `Input`s, the fate is
+    /// [`InputFate::Written`] when every one was written,
+    /// [`InputFate::NotSent`] when none was sent, [`InputFate::Discarded`]
+    /// when the host discarded any, and [`InputFate::Unknown`] otherwise:
+    /// some of the paste reached the program, or may have, and the rest
+    /// did not, which a caller treats like an unknown fate and never sends
+    /// again.
+    ///
     /// The wait has no bound of its own: an input is resolved when the host
     /// acknowledges it, and a program that stops reading its terminal over a
     /// healthy connection holds its input unacknowledged for as long as it
     /// does. A caller that cannot wait that long bounds the wait itself; to
     /// that caller, an input whose wait ran out is unknown.
     pub async fn fate(self) -> InputFate {
-        self.0.await.unwrap_or(InputFate::Unknown)
+        let mut fates = Vec::with_capacity(self.0.len());
+        for piece in self.0 {
+            fates.push(piece.await.unwrap_or(InputFate::Unknown));
+        }
+        combined_fate(&fates)
+    }
+}
+
+/// The fate of an input from the fates of the `Input`s it went out as
+/// ([`InputReceipt::fate`] says how they combine).
+fn combined_fate(fates: &[InputFate]) -> InputFate {
+    if fates.iter().all(|fate| *fate == InputFate::Written) {
+        InputFate::Written
+    } else if fates.iter().all(|fate| *fate == InputFate::NotSent) {
+        InputFate::NotSent
+    } else if fates.contains(&InputFate::Discarded) {
+        InputFate::Discarded
+    } else {
+        InputFate::Unknown
     }
 }
 
 /// Why [`HostTerminal::send_input`] took nothing.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum InputRefused {
-    /// The input is empty or longer than `MAX_INPUT`. A caller splits
-    /// longer input itself, never inside a key's encoding.
-    #[error("an input must be 1 to MAX_INPUT bytes")]
+    /// The input is empty or longer than `MAX_INPUT` (a paste: than
+    /// [`MAX_PASTE`]). A caller splits longer input itself, never inside a
+    /// key's encoding.
+    #[error("an input must be 1 to MAX_INPUT bytes (MAX_PASTE for a paste)")]
     Invalid,
     /// The terminal's runtime has ended.
     #[error("the terminal has ended")]
@@ -1434,12 +1627,36 @@ pub struct ShutdownReport {
     pub peer: Option<HostProcess>,
 }
 
-/// One caller's input, on its way to the task.
+/// One caller's input, on its way to the task: one `Input`, or a whole
+/// paste that the task queues as several in one turn.
 struct InputRequest {
     data: Vec<u8>,
-    fate: oneshot::Sender<InputFate>,
+    /// One receipt for each `MAX_INPUT` bytes of `data`, in order.
+    fates: Vec<oneshot::Sender<InputFate>>,
     /// The input epoch when `send_input` was called (`Inner::epoch`).
     epoch: u64,
+    /// For a paste: what the task needs to know of it.
+    paste: Option<PasteRequest>,
+}
+
+/// What a paste's request carries besides its bytes.
+struct PasteRequest {
+    /// Whether the paste is bracketed, which the task closes if a lost
+    /// connection cuts it short (`Runtime::open_pastes`).
+    bracketed: bool,
+    /// The paste's share of the terminal's paste budget
+    /// (`Inner::paste_budget`), given back when this is dropped: with the
+    /// request, or with the paste's last piece once it is sent.
+    _budget: tokio::sync::OwnedSemaphorePermit,
+}
+
+impl InputRequest {
+    /// Report the whole request not sent.
+    fn not_sent(self) {
+        for fate in self.fates {
+            let _ = fate.send(InputFate::NotSent);
+        }
+    }
 }
 
 /// A request to the task that is never held back behind input.
@@ -1586,6 +1803,12 @@ impl HostTerminal {
             caught_up: fence == 0 && adopted_end == Position::default(),
             checkpoint: checkpoints.accepted(),
             history_trimmed: false,
+            modes: emulator
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .modes_and_size()
+                .0,
+            size: info.initial_size,
         };
         let (status_tx, status_rx) = watch::channel(initial);
         let (input_tx, input_rx) = mpsc::channel(INPUT_QUEUE);
@@ -1620,6 +1843,8 @@ impl HostTerminal {
             reconnects: VecDeque::new(),
             fence,
             epoch: epoch.clone(),
+            host_size: info.size,
+            open_pastes: 0,
             checkpoints,
             redraw_wanted: false,
             notices,
@@ -1653,6 +1878,8 @@ impl HostTerminal {
                 size: size_tx,
                 epoch,
                 returned,
+                scrollback_lines: options.scrollback_lines,
+                paste_budget: Arc::new(tokio::sync::Semaphore::new(MAX_PASTE)),
                 encodes,
                 task,
                 adopted: peer,
@@ -1688,6 +1915,8 @@ impl HostTerminal {
             columns: 80,
             lines: 24,
         };
+        let emulator = Emulator::new(size, 0);
+        let modes = emulator.modes();
         let (notices, _) = broadcast::channel(1);
         let (_, status) = watch::channel(HostStatus {
             liveness: Liveness::Unavailable { reason, peer },
@@ -1698,6 +1927,8 @@ impl HostTerminal {
             caught_up: false,
             checkpoint: None,
             history_trimmed: false,
+            modes,
+            size: size_of(&emulator),
         });
         // Every channel's other end is dropped here, which is how a handle
         // learns that its runtime has ended.
@@ -1707,7 +1938,7 @@ impl HostTerminal {
         HostTerminal {
             inner: Arc::new(Inner {
                 socket: socket.to_path_buf(),
-                emulator: Arc::new(StdMutex::new(Held::new(Emulator::new(size, 0)))),
+                emulator: Arc::new(StdMutex::new(Held::new(emulator))),
                 notices: notices.downgrade(),
                 returned: Arc::new(tokio::sync::Notify::new()),
                 status,
@@ -1715,6 +1946,8 @@ impl HostTerminal {
                 control,
                 size: size_tx,
                 epoch: Arc::new(AtomicU64::new(0)),
+                scrollback_lines: 0,
+                paste_budget: Arc::new(tokio::sync::Semaphore::new(MAX_PASTE)),
                 encodes: Encodes::new(),
                 task: tokio::spawn(async {}).abort_handle(),
                 adopted: None,
@@ -1816,9 +2049,8 @@ impl HostTerminal {
         }
     }
 
-    /// Subscribe to the terminal's notices from now on (bells, clipboard
-    /// writes, title changes, from live output only); see
-    /// [`NoticeSubscription`].
+    /// Subscribe to the terminal's notices from now on (writes to the
+    /// clipboard, from live output only); see [`NoticeSubscription`].
     pub fn subscribe_notices(&self) -> NoticeSubscription {
         let receiver = match self.inner.notices.upgrade() {
             Some(sender) => sender.subscribe(),
@@ -1830,6 +2062,13 @@ impl HostTerminal {
             receiver,
             socket: self.inner.socket.clone(),
         }
+    }
+
+    /// Lines of history the emulator keeps at most, as the runtime was
+    /// made (`HostTerminalOptions::scrollback_lines`): what a viewer's
+    /// history is capped at.
+    pub fn scrollback_lines(&self) -> usize {
+        self.inner.scrollback_lines
     }
 
     /// The last `max_bytes` of the visible screen as plain text, shaped
@@ -1897,16 +2136,20 @@ impl HostTerminal {
     /// receipt does not take it back.
     ///
     /// The input carries the epoch of the moment this is called (module
-    /// docs, "Input"): for one-shot input. The parts of one paste go through
-    /// an [`InputSequence`] instead.
+    /// docs, "Input"): for one-shot input. Inputs that belong together go
+    /// through an [`InputSequence`] instead, and a paste through
+    /// [`InputSequence::send_paste`].
     pub async fn send_input(&self, data: &[u8]) -> Result<InputReceipt, InputRefused> {
+        if data.is_empty() || data.len() > MAX_INPUT {
+            return Err(InputRefused::Invalid);
+        }
         let epoch = self.inner.epoch.load(Ordering::SeqCst);
-        self.send_in_epoch(data, epoch).await
+        self.queue_input(data.to_vec(), epoch, None).await
     }
 
-    /// A sequence of inputs that belong together, such as the parts of one
-    /// paste: once any input is lost with a connection, none of its parts
-    /// asked for afterwards is written (module docs, "Input").
+    /// A sequence of inputs that belong together, such as a viewer's keys
+    /// and pastes: once any input is lost with a connection, none of its
+    /// parts asked for afterwards is written (module docs, "Input").
     pub fn input_sequence(&self) -> InputSequence {
         InputSequence {
             inner: Arc::downgrade(&self.inner),
@@ -1914,23 +2157,27 @@ impl HostTerminal {
         }
     }
 
-    /// [`Self::send_input`], stamped with `epoch`.
-    async fn send_in_epoch(&self, data: &[u8], epoch: u64) -> Result<InputReceipt, InputRefused> {
-        if data.is_empty() || data.len() > MAX_INPUT {
-            return Err(InputRefused::Invalid);
-        }
-        let (fate, receipt) = oneshot::channel();
+    /// Queue `data` (its length checked by the caller) stamped with
+    /// `epoch`, as one request with a receipt for each `MAX_INPUT` bytes.
+    async fn queue_input(
+        &self,
+        data: Vec<u8>,
+        epoch: u64,
+        paste: Option<PasteRequest>,
+    ) -> Result<InputReceipt, InputRefused> {
+        let (fates, receipts) = data.chunks(MAX_INPUT).map(|_| oneshot::channel()).unzip();
         let request = InputRequest {
-            data: data.to_vec(),
-            fate,
+            data,
+            fates,
             epoch,
+            paste,
         };
         self.inner
             .input
             .send(request)
             .await
             .map_err(|_| InputRefused::Ended)?;
-        Ok(InputReceipt(receipt))
+        Ok(InputReceipt(receipts))
     }
 
     /// Ask for the terminal to be `size`. Returns at once; the emulator takes
@@ -2255,18 +2502,60 @@ impl Effects for FedEffects {
     }
 }
 
-/// Input waiting for room in the window: a caller's, or the terminal's own
-/// answers.
+/// Input waiting for room in the window: a caller's, the terminal's own
+/// answers, or a closing marker owed for a paste cut short.
 struct Outgoing {
     data: Vec<u8>,
-    /// The caller's receipt; `None` for answers.
-    fate: Option<oneshot::Sender<InputFate>>,
+    from: Source,
+    /// Where it stands in a bracketed paste.
+    place: PastePlace,
+    /// For a paste's last piece, the paste's share of the paste budget
+    /// (`PasteRequest`), given back when the piece leaves the queue.
+    _budget: Option<PasteRequest>,
+}
+
+/// Whose an `Outgoing` is, which decides what a loss does with it.
+enum Source {
+    /// A caller's, with its receipt: a loss drops it (`drop_caller_input`).
+    /// Every piece of a paste is one, so a loss never keeps a piece of a
+    /// paste.
+    Caller(oneshot::Sender<InputFate>),
+    /// The terminal's answers to the program's queries, packed together
+    /// and counted in `Runtime::pending_answer_bytes`: a loss keeps them.
+    Answer,
+    /// The closing marker owed for a paste cut short (module docs, "A paste
+    /// goes in whole"): a loss keeps it, and nothing is packed into it.
+    Recovery,
+}
+
+impl Outgoing {
+    /// The caller's receipt, if it is a caller's.
+    fn into_fate(self) -> Option<oneshot::Sender<InputFate>> {
+        match self.from {
+            Source::Caller(fate) => Some(fate),
+            Source::Answer | Source::Recovery => None,
+        }
+    }
 }
 
 /// Input sent and not yet acknowledged.
 struct InFlight {
     ticket: InputTicket,
     fate: Option<oneshot::Sender<InputFate>>,
+    place: PastePlace,
+}
+
+/// Where an `Input` stands in a bracketed paste, for the task's count of
+/// the pastes begun and not closed on the connection
+/// (`Runtime::open_pastes`). Both false for anything else, an unbracketed
+/// paste's pieces included: one cut short leaves no mode to close. An owed
+/// closing marker has both: it is begun and closed by itself.
+#[derive(Debug, Clone, Copy, Default)]
+struct PastePlace {
+    /// Sending it begins a paste.
+    opens: bool,
+    /// Its acknowledgement closes one.
+    closes: bool,
 }
 
 /// Resolve a receipt, if there is one.
@@ -2361,6 +2650,19 @@ struct Runtime {
     /// an encode, and its offset: fed once the encode is done, before
     /// anything else, since the encode must see the emulator at the split.
     deferred: Option<(u64, Vec<u8>)>,
+    /// The size the host has, or will have once the resizes sent on this
+    /// connection are applied: its `Info` on connecting, then each size
+    /// sent. A size asked for that equals it is not sent. Only this
+    /// runtime resizes its host (it holds the only connection).
+    host_size: Size,
+    /// How many bracketed pastes, owed closing markers included, are begun
+    /// on this connection and not closed: an opening piece sent, its
+    /// closing piece not yet acknowledged. A count, not a flag, since the
+    /// window can hold several pastes, and acknowledging one says nothing
+    /// of the next. A loss while it is above zero and anything is
+    /// unacknowledged owes `PASTE_END` (module docs, "A paste goes in
+    /// whole").
+    open_pastes: usize,
 }
 
 /// A snapshot encode on the blocking pool, of the emulator at `position`.
@@ -2476,12 +2778,20 @@ impl Runtime {
             self.ask_for_redraw(conn).await?;
         }
         if let Some(size) = self.size_wanted {
-            match conn.resize(size).await {
-                // Sizes are checked by the handle; one the client refuses
-                // anyway is dropped rather than retried forever.
-                Ok(()) | Err(ClientError::InvalidRequest(_)) => self.size_wanted = None,
-                // Kept, to be sent on the next connection.
-                Err(error) => return Err(error),
+            if size == self.host_size {
+                self.size_wanted = None;
+            } else {
+                match conn.resize(size).await {
+                    Ok(()) => {
+                        self.size_wanted = None;
+                        self.host_size = size;
+                    }
+                    // Sizes are checked by the handle; one the client
+                    // refuses anyway is dropped rather than retried forever.
+                    Err(ClientError::InvalidRequest(_)) => self.size_wanted = None,
+                    // Kept, to be sent on the next connection.
+                    Err(error) => return Err(error),
+                }
             }
         }
         let deadline = self.lock().sync_deadline();
@@ -2495,6 +2805,10 @@ impl Runtime {
         // Callers' input is taken only while nothing waits for the window,
         // so that a program not reading its terminal holds it back in the
         // callers' sends rather than here.
+        //
+        // Waiting for an empty queue is also what keeps a paste whole: all
+        // of its pieces go into the queue in one turn, so neither another
+        // caller's input nor an answer can be queued between them.
         let accepting = self.pending.is_empty();
         let wake = tokio::select! {
             event = conn.next_event() => Wake::Event(event),
@@ -2507,14 +2821,11 @@ impl Runtime {
             Wake::Event(event) => self.on_event(event?).await,
             Wake::Input(Some(request)) if request.epoch < self.epoch.load(Ordering::SeqCst) => {
                 // Made before caller input was lost: behind the hole.
-                let _ = request.fate.send(InputFate::NotSent);
+                request.not_sent();
                 Turn::Continue
             }
             Wake::Input(Some(request)) => {
-                self.pending.push_back(Outgoing {
-                    data: request.data,
-                    fate: Some(request.fate),
-                });
+                self.queue_request(request);
                 Turn::Continue
             }
             Wake::Input(None) | Wake::Control(None) => Turn::Stop,
@@ -2570,10 +2881,7 @@ impl Runtime {
             match sent {
                 Ok(ticket) => {
                     let next = self.pop_pending();
-                    self.in_flight.push_back(InFlight {
-                        ticket,
-                        fate: next.fate,
-                    });
+                    self.in_flight_push(ticket, next);
                 }
                 Err(ClientError::InputWindowFull { .. }) => return Ok(()),
                 Err(error) if queued => {
@@ -2582,12 +2890,10 @@ impl Runtime {
                     // connection lost and after the one drop of what
                     // followed it (`reconnect`).
                     let lost = self.pop_pending();
-                    self.in_flight.push_back(InFlight {
-                        ticket: InputTicket {
-                            end: conn.input_counts().sent,
-                        },
-                        fate: lost.fate,
-                    });
+                    let ticket = InputTicket {
+                        end: conn.input_counts().sent,
+                    };
+                    self.in_flight_push(ticket, lost);
                     return Err(error);
                 }
                 Err(ClientError::InvalidRequest(why)) => {
@@ -2595,7 +2901,7 @@ impl Runtime {
                     // so this does not happen; dropping it keeps the queue
                     // moving if it ever does.
                     warn!(socket = %self.socket.display(), why, "dropping input the client refused");
-                    resolve(self.pop_pending().fate, InputFate::NotSent);
+                    resolve(self.pop_pending().into_fate(), InputFate::NotSent);
                 }
                 Err(error) => return Err(error),
             }
@@ -2606,10 +2912,25 @@ impl Runtime {
     /// Take the oldest waiting input, keeping the answer count right.
     fn pop_pending(&mut self) -> Outgoing {
         let next = self.pending.pop_front().expect("input is waiting");
-        if next.fate.is_none() {
+        if matches!(next.from, Source::Answer) {
             self.pending_answer_bytes -= next.data.len();
         }
         next
+    }
+
+    /// Record `sent` as in flight, counting a paste it begins. A paste's
+    /// share of the budget goes with its last piece, here: it is no longer
+    /// waiting.
+    fn in_flight_push(&mut self, ticket: InputTicket, sent: Outgoing) {
+        if sent.place.opens {
+            self.open_pastes += 1;
+        }
+        let place = sent.place;
+        self.in_flight.push_back(InFlight {
+            ticket,
+            fate: sent.into_fate(),
+            place,
+        });
     }
 
     /// Act on what a feed made the emulator do: queue its answers, packed
@@ -2625,19 +2946,7 @@ impl Runtime {
                 continue;
             }
             self.pending_answer_bytes += answer.len();
-            for piece in answer.chunks(MAX_INPUT) {
-                match self.pending.back_mut() {
-                    Some(last)
-                        if last.fate.is_none() && last.data.len() + piece.len() <= MAX_INPUT =>
-                    {
-                        last.data.extend_from_slice(piece);
-                    }
-                    _ => self.pending.push_back(Outgoing {
-                        data: piece.to_vec(),
-                        fate: None,
-                    }),
-                }
-            }
+            self.queue_answer(answer);
         }
         if dropped > 0 {
             warn!(
@@ -2648,12 +2957,75 @@ impl Runtime {
         }
     }
 
+    /// Queue one answer (already counted in `pending_answer_bytes`), packed
+    /// into the last waiting answer's `Input` when it fits.
+    fn queue_answer(&mut self, answer: Vec<u8>) {
+        for piece in answer.chunks(MAX_INPUT) {
+            match self.pending.back_mut() {
+                Some(last)
+                    if matches!(last.from, Source::Answer)
+                        && last.data.len() + piece.len() <= MAX_INPUT =>
+                {
+                    last.data.extend_from_slice(piece);
+                }
+                _ => self.pending.push_back(Outgoing {
+                    data: piece.to_vec(),
+                    from: Source::Answer,
+                    place: PastePlace::default(),
+                    _budget: None,
+                }),
+            }
+        }
+    }
+
+    /// Queue a caller's request whole, as one `Input` per `MAX_INPUT` bytes
+    /// with its own receipt: a paste's pieces go in together, in this one
+    /// turn (module docs, "A paste goes in whole"). The pieces are copies,
+    /// so a paste of `MAX_PASTE` bytes takes twice that, 16 MiB, until the
+    /// request is dropped at the end of this call; left that way rather
+    /// than share one buffer between the pieces.
+    fn queue_request(&mut self, request: InputRequest) {
+        let InputRequest {
+            data, fates, paste, ..
+        } = request;
+        let bracketed = paste.as_ref().is_some_and(|paste| paste.bracketed);
+        let mut budget = paste;
+        let pieces = fates.len();
+        for (at, (piece, fate)) in data.chunks(MAX_INPUT).zip(fates).enumerate() {
+            let last = at + 1 == pieces;
+            self.pending.push_back(Outgoing {
+                data: piece.to_vec(),
+                from: Source::Caller(fate),
+                place: PastePlace {
+                    opens: bracketed && at == 0,
+                    closes: bracketed && last,
+                },
+                _budget: if last { budget.take() } else { None },
+            });
+        }
+    }
+
     /// Send notices to every subscription open. The emulator reports
     /// notices only for live output, so these are all live. With nobody
     /// subscribed they go nowhere: nobody is watching.
+    ///
+    /// Only writes to the clipboard are sent: a viewer's grid stream, the
+    /// one subscriber, has no message for a bell or a title (a title reaches
+    /// a viewer with the session's details), and its client honors only
+    /// clipboard writes, not the primary selection's
+    /// (`farhelm_proto::grid`). A burst of anything else would push a
+    /// clipboard write out of a subscription's short backlog for nothing.
     fn deliver_notices(&self, notices: Vec<Notice>) {
         for notice in notices {
-            let _ = self.notices.send(notice);
+            if matches!(
+                notice,
+                Notice::Clipboard {
+                    target: ClipboardTarget::Clipboard,
+                    ..
+                }
+            ) {
+                let _ = self.notices.send(notice);
+            }
         }
     }
 
@@ -3129,6 +3501,7 @@ impl Runtime {
         };
         conn.resize(nudge).await?;
         conn.resize(size).await?;
+        self.host_size = size;
         self.redraw_wanted = false;
         Ok(())
     }
@@ -3140,7 +3513,7 @@ impl Runtime {
         }
         let mode = self.replay.flush_mode(self.position.offset);
         let mut answers = FedEffects::default();
-        self.lock().resize(emulator_size(size), mode, &mut answers);
+        self.resize_emulator(size, mode, &mut answers);
         self.position = Position {
             offset: offset.max(self.position.offset),
             resizes: index + 1,
@@ -3178,11 +3551,10 @@ impl Runtime {
             self.replay.crossed = true;
         }
         let mode = self.replay.flush_mode(self.position.offset);
-        {
-            let mut emulator = self.lock();
-            if emulator.size() != emulator_size(size) {
-                emulator.resize(emulator_size(size), mode, &mut answers);
-            }
+        // Only a gap that changed the size resizes the emulator (and so
+        // flushes an open synchronized update).
+        if self.lock().size() != emulator_size(size) {
+            self.resize_emulator(size, mode, &mut answers);
         }
         self.position = Position {
             offset: to.max(self.position.offset),
@@ -3225,6 +3597,11 @@ impl Runtime {
             } else {
                 InputFate::Discarded
             };
+            if front.place.closes {
+                // Written or discarded, the paste is over on this
+                // connection: nothing more of it will reach the program.
+                self.open_pastes = self.open_pastes.saturating_sub(1);
+            }
             resolve(front.fate, outcome);
         }
         self.counts = counts;
@@ -3270,17 +3647,18 @@ impl Runtime {
         let position = self.position;
         let caught_up = self.fence == 0 && reached(position, self.adopted_end);
         let checkpoint = self.checkpoints.accepted();
-        let history_trimmed = self
-            .emulator
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .history_trimmed();
+        let (history_trimmed, (modes, size)) = {
+            let held = self.emulator.lock().unwrap_or_else(PoisonError::into_inner);
+            (held.history_trimmed(), held.modes_and_size())
+        };
         self.status.send_modify(|status| {
             status.position = position;
             status.revision += 1;
             status.caught_up = caught_up;
             status.checkpoint = checkpoint;
             status.history_trimmed = history_trimmed;
+            status.modes = modes;
+            status.size = size;
         });
     }
 
@@ -3315,6 +3693,20 @@ impl Runtime {
         }
     }
 
+    /// Resize the emulator to `size`, counting the resize (`Held::resizes`)
+    /// under the same lock hold when it changes the size: it reflows the
+    /// history a viewer was sent. A resize to the size in force still
+    /// flushes an open synchronized update (`Emulator::resize`) but changes
+    /// no line, so it counts nothing. Every resize goes through here.
+    fn resize_emulator(&self, size: Size, mode: FeedMode, answers: &mut FedEffects) {
+        let mut held = self.lock();
+        let changes = held.size() != emulator_size(size);
+        held.resize(emulator_size(size), mode, answers);
+        if changes {
+            held.0.resizes += 1;
+        }
+    }
+
     /// The emulator, home (see `LiveGuard`).
     fn lock(&self) -> LiveGuard<'_> {
         LiveGuard(self.emulator.lock().unwrap_or_else(PoisonError::into_inner))
@@ -3330,11 +3722,21 @@ impl Runtime {
         // went with it, and may have been written. What callers sent after
         // it is dropped first, so that input a caller sends on learning of
         // the loss comes after the drop and is written.
+        //
+        // A paste begun and not closed, with anything unacknowledged, may
+        // have been cut short: since acknowledgements come in order, what
+        // is unacknowledged is the paste's own pieces or what followed
+        // them. With nothing unacknowledged, every piece sent was written
+        // and the paste goes on whole on the new connection.
+        let cut_short = self.open_pastes > 0 && !self.in_flight.is_empty();
         if self.in_flight.iter().any(|lost| lost.fate.is_some()) {
             self.drop_caller_input();
         }
         for lost in self.in_flight.drain(..) {
             resolve(lost.fate, InputFate::Unknown);
+        }
+        if cut_short {
+            self.owe_paste_end();
         }
         self.counts = InputCounts::default();
         // The rest of an interrupted read is read again from the position
@@ -3411,6 +3813,7 @@ impl Runtime {
             // runs, so the root pinned at adoption stands.
             Child::Running(_) | Child::Unpinned => {}
         }
+        self.host_size = info.size;
         if let Some(size) = self.size_requested
             && size != info.size
         {
@@ -3435,14 +3838,43 @@ impl Runtime {
         self.epoch.fetch_add(1, Ordering::SeqCst);
         let mut kept = VecDeque::with_capacity(self.pending.len());
         for waiting in self.pending.drain(..) {
-            match waiting.fate {
-                Some(fate) => {
+            match waiting.from {
+                Source::Caller(fate) => {
                     let _ = fate.send(InputFate::NotSent);
                 }
-                None => kept.push_back(waiting),
+                Source::Answer | Source::Recovery => kept.push_back(waiting),
             }
         }
         self.pending = kept;
+    }
+
+    /// Owe the program `PASTE_END` for a paste a loss cut short: first on
+    /// the new connection, ahead of the kept answers, which would
+    /// otherwise reach it as pasted text (module docs, "A paste goes in
+    /// whole"). The connection's pastes are over, closed by the marker,
+    /// which counts as a paste of its own once sent, so that a loss before
+    /// its acknowledgement owes it again.
+    fn owe_paste_end(&mut self) {
+        self.open_pastes = 0;
+        if matches!(
+            self.pending.front(),
+            Some(Outgoing {
+                from: Source::Recovery,
+                ..
+            })
+        ) {
+            // Owed already and never sent; one closes every paste.
+            return;
+        }
+        self.pending.push_front(Outgoing {
+            data: PASTE_END.to_vec(),
+            from: Source::Recovery,
+            place: PastePlace {
+                opens: true,
+                closes: true,
+            },
+            _budget: None,
+        });
     }
 
     /// The process to name as the host after a connect found `found`: the
@@ -3570,11 +4002,11 @@ impl Runtime {
             resolve(lost.fate, InputFate::Unknown);
         }
         for waiting in self.pending.drain(..) {
-            resolve(waiting.fate, InputFate::NotSent);
+            resolve(waiting.into_fate(), InputFate::NotSent);
         }
         self.input_rx.close();
         while let Ok(request) = self.input_rx.try_recv() {
-            let _ = request.fate.send(InputFate::NotSent);
+            request.not_sent();
         }
     }
 }

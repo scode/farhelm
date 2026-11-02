@@ -514,15 +514,17 @@ where
                         // `capture::note_first_input`). The whole frame must
                         // have been confirmed: the any-bytes latch is already
                         // true once those replies land, so it cannot say
-                        // whether THIS frame's Enter arrived.
+                        // whether THIS frame's Enter arrived. Which bytes
+                        // the frame delivered is the backend's to say: a
+                        // grid attachment's frame is a message, not bytes
+                        // (`AttachBackend::send_input`).
                         if route.key.terminal == TerminalId::Agent
-                            && matches!(send_result, Some(Ok(())))
-                            && super::capture::submits_a_line(&frame.body)
+                            && matches!(send_result, Some(Ok(true)))
                         {
                             note_first_input(entry, before_input);
                         }
                         match send_result {
-                            Some(Ok(())) => false,
+                            Some(Ok(_)) => false,
                             // A failed send is this session's problem,
                             // not the shared connection's. It is still
                             // fatal to this attachment: accepting later
@@ -1193,8 +1195,11 @@ fn reap_finished_tasks(tasks: &mut tokio::task::JoinSet<()>) {
     }
 }
 
-/// Why a forwarder stopped, and therefore what the client must be told.
-enum ForwarderEnd {
+/// Why a forwarder stopped, and therefore what the client must be told
+/// ([`report_forwarder_end`]). Shared by both kinds of output task: the tmux
+/// [`Forwarder`] and a host terminal's grid sender
+/// (`super::grid_stream::GridSender`).
+pub(crate) enum ForwarderEnd {
     /// The attachment owner requested an orderly detach.
     Requested,
     /// The client's connection is gone (its writer queue closed). Nothing
@@ -1208,6 +1213,12 @@ enum ForwarderEnd {
     /// every other outcome this one also TEARS THE ATTACHMENT DOWN — see
     /// `Forwarder::run`.
     Stalled,
+    /// The attachment's input broke where the connection's input path
+    /// could not see it: a grid attachment's input written to a host
+    /// terminal after the connection's data-frame arm had queued it
+    /// (`super::grid_stream`). Ends the attachment as an input failure in
+    /// that arm does, so no later input lands after the lost part.
+    InputFailed(String),
 }
 
 /// One attachment's output pump: everything between a pane's control-mode
@@ -1261,11 +1272,13 @@ pub(crate) struct Forwarder {
 /// marker, detach verdicts) is the same for every kind and stays in
 /// [`Forwarder`].
 ///
-/// The plan's host terminals stream grid diffs rather than bytes, through
-/// a sender per attachment, and that sender may end up beside this type
-/// rather than as a variant of it. Whichever change settles its shape
-/// either gives this enum that variant or folds the enum back into the
-/// tmux stream it wraps.
+/// Host terminals stream grids rather than bytes, from a task of their own
+/// beside this one (`super::grid_stream::GridSender`), which shares the
+/// forwarder's pause, stall and verdict machinery but none of its stream
+/// handling: there is no replay to render and no death recovery, since the
+/// emulator holds the whole screen. So this enum has one variant; it stays
+/// an enum so that a byte stream of another kind would get the same
+/// exhaustive dispatches.
 pub(crate) enum AttachOutput {
     /// A tmux control-mode client streaming one pane, with its attach
     /// replay (see [`TmuxOutput`]).
@@ -1499,58 +1512,14 @@ impl Forwarder {
         } else {
             end
         };
-        // The arbiters below identify "this attachment" by the forwarder
-        // task that reports the verdict. Channel ids are reused, so a client
-        // that detaches and reattaches on the same channel of the same
-        // connection produces a replacement that matches on channel and
-        // connection alone; only the forwarder's task id tells it apart.
-        // `run` always executes as the task `ActiveAttach::forwarder` joins.
-        let origin = tokio::task::id();
-        match end {
-            ForwarderEnd::Requested | ForwarderEnd::ClientGone => {}
-            ForwarderEnd::TerminalEnded => {
-                // Output-path checkpoint; see the first one in
-                // `OutputStream::next_output`.
-                debug!(channel = self.channel, session = %self.session_id, "pane output stream ended; detaching");
-                detach_naturally(
-                    &self.sup,
-                    AttachmentKey::new(&self.session_id, self.terminal),
-                    self.channel,
-                    self.tx,
-                    origin,
-                    "session terminal ended".to_string(),
-                );
-            }
-            ForwarderEnd::StreamFailed(reason) => {
-                // Must notify: swallowing this leaves the client with a
-                // terminal that silently stops updating while still
-                // accepting input, and no log line anywhere explaining why.
-                warn!(channel = self.channel, error = %reason, "output stream failed");
-                detach_naturally(
-                    &self.sup,
-                    AttachmentKey::new(&self.session_id, self.terminal),
-                    self.channel,
-                    self.tx,
-                    origin,
-                    format!("output stream failed: {reason}"),
-                );
-            }
-            ForwarderEnd::Stalled => {
-                warn!(
-                    channel = self.channel,
-                    session = %self.session_id,
-                    "attachment paused longer than {:?}; detaching as stalled",
-                    self.stall_timeout
-                );
-                detach_stalled(
-                    &self.sup,
-                    AttachmentKey::new(&self.session_id, self.terminal),
-                    self.channel,
-                    self.tx,
-                    origin,
-                );
-            }
-        }
+        report_forwarder_end(
+            &self.sup,
+            AttachmentKey::new(&self.session_id, self.terminal),
+            self.channel,
+            self.tx,
+            end,
+            self.stall_timeout,
+        );
     }
 
     /// Write one rendered replay to the client, segment by segment, under
@@ -1624,25 +1593,7 @@ impl Forwarder {
     /// enough to keep the forwarder moving between chunks could stay
     /// paused forever.
     async fn park_while_paused(&mut self) -> Result<(), ForwarderEnd> {
-        loop {
-            let Some(paused_at) = *self.pause_rx.borrow_and_update() else {
-                return Ok(());
-            };
-            tokio::select! {
-                () = tokio::time::sleep_until(paused_at + self.stall_timeout) => {
-                    return Err(ForwarderEnd::Stalled);
-                }
-                changed = self.pause_rx.changed() => {
-                    // The sender is dropped only when this attachment has
-                    // been removed from the map, at which point the separate
-                    // shutdown watch is also ready; falling through lets the
-                    // outer, biased select take that orderly path.
-                    if changed.is_err() {
-                        return Ok(());
-                    }
-                }
-            }
-        }
+        park_while_paused(&mut self.pause_rx, self.stall_timeout).await
     }
 
     /// Enqueue `bytes` as one or more data frames, honoring the client's
@@ -1830,6 +1781,106 @@ impl Forwarder {
     }
 }
 
+/// Tell the client how its attachment ended, as `end` says, from the output
+/// task that reported it. Must be called from that task: the detach arbiters
+/// below identify "this attachment" by the reporting task's id.
+///
+/// The arbiters identify "this attachment" by the forwarder task that
+/// reports the verdict. Channel ids are reused, so a client that detaches
+/// and reattaches on the same channel of the same connection produces a
+/// replacement that matches on channel and connection alone; only the
+/// forwarder's task id tells it apart. Every output task (`Forwarder::run`,
+/// the grid sender's `run`) executes as the task `ActiveAttach::forwarder`
+/// joins.
+pub(crate) fn report_forwarder_end(
+    sup: &Arc<Supervisor>,
+    key: AttachmentKey,
+    channel: u32,
+    tx: mpsc::Sender<Frame>,
+    end: ForwarderEnd,
+    stall_timeout: Duration,
+) {
+    let origin = tokio::task::id();
+    match end {
+        ForwarderEnd::Requested | ForwarderEnd::ClientGone => {}
+        ForwarderEnd::TerminalEnded => {
+            // Output-path checkpoint; see the first one in
+            // `OutputStream::next_output`.
+            debug!(channel, session = %key.session, "pane output stream ended; detaching");
+            detach_naturally(
+                sup,
+                key,
+                channel,
+                tx,
+                origin,
+                "session terminal ended".to_string(),
+            );
+        }
+        ForwarderEnd::StreamFailed(reason) => {
+            // Must notify: swallowing this leaves the client with a
+            // terminal that silently stops updating while still
+            // accepting input, and no log line anywhere explaining why.
+            warn!(channel, error = %reason, "output stream failed");
+            detach_naturally(
+                sup,
+                key,
+                channel,
+                tx,
+                origin,
+                format!("output stream failed: {reason}"),
+            );
+        }
+        ForwarderEnd::InputFailed(reason) => {
+            warn!(channel, error = %reason, "input dropped");
+            detach_naturally(
+                sup,
+                key,
+                channel,
+                tx,
+                origin,
+                format!("terminal input failed: {reason}"),
+            );
+        }
+        ForwarderEnd::Stalled => {
+            warn!(
+                channel,
+                session = %key.session,
+                "attachment paused longer than {stall_timeout:?}; detaching as stalled"
+            );
+            detach_stalled(sup, key, channel, tx, origin);
+        }
+    }
+}
+
+/// Park while the client has output paused, returning `Err(Stalled)` once
+/// this ONE pause has outlived `stall_timeout`, measured from the instant it
+/// started (see [`Forwarder::park_while_paused`] for why the deadline is
+/// absolute). Shared by every output task.
+pub(crate) async fn park_while_paused(
+    pause_rx: &mut watch::Receiver<Option<tokio::time::Instant>>,
+    stall_timeout: Duration,
+) -> Result<(), ForwarderEnd> {
+    loop {
+        let Some(paused_at) = *pause_rx.borrow_and_update() else {
+            return Ok(());
+        };
+        tokio::select! {
+            () = tokio::time::sleep_until(paused_at + stall_timeout) => {
+                return Err(ForwarderEnd::Stalled);
+            }
+            changed = pause_rx.changed() => {
+                // The sender is dropped only when this attachment has
+                // been removed from the map, at which point the separate
+                // shutdown watch is also ready; falling through lets the
+                // outer, biased select take that orderly path.
+                if changed.is_err() {
+                    return Ok(());
+                }
+            }
+        }
+    }
+}
+
 /// Await a latched death, including one published before this read started.
 /// Sender closure belongs to teardown; it must not manufacture pane death.
 async fn wait_for_pane_death(death: &mut watch::Receiver<bool>) {
@@ -1872,7 +1923,7 @@ async fn wait_until_resumed(mut pause: watch::Receiver<Option<tokio::time::Insta
 /// pause duration rather than a cumulative budget: a client that pauses
 /// and resumes repeatedly is a slow client being served correctly, not a
 /// stalled one, and each resume clears the stored start.
-async fn stalled_past_deadline(
+pub(crate) async fn stalled_past_deadline(
     mut pause_rx: watch::Receiver<Option<tokio::time::Instant>>,
     timeout: Duration,
 ) {

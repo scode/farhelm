@@ -183,26 +183,30 @@ that its required systemd or SSH substrate ran.
   only with its record; the adapters to the supervisor's pane types for every liveness, with a child pinned to a reused
   pid no root; input fates (written, discarded, unknown when the connection ends and not resent on the next one);
   callers held while the window is full, a cancelled waiting send sending nothing; nothing written after input lost with
-  a connection, a send still waiting for room in the queue included, nor any later part of a paste sent through one
-  input sequence; a lost connection freeing no room in the input queue while busy callers wait; input cut off while
-  written unknown and not resent, the epoch moving once for the loss (Linux); a reconnect answered by another process
-  than the adopted host unavailable as replaced, naming the adopted one; answers to a query flood bounded by the window
-  and the held-answer cap; a dropped connection resumed from the processed position, a resize lost with one sent again
-  and one already in force not, and resizes taking effect at the host's record; the reconnect limit; a shutdown whose
-  process stays reported unconfirmed, and one on a connection that ended unnoticed sent again on a new connection
-  (Linux). The stand-in answers the adoption's first `Info` after `Read` ahead of the stream's first records, as a real
-  host may. `crates/farhelm/tests/terminal_host_runtime.rs` runs it against real hosts started from the built `farhelm`
-  (never inside a test process, since a host forks): output, title and the pinned child; a DA1 query answered end to
-  end; input reaching the child and its exit recorded; an update left open drawn once a manual clock passes its
-  deadline; a host seeded with a snapshot, and one seeded with several hundred KiB of history and a silent child caught
-  up with the seed on screen when adoption returns (a seed that is not a snapshot failing the adoption); a recovered
-  runtime rebuilding the screen; the replay policy across a crash (a raw-mode child reading each answer in turn: a query
-  in the snapshot and one sent to the crashed supervisor not answered again, one asked while none was attached answered,
-  its premise shown by an `Info`-only connection, and only the clipboard write and bell after the recovery reported);
-  output overflowing the smallest journal while no supervisor is attached, with a shell that sets a mode in the lost
-  output, marked trimmed and redrawn on `SIGWINCH` with the mode back; a sequence left open then silence refused an
-  orderly checkpoint and ending in a gap; a sequence longer than the cap written while away ending in a gap; the FIFO
-  helpers giving up within their bound when nobody is at the other end; a resize; and a shutdown confirmed by the host's
+  a connection, a send still waiting for room in the queue included, nor any later part sent through one input sequence;
+  a paste going out as consecutive `Input`s with one receipt for all, and one cut short by a lost connection closed
+  first on the new connection; a closing marker owed for a paste after an earlier one in the window was acknowledged,
+  and owed again after a second loss before its acknowledgement; a paste waiting for the terminal's paste budget while
+  an earlier one is unsent, and refused as ended once the runtime is aborted; a lost connection freeing no room in the
+  input queue while busy callers wait; input cut off while written unknown and not resent, the epoch moving once for the
+  loss (Linux); a reconnect answered by another process than the adopted host unavailable as replaced, naming the
+  adopted one; answers to a query flood bounded by the window and the held-answer cap; a dropped connection resumed from
+  the processed position, a resize lost with one sent again and one already in force not, a resize to the size in force
+  never sent, and resizes taking effect at the host's record; the reconnect limit; a shutdown whose process stays
+  reported unconfirmed, and one on a connection that ended unnoticed sent again on a new connection (Linux). The
+  stand-in answers the adoption's first `Info` after `Read` ahead of the stream's first records, as a real host may.
+  `crates/farhelm/tests/terminal_host_runtime.rs` runs it against real hosts started from the built `farhelm` (never
+  inside a test process, since a host forks): output, title and the pinned child; a DA1 query answered end to end; input
+  reaching the child and its exit recorded; an update left open drawn once a manual clock passes its deadline; a host
+  seeded with a snapshot, and one seeded with several hundred KiB of history and a silent child caught up with the seed
+  on screen when adoption returns (a seed that is not a snapshot failing the adoption); a recovered runtime rebuilding
+  the screen; the replay policy across a crash (a raw-mode child reading each answer in turn: a query in the snapshot
+  and one sent to the crashed supervisor not answered again, one asked while none was attached answered, its premise
+  shown by an `Info`-only connection, and only the clipboard write after the recovery reported, never a bell); output
+  overflowing the smallest journal while no supervisor is attached, with a shell that sets a mode in the lost output,
+  marked trimmed and redrawn on `SIGWINCH` with the mode back; a sequence left open then silence refused an orderly
+  checkpoint and ending in a gap; a sequence longer than the cap written while away ending in a gap; the FIFO helpers
+  giving up within their bound when nobody is at the other end; a resize; and a shutdown confirmed by the host's
   process. Seconds, part of the workspace nextest run; the focused macOS CI job runs it too, in the terminal host step.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'host terminal switch points' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(/core::tests::host_terminals::/) | test(/a_failed_tmux_probe_still_samples_and_observes_host_terminals/) | test(/^service::session_hosts::/) | test(sweep_launch_dir_keeps_every_host_record) | test(/^host_terminals::/)'`
   — the supervisor's terminal switch points with a terminal host behind a session's agent (`Terminal::Host` in
@@ -214,26 +218,29 @@ that its required systemd or SSH substrate ran.
   recorded without waiting, an unreadable host left alone (no transition even beside a current sentinel, unknown status,
   a root that its earlier probe authorized refused, refused verbs and prompt), the ticker recording a host exit on the
   liveness notifier's wake with the tick far away, a failed tmux probe that still samples a live host and records a gone
-  one's exit, the hook anchor (and the publication gap's retry), the orderly stop's hold wait, and prompt delivery gated
-  on the emulator's paste mode, at one part and at the prompt cap's two. Delete's handling of hosts
-  (`service::session_hosts`) against stand-ins, some in the state directory's socket directory named by a launch record
-  the test writes: an unconditional Delete of an unreadable agent host killing its child from the identity pinned at
-  adoption and keeping the session when its adopted process cannot be confirmed ended (the stand-in's process is the
-  test runner, which the verified signal never signals); a recorded host that answers only with a foreign protocol
-  refused by the agent guard and signalled, never reconnected to, by an unconditional Delete (the stand-in counts two
-  connections, one per settling); a record naming another session's host refusing and touching nothing; the record of
-  the host the agent's runtime holds left to the runtime (the stand-in counts only the adoption's connection); a gone
-  record's leftover socket file removed with the session deleted; and the overall deadline for settling and ending hosts
-  (a gate holding each end before it starts, not a stuck process read, and a one-second budget) returning a retryable
-  refusal and releasing the directory admission and the lifecycle claim. Pure unit tests cover the bounded join and the
-  startup sweep keeping every launch host record. The e2e tests (`crates/farhelm/tests/e2e/host_terminals.rs`) move a
-  created session's agent into a real host started from the built `farhelm` (`Supervisor::install_host_agent_for_test`)
-  and check the exit stored with its code, Stop and Delete killing an unmarked process tree from the host's child (Stop
-  leaving the host's process running with its final screen), Restart refused before anything stops, the delete guard,
-  and the attach refusals; and Delete ending hosts, every test's grandchild ignoring SIGHUP (it publishes its pid only
-  after its trap; disposition and ancestry checked first) so that only a sweep rooted at the host's child reaches it: a
-  host agent guarded and then ended (gone at Delete's return) beside a record naming the host its runtime holds, a
-  recorded host of another generation refused by the agent guard beside an ended tmux agent and then ended while another
+  one's exit, the hook anchor (and the publication gap's retry), the orderly stop's hold wait, prompt delivery gated on
+  the emulator's paste mode, at one part and at the prompt cap's two, and grid attaches over the supervisor's own
+  connection handling (a bytes-only attach refused, a grid attach catching up and typing into the host, a takeover
+  displacing a grid attachment, a paused grid viewer detached as stalled, an attach to a startup placeholder refused
+  with an incumbent kept). Delete's handling of hosts (`service::session_hosts`) against stand-ins, some in the state
+  directory's socket directory named by a launch record the test writes: an unconditional Delete of an unreadable agent
+  host killing its child from the identity pinned at adoption and keeping the session when its adopted process cannot be
+  confirmed ended (the stand-in's process is the test runner, which the verified signal never signals); a recorded host
+  that answers only with a foreign protocol refused by the agent guard and signalled, never reconnected to, by an
+  unconditional Delete (the stand-in counts two connections, one per settling); a record naming another session's host
+  refusing and touching nothing; the record of the host the agent's runtime holds left to the runtime (the stand-in
+  counts only the adoption's connection); a gone record's leftover socket file removed with the session deleted; and the
+  overall deadline for settling and ending hosts (a gate holding each end before it starts, not a stuck process read,
+  and a one-second budget) returning a retryable refusal and releasing the directory admission and the lifecycle claim.
+  Pure unit tests cover the bounded join and the startup sweep keeping every launch host record. The e2e tests
+  (`crates/farhelm/tests/e2e/host_terminals.rs`) move a created session's agent into a real host started from the built
+  `farhelm` (`Supervisor::install_host_agent_for_test`) and check the exit stored with its code, Stop and Delete killing
+  an unmarked process tree from the host's child (Stop leaving the host's process running with its final screen),
+  Restart refused before anything stops, the delete guard, a bytes-only attach refused and a grid attach showing the
+  host child's output; and Delete ending hosts, every test's grandchild ignoring SIGHUP (it publishes its pid only after
+  its trap; disposition and ancestry checked first) so that only a sweep rooted at the host's child reaches it: a host
+  agent guarded and then ended (gone at Delete's return) beside a record naming the host its runtime holds, a recorded
+  host of another generation refused by the agent guard beside an ended tmux agent and then ended while another
   session's recorded host is never touched, a terminal-less session's recorded agent host, a SIGSTOPped host agent ended
   by the verified signal, a SIGSTOPped recorded host refused by the guard and then signalled, and a host renamed over
   the agent's socket neither shut down nor signalled while Delete ends the host the runtime adopted and deletes the
@@ -241,7 +248,8 @@ that its required systemd or SSH substrate ran.
   an unconditional Delete, and Delete of a session whose runtime is held in a snapshot encode ending the adopted host by
   its process after another host was renamed over its socket, which is left running. Linux only (the e2e suite), a few
   minutes (several tests wait out a stopped host's connect deadline); part of the workspace nextest run. Run it when a
-  switch point, the host runtime's adapters, the status evidence or Delete's handling of hosts change.
+  switch point, the host runtime's adapters, the status evidence, the grid attach path or Delete's handling of hosts
+  change.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'creating agents in terminal hosts' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(/core::host_launch::/) | test(/a_retry_finds_the_sessions_own_published_host|restart_refuses_a_terminal_less_session/) | test(/^hosts::spawn::/) | test(/^host_creates::/)'`
   — a create starting its agent in a terminal host under the supervisor's internal switch
   (`SupervisorSeams::new_terminals`, `crates/farhelm-supervisor/src/service/core/host_launch.rs`). The unit tests pin
@@ -308,6 +316,33 @@ that its required systemd or SSH substrate ran.
   suite), a minute or so; part of the workspace nextest run. Run it when reload, the orderly stop, re-adoption,
   discovery or the host runtime's adoption or encodes change. The encoder's cancel itself is in the terminal emulator
   selection below (`an_encode_stops_once_its_cancel_fires_and_is_unchanged_until_then`).
+- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'grid streams' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p farhelm-supervisor --lib -E 'test(/^grid_output::/) | test(/^service::grid_stream::/)'`
+  — how a host terminal reaches a grid viewer: the encoding (`crates/farhelm-supervisor/src/grid_output.rs`: cells to
+  runs with styles, redefined palette colors, wide and combining characters and links, a row with more links than a
+  message holds, hostile text packing into messages a client accepts, the screen diff, its shift and a shift-only
+  update, a resizing frame, the cursor's default blink, history appended across reads, reads bounded by lines and by
+  bytes (links counted, checked against the encoded size), eviction, erasure, relayout and palette-rewrite resets,
+  history's width and the alternate screen, message packing, clipboard parts) and the per-attachment sender and input
+  side (`crates/farhelm-supervisor/src/service/grid_stream.rs`) against a stand-in host in the test process: the attach
+  sequence while output runs; a paused flood withheld while paused (seen through the stream's park count, so a sender
+  that ignored the pause fails) and losing no history line; a writer queue shown full across several history batches;
+  eviction at the cap; a resize, an erasure and a restore resetting history, and a resize drag resetting it once it
+  settles; output and an exit published between a read and its bookkeeping not lost (held at a read seam), and output or
+  an exit during a long catch-up not lost; a resize drag during a long catch-up ending it and resetting history once,
+  after `ReplayComplete`; the stall bound, and an input failure ending a paused stream at once; clipboard writes, the
+  latest kept, with neither bells nor primary-selection writes able to push one out; the exit in `state`; an unreadable
+  host ending the stream; keys, text and bracketed pastes; a paste written only once its last part arrives, and nothing
+  of one whose last part never does, of one past the backlog, or of one half collected at a takeover; empty paste parts
+  adding nothing; query answers and another caller's input never landing inside a paste; a paste cut short by a lost
+  connection closed first on the new connection, ahead of the kept answers, and the attachment's input failing; ended
+  attachments leaving no pump; refused input; and input taken while the emulator is held. Every stream is applied to a
+  test client that runs the format's stream check (`grid_output::test_client`). Seconds, in-process. Part of the
+  workspace nextest run. Its ignored tests (one per kind of output: typical, 256-color, true color) measure the attach
+  cost and a resize drag's cost at the full scrollback (bytes, history resets, and arrival times over a simulated 10
+  Mbit/s link): run them by hand in release with `--run-ignored only --no-capture --test-threads 1` and
+  `-E 'test(/measure_the_(attach|resize)_cost_at_the_scrollback_cap/)'`, the attach ones optionally with
+  `FARHELM_GRID_MEASURE_OUT` naming a directory for their messages (passed with `--keep-farhelm-env`); they assert
+  nothing.
 - Terminal host coverage, when the crate changes:
   `cargo +nightly llvm-cov -p terminal-host --branch --summary-only -- --test-threads=1`, with cargo-llvm-cov 0.9.1
   installed in your scratch directory (`cargo install --locked --root <scratch>/tools cargo-llvm-cov --version 0.9.1`,

@@ -524,7 +524,8 @@ async fn an_update_straddling_delivered_end_answers_its_seen_part_never() {
 /// end), then a status request, a clipboard write and a bell as unseen
 /// output, then a clipboard write of `live` and a bell as live output: the
 /// program gets the status answer only, and the sink receives the live
-/// clipboard write and bell only, in that order.
+/// clipboard write only (a bell is never sent to a subscription, live or
+/// not: nothing that subscribes has a use for it).
 #[farhelm_testtrace::test]
 async fn a_recovery_answers_and_reports_only_what_no_supervisor_saw() {
     const SEEN: &[u8] = b"\x1b[c\x1b]52;c;c2Vlbg==\x07\x07";
@@ -573,10 +574,6 @@ async fn a_recovery_answers_and_reports_only_what_no_supervisor_saw() {
             target: farhelm_terminal_emulator::ClipboardTarget::Clipboard,
             text: "live".into()
         })
-    );
-    assert_eq!(
-        within("the second notice", notices.recv()).await,
-        Some(Notice::Bell)
     );
     server.output(end + LIVE.len() as u64, b"\x1b[5n").await;
     assert_eq!(server.input().await, STATUS_ANSWER);
@@ -1812,6 +1809,15 @@ fn the_adapters_map_each_liveness_like_a_pane() {
         caught_up: true,
         checkpoint: None,
         history_trimmed: false,
+        modes: Emulator::new(
+            farhelm_terminal_emulator::Size {
+                columns: 80,
+                lines: 24,
+            },
+            0,
+        )
+        .modes(),
+        size: Size { cols: 80, rows: 24 },
     };
     let anchor = Some(PaneAnchor {
         pid: own.pid,
@@ -2164,6 +2170,208 @@ async fn a_sequence_sends_nothing_after_input_lost_with_a_connection() {
     );
 }
 
+/// A paste goes out as consecutive `Input`s whose receipt says written only
+/// once every one of them was written; one that a lost connection cuts
+/// short is closed first on the new connection.
+///
+/// Why: prompt delivery submits only on a written paste, so the receipt
+/// must not resolve on the first piece's acknowledgement; and a program
+/// that read a bracketed paste's opening marker reads everything after as
+/// pasted text until a closing one arrives. Spec: an unbracketed paste of
+/// `2 * MAX_INPUT + 10` bytes arrives as three `Input`s that join to it,
+/// and its receipt is still pending after the first is acknowledged and
+/// `Written` after all are; a bracketed paste of three `Input`s whose first
+/// was acknowledged and second was in flight when the connection dropped is
+/// `Unknown`, and the new connection's first input is `ESC [201~`. An empty
+/// paste and one over `MAX_PASTE` are refused.
+#[farhelm_testtrace::test]
+async fn a_paste_goes_out_whole_and_is_closed_after_a_loss() {
+    let stand_in = StandIn::new();
+    let info = info(0);
+    let (terminal, mut server, _) = adopt(&stand_in, Adoption::Fresh, &info, options()).await;
+    let sequence = terminal.input_sequence();
+
+    let data: Vec<u8> = (0..2 * MAX_INPUT + 10).map(|at| (at % 251) as u8).collect();
+    let receipt = within("queueing a paste", sequence.send_paste(data.clone(), false))
+        .await
+        .unwrap();
+    let mut pieces = Vec::new();
+    for _ in 0..3 {
+        pieces.push(server.input().await);
+    }
+    assert_eq!(pieces.concat(), data);
+    server.ack(MAX_INPUT as u64).await;
+    let mut written = Box::pin(receipt.fate());
+    assert!(pending_once(&mut written).await, "written after one piece");
+    server.ack(data.len() as u64).await;
+    assert_eq!(
+        within("the paste's fate", written).await,
+        InputFate::Written
+    );
+
+    let mut paste = crate::grid_input::PASTE_START.to_vec();
+    paste.resize(2 * MAX_INPUT + 10, b'p');
+    paste.extend_from_slice(PASTE_END);
+    let receipt = within("queueing a paste", sequence.send_paste(paste.clone(), true))
+        .await
+        .unwrap();
+    let first = server.input().await;
+    assert_eq!(first, paste[..MAX_INPUT]);
+    server.ack((data.len() + MAX_INPUT) as u64).await;
+    let _second = server.input().await;
+    drop(server);
+    let (mut server, _) = stand_in.accept(&info).await;
+    assert_eq!(server.input().await, PASTE_END);
+    assert_eq!(fate(receipt).await, InputFate::Unknown);
+
+    assert_eq!(
+        sequence.send_paste(Vec::new(), false).await.unwrap_err(),
+        InputRefused::Invalid
+    );
+    assert_eq!(
+        sequence
+            .send_paste(vec![b'p'; MAX_PASTE + 1], false)
+            .await
+            .unwrap_err(),
+        InputRefused::Invalid
+    );
+}
+
+/// A closing marker is owed for a paste a loss may have cut short even
+/// when an earlier paste in the window was acknowledged, and stays owed
+/// until the host acknowledges the marker itself.
+///
+/// Why: the window can hold several pastes, and acknowledging one says
+/// nothing of the next; and a marker lost with a second connection leaves
+/// the program inside the paste as surely as the first loss did. Either
+/// way the next answer, or the next key, would be read as pasted text.
+/// Spec: bracketed pastes A and B both go out; A is acknowledged and
+/// written, and the connection drops with B unacknowledged (`Unknown`). On
+/// the second connection the program asks DA1: the runtime sends `ESC
+/// [201~` first and the answer after it. That connection drops with
+/// neither acknowledged; on the third, DA1 asked again gets `ESC [201~`
+/// first and the answer after it. Once both are acknowledged, a loss owes
+/// nothing: on the fourth connection the answer to DA1 is the first input.
+#[farhelm_testtrace::test]
+async fn a_closing_marker_stays_owed_until_acknowledged() {
+    let stand_in = StandIn::new();
+    let info = info(0);
+    let (terminal, mut server, _) = adopt(&stand_in, Adoption::Fresh, &info, options()).await;
+    let sequence = terminal.input_sequence();
+    let a = b"\x1b[200~A\x1b[201~".to_vec();
+    let b = b"\x1b[200~B\x1b[201~".to_vec();
+    let a_receipt = within("queueing A", sequence.send_paste(a.clone(), true))
+        .await
+        .unwrap();
+    let b_receipt = within("queueing B", sequence.send_paste(b.clone(), true))
+        .await
+        .unwrap();
+    assert_eq!(server.input().await, a);
+    assert_eq!(server.input().await, b);
+    server.ack(a.len() as u64).await;
+    assert_eq!(fate(a_receipt).await, InputFate::Written);
+
+    drop(server);
+    let (mut server, _) = stand_in.accept(&info).await;
+    assert_eq!(fate(b_receipt).await, InputFate::Unknown);
+    server.output(0, b"\x1b[c").await;
+    assert_eq!(server.input().await, PASTE_END);
+    assert_eq!(server.input().await, DA1_ANSWER);
+
+    drop(server);
+    let (mut server, _) = stand_in.accept(&info).await;
+    server.output(3, b"\x1b[c").await;
+    assert_eq!(server.input().await, PASTE_END);
+    assert_eq!(server.input().await, DA1_ANSWER);
+    server
+        .ack((PASTE_END.len() + DA1_ANSWER.len()) as u64)
+        .await;
+    // Output after the acknowledgement, processed: so is the
+    // acknowledgement, which arrived before it.
+    server.output(6, b"x").await;
+    wait_until(&terminal, "x", screen_has("x")).await;
+
+    drop(server);
+    let (mut server, _) = stand_in.accept(&info).await;
+    server.output(7, b"\x1b[c").await;
+    assert_eq!(server.input().await, DA1_ANSWER);
+}
+
+/// Pastes waiting for the runtime share one budget per terminal: a paste
+/// that does not fit in what is left waits until an earlier one has gone
+/// out.
+///
+/// Why: the runtime's queue is bounded by requests, not bytes, and a
+/// request can be a whole paste; pastes that attachments handed over and
+/// then ended would otherwise pile up, up to sixteen of them per terminal.
+/// Spec: with a paste of `MAX_PASTE` bytes taken and none of it
+/// acknowledged, a second paste of one byte waits to be taken; once the
+/// host has read and acknowledged every piece of the first, the second is
+/// taken and goes out next, and the first is `Written`.
+#[farhelm_testtrace::test]
+async fn pastes_wait_for_the_terminal_paste_budget() {
+    let stand_in = StandIn::new();
+    let info = info(0);
+    let (terminal, mut server, _) = adopt(&stand_in, Adoption::Fresh, &info, options()).await;
+    let sequence = terminal.input_sequence();
+    let first = within(
+        "queueing the first paste",
+        sequence.send_paste(vec![b'p'; MAX_PASTE], false),
+    )
+    .await
+    .unwrap();
+    let mut second = Box::pin(sequence.send_paste(b"q".to_vec(), false));
+    assert!(
+        pending_once(&mut second).await,
+        "the second paste waits for the budget"
+    );
+    let mut written = 0;
+    while written < MAX_PASTE {
+        written += server.input().await.len();
+        server.ack(written as u64).await;
+    }
+    let second = within("the second paste", second).await.unwrap();
+    assert_eq!(server.input().await, b"q");
+    server.ack((MAX_PASTE + 1) as u64).await;
+    assert_eq!(fate(first).await, InputFate::Written);
+    assert_eq!(fate(second).await, InputFate::Written);
+}
+
+/// An aborted runtime gives back the paste budget its queue held, and a
+/// paste still waiting for the budget is refused as ended.
+///
+/// Why: a supervisor's orderly stop and Delete abort runtimes
+/// (`HostTerminal::abort`); a paste that went on waiting for budget that
+/// nothing would ever give back would hold its caller (a viewer's input
+/// pump, a prompt delivery) until its own timeout. Spec: with a paste of
+/// `MAX_PASTE` bytes taken and none of it acknowledged, and a second paste
+/// waiting for the budget, aborting the runtime makes the second refused
+/// as `Ended` and the first's fate `Unknown`.
+#[farhelm_testtrace::test]
+async fn an_aborted_runtime_refuses_a_paste_waiting_for_the_budget() {
+    let stand_in = StandIn::new();
+    let info = info(0);
+    let (terminal, _server, _) = adopt(&stand_in, Adoption::Fresh, &info, options()).await;
+    let sequence = terminal.input_sequence();
+    let first = within(
+        "queueing the first paste",
+        sequence.send_paste(vec![b'p'; MAX_PASTE], false),
+    )
+    .await
+    .unwrap();
+    let mut second = Box::pin(sequence.send_paste(b"q".to_vec(), false));
+    assert!(
+        pending_once(&mut second).await,
+        "premise: the second paste waits for the budget"
+    );
+    terminal.abort();
+    assert_eq!(
+        within("the waiting paste", second).await.unwrap_err(),
+        InputRefused::Ended
+    );
+    assert_eq!(fate(first).await, InputFate::Unknown);
+}
+
 /// A lost connection frees no room in the runtime's input queue: callers
 /// still blocked on it stay blocked while the runtime reconnects, and the
 /// requests already queued are refused one at a time in the runtime's turn,
@@ -2407,6 +2615,34 @@ async fn a_resize_already_in_force_is_not_sent_again() {
     let (mut server, _) = stand_in.accept(&resized).await;
     let _fence = send(&terminal, b"fence").await;
     assert_eq!(server.next().await, ClientMessage::Input(b"fence".to_vec()));
+}
+
+/// A resize to the size the host already has is not sent.
+///
+/// Why: every viewer asks for its size when it attaches, usually the size
+/// in force; a resize record of an unchanged size would still signal the
+/// program, which redraws, and would reset a grid viewer's history for
+/// nothing (the grid stream format's "Resize"). Spec: on a host at 80x24,
+/// asking for 80x24 and then sending `fence` puts `fence` on the wire with
+/// no `Resize` before it, and `fence2`, sent once `fence` arrived, is next;
+/// asking for 90x20 then sends that resize.
+#[farhelm_testtrace::test]
+async fn a_resize_to_the_size_in_force_is_not_sent() {
+    let stand_in = StandIn::new();
+    let (terminal, mut server, _) = adopt(&stand_in, Adoption::Fresh, &info(0), options()).await;
+    terminal
+        .resize(Size { cols: 80, rows: 24 })
+        .expect("a valid size");
+    let _fence = send(&terminal, b"fence").await;
+    assert_eq!(server.next().await, ClientMessage::Input(b"fence".to_vec()));
+    let _fence = send(&terminal, b"fence2").await;
+    assert_eq!(
+        server.next().await,
+        ClientMessage::Input(b"fence2".to_vec())
+    );
+    let size = Size { cols: 90, rows: 20 };
+    terminal.resize(size).expect("a valid size");
+    assert_eq!(server.next().await, ClientMessage::Resize(size));
 }
 
 /// A connection that keeps ending makes the terminal unavailable after

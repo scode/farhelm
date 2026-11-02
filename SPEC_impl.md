@@ -1841,45 +1841,62 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   counts as seen even if that supervisor never interpreted it, so a query in it goes unanswered and the program waits
   out its own timeout; and an answer a supervisor had worked out but not written is lost the same way. That holds for a
   crash, and for an orderly stop too, for the output in flight between the host and the stopping supervisor when it lets
-  the connection go. Bells, clipboard writes and title changes reach notice subscribers only from live output, so the
-  user never sees one twice; each viewer attachment subscribes on its own, every subscription gets every notice, and one
-  that falls behind by more than a short backlog loses the oldest (logged) rather than holding the terminal up. Every
-  replacement of the emulator (a restored snapshot) goes through one place and is counted under the emulator's lock,
-  beside the gap's history-trimmed mark, so that a viewer's grid stream reading the emulator can tell that its history
-  must be sent again. **Checkpoints** keep the host's tail short: once the output since the previous attempt reaches
-  four times the latest snapshot's size (at least 1 MiB, at most a quarter of the host's journal cap), the runtime
-  snapshots its emulator at the next clean boundary (after a read's split candidate, at a read's end, after a
-  synchronized update's deadline draws it, or where the replay finishes) and hands the snapshot to the host, which then
-  drops the output before it; a rejected snapshot leaves the previous one. Nothing makes a checkpoint due by time: a
-  quiet terminal's short tail replays in milliseconds, so it costs nothing. The host's `Info` does not report its cap,
-  so a runtime assumes the default unless its creator passes the policy for another. Encoding a snapshot at full
-  scrollback takes long (in a release build about 0.3 s for typical output, 1.6 to 1.9 s for 12,000 lines of 200 columns
-  in true color, and over 10 s for a scrollback colored like an image), and so does restoring one (0.25 to 0.46 s), so
-  both run on tokio's blocking pool, never on an async worker. For an encode the emulator moves out to the blocking task
-  and back, and what status sampling reads (screen text, title, modes, size, whether history was trimmed) comes from a
-  view left in its place, without waiting; a reader of the whole emulator waits for it to come back, without blocking.
-  The runtime waits for an encode before it does anything else, so input, resizes and requests wait as long. Letting
-  input through meanwhile was decided against: the host stops acting on a client's requests while more than 256 KiB of
-  its output waits unread, so during a flood, where an encode hurts, a Ctrl-C would not take effect sooner; reading the
-  connection while the emulator is away would overflow the client's bounded event queue, or need a backlog of megabytes
-  that still runs out; and typed input's echo cannot be drawn until the emulator is back. An encode task lost with the
-  emulator (not an encoder panic, which hands it back) ends the runtime, unavailable. At about 100 KiB/s of output, a
-  full terminal in true color spends about 2% of a core on checkpoints (typical output about a fifth of that). The
-  exposure accepted: a scrollback colored like an image receiving about 1 MiB/s cannot be checkpointed as fast as it
-  fills the journal, and may gap while connected; the remedy is a faster encoder. An orderly stop asks for a checkpoint
-  within a deadline that bounds the encode and the host's answer: taken where the terminal is if it is clean there, else
-  none, so that the host keeps its last accepted snapshot and the tail after it, which a recovery replays; an encode the
-  deadline cuts short is finished and sent as an ordinary checkpoint, unless the runtime is stopped first, which cancels
-  every encode it runs (the encoder gives up between rows, keeping nothing). A host's **journal cap** is 32 MiB by
-  default: checkpoints keep the tail below a quarter of it, which leaves about four minutes of an agent's heaviest
-  redraw traffic, and hours of a shell's, for a supervisor's absence before the oldest of that output is trimmed into a
-  **gap**. A gap never resets a healthy emulator: the runtime carries on after it, marks the history trimmed for the
-  viewer (for as long as that runtime runs: a snapshot cannot carry the mark), and, once any replay is over, asks the
-  program to redraw by resizing the terminal one row smaller and back, since Linux sends no `SIGWINCH` for a resize to
-  the size in force (checked on Linux 6.8; the BSD tty code macOS uses compares the same way, read from its source, not
-  tested). It asks the same after restoring a snapshot that left out the screens or was drawn with another character
-  width table. A redraw cannot bring back the scrollback in the gap, or a mode the lost output set until the program
-  sets it again; a program that redraws on `SIGWINCH` sets its modes again as it does.
+  the connection go. Writes to the clipboard reach notice subscribers only from live output, so the user never sees one
+  twice (bells, title changes and writes to the primary selection are not sent: a viewer does nothing with any of them,
+  and a burst of them would push clipboard writes out of a subscriber's backlog); each viewer attachment subscribes on
+  its own, every subscription gets every notice, and one that falls behind by more than a short backlog loses the oldest
+  (logged) rather than holding the terminal up. Every replacement of the emulator (a restored snapshot) goes through one
+  place and is counted under the emulator's lock, beside the gap's history-trimmed mark, and so is every resize that
+  changes the size (a resize reflows history without replacing the emulator), so that a viewer's grid stream reading the
+  emulator can tell that its history must be sent again. The status carries the program's modes and the terminal's size
+  as of each change, so that a viewer's input is encoded without touching the emulator. A resize to the size the host
+  already has is not sent to it. A paste reaches the runtime whole, as one request of at most 8 MiB, which it queues as
+  all of its `Input`s in one turn, so that nothing lands between them: another producer's input waits for them, and the
+  runtime's answers to the program's queries queue behind them. Pastes waiting for the runtime share a budget of 8 MiB
+  per terminal, from before one enters its queue until its last piece is sent, so pastes left by ended attachments
+  cannot pile up. The runtime counts the bracketed pastes begun on a connection (an opening piece sent) and not closed
+  (a closing piece acknowledged); a loss while one is open and anything is unacknowledged owes the program a closing
+  marker, which goes first on the new connection, ahead of the answers kept from before the loss. The marker is input of
+  its own, never packed with answers, and stays owed until the host acknowledges it, so a second loss before then owes
+  it again; one marker closes any number of pastes. A loss with nothing unacknowledged owes nothing: the rest of the
+  paste goes on whole. Since an unacknowledged `Input` may have been written whole, in part or not at all, the program
+  can read a closing marker alone (when the loss caught the paste's opening piece unwritten) or twice (when a lost
+  closing piece or marker was written after all), which was accepted over leaving it inside a paste. A runtime that ends
+  with a marker owed closes nothing, and neither does the runtime that adopts the host next. **Checkpoints** keep the
+  host's tail short: once the output since the previous attempt reaches four times the latest snapshot's size (at least
+  1 MiB, at most a quarter of the host's journal cap), the runtime snapshots its emulator at the next clean boundary
+  (after a read's split candidate, at a read's end, after a synchronized update's deadline draws it, or where the replay
+  finishes) and hands the snapshot to the host, which then drops the output before it; a rejected snapshot leaves the
+  previous one. Nothing makes a checkpoint due by time: a quiet terminal's short tail replays in milliseconds, so it
+  costs nothing. The host's `Info` does not report its cap, so a runtime assumes the default unless its creator passes
+  the policy for another. Encoding a snapshot at full scrollback takes long (in a release build about 0.3 s for typical
+  output, 1.6 to 1.9 s for 12,000 lines of 200 columns in true color, and over 10 s for a scrollback colored like an
+  image), and so does restoring one (0.25 to 0.46 s), so both run on tokio's blocking pool, never on an async worker.
+  For an encode the emulator moves out to the blocking task and back, and what status sampling reads (screen text,
+  title, modes, size, whether history was trimmed) comes from a view left in its place, without waiting; a reader of the
+  whole emulator waits for it to come back, without blocking. The runtime waits for an encode before it does anything
+  else, so input, resizes and requests wait as long. Letting input through meanwhile was decided against: the host stops
+  acting on a client's requests while more than 256 KiB of its output waits unread, so during a flood, where an encode
+  hurts, a Ctrl-C would not take effect sooner; reading the connection while the emulator is away would overflow the
+  client's bounded event queue, or need a backlog of megabytes that still runs out; and typed input's echo cannot be
+  drawn until the emulator is back. An encode task lost with the emulator (not an encoder panic, which hands it back)
+  ends the runtime, unavailable. At about 100 KiB/s of output, a full terminal in true color spends about 2% of a core
+  on checkpoints (typical output about a fifth of that). The exposure accepted: a scrollback colored like an image
+  receiving about 1 MiB/s cannot be checkpointed as fast as it fills the journal, and may gap while connected; the
+  remedy is a faster encoder. An orderly stop asks for a checkpoint within a deadline that bounds the encode and the
+  host's answer: taken where the terminal is if it is clean there, else none, so that the host keeps its last accepted
+  snapshot and the tail after it, which a recovery replays; an encode the deadline cuts short is finished and sent as an
+  ordinary checkpoint, unless the runtime is stopped first, which cancels every encode it runs (the encoder gives up
+  between rows, keeping nothing). A host's **journal cap** is 32 MiB by default: checkpoints keep the tail below a
+  quarter of it, which leaves about four minutes of an agent's heaviest redraw traffic, and hours of a shell's, for a
+  supervisor's absence before the oldest of that output is trimmed into a **gap**. A gap never resets a healthy
+  emulator: the runtime carries on after it, marks the history trimmed for the viewer (for as long as that runtime runs:
+  a snapshot cannot carry the mark), and, once any replay is over, asks the program to redraw by resizing the terminal
+  one row smaller and back, since Linux sends no `SIGWINCH` for a resize to the size in force (checked on Linux 6.8; the
+  BSD tty code macOS uses compares the same way, read from its source, not tested). It asks the same after restoring a
+  snapshot that left out the screens or was drawn with another character width table. A redraw cannot bring back the
+  scrollback in the gap, or a mode the lost output set until the program sets it again; a program that redraws on
+  `SIGWINCH` sets its modes again as it does.
 - **The terminal switch points** (`service/terminals.rs`'s `Terminal`, one variant per kind, matched exhaustively
   wherever behavior differs) answer for a session whose agent runs in a host from its runtime, never from tmux. Status
   reads the same three classes of evidence for both kinds: a running child is live, a processed exit record is an exit
@@ -1901,13 +1918,15 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   anchored at the host's child; while the session's entry is not yet published the report waits for a later pass rather
   than being refused. Prompts check bracketed paste in the emulator's modes, once the runtime has caught up with its
   host's journal (until then, after a restart, a prompt is refused, since the modes are a past screen's), and send the
-  paste in parts of one input sequence, submitting only once all of it was written. The orderly stop's hold wait
-  compares the "held" mark with the child's pid. An attach is refused for a client that cannot show grids, permanently,
-  with `InvalidRequest`. A host agent's session has no tmux session of its own; tmux tabs of such a session are looked
-  for in the tmux session its row names, which is always `fh-` and its id. Only a create under the internal switch
-  (below) makes a host terminal, which a restarted supervisor finds again ("Across supervisor restarts" below), and
-  until Restart can start a new host and tabs can be hosts, Restart of a host agent is refused before anything is
-  stopped and tabs cannot be opened beside one.
+  paste as one paste through an input sequence, then the submit through the same sequence once all of the paste was
+  written; input written between the two (an answer to a query the program asked meanwhile, a viewer's keys) lands in
+  the prompt, which was accepted rather than have the runtime hold its answers across two sends. The orderly stop's hold
+  wait compares the "held" mark with the child's pid. An attach is refused for a client that cannot show grids,
+  permanently, with `InvalidRequest`; one that can gets a grid stream (below). A host agent's session has no tmux
+  session of its own; tmux tabs of such a session are looked for in the tmux session its row names, which is always
+  `fh-` and its id. Only a create under the internal switch (below) makes a host terminal, which a restarted supervisor
+  finds again ("Across supervisor restarts" below), and until Restart can start a new host and tabs can be hosts,
+  Restart of a host agent is refused before anything is stopped and tabs cannot be opened beside one.
 - **Creating agents in hosts** (`service/core/host_launch.rs`) is behind an internal switch,
   `SupervisorSeams::new_terminals` (`Tmux` by default, or `Host`), which only the in-process test harnesses set:
   `farhelm supervisor run` cannot turn it on, and no test sets it through its own environment. Only a new create
@@ -2069,6 +2088,47 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   a runtime. A placeholder whose reason will not pass on its own (another protocol version, snapshot format or tag, a
   launch record that cannot be read) is not retried, and a runtime that becomes unavailable after it ran stays so until
   the supervisor's next start, whose reload adopts the host afresh.
+- **Grid streams** (`service/grid_stream.rs`, the encoding in `grid_output.rs`): an attach to a host terminal from a
+  client that can show grids is answered with stream kind `grid` and gets a sender task of its own in the forwarder's
+  place, sharing the attachment machinery (takeover, detach, pause, the stall detach and its verdicts) with tmux
+  attachments. It waits up to a second for the viewer's size to take effect, then sends `hello`, `state`, the visible
+  screen, the history once (oldest first, in messages of about 32 KiB, so that what one attachment can have queued on
+  the connection stays about what a tmux terminal's can), and `ReplayComplete`; then, whenever the terminal changes, at
+  most every 8 ms, one cycle of what changed: `state`, the lines that entered history, and the screen rows that differ
+  from what this viewer was last sent, shifted when output scrolled. It reads the emulator only when it is home (never
+  waiting through a snapshot encode), marking the status seen just before each read, so a change published after a read
+  wakes it again. While the writer queue is full or the viewer has paused it sends nothing, and the next cycle starts
+  from the emulator as it is then, so skipped screen revisions cost nothing. History is not skipped: lines are numbered
+  by the vendored count of lines scrolled into history, and the viewer is sent every line from the one it is owed,
+  unless that line scrolled off the far end or history changed shape (a rebuild or a size-changing resize, which the
+  runtime counts, an erasure, which the emulator counts, or a redefined palette entry, which recolors rows already
+  sent), when it is sent `history_reset` and the history held; a change of shape is acted on once it has held for a
+  quarter second, or two seconds after the first of a run of changes that does not settle, so a window dragged to a new
+  size resends the history once, not at every step; after a reset forced by the two seconds, the next run waits until it
+  settles, so changes that never stop resend the history once, not every two seconds. A resend costs what an attach does
+  (for 12,000 lines at 200 columns, about 2.5 MB of typical output, 60 MB colored from the 256-color palette, 86 MB in
+  true color), and a redefined palette entry costs one whether or not any history row uses it, since telling would mean
+  scanning the history. A live cycle sends at most about 256 KiB of history ahead of its screen frame (an estimate that
+  errs high, counting escaped text and each run's link target, plus at most one row more), so a resend goes out over
+  many cycles with the screen current in each. The attach's catch-up ends early when history changes shape under it,
+  leaving the reset to the live path's settle rule, and is followed at once by a live cycle, since its later reads take
+  history only. The program's exit is `state`'s, over the final screen; a host that is gone ends the attachment as a
+  dead pane's, and an unavailable one as a failed stream. An attach to a host that cannot be read is refused as
+  `Unavailable` before anything is taken over, with a message that says what can help: a startup placeholder whose
+  reason may pass becomes attachable once re-adoption replaces it with a runtime (it never has an attachment, so the
+  viewer attaches again then), while a runtime that ran and became unavailable, or a placeholder whose reason will not
+  pass, stays refused until the supervisor restarts. Clipboard writes reach the viewer from the attachment's notice
+  subscription; while the viewer is behind only the latest is kept. Viewer input is decoded and encoded where the
+  connection reads it, with the modes and size the status carries, never waiting there, and handed to the attachment's
+  own input pump, which writes it through one input sequence per attachment. A paste is collected in the attachment and
+  handed on only with its last part, as one paste the runtime writes whole; one whose last part never arrives is dropped
+  whole. What an attachment holds (a paste being collected, input waiting for the pump, a paste not yet written) is
+  bounded at 8 MiB. A malformed message, an interrupted paste, input past the bound, or input whose fate is unknown or
+  not sent ends the attachment as an input failure, which the sender notices wherever it waits, a pause included. Since
+  another producer's input lost with a connection moves the terminal's input epoch too, an attachment's next input after
+  any such loss fails it, and the viewer attaches again. An attachment that ends drops the input its pump had not handed
+  to the runtime and stops the pump at once; what the pump handed over is written before anything a replacement
+  attachment sends.
 
 Test harnesses end the hosts they leave behind: `farhelm-teststate` ends every host whose socket is in a `hosts`
 directory within an owned run directory (its dead-run sweep, and every `TestDir` drop) through a small blocking client

@@ -1347,6 +1347,54 @@ pub(crate) const HOST_EXIT_RECORD_WAIT: Duration = Duration::from_secs(2);
 pub(crate) const ATTACH_NEEDS_GRID_CLIENT: &str =
     "this terminal runs in a terminal host and needs a client that can show grid terminals";
 
+/// Why an attach to `host` is refused, if it is: the host cannot be read
+/// ([`crate::hosts::Liveness::Unavailable`]). Refused before the takeover,
+/// the attach costs the session's current client nothing. The refusal is
+/// `Unavailable`, and its message says what can help, which differs by
+/// case:
+///
+/// - A startup placeholder (no runtime ever ran) for a reason that may
+///   pass is retried by re-adoption (`super::core::host_handover`), which
+///   replaces it with a runtime: an attach then works. A stream of the
+///   placeholder itself would show a blank screen that is not the
+///   program's. An attach never follows the replacement on its own: the
+///   placeholder never had an attachment, so the viewer attaches again.
+/// - A placeholder for a reason that will not pass, and a runtime that ran
+///   and became unavailable, stay so until the supervisor restarts, whose
+///   reload adopts the host afresh: no attach works before then. (A runtime
+///   that ran still holds the program's last screen; it is refused all the
+///   same, rather than shown and then failed.)
+fn host_attach_refusal(host: &crate::hosts::HostTerminal) -> Option<String> {
+    match host.status().liveness {
+        crate::hosts::Liveness::Unavailable { reason, .. }
+            if host.is_placeholder() && reason.may_pass() =>
+        {
+            Some(format!(
+                "this terminal's host could not be adopted yet ({reason}); the supervisor keeps \
+                 trying, and an attach can work once it has"
+            ))
+        }
+        crate::hosts::Liveness::Unavailable { reason, .. } => Some(format!(
+            "this terminal's host cannot be read ({reason}), and will not be until the supervisor \
+             restarts"
+        )),
+        crate::hosts::Liveness::Running { .. }
+        | crate::hosts::Liveness::Exited { .. }
+        | crate::hosts::Liveness::Gone => None,
+    }
+}
+
+/// What an attach streams, decided once from the terminal it resolved:
+/// a tmux pane, attached through the session's sink, a replay stream and
+/// an input client of its own; or a terminal in a terminal host, for a
+/// client that can show grids, attached through a grid sender and an input
+/// side (`super::grid_stream`). The handler's takeover is the same for
+/// both; only the setup before and after it differs.
+enum AttachTarget<'a> {
+    Tmux(&'a super::terminals::TmuxTerminal),
+    Host(crate::hosts::HostTerminal),
+}
+
 /// Every request-shape check the attach can make lives here,
 /// ahead of the first lookup and far ahead of the takeover: a
 /// malformed attach must cost the session's current client
@@ -1451,36 +1499,44 @@ async fn handle_attach(
         }
     };
     let key = AttachmentKey::new(&session_id, terminal_id);
-    // The kind is decided here, once, for the whole setup below: a tmux
-    // terminal is attached through the session's sink, a replay stream and
-    // an input client of its own, and a pane-death latch, all addressed by
-    // the tmux handles. Those become the attachment's `AttachBackend::Tmux`
-    // and its forwarder's `AttachOutput::Tmux` (which also carries the
-    // stream's attach replay), and everything after this handler (input,
-    // death observation, output, replay rendering, teardown) dispatches on
-    // those per kind. Resize and the revalidation below keep the
-    // `Terminal` itself.
+    // The kind is decided here, once, for the whole setup below
+    // (`AttachTarget`): a tmux terminal is attached through the session's
+    // sink, a replay stream and an input client of its own, and a
+    // pane-death latch, all addressed by the tmux handles. Those become
+    // the attachment's `AttachBackend::Tmux` and its forwarder's
+    // `AttachOutput::Tmux` (which also carries the stream's attach
+    // replay), and everything after this handler (input, death
+    // observation, output, replay rendering, teardown) dispatches on those
+    // per kind. Resize and the revalidation below keep the `Terminal`
+    // itself.
     //
     // A host terminal has no byte stream a client could render: its screen
     // lives in the supervisor's emulator, and reaches a viewer only as a
-    // grid (`farhelm_proto::grid`). A client that cannot show one is
-    // refused, permanently (`ATTACH_NEEDS_GRID_CLIENT`). One that can is
-    // refused too until this supervisor streams grids, which adds that
-    // branch here; that refusal is not retryable either (the same request
-    // fails the same way against this supervisor), so it is not `Internal`,
-    // which clients read as transient. Either refusal comes before the
-    // attach takes anything over or opens anything, so the session's
-    // current client keeps its attachments.
-    let tmux = match &terminal {
-        Terminal::Tmux(tmux) => tmux,
+    // grid (`farhelm_proto::grid`), from a grid sender of its own
+    // (`super::grid_stream::GridSender`, which takes the forwarder's place)
+    // and an input side (`AttachBackend::Host`, which takes the input
+    // client's). A client that cannot show grids is refused, permanently
+    // (`ATTACH_NEEDS_GRID_CLIENT`), before the attach takes anything over
+    // or opens anything, so the session's current client keeps its
+    // attachments. So is an attach to a host that cannot be read
+    // (`host_attach_refusal`), for now.
+    let target = match &terminal {
+        Terminal::Tmux(tmux) => AttachTarget::Tmux(tmux),
+        Terminal::Host(host) if grid => {
+            if let Some(refusal) = host_attach_refusal(host) {
+                reply_error(tx, req_id, ErrorKind::Unavailable, refusal).await;
+                return;
+            }
+            AttachTarget::Host(host.clone())
+        }
         Terminal::Host(_) => {
-            let message = if grid {
-                "this terminal runs in a terminal host, and this supervisor cannot stream it as \
-                 a grid yet"
-            } else {
-                ATTACH_NEEDS_GRID_CLIENT
-            };
-            reply_error(tx, req_id, ErrorKind::InvalidRequest, message.to_string()).await;
+            reply_error(
+                tx,
+                req_id,
+                ErrorKind::InvalidRequest,
+                ATTACH_NEEDS_GRID_CLIENT.to_string(),
+            )
+            .await;
             return;
         }
     };
@@ -1524,12 +1580,18 @@ async fn handle_attach(
     // traffic. Nothing about the sink needs the lock: the registry
     // has its own, and it is this `Arc` rather than any map entry
     // that keeps the sink alive.
-    let sink = match sup.ensure_session_sink(&tmux.tmux_name).await {
-        Ok(sink) => sink,
-        Err(e) => {
-            permit.send(error_frame(req_id, error_kind(&e), format!("{e:#}")));
-            return;
-        }
+    //
+    // A host terminal has no tmux session, so no sink: its host reads the
+    // program's output whoever watches.
+    let sink = match &target {
+        AttachTarget::Tmux(tmux) => match sup.ensure_session_sink(&tmux.tmux_name).await {
+            Ok(sink) => Some(sink),
+            Err(e) => {
+                permit.send(error_frame(req_id, error_kind(&e), format!("{e:#}")));
+                return;
+            }
+        },
+        AttachTarget::Host(_) => None,
     };
 
     // The whole takeover — kick every attachment this attach
@@ -1786,110 +1848,156 @@ async fn handle_attach(
         warn!(session = %session_id, error = %e, "resize during attach failed");
     }
 
-    // The incumbent must be fully gone before the replacement
-    // control client starts. Overlap reproducibly froze the new
-    // stream after replay, even though two steady-state control
-    // clients both receive output in isolation. The replacement
-    // attaches with output disabled, captures replay, and enables
-    // live output through that SAME client; its final command
-    // block is the exact replay/live boundary.
-    //
-    // This setup happens after takeover on purpose. There is no
-    // safe way to preserve the incumbent while also avoiding
-    // control-client overlap, so failure here leaves the session
-    // detached and reports only this attach request as failed.
-    //
-    // One replay stream and one input client PER ATTACHED
-    // TERMINAL, which is what makes flow control per terminal:
-    // `pause-after`/`%pause` are properties of a control client,
-    // so a client shared across terminals would let one stalled
-    // viewer pause another terminal's stream (PLAN_M4.md item 3).
-    // The overlap hazard above is per TERMINAL too — it is about
-    // two clients streaming one pane, not about a session having
-    // several. The stream is opened against the tmux SESSION,
-    // because that is the only thing a control client can attach
-    // to; it therefore hears every window's panes and filters down
-    // to this one by pane id (see `tmux::OutputStream`), which is
-    // what keeps a tab's output out of the agent's terminal.
-    let stream_candidate = match sup
-        .open_replay_stream_candidate(key.clone(), &tmux.tmux_name, &tmux.pane)
-        .await
-    {
-        Ok(candidate) => candidate,
-        Err(e) => {
-            drop(attachments);
-            permit.send(error_frame(req_id, error_kind(&e), format!("{e:#}")));
-            return;
-        }
-    };
-    // A second, dedicated control-mode client for this
-    // attachment's input (see `InputClient`) — opened here rather
-    // than derived from `stream`, since the two are now
-    // independent control connections rather than one shared
-    // stdin. A failure here must tear down the replay stream just
-    // opened above: leaving it live would attach this session to
-    // a client nothing will ever read from or write to again.
-    let input = match sup
-        .tmux
-        .open_input_client(&tmux.tmux_name, &tmux.pane)
-        .await
-    {
-        Ok(input) => input,
-        Err(e) => {
-            drop(stream_candidate);
-            drop(attachments);
-            permit.send(error_frame(req_id, error_kind(&e), format!("{e:#}")));
-            return;
-        }
-    };
-    let (modes, prefill, stream) = stream_candidate.install();
-
-    // The `Attached` reply is enqueued HERE, before the forwarder
-    // exists, using the capacity reserved before this handler took
-    // any lock. Both halves matter. It must precede the replay so
-    // the client's `attach()` can return and its consumer can
-    // start draining — otherwise a large replay floods the helm's
-    // bounded per-terminal queue while nobody is allowed to read
-    // it yet, and a perfectly healthy attach trips the
-    // stalled-terminal detach. And it must not AWAIT here, because
-    // `attachments` is held: `permit` makes the enqueue
-    // infallible and instant.
-    // Bytes: this path attaches tmux terminals only (host terminals were
-    // refused above).
-    permit.send(reply_frame(&ControlMsg::Attached {
-        req_id,
-        channel,
-        stream: farhelm_proto::StreamKind::Bytes,
-    }));
-
-    // Everything from here on — the replay prefill and the live
-    // pump — happens inside the forwarder task rather than here,
-    // and that placement is load-bearing.
-    // A full replay is megabytes of 32 KiB frames, and this
-    // handler runs under the supervisor-wide `attachments` mutex;
-    // sending them here would mean AWAITING a bounded queue (see
-    // CONNECTION_WRITER_QUEUE) with that lock held, letting one
-    // slow client stall every other session's attach and input.
-    // Ordering is unaffected: the forwarder is this channel's
-    // only writer, so its prefill necessarily precedes its own
-    // live output.
+    // Everything that streams the terminal to the client (a tmux
+    // terminal's replay prefill and live pump, a host terminal's grid
+    // attach sequence and live updates) happens inside the output task
+    // spawned below rather than here, and that placement is load-bearing.
+    // A full replay is megabytes of 32 KiB frames (a grid's history is as
+    // large), and this handler runs under the supervisor-wide
+    // `attachments` mutex; sending them here would mean AWAITING a bounded
+    // queue (see CONNECTION_WRITER_QUEUE) with that lock held, letting one
+    // slow client stall every other session's attach and input. Ordering
+    // is unaffected: the output task is this channel's only writer, so its
+    // prefill necessarily precedes its own live output.
     let (pause_tx, pause_rx) = watch::channel(None);
     let (forwarder_shutdown, shutdown_rx) = watch::channel(false);
     let (forwarder_cleanup, cleanup_rx) = watch::channel(None);
-    let (pane_death, death_rx) = super::terminals::PaneDeath::new(stream.session(), stream.pane());
-    let forwarder = Forwarder {
-        sup: Arc::clone(sup),
-        session_id: session_id.clone(),
-        terminal: key.terminal.clone(),
-        channel,
-        tx: tx.clone(),
-        stream: AttachOutput::Tmux(TmuxOutput::new(modes, prefill, stream)),
-        pause_rx,
-        death_rx,
-        stall_timeout: sup.timeouts.stall_detach,
-        cleanup: forwarder_cleanup,
+    let (task, backend) = match target {
+        AttachTarget::Tmux(tmux) => {
+            let sink = sink.expect("a tmux attach brought up its session's sink above");
+            // The incumbent must be fully gone before the replacement
+            // control client starts. Overlap reproducibly froze the new
+            // stream after replay, even though two steady-state control
+            // clients both receive output in isolation. The replacement
+            // attaches with output disabled, captures replay, and enables
+            // live output through that SAME client; its final command
+            // block is the exact replay/live boundary.
+            //
+            // This setup happens after takeover on purpose. There is no
+            // safe way to preserve the incumbent while also avoiding
+            // control-client overlap, so failure here leaves the session
+            // detached and reports only this attach request as failed.
+            //
+            // One replay stream and one input client PER ATTACHED
+            // TERMINAL, which is what makes flow control per terminal:
+            // `pause-after`/`%pause` are properties of a control client,
+            // so a client shared across terminals would let one stalled
+            // viewer pause another terminal's stream (PLAN_M4.md item 3).
+            // The overlap hazard above is per TERMINAL too — it is about
+            // two clients streaming one pane, not about a session having
+            // several. The stream is opened against the tmux SESSION,
+            // because that is the only thing a control client can attach
+            // to; it therefore hears every window's panes and filters down
+            // to this one by pane id (see `tmux::OutputStream`), which is
+            // what keeps a tab's output out of the agent's terminal.
+            let stream_candidate = match sup
+                .open_replay_stream_candidate(key.clone(), &tmux.tmux_name, &tmux.pane)
+                .await
+            {
+                Ok(candidate) => candidate,
+                Err(e) => {
+                    drop(attachments);
+                    permit.send(error_frame(req_id, error_kind(&e), format!("{e:#}")));
+                    return;
+                }
+            };
+            // A second, dedicated control-mode client for this
+            // attachment's input (see `InputClient`) — opened here rather
+            // than derived from `stream`, since the two are now
+            // independent control connections rather than one shared
+            // stdin. A failure here must tear down the replay stream just
+            // opened above: leaving it live would attach this session to
+            // a client nothing will ever read from or write to again.
+            let input = match sup
+                .tmux
+                .open_input_client(&tmux.tmux_name, &tmux.pane)
+                .await
+            {
+                Ok(input) => input,
+                Err(e) => {
+                    drop(stream_candidate);
+                    drop(attachments);
+                    permit.send(error_frame(req_id, error_kind(&e), format!("{e:#}")));
+                    return;
+                }
+            };
+            let (modes, prefill, stream) = stream_candidate.install();
+
+            // The `Attached` reply is enqueued HERE, before the forwarder
+            // exists, using the capacity reserved before this handler took
+            // any lock. Both halves matter. It must precede the replay so
+            // the client's `attach()` can return and its consumer can
+            // start draining — otherwise a large replay floods the helm's
+            // bounded per-terminal queue while nobody is allowed to read
+            // it yet, and a perfectly healthy attach trips the
+            // stalled-terminal detach. And it must not AWAIT here, because
+            // `attachments` is held: `permit` makes the enqueue
+            // infallible and instant.
+            permit.send(reply_frame(&ControlMsg::Attached {
+                req_id,
+                channel,
+                stream: farhelm_proto::StreamKind::Bytes,
+            }));
+
+            let (pane_death, death_rx) =
+                super::terminals::PaneDeath::new(stream.session(), stream.pane());
+            let forwarder = Forwarder {
+                sup: Arc::clone(sup),
+                session_id: session_id.clone(),
+                terminal: key.terminal.clone(),
+                channel,
+                tx: tx.clone(),
+                stream: AttachOutput::Tmux(TmuxOutput::new(modes, prefill, stream)),
+                pause_rx,
+                death_rx,
+                stall_timeout: sup.timeouts.stall_detach,
+                cleanup: forwarder_cleanup,
+            };
+            (
+                tokio::spawn(forwarder.run(shutdown_rx)),
+                AttachBackend::Tmux(TmuxAttach {
+                    pane_death,
+                    input,
+                    sink,
+                }),
+            )
+        }
+        AttachTarget::Host(host) => {
+            // A host terminal has no setup that can fail: its runtime is
+            // already connected. The reply goes first, through the permit
+            // reserved before any lock, for the tmux arm's reasons.
+            permit.send(reply_frame(&ControlMsg::Attached {
+                req_id,
+                channel,
+                stream: farhelm_proto::StreamKind::Grid,
+            }));
+            let (input, input_failure) = super::grid_stream::HostAttach::new(host.clone());
+            let stream = super::grid_stream::GridStream::new(super::grid_stream::GridStreamParts {
+                channel,
+                tx: tx.clone(),
+                notices: Some(host.subscribe_notices()),
+                host,
+                pause_rx,
+                stall_timeout: sup.timeouts.stall_detach,
+                attach_size: Some(terminal_host::protocol::Size { cols, rows }),
+                input_failure: Some(input_failure),
+                seams: super::grid_stream::StreamSeams::default(),
+            });
+            let sender = super::grid_stream::GridSender {
+                sup: Arc::clone(sup),
+                key: key.clone(),
+                channel,
+                tx: tx.clone(),
+                stream,
+                stall_timeout: sup.timeouts.stall_detach,
+                cleanup: forwarder_cleanup,
+            };
+            (
+                tokio::spawn(sender.run(shutdown_rx)),
+                AttachBackend::Host(input),
+            )
+        }
     };
-    let task = tokio::spawn(forwarder.run(shutdown_rx));
 
     attachments.insert(
         key.clone(),
@@ -1901,11 +2009,7 @@ async fn handle_attach(
             forwarder_shutdown,
             forwarder_cleanup: cleanup_rx,
             pause: pause_tx,
-            backend: AttachBackend::Tmux(TmuxAttach {
-                pane_death,
-                input,
-                sink,
-            }),
+            backend,
         },
     );
     drop(attachments);

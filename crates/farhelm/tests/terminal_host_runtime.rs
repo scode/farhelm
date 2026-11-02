@@ -620,7 +620,8 @@ const FLOOD: &str = "i=0; while [ $i -lt 3000 ]; do \
      printf 'filler line %05d xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\\n' $i; i=$((i+1)); done";
 
 /// A recovered runtime answers only the query no supervisor saw, and
-/// reports only live clipboard writes and bells: nothing from output in the
+/// reports only live clipboard writes (bells are never reported: a viewer
+/// has no use for one): nothing from output in the
 /// snapshot, nothing from output an earlier supervisor was sent after it,
 /// and of output written while no supervisor was attached, the query only.
 ///
@@ -639,7 +640,7 @@ const FLOOD: &str = "i=0; while [ $i -lt 3000 ]; do \
 /// before the recovery adopts the host. The recovered runtime makes the child print `1b 5b 30 6e`, the
 /// status answer; once released, the child writes `four` to the clipboard
 /// and rings, and a notice subscription taken on the recovered runtime
-/// receives that clipboard write and bell first.
+/// receives that clipboard write first, and nothing else.
 #[farhelm_testtrace::test]
 async fn the_replay_answers_only_what_no_supervisor_saw() {
     let fifos = tempfile::tempdir().unwrap();
@@ -725,10 +726,8 @@ async fn the_replay_answers_only_what_no_supervisor_saw() {
             text: "four".into()
         })
     );
-    assert_eq!(
-        within("the live bell", notices.recv()).await,
-        Some(Notice::Bell)
-    );
+    // The bell came in the same write, so it would be queued by now.
+    assert_eq!(notices.try_recv(), None, "a notice besides the write");
 }
 
 /// Output that overflows the journal while no supervisor is attached

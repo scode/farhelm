@@ -1,7 +1,10 @@
 //! A stand-in terminal host for the supervisor's own tests of its terminal
-//! switch points: a listener in the test process that speaks just enough of
-//! the protocol for a [`HostTerminal`] to adopt it, and that a test drives
-//! through a [`TestHost`] (output, the child's exit, becoming unreadable).
+//! switch points and grid streams: a listener in the test process that
+//! speaks just enough of the protocol for a [`HostTerminal`] to adopt it,
+//! applies resizes as a host does (a resize record in the stream), accepts
+//! every checkpoint, and that a test drives through a [`TestHost`] (output,
+//! the child's exit, becoming unreadable, holding and releasing input,
+//! dropping the connection, a restored snapshot).
 //!
 //! The runtime's own tests have a stand-in of their own
 //! (`hosts::terminal::tests`), which plays each record and acknowledgement
@@ -30,7 +33,7 @@ use terminal_host::protocol::{
 };
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::{UnixListener, UnixStream};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 
 use super::{Adoption, HostTerminal, HostTerminalOptions, LivenessNotifier};
 use crate::hosts::client::ClientDeadlines;
@@ -51,6 +54,23 @@ enum Command {
     /// Send the journaled output (see [`TestHostSpec::journaled`]) up to
     /// this many bytes, from where the last such command stopped.
     Replay(usize),
+    /// Stop acknowledging input: keep what arrives, unwritten, as a host
+    /// does while its program does not read the terminal; say so once in
+    /// force. The first `pass` inputs to arrive are still written, as a
+    /// program that stops reading partway through.
+    HoldInput {
+        pass: usize,
+        held: tokio::sync::oneshot::Sender<()>,
+    },
+    /// Write and acknowledge the input held, and every later input.
+    ReleaseInput,
+    /// End the connection, as a host whose client was cut off: input held
+    /// and not acknowledged is lost with it, as a host drops what a
+    /// displaced client sent and it had not acted on.
+    DropConnection,
+    /// Send a snapshot record of this blob at a position just past the
+    /// output sent so far, which the runtime restores (a rebuild).
+    Restore(Vec<u8>),
 }
 
 /// A running stand-in host. Dropping it ends the host's task and removes
@@ -62,6 +82,10 @@ pub(crate) struct TestHost {
     child_pid: u32,
     /// Every input byte the host acknowledged as written, in order.
     received: Arc<Mutex<Vec<u8>>>,
+    /// How many bytes `received` holds, to wait on.
+    received_len: watch::Receiver<usize>,
+    /// How many inputs are held unacknowledged (`Command::HoldInput`).
+    held: watch::Receiver<usize>,
     commands: mpsc::UnboundedSender<Command>,
     /// Whether the host answers every connection with a protocol version no
     /// supervisor speaks; shared with its task.
@@ -110,9 +134,27 @@ impl TestHost {
         self.received.lock().expect("the input record").clone()
     }
 
-    /// Have the child print `data`.
+    /// Wait, at most `within`, until the host has acknowledged exactly
+    /// `expected` as written; says whether it did.
+    pub(crate) async fn received_becomes(&self, expected: &[u8], within: Duration) -> bool {
+        let mut len = self.received_len.clone();
+        let waited = tokio::time::timeout(within, async {
+            while self.received() != expected {
+                if len.changed().await.is_err() {
+                    return;
+                }
+            }
+        })
+        .await;
+        waited.is_ok() && self.received() == expected
+    }
+
+    /// Have the child print `data`, in records no longer than a host's
+    /// (`MAX_OUTPUT_CHUNK`).
     pub(crate) fn output(&self, data: &[u8]) {
-        let _ = self.commands.send(Command::Output(data.to_vec()));
+        for chunk in data.chunks(terminal_host::protocol::MAX_OUTPUT_CHUNK) {
+            let _ = self.commands.send(Command::Output(chunk.to_vec()));
+        }
     }
 
     /// Have the child exit with `code`, which the host reports after the
@@ -141,6 +183,48 @@ impl TestHost {
     /// runtime is catching up with, delivered when the test says.
     pub(crate) fn replay_journaled(&self, upto: usize) {
         let _ = self.commands.send(Command::Replay(upto));
+    }
+
+    /// Stop acknowledging input, as a host whose program does not read its
+    /// terminal: the runtime's input window fills and callers' sends wait.
+    /// Returns once the host holds input (it must be serving a connection).
+    pub(crate) async fn hold_input(&self) {
+        self.hold_input_after(0).await;
+    }
+
+    /// [`Self::hold_input`], once the next `pass` inputs have been written
+    /// and acknowledged: for a test that needs the start of something
+    /// written and the rest held.
+    pub(crate) async fn hold_input_after(&self, pass: usize) {
+        let (held, holding) = tokio::sync::oneshot::channel();
+        let _ = self.commands.send(Command::HoldInput { pass, held });
+        let _ = tokio::time::timeout(ADOPT_WAIT, holding).await;
+    }
+
+    /// Wait, at most `within`, until the host holds at least `count` inputs
+    /// unacknowledged; says whether it did.
+    pub(crate) async fn holds(&self, count: usize, within: Duration) -> bool {
+        let mut held = self.held.clone();
+        tokio::time::timeout(within, held.wait_for(|held| *held >= count))
+            .await
+            .is_ok_and(|held| held.is_ok())
+    }
+
+    /// Write and acknowledge the input held, and every later input.
+    pub(crate) fn release_input(&self) {
+        let _ = self.commands.send(Command::ReleaseInput);
+    }
+
+    /// End the runtime's connection; it reconnects, and input held and not
+    /// acknowledged is lost (its fate unknown to the runtime).
+    pub(crate) fn drop_connection(&self) {
+        let _ = self.commands.send(Command::DropConnection);
+    }
+
+    /// Have the runtime restore the snapshot `blob`, as after a stream
+    /// that resumed past a gap: a rebuild of its emulator.
+    pub(crate) fn restore(&self, blob: Vec<u8>) {
+        let _ = self.commands.send(Command::Restore(blob));
     }
 }
 
@@ -329,6 +413,8 @@ fn start_with(
     let child_pid = child.id();
     let (commands, receiver) = mpsc::unbounded_channel();
     let received = Arc::new(Mutex::new(Vec::new()));
+    let (received_len_tx, received_len) = watch::channel(0);
+    let (held_tx, held) = watch::channel(0);
     let unreadable = Arc::new(AtomicBool::new(unreadable));
     let accepted = Arc::new(AtomicUsize::new(0));
     let journal = Journal {
@@ -344,6 +430,10 @@ fn start_with(
         listener,
         receiver,
         Arc::clone(&received),
+        Records {
+            received_len: received_len_tx,
+            held: held_tx,
+        },
         journal,
         Arc::clone(&accepted),
     ));
@@ -352,6 +442,8 @@ fn start_with(
         child: Mutex::new(Some(child)),
         child_pid,
         received,
+        received_len,
+        held,
         commands,
         unreadable,
         accepted,
@@ -366,6 +458,7 @@ async fn serve(
     listener: UnixListener,
     mut commands: mpsc::UnboundedReceiver<Command>,
     received: Arc<Mutex<Vec<u8>>>,
+    records: Records,
     mut journal: Journal,
     accepted: Arc<AtomicUsize>,
 ) {
@@ -378,7 +471,7 @@ async fn serve(
             refuse(stream).await;
             continue;
         }
-        if serve_one(stream, &mut journal, &mut commands, &received)
+        if serve_one(stream, &mut journal, &mut commands, &received, &records)
             .await
             .is_err()
         {
@@ -387,8 +480,10 @@ async fn serve(
     }
 }
 
+/// The size a test host starts at.
+pub(crate) const TEST_HOST_SIZE: Size = Size { cols: 80, rows: 24 };
+
 /// What the host has journaled, as its `Info` reports it.
-#[derive(Default)]
 struct Journal {
     /// The child's pid, as `Info` reports it.
     child_pid: u32,
@@ -399,28 +494,55 @@ struct Journal {
     unreadable: Arc<AtomicBool>,
     /// The client tag `Info` reports.
     tag: Vec<u8>,
-    /// Input bytes acknowledged as written, in all.
+    /// Input bytes acknowledged as written on the current connection:
+    /// acknowledgements count a connection's input, from 0 on each.
     written: u64,
     /// Output journaled before the adoption, at offset 0, which the stream
     /// sends only on [`Command::Replay`].
     journaled: Vec<u8>,
     /// How much of `journaled` the stream has sent.
     replayed: usize,
+    /// The size in force: the last resize's, or the initial one.
+    size: Size,
+    /// Resizes applied so far.
+    resizes: u64,
+    /// While input is held (`Command::HoldInput`), what arrived, unwritten.
+    held: Option<Vec<Vec<u8>>>,
+    /// While input is held, how many more inputs are written all the same.
+    pass: usize,
+}
+
+impl Default for Journal {
+    fn default() -> Self {
+        Journal {
+            child_pid: 0,
+            end: 0,
+            exit: None,
+            unreadable: Arc::default(),
+            tag: Vec::new(),
+            written: 0,
+            journaled: Vec::new(),
+            replayed: 0,
+            size: TEST_HOST_SIZE,
+            resizes: 0,
+            held: None,
+            pass: 0,
+        }
+    }
 }
 
 impl Journal {
     fn info(&self) -> Info {
-        let size = Size { cols: 80, rows: 24 };
         Info {
             host_pid: std::process::id(),
             child_pid: self.child_pid,
             child_exit: self.exit,
-            size,
-            initial_size: size,
+            size: self.size,
+            initial_size: TEST_HOST_SIZE,
             snapshot: Position::default(),
             tail_start: 0,
             end: self.end,
-            resizes: 0,
+            resizes: self.resizes,
             gap: false,
             delivered_end: 0,
             tag: self.tag.clone(),
@@ -435,7 +557,9 @@ async fn serve_one(
     journal: &mut Journal,
     commands: &mut mpsc::UnboundedReceiver<Command>,
     received: &Mutex<Vec<u8>>,
+    records: &Records,
 ) -> Result<(), ()> {
+    journal.written = 0;
     let mut buf = Vec::new();
     loop {
         while let Some(frame) = split_frame(&buf, MAX_FRAME).expect("a well-formed frame") {
@@ -445,25 +569,43 @@ async fn serve_one(
             let reply = match message {
                 ClientMessage::Hello { .. } => Some(HostMessage::Welcome { version: 1 }),
                 ClientMessage::Info => Some(HostMessage::InfoReply(journal.info())),
-                ClientMessage::Input(data) => {
-                    journal.written += data.len() as u64;
-                    received
-                        .lock()
-                        .expect("the input record")
-                        .extend_from_slice(&data);
-                    Some(HostMessage::InputAck {
-                        written: journal.written,
-                        discarded: 0,
-                    })
-                }
+                ClientMessage::Input(data) => match &mut journal.held {
+                    Some(held) if journal.pass == 0 => {
+                        held.push(data);
+                        records.held.send_replace(held.len());
+                        None
+                    }
+                    held => {
+                        if held.is_some() {
+                            journal.pass -= 1;
+                        }
+                        Some(write_input(journal, received, &records.received_len, &data))
+                    }
+                },
                 ClientMessage::Shutdown => {
                     let _ = stream.write_all(&encode_host(&HostMessage::Goodbye)).await;
                     return Ok(());
                 }
+                // Applied at once, as a resize record at the current end of
+                // the output, which is where a host puts it.
+                ClientMessage::Resize(size) => {
+                    journal.size = size;
+                    journal.resizes += 1;
+                    Some(HostMessage::Resized {
+                        offset: journal.end,
+                        index: journal.resizes - 1,
+                        size,
+                    })
+                }
+                // Every checkpoint is accepted (and its blob dropped: the
+                // stand-in never resumes a stream from one), so that a test
+                // writing megabytes is not cut off waiting for the answer.
+                ClientMessage::Snapshot { position, .. } => {
+                    Some(HostMessage::SnapshotAccepted(position))
+                }
                 // `Read` sends nothing itself: what was journaled before
                 // the adoption is streamed on the test's cue
-                // (`Command::Replay`); resizes and snapshots are not what
-                // these tests are about.
+                // (`Command::Replay`).
                 _ => None,
             };
             if let Some(reply) = reply
@@ -502,12 +644,83 @@ async fn serve_one(
                         journal.replayed = upto;
                         HostMessage::Output { offset, data }
                     }
+                    Command::HoldInput { pass, held } => {
+                        journal.held.get_or_insert_with(Vec::new);
+                        journal.pass = pass;
+                        let _ = held.send(());
+                        continue;
+                    }
+                    Command::ReleaseInput => {
+                        journal.pass = 0;
+                        let mut ack = None;
+                        for data in journal.held.take().unwrap_or_default() {
+                            ack = Some(write_input(
+                                journal,
+                                received,
+                                &records.received_len,
+                                &data,
+                            ));
+                        }
+                        records.held.send_replace(0);
+                        match ack {
+                            Some(ack) => ack,
+                            None => continue,
+                        }
+                    }
+                    Command::DropConnection => {
+                        // What was held goes with the connection; holding
+                        // goes on.
+                        if let Some(held) = &mut journal.held {
+                            held.clear();
+                        }
+                        records.held.send_replace(0);
+                        return Ok(());
+                    }
+                    Command::Restore(blob) => {
+                        journal.end += 1;
+                        HostMessage::SnapshotRecord {
+                            position: Position {
+                                offset: journal.end,
+                                resizes: journal.resizes,
+                            },
+                            blob,
+                        }
+                    }
                 };
                 if stream.write_all(&encode_host(&record)).await.is_err() {
                     return Ok(());
                 }
             }
         }
+    }
+}
+
+/// What the host reports to its [`TestHost`] as input arrives.
+struct Records {
+    /// How many bytes it has written.
+    received_len: watch::Sender<usize>,
+    /// How many inputs it holds unacknowledged.
+    held: watch::Sender<usize>,
+}
+
+/// Write `data` to the child, as far as the record goes, and the
+/// acknowledgement that says so.
+fn write_input(
+    journal: &mut Journal,
+    received: &Mutex<Vec<u8>>,
+    received_len: &watch::Sender<usize>,
+    data: &[u8],
+) -> HostMessage {
+    journal.written += data.len() as u64;
+    let len = {
+        let mut received = received.lock().expect("the input record");
+        received.extend_from_slice(data);
+        received.len()
+    };
+    received_len.send_replace(len);
+    HostMessage::InputAck {
+        written: journal.written,
+        discarded: 0,
     }
 }
 

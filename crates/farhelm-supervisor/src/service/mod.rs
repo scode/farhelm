@@ -103,6 +103,7 @@ mod channels;
 mod connection;
 mod core;
 mod downloads;
+mod grid_stream;
 mod handlers;
 mod hints;
 mod launch_artifacts;

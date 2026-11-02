@@ -97,8 +97,8 @@ pub enum KeyPlatform {
 
 /// A grid input message that breaks a rule spanning messages: a protocol
 /// violation, on which the caller ends the attachment as on a malformed
-/// message, writing [`InputEncoder::finish`]'s bytes as it does. The
-/// encoder leaves the paste open for that.
+/// message. The encoder leaves the paste open, for a caller that wrote its
+/// parts as they came and must close it ([`InputEncoder::finish`]).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum InputError {
     /// The parts of one paste must arrive with no other input between them
@@ -194,18 +194,21 @@ impl InputEncoder {
     /// pasted rather than sent), and in any paste it would land between the
     /// pasted characters. The encoder refuses viewer input meanwhile
     /// ([`InputError::PasteInterrupted`]), but it cannot see the
-    /// supervisor's own writes to the terminal; the grid sender holds those
-    /// (emulator query answers, prompt sends) until this turns false, or
-    /// until it has written [`InputEncoder::finish`]'s bytes.
+    /// supervisor's own writes to the terminal (emulator query answers,
+    /// prompt sends). The grid sender keeps those out by writing nothing of
+    /// a paste until its last part has arrived, and then the whole paste at
+    /// once (`service::grid_stream`, "Input").
     pub fn paste_open(&self) -> bool {
         self.paste.is_some()
     }
 
-    /// The bytes to write when the attachment ends: [`PASTE_END`] if it
-    /// ended in the middle of a bracketed paste, so the program is not left
-    /// reading everything after as pasted text; otherwise nothing. Forgets
-    /// the paste either way, including a held start of a marker, which an
-    /// abandoned paste has no use for.
+    /// The bytes to write when the attachment ends, for a caller that wrote
+    /// a paste's parts as they came (the grid sender does not: it drops a
+    /// paste cut short whole): [`PASTE_END`] if it ended in the middle of a
+    /// bracketed paste, so the program is not left reading everything after
+    /// as pasted text; otherwise nothing. Forgets the paste either way,
+    /// including a held start of a marker, which an abandoned paste has no
+    /// use for.
     pub fn finish(&mut self) -> Option<&'static [u8]> {
         match self.paste.take() {
             Some(PasteInProgress {
