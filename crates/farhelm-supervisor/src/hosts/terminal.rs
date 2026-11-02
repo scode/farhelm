@@ -130,14 +130,12 @@
 //!   once.
 //! - **Adapters** map a host terminal's state onto the types the supervisor
 //!   already decides with for tmux panes: [`HostStatus::probe`] gives a
-//!   [`PaneProbe`], and [`HostStatus::exit_code`] and `HostStatus::anchor`
-//!   the exit code and hook anchor a pane would give. Status evidence is the
-//!   exception: `service::status::PaneEvidence` borrows a tmux `PaneState`,
-//!   which a host terminal could only supply by fabricating its tmux fields
-//!   (session name, window, ordinals, markers), so [`HostStatus::evidence`]
-//!   gives the same three classes with what their consumers read
-//!   ([`HostEvidence`]), as the interim seam until `PaneEvidence` itself
-//!   carries owned liveness facts.
+//!   [`PaneProbe`], [`HostStatus::live_root`] the kill root beside it, and
+//!   [`HostStatus::exit_code`] and `HostStatus::anchor` the exit code and
+//!   hook anchor a pane would give. [`HostStatus::evidence`] gives the
+//!   three classes of status evidence ([`HostEvidence`]) with the owned
+//!   facts status reads (dead, exit code) and no tmux fields, which
+//!   `service::status::PaneEvidence` maps one to one.
 //! - **Checkpoints** (`checkpoint`): once enough output has passed since
 //!   the previous attempt (the plan's D-8, revised), the runtime snapshots
 //!   its emulator at the next clean boundary and hands the host the
@@ -554,6 +552,35 @@ impl HostStatus {
         }
     }
 
+    /// [`Self::child_root`] for a caller that must tell "no root" from
+    /// "could not tell": `Ok(None)` only when the child has really ended
+    /// (reaped by the host, exited, its host gone, or its pid no longer the
+    /// pinned process), an error when the process table could not be read
+    /// or the host can no longer be read at all. Stop, Restart and Delete
+    /// take their root this way, right after their probe, and refuse on the
+    /// error rather than sweep without a root that may still be running
+    /// (SPEC.md "Lifecycle operations": unexamined is unconfirmed, never
+    /// gone). An unavailable host in particular says nothing about its
+    /// child, so a host that became unreadable after the probe that
+    /// authorized a verb fails the verb here (the plan's D-16) instead of
+    /// letting it sweep without the child's tree.
+    pub fn live_root(&self) -> anyhow::Result<Option<ProcessRoot>> {
+        if let Liveness::Unavailable { reason, .. } = &self.liveness {
+            return Err(anyhow::anyhow!(
+                "the terminal host is unavailable ({reason}), so its child cannot be rooted"
+            ));
+        }
+        match self.pinned_child() {
+            Some(Ok(root)) => Ok(Some(root)),
+            Some(Err(why)) => Err(anyhow::anyhow!(
+                "could not read the terminal host's child {} before reaping it ({why}); \
+                 refusing to report its process tree cleaned up",
+                self.child_pid
+            )),
+            None => Ok(None),
+        }
+    }
+
     /// The pinned child checked against the process table: `Ok` while it
     /// still runs, `Err` with why the check could not be made, `None` when
     /// there is no running child to check (none pinned, reaped, or no
@@ -650,13 +677,6 @@ impl HostStatus {
     /// exited when the runtime adopted its host was never pinned, and is
     /// anchored by its pid alone, as tmux anchors a dead pane. `None`
     /// without a child pid, and for a host that cannot be read.
-    #[cfg_attr(
-        not(test),
-        allow(
-            dead_code,
-            reason = "the hook anchor's switch point is its first caller"
-        )
-    )]
     pub(crate) fn anchor(&self) -> Option<PaneAnchor> {
         match &self.liveness {
             Liveness::Unavailable { .. } => None,
@@ -1676,6 +1696,11 @@ impl HostTerminal {
         self.inner.status.borrow().child_root()
     }
 
+    /// See [`HostStatus::live_root`].
+    pub fn live_root(&self) -> anyhow::Result<Option<ProcessRoot>> {
+        self.inner.status.borrow().live_root()
+    }
+
     /// See [`HostStatus::probe`].
     pub fn probe(&self) -> anyhow::Result<PaneProbe> {
         self.inner.status.borrow().probe()
@@ -1692,13 +1717,6 @@ impl HostTerminal {
     }
 
     /// See `HostStatus::anchor`.
-    #[cfg_attr(
-        not(test),
-        allow(
-            dead_code,
-            reason = "the hook anchor's switch point is its first caller"
-        )
-    )]
     pub(crate) fn anchor(&self) -> Option<PaneAnchor> {
         self.inner.status.borrow().anchor()
     }
@@ -3172,3 +3190,6 @@ pub use checkpoint::{CHECKPOINT_MIN_BYTES, CheckpointOutcome, CheckpointPolicy, 
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+pub(crate) mod test_host;

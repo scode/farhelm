@@ -39,13 +39,13 @@ use super::launch_artifacts::{
     sentinel_could_still_apply, sweep_launch_dir, wrapper_failure_detail,
 };
 use super::sweep::{
-    ScopeKillFailure, ScopeUnits, StopFailure, SweepTarget, TabReapAnchor,
-    capture_process_identity, launch_scope_unit, reap_process_tree, stop_live_agent,
+    ScopeKillFailure, ScopeUnits, StopFailure, SweepTarget, TabReapAnchor, launch_scope_unit,
+    reap_process_tree, stop_live_agent,
 };
 use super::terminals::{
     ActiveAttach, AttachmentKey, OutputReapRegistry, SINK_READY_TIMEOUT, SinkRegistry,
     TAB_LAUNCH_SETTLE, TAB_LAUNCH_SETTLE_STEP, Terminal, TerminalId, TmuxTerminal,
-    agent_pane_from_states, resolve_terminal_for_close, tabs_from_pane_states,
+    agent_pane_from_states, resolve_terminal_for_close, tabs_from_pane_states, tmux_tab_home,
 };
 use super::ticker::{
     ACTIVITY_STAMP_QUANTUM, ActivitySample, REAP_BUDGET_PER_TICK, SAMPLING_ADMISSION_PERMITS,
@@ -2039,6 +2039,83 @@ struct SessionIdentity {
     tmux_name: String,
 }
 
+/// The refusal of a Restart whose agent runs in a terminal host.
+///
+/// A host runs one child for its whole life, so a restarted agent needs a
+/// new host, seeded with the old terminal's history; until the supervisor
+/// can start one, Restart of a host agent is refused before anything is
+/// stopped or changed. `Conflict`, as for the other Restart refusals that
+/// depend on the session's state rather than on the request.
+const HOST_RESTART_UNAVAILABLE: &str = "this session's agent runs in a terminal host, and this \
+     supervisor cannot restart an agent into a new terminal host yet; nothing was stopped";
+
+/// How long delivering one prompt into a host terminal may take, from the
+/// first part queued to the submit's acknowledgement: the same budget a tmux
+/// input client has for one exchange ([`crate::tmux::CONTROL_EXCHANGE_TIMEOUT`]),
+/// since both bound how long one prompt may hold its session's lifecycle
+/// claim behind a program that does not read its terminal.
+const HOST_PROMPT_DELIVERY_TIMEOUT: Duration = crate::tmux::CONTROL_EXCHANGE_TIMEOUT;
+
+/// Type a prompt into a host terminal: the bracketed `paste`, in parts of at
+/// most `MAX_INPUT` bytes, then the harness's `submit` keys.
+///
+/// The parts go through one input sequence
+/// (`crate::hosts::HostTerminal::input_sequence`), so a part lost with a
+/// connection is never followed by a later one, and the submit is sent only
+/// once every part of the paste was written to the pty: a paste that did not
+/// arrive whole must not be submitted, which is the guarantee the tmux path
+/// gets from its confirmed input client. Anything short of that is an error
+/// saying delivery may be partial, as the tmux path says it; nothing is sent
+/// again, since some of it may have reached the program.
+async fn deliver_prompt_to_host(
+    host: &crate::hosts::HostTerminal,
+    paste: &[u8],
+    submit: &[u8],
+) -> anyhow::Result<()> {
+    let sequence = host.input_sequence();
+    let deliver = async {
+        let mut receipts = Vec::new();
+        for part in paste.chunks(terminal_host::protocol::MAX_INPUT) {
+            receipts.push(
+                sequence
+                    .send(part)
+                    .await
+                    .context("delivering the prompt paste; delivery may be partial")?,
+            );
+        }
+        for receipt in receipts {
+            let fate = receipt.fate().await;
+            if fate != crate::hosts::InputFate::Written {
+                anyhow::bail!(
+                    "delivering the prompt paste; delivery may be partial (the terminal host's \
+                     input was {fate:?})"
+                );
+            }
+        }
+        let fate = sequence
+            .send(submit)
+            .await
+            .context("submitting the prompt; the paste was delivered without it")?
+            .fate()
+            .await;
+        if fate != crate::hosts::InputFate::Written {
+            anyhow::bail!(
+                "submitting the prompt; delivery may be partial (the terminal host's input was \
+                 {fate:?})"
+            );
+        }
+        Ok(())
+    };
+    tokio::time::timeout(HOST_PROMPT_DELIVERY_TIMEOUT, deliver)
+        .await
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "the prompt was not delivered within {HOST_PROMPT_DELIVERY_TIMEOUT:?}; delivery \
+                 may be partial"
+            )
+        })?
+}
+
 /// Mint identities for a launch that does not inherit any.
 ///
 /// The FULL uuid, not a truncated prefix: an 8-hex-char prefix collides
@@ -2051,11 +2128,26 @@ struct SessionIdentity {
 /// session names (verified empirically against a scratch server).
 fn new_session_identity() -> SessionIdentity {
     let session_id = uuid::Uuid::new_v4().to_string();
-    let tmux_name = format!("fh-{session_id}");
+    let tmux_name = session_tmux_name(&session_id);
     SessionIdentity {
         session_id,
         tmux_name,
     }
+}
+
+/// The name of a session's tmux session: `fh-` and its id.
+///
+/// Every stored row's `tmux_name` is exactly this. [`new_session_identity`]
+/// is the only place a session's identity is minted, and it has used this
+/// name since sessions were first persisted (the truncated names before
+/// that never reached a database). So code that knows a session but holds
+/// no tmux terminal for it can name its tmux session without a store read:
+/// [`super::status::KnownTmuxNames`] counts it as farhelm's, and tab
+/// rediscovery for a session whose agent runs in a terminal host looks for
+/// tabs there ([`super::terminals::tmux_tab_home`]). A change to this
+/// scheme has to keep reading the old one for existing rows.
+pub(crate) fn session_tmux_name(session_id: &str) -> String {
+    format!("fh-{session_id}")
 }
 
 /// What an existing reservation means for the request that found it.
@@ -4536,6 +4628,29 @@ pub struct Supervisor {
     /// ([`Self::wait_for_pending_holds`]). Always empty outside the
     /// versioned layout. Pruned of settled entries whenever one is added.
     pending_holds: std::sync::Mutex<Vec<PendingHold>>,
+    /// Where every host terminal this supervisor runs announces its
+    /// program's exit, and its host ending or becoming unreadable: the
+    /// notifier each adoption is given (`crate::hosts::HostTerminalOptions`),
+    /// so that one task learns of every host's exit without polling each.
+    /// The ticker takes the receiving end ([`Self::host_liveness_receiver`])
+    /// and runs its reap pass on each change, which is what records a host
+    /// agent's exit and reaps an exited tab between ticks, as tmux's
+    /// `pane-died` hook does for panes.
+    #[cfg_attr(
+        not(any(test, feature = "test-seams")),
+        expect(
+            dead_code,
+            reason = "read by every host adoption; until creating agents in hosts lands, only \
+                      the test seams adopt"
+        )
+    )]
+    pub(crate) host_liveness: crate::hosts::LivenessNotifier,
+    /// The receiving end of [`Self::host_liveness`], until the ticker takes
+    /// it (`ticker::start_ticker`). A ticker started without it (a second
+    /// one in a test) still sees every exit on its next tick.
+    host_liveness_receiver: std::sync::Mutex<
+        Option<tokio::sync::mpsc::UnboundedReceiver<crate::hosts::LivenessChange>>,
+    >,
     /// Launches in the versioned layout between starting their tmux window
     /// and being added to [`Self::pending_holds`] (or failing). The shutdown
     /// wait keeps going while any are in flight, so a window created just as
@@ -5863,6 +5978,7 @@ impl Supervisor {
             .map(|entry| entry.info.effective_work_started_at())
             .max()
             .unwrap_or(0);
+        let (host_liveness, host_liveness_receiver) = crate::hosts::LivenessNotifier::channel();
         let supervisor = Arc::new(Supervisor {
             state_dir,
             tmux,
@@ -5881,6 +5997,8 @@ impl Supervisor {
             farhelm_exe,
             versioned_program,
             pending_holds: std::sync::Mutex::new(Vec::new()),
+            host_liveness,
+            host_liveness_receiver: std::sync::Mutex::new(Some(host_liveness_receiver)),
             starting_launches: Default::default(),
             launches_closed: Default::default(),
             session_farhelm_exe,
@@ -6287,24 +6405,29 @@ impl Supervisor {
                 // preference ladder and its legacy fallback.
                 agent_pane_from_states(&pane_states, &row.tmux_name, &row.id)
             } else {
+                // The evidence classifies; the pane's tmux state, which the
+                // rebuilt terminal and the reconciliation below read, is
+                // looked up beside it (the evidence carries only what status
+                // decides with).
+                let state = || pane_states.get(&row.pane).cloned();
                 match super::status::pane_evidence(&row.pane, &row.tmux_name, &pane_states, &known)
                 {
-                    super::status::PaneEvidence::Owned(state) => {
-                        Some((row.pane.clone(), state.clone()))
+                    super::status::PaneEvidence::Owned(_) => {
+                        state().map(|state| (row.pane.clone(), state))
                     }
                     super::status::PaneEvidence::Absent => None,
                     // An Error row is settled already: it takes no terminal
                     // from a pane it cannot claim, and still gets the
                     // idempotent artifact cleanup below.
-                    super::status::PaneEvidence::Unattributed(_)
+                    super::status::PaneEvidence::Unattributed
                         if matches!(row.outcome, LastOutcome::Error { .. }) =>
                     {
                         None
                     }
                     // Possibly this session's own agent, renamed or moved out
                     // of band: held aside below rather than treated as found.
-                    super::status::PaneEvidence::Unattributed(state) => {
-                        unattributed = Some((row.pane.clone(), state.clone()));
+                    super::status::PaneEvidence::Unattributed => {
+                        unattributed = state().map(|state| (row.pane.clone(), state));
                         None
                     }
                 }
@@ -7136,10 +7259,26 @@ impl Supervisor {
         ))))
     }
 
+    /// The receiving end of the host terminals' liveness notifier
+    /// ([`Self::host_liveness`]), for the one task that waits on it: the
+    /// first caller gets it, every later one `None`.
+    pub(crate) fn take_host_liveness_receiver(
+        &self,
+    ) -> Option<tokio::sync::mpsc::UnboundedReceiver<crate::hosts::LivenessChange>> {
+        self.host_liveness_receiver
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+    }
+
     /// Remember a launch started through the hold step, for
     /// [`Self::wait_for_pending_holds`], dropping entries that have since
     /// shown "held" so the list only ever holds launches still starting.
-    fn track_pending_hold(&self, spec_path: &Path, session: String, pane: String) {
+    ///
+    /// `terminal` is where the launch's program runs: its window's pane for
+    /// tmux, its host for a terminal host. Nothing in production tracks a
+    /// host launch yet; creating agents in hosts adds that call.
+    fn track_pending_hold(&self, spec_path: &Path, terminal: Terminal) {
         if self.versioned_program.is_none() {
             return;
         }
@@ -7150,8 +7289,7 @@ impl Supervisor {
         pending.retain(|hold| crate::session_hold::read_mark(&hold.held).is_none());
         pending.push(PendingHold {
             held: crate::session_hold::held_mark_path(spec_path),
-            session,
-            pane,
+            terminal,
         });
     }
 
@@ -7231,12 +7369,22 @@ impl Supervisor {
     /// [`Self::wait_for_pending_holds`]. A tmux query that fails or does not
     /// answer within `left` is not settled, so the wait runs on until its
     /// budget.
+    ///
+    /// A host terminal answers from its runtime ([`Terminal::probe_process`]),
+    /// whose live answer is the host's child: the same process a pane's pid
+    /// names, since both start the launch's command chain, so the mark is
+    /// compared with it the same way. A host that cannot be read is not
+    /// settled either.
     async fn hold_settled(&self, hold: &PendingHold, left: Duration) -> bool {
-        match self
-            .tmux
-            .pane_process_within(&hold.session, &hold.pane, Some(left))
-            .await
-        {
+        let probe = match &hold.terminal {
+            Terminal::Tmux(tmux) => {
+                self.tmux
+                    .pane_process_within(&tmux.tmux_name, &tmux.pane, Some(left))
+                    .await
+            }
+            Terminal::Host(_) => hold.terminal.probe_process(self).await,
+        };
+        match probe {
             Ok(PaneProbe::Owned(pane)) if !pane.dead => {
                 crate::session_hold::read_mark(&hold.held) == pane.live_pid()
             }
@@ -7284,17 +7432,23 @@ impl Supervisor {
         let known = self.known_tmux_names().await;
         let entries: Vec<_> = self.sessions.lock().await.values().cloned().collect();
         for entry in entries {
-            let may_be_live = if let Some(terminal) = &entry.terminal {
-                let Terminal::Tmux(terminal) = terminal;
-                match super::status::pane_evidence(
+            let evidence = match &entry.terminal {
+                Some(Terminal::Tmux(terminal)) => Some(super::status::pane_evidence(
                     &terminal.pane,
                     &terminal.tmux_name,
                     states,
                     &known,
-                ) {
+                )),
+                // The runtime's own evidence: a host that cannot be read is
+                // unattributed, and protects its claim like a renamed pane.
+                Some(Terminal::Host(host)) => Some(host.evidence().into()),
+                None => None,
+            };
+            let may_be_live = if let Some(evidence) = evidence {
+                match evidence {
                     super::status::PaneEvidence::Owned(pane) => !pane.dead,
                     super::status::PaneEvidence::Absent => false,
-                    super::status::PaneEvidence::Unattributed(_) => true,
+                    super::status::PaneEvidence::Unattributed => true,
                 }
             } else {
                 // Error rows can retain a recorded but unattributed pane even
@@ -7314,7 +7468,7 @@ impl Supervisor {
                             ) {
                                 super::status::PaneEvidence::Owned(pane) => !pane.dead,
                                 super::status::PaneEvidence::Absent => false,
-                                super::status::PaneEvidence::Unattributed(_) => true,
+                                super::status::PaneEvidence::Unattributed => true,
                             }
                         }
                     }
@@ -11198,10 +11352,12 @@ impl Supervisor {
         super::status::KnownTmuxNames::from_sessions(sessions.iter().map(|(id, entry)| {
             (
                 id.as_str(),
-                entry
-                    .terminal
-                    .as_ref()
-                    .map(|Terminal::Tmux(terminal)| terminal.tmux_name.as_str()),
+                // A host terminal holds no tmux name; its session's minted
+                // one is counted by `from_sessions` all the same.
+                match &entry.terminal {
+                    Some(Terminal::Tmux(terminal)) => Some(terminal.tmux_name.as_str()),
+                    Some(Terminal::Host(_)) | None => None,
+                },
             )
         }))
     }
@@ -11286,40 +11442,54 @@ impl Supervisor {
                 .into());
             }
         }
-        // Delivery is a bracketed paste typed through a tmux input client,
-        // gated on tmux's record of the pane's paste mode.
-        let Terminal::Tmux(terminal) = terminal;
-        if !self
-            .tmux
-            .bracketed_paste_enabled(&terminal.tmux_name, &terminal.pane)
-            .await?
-        {
-            return Err(RequestError::new(
+        // Delivery is a bracketed paste, gated on the terminal's record of
+        // the program's paste mode: tmux's for a pane, the emulator's for a
+        // host terminal. Without it the program would read the prompt as
+        // typed keys, and its newlines as submits.
+        let paste_mode_off = || {
+            RequestError::new(
                 ErrorKind::Conflict,
                 "cannot send a prompt: the target agent's bracketed paste mode is off",
             )
-            .into());
-        }
-        let mut input = self
-            .tmux
-            .open_input_client(&terminal.tmux_name, &terminal.pane)
-            .await?;
+        };
         let crate::agent_kind::PromptDelivery::Typed { submit } = delivery;
         let mut paste = Vec::with_capacity(prompt.len() + 12);
         paste.extend_from_slice(b"\x1b[200~");
         paste.extend_from_slice(prompt.as_bytes());
         paste.extend_from_slice(b"\x1b[201~");
-        // Validation excludes ESC, so user text cannot close this paste. One
-        // InputClient call retains its ordering and absolute exchange budget
-        // even when the confirmed path chunks a large frame internally.
-        input
-            .send(&paste)
-            .await
-            .context("delivering the prompt paste; delivery may be partial")?;
-        input
-            .send(submit)
-            .await
-            .context("submitting the prompt; delivery may be partial")?;
+        // Validation excludes ESC, so user text cannot close this paste.
+        match terminal {
+            Terminal::Tmux(terminal) => {
+                if !self
+                    .tmux
+                    .bracketed_paste_enabled(&terminal.tmux_name, &terminal.pane)
+                    .await?
+                {
+                    return Err(paste_mode_off().into());
+                }
+                let mut input = self
+                    .tmux
+                    .open_input_client(&terminal.tmux_name, &terminal.pane)
+                    .await?;
+                // One InputClient call retains its ordering and absolute
+                // exchange budget even when the confirmed path chunks a large
+                // frame internally.
+                input
+                    .send(&paste)
+                    .await
+                    .context("delivering the prompt paste; delivery may be partial")?;
+                input
+                    .send(submit)
+                    .await
+                    .context("submitting the prompt; delivery may be partial")?;
+            }
+            Terminal::Host(host) => {
+                if !host.modes().bracketed_paste {
+                    return Err(paste_mode_off().into());
+                }
+                deliver_prompt_to_host(host, &paste, submit).await?;
+            }
+        }
         Ok(())
     }
 
@@ -11567,6 +11737,20 @@ impl Supervisor {
                 .is_none_or(|selection| selection.container.is_none()),
             "Restart and Restart with are unavailable for containerized sessions; replace the session instead"
         );
+        // A host runs one child and cannot start another, so a host agent
+        // restarts into a new host seeded with the old one's history, which
+        // this supervisor cannot start yet. Refused here, with the other
+        // refusals, before the agent is stopped or anything else changes.
+        match &entry.terminal {
+            Some(Terminal::Host(_)) => {
+                return Err(RequestError::new(
+                    ErrorKind::Conflict,
+                    HOST_RESTART_UNAVAILABLE.to_string(),
+                )
+                .into());
+            }
+            Some(Terminal::Tmux(_)) | None => {}
+        }
         if let Some(expected) = &expected_launch
             && *expected != entry.info.launch
         {
@@ -11743,15 +11927,14 @@ impl Supervisor {
         let alive_pane = pane_state.filter(|pane| !pane.dead);
         // Capture the pane identity before recording the stop intent. That
         // write and the subsequent sweep may outlive the original process;
-        // the start time prevents a recycled pid from becoming the root.
-        let alive_identity = match alive_pane
-            .and_then(|pane| pane.live_pid())
-            .map(capture_process_identity)
-        {
-            None => None,
-            Some(identity) => identity.map_err(|error| {
+        // the start time prevents a recycled pid from becoming the root. A
+        // host terminal's root is its child as pinned at adoption
+        // (`Terminal::live_root`).
+        let alive_identity = match (alive_pane, entry.terminal.as_ref()) {
+            (Some(pane), Some(terminal)) => terminal.live_root(&pane).map_err(|error| {
                 RequestError::new(ErrorKind::Internal, format!("not restarting: {error:#}"))
             })?,
+            (None, _) | (_, None) => None,
         };
         // No pane to probe is not proof of no agent: an ambiguous create
         // (`terminal_less_launch_may_be_live`) may have left one running.
@@ -11847,7 +12030,13 @@ impl Supervisor {
         // failure. Saying "did not survive" is what lets a fresh terminal
         // be created instead; the driver's session-paired target remains
         // the cross-session safety barrier either way.
-        let terminal_survives = pane_state.is_some();
+        //
+        // A host terminal never survives in this sense: a host runs one
+        // child and cannot start another, so a Restart never reuses it.
+        let terminal_survives = match entry.terminal.as_ref() {
+            Some(Terminal::Tmux(_)) => pane_state.is_some(),
+            Some(Terminal::Host(_)) | None => false,
+        };
         // Asset-backed reporters must be usable before the transaction chooses
         // to retain a capture. Spawn verifies the same asset again for injection;
         // its warning-and-continue fallback cannot repair a retained old target.
@@ -12330,19 +12519,31 @@ impl Supervisor {
         // preserved-session path re-discovers it after replacement; the
         // snapshot remains useful for pane reuse and for failure reporting.
         // A read failure refuses the restart before anything destructive.
-        let tabs = match terminal {
-            Some(terminal) => self.session_tabs(terminal).await.map_err(|e| {
-                RelaunchFailure::definitive(
-                    e.context("reading this session's terminal tabs before relaunching it"),
-                )
-            })?,
-            // No terminal means no tmux session, and therefore no windows
-            // for a tab to be.
-            None => Vec::new(),
-        };
+        // No terminal means no tmux session, and therefore no windows for a
+        // tab to be (`session_tabs` answers that without asking tmux).
+        let tabs = self.session_tabs(entry).await.map_err(|e| {
+            RelaunchFailure::definitive(
+                e.context("reading this session's terminal tabs before relaunching it"),
+            )
+        })?;
         // Every target below is tmux's: the surviving pane, a replacement
-        // window beside the session's tabs, or a fresh tmux session.
-        let terminal = terminal.map(|Terminal::Tmux(terminal)| terminal);
+        // window beside the session's tabs, or a fresh tmux session. A host
+        // terminal is never one of them: its host runs one child. The
+        // restart's own admission refuses a host agent before anything is
+        // stopped (`HOST_RESTART_UNAVAILABLE`); this arm keeps that true for
+        // any other way here, definitively, so the previous run's record is
+        // restored as it was.
+        let terminal = match terminal {
+            Some(Terminal::Tmux(terminal)) => Some(terminal),
+            Some(Terminal::Host(_)) => {
+                return Err(RelaunchFailure::definitive(anyhow::anyhow!(
+                    "session {} runs in a terminal host, and this supervisor cannot restart an \
+                     agent into a new terminal host yet",
+                    truncate_for_error(&id)
+                )));
+            }
+            None => None,
+        };
         let tmux_name = match terminal {
             Some(terminal) => terminal.tmux_name.clone(),
             // A session whose terminal did not survive keeps the tmux name
@@ -13210,28 +13411,6 @@ impl Supervisor {
         }
     }
 
-    /// One session's tabs, rediscovered from tmux, in creation order.
-    ///
-    /// Fallible on purpose, and the two failure shapes are not the same
-    /// answer. tmux definitively reporting that there is no server (or no
-    /// panes) is `Ok(vec![])` — the session genuinely has no tabs, which
-    /// is exactly what a session whose terminal no longer exists looks like.
-    /// Any
-    /// OTHER query failure is an `Err`: "we could not ask" is not "there
-    /// are none", and a caller that flattened the two would publish an
-    /// empty tab strip for a session whose tabs are alive and attached.
-    /// [`crate::tmux::TmuxDriver::is_definitively_empty`] is what draws
-    /// the line, against tmux's own stderr rather than a rendered string.
-    ///
-    /// Its own tmux round trip, unlike the `ListSessions` path (which
-    /// reuses the pane-state map it already fetched for liveness), because
-    /// a single-session reply has no such map to share.
-    ///
-    /// Dead tabs are omitted, exactly as the `ListSessions` path omits
-    /// them (`status::entry_info`): a reaped-any-tick-now corpse is not a
-    /// tab a REPLY should offer. Teardown must not use this — it
-    /// enumerates per-tab scopes and a hidden corpse still owns one; see
-    /// [`Self::session_tabs_including_dead`].
     /// What of this session is still alive right now beyond what `guard`
     /// allows a delete to stop, phrased as the reason the delete refuses, or
     /// `None` when nothing is.
@@ -13294,18 +13473,18 @@ impl Supervisor {
         // window, and after the agent's own window is gone a surviving tab
         // can be the session's only window (see `pane_states_with_markers`).
         // Missing it here would let an "unconfirmed" delete kill that tab.
-        // Tabs are windows in the agent's tmux session.
-        let Terminal::Tmux(terminal) = terminal;
+        // Tmux tabs are windows in the session's tmux session, whatever the
+        // agent's kind (`tmux_tab_home`).
+        let (tmux_name, agent_pane) = tmux_tab_home(&entry.info.id, terminal);
         let states = self
             .tmux
             .pane_states_with_markers()
             .await
             .context("listing this session's terminal tabs")?;
-        let tabs: Vec<_> =
-            tabs_from_pane_states(states.values(), &terminal.tmux_name, Some(&terminal.pane))
-                .into_iter()
-                .filter(|tab| !tab.dead)
-                .collect();
+        let tabs: Vec<_> = tabs_from_pane_states(states.values(), &tmux_name, agent_pane)
+            .into_iter()
+            .filter(|tab| !tab.dead)
+            .collect();
         Ok(match tabs.len() {
             0 => None,
             1 => Some("this session has 1 terminal tab open".to_string()),
@@ -13313,11 +13492,41 @@ impl Supervisor {
         })
     }
 
-    pub(crate) async fn session_tabs(&self, terminal: &Terminal) -> anyhow::Result<Vec<TabInfo>> {
-        let Terminal::Tmux(terminal) = terminal;
+    /// One session's tabs, rediscovered from tmux, in creation order.
+    ///
+    /// Fallible on purpose, and the two failure shapes are not the same
+    /// answer. tmux definitively reporting that there is no server (or no
+    /// panes) is `Ok(vec![])` — the session genuinely has no tabs, which
+    /// is exactly what a session whose terminal no longer exists looks like.
+    /// Any
+    /// OTHER query failure is an `Err`: "we could not ask" is not "there
+    /// are none", and a caller that flattened the two would publish an
+    /// empty tab strip for a session whose tabs are alive and attached.
+    /// [`crate::tmux::TmuxDriver::is_definitively_empty`] is what draws
+    /// the line, against tmux's own stderr rather than a rendered string.
+    ///
+    /// Its own tmux round trip, unlike the `ListSessions` path (which
+    /// reuses the pane-state map it already fetched for liveness), because
+    /// a single-session reply has no such map to share.
+    ///
+    /// Dead tabs are omitted, exactly as the `ListSessions` path omits
+    /// them (`status::entry_info`): a reaped-any-tick-now corpse is not a
+    /// tab a REPLY should offer. Teardown must not use this — it
+    /// enumerates per-tab scopes and a hidden corpse still owns one; see
+    /// [`Self::session_tabs_including_dead`].
+    ///
+    /// The tabs are the session's tmux tabs, wherever its agent runs
+    /// (`tmux_tab_home`). For an entry without a terminal, no tabs: with no
+    /// agent terminal there is no tmux session recorded to look in, as
+    /// `entry_info` says.
+    pub(crate) async fn session_tabs(&self, entry: &SessionEntry) -> anyhow::Result<Vec<TabInfo>> {
+        let Some(terminal) = entry.terminal.as_ref() else {
+            return Ok(Vec::new());
+        };
+        let (tmux_name, agent_pane) = tmux_tab_home(&entry.info.id, terminal);
         let states = self.tmux.pane_states().await?;
         Ok(
-            tabs_from_pane_states(states.values(), &terminal.tmux_name, Some(&terminal.pane))
+            tabs_from_pane_states(states.values(), &tmux_name, agent_pane)
                 .into_iter()
                 .filter(|tab| !tab.dead)
                 .map(|tab| TabInfo { id: tab.id })
@@ -13376,12 +13585,15 @@ impl Supervisor {
     /// — the glob is the belt for units tmux can no longer name at all.
     pub(crate) async fn session_tabs_including_dead(
         &self,
-        terminal: &Terminal,
+        entry: &SessionEntry,
     ) -> anyhow::Result<Vec<TabInfo>> {
-        let Terminal::Tmux(terminal) = terminal;
+        let Some(terminal) = entry.terminal.as_ref() else {
+            return Ok(Vec::new());
+        };
+        let (tmux_name, agent_pane) = tmux_tab_home(&entry.info.id, terminal);
         let states = self.tmux.pane_states().await?;
         Ok(
-            tabs_from_pane_states(states.values(), &terminal.tmux_name, Some(&terminal.pane))
+            tabs_from_pane_states(states.values(), &tmux_name, agent_pane)
                 .into_iter()
                 .map(|tab| TabInfo { id: tab.id })
                 .collect(),
@@ -13721,11 +13933,25 @@ impl Supervisor {
                 ),
             )
         };
-        let Some(agent) = entry.terminal.clone() else {
-            return Err(restart_first());
+        // A tab opens as a new window in the agent's tmux session, sized
+        // from the agent's pane. A session whose agent runs in a terminal
+        // host has neither: its tabs open in terminal hosts of their own,
+        // which this build cannot start yet, so the request is refused
+        // before anything is created.
+        let agent = match entry.terminal.clone() {
+            Some(Terminal::Tmux(agent)) => agent,
+            Some(Terminal::Host(_)) => {
+                return Err(RequestError::new(
+                    ErrorKind::Conflict,
+                    format!(
+                        "session {}'s agent runs in a terminal host, and this supervisor cannot \
+                         open terminal tabs beside one yet",
+                        truncate_for_error(session_id)
+                    ),
+                ));
+            }
+            None => return Err(restart_first()),
         };
-        // A tab opens as a new window in the agent's tmux session.
-        let Terminal::Tmux(agent) = agent;
         // The tmux session can also be gone WITHOUT the entry knowing —
         // this process may have been serving since before an external
         // `kill-session`, or since before the whole tmux server died. Both
@@ -14275,12 +14501,32 @@ impl Supervisor {
         // resize already treat it as gone.
         let terminal =
             resolve_terminal_for_close(self, &entry, &TerminalId::Tab(tab_id.to_string())).await?;
-        // Closing a tab reaps its shell and kills its tmux window.
-        let Terminal::Tmux(terminal) = terminal;
+        // Closing a tab reaps its shell and kills its tmux window. Tabs
+        // resolve only to tmux windows in this build (`resolve_terminal`
+        // finds no others), so a host tab is refused rather than handed to
+        // window teardown it has no window for.
+        let terminal = match terminal {
+            Terminal::Tmux(terminal) => terminal,
+            Terminal::Host(host) => {
+                return Err(RequestError::new(
+                    ErrorKind::Conflict,
+                    format!(
+                        "terminal tab {} of session {} runs in a terminal host ({}), which this \
+                         supervisor cannot close yet",
+                        truncate_for_error(tab_id),
+                        truncate_for_error(session_id),
+                        host.socket().display()
+                    ),
+                ));
+            }
+        };
+        // The agent window the close must never take for a tab: a tmux
+        // agent's recorded pane, and none for a host agent, which has no
+        // window in the session's tmux session (`tmux_tab_home`).
         let recorded_agent_pane = entry
             .terminal
             .as_ref()
-            .map(|Terminal::Tmux(agent)| agent.pane.clone());
+            .and_then(|agent| tmux_tab_home(session_id, agent).1.map(str::to_owned));
 
         // Supervisor-owned, like the open: a client disconnecting between
         // the first sweep and the window kill must not leave a half-reaped
@@ -14738,10 +14984,10 @@ impl Supervisor {
                 .await
                 .context("reading a terminal tab's pane process before reaping it")?
             {
-                PaneProbe::Owned(state) => match state.live_pid() {
-                    Some(pid) => capture_process_identity(pid)?,
-                    None => None,
-                },
+                // The root at the probe's boundary, per kind
+                // (`Terminal::live_root`): a host child's pinned identity,
+                // never one read again from a bare pid.
+                PaneProbe::Owned(state) => terminal.live_root(&state)?,
                 PaneProbe::Gone => None,
                 // A RECOGNIZED foreign owner gives no root to walk from —
                 // the recorded pane died with a previous tmux server, and
@@ -15497,7 +15743,13 @@ impl Supervisor {
                     )
                     .await;
                 }
-                self.track_pending_hold(artifacts.spec(), window_session, pane.clone());
+                self.track_pending_hold(
+                    artifacts.spec(),
+                    Terminal::Tmux(TmuxTerminal {
+                        tmux_name: window_session,
+                        pane: pane.clone(),
+                    }),
+                );
                 Ok(Spawned {
                     pane,
                     artifacts,
@@ -16395,6 +16647,70 @@ impl Supervisor {
         .expect("the test conversation is recorded");
     }
 
+    /// Make the host at `socket` session `id`'s agent terminal, in place of
+    /// the tmux terminal its create made, and return the runtime it now
+    /// runs through.
+    ///
+    /// Nothing in production creates an agent in a terminal host yet, while
+    /// every switch point already has its host arm; this is how tests reach
+    /// those arms with a real host (started by the test from the real
+    /// `farhelm` binary, never inside the test process, since a host forks).
+    /// It adopts the host as freshly spawned, with this supervisor's
+    /// liveness notifier, publishes an entry that keeps the created one's
+    /// run and session cells, generation and scope and differs only in its
+    /// terminal, records the row as a host row whose `pane` holds the
+    /// socket's name (the plan's D-14), and then kills the created tmux
+    /// session, so the session looks like one created in a host: no tmux
+    /// session of its own. The entry is swapped before the kill, so nothing
+    /// ever observes the session without a terminal. Compiled only for
+    /// tests and the `test-seams` feature.
+    #[cfg(any(test, feature = "test-seams"))]
+    pub async fn install_host_agent_for_test(
+        &self,
+        id: &str,
+        socket: &Path,
+    ) -> anyhow::Result<crate::hosts::HostTerminal> {
+        let host = crate::hosts::HostTerminal::adopt(
+            socket,
+            crate::hosts::Adoption::Fresh,
+            crate::hosts::HostTerminalOptions {
+                notifier: Some(self.host_liveness.clone()),
+                ..Default::default()
+            },
+        )
+        .await?;
+        let replaced = {
+            let mut sessions = self.sessions.lock().await;
+            let entry = sessions
+                .get(id)
+                .cloned()
+                .with_context(|| format!("no session {id} to install a host agent in"))?;
+            sessions.insert(
+                id.to_string(),
+                Arc::new(SessionEntry {
+                    info: entry.info.clone(),
+                    terminal: Some(Terminal::Host(host.clone())),
+                    run: entry.run.clone(),
+                    session: entry.session.clone(),
+                    snapshot: entry.snapshot.clone(),
+                    canonical_cwd: entry.canonical_cwd.clone(),
+                    generation: entry.generation,
+                    scope: entry.scope.clone(),
+                }),
+            );
+            entry.terminal.clone()
+        };
+        let socket_name = Terminal::Host(host.clone()).recorded_pane().to_string();
+        self.store
+            .set_terminal_for_test(id, crate::store::TerminalKind::Host, &socket_name)
+            .await?;
+        match replaced {
+            Some(Terminal::Tmux(tmux)) => self.tmux.kill_session(&tmux.tmux_name).await?,
+            Some(Terminal::Host(_)) | None => {}
+        }
+        Ok(host)
+    }
+
     /// Step 4b (write-result handling) and step 5 (the current-generation
     /// mirror under the same claim), shared by the proven and legacy
     /// paths. A failed CAS, a failed write, a timeout, or a rejection
@@ -16503,10 +16819,18 @@ impl Supervisor {
     /// A tmux that could not be asked is `Internal`, which the report drain
     /// treats as transient and retries on a later pass; a pane that is gone
     /// or no longer this session's is `Conflict`, a definitive refusal.
+    ///
+    /// A row whose agent runs in a terminal host is anchored at the host's
+    /// child instead ([`Self::host_agent_anchor`]); its `pane` column holds
+    /// the host's socket name, which no tmux lookup may read as a pane.
     pub(crate) async fn owned_pane_anchor(
         &self,
         row: &StoredSession,
     ) -> Result<crate::procs::PaneAnchor, RequestError> {
+        match row.terminal_kind {
+            crate::store::TerminalKind::Tmux => {}
+            crate::store::TerminalKind::Host => return self.host_agent_anchor(row).await,
+        }
         let pane = if row.pane.is_empty() {
             let states = self.tmux.pane_states().await.map_err(|_| {
                 RequestError::new(
@@ -16565,6 +16889,45 @@ impl Supervisor {
             }
         };
         Ok(crate::procs::PaneAnchor { pid, start })
+    }
+
+    /// The hook anchor of a row whose agent runs in a terminal host: the
+    /// host's child, with the start identity pinned while it ran
+    /// (`crate::hosts::HostStatus::anchor`), which a report's recorded chain
+    /// must reach just as it must reach a pane's process. Kept after the
+    /// child exits, so that a report written before the exit can still be
+    /// applied.
+    ///
+    /// The host is the one the session's published entry holds for the
+    /// row's own generation. Before that entry exists (the launch's
+    /// publication gap, when a hook can already report) or while it
+    /// describes another generation, the report is not refused: it is
+    /// `Internal`, which the report drain retries on a later pass, once the
+    /// entry this report belongs to is published. A host that cannot be
+    /// read gives no anchor, and is `Internal` the same way. Only an entry
+    /// of the row's generation whose terminal is not a host is `Conflict`.
+    async fn host_agent_anchor(
+        &self,
+        row: &StoredSession,
+    ) -> Result<crate::procs::PaneAnchor, RequestError> {
+        let entry = self.sessions.lock().await.get(&row.id).cloned();
+        let not_yet = || {
+            RequestError::new(
+                ErrorKind::Internal,
+                "the session's terminal host could not be inspected yet",
+            )
+        };
+        let Some(entry) = entry.filter(|entry| entry.generation == row.generation) else {
+            return Err(not_yet());
+        };
+        match &entry.terminal {
+            Some(Terminal::Host(host)) => host.anchor().ok_or_else(not_yet),
+            Some(Terminal::Tmux(_)) => Err(RequestError::new(
+                ErrorKind::Conflict,
+                "the session's recorded terminal host is not the terminal it runs in",
+            )),
+            None => Err(not_yet()),
+        }
     }
 
     /// Offer a witnessed transition to `session`'s durable outcome and
@@ -16823,12 +17186,10 @@ impl Drop for StartingLaunch {
 }
 
 /// One launch [`Supervisor::wait_for_pending_holds`] may wait for: where
-/// its "held" mark appears, and the tmux session and pane its window runs
-/// in.
+/// its "held" mark appears, and the terminal its program runs in.
 struct PendingHold {
     held: PathBuf,
-    session: String,
-    pane: String,
+    terminal: Terminal,
 }
 
 /// Whether SIGHUP's disposition is currently "ignore", as `nohup` leaves it
@@ -16896,6 +17257,7 @@ pub async fn connect(state_dir: &Path) -> anyhow::Result<UnixStream> {
 #[cfg(test)]
 pub(crate) mod tests {
     mod claude_pin;
+    pub(crate) mod host_terminals;
 
     /// Wrapper syntax must execute, but every composed suffix element remains
     /// exactly one argument, even when it contains shell syntax or a marker.
@@ -20876,7 +21238,7 @@ pub(crate) mod tests {
                 .expect("session liveness")
         );
         assert!(
-            sup.session_tabs(&Terminal::Tmux(agent.clone()))
+            sup.session_tabs(&entry)
                 .await
                 .expect("ordinary listing")
                 .is_empty(),
@@ -21589,10 +21951,7 @@ pub(crate) mod tests {
             .await
             .expect("forge a tab marker on the agent window");
 
-        let listed = sup
-            .session_tabs(&Terminal::Tmux(agent.clone()))
-            .await
-            .expect("tab listing");
+        let listed = sup.session_tabs(&entry).await.expect("tab listing");
         assert_eq!(
             listed,
             vec![genuine.clone()],
@@ -21625,7 +21984,7 @@ pub(crate) mod tests {
             .await
             .expect("close genuine tab");
         assert!(
-            sup.session_tabs(&Terminal::Tmux(agent.clone()))
+            sup.session_tabs(&entry)
                 .await
                 .expect("tab listing after genuine close")
                 .is_empty(),
@@ -28078,28 +28437,28 @@ exit 0
         std::fs::create_dir_all(spec.parent().unwrap()).expect("launch dir");
         let short = Duration::from_millis(300);
 
-        sup.track_pending_hold(&spec, name.to_string(), pane.clone());
+        sup.track_pending_hold(&spec, Terminal::tmux(name.to_string(), pane.clone()));
         assert!(
             !sup.wait_for_pending_holds(short).await,
             "no mark yet: the wait runs out"
         );
 
         std::fs::write(&held, format!("{}\n", pane_pid + 1)).expect("a stale mark");
-        sup.track_pending_hold(&spec, name.to_string(), pane.clone());
+        sup.track_pending_hold(&spec, Terminal::tmux(name.to_string(), pane.clone()));
         assert!(
             !sup.wait_for_pending_holds(short).await,
             "a mark naming another process does not count"
         );
 
         std::fs::write(&held, format!("{pane_pid}\n")).expect("this window's mark");
-        sup.track_pending_hold(&spec, name.to_string(), pane.clone());
+        sup.track_pending_hold(&spec, Terminal::tmux(name.to_string(), pane.clone()));
         assert!(
             sup.wait_for_pending_holds(PENDING_HOLD_WAIT).await,
             "the window's own mark settles it"
         );
 
         std::fs::remove_file(&held).expect("clear the mark");
-        sup.track_pending_hold(&spec, name.to_string(), pane.clone());
+        sup.track_pending_hold(&spec, Terminal::tmux(name.to_string(), pane.clone()));
         sup.tmux.kill_session(name).await.expect("close the window");
         assert!(
             sup.wait_for_pending_holds(PENDING_HOLD_WAIT).await,
@@ -28165,7 +28524,7 @@ exit 0
                     format!("{pane_pid}\n"),
                 )
                 .expect("the window's mark");
-                sup.track_pending_hold(&spec, name.to_string(), pane);
+                sup.track_pending_hold(&spec, Terminal::tmux(name.to_string(), pane));
                 drop(starting);
             })
         };
@@ -28177,7 +28536,7 @@ exit 0
 
         // A wedged tmux server: the probe must give up at the budget.
         std::fs::remove_file(crate::session_hold::held_mark_path(&spec)).expect("clear the mark");
-        sup.track_pending_hold(&spec, name.to_string(), pane.clone());
+        sup.track_pending_hold(&spec, Terminal::tmux(name.to_string(), pane.clone()));
         let (server, _, _) = crate::procs::read_process(pane_pid)
             .expect("read the window's process")
             .expect("the window's process exists");
@@ -28334,7 +28693,7 @@ exit 0
             .starting_launch()
             .expect("launches are open before the stop's wait")
             .expect("the versioned layout counts launches");
-        sup.track_pending_hold(&first, name.to_string(), pane.clone());
+        sup.track_pending_hold(&first, Terminal::tmux(name.to_string(), pane.clone()));
 
         let (server, _, _) = crate::procs::read_process(pane_pid)
             .expect("read the window's process")
@@ -28357,7 +28716,7 @@ exit 0
             tokio::spawn(async move {
                 // sleep-ok: scheduling stimulus; the second launch registers while the wait is blocked in the first probe.
                 tokio::time::sleep(Duration::from_millis(200)).await;
-                sup.track_pending_hold(&second, name.to_string(), pane);
+                sup.track_pending_hold(&second, Terminal::tmux(name.to_string(), pane));
                 let queued = sup
                     .pending_holds
                     .lock()

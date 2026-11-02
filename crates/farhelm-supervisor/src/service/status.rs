@@ -6,7 +6,10 @@
 //! describes — the half that answers "what happened to this session?" from
 //! two inputs, both handed in: the entry's own durable record and sample
 //! cell, and a pane-state map the CALLER's liveness probe returned. Nothing
-//! here goes looking for either one.
+//! here goes looking for either one. A terminal in a terminal host needs no
+//! map: its evidence is its runtime's state, read from memory
+//! ([`crate::hosts::HostStatus::evidence`]), so the same rules classify it
+//! without a probe.
 //!
 //! The guarantee that shape buys holds for the SYNCHRONOUS
 //! classification core — `session_status`, `session_restart_offer`, and
@@ -68,7 +71,7 @@ use super::core::{SessionEntry, Supervisor};
 use super::launch_artifacts::{
     append_launch_excerpt, read_launch_sentinel, sentinel_could_still_apply, wrapper_failure_detail,
 };
-use super::terminals::{Terminal, tabs_from_pane_states};
+use super::terminals::{Terminal, tabs_from_pane_states, tmux_tab_home};
 use crate::agent_kind::screen_reader::ScreenState;
 use crate::store::{LastOutcome, SessionStore, Transition};
 use crate::tmux::PaneState;
@@ -104,7 +107,7 @@ impl KnownTmuxNames {
     ) -> Self {
         let mut names = HashSet::new();
         for (id, tmux_name) in sessions {
-            names.insert(format!("fh-{id}"));
+            names.insert(super::core::session_tmux_name(id));
             if let Some(tmux_name) = tmux_name {
                 names.insert(tmux_name.to_string());
             }
@@ -117,56 +120,118 @@ impl KnownTmuxNames {
     }
 }
 
-/// What tmux says about one recorded pane, as far as it can be attributed to
-/// the session that recorded it.
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum PaneEvidence<'a> {
-    /// Present under the tmux session name this session recorded: its dead
-    /// flag and exit status are this session's.
-    Owned(&'a PaneState),
-    /// Not present, or present under ANOTHER farhelm session's name. Pane ids
-    /// restart at `%0` on a fresh tmux server, so a known owner is read as the
-    /// id having been recycled after ours went away. The tick and reload
-    /// can record the exit; screen sampling still requires positive ownership.
-    Absent,
-    /// Present under a name no session here answers to — most cheaply
-    /// explained by an out-of-band `rename-session` or `move-pane` on the
-    /// private socket, in which case it is still our agent. Neither liveness
-    /// nor an exit can be concluded from it, so observers draw no pane-based
-    /// inference and report an unresolved outcome as `Unknown`, the same way
-    /// the stop, restart and delete verbs refuse to act on it. The ticker
-    /// skips screen sampling but can still read launch evidence. A launch sentinel still counts: it is evidence about this
-    /// launch, not about the pane. The state is carried so a caller that keeps
-    /// the recorded terminal needs no second lookup.
-    Unattributed(&'a PaneState),
+/// What status reads from a terminal its session owns: whether its program
+/// has exited, and how. A tmux pane gives it from `PaneState::dead` and
+/// `PaneState::exit_code`; a host terminal from its runtime's exit record
+/// (`crate::hosts::HostEvidence::Owned`). One set of status rules reads both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct OwnedTerminal {
+    /// The program has exited, and the terminal still holds what it left:
+    /// a pane kept by `remain-on-exit`, or a host whose exit record has
+    /// been processed.
+    pub(crate) dead: bool,
+    /// The exit status, when the program is dead and exited with one.
+    pub(crate) exit_code: Option<i32>,
 }
 
-/// Classify `pane` for the session that recorded it under `tmux_name`.
-pub(crate) fn pane_evidence<'a>(
-    pane: &str,
-    tmux_name: &str,
-    pane_states: &'a HashMap<String, PaneState>,
-    known: &KnownTmuxNames,
-) -> PaneEvidence<'a> {
-    match pane_states.get(pane) {
-        None => PaneEvidence::Absent,
-        Some(state) if state.session_name == tmux_name => PaneEvidence::Owned(state),
-        Some(state) if known.contains(&state.session_name) => PaneEvidence::Absent,
-        Some(state) => PaneEvidence::Unattributed(state),
+impl From<&PaneState> for OwnedTerminal {
+    fn from(state: &PaneState) -> Self {
+        OwnedTerminal {
+            dead: state.dead,
+            exit_code: state.exit_code,
+        }
     }
 }
 
-/// [`pane_evidence`] for an entry's recorded terminal; no terminal at all is
-/// [`PaneEvidence::Absent`].
-fn terminal_evidence<'a>(
-    terminal: Option<&Terminal>,
-    pane_states: &'a HashMap<String, PaneState>,
+/// What can be said about one recorded terminal, as far as it can be
+/// attributed to the session that recorded it.
+///
+/// The three classes are the same for both kinds of terminal; only how a
+/// terminal falls into one differs ([`pane_evidence`] for a tmux pane,
+/// `crate::hosts::HostStatus::evidence` for a host terminal).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PaneEvidence {
+    /// The terminal answers for this session's program: its dead flag and
+    /// exit status are this session's. For tmux, the pane is present under
+    /// the tmux session name this session recorded; for a host, the host's
+    /// runtime reads it.
+    Owned(OwnedTerminal),
+    /// The terminal is gone. For tmux: not present, or present under
+    /// ANOTHER farhelm session's name (pane ids restart at `%0` on a fresh
+    /// tmux server, so a known owner is read as the id having been recycled
+    /// after ours went away). For a host: the host has ended. The tick and
+    /// reload can record the exit; screen sampling still requires positive
+    /// ownership.
+    Absent,
+    /// The terminal may run this session's program, and nothing can be
+    /// concluded about it. For tmux, a pane present under a name no session
+    /// here answers to, most cheaply explained by an out-of-band
+    /// `rename-session` or `move-pane` on the private socket, in which case
+    /// it is still our agent. For a host, a host that may run but cannot be
+    /// read (an unknown protocol or snapshot format, a connection that
+    /// keeps ending: the plan's D-16). Neither liveness nor an exit can be
+    /// concluded from it, so observers draw no inference and report an
+    /// unresolved outcome as `Unknown`, the same way the stop, restart and
+    /// delete verbs refuse to act on it, and no exit is recorded. The ticker
+    /// skips screen sampling. For a tmux pane it can still read launch
+    /// evidence (a launch sentinel is evidence about this launch, not about
+    /// the pane, and the pane is most likely our own agent renamed); for a
+    /// host it records nothing at all, sentinel included, since the host may
+    /// belong to a supervisor that can read it and will classify the launch
+    /// itself (the plan's D-16).
+    Unattributed,
+}
+
+impl From<crate::hosts::HostEvidence> for PaneEvidence {
+    fn from(evidence: crate::hosts::HostEvidence) -> Self {
+        match evidence {
+            crate::hosts::HostEvidence::Owned { dead, exit_code } => {
+                PaneEvidence::Owned(OwnedTerminal { dead, exit_code })
+            }
+            crate::hosts::HostEvidence::Absent => PaneEvidence::Absent,
+            crate::hosts::HostEvidence::Unattributed => PaneEvidence::Unattributed,
+        }
+    }
+}
+
+/// Classify `pane` for the session that recorded it under `tmux_name`.
+///
+/// A caller that needs the pane's tmux state itself (reload keeps it to
+/// rebuild the terminal) reads it from `pane_states` in its own arm: the
+/// evidence carries only what status decides with, the same for both kinds
+/// of terminal.
+pub(crate) fn pane_evidence(
+    pane: &str,
+    tmux_name: &str,
+    pane_states: &HashMap<String, PaneState>,
     known: &KnownTmuxNames,
-) -> PaneEvidence<'a> {
-    terminal.map_or(PaneEvidence::Absent, |terminal| {
-        let Terminal::Tmux(tmux) = terminal;
-        pane_evidence(&tmux.pane, &tmux.tmux_name, pane_states, known)
-    })
+) -> PaneEvidence {
+    match pane_states.get(pane) {
+        None => PaneEvidence::Absent,
+        Some(state) if state.session_name == tmux_name => PaneEvidence::Owned(state.into()),
+        Some(state) if known.contains(&state.session_name) => PaneEvidence::Absent,
+        Some(_) => PaneEvidence::Unattributed,
+    }
+}
+
+/// The evidence for an entry's recorded terminal; no terminal at all is
+/// [`PaneEvidence::Absent`].
+///
+/// A tmux pane is classified from the caller's `pane_states` snapshot
+/// ([`pane_evidence`]); a host terminal from its runtime's state now, which
+/// needs no snapshot and no tmux.
+fn terminal_evidence(
+    terminal: Option<&Terminal>,
+    pane_states: &HashMap<String, PaneState>,
+    known: &KnownTmuxNames,
+) -> PaneEvidence {
+    match terminal {
+        Some(Terminal::Tmux(tmux)) => {
+            pane_evidence(&tmux.pane, &tmux.tmux_name, pane_states, known)
+        }
+        Some(Terminal::Host(host)) => host.evidence().into(),
+        None => PaneEvidence::Absent,
+    }
 }
 
 /// Compute one session's liveness for a `ListSessions` reply. tmux is the
@@ -265,10 +330,10 @@ pub(crate) fn session_status(
         PaneEvidence::Absent => None,
         // A settled outcome is retained knowledge and still speaks below; an
         // unsettled one has nothing observable to decide it.
-        PaneEvidence::Unattributed(_) if !recorded.is_terminal() => {
+        PaneEvidence::Unattributed if !recorded.is_terminal() => {
             return (SessionStatus::Unknown, None);
         }
-        PaneEvidence::Unattributed(_) => None,
+        PaneEvidence::Unattributed => None,
     };
     match (&*recorded, live) {
         (LastOutcome::Error { detail }, _) => (
@@ -455,12 +520,15 @@ pub(crate) fn entry_info(
     // honestly. Dead tabs are omitted: SPEC.md reaps a tab whose process
     // exited, and the ticker's reap may lag this reply by a tick — hiding
     // the corpse here is what keeps the listing honest in that window.
+    //
+    // Tabs are windows in the SESSION's tmux session whatever the agent's
+    // kind (`tmux_tab_home`).
     info.tabs = entry
         .terminal
         .as_ref()
         .map(|terminal| {
-            let Terminal::Tmux(tmux) = terminal;
-            tabs_from_pane_states(pane_states.values(), &tmux.tmux_name, Some(&tmux.pane))
+            let (tmux_name, agent_pane) = tmux_tab_home(&entry.info.id, terminal);
+            tabs_from_pane_states(pane_states.values(), &tmux_name, agent_pane)
                 .into_iter()
                 .filter(|tab| !tab.dead)
                 .map(|tab| TabInfo { id: tab.id })
@@ -508,16 +576,21 @@ pub(crate) fn entry_info(
     info
 }
 
-/// The exit code tmux still holds for `terminal`'s pane, if the pane is
-/// dead and tmux could reduce its death to one.
+/// The exit code `terminal` still holds, if its program is dead and its
+/// death reduces to one.
 ///
-/// `pane_states`, not `pane_process`: the latter answers "is it dead, and
-/// what pid did it have", and only the former carries
+/// For tmux, `pane_states`, not `pane_process`: the latter answers "is it
+/// dead, and what pid did it have", and only the former carries
 /// `#{pane_dead_status}` at all. Used by `StopSession` at both of its
 /// exit-recording moments — a stop that found the agent already gone, and
 /// a stop whose kill sweep just finished — because in both the code is
 /// worth keeping for exactly as long as the pane survives to hold it, and
 /// nothing else will look again.
+///
+/// A host terminal answers from its runtime's processed exit record
+/// ([`crate::hosts::HostTerminal::exit_code`]). Right after a kill sweep
+/// that record may not have arrived yet, which reads as no code, the same
+/// as a pane tmux has not reaped yet.
 ///
 /// A failed query is logged and degrades to `None` rather than failing the
 /// stop: it costs the exit code, never the annotation, and the store's
@@ -527,7 +600,10 @@ pub(crate) async fn dead_pane_exit_code(
     terminal: Option<&Terminal>,
     session_id: &str,
 ) -> Option<i32> {
-    let Terminal::Tmux(terminal) = terminal?;
+    let terminal = match terminal? {
+        Terminal::Tmux(terminal) => terminal,
+        Terminal::Host(host) => return host.exit_code(),
+    };
     match sup.tmux.pane_states().await {
         Ok(states) => states
             .get(&terminal.pane)
@@ -552,7 +628,10 @@ pub(crate) async fn dead_pane_exit_code(
 /// can add to `Interrupted`, `Error`, or an exit that already has its
 /// code), and a `Launching` row with no pane — see `session_status`'s
 /// point 4 for why absence of side effects is not evidence of an exit.
-pub(crate) fn observation(recorded: &LastOutcome, live: Option<&PaneState>) -> Option<Transition> {
+pub(crate) fn observation(
+    recorded: &LastOutcome,
+    live: Option<OwnedTerminal>,
+) -> Option<Transition> {
     match live {
         Some(state) if !state.dead => None,
         Some(state) => {
@@ -662,8 +741,6 @@ pub(crate) async fn observe_entry_with_capture_budget(
         .lock()
         .expect("outcome mutex poisoned")
         .clone();
-    // Borrowed out of the caller's map rather than cloned: this runs once
-    // per entry on the polling path, and the pane state is only ever read.
     let evidence = terminal_evidence(entry.terminal.as_ref(), pane_states, known);
     if matches!(recorded, LastOutcome::Error { .. }) {
         return Ok(EntryObservation {
@@ -673,14 +750,30 @@ pub(crate) async fn observe_entry_with_capture_budget(
             settle_launch_reads: false,
         });
     }
+    // An unreadable host records nothing durable, not even a sentinel: the
+    // plan's D-16 leaves it to whoever can read it. The renamed-pane
+    // exception below is tmux's alone.
+    let unreadable_host = match (&evidence, entry.terminal.as_ref()) {
+        (PaneEvidence::Unattributed, Some(Terminal::Host(_))) => true,
+        (PaneEvidence::Unattributed, Some(Terminal::Tmux(_)) | None) => false,
+        (PaneEvidence::Owned(_) | PaneEvidence::Absent, _) => false,
+    };
+    if unreadable_host {
+        return Ok(EntryObservation {
+            sentinel: None,
+            transition: None,
+            settled_error: false,
+            settle_launch_reads: false,
+        });
+    }
     // Possibly our own agent under another name: only the sentinel, which
     // is about this launch rather than any pane, may speak for it. The
     // wrapper-failure, preparation and exit inferences all read the pane,
     // which is how the ticker and the lifecycle verbs already treat it.
-    let unattributed = matches!(evidence, PaneEvidence::Unattributed(_));
+    let unattributed = matches!(evidence, PaneEvidence::Unattributed);
     let live = match evidence {
         PaneEvidence::Owned(state) => Some(state),
-        PaneEvidence::Absent | PaneEvidence::Unattributed(_) => None,
+        PaneEvidence::Absent | PaneEvidence::Unattributed => None,
     };
 
     // Two different questions, deliberately not one: "no live
@@ -1108,13 +1201,16 @@ mod tests {
         let dead_without_code = PaneState::for_test("fh-1", "%0", "@0").dead_with(None);
         let alive = PaneState::for_test("fh-1", "%0", "@0");
 
-        assert_eq!(observation(&LastOutcome::Running, Some(&alive)), None);
         assert_eq!(
-            observation(&LastOutcome::Running, Some(&dead_with_code)),
+            observation(&LastOutcome::Running, Some((&alive).into())),
+            None
+        );
+        assert_eq!(
+            observation(&LastOutcome::Running, Some((&dead_with_code).into())),
             Some(Transition::ObservedExit { exit_code: Some(3) })
         );
         assert_eq!(
-            observation(&LastOutcome::Launching, Some(&dead_with_code)),
+            observation(&LastOutcome::Launching, Some((&dead_with_code).into())),
             None,
             "a dead pane during an ambiguous launch cannot establish that the new run exited"
         );
@@ -1143,7 +1239,7 @@ mod tests {
                     exit_code: None,
                     annotation: None
                 },
-                Some(&dead_with_code)
+                Some((&dead_with_code).into())
             ),
             Some(Transition::ObservedExit { exit_code: Some(3) }),
             "a code tmux can only now report must still reach the record"
@@ -1154,7 +1250,7 @@ mod tests {
                     exit_code: Some(3),
                     annotation: None
                 },
-                Some(&dead_without_code)
+                Some((&dead_without_code).into())
             ),
             None,
             "a known code is never re-offered to be replaced by a missing one"

@@ -204,6 +204,24 @@ that its required systemd or SSH substrate ran.
   orderly checkpoint and ending in a gap; a sequence longer than the cap written while away ending in a gap; the FIFO
   helpers giving up within their bound when nobody is at the other end; a resize; and a shutdown confirmed by the host's
   process. Seconds, part of the workspace nextest run; the focused macOS CI job runs it too, in the terminal host step.
+- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'host terminal switch points' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(/core::tests::host_terminals::/) | test(/a_failed_tmux_probe_still_samples_and_observes_host_terminals/) | test(/^host_terminals::/)'`
+  — the supervisor's terminal switch points with a terminal host behind a session's agent (`Terminal::Host` in
+  `crates/farhelm-supervisor/src/service/terminals.rs`). The unit tests (`service::core::tests::host_terminals`, and one
+  in `service::ticker::tests`) use a stand-in host in the test process (`hosts::terminal::test_host`) whose child is a
+  `sleep` the stand-in owns: status and the recorded exit code, the never-started excerpt from the emulator, Stop before
+  the host's exit record (a plain exit, then the launch failure once the record arrives) and Stop classifying from a
+  record that arrives while it waits, the wait for that record pending until it arrives, the launch shim's own report
+  recorded without waiting, an unreadable host left alone (no transition even beside a current sentinel, unknown status,
+  a root that its earlier probe authorized refused, refused verbs and prompt), the ticker recording a host exit on the
+  liveness notifier's wake with the tick far away, a failed tmux probe that still samples a live host and records a gone
+  one's exit, the hook anchor (and the publication gap's retry), the orderly stop's hold wait, and prompt delivery gated
+  on the emulator's paste mode, at one part and at the prompt cap's two. The e2e tests
+  (`crates/farhelm/tests/e2e/host_terminals.rs`) move a created session's agent into a real host started from the built
+  `farhelm` (`Supervisor::install_host_agent_for_test`) and check the exit stored with its code, Stop and Delete killing
+  an unmarked process tree from the host's child (Stop leaving the host's process running with its final screen),
+  Restart refused before anything stops, the delete guard, and the attach refusals. Linux only (the e2e suite), a minute
+  or two; part of the workspace nextest run. Run it when a switch point, the host runtime's adapters or the status
+  evidence change.
 - Terminal host coverage, when the crate changes:
   `cargo +nightly llvm-cov -p terminal-host --branch --summary-only -- --test-threads=1`, with cargo-llvm-cov 0.9.1
   installed in your scratch directory (`cargo install --locked --root <scratch>/tools cargo-llvm-cov --version 0.9.1`,
