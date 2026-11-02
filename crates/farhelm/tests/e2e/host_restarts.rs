@@ -31,15 +31,15 @@ use std::path::Path;
 /// drop ends any host left in it), its private tmux server, and the
 /// session's working directory. The tmux guard is declared before the state
 /// directory so the server stops before its socket's directory goes.
-struct Stack {
+pub(crate) struct Stack {
     _tmux: TmuxServerGuard,
-    state: farhelm_teststate::TestDir,
-    work: farhelm_teststate::TestDir,
+    pub(crate) state: farhelm_teststate::TestDir,
+    pub(crate) work: farhelm_teststate::TestDir,
     _slot: tokio::sync::SemaphorePermit<'static>,
 }
 
 impl Stack {
-    async fn new() -> Self {
+    pub(crate) async fn new() -> Self {
         let slot = SLOTS.acquire().await.expect("semaphore is never closed");
         let state = farhelm_teststate::tempdir().expect("state");
         Self {
@@ -54,7 +54,10 @@ impl Stack {
     /// hold the directory's claim (a supervisor without it reconciles
     /// nothing and finds no host, which would make a restart test pass for
     /// the wrong reason), and a client of it.
-    async fn supervisor(&self, seams: SupervisorSeams) -> (Arc<Supervisor>, Arc<SupervisorClient>) {
+    pub(crate) async fn supervisor(
+        &self,
+        seams: SupervisorSeams,
+    ) -> (Arc<Supervisor>, Arc<SupervisorClient>) {
         let sup = Supervisor::new_with_seams(
             self.state.path(),
             farhelm_bin().into(),
@@ -72,7 +75,7 @@ impl Stack {
     }
 
     /// Create a session running `command` in this stack's working directory.
-    async fn create(&self, client: &SupervisorClient, command: &str) -> SessionInfo {
+    pub(crate) async fn create(&self, client: &SupervisorClient, command: &str) -> SessionInfo {
         client
             .create_session(&self.work.path().to_string_lossy(), command, None, 80, 24)
             .await
@@ -84,7 +87,7 @@ impl Stack {
 /// directory's claim, so that the next supervisor owns the directory. Its
 /// host runtimes end with it, their connections closed and their hosts left
 /// running, as at a crash.
-async fn retire(state: &Path, sup: Arc<Supervisor>, client: Arc<SupervisorClient>) {
+pub(crate) async fn retire(state: &Path, sup: Arc<Supervisor>, client: Arc<SupervisorClient>) {
     drop(client);
     let deadline = tokio::time::Instant::now() + Duration::from_secs(WAIT_SECS);
     while Arc::strong_count(&sup) > 1 {
@@ -100,7 +103,7 @@ async fn retire(state: &Path, sup: Arc<Supervisor>, client: Arc<SupervisorClient
 }
 
 /// The published runtime of `session_id`'s agent host.
-async fn agent_host(sup: &Supervisor, session_id: &str) -> HostTerminal {
+pub(crate) async fn agent_host(sup: &Supervisor, session_id: &str) -> HostTerminal {
     sup.agent_host_for_test(session_id)
         .await
         .expect("the session's agent terminal is a host")
@@ -108,7 +111,7 @@ async fn agent_host(sup: &Supervisor, session_id: &str) -> HostTerminal {
 
 /// Wait until `host`'s runtime has processed everything its host had
 /// journaled when it was adopted.
-async fn wait_until_caught_up(host: &HostTerminal) {
+pub(crate) async fn wait_until_caught_up(host: &HostTerminal) {
     let mut status = host.subscribe();
     let waited = tokio::time::timeout(Duration::from_secs(WAIT_SECS), async {
         while !host.status().caught_up {
@@ -174,7 +177,7 @@ async fn assert_reloaded_as_running(
 
 /// Send `line` and Enter to the program in `host`, and require that the
 /// host wrote it.
-async fn type_line(host: &HostTerminal, line: &str) {
+pub(crate) async fn type_line(host: &HostTerminal, line: &str) {
     let receipt = host
         .send_input(format!("{line}\r").as_bytes())
         .await
@@ -240,11 +243,11 @@ fn recorded_socket(state: &Path, session_id: &str) -> std::path::PathBuf {
 /// stops a host (SIGSTOP) holds one, so that a failing assertion never
 /// leaves the host stopped, which the state directory's cleanup could not
 /// end through the protocol.
-struct Stopped(u32);
+pub(crate) struct Stopped(u32);
 
 impl Stopped {
     /// Stop process `pid`, the test's own host.
-    fn stop(pid: u32) -> Self {
+    pub(crate) fn stop(pid: u32) -> Self {
         // SAFETY: `kill` has no memory-safety preconditions; the pid is a
         // host this test's supervisor started, found by its socket.
         assert_eq!(unsafe { libc::kill(pid as i32, libc::SIGSTOP) }, 0);

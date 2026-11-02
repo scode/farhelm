@@ -1163,6 +1163,9 @@ async fn reap_pass(sup: &Arc<Supervisor>, stop: &mut oneshot::Receiver<()>) {
         publish_pane_deaths(sup, states, probe_started);
         reap_dead_tabs(sup, states, &entries, stop).await;
     }
+    // Tabs in terminal hosts need no pane map: this is the wake their exit
+    // drives, so a failed tmux query never holds them back.
+    reap_dead_host_tabs(sup, &entries, stop);
     // A dead tab must not turn the wake into a fleet sweep. Only an owned
     // dead agent terminal with an unsettled outcome needs prompt persistence;
     // absent terminals and already-stopped sessions remain the timer's work.
@@ -1588,6 +1591,10 @@ async fn sample_pass(
         publish_pane_deaths(sup, states, probe_started);
         reap_dead_tabs(sup, states, &entries, stop).await;
     }
+    // The tick's fallback for tabs in terminal hosts, whose exits normally
+    // wake `reap_pass` at once: a close the busy session deferred, or one
+    // that failed, is started again here.
+    reap_dead_host_tabs(sup, &entries, stop);
 
     // Ownership classification belongs to the shared observer. In particular,
     // an unattributed pane permits sentinel evidence, and a pane recycled into
@@ -1983,15 +1990,11 @@ pub(crate) const REAP_BUDGET_PER_TICK: usize = 4;
 /// then failed its process sweep — a tab that no longer exists to retry
 /// through, with only its scope/marker sweeps left to catch stragglers.
 ///
-/// One residual this inherits rather than creates: pane-state marker
-/// collection is skipped entirely when NO session on the private tmux
-/// server has two or more windows, so a server reduced by hand to
-/// single-window sessions (an agent window killed directly against the
-/// private socket, leaving one tab window) has undiscoverable — and
-/// therefore unreapable — tabs. That state is unreachable through the
-/// product (the agent window is never killed while the session lives;
-/// `remain-on-exit` keeps even a dead agent pane's window), and it is the
-/// same residual `detach_closed_tab` documents for by-hand window kills.
+/// Pane-state marker collection is skipped only when no session on the
+/// private tmux server has two or more windows and no window carries a tab
+/// marker (`TmuxDriver::pane_states`), so a tab that is its session's only
+/// window (a host agent's last old tab, or a server reduced by hand to
+/// single-window sessions) is still discovered and reaped.
 async fn reap_dead_tabs(
     sup: &Arc<Supervisor>,
     states: &std::collections::HashMap<String, crate::tmux::PaneState>,
@@ -2048,6 +2051,53 @@ async fn reap_dead_tabs(
                 );
                 continue;
             };
+            budget -= 1;
+        }
+    }
+}
+
+/// Start the automatic close of every tab in a terminal host whose shell
+/// has exited (or whose host ended under it, or whose earlier close could
+/// not confirm its host ended: `HostTab::reap_due`), the host-tab half of SPEC.md's
+/// "a tab whose process exits is reaped automatically" ([`reap_dead_tabs`]
+/// is the tmux half).
+///
+/// Driven by the host's exit event, not a poll: the tab's runtime announces
+/// its processed exit record on the supervisor's liveness notifier, which
+/// wakes [`reap_pass`] at once (see [`start_ticker`]), and the tick runs it
+/// too, for a close a busy session put off. Each exited tab is read from its
+/// session's cell (`SessionCells::host_tabs`), whatever the session's agent
+/// runs in, and closed through [`Supervisor::try_close_tab`], the ordinary
+/// close under the session's lifecycle claim, taken without waiting, which
+/// checks again that the tab's shell exited before it ends anything. Starts
+/// are bounded by [`REAP_BUDGET_PER_TICK`] per pass and re-checked against
+/// `stop`, as for tmux tabs; nothing here waits for a close.
+fn reap_dead_host_tabs(
+    sup: &Arc<Supervisor>,
+    entries: &[Arc<SessionEntry>],
+    stop: &mut oneshot::Receiver<()>,
+) {
+    let mut budget = REAP_BUDGET_PER_TICK;
+    for entry in entries {
+        for tab_id in super::core::reap_due_host_tabs(&entry.session.host_tabs) {
+            if stop_requested(stop) {
+                return;
+            }
+            if budget == 0 {
+                debug!(
+                    "the pass's host-tab reap budget is spent; remaining exited tabs stay hidden \
+                     and the next pass continues"
+                );
+                return;
+            }
+            if sup.try_close_tab(&entry.info.id, &tab_id).is_none() {
+                debug!(
+                    session = %entry.info.id, tab = %tab_id,
+                    "an exited host tab's session is busy with another operation; the reap \
+                     retries on a later pass"
+                );
+                continue;
+            }
             budget -= 1;
         }
     }

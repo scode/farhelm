@@ -267,7 +267,7 @@ type PauseHook =
 /// `notify_one` before anyone waits still stores a permit, so a test that
 /// reaches its `notified()` after the supervisor has already entered the
 /// gate is not left waiting for a notification that has been and gone.
-fn notifying_gate() -> (
+pub(crate) fn notifying_gate() -> (
     PauseHook,
     Arc<tokio::sync::Notify>,
     Arc<tokio::sync::Notify>,

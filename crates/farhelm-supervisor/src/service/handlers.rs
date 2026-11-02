@@ -10000,6 +10000,7 @@ mod tests {
                     last_activity_at: crate::service::core::activity_stamp(1_700_000_000),
                     last_work_started_at: crate::service::core::activity_stamp(1_700_000_000_000),
                     notifications: crate::service::core::notification_cell(),
+                    host_tabs: crate::service::core::host_tab_cell(Vec::new()),
                 },
                 snapshot: IntegrationSnapshot {
                     kind: AgentKind::Generic,
@@ -10194,6 +10195,7 @@ mod tests {
                     created_at.saturating_mul(1_000),
                 ),
                 notifications: crate::service::core::notification_cell(),
+                host_tabs: crate::service::core::host_tab_cell(Vec::new()),
             },
             snapshot: IntegrationSnapshot {
                 kind: AgentKind::Generic,
@@ -10403,6 +10405,7 @@ mod tests {
                     last_activity_at: crate::service::core::activity_stamp(1_700_000_000),
                     last_work_started_at: crate::service::core::activity_stamp(1_700_000_000_000),
                     notifications: crate::service::core::notification_cell(),
+                    host_tabs: crate::service::core::host_tab_cell(Vec::new()),
                 },
                 snapshot: IntegrationSnapshot {
                     kind: AgentKind::Generic,

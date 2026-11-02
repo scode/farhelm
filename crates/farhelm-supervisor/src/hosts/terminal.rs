@@ -1219,6 +1219,10 @@ struct Inner {
     /// "Input"): a caller blocked on a full queue when input was lost is
     /// behind the hole too.
     epoch: Arc<AtomicU64>,
+    /// How many times the runtime's connection to its host ended and the
+    /// runtime connected again and resumed its stream on the new connection
+    /// ([`HostTerminal::reconnects`]).
+    reconnected: Arc<AtomicU64>,
     /// Lines of history the emulator keeps, as made.
     scrollback_lines: usize,
     /// The terminal's budget for pastes waiting for the task, in bytes
@@ -1815,6 +1819,7 @@ impl HostTerminal {
         let (control_tx, control_rx) = mpsc::channel(1);
         let (size_tx, size_rx) = watch::channel(None);
         let epoch = Arc::new(AtomicU64::new(0));
+        let reconnected = Arc::new(AtomicU64::new(0));
         let encodes = Encodes::new();
 
         let mut runtime = Runtime {
@@ -1843,6 +1848,7 @@ impl HostTerminal {
             reconnects: VecDeque::new(),
             fence,
             epoch: epoch.clone(),
+            reconnected: reconnected.clone(),
             host_size: info.size,
             open_pastes: 0,
             checkpoints,
@@ -1877,6 +1883,7 @@ impl HostTerminal {
                 control: control_tx,
                 size: size_tx,
                 epoch,
+                reconnected,
                 returned,
                 scrollback_lines: options.scrollback_lines,
                 paste_budget: Arc::new(tokio::sync::Semaphore::new(MAX_PASTE)),
@@ -1946,6 +1953,7 @@ impl HostTerminal {
                 control,
                 size: size_tx,
                 epoch: Arc::new(AtomicU64::new(0)),
+                reconnected: Arc::new(AtomicU64::new(0)),
                 scrollback_lines: 0,
                 paste_budget: Arc::new(tokio::sync::Semaphore::new(MAX_PASTE)),
                 encodes: Encodes::new(),
@@ -1954,6 +1962,19 @@ impl HostTerminal {
                 placeholder: true,
             }),
         }
+    }
+
+    /// How many times this runtime's connection to its host ended and it
+    /// connected again and resumed reading on the new connection: 0 for a
+    /// runtime that has kept the connection its adoption made. Counted only
+    /// once the new connection is established, so when it moves, the
+    /// runtime holds its host again (every connection takes the host over,
+    /// so whoever held it before has been cut off). A count that moves while
+    /// nothing else should touch the host shows that something did (a scan
+    /// that should have skipped it, say). An attempt that fails is not
+    /// counted. Diagnostic, and what tests of that read.
+    pub fn reconnects(&self) -> u64 {
+        self.inner.reconnected.load(Ordering::SeqCst)
     }
 
     /// Whether this handle is a placeholder [`Self::unavailable`] made for a
@@ -2629,6 +2650,8 @@ struct Runtime {
     reconnects: VecDeque<tokio::time::Instant>,
     /// The input epoch (`Inner::epoch`).
     epoch: Arc<AtomicU64>,
+    /// How many reconnects completed (`Inner::reconnected`).
+    reconnected: Arc<AtomicU64>,
     /// How many of the adoption's first events, read before its fence
     /// `Info` reply, are still to be processed; caught up only at 0.
     fence: usize,
@@ -3791,7 +3814,10 @@ impl Runtime {
                 }
             }
             match self.resume(&mut conn).await {
-                Ok(()) => return Some(conn),
+                Ok(()) => {
+                    self.reconnected.fetch_add(1, Ordering::SeqCst);
+                    return Some(conn);
+                }
                 Err(failure) => error = failure,
             }
         }

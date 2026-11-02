@@ -276,9 +276,9 @@ that its required systemd or SSH substrate ran.
   nothing, and one the spawn reports may have left a host, which the create ends and removes the socket of; stand-in
   hosts that cannot be used, ended by the verified signal and rolled back, or kept as a launching record when the signal
   must not touch them; a retry keeping its row's kind with the switch flipped either way across a restart; and Restart
-  and tabs refused for a created host agent. Needs the pinned tmux first on `PATH` and Python 3 at `/usr/bin/python3`
-  (the stand-in hosts). Linux only, two or three minutes (several tests wait out client deadlines); part of the
-  workspace nextest run. The container launch kind's test is in the containerized suite above
+  refused for a created host agent. Needs the pinned tmux first on `PATH` and Python 3 at `/usr/bin/python3` (the
+  stand-in hosts). Linux only, two or three minutes (several tests wait out client deadlines); part of the workspace
+  nextest run. The container launch kind's test is in the containerized suite above
   (`containerized_sessions::podman_agent_runs_from_a_terminal_host`). Run it when the create path, the launch spec's
   composition, the host spawn or the launch identity's rollback or evidence changes.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'host terminals across supervisor restarts' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(/a_prompt_waits_for_a_recovered_host_terminal_to_catch_up|spare_claims_read_a_host_rows_own_host|a_stop_request_survives_a_restart|an_unreadable_launch_record_leaves_its_session_unavailable|an_orderly_stop_ends_its_encodes_before_its_runtime_drops|a_readoption_that_loses_its_fence|readoption_backs_off_without_spinning|a_scan_restricted_to_some_names|delete_settles_the_record_of_a_startup_placeholders_socket/) | test(/^host_restarts::/)'`
@@ -316,6 +316,39 @@ that its required systemd or SSH substrate ran.
   suite), a minute or so; part of the workspace nextest run. Run it when reload, the orderly stop, re-adoption,
   discovery or the host runtime's adoption or encodes change. The encoder's cancel itself is in the terminal emulator
   selection below (`an_encode_stops_once_its_cancel_fires_and_is_unchanged_until_then`).
+- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'terminal tabs in terminal hosts' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(launch_file_names_round_trip_through_the_parser) | test(sweep_launch_dir_keeps_every_host_record) | test(/core::host_tabs::tests::/) | test(/tmux::control_codec::tests::/) | test(closing_a_tab_whose_runtime_reads_gone_confirms_its_process_first) | test(/^host_tabs::/)'`
+  — terminal tabs in terminal hosts under the supervisor's internal switch
+  (`crates/farhelm-supervisor/src/service/core/host_tabs.rs`). The unit tests pin a tab host's launch record name
+  (`<id>.tab-<tab id>.host`) round-tripping through the launch-directory name parser, which accepts the tab form only
+  for a `.host` record; the startup sweep keeping tab records; the tab strip's creation order against stand-in hosts (an
+  exited tab hidden and picked by the reap, unreadable tabs kept and never reaped, a tab whose close failed reaped
+  again, once its retry time comes, which backs off from a second to a minute) and a new tab stamped past the session's
+  newest; a close whose tab runtime reads its host gone while the adopted process runs (a stand-in) keeping the tab, its
+  record and its retry mark; and the pane-fact query's tab flag, which makes tmux's marker query run whenever a window
+  carries a tab marker, a lone one at index 0 included, and only then for single-window sessions. The e2e tests
+  (`crates/farhelm/tests/e2e/host_tabs.rs`) run in-process supervisors with the switch on and `/bin/sh` tab shells,
+  starting hosts from the built `farhelm`: a tab beside a host agent opened at the agent's size, its record naming its
+  socket, typed into, attached as a grid, a takeover displacing the previous client's agent and tab attachments
+  together, and closed leaving no host, socket, record or tab process; a tmux agent's session (made with the switch off,
+  served after a restart with it on) listing its tmux tab before its host tabs in opening order, each host tab at the
+  tmux window's size, a takeover across the tmux agent and a host tab, and its Delete refused for three open tabs by a
+  guard, then ending both tab hosts, their sockets and records and the tmux session while another session's tab host
+  runs on; a host agent whose last old tmux tab closes (tmux ends its tmux session) with a host tab already open, both
+  still running and a further host tab opening; a lone tmux tab at index 0 listed and closed; a tab shell dead at open
+  (the settle held until its pid is gone) refused with its last words, leaving no tab host process, socket or record;
+  opens failed just before publishing, and (with the user manager, else `SKIPPED`) after the host started and before its
+  adoption, leaving nothing at the refusal's return, the latter killing a SIGHUP-immune job of the tab's shell and its
+  tab scope; a SIGHUP-immune job with no markers under a tab's shell killed by its close and by Delete; a tab start
+  interrupted with its first stage holding the spec settled by the next supervisor's reload (which waits for it) and its
+  host adopted, then ended by Delete; `serve`'s reload keeping held tab runtimes without contacting their hosts while it
+  scans for another session's agent; a tab host stopped across a restart kept as a listed placeholder whose close and
+  guarded Delete are refused and which an unconditional Delete ends, and a tab runtime made unreadable (its reconnect
+  limit) treated the same way; an exited tab, and a tab whose host was killed, reaped with a ten-minute ticker interval;
+  a close whose host end fails (a seam) finished by the reap, no sooner than its one-second backoff; and an orderly
+  restart keeping a tab listed, at the same socket, with its screen, attachable as a grid and typed into. Needs the
+  pinned tmux first on `PATH`. Linux only (the e2e suite), a minute or two; part of the workspace nextest run. Run it
+  when tab opening, closing, the tab strip, the tab reap, the tab records, Delete's handling of tab runtimes, the
+  reload's tab adoption or tmux's pane listing change.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'grid streams' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p farhelm-supervisor --lib -E 'test(/^grid_output::/) | test(/^service::grid_stream::/)'`
   — how a host terminal reaches a grid viewer: the encoding (`crates/farhelm-supervisor/src/grid_output.rs`: cells to
   runs with styles, redefined palette colors, wide and combining characters and links, a row with more links than a

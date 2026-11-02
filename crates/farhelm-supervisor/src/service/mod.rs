@@ -78,7 +78,8 @@
 //! together.
 //!
 //! `session_hosts` is `teardown`'s helper for terminal hosts: which hosts are
-//! a session's (its agent's runtime and its launch records, never a scan),
+//! a session's (its agent's runtime, its tab runtimes and its launch records,
+//! never a scan),
 //! the roots their children give Delete's sweep, and ending each host
 //! afterwards. Delete's guard asks it about live agents and open tabs too.
 //!

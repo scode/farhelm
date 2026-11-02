@@ -329,6 +329,10 @@ impl Candidate {
                     .context("launch name")?,
             )
             .context("launch generation")?;
+            let generation = match generation {
+                crate::launch::LaunchFileOf::Launch(generation) => generation,
+                crate::launch::LaunchFileOf::Tab(_) => bail!("a tab has no launch status"),
+            };
             if session != spec.session_id {
                 bail!("claim session differs from launch");
             }
