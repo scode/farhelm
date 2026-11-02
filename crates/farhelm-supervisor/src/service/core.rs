@@ -44,8 +44,8 @@ use super::sweep::{
 };
 use super::terminals::{
     ActiveAttach, AttachmentKey, OutputReapRegistry, SINK_READY_TIMEOUT, SinkRegistry,
-    TAB_LAUNCH_SETTLE, TAB_LAUNCH_SETTLE_STEP, Terminal, TerminalId, agent_pane_from_states,
-    resolve_terminal_for_close, tabs_from_pane_states,
+    TAB_LAUNCH_SETTLE, TAB_LAUNCH_SETTLE_STEP, Terminal, TerminalId, TmuxTerminal,
+    agent_pane_from_states, resolve_terminal_for_close, tabs_from_pane_states,
 };
 use super::ticker::{
     ACTIVITY_STAMP_QUANTUM, ActivitySample, REAP_BUDGET_PER_TICK, SAMPLING_ADMISSION_PERMITS,
@@ -3515,7 +3515,7 @@ struct Spawned {
 /// into a session-wide teardown.
 enum SpawnTarget<'a> {
     /// Respawn inside the existing recorded pane, retaining its scrollback.
-    Reuse(&'a Terminal),
+    Reuse(&'a TmuxTerminal),
     /// Add a replacement agent window to this already-existing session.
     ExistingSession(&'a str),
     /// Create a new tmux session for the first launch or a missing session.
@@ -3541,14 +3541,14 @@ enum SpawnFailure {
         error: anyhow::Error,
         /// A replacement window that was created before a later tmux step
         /// failed. Its pane handle makes single-window cleanup safe.
-        replacement: Option<Terminal>,
+        replacement: Option<TmuxTerminal>,
         /// The agent terminal of a NEW session that tmux created before a
         /// later step (marking its window) failed. Kept apart from
         /// `replacement`, whose cleanup semantics differ: a create that
         /// retains its row publishes this as the session's terminal, since
         /// the agent may be running in it and the entry is the only handle
         /// that can open, stop, or delete it.
-        created: Option<Terminal>,
+        created: Option<TmuxTerminal>,
         /// Whether the tmux operation was actually attempted. A fault seam
         /// before `new-window` is a confirmed no-op even though the preserved
         /// session itself still exists.
@@ -6610,9 +6610,11 @@ impl Supervisor {
         // settlement's own comment for what each source proves.
         let mut launched: HashSet<String> = HashSet::new();
         for row in rows {
-            let terminal = found_panes.remove(&row.id).map(|(pane, _)| Terminal {
-                tmux_name: row.tmux_name.clone(),
-                pane,
+            let terminal = found_panes.remove(&row.id).map(|(pane, _)| {
+                Terminal::Tmux(TmuxTerminal {
+                    tmux_name: row.tmux_name.clone(),
+                    pane,
+                })
             });
             let outcome = committed.get(&row.id).cloned().unwrap_or(row.outcome);
             if terminal.is_some() || !row.pane.is_empty() {
@@ -7283,6 +7285,7 @@ impl Supervisor {
         let entries: Vec<_> = self.sessions.lock().await.values().cloned().collect();
         for entry in entries {
             let may_be_live = if let Some(terminal) = &entry.terminal {
+                let Terminal::Tmux(terminal) = terminal;
                 match super::status::pane_evidence(
                     &terminal.pane,
                     &terminal.tmux_name,
@@ -10807,7 +10810,7 @@ impl Supervisor {
                         // reload rediscovered the pane.
                         self.publish_retained_launch(
                             &info,
-                            created.clone(),
+                            created.clone().map(Terminal::Tmux),
                             &snapshot,
                             canonical_cwd.as_deref(),
                             LastOutcome::Launching,
@@ -10825,7 +10828,7 @@ impl Supervisor {
                         ));
                         self.publish_retained_launch(
                             &info,
-                            created.clone(),
+                            created.clone().map(Terminal::Tmux),
                             &snapshot,
                             canonical_cwd.as_deref(),
                             LastOutcome::Launching,
@@ -11022,10 +11025,10 @@ impl Supervisor {
             } else {
                 self.publish_retained_launch(
                     &info,
-                    Some(Terminal {
+                    Some(Terminal::Tmux(TmuxTerminal {
                         tmux_name: tmux_name.clone(),
                         pane: pane.clone(),
-                    }),
+                    })),
                     &snapshot,
                     canonical_cwd.as_deref(),
                     LastOutcome::Launching,
@@ -11048,7 +11051,7 @@ impl Supervisor {
             id,
             Arc::new(SessionEntry {
                 info: info.clone(),
-                terminal: Some(Terminal { tmux_name, pane }),
+                terminal: Some(Terminal::Tmux(TmuxTerminal { tmux_name, pane })),
                 run: RunCells {
                     launch_boot_ended: false,
                     launch_reads_settled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -11194,7 +11197,7 @@ impl Supervisor {
                 entry
                     .terminal
                     .as_ref()
-                    .map(|terminal| terminal.tmux_name.as_str()),
+                    .map(|Terminal::Tmux(terminal)| terminal.tmux_name.as_str()),
             )
         }))
     }
@@ -11247,9 +11250,8 @@ impl Supervisor {
         let terminal = entry.terminal.as_ref().ok_or_else(|| {
             RequestError::new(ErrorKind::Conflict, "the target agent is not running")
         })?;
-        match self
-            .tmux
-            .pane_process(&terminal.tmux_name, &terminal.pane)
+        match terminal
+            .probe_process(self)
             .await
             .context("rechecking the prompt target's live pane")?
         {
@@ -11280,6 +11282,9 @@ impl Supervisor {
                 .into());
             }
         }
+        // Delivery is a bracketed paste typed through a tmux input client,
+        // gated on tmux's record of the pane's paste mode.
+        let Terminal::Tmux(terminal) = terminal;
         if !self
             .tmux
             .bracketed_paste_enabled(&terminal.tmux_name, &terminal.pane)
@@ -11686,9 +11691,8 @@ impl Supervisor {
         // running": that would be the one direction that can kill nothing
         // and relaunch beside a live agent.
         let pane_state = match entry.terminal.as_ref() {
-            Some(terminal) => match self
-                .tmux
-                .pane_process(&terminal.tmux_name, &terminal.pane)
+            Some(terminal) => match terminal
+                .probe_process(self)
                 .await
                 .context("rechecking whether this session's agent is still running")?
             {
@@ -11719,12 +11723,8 @@ impl Supervisor {
                 // consent `stop_if_running` exists to obtain.
                 PaneProbe::ForeignOwner { owner } => {
                     if !self.known_session_tmux_name(&owner).await {
-                        return Err(anyhow::anyhow!(unknown_pane_owner_refusal(
-                            &terminal.pane,
-                            &owner,
-                            &terminal.tmux_name
-                        ))
-                        .context("rechecking whether this session's agent is still running"));
+                        return Err(anyhow::anyhow!(terminal.unknown_owner_refusal(&owner))
+                            .context("rechecking whether this session's agent is still running"));
                     }
                     warn!(
                         session = %session_id, foreign_owner = %owner,
@@ -12336,6 +12336,9 @@ impl Supervisor {
             // for a tab to be.
             None => Vec::new(),
         };
+        // Every target below is tmux's: the surviving pane, a replacement
+        // window beside the session's tabs, or a fresh tmux session.
+        let terminal = terminal.map(|Terminal::Tmux(terminal)| terminal);
         let tmux_name = match terminal {
             Some(terminal) => terminal.tmux_name.clone(),
             // A session whose terminal did not survive keeps the tmux name
@@ -12533,7 +12536,7 @@ impl Supervisor {
             Ok(confirmed) => confirmed,
             Err(e) => {
                 if existing_session.is_some() {
-                    let replacement = Terminal {
+                    let replacement = TmuxTerminal {
                         tmux_name: tmux_name.clone(),
                         pane: pane.clone(),
                     };
@@ -12564,10 +12567,10 @@ impl Supervisor {
                     entry,
                     generation,
                     Relaunched {
-                        terminal: Terminal {
+                        terminal: Terminal::Tmux(TmuxTerminal {
                             tmux_name: tmux_name.clone(),
                             pane: pane.clone(),
-                        },
+                        }),
                         launch_excerpt,
                         scope: scope.clone(),
                         outcome: LastOutcome::Launching,
@@ -12613,7 +12616,7 @@ impl Supervisor {
                     self.cleanup_replacement_window(
                         &id,
                         scope.as_deref(),
-                        &Terminal {
+                        &TmuxTerminal {
                             tmux_name: tmux_name.clone(),
                             pane: pane.clone(),
                         },
@@ -12667,10 +12670,10 @@ impl Supervisor {
                         entry,
                         generation,
                         Relaunched {
-                            terminal: Terminal {
+                            terminal: Terminal::Tmux(TmuxTerminal {
                                 tmux_name: tmux_name.clone(),
                                 pane: pane.clone(),
-                            },
+                            }),
                             launch_excerpt,
                             scope,
                             outcome: other,
@@ -12705,7 +12708,7 @@ impl Supervisor {
         // pre-restart snapshot after an operation that changed one window.
         let tabs = if existing_session.is_some() {
             match self
-                .replacement_session_tabs(&Terminal {
+                .replacement_session_tabs(&TmuxTerminal {
                     tmux_name: tmux_name.clone(),
                     pane: pane.clone(),
                 })
@@ -12717,10 +12720,10 @@ impl Supervisor {
                         entry,
                         generation,
                         Relaunched {
-                            terminal: Terminal {
+                            terminal: Terminal::Tmux(TmuxTerminal {
                                 tmux_name: tmux_name.clone(),
                                 pane: pane.clone(),
-                            },
+                            }),
                             launch_excerpt,
                             scope,
                             outcome: LastOutcome::Running,
@@ -12748,7 +12751,7 @@ impl Supervisor {
                 entry,
                 generation,
                 Relaunched {
-                    terminal: Terminal { tmux_name, pane },
+                    terminal: Terminal::Tmux(TmuxTerminal { tmux_name, pane }),
                     launch_excerpt,
                     scope,
                     outcome: LastOutcome::Running,
@@ -12788,8 +12791,8 @@ impl Supervisor {
         id: &str,
         tmux_name: &str,
         scope: Option<&str>,
-        reuse: Option<&Terminal>,
-        replacement: Option<&Terminal>,
+        reuse: Option<&TmuxTerminal>,
+        replacement: Option<&TmuxTerminal>,
         preserved_session: bool,
         tmux_attempted: bool,
         artifacts: &LaunchArtifacts,
@@ -12943,7 +12946,7 @@ impl Supervisor {
         &self,
         id: &str,
         scope: Option<&str>,
-        replacement: &Terminal,
+        replacement: &TmuxTerminal,
     ) -> anyhow::Result<()> {
         reap_process_tree(
             &self.seams.scopes,
@@ -13115,7 +13118,7 @@ impl Supervisor {
             .lock()
             .await
             .get(&AttachmentKey::new(session_id, terminal))
-            .and_then(|attachment| attachment.input.pid())
+            .and_then(|attachment| attachment.backend.input_client_pid())
     }
 
     /// Tear down whatever is attached to a session being relaunched,
@@ -13145,15 +13148,17 @@ impl Supervisor {
         };
         // Stop before destructuring so the forwarder retains its cleanup tail;
         // publishing while the map lock is still held prevents a replacement
-        // from observing neither the old entry nor its reap barrier. `..` then
-        // drops this attachment's input client and pause sender.
+        // from observing neither the old entry nor its reap barrier. `..`
+        // then holds this attachment's pause sender to the end of this
+        // function, and its backend (input client and sink share) is dropped
+        // once the forwarder is joined.
         self.begin_forwarder_shutdown(key.clone(), &attachment);
         drop(attachments);
         let ActiveAttach {
             channel,
             notify,
             forwarder,
-            sink,
+            backend,
             ..
         } = attachment;
         // Stopped before the notice, exactly as the delete handler does, so
@@ -13163,7 +13168,7 @@ impl Supervisor {
             .record_forwarder_join(key.clone(), forwarder.await)
             .err();
         let reaping = self.has_output_reap_for_key(&key);
-        drop(sink);
+        drop(backend);
         let restart_failure = match cleanup {
             Some(cleanup) => Some(cleanup.to_string()),
             None if reaping => Some(
@@ -13258,9 +13263,8 @@ impl Supervisor {
         let Some(terminal) = entry.terminal.as_ref() else {
             return Ok(None);
         };
-        match self
-            .tmux
-            .pane_process(&terminal.tmux_name, &terminal.pane)
+        match terminal
+            .probe_process(self)
             .await
             .context("checking whether this session's agent is still running")?
         {
@@ -13286,6 +13290,8 @@ impl Supervisor {
         // window, and after the agent's own window is gone a surviving tab
         // can be the session's only window (see `pane_states_with_markers`).
         // Missing it here would let an "unconfirmed" delete kill that tab.
+        // Tabs are windows in the agent's tmux session.
+        let Terminal::Tmux(terminal) = terminal;
         let states = self
             .tmux
             .pane_states_with_markers()
@@ -13304,6 +13310,7 @@ impl Supervisor {
     }
 
     pub(crate) async fn session_tabs(&self, terminal: &Terminal) -> anyhow::Result<Vec<TabInfo>> {
+        let Terminal::Tmux(terminal) = terminal;
         let states = self.tmux.pane_states().await?;
         Ok(
             tabs_from_pane_states(states.values(), &terminal.tmux_name, Some(&terminal.pane))
@@ -13325,7 +13332,7 @@ impl Supervisor {
     /// presentation-only exception.
     async fn replacement_session_tabs(
         &self,
-        replacement: &Terminal,
+        replacement: &TmuxTerminal,
     ) -> anyhow::Result<Vec<TabInfo>> {
         let states = self.tmux.pane_states_with_markers().await?;
         let replacement_window = states
@@ -13367,6 +13374,7 @@ impl Supervisor {
         &self,
         terminal: &Terminal,
     ) -> anyhow::Result<Vec<TabInfo>> {
+        let Terminal::Tmux(terminal) = terminal;
         let states = self.tmux.pane_states().await?;
         Ok(
             tabs_from_pane_states(states.values(), &terminal.tmux_name, Some(&terminal.pane))
@@ -13712,6 +13720,8 @@ impl Supervisor {
         let Some(agent) = entry.terminal.clone() else {
             return Err(restart_first());
         };
+        // A tab opens as a new window in the agent's tmux session.
+        let Terminal::Tmux(agent) = agent;
         // The tmux session can also be gone WITHOUT the entry knowing —
         // this process may have been serving since before an external
         // `kill-session`, or since before the whole tmux server died. Both
@@ -13891,7 +13901,7 @@ impl Supervisor {
         &self,
         session_id: &str,
         session_token: &str,
-        agent: &Terminal,
+        agent: &TmuxTerminal,
         cwd: &str,
         container: Option<&crate::container::ContainerRuntime>,
     ) -> Result<TabInfo, RequestError> {
@@ -13960,7 +13970,7 @@ impl Supervisor {
                     format!("could not open a terminal tab for session {session_id}: {e:#}"),
                 )
             })?;
-        let terminal = Terminal {
+        let terminal = TmuxTerminal {
             tmux_name: agent.tmux_name.clone(),
             pane,
         };
@@ -14261,10 +14271,12 @@ impl Supervisor {
         // resize already treat it as gone.
         let terminal =
             resolve_terminal_for_close(self, &entry, &TerminalId::Tab(tab_id.to_string())).await?;
+        // Closing a tab reaps its shell and kills its tmux window.
+        let Terminal::Tmux(terminal) = terminal;
         let recorded_agent_pane = entry
             .terminal
             .as_ref()
-            .map(|terminal| terminal.pane.clone());
+            .map(|Terminal::Tmux(agent)| agent.pane.clone());
 
         // Supervisor-owned, like the open: a client disconnecting between
         // the first sweep and the window kill must not leave a half-reaped
@@ -14304,7 +14316,7 @@ impl Supervisor {
     async fn close_tab_window(
         &self,
         session_id: &str,
-        terminal: &Terminal,
+        terminal: &TmuxTerminal,
         tab_id: &str,
         recorded_agent_pane: Option<&str>,
         only_if_dead: bool,
@@ -14398,9 +14410,12 @@ impl Supervisor {
                     ),
                 )
             })?;
+        // The process reap is shared with every kind of terminal, so it takes
+        // the `Terminal`; only this window machinery around it is tmux's.
+        let reaped = Terminal::Tmux(terminal.clone());
         self.reap_tab_tree(
             session_id,
-            terminal,
+            &reaped,
             tab_id,
             tab_scope,
             TabReapAnchor::PaneIfLive,
@@ -14432,7 +14447,7 @@ impl Supervisor {
         let survivors = self
             .reap_tab_tree(
                 session_id,
-                terminal,
+                &reaped,
                 tab_id,
                 tab_scope,
                 TabReapAnchor::MarkerOnly,
@@ -14483,20 +14498,21 @@ impl Supervisor {
         // concurrent attach cannot slip into the removal-to-publication gap.
         self.begin_forwarder_shutdown(key.clone(), &attachment);
         drop(attachments);
-        // `..` drops this attachment's input client (killing its
-        // no-output control client) and its pause sender.
+        // Dropping the backend once the forwarder is joined kills this
+        // attachment's input client (a no-output control client) and
+        // releases its sink share; `..` keeps the pause sender to the end.
         let ActiveAttach {
             channel,
             notify,
             forwarder,
-            sink,
+            backend,
             ..
         } = attachment;
         let cleanup = self
             .record_forwarder_join(key.clone(), forwarder.await)
             .err();
         let reaping = self.has_output_reap_for_key(&key);
-        drop(sink);
+        drop(backend);
         notify_detached(
             &notify,
             channel,
@@ -14534,7 +14550,7 @@ impl Supervisor {
     async fn discard_failed_tab_window(
         &self,
         session_id: &str,
-        terminal: &Terminal,
+        terminal: &TmuxTerminal,
         tab_id: &str,
         tab_scope: TabScopeMarker,
         because: String,
@@ -14545,7 +14561,7 @@ impl Supervisor {
         if let Err(e) = self
             .reap_tab_tree(
                 session_id,
-                terminal,
+                &Terminal::Tmux(terminal.clone()),
                 tab_id,
                 tab_scope,
                 TabReapAnchor::PaneIfLive,
@@ -14605,7 +14621,7 @@ impl Supervisor {
     /// report success over a pane it does not own.
     async fn settled_tab_pane(
         &self,
-        terminal: &Terminal,
+        terminal: &TmuxTerminal,
     ) -> anyhow::Result<Option<crate::tmux::PaneProcess>> {
         let deadline = tokio::time::Instant::now() + TAB_LAUNCH_SETTLE;
         loop {
@@ -14650,7 +14666,7 @@ impl Supervisor {
     /// the shell said, that it said nothing, and that we could not look.
     /// A cap far below the snapshot cap, because this ends up inside a
     /// protocol error message rather than a replay frame.
-    async fn tab_pane_last_words(&self, terminal: &Terminal) -> anyhow::Result<String> {
+    async fn tab_pane_last_words(&self, terminal: &TmuxTerminal) -> anyhow::Result<String> {
         const MAX_LAST_WORDS: usize = 4 * 1024;
         self.tmux
             .capture_pane_text(&terminal.tmux_name, &terminal.pane, MAX_LAST_WORDS)
@@ -14667,7 +14683,11 @@ impl Supervisor {
     /// then the marker sweep keyed on that tab's marker.
     ///
     /// Shared by `close_tab` and by the failed-open unwind so both reap
-    /// identically. The pane's own pid is looked up here rather than
+    /// identically. It takes the [`Terminal`], not the tmux handles those
+    /// tmux window steps hold, because none of this is window machinery:
+    /// the scope and marker sweep is the same for every kind of terminal,
+    /// and the live-root probe and its refusal go through `Terminal`'s
+    /// exhaustive dispatches. The pane's own pid is looked up here rather than
     /// passed in, and the answers are NOT the same: a live pane is
     /// the PPID closure's root, a CONFIRMED-absent or dead pane means
     /// there is no root to walk from (a dead pane's remembered pid may
@@ -14709,9 +14729,8 @@ impl Supervisor {
         anchor: TabReapAnchor,
     ) -> anyhow::Result<()> {
         let root_identity = match anchor {
-            TabReapAnchor::PaneIfLive => match self
-                .tmux
-                .pane_process(&terminal.tmux_name, &terminal.pane)
+            TabReapAnchor::PaneIfLive => match terminal
+                .probe_process(self)
                 .await
                 .context("reading a terminal tab's pane process before reaping it")?
             {
@@ -14737,11 +14756,7 @@ impl Supervisor {
                 // incomplete cleanup instead of claiming removal.
                 PaneProbe::ForeignOwner { owner } => {
                     if !self.known_session_tmux_name(&owner).await {
-                        anyhow::bail!(unknown_pane_owner_refusal(
-                            &terminal.pane,
-                            &owner,
-                            &terminal.tmux_name
-                        ));
+                        anyhow::bail!(terminal.unknown_owner_refusal(&owner));
                     }
                     None
                 }
@@ -15417,7 +15432,7 @@ impl Supervisor {
                     return Err(SpawnFailure::Tmux {
                         artifacts,
                         error: error.context("injected replacement-window marking failure"),
-                        replacement: existing_session.map(|session| Terminal {
+                        replacement: existing_session.map(|session| TmuxTerminal {
                             tmux_name: session,
                             pane: pane.clone(),
                         }),
@@ -15437,11 +15452,11 @@ impl Supervisor {
                             "marking the session's agent window, without which a later reload \
                             could not tell it apart from a terminal tab",
                         ),
-                        created: existing_session.is_none().then(|| Terminal {
+                        created: existing_session.is_none().then(|| TmuxTerminal {
                             tmux_name: tmux_name.to_string(),
                             pane: pane.clone(),
                         }),
-                        replacement: existing_session.map(|session| Terminal {
+                        replacement: existing_session.map(|session| TmuxTerminal {
                             tmux_name: session,
                             pane: pane.clone(),
                         }),
@@ -18428,10 +18443,7 @@ pub(crate) mod tests {
                 "{settled:?} without a terminal must not count as possibly live"
             );
         }
-        let terminal = Terminal {
-            tmux_name: "fh-s1".to_string(),
-            pane: "%1".to_string(),
-        };
+        let terminal = Terminal::tmux("fh-s1".to_string(), "%1".to_string());
         assert!(!terminal_less_launch_may_be_live(&entry_with(
             Some(terminal),
             LastOutcome::Launching
@@ -19023,7 +19035,7 @@ pub(crate) mod tests {
             .get(&created.id)
             .cloned()
             .expect("session entry");
-        let agent = entry.terminal.clone().expect("agent terminal");
+        let agent = agent_tmux(&entry);
         let tab_pane = sup
             .tmux
             .pane_states_with_markers()
@@ -19103,12 +19115,7 @@ pub(crate) mod tests {
             .get(&created.id)
             .cloned()
             .expect("session entry");
-        let tmux_name = entry
-            .terminal
-            .as_ref()
-            .expect("agent terminal")
-            .tmux_name
-            .clone();
+        let tmux_name = agent_tmux(&entry).tmux_name;
         let tab_pane = sup
             .tmux
             .pane_states_with_markers()
@@ -19347,23 +19354,17 @@ pub(crate) mod tests {
     /// pane, gives the prior terminal back.
     #[farhelm_testtrace::test]
     fn an_ambiguous_fresh_relaunch_republishes_no_terminal() {
-        let pane = |terminal: Option<Terminal>| terminal.map(|terminal| terminal.pane);
         let prior = Some(a_terminal());
-        let prior_pane = pane(prior.clone());
-        assert!(prior_pane.is_some(), "test premise: a prior terminal");
+        assert_eq!(republished_terminal(false, false, prior.clone()), None);
         assert_eq!(
-            pane(republished_terminal(false, false, prior.clone())),
-            None
+            republished_terminal(true, false, prior.clone()),
+            prior.clone()
         );
         assert_eq!(
-            pane(republished_terminal(true, false, prior.clone())),
-            prior_pane
+            republished_terminal(false, true, prior.clone()),
+            prior.clone()
         );
-        assert_eq!(
-            pane(republished_terminal(false, true, prior.clone())),
-            prior_pane
-        );
-        assert_eq!(pane(republished_terminal(true, true, prior)), prior_pane);
+        assert_eq!(republished_terminal(true, true, prior.clone()), prior);
     }
 
     /// Browsing is a host-side discovery operation, so its canonical answer
@@ -20838,7 +20839,7 @@ pub(crate) mod tests {
             .get(&created.id)
             .cloned()
             .expect("session entry");
-        let agent = entry.terminal.clone().expect("agent terminal");
+        let agent = agent_tmux(&entry);
         sup.tmux
             .kill_pane_for_test(&agent.pane)
             .await
@@ -20859,7 +20860,7 @@ pub(crate) mod tests {
                 .expect("session liveness")
         );
         assert!(
-            sup.session_tabs(&agent)
+            sup.session_tabs(&Terminal::Tmux(agent.clone()))
                 .await
                 .expect("ordinary listing")
                 .is_empty(),
@@ -20916,13 +20917,7 @@ pub(crate) mod tests {
             )
             .await
             .unwrap();
-        let mut entry = entry_with(
-            Some(Terminal {
-                tmux_name: name,
-                pane,
-            }),
-            LastOutcome::Running,
-        );
+        let mut entry = entry_with(Some(Terminal::tmux(name, pane)), LastOutcome::Running);
         entry.snapshot.kind = kind;
         entry.info.agent_kind = kind;
         let entry = Arc::new(entry);
@@ -20930,7 +20925,7 @@ pub(crate) mod tests {
             .lock()
             .await
             .insert(entry.info.id.clone(), Arc::clone(&entry));
-        let terminal = entry.terminal.as_ref().unwrap();
+        let terminal = entry.terminal.as_ref().unwrap().expect_tmux();
         let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
         loop {
             let probe = sup
@@ -20975,7 +20970,7 @@ pub(crate) mod tests {
         path: &Path,
         expected: &[u8],
     ) {
-        let terminal = entry.terminal.as_ref().unwrap();
+        let terminal = entry.terminal.as_ref().unwrap().expect_tmux();
         let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
         loop {
             let probe = sup
@@ -21149,14 +21144,14 @@ pub(crate) mod tests {
         }
         for target in [
             None,
-            Some(Terminal {
-                tmux_name: "absent-session".into(),
-                pane: terminal.as_ref().unwrap().pane.clone(),
-            }),
-            Some(Terminal {
-                tmux_name: terminal.as_ref().unwrap().tmux_name.clone(),
-                pane: "%999999".into(),
-            }),
+            Some(Terminal::tmux(
+                "absent-session".into(),
+                terminal.as_ref().unwrap().expect_tmux().pane.clone(),
+            )),
+            Some(Terminal::tmux(
+                terminal.as_ref().unwrap().expect_tmux().tmux_name.clone(),
+                "%999999".into(),
+            )),
         ] {
             let mut missing = entry_with(target, LastOutcome::Running);
             missing.snapshot.kind = AgentKind::Claude;
@@ -21197,10 +21192,7 @@ pub(crate) mod tests {
             matches!(sup.tmux.pane_process(&dead_name, &dead_pane).await.unwrap(), PaneProbe::Owned(process) if process.dead)
         );
         let mut dead = entry_with(
-            Some(Terminal {
-                tmux_name: dead_name,
-                pane: dead_pane,
-            }),
+            Some(Terminal::tmux(dead_name, dead_pane)),
             LastOutcome::Running,
         );
         dead.snapshot.kind = AgentKind::Claude;
@@ -21214,7 +21206,7 @@ pub(crate) mod tests {
             .lock()
             .await
             .insert("s1".into(), Arc::clone(&entry));
-        let agent = terminal.unwrap();
+        let agent = terminal.unwrap().expect_tmux().clone();
         sup.tmux.kill_pane_for_test(&agent.pane).await.unwrap();
         assert!(matches!(
             sup.tmux
@@ -21290,7 +21282,7 @@ pub(crate) mod tests {
                 .get(&created.id)
                 .cloned()
                 .expect("session entry");
-            let agent = entry.terminal.clone().expect("agent terminal");
+            let agent = agent_tmux(&entry);
             let live_pid = || async {
                 match sup
                     .tmux
@@ -21476,7 +21468,7 @@ pub(crate) mod tests {
             .get(&created.id)
             .cloned()
             .expect("session entry");
-        let agent = entry.terminal.clone().expect("agent terminal");
+        let agent = agent_tmux(&entry);
         let states = sup.tmux.pane_states().await.expect("pane states");
         let tab_pane = tabs_from_pane_states(states.values(), &agent.tmux_name, None)
             .into_iter()
@@ -21562,7 +21554,7 @@ pub(crate) mod tests {
             .get(&created.id)
             .cloned()
             .expect("session entry");
-        let agent = entry.terminal.clone().expect("agent terminal");
+        let agent = agent_tmux(&entry);
         let forged = uuid::Uuid::new_v4().to_string();
 
         // A malformed agent marker parses as absent, and the forged tab
@@ -21581,7 +21573,10 @@ pub(crate) mod tests {
             .await
             .expect("forge a tab marker on the agent window");
 
-        let listed = sup.session_tabs(&agent).await.expect("tab listing");
+        let listed = sup
+            .session_tabs(&Terminal::Tmux(agent.clone()))
+            .await
+            .expect("tab listing");
         assert_eq!(
             listed,
             vec![genuine.clone()],
@@ -21614,7 +21609,7 @@ pub(crate) mod tests {
             .await
             .expect("close genuine tab");
         assert!(
-            sup.session_tabs(&agent)
+            sup.session_tabs(&Terminal::Tmux(agent.clone()))
                 .await
                 .expect("tab listing after genuine close")
                 .is_empty(),
@@ -21654,7 +21649,7 @@ pub(crate) mod tests {
             .get(&created.id)
             .cloned()
             .expect("session entry");
-        let agent = entry.terminal.clone().expect("agent terminal");
+        let agent = agent_tmux(&entry);
         assert!(
             matches!(
                 sup.tmux.pane_process(&agent.tmux_name, &agent.pane).await.expect("agent probe"),
@@ -21906,7 +21901,7 @@ pub(crate) mod tests {
         }
         let before = sup.store.session(&created.id).await.unwrap().unwrap();
         let entry = sup.sessions.lock().await[&created.id].clone();
-        let agent = entry.terminal.as_ref().expect("agent terminal");
+        let agent = agent_tmux(&entry);
         assert!(
             matches!(
                 sup.tmux.pane_process(&agent.tmux_name, &agent.pane).await.expect("agent probe"),
@@ -22022,7 +22017,7 @@ pub(crate) mod tests {
             .get(&created.id)
             .cloned()
             .expect("session entry");
-        let agent = entry.terminal.clone().expect("agent terminal");
+        let agent = agent_tmux(&entry);
         let states = sup.tmux.pane_states().await.expect("pane states");
         let tab = tabs_from_pane_states(states.values(), &agent.tmux_name, None)
             .into_iter()
@@ -22077,7 +22072,10 @@ pub(crate) mod tests {
         assert_eq!(entry.info.tabs.len(), 1);
         assert_eq!(entry.info.tabs[0].id.as_str(), tab.id.as_str());
         assert_ne!(
-            entry.terminal.as_ref().map(|terminal| &terminal.pane),
+            entry
+                .terminal
+                .as_ref()
+                .map(|terminal| &terminal.expect_tmux().pane),
             Some(&agent.pane),
             "the replacement must be the published terminal"
         );
@@ -22147,7 +22145,7 @@ pub(crate) mod tests {
                 .get(&created.id)
                 .cloned()
                 .expect("session entry");
-            let agent = entry.terminal.clone().expect("agent terminal");
+            let agent = agent_tmux(&entry);
             let states = sup.tmux.pane_states().await.expect("pane states");
             let tab = tabs_from_pane_states(states.values(), &agent.tmux_name, None)
                 .into_iter()
@@ -22237,7 +22235,10 @@ pub(crate) mod tests {
             };
             assert_eq!(after_pid, tab_pid, "{stage:?}: tab shell was not replaced");
             assert_eq!(
-                entry.terminal.as_ref().map(|terminal| &terminal.pane),
+                entry
+                    .terminal
+                    .as_ref()
+                    .map(|terminal| &terminal.expect_tmux().pane),
                 Some(&agent.pane)
             );
             let surviving_windows: HashSet<String> = states
@@ -22259,13 +22260,25 @@ pub(crate) mod tests {
         }
     }
 
+    /// The tmux handles of `entry`'s agent terminal, for a test whose
+    /// fixture session was created on tmux: the shared spelling of that
+    /// assertion about the fixture (it has a terminal, and that terminal is
+    /// tmux's), so a test that needs the pane does not repeat it. A few
+    /// tests still spell the chain out with an `expect` message of their
+    /// own.
+    pub(crate) fn agent_tmux(entry: &SessionEntry) -> TmuxTerminal {
+        entry
+            .terminal
+            .as_ref()
+            .expect("agent terminal")
+            .expect_tmux()
+            .clone()
+    }
+
     /// The one terminal the entry-replacement tests above and
     /// `service::status`'s classification tests use.
     pub(crate) fn a_terminal() -> Terminal {
-        Terminal {
-            tmux_name: "fh-1".to_string(),
-            pane: "%0".to_string(),
-        }
+        Terminal::tmux("fh-1".to_string(), "%0".to_string())
     }
 
     /// Spec: startup reload leaves a running row whose pane tmux now reports
@@ -22345,7 +22358,11 @@ pub(crate) mod tests {
 
         let entry = &sessions["renamed"];
         assert_eq!(*entry.run.outcome.lock().unwrap(), LastOutcome::Running);
-        let terminal = entry.terminal.as_ref().expect("the terminal survives");
+        let terminal = entry
+            .terminal
+            .as_ref()
+            .expect("the terminal survives")
+            .expect_tmux();
         assert_eq!(
             (terminal.tmux_name.as_str(), terminal.pane.as_str()),
             ("fh-renamed", pane.as_str()),
@@ -22625,7 +22642,7 @@ pub(crate) mod tests {
             read_only_entry
                 .terminal
                 .as_ref()
-                .map(|terminal| terminal.pane.as_str()),
+                .map(|terminal| terminal.expect_tmux().pane.as_str()),
             Some(pane.as_str()),
             "an existing Error-row pane must remain attachable after reload"
         );
@@ -22633,7 +22650,7 @@ pub(crate) mod tests {
             read_only_entry
                 .terminal
                 .as_ref()
-                .map(|terminal| terminal.tmux_name.as_str()),
+                .map(|terminal| terminal.expect_tmux().tmux_name.as_str()),
             Some(tmux_name),
             "the restored terminal must name the row's tmux session"
         );
@@ -27179,10 +27196,7 @@ exit 0
         sup.sessions.lock().await.insert(
             "s1".into(),
             Arc::new(entry_with(
-                Some(Terminal {
-                    tmux_name: tmux_name.into(),
-                    pane,
-                }),
+                Some(Terminal::tmux(tmux_name.into(), pane)),
                 LastOutcome::Running,
             )),
         );
@@ -36806,10 +36820,7 @@ exit 0
         assert!(spec.exists());
         assert!(!crate::launch::status_path_for_spec(&spec).exists());
         let mut entry = entry_with(
-            Some(Terminal {
-                tmux_name: row.tmux_name.clone(),
-                pane: pane.clone(),
-            }),
+            Some(Terminal::tmux(row.tmux_name.clone(), pane.clone())),
             LastOutcome::Launching,
         );
         entry.info.id = row.id.clone();

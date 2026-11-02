@@ -53,12 +53,12 @@
 //! `DeleteSession` itself.
 //!
 use super::connection::notify_detached;
-use super::core::{SessionEntry, Supervisor, unknown_pane_owner_refusal};
+use super::core::{SessionEntry, Supervisor};
 use super::launch_artifacts::remove_launch_artifacts_for_session;
 use super::sweep::{
     ScopeKillFailure, ScopeUnits, SweepTarget, capture_process_identity, reap_process_tree,
 };
-use super::terminals::{ActiveAttach, AttachmentKey, SinkReapWait};
+use super::terminals::{ActiveAttach, AttachmentKey, SinkReapWait, Terminal};
 use super::uploads::abort_session_uploads;
 use crate::tmux::PaneProbe;
 
@@ -156,7 +156,9 @@ impl Supervisor {
         session_id: &str,
     ) -> Result<Vec<(u32, u64)>, TeardownError> {
         let (tmux_name, agent_pane) = match entry.terminal.as_ref() {
-            Some(terminal) => (terminal.tmux_name.clone(), Some(terminal.pane.as_str())),
+            Some(Terminal::Tmux(terminal)) => {
+                (terminal.tmux_name.clone(), Some(terminal.pane.as_str()))
+            }
             None => match self
                 .store
                 .tmux_name(session_id)
@@ -277,9 +279,8 @@ impl Supervisor {
         // the marker sweep still runs even with no live pane pid, for
         // the same leftover-reaping reason documented there.
         let live_pane = match entry.terminal.as_ref() {
-            Some(terminal) => match self
-                .tmux
-                .pane_process(&terminal.tmux_name, &terminal.pane)
+            Some(terminal) => match terminal
+                .probe_process(self)
                 .await
                 .map_err(TeardownError::PaneProbe)?
             {
@@ -310,7 +311,7 @@ impl Supervisor {
                 PaneProbe::ForeignOwner { owner } => {
                     if !self.known_session_tmux_name(&owner).await {
                         return Err(TeardownError::PaneProbe(anyhow::anyhow!(
-                            unknown_pane_owner_refusal(&terminal.pane, &owner, &terminal.tmux_name)
+                            terminal.unknown_owner_refusal(&owner)
                         )));
                     }
                     warn!(
@@ -509,22 +510,23 @@ impl Supervisor {
             self.begin_forwarder_shutdown(key.clone(), old);
         }
         let mut notify_detach = Vec::with_capacity(doomed.len());
-        // `..` drops each attachment's input client — killing its
-        // control-mode process via `kill_on_drop`, like every other
-        // teardown path — and its pause sender, which the stopped
-        // forwarder can no longer observe anyway.
+        // `..` drops each attachment's pause sender, which the stopped
+        // forwarder can no longer observe anyway. Its backend goes with the
+        // forwarder's join: for tmux that kills the input client's
+        // control-mode process via `kill_on_drop`, like every other teardown
+        // path, and releases the sink share.
         let mut forwarders = tokio::task::JoinSet::new();
         for (key, old) in doomed {
             let ActiveAttach {
                 channel,
                 notify,
                 forwarder,
-                sink,
+                backend,
                 ..
             } = old;
             forwarders.spawn(async move {
                 let joined = forwarder.await;
-                drop(sink);
+                drop(backend);
                 (key, joined, channel, notify)
             });
         }
@@ -604,7 +606,7 @@ impl Supervisor {
             // only when tmux confirms the session is there. A server that
             // is not running at all is the same answer as "not there".
             let tmux_name = match entry.terminal.as_ref() {
-                Some(terminal) => Some(terminal.tmux_name.clone()),
+                Some(Terminal::Tmux(terminal)) => Some(terminal.tmux_name.clone()),
                 None => match self.store.tmux_name(session_id).await {
                     Ok(Some(tmux_name)) => match self
                         .tmux
@@ -1227,15 +1229,16 @@ impl Supervisor {
                     self.begin_forwarder_shutdown(key.clone(), old);
                 }
                 for (key, old) in doomed {
-                    // `..` drops the input client (its control process goes
-                    // with `kill_on_drop`; it carries no output) and the
-                    // pause sender, exactly as whole-session delete does.
+                    // `..` drops the pause sender, and the backend goes with
+                    // the forwarder's join (for tmux, the input client's
+                    // control process ends with `kill_on_drop`; it carries
+                    // no output), exactly as whole-session delete does.
                     let ActiveAttach {
-                        forwarder, sink, ..
+                        forwarder, backend, ..
                     } = old;
                     forwarders.spawn(async move {
                         let joined = forwarder.await;
-                        drop(sink);
+                        drop(backend);
                         (key, joined)
                     });
                 }
@@ -1654,10 +1657,14 @@ mod tests {
                 forwarder: tokio::spawn(async {}),
                 forwarder_shutdown,
                 forwarder_cleanup: cleanup_rx,
-                input,
                 pause,
-                pane_death: super::super::terminals::PaneDeath::new(&tmux_name, &pane).0,
-                sink,
+                backend: super::super::terminals::AttachBackend::Tmux(
+                    super::super::terminals::TmuxAttach {
+                        pane_death: super::super::terminals::PaneDeath::new(&tmux_name, &pane).0,
+                        input,
+                        sink,
+                    },
+                ),
             },
         );
         drop(forwarder_cleanup);
@@ -1885,10 +1892,14 @@ mod tests {
                 forwarder,
                 forwarder_shutdown,
                 forwarder_cleanup: cleanup_rx,
-                input,
                 pause,
-                pane_death: super::super::terminals::PaneDeath::new(&tmux_name, &pane).0,
-                sink,
+                backend: super::super::terminals::AttachBackend::Tmux(
+                    super::super::terminals::TmuxAttach {
+                        pane_death: super::super::terminals::PaneDeath::new(&tmux_name, &pane).0,
+                        input,
+                        sink,
+                    },
+                ),
             },
         );
         drop(forwarder_cleanup);
