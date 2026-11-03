@@ -5,7 +5,8 @@
 // line clear the first and `CSI J` with a wrap pending keep the last column,
 // stops relative vertical cursor moves at the scroll margins, keeps CHA on the
 // cursor's line in origin mode, homes the cursor when origin mode is reset,
-// and bounds the storage one terminal's cell extras (combining characters,
+// keeps the UTF-8 (1005) and SGR (1006) mouse encodings independent, and
+// bounds the storage one terminal's cell extras (combining characters,
 // underline colors, hyperlinks) take. See vendor/README.md in the Farhelm
 // repository.
 
@@ -2187,15 +2188,13 @@ impl<T: EventListener> Handler for Term<T> {
             },
             NamedPrivateMode::ReportFocusInOut => self.mode.insert(TermMode::FOCUS_IN_OUT),
             NamedPrivateMode::BracketedPaste => self.mode.insert(TermMode::BRACKETED_PASTE),
-            // Mouse encodings are mutually exclusive.
-            NamedPrivateMode::SgrMouse => {
-                self.mode.remove(TermMode::UTF8_MOUSE);
-                self.mode.insert(TermMode::SGR_MOUSE);
-            },
-            NamedPrivateMode::Utf8Mouse => {
-                self.mode.remove(TermMode::SGR_MOUSE);
-                self.mode.insert(TermMode::UTF8_MOUSE);
-            },
+            // Farhelm patch: 1005 and 1006 are separate modes, as in tmux, so
+            // setting one does not reset the other, and an encoder that sees
+            // both uses SGR (1006), as tmux does (xterm.js ignores 1005, so
+            // 1006 stays in force there). xterm, which upstream follows,
+            // keeps only the last one set.
+            NamedPrivateMode::SgrMouse => self.mode.insert(TermMode::SGR_MOUSE),
+            NamedPrivateMode::Utf8Mouse => self.mode.insert(TermMode::UTF8_MOUSE),
             NamedPrivateMode::AlternateScroll => self.mode.insert(TermMode::ALTERNATE_SCROLL),
             NamedPrivateMode::LineWrap => self.mode.insert(TermMode::LINE_WRAP),
             NamedPrivateMode::Origin => {
@@ -3785,6 +3784,30 @@ mod tests {
         let term = fed_term(4, 6, 0, b"\x1b[2;4r\x1b[?6h\x1b[2;2H\x1b[?6l");
         let point = term.grid().cursor.point;
         assert_eq!((point.line, point.column), (Line(0), Column(0)));
+    }
+
+    /// Spec: setting the UTF-8 (1005) and SGR (1006) mouse encodings, in
+    /// either order, leaves both set, and resetting one leaves the other.
+    ///
+    /// Why: tmux keeps the two separately and encodes with SGR whenever 1006
+    /// is set, and xterm.js ignores 1005, so 1006 stays in force there too;
+    /// upstream's "set one, reset the other" gave a program that sets 1006
+    /// and then 1005 UTF-8 coordinates instead.
+    #[test]
+    fn utf8_and_sgr_mouse_encodings_are_independent() {
+        let both = TermMode::UTF8_MOUSE | TermMode::SGR_MOUSE;
+        let sets: [&[u8]; 3] =
+            [b"\x1b[?1006h\x1b[?1005h", b"\x1b[?1005h\x1b[?1006h", b"\x1b[?1005;1006h"];
+        for bytes in sets {
+            let term = fed_term(4, 2, 0, bytes);
+            assert!(term.mode().contains(both), "after {bytes:?}");
+        }
+        let term = fed_term(4, 2, 0, b"\x1b[?1005h\x1b[?1006h\x1b[?1005l");
+        assert!(term.mode().contains(TermMode::SGR_MOUSE));
+        assert!(!term.mode().contains(TermMode::UTF8_MOUSE));
+        let term = fed_term(4, 2, 0, b"\x1b[?1005h\x1b[?1006h\x1b[?1006l");
+        assert!(term.mode().contains(TermMode::UTF8_MOUSE));
+        assert!(!term.mode().contains(TermMode::SGR_MOUSE));
     }
 
     /// Spec: a cell keeps the first `MAX_ZEROWIDTH_CHARS` zero-width

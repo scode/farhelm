@@ -175,6 +175,23 @@ that its required systemd or SSH substrate ran.
   directory holding the session's `raw.bin` and `events.jsonl`, `recordings.rs` gives the format) and run the same
   command with `--keep-farhelm-env FARHELM_TEST_AGENT_RECORDINGS` before the `--` and `--run-ignored only` after
   `--lib`, selecting `test(emulator_parity::recordings::)`.
+- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'grid input encoder' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p farhelm-supervisor --lib -E 'test(/^grid_input::/)'`
+  — the supervisor's encoder of grid viewer input (`crates/farhelm-supervisor/src/grid_input.rs`): keys against the
+  golden table `crates/farhelm-supervisor/tests/fixtures/xterm-keys.jsonl` (the sequence the vendored xterm.js's
+  `evaluateKeyboardEvent` computes for every key code below 256, modifier set, platform and cursor-key mode), mouse
+  reports against `crates/farhelm-supervisor/tests/fixtures/xterm-mouse.jsonl` (what the vendored mouse service reports
+  for every grid mouse event, modifier set, reporting mode and encoding, at the screen's edge and the default encoding's
+  limit), pastes (bracketed-paste markers once around a paste of several parts, line endings and sanitizing carried
+  across parts, the closing marker of an interrupted paste), UTF-8 mouse coordinates, focus reports, the wheel on the
+  alternate screen, and `Input` framing. Seconds, in-process. Part of the workspace nextest run. Which keydowns become
+  key messages at all (the filters xterm.js's `_keyDown` applies around `evaluateKeyboardEvent`: third-level shift, lone
+  capitals, the key after a dead key) and mouse motion de-duplication are the grid client's, pinned by its own tests,
+  not this selection. Both tables are generated from the vendored xterm.js bundle, from the repository root:
+  `node crates/farhelm-ui/js-tests/xterm-key-table.js --write` and
+  `node crates/farhelm-ui/js-tests/xterm-mouse-table.js --write`. Regenerate them whenever
+  `crates/farhelm-ui/assets/vendor/xterm.js` (or, for keys, `crates/farhelm-ui/assets/shift-enter-key.js`) changes,
+  review the diff (a changed row is a key or click a program will read differently), and run this selection; the JS
+  harness's `xterm-key-table.test.js` and `xterm-mouse-table.test.js` fail while a checked-in table is stale.
 - `python3 scripts/record-test-run.py --kind development --selection 'vendored vte' --concurrency 'libtest default threads' --tmux none -- cargo test --manifest-path vendor/vte/Cargo.toml --features ansi`,
   `python3 scripts/record-test-run.py --kind development --selection 'vendored alacritty_terminal' --concurrency 'libtest default threads' --tmux none -- cargo test --locked --lib --manifest-path vendor/alacritty_terminal/Cargo.toml`
   and

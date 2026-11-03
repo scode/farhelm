@@ -7,8 +7,9 @@ patch file together.
 The supervisor's terminal emulator (`crates/farhelm-terminal-emulator/`) runs on `alacritty_terminal` 0.26.0 and its
 parser `vte` 0.15.0. Both are used as published on crates.io except for a few small patches: accessors that snapshot and
 restore need, caps on what hostile program output can make them store, two history counters for the grid stream, one
-more query for the handler to answer, and nine bug fixes. The root `Cargo.toml` swaps these trees in for the crates.io
-versions with `[patch.crates-io]`.
+more query for the handler to answer, nine bug fixes, and one mode change that follows tmux over xterm (the UTF-8 and
+SGR mouse encodings as separate modes). The root `Cargo.toml` swaps these trees in for the crates.io versions with
+`[patch.crates-io]`.
 
 ## What is here
 
@@ -46,8 +47,8 @@ files to say so, so every patched file starts with a `Modified for Farhelm` comm
 
 ## The patches
 
-Here's what each one changes and why. None changes behavior except the caps and the bug fixes, and the XTVERSION hook
-changes it only for a handler that implements the new method.
+Here's what each one changes and why. None changes behavior except the caps, the bug fixes and the mouse-encoding
+change, and the XTVERSION hook changes it only for a handler that implements the new method.
 
 ### Snapshot accessors
 
@@ -566,6 +567,45 @@ by the supervisor's comparison with a live tmux 3.7c (`crates/farhelm-supervisor
   `emulator_parity::generated::generated_streams_match_tmux`.
 - Upstream status: not yet reported. Upstreamable as is.
 
+#### alacritty_terminal: the UTF-8 and SGR mouse encodings are separate modes
+
+- Upstream today: `Term::set_private_mode` treats the UTF-8 (1005) and SGR (1006) mouse encodings as mutually exclusive
+  ("Mouse encodings are mutually exclusive"): setting either clears the other's `TermMode` bit, so the one set last is
+  the only one left, and DECRQM reports the other as reset.
+- Reproduction (10x2), observed with the published crate: `ESC [ ? 1006 h ESC [ ? 1005 h`, then
+  `ESC [ ? 1005 $ p ESC [ ? 1006 $ p`. Observed: `UTF8_MOUSE` set, `SGR_MOUSE` clear, answers `ESC [ ? 1005 ; 1 $ y` and
+  `ESC [ ? 1006 ; 2 $ y`. Expected (tmux): both set, both answered `; 1 $ y`, and reports in SGR. The other order
+  (`ESC [ ? 1005 h ESC [ ? 1006 h`, or `ESC [ ? 1005 ; 1006 h`) leaves only `SGR_MOUSE`, where tmux has both.
+- tmux 3.7c keeps them as separate bits (`tmux.h`, `MODE_MOUSE_UTF8` and `MODE_MOUSE_SGR`), sets and resets each on its
+  own (`input.c`, `input_csi_dispatch_sm_private` and `input_csi_dispatch_rm_private`, cases 1005 and 1006), answers
+  DECRQM for each from its own bit (`input.c`, `input_csi_dispatch`, `INPUT_CSI_QUERY_PRIVATE`), and encodes a mouse
+  event in SGR when 1006 is set and the event reached tmux in SGR, otherwise in UTF-8 when 1005 is set (`input-keys.c`,
+  `input_key_get_mouse`: `m->sgr_type != ' ' && (s->mode & MODE_MOUSE_SGR)`; a legacy report cannot say which button was
+  released, so it cannot become SGR). In practice the event is SGR whenever a pane asks for any mouse mode, because tmux
+  then turns 1006 on in its own outer terminal (`tty.c`, `tty_update_mode`), so a pane with both set gets SGR. Farhelm's
+  grid events carry the button directly, so the encoder needs no such fallback and uses SGR whenever 1006 is set.
+  xterm.js, which renders Farhelm's terminals today, does not implement 1005 at all ("DECSET 1005 not supported"; DECRQM
+  1005 answers 4, permanently reset), so 1006 stays in force there whatever follows it. xterm, which upstream follows,
+  makes all its coordinate modes (1005, 1006, 1015, 1016) exclusive on purpose, the last one set winning, and resets one
+  only if it is the active one (`charproc.c`, `dpmodes`, the `srm_EXT_MODE_MOUSE` group: "Rather than choose an
+  arbitrary precedence among the coordinate modes, they are mutually exclusive").
+- Fix: setting 1005 or 1006 sets only its own bit; resetting was already independent. An embedder that sees both uses
+  SGR; the emulator's `Modes::from_term_mode` already reads SGR first (`farhelm-terminal-emulator`, `src/modes.rs`).
+- Why Farhelm needs it: the supervisor encodes viewers' mouse events from these modes for terminals in terminal hosts,
+  and must report to a program the way today's terminal does: a program that asks for SGR and then also for UTF-8 gets
+  SGR from xterm.js and from tmux, and would have got UTF-8 coordinates from the emulator. DECRQM answers now match
+  tmux's for both modes too.
+- Upstream code: `alacritty_terminal/src/term/mod.rs`, `Term::set_private_mode`.
+- Tests: `term::tests::utf8_and_sgr_mouse_encodings_are_independent` (vendored: both orders, one sequence with both, and
+  resetting either); `mouse_modes_replace_one_another_but_encodings_combine` (`farhelm-terminal-emulator`,
+  `tests/modes.rs`); `both_mouse_encodings_set_round_trip` (`tests/snapshot.rs`); and the encoder's
+  `sgr_wins_over_utf8_whichever_was_set_first` (`farhelm-supervisor`, `grid_input`); and two rows of
+  `emulator_parity::queries::the_answer_table_matches_tmux` (both orders, against a live tmux 3.7c).
+- Upstream status: not yet reported. Not a bug fix: the exclusion follows xterm on purpose, so this is a question of
+  which reference to follow, and is better raised upstream as a question. Before raising it, check how the alacritty
+  application's own mouse reporting reads the two bits when both are set (not checked for this record; it is outside the
+  crate).
+
 #### alacritty_terminal: a per-terminal limit on cell extra storage
 
 - Upstream today: a cell keeps combining characters, an underline color and an OSC 8 hyperlink in a separate
@@ -667,7 +707,8 @@ skipped by serde and left out of `Grid`'s `PartialEq`, so serialized grids and g
 Three of the nine upstream bugs the patches fix: the two that ordinary program output reaches on a one-column terminal
 or across reads, and clearing a row after it grew; each fix is a few lines in the place the bug is. The other six are
 described only in their per-patch records above (the two erase fixes, the wrap-flag fix, and the cursor-movement, CHA
-and origin-mode fixes).
+and origin-mode fixes). The independent mouse encodings are not counted among them: upstream's behavior there follows
+xterm on purpose, and the patch chooses tmux's instead (its record).
 
 - A wide character on a grid one column wide. A wide character needs two cells, and upstream's `Term::input` writes its
   spacer cell into the second column even when there is none, which panics with an index out of bounds; and
@@ -762,10 +803,10 @@ To upgrade to a new version:
   and its dispatch and `advance_partial_utf8` in `vte/src/lib.rs`, `Processor` and the CSI dispatch in
   `vte/src/ansi.rs`, `Cell::push_zerowidth`, `Cell`'s setters and `CellExtra`, `Hyperlink` and `HyperlinkInner`,
   `Term::input` (and every reader of `Cursor::input_needs_wrap`, whose upstream code the wrap-flag fix relies on),
-  `Term::clear_screen`, `Term::unset_private_mode`, the `Term` cursor moves, `Term::set_hyperlink`,
-  `Term::terminal_attribute`, `Term::set_title`, `Grid::scroll_up`, `Grid::shrink_columns`, `Grid::clear_history` and
-  `Row::grow`. A cap that upstream now enforces itself may make a hunk unnecessary; a moved field may need the hunk
-  rewritten.
+  `Term::clear_screen`, `Term::set_private_mode`, `Term::unset_private_mode`, the `Term` cursor moves,
+  `Term::set_hyperlink`, `Term::terminal_attribute`, `Term::set_title`, `Grid::scroll_up`, `Grid::shrink_columns`,
+  `Grid::clear_history` and `Row::grow`. A cap that upstream now enforces itself may make a hunk unnecessary; a moved
+  field may need the hunk rewritten.
 - Unpack the new crate twice in the scratch directory, as `a/<name>` (left as published, minus `tests/` for
   `alacritty_terminal`) and `b/<name>`, and apply the old patch to `b` with `patch -p1 -d b`. Fix rejected hunks by
   hand, keeping each hunk small and marked `Farhelm patch`.
