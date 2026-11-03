@@ -66,6 +66,7 @@ async fn seed_pin_session(sup: &Arc<Supervisor>, id: &str, case: PinCase) {
         launch: launch.clone(),
         tmux_name: format!("fh-{id}"),
         pane: String::new(),
+        terminal_kind: crate::store::TerminalKind::Tmux,
         outcome: LastOutcome::Running,
         canonical_cwd: None,
         captured_conversation: Some("historical-claude".into()),

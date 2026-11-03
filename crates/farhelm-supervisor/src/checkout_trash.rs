@@ -1559,6 +1559,7 @@ mod tests {
                         launch: farhelm_proto::SessionLaunch::plain_command("exit 0"),
                         tmux_name: format!("fh-{id}"),
                         pane: String::new(),
+                        terminal_kind: crate::store::TerminalKind::Tmux,
                         outcome: crate::store::LastOutcome::Exited {
                             exit_code: Some(0),
                             annotation: Some(farhelm_proto::STOP_ANNOTATION.into()),
