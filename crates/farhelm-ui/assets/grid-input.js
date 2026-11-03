@@ -327,17 +327,33 @@
   /**
    * The `key` message for a keydown `keydownAction` said to send, or null
    * when a browser value is past the format's 64-byte field bound (no
-   * real key name is). `mac` says whether the viewer is a Mac by
+   * real key name is). `mac: true` says the viewer is a Mac by
    * `platformOf`'s list: some keys encode differently there in today's
    * xterm.js (Ctrl+Option with `_` or `@`, among others), so the
-   * supervisor needs it, and it is sent on every key message.
+   * supervisor needs it.
+   *
+   * Any other viewer's message leaves `mac` out, which the format reads as
+   * false. That is the canonical form `farhelm-proto` encodes and its golden
+   * fixtures show (`key.json` has no `mac`; a `mac` written out as false is
+   * only tolerated), and the unit tests hold this function to those
+   * fixtures.
    */
   function keyMessage(ev, platform) {
     const key = typeof ev.key === "string" ? ev.key : "";
     const code = typeof ev.code === "string" ? ev.code : "";
     if (utf8Length(key) > MAX_KEY_FIELD_BYTES || utf8Length(code) > MAX_KEY_FIELD_BYTES) return null;
     const kc = Number.isInteger(ev.keyCode) && ev.keyCode >= 0 ? ev.keyCode : 0;
-    return { t: "key", key, code, kc, mods: modifiers(ev), mac: platformOf(platform).isMac };
+    return withMacFlag({ t: "key", key, code, kc, mods: modifiers(ev) }, platform);
+  }
+
+  /**
+   * `message` (a `key` message the caller just built) with `mac: true` added
+   * for a Mac viewer and left as it is otherwise (see `keyMessage`). Adds the
+   * field in place and returns the same object.
+   */
+  function withMacFlag(message, platform) {
+    if (platformOf(platform).isMac) message.mac = true;
+    return message;
   }
 
   function utf8Length(text) {
@@ -475,6 +491,35 @@
     if (buttons & 4) return 1;
     if (buttons & 2) return 2;
     return -1;
+  }
+
+  /**
+   * The button a wheel step reports: 0 for up (toward the top of the
+   * history, a negative `deltaY`) and 1 for down, as xterm.js numbers wheel
+   * buttons. Only the sign matters; `createWheelAccumulator` decides whether
+   * the event scrolls a line at all.
+   */
+  function wheelButton(ev) {
+    return ev.deltaY < 0 ? 0 : 1;
+  }
+
+  /**
+   * The `mouse` message for a pointer event over `cell` (as `mouseCell`
+   * gives it): `kind` is "down", "up", "move" or "wheel", `button` what
+   * `pressButton` or `moveButton` gave (`wheelButton` for a wheel step),
+   * and the modifiers the event carries. Whether the event is sent at all
+   * (the program's mode, move deduplication, a wheel step that scrolls no
+   * line) is the caller's decision; this only shapes the message, here
+   * rather than in grid-terminal.js so the unit tests can hold it to the
+   * format's golden fixtures.
+   */
+  function mouseReport(kind, button, cell, ev) {
+    return { t: "mouse", kind, button, x: cell.x, y: cell.y, mods: modifiers(ev) };
+  }
+
+  /** The `focus` message for focus gained (`true`) or lost. */
+  function focusReport(focused) {
+    return { t: "focus", in: !!focused };
   }
 
   /**
@@ -706,34 +751,38 @@
    */
   function arrowKeyMessages(sequence, platform) {
     const messages = [];
-    const mac = platformOf(platform).isMac;
     for (let i = 0; i + 2 < sequence.length; i += 3) {
       const arrow = ARROWS[sequence[i + 2]];
-      if (arrow) messages.push({ t: "key", key: arrow.key, code: arrow.key, kc: arrow.kc, mods: 0, mac });
+      if (arrow) messages.push(withMacFlag({ t: "key", key: arrow.key, code: arrow.key, kc: arrow.kc, mods: 0 }, platform));
     }
     return messages;
   }
 
   const api = {
     MAX_INPUT_MESSAGE,
+    MAX_KEY_FIELD_BYTES,
+    MAX_PASTE_BYTES,
     MAX_TEXT_BYTES,
     MODS,
     arrowKeyMessages,
     createMouseDeduper,
     createWheelAccumulator,
     encodeInput,
+    focusReport,
     isThirdLevelShift,
     keydownAction,
     keyMessage,
     modeReports,
     modifiers,
     mouseCell,
+    mouseReport,
     moveToCellSequence,
     moveButton,
     pasteMessages,
     platformOf,
     pressButton,
     textMessages,
+    wheelButton,
     wheelGoesToProgram,
     xtermKeyboardResult,
   };

@@ -3044,7 +3044,11 @@ would avoid it are not built.
 
 The format is not permanent: it changes with ordinary protocol bumps, unlike the terminal host's protocol and snapshots.
 Its contract, bounds and golden fixtures are in `farhelm-proto` (`crates/farhelm-proto/src/grid.rs` and
-`crates/farhelm-proto/grid-fixtures/`). Nothing sends grid streams until terminal hosts are switched on.
+`crates/farhelm-proto/grid-fixtures/`). `farhelm-proto`'s Rust tests validate every fixture. The grid client's node
+tests apply every output fixture to the browser's decoder and compare its input builders with the valid input fixtures,
+some of which are allowed wire forms the client never sends (an empty last paste part, for one); they also hold the
+client's hand-copied input bounds to the invalid input fixtures. Nothing sends grid streams until terminal hosts are
+switched on.
 
 `SessionInfo` carries a `last_activity_at` (unix seconds) beside `created_at`: the last time the supervisor observed
 that session's agent pane change. It was added WITHIN protocol version 11 rather than bumping it, per the running rule

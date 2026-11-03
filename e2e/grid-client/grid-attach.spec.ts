@@ -227,16 +227,23 @@ async function sentFrames(page: Page): Promise<any[]> {
   return page.evaluate(() => (window as any).FakeSocket.all[0].sent.slice());
 }
 
-/**
- * Whether this browser is a Mac by xterm.js's exact platform list, the
- * `mac` flag every key message carries (the format's `key` bullet).
- */
+/** Whether this browser is a Mac by xterm.js's exact platform list. */
 async function viewerIsMac(page: Page): Promise<boolean> {
   return page.evaluate(() => ["Macintosh", "MacIntel", "MacPPC", "Mac68K"].includes(navigator.platform));
 }
 
+/**
+ * What this browser's key messages carry of the `mac` flag (the format's
+ * `key` bullet): `mac: true` on a Mac, and nothing elsewhere, since an
+ * absent `mac` means false and that is how `farhelm-proto` encodes it (its
+ * golden fixture `key.json`).
+ */
+async function macField(page: Page): Promise<{ mac?: true }> {
+  return (await viewerIsMac(page)) ? { mac: true } : {};
+}
+
 test("a grid notice swaps in the grid component and keeps the catch-up, input and resize", async ({ page }) => {
-  const mac = await viewerIsMac(page);
+  const mac = await macField(page);
   await mountTerminal(page);
   const url = await page.evaluate(() => (window as any).FakeSocket.all[0].url as string);
   expect(new URL(url).searchParams.get("grid")).toBe("1");
@@ -259,7 +266,7 @@ test("a grid notice swaps in the grid component and keeps the catch-up, input an
   await page.evaluate(() => (window as any).__farhelmGrid.focus());
   await page.keyboard.press("Enter");
   await expect.poll(async () => (await sentFrames(page)).filter((frame) => typeof frame !== "string")).toEqual([
-    { binary: JSON.stringify({ t: "key", key: "Enter", code: "Enter", kc: 13, mods: 0, mac }) },
+    { binary: JSON.stringify({ t: "key", key: "Enter", code: "Enter", kc: 13, mods: 0, ...mac }) },
   ]);
   // The program was only ever asked for the size the URL carried: once at
   // open, as for every attachment, and once more because the fixture's
@@ -319,6 +326,7 @@ test("page shortcuts pressed in a grid terminal act and never reach the program"
   await expect(input).toBeFocused();
   const resizesBefore = (await resizes(page)).length;
   const mac = await viewerIsMac(page);
+  const macKey = await macField(page);
   // Text size is Cmd+Shift on a Mac; the switcher chords are Cmd alone.
   const textSize = mac ? "Meta+Shift" : "Control+Shift";
   const platform = mac ? "Meta" : "Control+Shift";
@@ -338,7 +346,7 @@ test("page shortcuts pressed in a grid terminal act and never reach the program"
   // shortcuts were kept from it, not that nothing could have been sent.
   await page.keyboard.press("a");
   await expect.poll(async () => (await sentFrames(page)).filter((frame) => typeof frame !== "string")).toEqual([
-    { binary: JSON.stringify({ t: "key", key: "a", code: "KeyA", kc: 65, mods: 0, mac }) },
+    { binary: JSON.stringify({ t: "key", key: "a", code: "KeyA", kc: 65, mods: 0, ...macKey }) },
   ]);
 });
 
@@ -715,7 +723,7 @@ test("a dropped connection keeps the grid's last screen while it recovers, and a
 });
 
 test("a recovered grid terminal replays into a new grid and drops the held screen", async ({ page }) => {
-  const mac = await viewerIsMac(page);
+  const mac = await macField(page);
   await mountTerminal(page, undefined, { reconnect: RECONNECT_POLICY });
   await attachGrid(page);
   await socket(page, "close");
@@ -729,7 +737,7 @@ test("a recovered grid terminal replays into a new grid and drops the held scree
   // The new grid is live: typing reaches the new socket.
   await page.evaluate(() => (window as any).__farhelmGrid.focus());
   await page.keyboard.press("x");
-  await expect.poll(() => inputMessages(page, 1)).toEqual([{ t: "key", key: "x", code: "KeyX", kc: 88, mods: 0, mac }]);
+  await expect.poll(() => inputMessages(page, 1)).toEqual([{ t: "key", key: "x", code: "KeyX", kc: 88, mods: 0, ...mac }]);
 });
 
 // ## Tier 3: the hyperlink mismatch warning, file paths, tunnels

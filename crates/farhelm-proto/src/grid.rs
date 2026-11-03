@@ -254,6 +254,12 @@
 //! and focus changes. Resize stays the existing control message; the grid
 //! client sends no pause or resume (see "Attach and the stream kind").
 //!
+//! A resize to the size the terminal already has is a no-op for a grid
+//! terminal: the supervisor does not resize the pty, reflow, redraw or reset
+//! history for it. The browser sends one whenever a grid attachment's socket
+//! opens and sometimes a second, identical one after `hello`, so acting on
+//! it would cost a history reset and a full resend on every attach.
+//!
 //! Each `key` message says whether the viewer runs on a Mac (`mac`, absent
 //! meaning false), since today's xterm.js encodes some keys differently
 //! there; the supervisor encodes each key from the message alone, with no
@@ -332,15 +338,35 @@
 //!
 //! # Golden fixtures
 //!
-//! `crates/farhelm-proto/grid-fixtures/` holds one JSON file per message, for
-//! this module's tests and for the browser grid client's JS unit tests (which
-//! the grid client's own change adds). `output/` is supervisor to client and
-//! `input/` client to supervisor; under each, `valid/` fixtures decode and
-//! encode back to the same JSON, `tolerated/` fixtures decode (unknown
-//! fields, explicitly empty optional fields, a `mac` written out as false)
-//! but need not encode back to themselves, and `invalid/` fixtures must be
-//! rejected, each for the one reason its name gives. Size limits and the rules spanning messages have no
-//! fixtures; the tests construct those.
+//! `crates/farhelm-proto/grid-fixtures/` holds one JSON file per message.
+//! `output/` is supervisor to client and `input/` client to supervisor;
+//! under each, `valid/` fixtures decode and encode back to the same JSON,
+//! `tolerated/` fixtures decode (unknown fields, explicitly empty optional
+//! fields, a `mac` written out as false) but need not encode back to
+//! themselves, and `invalid/` fixtures must be rejected, each for the one
+//! reason its name gives. The bounds too large to write out as a fixture
+//! (the whole-message sizes, [`GRID_MAX_MESSAGE`] and
+//! [`GRID_MAX_INPUT_MESSAGE`], and the clipboard part and write sizes) and
+//! the rules spanning messages have no fixtures; the tests construct those.
+//! Every other bound in the table above has an `invalid/` fixture past it.
+//!
+//! This module's tests validate every fixture. The browser grid client's
+//! JS unit tests (`crates/farhelm-ui/js-tests/grid-proto-fixtures.test.js`)
+//! read the same directories, and each of their tables must name exactly
+//! the files in its directory, so a new fixture fails there until the
+//! client's side of it is decided. They apply every output fixture to the
+//! client's decoder: valid and tolerated ones must be accepted and keep
+//! their content, invalid ones refused. They compare the client's input
+//! builders with each valid input fixture. Valid input fixtures are in the
+//! client's encoding (no `mac` from a viewer that is not a Mac, for
+//! example), but some are wire forms the client never sends as written: an
+//! empty last paste part, a short paste part that is not the last, a wheel
+//! step with Shift held, a key code an input method owns. For tolerated and
+//! invalid input fixtures, the JS tests check that the client sends the
+//! canonical form instead and stays within the bounds the invalid ones
+//! break. The input size fixtures are one byte past the limit: this
+//! module's tests pin the limit in their refusal text and the JS tests pin
+//! it to the client's own copy, so a limit changed on one side fails.
 
 use serde::de::{self, IgnoredAny, MapAccess, SeqAccess, Visitor};
 use serde::ser::SerializeSeq;

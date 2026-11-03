@@ -233,11 +233,24 @@ fn tolerated_fixtures_decode() {
 /// a field its rule does not need) would still pass as "refused", and the
 /// rule it was written for would go untested on both sides. The text is the
 /// Rust side's own wording; the browser's tests decide their own.
+///
+/// The input size fixtures' reasons name the limit as well as the size
+/// ("over 16384"): the browser copies those limits by hand and is checked
+/// against these fixtures, which are one byte past them. Pinning the limit
+/// makes a changed constant fail here until the fixture is made again at
+/// the new limit, rather than leave a fixture that still passes on both
+/// sides while the client keeps sending messages the supervisor refuses.
 const INVALID_REASONS: &[(&str, &str)] = &[
-    ("input/invalid/code-too-long.json", "code of 65 bytes"),
+    (
+        "input/invalid/code-too-long.json",
+        "code of 65 bytes, over 64",
+    ),
     ("input/invalid/focus-missing-in.json", "missing field `in`"),
     ("input/invalid/key-mac-not-bool.json", "expected a boolean"),
-    ("input/invalid/key-too-long.json", "key of 65 bytes"),
+    (
+        "input/invalid/key-too-long.json",
+        "key of 65 bytes, over 64",
+    ),
     (
         "input/invalid/key-undefined-modifier.json",
         "modifier bits 0x10",
@@ -264,11 +277,11 @@ const INVALID_REASONS: &[(&str, &str)] = &[
     ),
     (
         "input/invalid/paste-too-long.json",
-        "paste part of 32769 bytes",
+        "paste part of 32769 bytes, over 32768",
     ),
     (
         "input/invalid/text-too-long.json",
-        "text input of 16385 bytes",
+        "text input of 16385 bytes, over 16384",
     ),
     (
         "input/invalid/unknown-type.json",

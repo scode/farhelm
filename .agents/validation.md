@@ -598,7 +598,9 @@ that its required systemd or SSH substrate ran.
   (PLAN_M6_5.md item 1); node is already a CI requirement for Playwright below, so this adds no dependency. Run from
   inside the directory rather than as a glob from the repo root: node's no-argument default discovery (every `*.test.js`
   in cwd) is the oldest, most version-portable form the test runner has, whereas quoted-glob CLI arguments are newer and
-  CI pins no node version.
+  CI pins no node version. Run it also when `crates/farhelm-proto/grid-fixtures/` changes: `grid-proto-fixtures.test.js`
+  holds the grid client to those files and fails on a fixture it has no entry for, which `farhelm-proto`'s own tests
+  cannot show.
 - `cd e2e && npx playwright test --config grid-client/playwright.config.ts` — the grid terminal component
   (`crates/farhelm-ui/assets/grid-*.js`) on a static page fed recorded grid streams (display, input, scrollback,
   selection and copy, links, paste, history applied in slices), its fit and its copy across a wide character's wrap held

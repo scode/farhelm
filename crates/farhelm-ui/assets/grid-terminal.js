@@ -1501,7 +1501,7 @@
       element.classList.toggle("grid-terminal-focused", value);
       // Focus in/out reports are what the program asked for with mode 1004
       // (the report of the state at the moment it asks is in `receive`).
-      if (model.state.focus) sendMessage({ t: "focus", in: value });
+      if (model.state.focus) sendMessage(gridInput.focusReport(value));
       paintCursor(viewRowOffset());
     }
 
@@ -1548,7 +1548,7 @@
       if (!model.started || !cellWidth) return null;
       const rect = screen.getBoundingClientRect();
       const cell = gridInput.mouseCell(ev.clientX - rect.left, ev.clientY - rect.top, cellWidth, cellHeight, model.cols, model.rows);
-      return { t: "mouse", kind, button, x: cell.x, y: cell.y, mods: gridInput.modifiers(ev) };
+      return gridInput.mouseReport(kind, button, cell, ev);
     }
 
     /**
@@ -1732,7 +1732,7 @@
         // One message per event that scrolls at least a line, as xterm.js
         // sends one report (or one arrow key) per such event.
         if (wheel.consume(ev, wheelRowHeight, model.rows) === 0) return;
-        const button = ev.deltaY < 0 ? 0 : 1;
+        const button = gridInput.wheelButton(ev);
         if (model.state.mouse === "off") {
           // The alternate screen without mouse reporting: the supervisor
           // turns the step into an arrow key, as xterm.js does.
@@ -1889,7 +1889,7 @@
         noteModelChange();
         // A program turning focus reporting on hears the current state at
         // once, focused or not, as xterm.js answers DECSET 1004.
-        if (!reporting && model.state.focus) sendMessage({ t: "focus", in: focused });
+        if (!reporting && model.state.focus) sendMessage(gridInput.focusReport(focused));
         // A program's completed clipboard write (OSC 52).
         for (const write of model.takeClipboard()) if (onClipboard) onClipboard(write.text, write.target);
         // The program's real size, at attach. If it is not the size this

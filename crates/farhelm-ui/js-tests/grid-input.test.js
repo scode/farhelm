@@ -213,7 +213,7 @@ test("keys an input method is composing are ignored", () => {
 
 test("key messages carry the browser's values and refuse fields past 64 bytes", () => {
   const ev = keyEvent({ key: "ArrowUp", code: "ArrowUp", keyCode: 38, shiftKey: true, ctrlKey: true, metaKey: true });
-  assert.deepEqual(input.keyMessage(ev, LINUX), { t: "key", key: "ArrowUp", code: "ArrowUp", kc: 38, mods: 13, mac: false });
+  assert.deepEqual(input.keyMessage(ev, LINUX), { t: "key", key: "ArrowUp", code: "ArrowUp", kc: 38, mods: 13 });
   assert.equal(input.keyMessage(keyEvent({ key: "x".repeat(65), keyCode: 65 })), null);
   assert.equal(input.keyMessage(keyEvent({ key: "a", code: "é".repeat(33), keyCode: 65 })), null);
 });
@@ -353,14 +353,15 @@ test("key messages say whether the viewer is a Mac, by xterm.js's exact platform
   // The supervisor's encoder picks Mac-only encodings from this flag, and
   // the client's own decisions (Option as a third-level shift, Cmd+A) read
   // the same list, so both sides agree with xterm.js's `Browser.isMac`:
-  // exact `navigator.platform` values, not anything containing "Mac".
+  // exact `navigator.platform` values, not anything containing "Mac". Any
+  // other viewer leaves the flag out, the format's canonical "false".
   const ev = keyEvent({ key: "a", code: "KeyA", keyCode: 65 });
   for (const platform of ["Macintosh", "MacIntel", "MacPPC", "Mac68K"]) {
     assert.equal(input.keyMessage(ev, platform).mac, true, platform);
     assert.equal(input.platformOf(platform).isMac, true, platform);
   }
   for (const platform of ["Linux x86_64", "Win32", "iPad", "iPhone", "MacSomething", "", undefined]) {
-    assert.equal(input.keyMessage(ev, platform).mac, false, String(platform));
+    assert.equal("mac" in input.keyMessage(ev, platform), false, String(platform));
     assert.equal(input.platformOf(platform).isMac, false, String(platform));
   }
   // Option on a Mac composes text rather than sending ESC-prefixed keys;
@@ -584,10 +585,13 @@ test("Alt-click's arrow keys match the vendored moveToCellSequence on both scree
 test("Alt-click's arrows become key messages the supervisor encodes", () => {
   const sequence = "\x1b[D\x1b[D\x1b[A\x1b[C";
   assert.deepEqual(input.arrowKeyMessages(sequence, "Linux x86_64"), [
-    { t: "key", key: "ArrowLeft", code: "ArrowLeft", kc: 37, mods: 0, mac: false },
-    { t: "key", key: "ArrowLeft", code: "ArrowLeft", kc: 37, mods: 0, mac: false },
-    { t: "key", key: "ArrowUp", code: "ArrowUp", kc: 38, mods: 0, mac: false },
-    { t: "key", key: "ArrowRight", code: "ArrowRight", kc: 39, mods: 0, mac: false },
+    { t: "key", key: "ArrowLeft", code: "ArrowLeft", kc: 37, mods: 0 },
+    { t: "key", key: "ArrowLeft", code: "ArrowLeft", kc: 37, mods: 0 },
+    { t: "key", key: "ArrowUp", code: "ArrowUp", kc: 38, mods: 0 },
+    { t: "key", key: "ArrowRight", code: "ArrowRight", kc: 39, mods: 0 },
+  ]);
+  assert.deepEqual(input.arrowKeyMessages("\x1b[A", "MacIntel"), [
+    { t: "key", key: "ArrowUp", code: "ArrowUp", kc: 38, mods: 0, mac: true },
   ]);
   assert.deepEqual(input.arrowKeyMessages("", "MacIntel"), []);
 });

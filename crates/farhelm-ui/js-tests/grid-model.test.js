@@ -12,8 +12,10 @@
 // and leaves the model untouched, and that markup-looking text is kept as
 // plain data.
 //
-// The fixtures are hand-written streams for now; the golden fixtures from
-// `farhelm-proto` replace or join them once that crate has them.
+// The streams under fixtures/grid/ are hand-written, to show the model's
+// behavior across whole attaches. The format's golden fixtures, one message
+// each, live in `farhelm-proto` and are applied by
+// grid-proto-fixtures.test.js, which holds this decoder to the Rust one.
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -451,11 +453,23 @@ test("frames with bad revisions, sizes, shifts or cursors are refused", () => {
   refuses(model, frame(5, { cursor: null }), "no cursor");
 });
 
-test("a cursor past the screen's edge is drawn at the edge", () => {
+test("a cursor must lie on the committing frame's screen", () => {
+  // The format puts the cursor on the screen (`x < cols`, `y < rows`), and
+  // `farhelm-proto` refuses one past either edge. This decoder used to
+  // clamp it instead, so the two sides disagreed about what a stream may
+  // carry; the golden fixtures pin the one-past case for both. Spec: the
+  // last column and row are accepted as sent, one past either is refused,
+  // and the bound is the committing frame's size, not the previous one's,
+  // whether the frame grows the screen or shrinks it.
   const model = started();
-  model.apply(frame(1, { cursor: { x: 10, y: 50, visible: true, shape: "bar", blink: false } }));
-  assert.equal(model.cursor.x, 9);
-  assert.equal(model.cursor.y, 2);
+  const at = (x, y) => ({ x, y, visible: true, shape: "bar", blink: false });
+  model.apply(frame(1, { cursor: at(9, 2) }));
+  assert.deepEqual(model.cursor, at(9, 2));
+  refuses(model, frame(2, { cursor: at(10, 0) }), "a cursor one past the last column");
+  refuses(model, frame(2, { cursor: at(0, 3) }), "a cursor one past the last row");
+  model.apply(frame(2, { cols: 11, rows: 4, cursor: at(10, 3) }));
+  assert.deepEqual(model.cursor, at(10, 3), "a growing frame's cursor is checked against its new size");
+  refuses(model, frame(3, { cols: 5, rows: 2, cursor: at(9, 2) }), "a cursor that fits only the screen a shrinking frame leaves");
 });
 
 test("bad state messages are refused", () => {
