@@ -134,6 +134,7 @@ impl MarkerPeer {
                 terminal: selector,
                 lease: lease.to_string(),
                 if_unowned: false,
+                grid: false,
             })
             .await
             .expect("write attach");
@@ -205,6 +206,7 @@ impl MarkerPeer {
                 terminal: TerminalSelector::Agent,
                 lease: String::new(),
                 if_unowned: false,
+                grid: false,
             })
             .await
             .expect("write the detach barrier");

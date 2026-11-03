@@ -1,0 +1,8 @@
+{
+  "t": "frame",
+  "rev": 7,
+  "cols": 100,
+  "rows": 30,
+  "shift": 30,
+  "cursor": { "x": 99, "y": 29, "visible": false, "shape": "bar", "blink": false }
+}
