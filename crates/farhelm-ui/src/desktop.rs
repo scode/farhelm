@@ -2821,7 +2821,21 @@ mod tests {
     /// and one that is not executable refuse, naming the program.
     #[farhelm_testtrace::test]
     fn a_replacement_refuses_a_program_that_does_not_run() {
+        use std::os::unix::fs::PermissionsExt as _;
+
         let dir = tempfile::tempdir().expect("dir");
+        // Own the program fixtures: system utility paths differ between
+        // macOS and Linux, and this check cares only whether --version succeeds.
+        let runnable = dir.path().join("runnable");
+        let failing = dir.path().join("failing");
+        for (path, script) in [
+            (&runnable, "#!/bin/sh\nexit 0\n"),
+            (&failing, "#!/bin/sh\nexit 1\n"),
+        ] {
+            std::fs::write(path, script).unwrap();
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let program = ProgramFile::read(&runnable).expect("runnable fixture");
         let not_executable = dir.path().join("farhelm");
         std::fs::write(&not_executable, b"#!/bin/sh\nexit 0\n").unwrap();
         let state = dir.path().join("state");
@@ -2829,7 +2843,7 @@ mod tests {
             SpawnInputs {
                 farhelm,
                 absolute: farhelm,
-                program: &ProgramFile::read(Path::new("/bin/true")).expect("fixture: /bin/true"),
+                program: &program,
                 state_dir: &state,
                 supervisor_tmux: None,
                 ambient_tmux: None,
@@ -2837,9 +2851,12 @@ mod tests {
             }
             .check_program_runs()
         };
-        check(Path::new("/bin/true")).expect("a program that runs passes");
-        let error = check(Path::new("/bin/false")).expect_err("a failing program refuses");
-        assert!(format!("{error:#}").contains("/bin/false"), "{error:#}");
+        check(&runnable).expect("a program that runs passes");
+        let error = check(&failing).expect_err("a failing program refuses");
+        assert!(
+            format!("{error:#}").contains(&failing.display().to_string()),
+            "{error:#}"
+        );
         let error = check(&not_executable).expect_err("a non-executable file refuses");
         assert!(
             format!("{error:#}").contains(&not_executable.display().to_string()),
