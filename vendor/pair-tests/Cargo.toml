@@ -4,6 +4,9 @@
 name = "vendor-pair-tests"
 version = "0.0.0"
 edition = "2024"
+# Farhelm's own code, under Farhelm's license. Spelled out rather than `license.workspace = true`: the `[workspace]`
+# below is this crate's own, which has no license to inherit.
+license = "Apache-2.0"
 publish = false
 
 [dependencies]
