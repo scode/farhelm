@@ -6,15 +6,27 @@ license.workspace = true
 repository.workspace = true
 description = "A tiny long-lived process that keeps one terminal and its program alive and journals its output for a client"
 
-# Never an artifact of its own: the host is to ship inside the `farhelm`
-# binary. See `farhelm-helm/Cargo.toml` for why every non-shipping member says
-# so explicitly.
+# Shipped only inside the `farhelm` binary (`farhelm internal terminal-host`),
+# never as an artifact of its own; see `farhelm-helm/Cargo.toml` for why
+# every non-shipping member says so explicitly.
 [package.metadata.dist]
 dist = false
 
 # SPEC.md is the contract; it lives with the crate so the crate could be lifted
 # out as a project of its own without carrying anything from around it.
 
+[dependencies]
+# The pty, fork/exec, poll, signals and socket credentials. Nothing else: every
+# dependency is another reason to rebuild a program that must almost never
+# change (SPEC.md, "Change policy").
+libc.workspace = true
+
 [dev-dependencies]
 # Property tests for the codec and the journal. Dev-only: never part of a host.
 proptest = "1"
+# Private socket directories for the integration tests.
+tempfile.workspace = true
+
+[lints.rust]
+# `cargo llvm-cov` on nightly sets `coverage_nightly`; see src/lib.rs.
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage_nightly)"] }
