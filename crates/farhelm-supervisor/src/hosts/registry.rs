@@ -115,6 +115,13 @@ pub struct ScanOptions {
     /// preconditions); a name missing from it is taken over. Skipped names
     /// appear in no class of the result.
     pub skip: HashSet<OsString>,
+    /// When set, the only socket names in the directory to contact (less
+    /// any in [`Self::skip`]); the rest appear in no class, as skipped ones.
+    /// For a caller that already knows which sockets it is asking about (a
+    /// supervisor adopting particular hosts again), so that it neither pays
+    /// for nor disturbs the others. Lookups then see only those hosts, and
+    /// [`HostRegistry::is_complete`] speaks only for them.
+    pub only: Option<HashSet<OsString>>,
 }
 
 /// Why a scan could not run at all. Problems with single hosts or entries
@@ -515,7 +522,7 @@ impl HostRegistry {
         let Some(dir) = existing_hosts_dir(&state_dir)? else {
             return Ok(Self::default());
         };
-        let (candidates, skipped) = list(&dir, &options.skip)?;
+        let (candidates, skipped) = list(&dir, &options.skip, options.only.as_ref())?;
         let mut registry = Self {
             skipped,
             ..Self::default()
@@ -710,6 +717,7 @@ enum Class {
 fn list(
     dir: &Path,
     skip: &HashSet<OsString>,
+    only: Option<&HashSet<OsString>>,
 ) -> Result<(Vec<Candidate>, Vec<SkippedEntry>), ScanError> {
     let entries = fs::read_dir(dir).map_err(|source| ScanError::List {
         path: dir.to_path_buf(),
@@ -729,7 +737,7 @@ fn list(
             }
         };
         let name = entry.file_name();
-        if skip.contains(&name) {
+        if skip.contains(&name) || only.is_some_and(|only| !only.contains(&name)) {
             continue;
         }
         let path = dir.join(&name);

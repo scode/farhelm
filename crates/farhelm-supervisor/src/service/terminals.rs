@@ -109,9 +109,12 @@ pub(crate) struct TmuxTerminal {
 ///
 /// A create makes a [`Terminal::Host`] when the supervisor's internal
 /// switch says so (`SupervisorSeams::new_terminals`, off in every shipped
-/// supervisor); the startup discovery that finds such terminals again comes
-/// later. Every arm for it here and at the decision points is the final one,
-/// so those later changes only add constructors.
+/// supervisor), and a restarted supervisor's reload makes one for every
+/// host row whose host it finds again (`core::host_handover`): adopted, or,
+/// for a host it cannot read, a handle that answers as unavailable
+/// (`crate::hosts::HostTerminal::unavailable`), never no terminal at all.
+/// Every arm for it here and at the decision points is the final one, so
+/// later changes only add constructors.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Terminal {
     /// A tmux pane in the session's tmux session: every terminal before

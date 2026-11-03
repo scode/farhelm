@@ -48,6 +48,9 @@ enum Command {
     /// version no supervisor speaks, so that the runtime finds its host
     /// unreadable when it reconnects.
     BecomeUnreadable,
+    /// Send the journaled output (see [`TestHostSpec::journaled`]) up to
+    /// this many bytes, from where the last such command stopped.
+    Replay(usize),
 }
 
 /// A running stand-in host. Dropping it ends the host's task and removes
@@ -132,6 +135,112 @@ impl TestHost {
     pub(crate) fn connections(&self) -> usize {
         self.accepted.load(Ordering::SeqCst)
     }
+
+    /// Stream the output the host journaled before its adoption
+    /// ([`TestHostSpec::journaled`]) up to byte `upto`: the replay the
+    /// runtime is catching up with, delivered when the test says.
+    pub(crate) fn replay_journaled(&self, upto: usize) {
+        let _ = self.commands.send(Command::Replay(upto));
+    }
+}
+
+/// What a stand-in host is started with ([`start_test_host`]).
+#[derive(Default)]
+pub(crate) struct TestHostSpec {
+    /// Where its socket is bound; a fresh private directory's `h` when
+    /// `None`. A test of discovery binds it in a state directory's socket
+    /// directory, so that a supervisor's scan finds it.
+    pub(crate) socket: Option<PathBuf>,
+    /// The client tag its `Info` returns.
+    pub(crate) tag: Vec<u8>,
+    /// Output journaled before any supervisor read it, sent only on
+    /// [`TestHost::replay_journaled`].
+    pub(crate) journaled: Vec<u8>,
+    /// The child's exit status, as reaped before any supervisor connected:
+    /// its `Info` says so from the start, while the exit record follows the
+    /// journal only on [`TestHost::exit`]. A host whose child exited while
+    /// no supervisor was attached, with its replay not yet done.
+    pub(crate) exited: Option<i32>,
+    /// The options a test's own adoption of it uses.
+    pub(crate) options: Option<HostTerminalOptions>,
+}
+
+/// The options a test adopts a stand-in host with: `notifier`, and client
+/// deadlines short enough that a reconnect to an unreadable host is judged
+/// in about a second.
+pub(crate) fn test_host_options(notifier: Option<LivenessNotifier>) -> HostTerminalOptions {
+    HostTerminalOptions {
+        notifier,
+        deadlines: ClientDeadlines {
+            connect: Duration::from_secs(1),
+            refusal_window: Duration::from_secs(1),
+            retry_interval: Duration::from_millis(50),
+            reply: Duration::from_secs(5),
+            shutdown: Duration::from_secs(5),
+        },
+        ..HostTerminalOptions::default()
+    }
+}
+
+/// Start a stand-in host as `spec` says, without adopting it: for a test
+/// that has the supervisor find it.
+pub(crate) fn start_test_host(spec: TestHostSpec) -> TestHost {
+    let (socket, dir) = match spec.socket {
+        Some(socket) => (socket, None),
+        None => {
+            let dir = tempfile::tempdir().expect("a directory for the test host's socket");
+            (dir.path().join("h"), Some(dir))
+        }
+    };
+    let mut host = start_with(&socket, spec.tag, false, spec.journaled, spec.exited);
+    host._dir = dir;
+    host
+}
+
+/// Start a stand-in host as `spec` says and adopt it as `adoption` says.
+/// Fails the test when the adoption does not succeed in time.
+pub(crate) async fn adopt_test_host_with(
+    mut spec: TestHostSpec,
+    adoption: Adoption,
+) -> (HostTerminal, TestHost) {
+    let options = spec
+        .options
+        .take()
+        .unwrap_or_else(|| test_host_options(None));
+    let host = start_test_host(spec);
+    let adopted = tokio::time::timeout(
+        ADOPT_WAIT,
+        HostTerminal::adopt(&host.socket, adoption, options),
+    )
+    .await;
+    match adopted {
+        // The child is the test's to end, whatever went wrong: dropping the
+        // host does that.
+        Ok(Ok(terminal)) => (terminal, host),
+        failed => panic!("the test host was not adopted: {failed:?}"),
+    }
+}
+
+/// Start a stand-in host that journaled `journaled` before any supervisor
+/// read it, and adopt it as one that ran before (`Adoption::Recovered`), as
+/// a restarted supervisor does. The host's `Info` reports the journal's end
+/// from the start, but its stream sends the journaled bytes only when the
+/// test calls [`TestHost::replay_journaled`], so the runtime stays short of
+/// caught up (`HostStatus::caught_up`) for as long as the test wants: the
+/// window after a restart in which the emulator holds a past screen.
+pub(crate) async fn adopt_test_host_recovering(
+    notifier: Option<LivenessNotifier>,
+    journaled: Vec<u8>,
+) -> (HostTerminal, TestHost) {
+    adopt_test_host_with(
+        TestHostSpec {
+            journaled,
+            options: Some(test_host_options(notifier)),
+            ..TestHostSpec::default()
+        },
+        Adoption::Recovered,
+    )
+    .await
 }
 
 /// Start a stand-in host and adopt it as freshly spawned, with `notifier`
@@ -193,6 +302,19 @@ pub(crate) fn start_test_host_at(socket: &Path, tag: Vec<u8>, unreadable: bool) 
 
 /// Bind `socket`, start the host's child and serve the socket.
 fn start(socket: &Path, tag: Vec<u8>, unreadable: bool) -> TestHost {
+    start_with(socket, tag, unreadable, Vec::new(), None)
+}
+
+/// [`start`], with output `journaled` before any reader (streamed only on
+/// [`TestHost::replay_journaled`]) and the child already reaped with
+/// `exited`, as [`TestHostSpec`] describes.
+fn start_with(
+    socket: &Path,
+    tag: Vec<u8>,
+    unreadable: bool,
+    journaled: Vec<u8>,
+    exited: Option<i32>,
+) -> TestHost {
     let listener = UnixListener::bind(socket).expect("bind the test host's socket");
     // Bounded, so that a test process killed before its drop leaves the
     // child behind for a minute at most; every test using a test host
@@ -213,6 +335,9 @@ fn start(socket: &Path, tag: Vec<u8>, unreadable: bool) -> TestHost {
         child_pid,
         tag,
         unreadable: Arc::clone(&unreadable),
+        end: journaled.len() as u64,
+        journaled,
+        exit: exited.map(ChildExit::Code),
         ..Journal::default()
     };
     let task = tokio::spawn(serve(
@@ -276,6 +401,11 @@ struct Journal {
     tag: Vec<u8>,
     /// Input bytes acknowledged as written, in all.
     written: u64,
+    /// Output journaled before the adoption, at offset 0, which the stream
+    /// sends only on [`Command::Replay`].
+    journaled: Vec<u8>,
+    /// How much of `journaled` the stream has sent.
+    replayed: usize,
 }
 
 impl Journal {
@@ -330,8 +460,10 @@ async fn serve_one(
                     let _ = stream.write_all(&encode_host(&HostMessage::Goodbye)).await;
                     return Ok(());
                 }
-                // The stream starts empty, so `Read` has nothing to send;
-                // resizes and snapshots are not what these tests are about.
+                // `Read` sends nothing itself: what was journaled before
+                // the adoption is streamed on the test's cue
+                // (`Command::Replay`); resizes and snapshots are not what
+                // these tests are about.
                 _ => None,
             };
             if let Some(reply) = reply
@@ -362,6 +494,13 @@ async fn serve_one(
                     Command::BecomeUnreadable => {
                         journal.unreadable.store(true, Ordering::SeqCst);
                         return Ok(());
+                    }
+                    Command::Replay(upto) => {
+                        let upto = upto.min(journal.journaled.len()).max(journal.replayed);
+                        let offset = journal.replayed as u64;
+                        let data = journal.journaled[journal.replayed..upto].to_vec();
+                        journal.replayed = upto;
+                        HostMessage::Output { offset, data }
                     }
                 };
                 if stream.write_all(&encode_host(&record)).await.is_err() {

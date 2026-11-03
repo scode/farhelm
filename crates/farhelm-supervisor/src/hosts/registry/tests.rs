@@ -32,6 +32,7 @@ fn options() -> ScanOptions {
             shutdown: Duration::from_secs(5),
         },
         skip: HashSet::new(),
+        only: None,
     }
 }
 
@@ -598,6 +599,35 @@ async fn sockets_the_caller_owns_are_not_contacted() {
     assert!(registry.is_complete());
     assert_eq!(owned.load(Ordering::SeqCst), 0);
     assert_eq!(other.load(Ordering::SeqCst), 1);
+}
+
+/// A scan restricted to some socket names contacts only those.
+///
+/// Why: a supervisor adopting particular hosts again (ones that were
+/// unavailable) must not take over, or pay the deadlines of, every other
+/// socket in the directory each time it retries. Spec: with stand-ins
+/// `wanted` and `other`, a scan restricted to `wanted` finds it live and
+/// nothing by the name `other`, which accepted no connection.
+#[farhelm_testtrace::test]
+async fn a_scan_restricted_to_some_names_contacts_only_those() {
+    let mut dir = Dir::new();
+    let wanted = dir.stand_in("wanted", Answer::Host(info_with(1, golden_tag("agent"))));
+    let other = dir.stand_in(
+        "other",
+        Answer::Host(info_with(2, golden_tag("tab-scoped"))),
+    );
+    let mut options = options();
+    options.only = Some(HashSet::from([OsString::from("wanted")]));
+    let registry = HostRegistry::scan(dir.state.path(), &options)
+        .await
+        .unwrap();
+    assert_eq!(
+        names(registry.live().iter().map(|host| &host.name)),
+        ["wanted"]
+    );
+    assert!(registry.by_name(OsStr::new("other")).is_none());
+    assert_eq!(wanted.load(Ordering::SeqCst), 1);
+    assert_eq!(other.load(Ordering::SeqCst), 0);
 }
 
 /// Taking a live host hands over the scan's connection, still usable, and

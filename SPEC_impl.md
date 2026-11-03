@@ -1820,12 +1820,13 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   position processed, so nothing is fed twice, and the latest size asked for is sent again if the host reports another;
   after three reconnects within a minute the terminal is made unavailable rather than fight whoever keeps taking the
   host over. Unavailable ends a runtime, not a host's chances: for a reason that can pass (a timed-out connect, a host
-  briefly stopped, a connection that kept ending), the runtimes' owner adopts the host again later. The child's pid is a
-  kill root only while the host reports the child alive and the process under that pid still has the start identity
-  pinned at adoption (between two `Info` replies that both say it runs; a pid is not reused before the host reaps it),
-  re-read each time a root is asked for. A terminal counts as exited only once the stream's exit record is processed,
-  which the host sends after the child's drained output, so whatever acts on the exit reads the final screen; every
-  exit, end or loss of a host terminal is also sent to one shared notifier, so one task can wait on every exit.
+  briefly stopped, a connection that kept ending), the host is adopted again at the supervisor's next start, and a host
+  startup itself could not adopt is also retried while it runs ("Across supervisor restarts", re-adoption). The child's
+  pid is a kill root only while the host reports the child alive and the process under that pid still has the start
+  identity pinned at adoption (between two `Info` replies that both say it runs; a pid is not reused before the host
+  reaps it), re-read each time a root is asked for. A terminal counts as exited only once the stream's exit record is
+  processed, which the host sends after the child's drained output, so whatever acts on the exit reads the final screen;
+  every exit, end or loss of a host terminal is also sent to one shared notifier, so one task can wait on every exit.
 - **Recovery and checkpoints** (`hosts/terminal.rs`, `hosts/terminal/checkpoint.rs`). The **replay policy** decides what
   replayed output may do, by the host's `delivered_end` (the end of the output it wrote whole to some client). Output in
   the stored snapshot is never replayed: a restore has no side effects. Output below `delivered_end` was sent to an
@@ -1868,9 +1869,10 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   fills the journal, and may gap while connected; the remedy is a faster encoder. An orderly stop asks for a checkpoint
   within a deadline that bounds the encode and the host's answer: taken where the terminal is if it is clean there, else
   none, so that the host keeps its last accepted snapshot and the tail after it, which a recovery replays; an encode the
-  deadline cuts short is finished and sent as an ordinary checkpoint. A host's **journal cap** is 32 MiB by default:
-  checkpoints keep the tail below a quarter of it, which leaves about four minutes of an agent's heaviest redraw
-  traffic, and hours of a shell's, for a supervisor's absence before the oldest of that output is trimmed into a
+  deadline cuts short is finished and sent as an ordinary checkpoint, unless the runtime is stopped first, which cancels
+  every encode it runs (the encoder gives up between rows, keeping nothing). A host's **journal cap** is 32 MiB by
+  default: checkpoints keep the tail below a quarter of it, which leaves about four minutes of an agent's heaviest
+  redraw traffic, and hours of a shell's, for a supervisor's absence before the oldest of that output is trimmed into a
   **gap**. A gap never resets a healthy emulator: the runtime carries on after it, marks the history trimmed for the
   viewer (for as long as that runtime runs: a snapshot cannot carry the mark), and, once any replay is over, asks the
   program to redraw by resizing the terminal one row smaller and back, since Linux sends no `SIGWINCH` for a resize to
@@ -1897,11 +1899,13 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   waits two seconds for the record and otherwise records a plain exit, which the observer can still turn into the
   launch's error (the launch shim's own failure report quotes no screen and is recorded at once). A hook report is
   anchored at the host's child; while the session's entry is not yet published the report waits for a later pass rather
-  than being refused. Prompts check bracketed paste in the emulator's modes and send the paste in parts of one input
-  sequence, submitting only once all of it was written. The orderly stop's hold wait compares the "held" mark with the
-  child's pid. An attach is refused for a client that cannot show grids, permanently, with `InvalidRequest`. A host
-  agent's session has no tmux session of its own; tmux tabs of such a session are looked for in the tmux session its row
-  names, which is always `fh-` and its id. Only a create under the internal switch (below) makes a host terminal, and
+  than being refused. Prompts check bracketed paste in the emulator's modes, once the runtime has caught up with its
+  host's journal (until then, after a restart, a prompt is refused, since the modes are a past screen's), and send the
+  paste in parts of one input sequence, submitting only once all of it was written. The orderly stop's hold wait
+  compares the "held" mark with the child's pid. An attach is refused for a client that cannot show grids, permanently,
+  with `InvalidRequest`. A host agent's session has no tmux session of its own; tmux tabs of such a session are looked
+  for in the tmux session its row names, which is always `fh-` and its id. Only a create under the internal switch
+  (below) makes a host terminal, which a restarted supervisor finds again ("Across supervisor restarts" below), and
   until Restart can start a new host and tabs can be hosts, Restart of a host agent is refused before anything is
   stopped and tabs cannot be opened beside one.
 - **Creating agents in hosts** (`service/core/host_launch.rs`) is behind an internal switch,
@@ -1950,13 +1954,13 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   socket is looked at again for up to five seconds while such a process remains, and the retry is left unresolved if one
   stays. The record stays through an agent's launch error (the error settles the agent, not its host, which may still
   run with the failed launch's final screen and is named nowhere else while the row's `pane` is empty). A retry that
-  finds the host replays the session as created and starts nothing; the interrupted attempt's host itself stays running
-  for the restart reconciliation a later change brings to hosts, as an interrupted tmux launch's pane waits for reload.
+  finds the host replays the session as created and starts nothing; the interrupted attempt's host itself stays running,
+  and a restarted supervisor's reload adopts it by its tag, as it finds an interrupted tmux launch's pane by its marker.
   The supervisor-wide `host_scan` lock keeps host spawns (holding it shared from just before the first stage starts
   until the host's entry is published, or until the create gives the host up) apart from what must not overlap them
-  (holding it exclusively): today the removal of an ended host's socket file (by a create or by Delete), whose
-  re-verifying removal requires that nothing binds sockets in the directory meanwhile; a later scan of the socket
-  directory would take it the same way, since a scan would take a host over from the create that is starting it.
+  (holding it exclusively): the removal of an ended host's socket file (by a create or by Delete), whose re-verifying
+  removal requires that nothing binds sockets in the directory meanwhile, and any scan of the socket directory inside a
+  running supervisor (today `serve`'s reload), since a scan would take a host over from the create that is starting it.
   Delete's settling of its session's launch records takes no part in it: the session's lifecycle claim keeps that
   session's own creates out. A session kept as a launching record with its host unconfirmed ended has that host ended by
   its Delete, which finds it by the launch record.
@@ -2003,7 +2007,68 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   returns; and these keep a session undeletable until a person deals with them: a record that cannot be read or decoded,
   a record whose socket serves another terminal's host, a recorded host whose process is not known, whose command line
   the verified signal rejects (it does not end with `--socket` and that socket's path), or that survives SIGKILL, and a
-  recorded host whose child runs but cannot be read to pin it.
+  recorded host whose child runs but cannot be read to pin it. A session whose agent terminal is a startup placeholder
+  (a host a restarted supervisor could not adopt, "Across supervisor restarts" below) has no runtime: the launch record
+  naming its socket is settled like any other. A placeholder no record names is ended only when the host at its socket
+  answers with a tag naming the session (then it is counted, rooted and shut down like a recorded host of the session);
+  anything else there keeps the session and is never signalled, since nothing but the socket's name ties that process to
+  the session.
+- **Across supervisor restarts** (`service/core/host_handover.rs`) a host terminal keeps running, and its session keeps
+  its state. An orderly stop asks every host terminal's runtime for a checkpoint under one ten-second deadline that runs
+  beside the output clients' ten seconds, at most as many encodes at once as the machine has cores, and closes each
+  runtime's connection once its checkpoint is settled or the deadline passes (every host terminal in the map is closed,
+  those already ended included, since one may still be settling an encode). Closing a runtime cancels any encode it
+  still runs: the encoder looks at its cancel between rows and gives up within about a millisecond, keeping nothing, and
+  the stop waits until every encode has ended. That is what keeps the stop, and so the process's exit and the release of
+  its state directory's claim, within the deadline: an encode runs on tokio's blocking pool, which the supervisor's
+  runtime waits for as it drops. From the moment the stop gathers its host terminals nothing publishes a host runtime: a
+  create whose host is ready only then stops its runtime and publishes a placeholder, its row and launch record kept for
+  the next supervisor, and a re-adoption stops the runtime it made. After the pending-hold wait the stop closes every
+  host terminal then in the map again, waiting up to a second for their encodes, and a runtime cancels its encodes
+  whenever it ends, also when the process's tokio runtime drops its task (it does so before waiting for the blocking
+  pool), so a stop that could not take the session map's lock in time still exits within one encode's look at its
+  cancel. A host whose checkpoint did not finish, never got a core, or could not be taken (a sequence left open, a
+  runtime still replaying) keeps its previous snapshot and all the output after it, which the next supervisor replays: a
+  slower recovery, the same terminal. Every host with output since its snapshot is checkpointed however little that
+  output is, and each encode is of the whole terminal (up to about two seconds of a core at full scrollback in true
+  color). Closing the connection right after the checkpoint limits the output the stopping supervisor counts as
+  delivered without acting on it to what the host had already written to the connection, which the next supervisor
+  replays without side effects (the delivery ambiguity above); output after the close is unseen, and its queries are
+  answered. A crash or a kill leaves each host its latest checkpoint and the tail after it, the same way. A starting
+  supervisor reloads its sessions only once it holds its state directory and has opened, and checked, its database, so a
+  build that cannot read the database refuses before contacting any host. Host rows never go through tmux's pane lookup,
+  since their `pane` holds a socket name: reload scans the socket directory (discovery, above) and matches each host row
+  to a host by its tag (session and launch generation), else by the socket the row names (its `pane`, or for a launch
+  never confirmed, its launch record). A host found is adopted as recovered (its snapshot restored, the tail replayed
+  under the replay policy) and taken as a found pane is: an unconfirmed launch found by its tag is confirmed with its
+  socket's name. A host that may run and cannot be used (no answer, another protocol version, busy, a tag this build
+  cannot read, a tag naming another launch, a socket directory that cannot be scanned, a launch record that cannot be
+  read) is left as it is and never treated as gone: the session holds a handle that answers as unavailable, never no
+  terminal, which records nothing durable (not even a launch sentinel, also in later observations), lists the session as
+  unknown and makes the verbs refuse. A host row's host is absent only when no live host carries its tag and nothing
+  serves the socket the row names (names are drawn fresh per launch) or its file is missing, or when the launch never
+  reached a host (unconfirmed, with no launch record); the session is then reconciled as a vanished pane's. A host whose
+  child exited while no supervisor was attached reads as running until its runtime has replayed the exit record, after
+  which the ticker records the exit, with any never-started classification; reload confirms such a session's launch, but
+  leaves a durable stop request as it is, so that the exit is recorded as stopped by the user, and clears it only for a
+  child the host reports alive. The scan takes over the hosts it reaches, so a supervisor without its state directory's
+  claim scans nothing (its host rows are unavailable to it); `serve`'s second reload keeps the terminals the
+  constructor's made, skips their sockets and those found gone (socket names are never reused), and runs under a lock
+  re-adoption takes too; hosts no row claims are left as they were. The spare-checkout claims at startup read a host
+  row's terminal, and for a host row with no terminal, whether a socket file is still at the path the row (or its launch
+  record) names and was not found gone by the reload: a claim is released only then. **Re-adoption**: a running
+  supervisor retries a host startup could not adopt for a reason that can pass (no answer in time, busy, closed
+  connections, a child that could not be pinned, a socket directory that could not be scanned), one placeholder at a
+  time: after a second, then doubling to a minute, each next try scheduled before the try and never reset. A try takes
+  the session's lifecycle claim without waiting (a busy session is tried later), checks that the entry still holds that
+  very placeholder for the same launch generation and that no orderly stop has begun, looks only at the one socket the
+  placeholder names (its tag must name the session's launch), and swaps the outcome in under the session map after
+  checking again, keeping the entry's run and session cells; a launch or stop request is then confirmed as reload would
+  for a child the host reports alive. A runtime it made but does not install is stopped, leaving the host as it was. An
+  orderly stop sets a flag under the session map as it gathers the host terminals it closes, after which no try installs
+  a runtime. A placeholder whose reason will not pass on its own (another protocol version, snapshot format or tag, a
+  launch record that cannot be read) is not retried, and a runtime that becomes unavailable after it ran stays so until
+  the supervisor's next start, whose reload adopts the host afresh.
 
 Test harnesses end the hosts they leave behind: `farhelm-teststate` ends every host whose socket is in a `hosts`
 directory within an owned run directory (its dead-run sweep, and every `TestDir` drop) through a small blocking client
@@ -2224,11 +2289,12 @@ the browser's normal buffer behind it is empty until new output arrives, where t
 pre-program scrollback. Replaying both would add two captures to every attach for a cosmetic gain, and was declined
 (review finding A7-C8).
 
-Planned supervisor stops give orderly output-client teardown ten seconds, including waiting for the attachment lock. On
-expiry, one best-effort attempt lists the private server's control clients and switches them to no-output, within two
-additional seconds. It neither kills clients nor retries or verifies the roster; failure is logged and the process still
-exits. This can quiet existing clients even when the attachment lock spent the original budget, but does not guarantee
-that every client closes safely.
+Planned supervisor stops give orderly output-client teardown ten seconds, including waiting for the attachment lock
+(host terminals are checkpointed during the same ten seconds: "Terminal host", "Across supervisor restarts"). On expiry,
+one best-effort attempt lists the private server's control clients and switches them to no-output, within two additional
+seconds. It neither kills clients nor retries or verifies the roster; failure is logged and the process still exits.
+This can quiet existing clients even when the attachment lock spent the original budget, but does not guarantee that
+every client closes safely.
 
 Further defenses against a tmux abort on abrupt closure of an output-bearing control client are not worth significant
 complexity without an observed abort on tmux 3.7c or later. The recorded aborts are on distro tmux 3.6 and tmux 3.7b;

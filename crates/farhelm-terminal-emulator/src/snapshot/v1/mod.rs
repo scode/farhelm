@@ -111,7 +111,8 @@ pub(super) use paint::{Content, Mode};
 use wire::{Extras, Reader, Writer, malformed};
 
 use super::{
-    MAGIC, MAX_RESTORE_CELLS, MAX_SIDE, Restored, SnapshotError, WidthTable, restorable_history,
+    Cancel, MAGIC, MAX_RESTORE_CELLS, MAX_SIDE, Restored, SnapshotError, WidthTable,
+    restorable_history,
 };
 use crate::effects::{Collected, FeedMode, Listener};
 use crate::emulator::{Emulator, Size};
@@ -186,6 +187,8 @@ pub(super) struct Encoded {
     /// was measured ([`Encoded::keep`]).
     stream_len: usize,
     cell_fixup_bytes: usize,
+    /// The encode was cancelled part way: the rest describes nothing.
+    pub(super) cancelled: bool,
 }
 
 impl Encoded {
@@ -209,6 +212,7 @@ pub(super) fn encode(
     skip_titles: usize,
     trimmed_for: u32,
     mode: Mode,
+    cancel: &Cancel,
 ) -> Encoded {
     let painted = paint::paint(
         &emulator.term,
@@ -216,6 +220,7 @@ pub(super) fn encode(
         content,
         skip_titles,
         mode,
+        cancel,
     );
     let mut flags = 0;
     if trimmed_for > 0 {
@@ -242,8 +247,9 @@ pub(super) fn encode_history(
     skip: usize,
     trimmed_for: u32,
     mode: Mode,
+    cancel: &Cancel,
 ) -> Encoded {
-    let painted = paint::paint_history(&emulator.term, skip, mode);
+    let painted = paint::paint_history(&emulator.term, skip, mode, cancel);
     let flags = if trimmed_for > 0 {
         FLAG_HISTORY_TRIMMED
     } else {
@@ -263,6 +269,16 @@ fn container(
     painted: paint::Painted,
     mode: Mode,
 ) -> Encoded {
+    if painted.cancelled {
+        return Encoded {
+            blob: Vec::new(),
+            len: 0,
+            history_costs: Vec::new(),
+            stream_len: 0,
+            cell_fixup_bytes: 0,
+            cancelled: true,
+        };
+    }
     let measured = mode == Mode::Measure;
     let fixups = painted.fixups;
     let mut cursors = Writer::default();
@@ -289,6 +305,7 @@ fn container(
             history_costs: painted.history_costs,
             stream_len: painted.stream_len,
             cell_fixup_bytes: painted.cell_fixup_bytes,
+            cancelled: false,
         };
     }
 
@@ -334,6 +351,7 @@ fn container(
         history_costs: painted.history_costs,
         stream_len: painted.stream_len,
         cell_fixup_bytes: painted.cell_fixup_bytes,
+        cancelled: false,
     }
 }
 

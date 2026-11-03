@@ -273,6 +273,41 @@ that its required systemd or SSH substrate ran.
   workspace nextest run. The container launch kind's test is in the containerized suite above
   (`containerized_sessions::podman_agent_runs_from_a_terminal_host`). Run it when the create path, the launch spec's
   composition, the host spawn or the launch identity's rollback or evidence changes.
+- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'host terminals across supervisor restarts' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(/a_prompt_waits_for_a_recovered_host_terminal_to_catch_up|spare_claims_read_a_host_rows_own_host|a_stop_request_survives_a_restart|an_unreadable_launch_record_leaves_its_session_unavailable|an_orderly_stop_ends_its_encodes_before_its_runtime_drops|a_readoption_that_loses_its_fence|readoption_backs_off_without_spinning|a_scan_restricted_to_some_names|delete_settles_the_record_of_a_startup_placeholders_socket/) | test(/^host_restarts::/)'`
+  — a restarted supervisor keeping its host terminals (`crates/farhelm-supervisor/src/service/core/host_handover.rs`):
+  the orderly stop's checkpoints, reload finding each host row's host again, and re-adoption of hosts that were
+  unavailable. The unit tests (in `service::core::tests::host_terminals`, against stand-in hosts, some bound in the
+  state directory's socket directory where a reload finds them) refuse a prompt while a recovered runtime is still
+  replaying, even with paste mode on, and deliver it once caught up; protect a host session's spare-checkout claim while
+  its runtime runs or cannot read its host, release it once its child exited, and, with no terminal on the entry,
+  release it only while no socket file is at the path its row names; keep a durable stop request through a reload whose
+  host reports its child reaped before the exit record is replayed, and record the exit with its code and the stop
+  annotation once it is; keep an unavailable terminal, recording and removing nothing (a launch sentinel included), for
+  a session whose launch record cannot be read beside a host whose tag cannot; and, on a runtime the test owns, end an
+  orderly stop's checkpoints within its budget while every encode is held, with the held encode released by its cancel,
+  the runtime dropping at once and the state directory's claim free; a re-adoption of a startup placeholder whose entry
+  changed, or during which an orderly stop began, installing nothing and ending the runtime it made; and re-adoption's
+  backoff (a placeholder first tried a second after it is seen, the next try scheduled later before each try, none
+  repeated before it is due while the session is busy); and Delete of a session holding a placeholder settling the
+  launch record of its socket (its recorded first stage fenced) rather than reaching the host as a runtime's.
+  `hosts::registry`'s restricted scan contacts only the names asked for. The e2e tests
+  (`crates/farhelm/tests/e2e/host_restarts.rs`) run in-process supervisors with the switch on and real hosts started
+  from the built `farhelm`, dropped and constructed again on one state directory: an orderly stop leaving each host a
+  snapshot where its terminal is and ending its runtime, after which the next supervisor publishes the same host,
+  restored from that snapshot, with the same screen and a `Running` row, keeps that very runtime through `serve`'s
+  second reload, and drives it; a crash (no orderly stop) recovered from a snapshot plus output seen before the crash
+  and output written while no supervisor was attached; an agent that exits with code 7 while no supervisor runs,
+  recorded with its code once replayed; a host killed while none runs, its session recorded as exited with no terminal;
+  a create interrupted before its confirmation found by its host's tag and confirmed, and one whose login shell failed
+  before the launch step ending as a launch error once its exit is replayed; a stop whose checkpoint ran out of time
+  (its encode held) leaving the previous snapshot, from which the next supervisor recovers with the tail; a create
+  published after the stop began gathering, on a runtime the test owns, publishing a placeholder, its runtime stopped
+  and its held encode cancelled, and the runtime dropping at once; and a host stopped with SIGSTOP left alone
+  (unavailable, listed unknown, nothing recorded, Stop refused for the unavailable host, the host and its agent still
+  running) and adopted by the same supervisor once continued. Needs the pinned tmux first on `PATH`. Linux only (the e2e
+  suite), a minute or so; part of the workspace nextest run. Run it when reload, the orderly stop, re-adoption,
+  discovery or the host runtime's adoption or encodes change. The encoder's cancel itself is in the terminal emulator
+  selection below (`an_encode_stops_once_its_cancel_fires_and_is_unchanged_until_then`).
 - Terminal host coverage, when the crate changes:
   `cargo +nightly llvm-cov -p terminal-host --branch --summary-only -- --test-threads=1`, with cargo-llvm-cov 0.9.1
   installed in your scratch directory (`cargo install --locked --root <scratch>/tools cargo-llvm-cov --version 0.9.1`,
@@ -311,9 +346,10 @@ that its required systemd or SSH substrate ran.
   and unknown-version blobs, of streams holding sequences version 1 never writes or taking too much work to replay
   (before feeding), and of fixups no live output makes; history past the restore's cell bound dropped and marked
   trimmed; mutated and crafted blobs never panicking; extras shared by content through a restore, within the extra
-  storage limit; the size ladder (titles before history); the trimmed mark across restores; the character width table's
-  fingerprint; the Restart seeds. About a minute. Part of the workspace nextest run. Run it when the crate or anything
-  under `vendor/` changes. Ignored tests, run by hand in release: the snapshot spike's full round-trip configuration
+  storage limit; the size ladder (titles before history); the trimmed mark across restores; an encode's cancel (nothing
+  once it fires, the same bytes until then); the character width table's fingerprint; the Restart seeds. About a minute.
+  Part of the workspace nextest run. Run it when the crate or anything under `vendor/` changes. Ignored tests, run by
+  hand in release: the snapshot spike's full round-trip configuration
   (`cargo nextest run -p farhelm-terminal-emulator --release --run-ignored only -E 'test(/^full_size_round_trip_seed_/)'`,
   a few minutes), the review's 300,000 short scripts (`-E 'test(short_scripts_round_trip_at_review_size)'`) and 230,000
   hostile blobs (`-E 'test(hostile_blobs_never_panic_at_review_size)'`), the full round trip over private recordings of

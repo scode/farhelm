@@ -9,7 +9,10 @@
 //! queries are answered through the host's `Input`, its synchronized updates
 //! are flushed on their deadline, and the child's life is followed from the
 //! host's records. [`HostTerminal`] is the handle the rest of the supervisor
-//! holds; [`HostTerminal::adopt`] connects to a host and starts the task.
+//! holds; [`HostTerminal::adopt`] connects to a host and starts the task,
+//! [`HostTerminal::adopt_found`] does the same over the connection a
+//! discovery scan already made, and [`HostTerminal::unavailable`] stands for
+//! a host startup found and cannot use, whose runtime never ran.
 //!
 //! - **One owner.** Every connection to a host takes it over (the client's
 //!   module docs, the plan's D-11), so a second runtime for the same host
@@ -176,7 +179,12 @@
 //!   echo of typed input cannot be drawn until the emulator is back. An
 //!   orderly stop's deadline bounds its wait for the encode; one that runs
 //!   out leaves the host its previous snapshot, and the late snapshot is
-//!   sent as an ordinary checkpoint once it is done. An encoder that panics
+//!   sent as an ordinary checkpoint once it is done, unless the runtime is
+//!   stopped first ([`HostTerminal::abort`], which a supervisor's orderly
+//!   stop does once its checkpoints are settled): stopping cancels every
+//!   encode, which gives up between rows and keeps nothing, so that no
+//!   encode outlives a stopping supervisor on the blocking pool
+//!   ([`HostTerminal::encodes_ended`]). An encoder that panics
 //!   hands the emulator back; an encode task lost altogether (cancelled, or
 //!   failed outside the encoder) took the emulator with it, and the runtime
 //!   ends, unavailable ([`Unavailability::EmulatorLost`]).
@@ -205,8 +213,12 @@
 //!   reasons are lasting (a protocol or snapshot format this build does not
 //!   know); others can pass (a connect that timed out on a loaded machine,
 //!   a host that was briefly stopped, a child that could not be pinned, a
-//!   connection that kept ending). Whoever owns the runtimes adopts such a
-//!   host again, on a backoff, with a new runtime.
+//!   connection that kept ending; [`Unavailability::may_pass`]). In the
+//!   supervisor, only a host startup could not adopt is tried again, with a
+//!   new runtime, while its reason may pass (`service::core::host_handover`,
+//!   "Adopting again"); a runtime that ends unavailable after it ran stays
+//!   so until the next start of the supervisor, whose reload adopts the
+//!   host afresh.
 //!
 //! What a viewer's grid stream (a later step) builds on is here as seams:
 //! [`HostTerminal::subscribe_notices`], [`HostTerminal::try_read`] and
@@ -220,7 +232,8 @@ use std::sync::{Arc, Mutex as StdMutex, PoisonError, Weak};
 use std::time::{Duration, Instant};
 
 use farhelm_terminal_emulator::{
-    Effects, Emulator, FeedMode, Modes, Notice, Snapshot, SnapshotError, snapshot_split_candidate,
+    Cancel, Effects, Emulator, FeedMode, Modes, Notice, Snapshot, SnapshotError, SnapshotStopped,
+    snapshot_split_candidate,
 };
 use terminal_host::protocol::{ChildExit, Info, MAX_INPUT, MAX_SNAPSHOT, Position, Size};
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
@@ -424,9 +437,7 @@ impl Liveness {
 ///
 /// Some reasons can pass, and the host should be adopted again later (see
 /// the module docs, "Unavailable is final for a runtime, not for a host"):
-/// `Connect` with a timeout, a host no longer taking connections or one
-/// closing them before it answered, `Busy`, `Request`, `ChildUnpinned` and
-/// `Unstable`. The others say this build cannot use the host at all.
+/// [`Self::may_pass`] says which.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum Unavailability {
     /// Connecting found a host this supervisor cannot use.
@@ -468,6 +479,58 @@ pub enum Unavailability {
     /// runtime ends; a new adoption rebuilds it from the host.
     #[error("the terminal's emulator was lost with a checkpoint's encode")]
     EmulatorLost,
+    /// Startup could not tell which host is this terminal's, or could not
+    /// use the one it found, for a reason the connection itself does not
+    /// name: the host's tag is one this build cannot read (a newer
+    /// release's), it names another launch, several hosts claim the launch,
+    /// the launch record that names the socket cannot be read, or the
+    /// supervisor was stopping when the terminal would have been published.
+    /// No runtime ever ran (the handle is [`HostTerminal::unavailable`]'s),
+    /// and none is tried until the supervisor's next start.
+    #[error("the terminal host could not be identified: {0}")]
+    Unidentified(String),
+    /// Startup could not scan the socket directory (a listing that failed,
+    /// say), so it never asked the host at the socket the session names.
+    /// Can pass: the socket is known, and a later look may reach it.
+    #[error("the terminal host was not looked at: {0}")]
+    NotScanned(String),
+}
+
+impl Unavailability {
+    /// Whether this can pass on its own, so that adopting the host again is
+    /// worth trying (a supervisor retries the hosts startup could not adopt
+    /// for such a reason; `service::core::host_handover`, "Adopting again"):
+    /// a host that did not answer in time, closed or stopped taking
+    /// connections, stayed busy, failed a request, had a child that could
+    /// not be pinned, kept dropping its connection, lost its emulator with
+    /// an encode, or was never looked at. A protocol version, snapshot
+    /// format or tag this build does not know, a socket another process now
+    /// serves, a refused or malformed answer, and a shutdown that did not
+    /// end the host stay as they are until something changes outside this
+    /// supervisor.
+    pub fn may_pass(&self) -> bool {
+        match self {
+            Unavailability::Connect(reason) => match reason {
+                Unavailable::Timeout
+                | Unavailable::Closed
+                | Unavailable::NotAccepting
+                | Unavailable::Io(_) => true,
+                Unavailable::UnsupportedVersion(_)
+                | Unavailable::Refused { .. }
+                | Unavailable::Malformed(_) => false,
+            },
+            Unavailability::Busy
+            | Unavailability::Request(_)
+            | Unavailability::ChildUnpinned { .. }
+            | Unavailability::Unstable
+            | Unavailability::EmulatorLost
+            | Unavailability::NotScanned(_) => true,
+            Unavailability::Snapshot(_)
+            | Unavailability::Replaced
+            | Unavailability::ShutdownUnconfirmed
+            | Unavailability::Unidentified(_) => false,
+        }
+    }
 }
 
 /// [`HostTerminal::read`] found the emulator lost
@@ -893,6 +956,9 @@ struct GateState {
     /// An encode went past the gate because [`EncodeGate::LIMIT`] ran out,
     /// not because the gate was opened.
     expired: bool,
+    /// An encode went past the gate because it was cancelled (its runtime
+    /// was stopped), not because the gate was opened.
+    cancelled: bool,
 }
 
 /// A failure an [`EncodeGate`] makes an encode have, for the paths that
@@ -952,26 +1018,54 @@ impl EncodeGate {
         state.lock().unwrap_or_else(PoisonError::into_inner).expired
     }
 
+    /// Whether an encode went past the gate, unopened, because it was
+    /// cancelled: the runtime holding it was stopped
+    /// ([`HostTerminal::abort`]).
+    pub fn cancelled(&self) -> bool {
+        let (state, _) = &*self.0;
+        state
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .cancelled
+    }
+
+    /// Hold every encode from now on again, until [`Self::open`]: for a test
+    /// that lets some encodes through and then holds a later one.
+    pub fn close(&self) {
+        let (state, _) = &*self.0;
+        state.lock().unwrap_or_else(PoisonError::into_inner).open = false;
+    }
+
     /// Make every encode past the gate have `fault`.
     pub fn fail_with(&self, fault: EncodeFault) {
         let (state, _) = &*self.0;
         state.lock().unwrap_or_else(PoisonError::into_inner).fault = Some(fault);
     }
 
-    /// Wait until the gate is open, or [`Self::LIMIT`] has passed, and
+    /// Wait until the gate is open, the encode is cancelled (as an encode
+    /// held anywhere else would see it), or [`Self::LIMIT`] has passed, and
     /// say which fault the encode is to have.
-    fn pass(&self) -> Option<EncodeFault> {
+    fn pass(&self, cancel: &Cancel) -> Option<EncodeFault> {
+        /// How often a held encode looks at its cancel.
+        const CANCEL_POLL: Duration = Duration::from_millis(5);
         let (state, changed) = &*self.0;
         let mut guard = state.lock().unwrap_or_else(PoisonError::into_inner);
         guard.entered = true;
         changed.notify_all();
-        let mut guard = changed
-            .wait_timeout_while(guard, Self::LIMIT, |state| !state.open)
-            .unwrap_or_else(PoisonError::into_inner)
-            .0;
+        let until = Instant::now() + Self::LIMIT;
+        while !guard.open && !cancel.is_cancelled() && Instant::now() < until {
+            guard = changed
+                .wait_timeout(guard, CANCEL_POLL)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
+        }
         guard.passed = true;
         if !guard.open {
-            guard.expired = true;
+            if cancel.is_cancelled() {
+                guard.cancelled = true;
+            } else {
+                guard.expired = true;
+            }
         }
         guard.fault
     }
@@ -1045,11 +1139,59 @@ struct Inner {
     /// "Input"): a caller blocked on a full queue when input was lost is
     /// behind the hole too.
     epoch: Arc<AtomicU64>,
+    /// The runtime's snapshot encodes, shared with it: what
+    /// [`HostTerminal::abort`] cancels and [`HostTerminal::encodes_ended`]
+    /// waits for.
+    encodes: Arc<Encodes>,
     /// Ends the runtime's task where it waits, for [`HostTerminal::abort`].
     task: tokio::task::AbortHandle,
     /// The host process this runtime adopted, from the adoption's
     /// connection: see [`HostTerminal::adopted_process`].
     adopted: Option<HostProcess>,
+    /// Made by [`HostTerminal::unavailable`]: no runtime ever ran.
+    placeholder: bool,
+}
+
+/// A runtime's snapshot encodes, as a handle sees them: how many run on the
+/// blocking pool now, and the flag that cancels them.
+///
+/// An encode runs on a thread of tokio's blocking pool, which nothing can
+/// interrupt from outside, and a runtime that owns the pool waits for it
+/// when it drops: an encode a supervisor's orderly stop left running would
+/// hold the process (and its state directory's claim) for as long as it
+/// takes, seconds at full scrollback. So every encode looks at the flag
+/// between rows (`farhelm_terminal_emulator::Cancel`) and gives up once it
+/// is set, and the count lets the stop wait until they have.
+#[derive(Debug)]
+struct Encodes {
+    cancel: Arc<std::sync::atomic::AtomicBool>,
+    running: watch::Sender<usize>,
+}
+
+impl Encodes {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            running: watch::channel(0).0,
+        })
+    }
+}
+
+/// Counts one encode as running from its making until it is dropped, at
+/// the end of the encode's blocking job, however that job ends.
+struct RunningEncode(Arc<Encodes>);
+
+impl RunningEncode {
+    fn start(encodes: &Arc<Encodes>) -> Self {
+        encodes.running.send_modify(|running| *running += 1);
+        Self(Arc::clone(encodes))
+    }
+}
+
+impl Drop for RunningEncode {
+    fn drop(&mut self) {
+        self.0.running.send_modify(|running| *running -= 1);
+    }
 }
 
 /// What the emulator's lock guards: the emulator, or the view of it left
@@ -1328,7 +1470,37 @@ impl HostTerminal {
         adoption: Adoption,
         options: HostTerminalOptions,
     ) -> Result<HostTerminal, AdoptError> {
-        let mut conn = HostConnection::connect_with(socket, options.deadlines).await?;
+        let conn = HostConnection::connect_with(socket, options.deadlines).await?;
+        Self::adopt_connected(conn, socket, adoption, options).await
+    }
+
+    /// [`Self::adopt`] for a host discovery found, over the connection the
+    /// scan made, which owns the host from now on
+    /// (`super::registry`'s module docs): a second connection would take
+    /// the host over from the first, so the scan's is the one kept. The
+    /// scan sent the host only `Hello` and `Info`, both answered, so the
+    /// adoption's own exchange starts from a connection that owes it
+    /// nothing, as one just made does.
+    pub async fn adopt_found(
+        host: super::registry::LiveHost,
+        adoption: Adoption,
+        options: HostTerminalOptions,
+    ) -> Result<HostTerminal, AdoptError> {
+        let super::registry::LiveHost {
+            socket, connection, ..
+        } = host;
+        Self::adopt_connected(connection, &socket, adoption, options).await
+    }
+
+    /// The adoption itself (see [`Self::adopt`]), over `conn`, a connection
+    /// to the host at `socket` that has sent no `Read` and no input and has
+    /// every reply it asked for.
+    async fn adopt_connected(
+        mut conn: HostConnection,
+        socket: &Path,
+        adoption: Adoption,
+        options: HostTerminalOptions,
+    ) -> Result<HostTerminal, AdoptError> {
         let peer = conn.peer();
         let unavailable = |reason| AdoptError::Unavailable { reason, peer };
         let (child, info) = pin_child(&mut conn)
@@ -1420,6 +1592,7 @@ impl HostTerminal {
         let (control_tx, control_rx) = mpsc::channel(1);
         let (size_tx, size_rx) = watch::channel(None);
         let epoch = Arc::new(AtomicU64::new(0));
+        let encodes = Encodes::new();
 
         let mut runtime = Runtime {
             socket: socket.to_path_buf(),
@@ -1453,6 +1626,7 @@ impl HostTerminal {
             #[cfg(any(test, feature = "test-seams"))]
             encode_gate: options.encode_gate,
             returned: returned.clone(),
+            encodes: Arc::clone(&encodes),
             encoding: None,
             lost: false,
             deferred: None,
@@ -1479,10 +1653,82 @@ impl HostTerminal {
                 size: size_tx,
                 epoch,
                 returned,
+                encodes,
                 task,
                 adopted: peer,
+                placeholder: false,
             }),
         })
+    }
+
+    /// A handle for a host at `socket` that the supervisor knows of and will
+    /// not drive: a terminal whose runtime has already ended
+    /// [`Liveness::Unavailable`] with `reason` and `peer`, without ever
+    /// having connected.
+    ///
+    /// It exists so that a terminal startup could not adopt (its host does
+    /// not answer, speaks another version, carries a tag this build cannot
+    /// read) is still a [`HostTerminal`] wherever the supervisor keeps
+    /// terminals, and so answers every question the way an unavailable
+    /// runtime does (the plan's D-16): unattributed evidence, an error from
+    /// the probes, no anchor, no root, and every request refused as ended.
+    /// Leaving such a session with no terminal at all would read as "its
+    /// terminal is gone", which records the agent as exited.
+    ///
+    /// The emulator is a blank one at the default size; nothing ever feeds
+    /// it, and nothing should read it, since the status says unavailable.
+    /// Must be called within a tokio runtime (the handle carries a task's
+    /// abort handle, here a task that has nothing to do).
+    pub fn unavailable(
+        socket: &Path,
+        reason: Unavailability,
+        peer: Option<HostProcess>,
+    ) -> HostTerminal {
+        let size = farhelm_terminal_emulator::Size {
+            columns: 80,
+            lines: 24,
+        };
+        let (notices, _) = broadcast::channel(1);
+        let (_, status) = watch::channel(HostStatus {
+            liveness: Liveness::Unavailable { reason, peer },
+            child_pid: 0,
+            child_start: None,
+            position: Position::default(),
+            revision: 0,
+            caught_up: false,
+            checkpoint: None,
+            history_trimmed: false,
+        });
+        // Every channel's other end is dropped here, which is how a handle
+        // learns that its runtime has ended.
+        let (input, _) = mpsc::channel(1);
+        let (control, _) = mpsc::channel(1);
+        let (size_tx, _) = watch::channel(None);
+        HostTerminal {
+            inner: Arc::new(Inner {
+                socket: socket.to_path_buf(),
+                emulator: Arc::new(StdMutex::new(Held::new(Emulator::new(size, 0)))),
+                notices: notices.downgrade(),
+                returned: Arc::new(tokio::sync::Notify::new()),
+                status,
+                input,
+                control,
+                size: size_tx,
+                epoch: Arc::new(AtomicU64::new(0)),
+                encodes: Encodes::new(),
+                task: tokio::spawn(async {}).abort_handle(),
+                adopted: None,
+                placeholder: true,
+            }),
+        }
+    }
+
+    /// Whether this handle is a placeholder [`Self::unavailable`] made for a
+    /// host the supervisor could not adopt, rather than a runtime that ran:
+    /// what re-adoption retries (`service::core::host_handover`, "Adopting
+    /// again"), and nothing else.
+    pub fn is_placeholder(&self) -> bool {
+        self.inner.placeholder
     }
 
     /// The host's socket, which names the host.
@@ -1748,8 +1994,17 @@ impl HostTerminal {
     /// until the encode is done): without this, a runtime still holding a
     /// request would reconnect and take the host back from the caller's own
     /// connection mid-shutdown. Input in flight is lost unreported, as with
-    /// any ended connection.
+    /// any ended connection. Also for a supervisor's orderly stop, which
+    /// closes every host connection once its checkpoints are done.
+    ///
+    /// Any snapshot encode the runtime started is cancelled too: it gives up
+    /// between rows, keeps nothing, and the host keeps its previous snapshot
+    /// ([`Self::encodes_ended`] waits for that).
     pub fn abort(&self) {
+        self.inner
+            .encodes
+            .cancel
+            .store(true, std::sync::atomic::Ordering::Relaxed);
         self.inner.task.abort();
     }
 
@@ -1765,6 +2020,21 @@ impl HostTerminal {
     /// connection could reach instead (`Unavailability::Replaced`).
     pub fn adopted_process(&self) -> Option<HostProcess> {
         self.inner.adopted
+    }
+
+    /// Wait until none of this runtime's snapshot encodes runs on the
+    /// blocking pool any more.
+    ///
+    /// After [`Self::abort`], which cancels them, that is within about a
+    /// millisecond of the cancel (the encoder looks at it between rows),
+    /// and it is what lets a stopping supervisor's runtime drop without
+    /// waiting for an encode: the runtime's task is gone at once, but the
+    /// encode it started is not. Without an abort it waits for the encodes
+    /// to finish on their own. The caller bounds the wait.
+    pub async fn encodes_ended(&self) {
+        let mut running = self.inner.encodes.running.subscribe();
+        // The sender lives in `Inner`, so the channel never closes here.
+        let _ = running.wait_for(|running| *running == 0).await;
     }
 
     /// Snapshot the terminal for its host now, for an orderly stop, and
@@ -2037,6 +2307,8 @@ struct Runtime {
     emulator: Arc<StdMutex<Held>>,
     /// Woken when the emulator comes back from an encode (`Inner::returned`).
     returned: Arc<tokio::sync::Notify>,
+    /// See `Inner::encodes`.
+    encodes: Arc<Encodes>,
     status: watch::Sender<HostStatus>,
     input_rx: mpsc::Receiver<InputRequest>,
     control_rx: mpsc::Receiver<Control>,
@@ -2102,6 +2374,9 @@ struct Encoding {
 struct Encoded {
     emulator: Box<Emulator>,
     snapshot: Option<Snapshot>,
+    /// The encode gave up because it was cancelled (`Inner::encodes`), which
+    /// is no failure: the runtime is being stopped.
+    cancelled: bool,
 }
 
 /// The emulator while it is home, for the runtime, which touches it only
@@ -2129,6 +2404,20 @@ impl std::ops::DerefMut for LiveGuard<'_> {
                 unreachable!("the runtime touched the emulator while it was away")
             }
         }
+    }
+}
+
+/// A runtime that ends, however it ends (its host gone, every handle
+/// dropped, its task aborted, or the process's tokio runtime dropping its
+/// tasks as it shuts down), cancels the encodes it started: nobody will take
+/// their result, and an encode left running on the blocking pool would hold
+/// up the drop of the tokio runtime that owns the pool, and with it a
+/// stopping supervisor's exit and the release of its state directory.
+impl Drop for Runtime {
+    fn drop(&mut self) {
+        self.encodes
+            .cancel
+            .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
@@ -2635,24 +2924,31 @@ impl Runtime {
         };
         #[cfg(any(test, feature = "test-seams"))]
         let gate = self.encode_gate.clone();
+        let cancel = Cancel::new(Arc::clone(&self.encodes.cancel), None);
+        let running = RunningEncode::start(&self.encodes);
         let task = tokio::task::spawn_blocking(move || {
+            let _running = running;
             #[cfg(any(test, feature = "test-seams"))]
-            let fault = gate.as_ref().and_then(EncodeGate::pass);
+            let fault = gate.as_ref().and_then(|gate| gate.pass(&cancel));
             #[cfg(any(test, feature = "test-seams"))]
             if fault == Some(EncodeFault::TaskLost) {
                 panic!("test seam: an encode task lost with its emulator");
             }
             // A panic in the encoder must not take the emulator with it.
-            let snapshot = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let encoded = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 #[cfg(any(test, feature = "test-seams"))]
                 if fault == Some(EncodeFault::EncoderPanics) {
                     panic!("test seam: an encoder panic");
                 }
-                emulator.snapshot(MAX_SNAPSHOT)
-            }))
-            .ok()
-            .and_then(Result::ok);
-            Encoded { emulator, snapshot }
+                emulator.snapshot_until(MAX_SNAPSHOT, &cancel)
+            }));
+            let cancelled = matches!(encoded, Ok(Err(SnapshotStopped::Cancelled)));
+            let snapshot = encoded.ok().and_then(Result::ok);
+            Encoded {
+                emulator,
+                snapshot,
+                cancelled,
+            }
         });
         self.checkpoints.attempted(self.position);
         self.encoding = Some(Encoding {
@@ -2705,7 +3001,9 @@ impl Runtime {
             .slot = Slot::Live(encoded.emulator);
         self.returned.notify_waiters();
         self.publish();
-        if encoded.snapshot.is_none() {
+        if encoded.cancelled {
+            info!(socket = %self.socket.display(), "a terminal checkpoint's encode was cancelled");
+        } else if encoded.snapshot.is_none() {
             warn!(socket = %self.socket.display(), "a terminal checkpoint's encode failed");
         }
         encoded.snapshot
@@ -2766,10 +3064,16 @@ impl Runtime {
         }
         let mut encoding = self.encoding.take().expect("just started");
         let snapshot = match tokio::time::timeout_at(deadline, &mut encoding.task).await {
-            Ok(Ok(encoded)) => match self.home(encoded) {
-                Some(snapshot) => snapshot,
-                None => return (CheckpointOutcome::Kept(NotTaken::EncodeFailed), None),
-            },
+            Ok(Ok(encoded)) => {
+                let cancelled = encoded.cancelled;
+                match self.home(encoded) {
+                    Some(snapshot) => snapshot,
+                    None if cancelled => {
+                        return (CheckpointOutcome::Kept(NotTaken::TimedOut), None);
+                    }
+                    None => return (CheckpointOutcome::Kept(NotTaken::EncodeFailed), None),
+                }
+            }
             Ok(Err(error)) => {
                 self.lose(&error);
                 return (CheckpointOutcome::Kept(NotTaken::EncodeFailed), None);

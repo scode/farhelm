@@ -921,11 +921,17 @@ impl Supervisor {
     /// socket directory, spelled absolute as the spawn spells it (which the
     /// verified signal compares byte for byte).
     pub(crate) fn recorded_socket(&self, record: &LaunchHostRecord) -> anyhow::Result<PathBuf> {
+        self.named_socket(&record.socket)
+    }
+
+    /// The full path of the socket called `name` in this supervisor's
+    /// socket directory, spelled as [`Self::recorded_socket`] spells a
+    /// record's, so that Delete finds a placeholder's socket and a record's
+    /// equal exactly when they are one socket.
+    pub(crate) fn named_socket(&self, name: &crate::hosts::HostName) -> anyhow::Result<PathBuf> {
         let state_dir = std::path::absolute(&self.state_dir)
             .map_err(|error| anyhow::Error::new(error).context("resolving the state directory"))?;
-        Ok(record
-            .socket
-            .socket_in(&crate::hosts::hosts_dir(&state_dir)))
+        Ok(name.socket_in(&crate::hosts::hosts_dir(&state_dir)))
     }
 
     /// Settle what a launch record's start left at its socket, for a caller

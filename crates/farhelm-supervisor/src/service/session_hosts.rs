@@ -18,7 +18,18 @@
 //! - **The agent's runtime**, when the session's agent terminal is a host
 //!   (`Terminal::Host`). The caller roots the sweep at its child as pinned
 //!   at adoption (`hosts::HostStatus::pinned_child_root`) and hands the
-//!   runtime to [`SessionHosts::end`].
+//!   runtime to [`SessionHosts::end`]. A startup placeholder
+//!   (`hosts::HostTerminal::is_placeholder`, for a host a restarted
+//!   supervisor could not adopt) is no runtime: it holds no connection and
+//!   adopted no process, so its socket is settled from the session's launch
+//!   record like the rest. A placeholder no record names has nothing but
+//!   its host's tag to tie the socket to the session: a host there whose
+//!   tag names the session is taken as a recorded one of the session
+//!   would be, a socket nothing serves is gone, and anything else (another
+//!   tag, an unreadable tag, a busy, wedged or silent process, a path that
+//!   is not a host socket) refuses and keeps the session without
+//!   signalling anything, since a process that merely names the socket on
+//!   its command line is not shown to be the session's.
 //! - **The session's launch records** (`<state>/launch/<id>.<generation>.host`,
 //!   `service::core::host_launch`), written before every host start the
 //!   supervisor makes for the session and kept until that host is confirmed
@@ -77,8 +88,10 @@
 //! that cannot be read or decoded; a record whose socket serves another
 //! terminal's host; a recorded host whose process is not known, whose
 //! command line the verified signal rejects (it does not end with
-//! `--socket` and this socket's path), or that survives SIGKILL; and a
-//! recorded host whose child runs but cannot be read to pin it as a root.
+//! `--socket` and this socket's path), or that survives SIGKILL; a
+//! recorded host whose child runs but cannot be read to pin it as a root;
+//! and a startup placeholder no record names whose socket is served by
+//! anything but a host tagged as this session's.
 //!
 //! # What keeps the connections Delete holds
 //!
@@ -86,8 +99,10 @@
 //! connection to each answering host of the session, which owns that host
 //! until it is dropped. Nothing else connects to a session's recorded hosts
 //! meanwhile: the session's lifecycle claim excludes its own create, Restart
-//! and tab operations, and the only other code that settles a record (a
-//! retried create) settles its own session's.
+//! and tab operations, and re-adoption of a startup placeholder, which takes
+//! the same claim (`try_claim`) before it probes the placeholder's socket;
+//! and the only other code that settles a record (a retried create) settles
+//! its own session's.
 
 use std::future::Future;
 use std::path::PathBuf;
@@ -102,7 +117,9 @@ use super::core::{AtRecordedSocket, Supervisor, read_launch_record};
 use super::terminals::Terminal;
 use crate::hosts::stop::{HostOutcome, StopLimits, shut_down, signal};
 use crate::hosts::terminal::{Child, pin_child};
-use crate::hosts::{ConnectError, HostConnection, HostProcess, HostRole, HostTag, HostTerminal};
+use crate::hosts::{
+    ConnectError, HostConnection, HostName, HostProcess, HostRole, HostTag, HostTerminal,
+};
 use terminal_host::protocol::Info;
 
 /// How long Delete spends settling a session's launch records, all of them
@@ -147,6 +164,17 @@ enum RecordedHost {
     },
 }
 
+impl RecordedHost {
+    /// The socket this host was found at.
+    fn socket(&self) -> &std::path::Path {
+        match self {
+            RecordedHost::Gone { socket }
+            | RecordedHost::Ours { socket, .. }
+            | RecordedHost::Unreadable { socket, .. } => socket,
+        }
+    }
+}
+
 /// The terminal hosts of one session that no runtime in this supervisor
 /// holds, as settling the session's launch records found them (module
 /// docs). The agent's runtime, when it has one, is not in here: the caller
@@ -184,9 +212,15 @@ impl Supervisor {
         budget: Duration,
     ) -> anyhow::Result<SessionHosts> {
         let deadline = tokio::time::Instant::now() + budget;
-        let held = match agent {
-            Some(Terminal::Host(host)) => host.socket().file_name().map(ToOwned::to_owned),
-            Some(Terminal::Tmux(_)) | None => None,
+        // A startup placeholder (`HostTerminal::is_placeholder`) holds no
+        // connection and adopted no process: its socket is settled from the
+        // session's record like any other, so that a recorded first stage is
+        // fenced and only a host the record names is ended. One that no
+        // record names is settled by its host's tag alone, below.
+        let (held, placeholder) = match agent {
+            Some(Terminal::Host(host)) if host.is_placeholder() => (None, Some(host)),
+            Some(Terminal::Host(host)) => (host.socket().file_name().map(ToOwned::to_owned), None),
+            Some(Terminal::Tmux(_)) | None => (None, None),
         };
         let mut records = Vec::new();
         for path in self.launch_records_of(session_id).await? {
@@ -198,10 +232,17 @@ impl Supervisor {
                 records.push((path, record, socket));
             }
         }
+        let unrecorded = match placeholder {
+            Some(placeholder) => {
+                let socket = self.placeholder_socket(placeholder)?;
+                (!records.iter().any(|(_, _, recorded)| *recorded == socket)).then_some(socket)
+            }
+            None => None,
+        };
         // Every record at once, within settling's own budget: each can
         // wait for its first stage and for a stray second stage.
         type Settling<'a> = Pin<Box<dyn Future<Output = anyhow::Result<RecordedHost>> + Send + 'a>>;
-        let settlings: Vec<Settling<'_>> = records
+        let mut settlings: Vec<Settling<'_>> = records
             .iter()
             .map(|(path, record, socket)| {
                 Box::pin(async move {
@@ -220,8 +261,15 @@ impl Supervisor {
                 }) as Settling<'_>
             })
             .collect();
+        if let Some(socket) = &unrecorded {
+            settlings.push(Box::pin(settle_unrecorded_placeholder(
+                session_id,
+                socket.clone(),
+            )));
+        }
+        let mut settled = join_until(settlings, deadline).await.into_iter();
         let mut hosts = Vec::new();
-        for ((path, _, _), settled) in records.iter().zip(join_until(settlings, deadline).await) {
+        for ((path, _, _), settled) in records.iter().zip(settled.by_ref()) {
             match settled {
                 Some(host) => hosts.push(host?),
                 None => anyhow::bail!(
@@ -230,11 +278,43 @@ impl Supervisor {
                 ),
             }
         }
+        if let Some(socket) = &unrecorded {
+            match settled.next().flatten() {
+                Some(host) => hosts.push(host?),
+                None => anyhow::bail!(
+                    "this session's terminal host at {} could not be settled within {budget:?}",
+                    socket.display()
+                ),
+            }
+        }
         Ok(SessionHosts {
             session_id: session_id.to_owned(),
             hosts,
             budget,
         })
+    }
+
+    /// The socket a startup placeholder stands for, spelled the way a launch
+    /// record's socket is ([`Supervisor::named_socket`]), so that the record
+    /// naming it, if any, compares equal. An error when the placeholder's
+    /// path does not end in a host socket name (a startup that could not
+    /// tell which socket the row's host is at records the socket directory
+    /// itself): then nothing says which host is the session's, and Delete
+    /// refuses rather than guess.
+    fn placeholder_socket(&self, placeholder: &HostTerminal) -> anyhow::Result<PathBuf> {
+        let name = placeholder
+            .socket()
+            .file_name()
+            .and_then(|name| name.to_str())
+            .and_then(HostName::parse)
+            .with_context(|| {
+                format!(
+                    "this session's terminal host could not be identified at startup ({}), so \
+                     which host to end is not known",
+                    placeholder.socket().display()
+                )
+            })?;
+        self.named_socket(&name)
     }
 
     /// The paths of `session_id`'s launch records, in the launch directory.
@@ -312,6 +392,66 @@ fn classify(
             unreadable(socket, peer, error.to_string())
         }
         AtRecordedSocket::NoInfo { error, peer } => unreadable(socket, peer, error.to_string()),
+    }
+}
+
+/// Settle the socket of the session's startup placeholder when no launch
+/// record of the session names it (module docs, "Which hosts"). With no
+/// record there is no first stage to fence and no record tying the socket
+/// to the session, so the only evidence that the host there is the
+/// session's is the host's own tag: a host that answers with a tag naming
+/// `session_id` is [`RecordedHost::Ours`] (counted by the guard, rooted and
+/// ended over this connection like a recorded one), and a socket nothing
+/// serves is [`RecordedHost::Gone`].
+///
+/// Everything else is an error, which refuses the Delete and keeps the
+/// session, and nothing is ever signalled from here: a host that is busy,
+/// wedged, speaks another protocol, does not report its `Info` or carries a
+/// tag this build cannot read is only a process whose command line names
+/// the socket, which a process renamed over the path shares, so it is never
+/// [`RecordedHost::Unreadable`] (whose end is the verified signal).
+async fn settle_unrecorded_placeholder(
+    session_id: &str,
+    socket: PathBuf,
+) -> anyhow::Result<RecordedHost> {
+    let unproven = |socket: &std::path::Path, why: String| {
+        anyhow::anyhow!(
+            "this session's terminal host at {} has no launch record, and {why}, so nothing \
+             shows it is this session's; nothing was signalled",
+            socket.display()
+        )
+    };
+    let mut connection =
+        match HostConnection::connect_with(&socket, StopLimits::default().client).await {
+            Ok(connection) => connection,
+            Err(ConnectError::Gone(_)) => return Ok(RecordedHost::Gone { socket }),
+            Err(error) => return Err(unproven(&socket, format!("it does not answer ({error})"))),
+        };
+    let info = match connection.info().await {
+        Ok(info) => info,
+        Err(error) => {
+            return Err(unproven(
+                &socket,
+                format!("it did not report itself ({error})"),
+            ));
+        }
+    };
+    match HostTag::decode(&info.tag) {
+        Ok(tag) if tag.session_id == session_id => Ok(RecordedHost::Ours {
+            socket,
+            connection: Box::new(connection),
+            tag,
+            info,
+        }),
+        Ok(tag) => Err(anyhow::anyhow!(
+            "this session's terminal host socket {} now serves a host for another terminal \
+             ({tag:?}); nothing was touched",
+            socket.display()
+        )),
+        Err(unreadable) => Err(unproven(
+            &socket,
+            format!("its tag cannot be read ({unreadable})"),
+        )),
     }
 }
 
@@ -476,6 +616,29 @@ impl SessionHosts {
         type Ending<'a> = Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>>;
         let mut sockets: Vec<PathBuf> = Vec::new();
         let mut endings: Vec<Ending<'_>> = Vec::new();
+        // A placeholder holds no host: `Supervisor::session_hosts` settled
+        // its socket into `self.hosts` (from the record naming it, or by its
+        // host's tag when none does) or refused, and it is ended from there
+        // below. One whose socket is not there was never settled, and is
+        // never ended (or signalled) on the strength of the placeholder
+        // alone: refuse instead.
+        let agent = match agent {
+            Some(agent) if agent.is_placeholder() => {
+                let settled = self
+                    .hosts
+                    .iter()
+                    .any(|host| host.socket().file_name() == agent.socket().file_name());
+                if !settled {
+                    return Err(format!(
+                        "the terminal host at {} was never settled for this Delete, so it may \
+                         still run",
+                        agent.socket().display()
+                    ));
+                }
+                None
+            }
+            agent => agent,
+        };
         if let Some(agent) = agent {
             let socket = agent.socket().to_path_buf();
             sockets.push(socket.clone());

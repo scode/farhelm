@@ -111,7 +111,10 @@ async fn stored_sessions(state: &std::path::Path) -> Vec<StoredSession> {
 /// defect was fixed in the teststate sweep fixture (#384); the ownership
 /// assertion below is retained deliberately — a read-only reload would make
 /// the rename test pass without exercising a real successor.
-async fn wait_for_state_dir_claim_release(state: &std::path::Path, deadline: tokio::time::Instant) {
+pub(crate) async fn wait_for_state_dir_claim_release(
+    state: &std::path::Path,
+    deadline: tokio::time::Instant,
+) {
     let lock_path = state.join("supervisor.lock");
     tokio::task::spawn_blocking(move || {
         let lock = std::fs::OpenOptions::new()
