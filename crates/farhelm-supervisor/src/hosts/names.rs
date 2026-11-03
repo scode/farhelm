@@ -45,6 +45,15 @@ impl HostName {
         Ok(HostName(name))
     }
 
+    /// Read back a name this module made, as a caller recorded it: `None`
+    /// for anything that is not [`NAME_LEN`] characters of the alphabet,
+    /// so a damaged record can never name a path outside the socket
+    /// directory.
+    pub fn parse(text: &str) -> Option<HostName> {
+        (text.len() == NAME_LEN && text.bytes().all(|byte| ALPHABET.contains(&byte)))
+            .then(|| HostName(text.to_string()))
+    }
+
     /// The name as text.
     pub fn as_str(&self) -> &str {
         &self.0

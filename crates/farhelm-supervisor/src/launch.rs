@@ -147,6 +147,13 @@ pub const AGENT_ID_ENV_VAR: &str = "FARHELM_AGENT_ID";
 /// names its socket explicitly, and in-pane helpers find the supervisor
 /// through `FARHELM_SUPERVISOR_SOCK`. Deliberately reaching the private
 /// server by its socket stays possible and stays unsupported.
+///
+/// An agent in a terminal host has no tmux around it, but its login shell
+/// still runs its startup files with a placeholder `TMUX`
+/// (`service::core::host_launch::STARTUP_TMUX_PLACEHOLDER`), so that a
+/// startup file that starts tmux when `TMUX` is unset stays held back as it
+/// is in a pane. This removal is what takes that placeholder away again
+/// before the agent starts, so it is load-bearing for both kinds.
 pub const PRIVATE_TMUX_ENV_VARS: [&str; 2] = ["TMUX", "TMUX_PANE"];
 
 /// What the shim needs to launch the agent: written as JSON by the
@@ -802,6 +809,7 @@ pub(crate) struct LaunchArtifacts {
     spec: PathBuf,
     status: PathBuf,
     waypoint: PathBuf,
+    host: PathBuf,
 }
 
 impl LaunchArtifacts {
@@ -823,6 +831,7 @@ impl LaunchArtifacts {
             spec: spec.to_path_buf(),
             status: spec.with_extension("status"),
             waypoint: spec.with_extension("waypoint"),
+            host: spec.with_extension("host"),
         }
     }
 
@@ -839,6 +848,15 @@ impl LaunchArtifacts {
     /// Generation-local proof that shell startup reached the scope wrapper.
     pub(crate) fn waypoint(&self) -> &Path {
         &self.waypoint
+    }
+
+    /// For a launch in a terminal host: which socket the host was to bind and
+    /// which first-stage process could still start it, recorded before that
+    /// process is given the spec (`service::core::host_launch`, "The launch
+    /// record"). What a later supervisor fences an interrupted create's
+    /// starter by; it holds no credential.
+    pub(crate) fn host(&self) -> &Path {
+        &self.host
     }
 
     /// Unlink only a spec whose bytes the shim has already read, before parsing.
@@ -889,13 +907,15 @@ pub fn spec_path_for_launch(state_dir: &Path, id: &str, generation: i64) -> Path
 ///
 /// Besides the spec (`.json`), its sentinel (`.status`) and its waypoint, a
 /// launch in the Mac app's version layout leaves two marks with the same stem
-/// (`crate::session_hold`'s `.held` and `.launched`), so every sweep and
-/// delete that enumerates this directory removes them with their launch.
+/// (`crate::session_hold`'s `.held` and `.launched`), and a launch in a
+/// terminal host its host record (`.host`, [`LaunchArtifacts::host`]), so
+/// every sweep and delete that enumerates this directory removes them with
+/// their launch.
 pub fn parse_launch_file_name(name: &str) -> Option<(&str, i64)> {
     let (rest, extension) = name.rsplit_once('.')?;
     if !matches!(
         extension,
-        "json" | "status" | "waypoint" | "held" | "launched"
+        "json" | "status" | "waypoint" | "held" | "launched" | "host"
     ) {
         return None;
     }

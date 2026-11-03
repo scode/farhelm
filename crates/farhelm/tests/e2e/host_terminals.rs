@@ -2,10 +2,14 @@
 //! a session's agent: exit recording, Stop, Restart's refusal, Delete (its
 //! guard and its process root) and attach.
 //!
-//! Nothing in the supervisor creates an agent in a host yet, so each test
-//! creates an ordinary session and moves its agent into a host it started
-//! itself (`Supervisor::install_host_agent_for_test`, which adopts the host,
-//! records the row as a host row and kills the created tmux session). The
+//! Each test here wants a host child of its own choosing rather than an
+//! agent's launch chain, so it creates an ordinary session and moves its
+//! agent into a host it started itself
+//! (`Supervisor::install_host_agent_for_test`, which adopts the host,
+//! records the row as a host row and kills the created tmux session); a
+//! create that starts its agent in a host under the supervisor's internal
+//! switch is tested in `host_creates.rs`, which also uses the helpers
+//! shared from here. The
 //! host is started from the real `farhelm` binary by the supervisor's own
 //! spawn (`farhelm_supervisor::hosts::spawn_host`), which runs the binary
 //! first, so the host's own fork never happens inside this test process. The
@@ -33,7 +37,7 @@ use std::path::Path;
 use terminal_host::protocol::Size;
 
 /// How long a test waits for a process to go or a host to report a change.
-const WAIT_SECS: u64 = 15;
+pub(crate) const WAIT_SECS: u64 = 15;
 
 /// A script that records its own pid and a background grandchild's in
 /// `dir`, says it is ready, and then waits for the grandchild: a child with
@@ -87,7 +91,7 @@ async fn install_host(h: &Harness, session_id: &str, script: &str) -> Installed 
 /// The process whose command line carries `--socket <socket>`, as a host's
 /// own does, if one runs: an observation of the host that does not go
 /// through the supervisor's runtime for it.
-fn host_process(socket: &Path) -> Option<u32> {
+pub(crate) fn host_process(socket: &Path) -> Option<u32> {
     let socket = socket.as_os_str().as_encoded_bytes();
     std::fs::read_dir("/proc")
         .ok()?
@@ -102,7 +106,7 @@ fn host_process(socket: &Path) -> Option<u32> {
 }
 
 /// Wait until `host`'s screen shows `text`.
-async fn wait_for_screen(host: &HostTerminal, text: &str) {
+pub(crate) async fn wait_for_screen(host: &HostTerminal, text: &str) {
     let mut status = host.subscribe();
     let waited = tokio::time::timeout(Duration::from_secs(WAIT_SECS), async {
         while !host.screen_tail(4096).contains(text) {
@@ -122,7 +126,7 @@ async fn wait_for_screen(host: &HostTerminal, text: &str) {
 }
 
 /// The session's durable row, read from the store the supervisor writes.
-async fn stored_outcome(h: &Harness, session_id: &str) -> LastOutcome {
+pub(crate) async fn stored_outcome(h: &Harness, session_id: &str) -> LastOutcome {
     SessionStore::open(&h.state.path().join("supervisor.db"), false)
         .await
         .expect("open the store")
@@ -145,7 +149,11 @@ async fn tree_pids(dir: &Path) -> (u32, u32) {
 }
 
 /// Wait until `host`'s liveness satisfies `condition`.
-async fn wait_for_liveness(host: &HostTerminal, what: &str, condition: impl Fn(&Liveness) -> bool) {
+pub(crate) async fn wait_for_liveness(
+    host: &HostTerminal,
+    what: &str,
+    condition: impl Fn(&Liveness) -> bool,
+) {
     let mut status = host.subscribe();
     let waited = tokio::time::timeout(Duration::from_secs(WAIT_SECS), async {
         while !condition(&host.liveness()) {
@@ -165,7 +173,7 @@ async fn wait_for_liveness(host: &HostTerminal, what: &str, condition: impl Fn(&
 }
 
 /// The session as the list reports it.
-async fn listed_info(h: &Harness, session_id: &str) -> SessionInfo {
+pub(crate) async fn listed_info(h: &Harness, session_id: &str) -> SessionInfo {
     h.client
         .list_sessions()
         .await

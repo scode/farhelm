@@ -66,9 +66,9 @@
 //!   returns, so a name added only once the spawn has finished leaves a
 //!   window in which the scan takes the new host over from its starter. A
 //!   caller either serializes scans with its spawns or reserves each
-//!   spawn's name in its skip source before the host binds it (the spawn
-//!   draws its name itself today; a caller that needs the reservation has
-//!   `hosts::spawn` take the name from it).
+//!   spawn's name in its skip source before the host binds it (a caller
+//!   that reserves names draws them with `hosts::spawn::free_host_name` and
+//!   starts the host with `hosts::spawn::start_host`, which takes the name).
 //!
 //! Every host is classified within its own bounds: the connect deadline (a
 //! socket that only refuses is followed for up to the refusal window past
@@ -271,6 +271,34 @@ enum Probe {
 }
 
 impl GoneHost {
+    /// The socket file at `socket`, for a caller that has just ended the
+    /// host there itself and confirmed it ended (by its process, or by
+    /// nothing serving the socket), so that [`Self::remove_socket`] can
+    /// remove the file a host killed by a signal leaves behind. `None` when
+    /// nothing, or something that is not a socket, is at the path.
+    ///
+    /// The caller's confirmation is no more trusted than a scan's:
+    /// [`Self::remove_socket`] judges the socket gone again before it
+    /// unlinks anything, and its precondition (no spawn in the state
+    /// directory meanwhile) binds this caller too.
+    pub fn ended_at(socket: &Path, deadlines: ClientDeadlines) -> io::Result<Option<GoneHost>> {
+        let meta = match fs::symlink_metadata(socket) {
+            Ok(meta) => meta,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        if !meta.file_type().is_socket() {
+            return Ok(None);
+        }
+        Ok(Some(GoneHost {
+            name: socket.file_name().map(OsString::from).unwrap_or_default(),
+            socket: socket.to_path_buf(),
+            why: Gone::Refused,
+            file: FileId::of(&meta),
+            deadlines,
+        }))
+    }
+
     /// Remove this host's socket file, if the socket is still gone now.
     ///
     /// The scan's judgment is not trusted for this: by now the file may be

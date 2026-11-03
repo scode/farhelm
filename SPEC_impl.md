@@ -1677,9 +1677,9 @@ other Farhelm crate, no Farhelm concepts in its code, `libc` its only runtime de
 every update: the protocol only grows, and every client release must keep working with every host ever shipped (its
 "Change policy"). It ships inside the `farhelm` binary as `farhelm internal terminal-host`, which takes no version lock
 (a host lives for weeks and must keep neither pruning nor uninstall waiting) and runs before anything starts a thread,
-since the host forks. Nothing starts hosts yet; the supervisor's use of them comes with the switch that turns them on.
-Each session row already records its agent terminal's kind (the supervisor schema 32 column `terminal_kind`), and every
-row is `tmux` until that switch.
+since the host forks. A create starts its agent in a host only under the supervisor's internal switch ("Creating agents
+in hosts" below), which no shipped supervisor turns on yet. Each session row records its agent terminal's kind (the
+supervisor schema 32 column `terminal_kind`), which is `tmux` unless a create under that switch wrote `host`.
 
 The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
 
@@ -1698,7 +1698,9 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   as a clean refusal: the host may have reported ready just before, and a tab found later by its tag would pass for one
   the user was told never opened. The spawn kills and reaps the first stage, ends whatever answers at the socket (a
   second stage that has not reported yet ends itself when its report finds no reader), and returns either "nothing left"
-  or the socket where something may remain.
+  or the socket where something may remain. A caller may choose the socket name itself and start the first stage apart
+  from giving it the spec, which the first stage needs whole before it starts anything: in between it learns the first
+  stage's process, pinned to its start identity, and can record it ("Creating agents in hosts" below).
 - **The client tag** records the session, the role (agent with its launch generation, or tab with its tab id and whether
   it runs in its own scope) and the spawn time in nanoseconds, which orders a session's tabs without new persistence.
   Its encoding is permanent, because a host keeps its tag across every update: every tag starts with the magic `FHTG`
@@ -1898,9 +1900,63 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   modes and send the paste in parts of one input sequence, submitting only once all of it was written. The orderly
   stop's hold wait compares the "held" mark with the child's pid. An attach is refused for a client that cannot show
   grids, permanently, with `InvalidRequest`. A host agent's session has no tmux session of its own; tmux tabs of such a
-  session are looked for in the tmux session its row names, which is always `fh-` and its id. Nothing in production
-  makes a host terminal yet, so until the switch, Restart of a host agent is refused before anything is stopped, tabs
-  cannot be opened beside one, and Delete does not yet end the host itself.
+  session are looked for in the tmux session its row names, which is always `fh-` and its id. Only a create under the
+  internal switch (below) makes a host terminal, and until Restart can start a new host, tabs can be hosts and Delete
+  ends hosts, Restart of a host agent is refused before anything is stopped, tabs cannot be opened beside one, and
+  Delete does not end the host itself.
+- **Creating agents in hosts** (`service/core/host_launch.rs`) is behind an internal switch,
+  `SupervisorSeams::new_terminals` (`Tmux` by default, or `Host`), which only the in-process test harnesses set:
+  `farhelm supervisor run` cannot turn it on, and no test sets it through its own environment. Only a new create
+  consults it; Restart of a tmux session stays in tmux under either setting until Restart can move a session into a
+  host. A create decides the kind once and commits it with the launching row, before anything starts, so a crash between
+  the start and its confirmation leaves a row that says where to look; a retried create launches in the kind its row
+  records, whatever the switch says by then, since the evidence that allowed the retry was gathered for that kind. A
+  host launch shares everything with a pane's up to the command (the spec, the hooks, the login shell, and the shim's
+  command line with its `systemd-run --user --scope` wrapper exactly where a pane has it), and the host's child runs
+  that command: the agent keeps its launch scope, and the host gets no scope of its own, living in the supervisor's
+  control group as the tmux server does. The child's environment is what tmux 3.7c gives a pane's command when the
+  supervisor creates a session: the supervisor's own environment, then the launch environment, then
+  `TERM=xterm-256color`, `TERM_PROGRAM=tmux`, `TERM_PROGRAM_VERSION` (the private server's version) and
+  `COLORTERM=truecolor`, the supervisor's `PATH` (else the launch environment's, else `/usr/bin:/bin`), `SHELL` (the
+  user's login shell) and `PWD`, without `TMUX_PANE` and systemd's `LISTEN_*`. `TERM_PROGRAM` names tmux although none
+  is involved, so that agents read exactly what they read in a pane; tmux's passthrough envelope, which a program that
+  believes it runs in tmux may use, is off in Farhelm's tmux and dropped by the emulator alike. `TMUX` is a placeholder
+  naming a socket under `/dev/null`, where none can exist: a pane's login shell runs its startup files with tmux's
+  `TMUX` set, which holds back a startup file that starts tmux when `TMUX` is unset, and the placeholder keeps that
+  protection; the launch shim removes it with the private server's variables before the agent starts. A tmux command a
+  startup file runs because `TMUX` is set reaches no server and prints that it cannot connect, where in a pane it
+  reached the private server silently. The host's tag binds it to the session and the launch generation, and confirming
+  the launch writes the socket's name to the row's `pane`. **The launch record**: the socket's name is drawn before the
+  host's first stage starts, and before that first stage is given the spec (it starts nothing until it has read it
+  whole), the launch's artifacts record the socket's name and the first stage's process, pinned to its start identity
+  (`<state>/launch/<id>.<generation>.host`). A supervisor that dies after the record leaves a first stage that can still
+  start the host on its own, and the record is how a retry finds it; one that dies before it leaves a first stage whose
+  stdin ends without a spec, which starts nothing. A failed host start is classified from the first stage's exit status:
+  a refusal, or an unfinished start the spawn confirmed ended, leaves nothing, and the create rolls back as for an
+  absent tmux session; a host that may still run (an unfinished start not confirmed ended, or a host that reported ready
+  but cannot be used) is ended through the protocol or by the verified signal, and only when that cannot be confirmed is
+  the launching row kept (with its record). A create that lost to Delete, or whose confirmation failed, sweeps the
+  agent's process tree and then ends its host the same way: through its runtime's `Shutdown` within 15 seconds (a
+  runtime takes it up only between its other work, which a snapshot encode can hold), and otherwise, with the runtime
+  stopped so that it cannot take the host back, by its socket within `stop-terminal-hosts`'s per-host limits. The socket
+  file a host ended by a signal leaves is then removed, judged gone again first. A retried create whose row shows no
+  launch asks, in order: whether the session's published entry holds a host (a create kept as a launching record
+  publishes the host it could not end), which is the launch; whether a launch record exists, without which no host start
+  ever got its spec; whether the recorded first stage still runs, in which case it is waited for up to five seconds and
+  then ended with the verified signal; and finally what is at the recorded socket. A host whose tag names the session's
+  first launch is the launch, and anything else that answers leaves the retry unresolved. Nothing there is absence only
+  once no live process names the socket on its command line: a second stage the first stage forked before it ended still
+  binds the socket and starts the child before its readiness report finds the first stage gone and it ends both, so the
+  socket is looked at again for up to five seconds while such a process remains, and the retry is left unresolved if one
+  stays. The record stays through an agent's launch error (the error settles the agent, not its host, which may still
+  run with the failed launch's final screen and is named nowhere else while the row's `pane` is empty). A retry that
+  finds the host replays the session as created and starts nothing; the interrupted attempt's host itself stays running
+  for the restart reconciliation a later change brings to hosts, as an interrupted tmux launch's pane waits for reload.
+  The supervisor-wide `host_scan` lock keeps host spawns (holding it shared from just before the first stage starts
+  until the host's entry is published, or until the create gives the host up) apart from what must not overlap them
+  (holding it exclusively): today the removal of an ended host's socket file, later any scan of the socket directory,
+  which would take a host over from the create that is starting it. A session kept as a launching record with its host
+  unconfirmed ended is Deleted without its host being ended until Delete ends hosts.
 
 Test harnesses end the hosts they leave behind: `farhelm-teststate` ends every host whose socket is in a `hosts`
 directory within an owned run directory (its dead-run sweep, and every `TestDir` drop) through a small blocking client

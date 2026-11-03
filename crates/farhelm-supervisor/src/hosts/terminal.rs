@@ -846,13 +846,20 @@ impl NoticeSubscription {
 #[derive(Debug, Clone, Default)]
 pub struct EncodeGate(Arc<(StdMutex<GateState>, std::sync::Condvar)>);
 
-/// An [`EncodeGate`]'s state: whether it is open, and the fault it makes
-/// every encode past it have.
+/// An [`EncodeGate`]'s state: whether it is open, the fault it makes
+/// every encode past it have, and what encodes it has seen.
 #[cfg(any(test, feature = "test-seams"))]
 #[derive(Debug, Default)]
 struct GateState {
     open: bool,
     fault: Option<EncodeFault>,
+    /// An encode has reached the gate.
+    entered: bool,
+    /// An encode has gone past the gate, opened or not.
+    passed: bool,
+    /// An encode went past the gate because [`EncodeGate::LIMIT`] ran out,
+    /// not because the gate was opened.
+    expired: bool,
 }
 
 /// A failure an [`EncodeGate`] makes an encode have, for the paths that
@@ -884,6 +891,34 @@ impl EncodeGate {
         opened.notify_all();
     }
 
+    /// Wait, blocking, up to `within` until an encode has reached the gate,
+    /// and say whether one did: the observable that an encode is in
+    /// progress, for a test of what happens meanwhile.
+    pub fn wait_entered(&self, within: Duration) -> bool {
+        let (state, changed) = &*self.0;
+        let guard = state.lock().unwrap_or_else(PoisonError::into_inner);
+        changed
+            .wait_timeout_while(guard, within, |state| !state.entered)
+            .unwrap_or_else(PoisonError::into_inner)
+            .0
+            .entered
+    }
+
+    /// Whether an encode has gone past the gate yet: `false` while every
+    /// encode that reached it is still held.
+    pub fn passed(&self) -> bool {
+        let (state, _) = &*self.0;
+        state.lock().unwrap_or_else(PoisonError::into_inner).passed
+    }
+
+    /// Whether an encode went past the gate because [`Self::LIMIT`] ran
+    /// out: a test that held an encode on purpose must see `false`, or its
+    /// premise (the encode held throughout) did not hold.
+    pub fn expired(&self) -> bool {
+        let (state, _) = &*self.0;
+        state.lock().unwrap_or_else(PoisonError::into_inner).expired
+    }
+
     /// Make every encode past the gate have `fault`.
     pub fn fail_with(&self, fault: EncodeFault) {
         let (state, _) = &*self.0;
@@ -893,12 +928,18 @@ impl EncodeGate {
     /// Wait until the gate is open, or [`Self::LIMIT`] has passed, and
     /// say which fault the encode is to have.
     fn pass(&self) -> Option<EncodeFault> {
-        let (state, opened) = &*self.0;
-        let guard = state.lock().unwrap_or_else(PoisonError::into_inner);
-        let guard = opened
+        let (state, changed) = &*self.0;
+        let mut guard = state.lock().unwrap_or_else(PoisonError::into_inner);
+        guard.entered = true;
+        changed.notify_all();
+        let mut guard = changed
             .wait_timeout_while(guard, Self::LIMIT, |state| !state.open)
             .unwrap_or_else(PoisonError::into_inner)
             .0;
+        guard.passed = true;
+        if !guard.open {
+            guard.expired = true;
+        }
         guard.fault
     }
 }
@@ -971,6 +1012,8 @@ struct Inner {
     /// "Input"): a caller blocked on a full queue when input was lost is
     /// behind the hole too.
     epoch: Arc<AtomicU64>,
+    /// Ends the runtime's task where it waits, for [`HostTerminal::abort`].
+    task: tokio::task::AbortHandle,
 }
 
 /// What the emulator's lock guards: the emulator, or the view of it left
@@ -1388,7 +1431,7 @@ impl HostTerminal {
                 return Err(unavailable(reason));
             }
         }
-        tokio::spawn(runtime.run(conn));
+        let task = tokio::spawn(runtime.run(conn)).abort_handle();
         Ok(HostTerminal {
             inner: Arc::new(Inner {
                 socket: socket.to_path_buf(),
@@ -1400,6 +1443,7 @@ impl HostTerminal {
                 size: size_tx,
                 epoch,
                 returned,
+                task,
             }),
         })
     }
@@ -1651,6 +1695,25 @@ impl HostTerminal {
             return Err(self.liveness());
         }
         report.await.map_err(|_| self.liveness())
+    }
+
+    /// Stop this runtime now, wherever it is waiting, and leave the host as
+    /// it is: the connection closes and nothing more is sent, read or
+    /// announced. The host keeps running (ending it is the caller's next
+    /// step), and every clone of this handle keeps reading the last status
+    /// the runtime published. An emulator away in an encode when the
+    /// runtime stops is never brought home, so reads of it then report it
+    /// lost.
+    ///
+    /// For a caller that must end the host some other way after
+    /// [`Self::shutdown`] did not confirm it within the caller's bound (a
+    /// runtime waiting on a snapshot encode does not take up a shutdown
+    /// until the encode is done): without this, a runtime still holding a
+    /// request would reconnect and take the host back from the caller's own
+    /// connection mid-shutdown. Input in flight is lost unreported, as with
+    /// any ended connection.
+    pub fn abort(&self) {
+        self.inner.task.abort();
     }
 
     /// Snapshot the terminal for its host now, for an orderly stop, and

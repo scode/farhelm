@@ -222,6 +222,36 @@ that its required systemd or SSH substrate ran.
   Restart refused before anything stops, the delete guard, and the attach refusals. Linux only (the e2e suite), a minute
   or two; part of the workspace nextest run. Run it when a switch point, the host runtime's adapters or the status
   evidence change.
+- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'creating agents in terminal hosts' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(/core::host_launch::/) | test(/a_retry_finds_the_sessions_own_published_host|restart_refuses_a_terminal_less_session/) | test(/^hosts::spawn::/) | test(/^host_creates::/)'`
+  — a create starting its agent in a terminal host under the supervisor's internal switch
+  (`SupervisorSeams::new_terminals`, `crates/farhelm-supervisor/src/service/core/host_launch.rs`). The unit tests pin
+  the host child's environment as a function of its inputs (what tmux gives a pane's command, `TERM_PROGRAM` and its
+  version, the `TMUX` placeholder, where the launch environment applies, the default `PATH`), the launch record's
+  encoding and its refusals, a first stage started apart from its spec (pinned, given nothing until finished, killed
+  having read nothing when dropped, a taken name refused), a retry that finds the session's own published host with no
+  other evidence, and Restart refused for a terminal-less host row. The e2e tests
+  (`crates/farhelm/tests/e2e/host_creates.rs`) run in-process supervisors with the switch on, starting hosts from the
+  built `farhelm`: the row recorded as a host row with the socket's name, no tmux session, Stop ending the agent and
+  sparing the host; the host's command line and empty environment holding no credential or marker while its child has
+  the markers; the agent in its launch scope with the host outside it (with a user manager, else `SKIPPED`); the login
+  shell's environment compared with a real tmux pane's under the same command (equal but for `TMUX` and `TMUX_PANE`),
+  and a startup file's tmux autostart held back in both; a wrapper prefix running in the host; a create interrupted
+  after its host started retried without a second agent; a first stage that outlived an interrupted create (holding its
+  spec, before binding) waited for by the retry, which then finds its host, or ended by the verified signal when it does
+  not finish, with one host and one agent either way; a process the interrupted first stage forked that still names the
+  socket (a stand-in second stage) leaving the retry unresolved while it stays, and letting the same retry relaunch when
+  it ends during the retry's wait; a launch error's cleanup after a restart keeping the host record of a host that still
+  runs; a cleanup whose runtime is held by a snapshot encode (an encode gate) falling back to ending the host by its
+  socket after the runtime's 15 s bound, while the encode is still held (the gate shows no encode passed or expired); a
+  create that lost to Delete ending its host; a start whose first stage dies after readiness leaving nothing, and one
+  the spawn reports may have left a host, which the create ends and removes the socket of; stand-in hosts that cannot be
+  used, ended by the verified signal and rolled back, or kept as a launching record when the signal must not touch them;
+  a retry keeping its row's kind with the switch flipped either way across a restart; and Restart and tabs refused for a
+  created host agent. Needs the pinned tmux first on `PATH` and Python 3 at `/usr/bin/python3` (the stand-in hosts).
+  Linux only, two or three minutes (several tests wait out client deadlines); part of the workspace nextest run. The
+  container launch kind's test is in the containerized suite above
+  (`containerized_sessions::podman_agent_runs_from_a_terminal_host`). Run it when the create path, the launch spec's
+  composition, the host spawn or the launch identity's rollback or evidence changes.
 - Terminal host coverage, when the crate changes:
   `cargo +nightly llvm-cov -p terminal-host --branch --summary-only -- --test-threads=1`, with cargo-llvm-cov 0.9.1
   installed in your scratch directory (`cargo install --locked --root <scratch>/tools cargo-llvm-cov --version 0.9.1`,
