@@ -291,6 +291,78 @@ async fn a_create_starts_its_agent_in_a_terminal_host() {
     end_runtime(&host, host_pid).await;
 }
 
+/// A host agent's replies name its terminal as new and report that this
+/// supervisor creates new terminals.
+///
+/// Why: the client's migration band and session details read these fields;
+/// a session created in a host must never be told to move, and the switch
+/// report is what makes the client show guidance at all. Spec: with the
+/// switch on, the create reply and the listing both carry
+/// `agent_terminal: host` and `supervisor_creates_host_terminals: true`, and
+/// a session with no tabs lists none.
+#[farhelm_testtrace::test]
+async fn replies_name_a_host_agent_and_report_the_switch_on() {
+    let h = host_harness().await;
+    let (session, _work) = basic_session_mid_launch(&h).await;
+    assert_eq!(
+        session.agent_terminal,
+        Some(farhelm_proto::TerminalKind::Host),
+        "the create reply names the agent's terminal"
+    );
+    assert!(session.supervisor_creates_host_terminals);
+    let host = agent_host(&h, &session.id).await;
+    wait_for_screen(&host, AGENT_READY_MARKER).await;
+
+    let info = listed_info(&h, &session.id).await;
+    assert_eq!(info.agent_terminal, Some(farhelm_proto::TerminalKind::Host));
+    assert!(info.supervisor_creates_host_terminals);
+    assert!(info.tabs.is_empty());
+    let host_pid = host_process(host.socket()).expect("the host's process serves its socket");
+    end_runtime(&host, host_pid).await;
+}
+
+/// A retried keyed create of a host agent replays the same session with the
+/// same terminal kind and switch report as the first reply.
+///
+/// Why: a client that lost the first reply learns about the session from the
+/// replay alone, and a replay built from the stored row would otherwise
+/// carry no kind, which reads as "this session has no terminal". Spec: with
+/// the switch on, the first reply and its keyed replay both carry
+/// `agent_terminal: host` and `supervisor_creates_host_terminals: true`.
+#[farhelm_testtrace::test]
+async fn a_replayed_keyed_create_names_the_host_agent_and_the_switch() {
+    let h = host_harness().await;
+    let work = farhelm_teststate::tempdir().expect("workdir");
+    let cwd = work.path().to_string_lossy().into_owned();
+    let command = fixture_cmd("fake-agent --script basic");
+    let create = || {
+        h.client.create_session_with_key(
+            &cwd,
+            &command,
+            Some("keyed".to_string()),
+            80,
+            24,
+            Some("host-intent".to_string()),
+        )
+    };
+    let first = create().await.expect("create");
+    let replay = create().await.expect("the keyed retry replays");
+    assert_eq!(
+        replay.id, first.id,
+        "premise: the retry replayed the same session"
+    );
+    for reply in [&first, &replay] {
+        assert_eq!(
+            reply.agent_terminal,
+            Some(farhelm_proto::TerminalKind::Host)
+        );
+        assert!(reply.supervisor_creates_host_terminals);
+    }
+    let host = agent_host(&h, &first.id).await;
+    let host_pid = host_process(host.socket()).expect("the host's process serves its socket");
+    end_runtime(&host, host_pid).await;
+}
+
 /// The host's own command line holds only its socket and its environment
 /// is empty, while its child, the agent, carries the session's markers and
 /// none of tmux's.

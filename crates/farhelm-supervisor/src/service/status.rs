@@ -67,16 +67,16 @@
 //! describes a session exactly as `ListSessions` would" a property of the
 //! code rather than a promise maintained by hand.
 
-use super::core::{SessionEntry, Supervisor};
+use super::core::{NewTerminals, SessionEntry, Supervisor};
 use super::launch_artifacts::{
     append_launch_excerpt, read_launch_sentinel, sentinel_could_still_apply, wrapper_failure_detail,
 };
-use super::terminals::{Terminal, tabs_from_pane_states, tmux_tab_home};
+use super::terminals::{DiscoveredTab, Terminal, tabs_from_pane_states, tmux_tab_home};
 use crate::agent_kind::screen_reader::ScreenState;
 use crate::store::{LastOutcome, SessionStore, Transition};
 use crate::tmux::PaneState;
 use anyhow::Context;
-use farhelm_proto::{RestartOffer, SessionInfo, SessionStatus, TabInfo};
+use farhelm_proto::{RestartOffer, SessionInfo, SessionStatus};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
@@ -526,7 +526,8 @@ pub(crate) fn entry_info(
     // in terminal hosts follow, in the order they were opened, from the
     // session's own cell, whatever the agent terminal (a session can have
     // both kinds: SPEC_impl.md, "Terminal host"); an exited one is hidden
-    // the same way until the reap ends its host.
+    // the same way until the reap ends its host. Each tab's kind is where it
+    // was found, never a stored fact.
     info.tabs = entry
         .terminal
         .as_ref()
@@ -535,7 +536,7 @@ pub(crate) fn entry_info(
             tabs_from_pane_states(pane_states.values(), &tmux_name, agent_pane)
                 .into_iter()
                 .filter(|tab| !tab.dead)
-                .map(|tab| TabInfo { id: tab.id })
+                .map(DiscoveredTab::tab_info)
                 .collect()
         })
         .unwrap_or_default();
@@ -543,6 +544,10 @@ pub(crate) fn entry_info(
         &entry.session.host_tabs,
         false,
     ));
+    // From the terminal the entry holds, not the row's stored kind: a
+    // terminal-less entry (a launch not yet confirmed, a terminal a reboot
+    // took) has nothing a client could move, so it reports no kind.
+    info.agent_terminal = entry.terminal.as_ref().map(Terminal::wire_kind);
     let (mut status, mut annotation) = session_status(entry, pane_states, known);
     let launch_error = entry
         .run
@@ -582,6 +587,27 @@ pub(crate) fn entry_info(
     info.claude_trust_prompt &= info.status.is_live();
     info.workspace_trust_prompt &= info.status.is_live();
     info
+}
+
+/// Report on a reply whether this supervisor creates new terminals in
+/// terminal hosts (`SessionInfo::supervisor_creates_host_terminals`): the
+/// supervisor's switch as `Supervisor::new_terminals` reads it, the same
+/// reading a create decides its kind from, so the report and what a create
+/// does cannot disagree.
+///
+/// The client shows its migration band only for a session whose supervisor
+/// reports this, so a supervisor kept on old terminals (the switch off, as
+/// the media harnesses run it) never shows one. Applied at the two reply
+/// boundaries every `SessionInfo` leaves through, the listing
+/// (`listing::list_all`) and the single-session replies
+/// (`Supervisor::with_checkout_metadata`), rather than stored on entries:
+/// the switch belongs to this process, while a stored copy would describe
+/// whichever supervisor built the entry.
+pub(crate) fn report_new_terminals(new_terminals: NewTerminals, info: &mut SessionInfo) {
+    info.supervisor_creates_host_terminals = match new_terminals {
+        NewTerminals::Tmux => false,
+        NewTerminals::Host => true,
+    };
 }
 
 /// The exit code `terminal` still holds, if its program is dead and its

@@ -339,12 +339,17 @@ async fn a_reboot_interrupts_live_sessions_and_preserves_ended_ones() {
     let sup2 = supervisor_believing_boot(h.state.path(), Some("boot-b")).await;
     let client2 = connect_client(&sup2).await;
 
+    let interrupted = listed(&client2, &live.id).await;
     assert_eq!(
-        listed(&client2, &live.id).await.status,
+        interrupted.status,
         SessionStatus::Interrupted,
         "a session that was running when the host rebooted lost its terminal to that \
          reboot; that is knowable, unlike how (or whether) its agent ended"
     );
+    // Its row still says its last terminal was tmux, but it holds no
+    // terminal now, so it reports no kind: there is nothing left that a
+    // client's migration band could ask the user to move.
+    assert_eq!(interrupted.agent_terminal, None);
     let after = listed(&client2, &stopped.id).await;
     assert!(
         matches!(after.status, SessionStatus::Exited { .. }),

@@ -168,6 +168,54 @@ pub(crate) fn visible_tabs(
     ids
 }
 
+/// The tabs the strip shows, in its order, each with its kind (old or new
+/// terminal): what the surfaces that name tabs by their strip labels take
+/// (the migration band and the session details' terminal kinds,
+/// `migration`).
+///
+/// A type of its own, built only by [`visible_tab_infos`], so that those
+/// surfaces cannot be handed the server's list (`Session::tabs`) by
+/// mistake: the server's list numbers tabs differently from the strip for a
+/// moment after a close or an open, and the band would then name the wrong
+/// shell. Going back to the server's list is a compile error, not a test
+/// failure.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct VisibleTabs(Vec<Tab>);
+
+impl VisibleTabs {
+    /// The tabs, in the strip's order: index 0 is "Terminal 1".
+    pub(crate) fn as_slice(&self) -> &[Tab] {
+        &self.0
+    }
+}
+
+/// [`visible_tabs`] with each tab's kind, as [`VisibleTabs`].
+///
+/// The same list in the same order as the strip, so a label here is the
+/// label on screen. A tab the server lists keeps the kind the server gave
+/// it; an optimistically opened one takes the kind its open reply gave
+/// (`opened_kinds`, by tab id), and none if that reply named none.
+pub(crate) fn visible_tab_infos(
+    server: &[Tab],
+    opened: &[(String, u64)],
+    opened_kinds: &HashMap<String, farhelm_proto::TerminalKind>,
+    closed: &HashSet<String>,
+) -> VisibleTabs {
+    VisibleTabs(
+        visible_tabs(server, opened, closed)
+            .into_iter()
+            .map(|id| {
+                let kind = server
+                    .iter()
+                    .find(|tab| tab.id == id)
+                    .map(|tab| tab.kind)
+                    .unwrap_or_else(|| opened_kinds.get(&id).copied());
+                Tab { id, kind }
+            })
+            .collect(),
+    )
+}
+
 /// The helm WebSocket path one terminal of a session attaches on.
 ///
 /// `lease` rides on EVERY terminal of the view, the agent's included
@@ -312,7 +360,10 @@ mod tests {
     /// A tab with the given id — the whole of `Tab`, which is why this is
     /// a one-liner rather than a builder.
     fn tab(id: &str) -> Tab {
-        Tab { id: id.into() }
+        Tab {
+            id: id.into(),
+            kind: None,
+        }
     }
 
     /// The server's list is the spine of the rendered order, and the two

@@ -336,6 +336,60 @@ impl Terminal {
             Terminal::Host(host) => Ok(host.title()),
         }
     }
+
+    /// Which kind this terminal is, as replies report it to clients
+    /// (`SessionInfo::agent_terminal`, `TabInfo::kind`): the client's
+    /// migration band and session details are built on it.
+    ///
+    /// Taken from the variant, so a terminal reports the kind of the process
+    /// that actually backs it whatever its row says. A host this supervisor
+    /// cannot read is still a host: its session is already on a new
+    /// terminal, and nothing would move it anywhere by restarting it.
+    pub(crate) fn wire_kind(&self) -> farhelm_proto::TerminalKind {
+        match self {
+            Terminal::Tmux(_) => farhelm_proto::TerminalKind::Tmux,
+            Terminal::Host(_) => farhelm_proto::TerminalKind::Host,
+        }
+    }
+
+    /// The reply's description of a tab backed by this terminal: its id,
+    /// and its kind from the variant ([`Self::wire_kind`]).
+    ///
+    /// Every `TabInfo` a reply carries is built here, through
+    /// [`TmuxTerminal::tab_info`] (a tab just opened in tmux) or
+    /// `core::host_tabs::HostTab::tab_info` (a tab in a terminal host), or by
+    /// [`DiscoveredTab::tab_info`] for a tab already known to be a tmux
+    /// window, so no other site spells a kind out: a tab without a reported kind silently drops out of the
+    /// client's migration band and terminal kinds, which no test would
+    /// notice.
+    pub(crate) fn tab_info(&self, id: String) -> farhelm_proto::TabInfo {
+        farhelm_proto::TabInfo {
+            id,
+            kind: Some(self.wire_kind()),
+        }
+    }
+}
+
+impl TmuxTerminal {
+    /// [`Terminal::tab_info`] for a tab whose window this is (a tab just
+    /// opened in tmux), through the variant like every other tab.
+    pub(crate) fn tab_info(&self, id: String) -> farhelm_proto::TabInfo {
+        Terminal::Tmux(self.clone()).tab_info(id)
+    }
+}
+
+impl DiscoveredTab {
+    /// [`Terminal::tab_info`] for a tab rediscovered from its window marker
+    /// in the session's tmux session ([`tabs_from_pane_states`]): a tmux
+    /// window, so a tmux terminal. Spelled out rather than built through a
+    /// [`Terminal`] only because a listing would otherwise clone a tmux
+    /// handle per tab for nothing.
+    pub(crate) fn tab_info(self) -> farhelm_proto::TabInfo {
+        farhelm_proto::TabInfo {
+            id: self.id,
+            kind: Some(farhelm_proto::TerminalKind::Tmux),
+        }
+    }
 }
 
 /// Where a session's tmux tabs are rediscovered, given its agent terminal:

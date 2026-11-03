@@ -103,6 +103,8 @@ pub(crate) fn session(id: &str, created_at: i64) -> SessionInfo {
         github_repo: None,
         working_copy: None,
         notifications: Vec::new(),
+        agent_terminal: None,
+        supervisor_creates_host_terminals: false,
     }
 }
 

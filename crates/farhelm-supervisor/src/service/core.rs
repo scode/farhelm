@@ -74,8 +74,8 @@ use super::sweep::{
     reap_process_tree, stop_live_agent,
 };
 use super::terminals::{
-    ActiveAttach, AttachmentKey, OutputReapRegistry, SINK_READY_TIMEOUT, SinkRegistry,
-    TAB_LAUNCH_SETTLE, TAB_LAUNCH_SETTLE_STEP, Terminal, TerminalId, TmuxTerminal,
+    ActiveAttach, AttachmentKey, DiscoveredTab, OutputReapRegistry, SINK_READY_TIMEOUT,
+    SinkRegistry, TAB_LAUNCH_SETTLE, TAB_LAUNCH_SETTLE_STEP, Terminal, TerminalId, TmuxTerminal,
     agent_pane_from_states, resolve_terminal_for_close, tabs_from_pane_states, tmux_tab_home,
 };
 use super::ticker::{
@@ -7451,6 +7451,11 @@ impl Supervisor {
                         github_repo: None,
                         working_copy: None,
                         notifications: Vec::new(),
+                        // Both answered at reply time rather than stored here: the
+                        // agent's terminal kind by `entry_info` from the entry's own
+                        // terminal, the switch by `report_new_terminals`.
+                        agent_terminal: None,
+                        supervisor_creates_host_terminals: false,
                     },
                     terminal,
                     run: RunCells {
@@ -10430,6 +10435,17 @@ impl Supervisor {
                     .await
                     .unwrap_or_default();
                 let snapshot = IntegrationSnapshot::of(&row.launch);
+                // The kind of the terminal the live entry holds, as the first
+                // reply and every listing report it (`entry_info`), and none
+                // when the entry has no terminal; never inferred from the
+                // row's stored column, which would name a terminal a reboot
+                // took. Read under the map's lock alone, held for the lookup.
+                let agent_terminal = self
+                    .sessions
+                    .lock()
+                    .await
+                    .get(&row.id)
+                    .and_then(|entry| entry.terminal.as_ref().map(Terminal::wire_kind));
                 let info = SessionInfo {
                     screen_yolo: false,
                     claude_trust_prompt: false,
@@ -10463,6 +10479,10 @@ impl Supervisor {
                     github_repo: None,
                     working_copy: None,
                     notifications: replayed_notifications,
+                    // The live entry's kind (above); the switch is added by
+                    // `with_checkout_metadata` below (`report_new_terminals`).
+                    agent_terminal,
+                    supervisor_creates_host_terminals: false,
                 };
                 self.with_checkout_metadata(info).await
             }
@@ -11496,6 +11516,12 @@ impl Supervisor {
             github_repo: None,
             working_copy: None,
             notifications: Vec::new(),
+            // The create's reply gets the kind of the terminal it publishes
+            // (set where it publishes, below) and the switch at the reply
+            // boundary (`report_new_terminals`); every later reply answers
+            // from the entry's terminal (`entry_info`).
+            agent_terminal: None,
+            supervisor_creates_host_terminals: false,
         };
         // Creation uses its own timestamp rather than pretending the
         // sampler observed a work transition. It still raises the allocator
@@ -12144,6 +12170,10 @@ impl Supervisor {
         // launch stays recorded for the next supervisor.
         let mut sessions = self.sessions.lock().await;
         let terminal = self.publishable(Some(terminal));
+        // Read before the entry takes the terminal: the reply below says
+        // which kind it is, as every later reply does from the entry
+        // (`entry_info`).
+        let agent_terminal = terminal.as_ref().map(Terminal::wire_kind);
         sessions.insert(
             id,
             Arc::new(SessionEntry {
@@ -12217,6 +12247,7 @@ impl Supervisor {
         // the spawn recorded anything.
         let mut info = info;
         info.notifications = self.published_notifications(&session_id).await;
+        info.agent_terminal = agent_terminal;
         self.with_checkout_metadata(info).await.with_context(|| {
             format!(
                 "session {session_id} WAS created and is running; only describing its checkout \
@@ -12229,12 +12260,20 @@ impl Supervisor {
 
     /// Single-session counterpart of the listing's batched registry snapshot.
     /// Kept outside `entry_info`, whose status projection performs no I/O.
+    ///
+    /// Also the single-session half of the terminal switch report
+    /// ([`super::status::report_new_terminals`]): every single-session reply
+    /// (create, restart, rename, a detail read) passes through here, as every
+    /// listing passes through `listing::list_all`, so no reply can leave the
+    /// supervisor without it.
     pub(crate) async fn with_checkout_metadata(
         &self,
         info: SessionInfo,
     ) -> anyhow::Result<SessionInfo> {
         let mut projected = self.store.project_checkout_metadata(vec![info]).await?;
-        Ok(projected.remove(0))
+        let mut info = projected.remove(0);
+        super::status::report_new_terminals(self.new_terminals(), &mut info);
+        Ok(info)
     }
 
     /// Is `owner` the tmux session name of a session this supervisor
@@ -14338,6 +14377,12 @@ impl Supervisor {
             github_repo: None,
             working_copy: None,
             notifications: Vec::new(),
+            // The terminal this relaunch runs in, so that the reply already
+            // says which kind it is; `entry_info` answers from the same
+            // terminal for every later reply. The switch is added at the
+            // reply boundary (`report_new_terminals`).
+            agent_terminal: Some(terminal.wire_kind()),
+            supervisor_creates_host_terminals: false,
         };
         {
             // The held row is dropped in the same lock scope the entry comes
@@ -14688,7 +14733,7 @@ impl Supervisor {
                 tabs_from_pane_states(states.values(), &tmux_name, agent_pane)
                     .into_iter()
                     .filter(|tab| !tab.dead)
-                    .map(|tab| TabInfo { id: tab.id })
+                    .map(DiscoveredTab::tab_info)
                     .collect()
             }
             None => Vec::new(),
@@ -14737,7 +14782,7 @@ impl Supervisor {
         )
         .into_iter()
         .filter(|tab| !tab.dead)
-        .map(|tab| TabInfo { id: tab.id })
+        .map(DiscoveredTab::tab_info)
         .collect();
         tabs.extend(host_tabs::listed_host_tabs(&entry.session.host_tabs, false));
         Ok(tabs)
@@ -14763,7 +14808,7 @@ impl Supervisor {
                 let states = self.tmux.pane_states().await?;
                 tabs_from_pane_states(states.values(), &tmux_name, agent_pane)
                     .into_iter()
-                    .map(|tab| TabInfo { id: tab.id })
+                    .map(DiscoveredTab::tab_info)
                     .collect()
             }
             None => Vec::new(),
@@ -15611,7 +15656,7 @@ impl Supervisor {
             pane = %terminal.pane, scoped = unit.is_some(),
             "terminal tab opened"
         );
-        Ok(TabInfo { id: tab_id })
+        Ok(terminal.tab_info(tab_id))
     }
 
     /// Close a terminal tab: reap its shell and everything that shell left
@@ -17317,6 +17362,11 @@ impl Supervisor {
             github_repo: None,
             working_copy: None,
             notifications: Vec::new(),
+            // Both answered at reply time rather than stored here: the
+            // agent's terminal kind by `entry_info` from the entry's own
+            // terminal, the switch by `report_new_terminals`.
+            agent_terminal: None,
+            supervisor_creates_host_terminals: false,
         };
         let capture = match row.captured_conversation.as_deref() {
             Some(conversation) => CaptureState::Reported {
@@ -22031,6 +22081,8 @@ pub(crate) mod tests {
                 github_repo: None,
                 working_copy: None,
                 notifications: Vec::new(),
+                agent_terminal: None,
+                supervisor_creates_host_terminals: false,
             },
             terminal,
             run: RunCells {
@@ -23605,7 +23657,13 @@ pub(crate) mod tests {
             .restart_session(&created.id, true, None, None)
             .await
             .expect("restart with a live agent pane");
-        assert_eq!(restarted.tabs, vec![TabInfo { id: tab.id.clone() }]);
+        assert_eq!(
+            restarted.tabs,
+            vec![TabInfo {
+                id: tab.id.clone(),
+                kind: Some(farhelm_proto::TerminalKind::Tmux)
+            }]
+        );
         let after_pid = match sup
             .tmux
             .pane_process(&agent.tmux_name, &tab.pane)

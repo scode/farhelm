@@ -9981,6 +9981,8 @@ mod tests {
                     github_repo: None,
                     working_copy: None,
                     notifications: Vec::new(),
+                    agent_terminal: None,
+                    supervisor_creates_host_terminals: false,
                 },
                 terminal: Some(Terminal::tmux("fh-fake".to_string(), "%0".to_string())),
                 run: RunCells {
@@ -10174,6 +10176,8 @@ mod tests {
                 github_repo: None,
                 working_copy: None,
                 notifications: Vec::new(),
+                agent_terminal: None,
+                supervisor_creates_host_terminals: false,
             },
             terminal: None,
             run: RunCells {
@@ -10386,6 +10390,8 @@ mod tests {
                     github_repo: None,
                     working_copy: None,
                     notifications: Vec::new(),
+                    agent_terminal: None,
+                    supervisor_creates_host_terminals: false,
                 },
                 terminal: None,
                 run: RunCells {

@@ -2793,6 +2793,8 @@ pub(super) fn row_specimen(id: &str) -> Session {
         pinned: false,
         notifications: Vec::new(),
         notifications_read_through: 0,
+        agent_terminal: None,
+        supervisor_creates_host_terminals: false,
     }
 }
 

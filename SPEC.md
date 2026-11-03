@@ -2128,32 +2128,48 @@ whatever the agent renders is what you see. There is no composer, no message abs
   the tunnel pill remain fully visible and keyboard reachable from a 650px main pane; only the tab strip takes the
   remaining width and scrolls horizontally when needed. Narrower panes may clip the row, which never wraps. The bottom
   bar is about one tab-strip row high and shows, in order, status, session name, host, age, the managed-checkout branch
-  mark when present, directory, and command line. The host's icon follows the session list's rules; its name is the full
-  display name, prominent beside the session name. A missing host name omits the host rather than inventing one.
-  Directory display still abbreviates the home directory to `~`. Keyboard order follows the top row, terminal, then
-  bottom bar. The terminal loses no height in the steady state. Conditional notices stay between the top row and
-  terminal; a stale session's status appears only in its stale notice, not again in the bottom bar. Restart and its
-  menu's matching entries are greyed out when the session cannot resume its conversation (see Lifecycle operations);
-  their tooltips and accessible descriptions explain the specific reason, such as an agent type without conversation
-  reporting, a command launch that declared no agent type or did not opt into Resume, or a conversation not captured
-  yet. For an agent that reports conversations, a running session's explanation says, naming the agent, when Restart
-  normally becomes available for it (Codex, for instance, once the first prompt is submitted), and an ended session's
-  says its conversation was never captured; both invite the user to send feedback if that is not what happened, since
-  Farhelm cannot tell a report still to come from one that never will. The supervisor's refusal of such a restart and
-  the agent instructions state the same timing, without the invitation. Directory and command line are muted
-  click-to-copy buttons that take the width their values need and ellipsize before the session name or host when the bar
-  runs out of room; a click confirms locally for about 1.5 seconds. A hidden-characters copy warning opens upward from
-  the bar and stays within the window. Clipboard writes use the native bridge first and `navigator.clipboard` second,
-  with JSON serialization and silent failures. Replace has its own anchored danger confirmation and neutral
-  cancellation. Delete is styled as the danger action and asks first in the same anchored way, even for a session that
-  has ended, with the same consequence text the row's delete prompt shows. Restart's confirmation is likewise anchored
-  under its top-row button; Escape cancels these questions and returns focus to the terminal. The session-confirmation
-  setting skips the top row's Delete, Replace and Restart questions, the interrupted-card Replace question, and tab
-  Close, using the screen's consent and existing guards. Split menus follow the app's shared keyboard rules: mouse or
-  pen movement focuses the hovered choice without scrolling, arrows and Home/End move between choices, and only the
-  focused enabled choice has the highlight fill. Leaving the menu keeps that focus; Escape or Tab closes the menu and
-  returns focus to its caret. Cancelling Restart with returns to that persistent caret. An unavailable plain Restart
-  does not hide an independently available Restart with; the menu remains available to inspect reasons.
+  mark when present, the session's terminal kinds when shown (below), directory, and command line. The host's icon
+  follows the session list's rules; its name is the full display name, prominent beside the session name. A missing host
+  name omits the host rather than inventing one. Directory display still abbreviates the home directory to `~`. Keyboard
+  order follows the top row, terminal, then bottom bar. The terminal loses no height in the steady state. Conditional
+  notices stay between the top row and terminal; a stale session's status appears only in its stale notice, not again in
+  the bottom bar. Restart and its menu's matching entries are greyed out when the session cannot resume its conversation
+  (see Lifecycle operations); their tooltips and accessible descriptions explain the specific reason, such as an agent
+  type without conversation reporting, a command launch that declared no agent type or did not opt into Resume, or a
+  conversation not captured yet. For an agent that reports conversations, a running session's explanation says, naming
+  the agent, when Restart normally becomes available for it (Codex, for instance, once the first prompt is submitted),
+  and an ended session's says its conversation was never captured; both invite the user to send feedback if that is not
+  what happened, since Farhelm cannot tell a report still to come from one that never will. The supervisor's refusal of
+  such a restart and the agent instructions state the same timing, without the invitation. Directory and command line
+  are muted click-to-copy buttons that take the width their values need and ellipsize before the session name or host
+  when the bar runs out of room; a click confirms locally for about 1.5 seconds. A hidden-characters copy warning opens
+  upward from the bar and stays within the window. Clipboard writes use the native bridge first and
+  `navigator.clipboard` second, with JSON serialization and silent failures. Replace has its own anchored danger
+  confirmation and neutral cancellation. Delete is styled as the danger action and asks first in the same anchored way,
+  even for a session that has ended, with the same consequence text the row's delete prompt shows. Restart's
+  confirmation is likewise anchored under its top-row button; Escape cancels these questions and returns focus to the
+  terminal. The session-confirmation setting skips the top row's Delete, Replace and Restart questions, the
+  interrupted-card Replace question, and tab Close, using the screen's consent and existing guards. Split menus follow
+  the app's shared keyboard rules: mouse or pen movement focuses the hovered choice without scrolling, arrows and
+  Home/End move between choices, and only the focused enabled choice has the highlight fill. Leaving the menu keeps that
+  focus; Escape or Tab closes the menu and returns focus to its caret. Cancelling Restart with returns to that
+  persistent caret. An unavailable plain Restart does not hide an independently available Restart with; the menu remains
+  available to inspect reasons.
+- While terminals move out of tmux, each of a session's terminals (the agent's and each tab's) is old, in the host's
+  private tmux server, or new, in a terminal process of its own, and never changes kind while it lives. Once a host
+  creates new terminals, everything started there gets one (a new session, Restart, Clone, Replace, a new tab), and
+  existing terminals stay as they are until the user moves them. While the session's host creates new terminals, a
+  session that still has an old terminal shows a loud band at the top of the session view, below the top row, linking to
+  the docs page that explains the move. When the agent's terminal is old, it asks the user to restart the session when
+  convenient, or, when Restart is unavailable for the session, to clone or replace it, which starts a fresh conversation
+  unless the user picks one to continue. When the agent's terminal is new but some tabs are old, it names those tabs as
+  the tab strip labels them and asks the user to close them and open new ones when convenient, since restarting the
+  agent does not move tabs. Its × hides that message until the session is next opened, never on a timer (a different
+  message the session comes to need meanwhile still shows), and the dismissal is that view's alone: nothing is stored or
+  shared. No band shows for a session shown from a disconnected host's last known state, or whose agent has no terminal.
+  The bottom bar names the session's terminal kinds (old, new, or both, with each terminal listed in its tooltip and
+  accessible text) while its host creates new terminals or any of its terminals is new; a host that only creates old
+  terminals shows neither the band nor the kinds, so its sessions look as they always have.
 - One attached client per session, enforced by the supervisor: attaching from a second client visibly detaches the
   first, which keeps a non-live snapshot and an explicit take-control action. No shared-input mirroring in v1.
 - A viewer that is slow is served slowly, for as long as it takes. Honoring that can briefly slow the agent's OUTPUT — a

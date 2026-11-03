@@ -161,6 +161,14 @@ pub(crate) struct HostTab {
 }
 
 impl HostTab {
+    /// The reply's description of this tab: [`Terminal::tab_info`] for its
+    /// host, so the tab reports itself as a terminal host's (the client's
+    /// migration band and terminal kinds read that) without spelling the kind
+    /// out here.
+    pub(crate) fn tab_info(&self) -> TabInfo {
+        Terminal::Host(self.host.clone()).tab_info(self.tab_id.clone())
+    }
+
     /// Whether the tab is over: its shell exited (its runtime processed the
     /// host's exit record, so the final screen is in), or its host ended
     /// under it (killed, say), which leaves nothing to show. The state in
@@ -247,7 +255,7 @@ pub(crate) fn listed_host_tabs(cell: &HostTabs, include_exited: bool) -> Vec<Tab
     host_tabs_of(cell)
         .into_iter()
         .filter(|tab| include_exited || !tab.finished())
-        .map(|tab| TabInfo { id: tab.tab_id })
+        .map(|tab| tab.tab_info())
         .collect()
 }
 
@@ -521,7 +529,7 @@ impl Supervisor {
             scoped, cols = size.cols, rows = size.rows,
             "terminal tab opened in a terminal host"
         );
-        Ok(TabInfo { id: tab_id })
+        Ok(tab.tab_info())
     }
 
     /// The size of the agent's terminal, for a new tab to start at: its

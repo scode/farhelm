@@ -76,6 +76,7 @@ fn session_list_body() -> SessionListBody {
         restart_offer: RestartOffer::Resume,
         tabs: vec![TabInfo {
             id: "tab-1".to_string(),
+            kind: Some(farhelm_proto::TerminalKind::Tmux),
         }],
         github_repo: Some(repo.clone()),
         working_copy: Some(WorkingCopyInfo {
@@ -90,6 +91,8 @@ fn session_list_body() -> SessionListBody {
             text: "Restart stopped offering to resume the conversation.".to_string(),
             resolved: true,
         }],
+        agent_terminal: Some(farhelm_proto::TerminalKind::Host),
+        supervisor_creates_host_terminals: true,
     };
     SessionListBody {
         sessions: vec![SessionRow {

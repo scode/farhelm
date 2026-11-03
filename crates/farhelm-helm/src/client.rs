@@ -4893,6 +4893,8 @@ mod tests {
             github_repo: None,
             working_copy: None,
             notifications: Vec::new(),
+            agent_terminal: None,
+            supervisor_creates_host_terminals: false,
         }
     }
 
@@ -7586,6 +7588,7 @@ mod tests {
                     req_id,
                     tab: farhelm_proto::TabInfo {
                         id: "t1".to_string(),
+                        kind: None,
                     },
                 })
                 .await

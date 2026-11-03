@@ -1108,6 +1108,38 @@ pub struct SessionInfo {
     /// tabs known.
     #[serde(default)]
     pub tabs: Vec<TabInfo>,
+    /// Which kind of terminal the session's agent runs in now, from the
+    /// terminal the supervisor holds for it; `None` when it holds none (a
+    /// launch not yet confirmed, a terminal lost to a reboot), when the
+    /// sender predates the field, or for a kind this build does not know
+    /// ([`lenient_terminal_kind`]).
+    ///
+    /// Live rather than the row's stored kind on purpose: a session whose
+    /// terminal is gone has nothing left to move to a new terminal, and the
+    /// migration band must not ask the user to move it.
+    ///
+    /// Additive within `PROTOCOL_VERSION` 68, for [`TabInfo::kind`]'s reason.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient_terminal_kind"
+    )]
+    pub agent_terminal: Option<TerminalKind>,
+    /// Whether this session's supervisor creates new terminals in terminal
+    /// hosts: its internal switch (`SupervisorSeams::new_terminals` in
+    /// `farhelm-supervisor`) is on. A fact about the supervisor, repeated on
+    /// each of its sessions so that a reader holding one session can decide
+    /// on its own.
+    ///
+    /// The UI shows the migration band only while this is true, and the
+    /// session details' terminal kinds only while this is true or the
+    /// session already has a new terminal: before a host creates new
+    /// terminals, there is nothing to move a session to. False from a sender
+    /// that predates the field, which is the safe reading for the same
+    /// reason. A supervisor kept on old terminals on purpose (the media
+    /// harnesses' option) reports false too.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub supervisor_creates_host_terminals: bool,
     /// The repository this session was created from by a fresh GitHub
     /// checkout — provenance, fixed at create time. `None` for every other
     /// kind of session and for any sender predating protocol 24 (the field
@@ -1656,6 +1688,53 @@ pub enum StreamKind {
     Grid,
 }
 
+/// Which kind of terminal one of a session's terminals is: an old one in the
+/// supervisor's private tmux server, or a new one in a terminal host of its
+/// own (SPEC_impl.md, "Terminal host").
+///
+/// A terminal never changes kind while it lives; a session moves to new
+/// terminals only by getting new ones (Restart, Clone or Replace for its
+/// agent, closing and reopening for a tab). The UI reads it for the
+/// migration band and for the kinds the session details show (SPEC.md,
+/// "Terminal experience").
+///
+/// The fields that carry it ([`SessionInfo::agent_terminal`],
+/// [`TabInfo::kind`]) decode through [`lenient_terminal_kind`], so a kind
+/// this build has never heard of reads as "not reported" rather than failing
+/// the whole session: the UI decodes these types directly, and a browser tab
+/// loaded before a helm upgrade must keep reading a newer helm's listing.
+/// A third kind would still change what a receiver does with a session and
+/// so would earn a protocol bump of its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TerminalKind {
+    /// A pane in the supervisor's private tmux server: every terminal from
+    /// before terminal hosts, and the kind a supervisor with its internal
+    /// switch off still creates.
+    Tmux,
+    /// A terminal host process that owns the pty and the program in it.
+    Host,
+}
+
+/// Decode an optional [`TerminalKind`] the way the session fields that carry
+/// one need: an absent field, `null` and an unrecognized kind are all `None`.
+///
+/// Used through `#[serde(deserialize_with = ...)]` together with
+/// `#[serde(default)]`, which is what covers a field the sender left out.
+/// Public because the UI's own mirror of the session JSON decodes the same
+/// field and must tolerate the same words.
+pub fn lenient_terminal_kind<'de, D>(deserializer: D) -> Result<Option<TerminalKind>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let word = Option::<String>::deserialize(deserializer)?;
+    Ok(match word.as_deref() {
+        Some("tmux") => Some(TerminalKind::Tmux),
+        Some("host") => Some(TerminalKind::Host),
+        Some(_) | None => None,
+    })
+}
+
 /// One terminal tab as the supervisor reports it (PLAN_M4.md item 2). Not
 /// durable metadata — SPEC.md says tabs are gone after a reboot or
 /// archive and nothing recreates them — so this is a live-rediscovered
@@ -1676,6 +1755,21 @@ pub struct TabInfo {
     /// (`TerminalSelector::Tab`, `ControlMsg::CloseTab`) and never parse
     /// it.
     pub id: String,
+    /// Which kind of terminal this tab is, taken from where the supervisor
+    /// found it (a tmux window, or a terminal host of its own). `None` when
+    /// the sender predates the field or names a kind this build does not
+    /// know ([`lenient_terminal_kind`]); readers treat that as "not
+    /// reported", never as either kind.
+    ///
+    /// Additive within `PROTOCOL_VERSION` 68: a receiver that ignores it only
+    /// shows no terminal kinds and no migration band for the session, which
+    /// is what a supervisor without terminal hosts would have it show anyway.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient_terminal_kind"
+    )]
+    pub kind: Option<TerminalKind>,
 }
 
 /// Ceiling for one attachment-upload data frame's body (PLAN_M4.md item
@@ -5008,6 +5102,8 @@ mod tests {
             github_repo: None,
             working_copy: None,
             notifications: Vec::new(),
+            agent_terminal: None,
+            supervisor_creates_host_terminals: false,
         };
         assert_eq!(
             serde_json::to_value(&info).unwrap()["created_at"],
@@ -5175,6 +5271,8 @@ mod tests {
             github_repo: None,
             working_copy: None,
             notifications: Vec::new(),
+            agent_terminal: None,
+            supervisor_creates_host_terminals: false,
         };
         info.github_repo = Some(parse_github_repo("acme/bar").expect("valid repo"));
         info.working_copy = Some(WorkingCopyInfo {
@@ -6584,6 +6682,8 @@ mod tests {
             github_repo: None,
             working_copy: None,
             notifications: Vec::new(),
+            agent_terminal: None,
+            supervisor_creates_host_terminals: false,
         };
         let mut json = serde_json::to_value(&info).unwrap();
         assert_eq!(json["agent_kind"], "goose");
@@ -6644,6 +6744,8 @@ mod tests {
             github_repo: None,
             working_copy: None,
             notifications: Vec::new(),
+            agent_terminal: None,
+            supervisor_creates_host_terminals: false,
         };
         assert_eq!(
             serde_json::to_value(&bare).unwrap(),
@@ -6796,6 +6898,8 @@ mod tests {
             github_repo: None,
             working_copy: None,
             notifications: Vec::new(),
+            agent_terminal: None,
+            supervisor_creates_host_terminals: false,
         };
 
         let sampled = at(1_700_000_000, 1_700_000_600);
@@ -6841,6 +6945,8 @@ mod tests {
             github_repo: None,
             working_copy: None,
             notifications: Vec::new(),
+            agent_terminal: None,
+            supervisor_creates_host_terminals: false,
         };
         assert_eq!(info.effective_work_started_at(), 1_700_000_000_000);
         info.last_activity_at = i64::MAX;
@@ -6888,19 +6994,98 @@ mod tests {
             tabs: vec![
                 TabInfo {
                     id: "t1".to_string(),
+                    kind: None,
                 },
                 TabInfo {
                     id: "t2".to_string(),
+                    kind: None,
                 },
             ],
             github_repo: None,
             working_copy: None,
             notifications: Vec::new(),
+            agent_terminal: None,
+            supervisor_creates_host_terminals: false,
         };
         assert_eq!(
             serde_json::to_value(&info).unwrap()["tabs"],
             serde_json::json!([{"id": "t1"}, {"id": "t2"}])
         );
+    }
+
+    /// Spec: the terminal kinds and the switch report travel as
+    /// `agent_terminal`, `supervisor_creates_host_terminals` and a tab's
+    /// `kind`, spelled `tmux` and `host`; an absent field, `null` and a kind
+    /// this build does not know all decode as "not reported" (and the switch
+    /// as off), and the unset values are left off the wire.
+    ///
+    /// Why: these fields join protocol 68 as additive, which holds only if
+    /// a receiver that lacks them, or a sender that omits them, changes
+    /// nothing but the migration guidance; and the UI decodes them directly,
+    /// so an unknown kind failing the decode would drop the whole session
+    /// from a browser tab loaded before a helm upgrade.
+    #[test]
+    fn terminal_kinds_and_the_switch_report_round_trip_and_decode_leniently() {
+        let mut info = SessionInfo {
+            screen_yolo: false,
+            claude_trust_prompt: false,
+            workspace_trust_prompt: false,
+            agent_kind: crate::AgentKind::Generic,
+            parent: None,
+            id: "s1".to_string(),
+            title: "demo".to_string(),
+            created_at: 1_700_000_000,
+            last_activity_at: 1_700_000_000,
+            last_work_started_at: 0,
+            creation_seq: None,
+            cwd: "/tmp".to_string(),
+            canonical_cwd: None,
+            invocation: "agent".to_string(),
+            launch: SessionLaunch::plain_command("agent"),
+            status: SessionStatus::Running,
+            annotation: None,
+            restart_offer: RestartOffer::default(),
+            tabs: vec![
+                TabInfo {
+                    id: "t1".to_string(),
+                    kind: Some(TerminalKind::Tmux),
+                },
+                TabInfo {
+                    id: "t2".to_string(),
+                    kind: None,
+                },
+            ],
+            agent_terminal: Some(TerminalKind::Host),
+            supervisor_creates_host_terminals: true,
+            github_repo: None,
+            working_copy: None,
+            notifications: Vec::new(),
+        };
+        let json = serde_json::to_value(&info).unwrap();
+        assert_eq!(json["agent_terminal"], "host");
+        assert_eq!(json["supervisor_creates_host_terminals"], true);
+        assert_eq!(
+            json["tabs"],
+            serde_json::json!([{"id": "t1", "kind": "tmux"}, {"id": "t2"}])
+        );
+        assert_eq!(serde_json::from_value::<SessionInfo>(json).unwrap(), info);
+
+        info.agent_terminal = None;
+        info.supervisor_creates_host_terminals = false;
+        let unset = serde_json::to_value(&info).unwrap();
+        assert!(unset.get("agent_terminal").is_none(), "{unset}");
+        assert!(
+            unset.get("supervisor_creates_host_terminals").is_none(),
+            "{unset}"
+        );
+
+        let mut odd = unset.clone();
+        odd["agent_terminal"] = serde_json::json!("pty-of-the-future");
+        odd["tabs"] = serde_json::json!([{"id": "t1", "kind": null}, {"id": "t2", "kind": "else"}]);
+        let decoded: SessionInfo = serde_json::from_value(odd).expect("unknown kinds decode");
+        assert_eq!(decoded.agent_terminal, None);
+        assert!(decoded.tabs.iter().all(|tab| tab.kind.is_none()));
+        assert!(!decoded.supervisor_creates_host_terminals);
     }
 
     /// PLAN_M3 review batch item 23: a future field appearing INSIDE a
@@ -7104,13 +7289,16 @@ mod tests {
             sessions[0].tabs,
             vec![
                 TabInfo {
-                    id: "t1".to_string()
+                    id: "t1".to_string(),
+                    kind: None,
                 },
                 TabInfo {
-                    id: "t2".to_string()
+                    id: "t2".to_string(),
+                    kind: None,
                 },
                 TabInfo {
-                    id: "t3".to_string()
+                    id: "t3".to_string(),
+                    kind: None,
                 },
             ],
             "tab identity and creation order must both survive the wire"
@@ -7531,6 +7719,8 @@ mod tests {
                 github_repo: None,
                 working_copy: None,
                 notifications: Vec::new(),
+                agent_terminal: None,
+                supervisor_creates_host_terminals: false,
             },
         };
         let mut wire = Vec::new();
@@ -7744,6 +7934,8 @@ mod tests {
                 github_repo: None,
                 working_copy: None,
                 notifications: Vec::new(),
+                agent_terminal: None,
+                supervisor_creates_host_terminals: false,
             },
         };
         assert_eq!(
@@ -7888,6 +8080,8 @@ mod tests {
                         github_repo: None,
                         working_copy: None,
                         notifications: Vec::new(),
+                        agent_terminal: None,
+                        supervisor_creates_host_terminals: false,
                     },
                 },
                 serde_json::json!({
@@ -8033,6 +8227,7 @@ mod tests {
                     req_id: 20,
                     tab: TabInfo {
                         id: "t1".to_string(),
+                        kind: None,
                     },
                 },
                 serde_json::json!({
@@ -8083,6 +8278,7 @@ mod tests {
                 req_id: 1,
                 tab: TabInfo {
                     id: "t1".to_string(),
+                    kind: None,
                 },
             },
             ControlMsg::CloseTab {
@@ -8497,6 +8693,8 @@ mod tests {
                 github_repo: None,
                 working_copy: None,
                 notifications: Vec::new(),
+                agent_terminal: None,
+                supervisor_creates_host_terminals: false,
             }],
             truncated: false,
         };
