@@ -1796,6 +1796,36 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   cancelled and keeps its thread, and whatever stalled it (a process stuck in the kernel) stalls later walks too, so
   while it is still stuck every later search fails at once, which leaves sockets unavailable rather than gone, instead
   of stranding one more thread each.
+- **A host terminal's runtime** (`hosts/terminal.rs`) is one task per host that owns the host's one connection and the
+  terminal's emulator. It reads the host's journal from the start, restores the stored snapshot record before adoption
+  returns (so a host whose snapshot cannot be restored is never a terminal that looks usable), and feeds the rest. It
+  knows the snapshot record has arrived from the one exchange whose order every host promises
+  (`crates/terminal-host/SPEC.md`, "Reading"): owed nothing else, it sends `Read` and one `Info`, waits for that reply,
+  and sends a second `Info`, whose reply comes behind the stream's first record when the stream holds one; it writes the
+  emulator's answers to the program's queries back as input, and draws a synchronized update the program left open once
+  its 150 ms deadline passes on the runtime's own clock, which tests advance by hand. For a host the supervisor has just
+  spawned, everything is live, so the program's first queries are answered even when it asked before the supervisor
+  connected; output the host's `delivered_end` says some client was already sent is replay all the same. For a host that
+  ran before, what was journaled before adoption is fed without answers, bells or clipboard writes for now: never
+  answering twice matters more than answering a query asked while no supervisor was attached, until the replay policy
+  splits that output at the host's `delivered_end`. Answers waiting for room in the input window are capped at 64 KiB
+  and dropped past it, since a program that floods queries without reading its terminal would otherwise grow the
+  supervisor without bound. Input is sent whole and in order and never resent; input in flight when a connection ends is
+  reported as unknown, and caller input asked for before that loss is reported not sent rather than written after the
+  hole. Each input carries an epoch, which a connection that lost caller input moves on once: a one-off input takes the
+  epoch of its call, and the parts of a paste sent through one input sequence share the sequence's, so no part asked for
+  after a loss is written even when the sender never waited for a receipt. A connection that a different process than
+  the adopted host answers is never named as the host's: the terminal becomes unavailable as replaced, naming the
+  adopted process. A connection that ends while the host answers is resumed from the position processed, so nothing is
+  fed twice, and the latest size asked for is sent again if the host reports another; after three reconnects within a
+  minute the terminal is made unavailable rather than fight whoever keeps taking the host over. Unavailable ends a
+  runtime, not a host's chances: for a reason that can pass (a timed-out connect, a host briefly stopped, a connection
+  that kept ending), the runtimes' owner adopts the host again later. The child's pid is a kill root only while the host
+  reports the child alive and the process under that pid still has the start identity pinned at adoption (between two
+  `Info` replies that both say it runs; a pid is not reused before the host reaps it), re-read each time a root is asked
+  for. A terminal counts as exited only once the stream's exit record is processed, which the host sends after the
+  child's drained output, so whatever acts on the exit reads the final screen; every exit, end or loss of a host
+  terminal is also sent to one shared notifier, so one task can wait on every exit.
 
 Test harnesses end the hosts they leave behind: `farhelm-teststate` ends every host whose socket is in a `hosts`
 directory within an owned run directory (its dead-run sweep, and every `TestDir` drop) through a small blocking client

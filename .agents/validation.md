@@ -88,14 +88,15 @@ that its required systemd or SSH substrate ran.
   descendant holds the pty, stuck input on the client's own connection, malformed peers, snapshots and trimming, the
   child's signals, environment and descriptors, the host's own signal mask, descriptors and command line, terminal
   settings byte-equal to a tmux 3.7c pane's when that tmux is first on `PATH`, else said as `SKIPPED`), in-process tests
-  of its event loop, golden fixtures of every version-1 frame (`tests/golden/v1/`), and property tests of the codec and
-  of the journal against a model. Seconds. Part of the workspace nextest run; the focused macOS CI job runs it too, in a
-  step of its own after the uninstall acceptance. Nextest runs each test in a process of its own, which these fixtures
-  need: under libtest (`cargo test`, and the coverage and mutation runs below) run them with one test thread
-  (`RUST_TEST_THREADS=1` or `-- --test-threads=1`). Plain parallel `cargo test` is not supported for this crate: a child
-  one test forks holds every descriptor of the test process until it execs, and on macOS, which cannot open a pty or
-  socket close-on-exec in one call, it can keep another test's for good; that test then waits for an end of output or a
-  close that never comes (`crates/terminal-host/TESTING.md`).
+  of its event loop (among them the order of replies and the stream's first record that clients rely on), golden
+  fixtures of every version-1 frame (`tests/golden/v1/`), and property tests of the codec and of the journal against a
+  model. Seconds. Part of the workspace nextest run; the focused macOS CI job runs it too, in a step of its own after
+  the uninstall acceptance. Nextest runs each test in a process of its own, which these fixtures need: under libtest
+  (`cargo test`, and the coverage and mutation runs below) run them with one test thread (`RUST_TEST_THREADS=1` or
+  `-- --test-threads=1`). Plain parallel `cargo test` is not supported for this crate: a child one test forks holds
+  every descriptor of the test process until it execs, and on macOS, which cannot open a pty or socket close-on-exec in
+  one call, it can keep another test's for good; that test then waits for an end of output or a close that never comes
+  (`crates/terminal-host/TESTING.md`).
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'terminal host spawning, client, discovery and cleanup' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p farhelm-supervisor -p farhelm-teststate -p farhelm --lib --test terminal_host_spawn --test terminal_host_client --test terminal_host_stop --test terminal_host_registry -E 'test(/^hosts::/) | binary(terminal_host_spawn) | binary(terminal_host_client) | binary(terminal_host_stop) | binary(terminal_host_registry)'`
   — the supervisor's side of terminal hosts and the harnesses' cleanup of them. The supervisor's `hosts::` unit tests
   cover the private socket directory, the socket path bound against macOS's 104-byte limit, the client tag's golden
@@ -150,6 +151,34 @@ that its required systemd or SSH substrate ran.
   boots and requires the stack's cleanup to end them, while a host in another stack's live run directory (in the sweep's
   family, its lock held and backdated past the sweep's grace) survives every phase and a directly observed sweep pass,
   which must reap a dead canary run beside it.
+- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'host terminal runtime' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test terminal_host_runtime -E 'test(/^hosts::terminal::/) | binary(terminal_host_runtime)'`
+  — the supervisor's runtime for a terminal in a terminal host (`crates/farhelm-supervisor/src/hosts/terminal.rs`). The
+  `hosts::terminal::` unit tests (also part of the `hosts::` selection above) drive it against stand-in hosts in the
+  test process: a recovered adoption answering only what follows the journal it adopted, splitting a read that straddles
+  the two, a fresh one answering everything, and a "fresh" one whose host already sent output treating that output as
+  replay; a replay ending inside an open synchronized update answering nothing of it; a snapshot record restored once
+  (before adoption returns, so a seeded host is caught up only with its seed) and not again on a resumed stream, and one
+  that does not restore making the host unavailable; a gap keeping the emulator; a synchronized update drawn at its
+  deadline on a manual clock; the child's exit ending its root for good and reaching the notifier, and an exit known
+  from `Info` (at adoption or on a reconnect) withdrawing the root at once but announced only with its record; the
+  adapters to the supervisor's pane types for every liveness, with a child pinned to a reused pid no root; input fates
+  (written, discarded, unknown when the connection ends and not resent on the next one); callers held while the window
+  is full, a cancelled waiting send sending nothing; nothing written after input lost with a connection, a send still
+  waiting for room in the queue included, nor any later part of a paste sent through one input sequence; a lost
+  connection freeing no room in the input queue while busy callers wait; input cut off while written unknown and not
+  resent, the epoch moving once for the loss (Linux); a reconnect answered by another process than the adopted host
+  unavailable as replaced, naming the adopted one; answers to a query flood bounded by the window and the held-answer
+  cap; a dropped connection resumed from the processed position, a resize lost with one sent again and one already in
+  force not, and resizes taking effect at the host's record; the reconnect limit; a shutdown whose process stays
+  reported unconfirmed, and one on a connection that ended unnoticed sent again on a new connection (Linux). The
+  stand-in answers the adoption's first `Info` after `Read` ahead of the stream's first records, as a real host may.
+  `crates/farhelm/tests/terminal_host_runtime.rs` runs it against real hosts started from the built `farhelm` (never
+  inside a test process, since a host forks): output, title and the pinned child; a DA1 query answered end to end; input
+  reaching the child and its exit recorded; an update left open drawn once a manual clock passes its deadline; a host
+  seeded with a snapshot, and one seeded with several hundred KiB of history and a silent child caught up with the seed
+  on screen when adoption returns (a seed that is not a snapshot failing the adoption); a recovered runtime rebuilding
+  the screen; a resize; and a shutdown confirmed by the host's process. Seconds, part of the workspace nextest run; the
+  focused macOS CI job runs it too, in the terminal host step.
 - Terminal host coverage, when the crate changes:
   `cargo +nightly llvm-cov -p terminal-host --branch --summary-only -- --test-threads=1`, with cargo-llvm-cov 0.9.1
   installed in your scratch directory (`cargo install --locked --root <scratch>/tools cargo-llvm-cov --version 0.9.1`,
@@ -332,9 +361,10 @@ that its required systemd or SSH substrate ran.
   uninstall stop's own tests are part of `uninstall::` above). After the uninstall acceptance, in a step of its own that
   runs whatever the steps before it did (so that a host failure cannot hide that gate), it runs the terminal host's
   whole test suite, `cargo nextest run -p terminal-host`, the host's entry test in the CLI,
-  `cargo nextest run -p farhelm --test terminal_host_entry`, and the supervisor's spawning, its client, discovery, the
-  test-state cleanup and the command that stops a state directory's hosts (the
-  `terminal host spawning, client, discovery and cleanup` selection above).
+  `cargo nextest run -p farhelm --test terminal_host_entry`, and the supervisor's spawning, its client, its host
+  terminal runtime, discovery, the test-state cleanup and the command that stops a state directory's hosts (the
+  `terminal host spawning, client, discovery and cleanup` selection above with `--test terminal_host_runtime` and
+  `| binary(terminal_host_runtime)` added).
 - `scripts/test-provision-centos.sh` — the x86_64 Linux release gate boots a systemd CentOS Stream 9 container and makes
   the helm provision it over ssh, which is the only coverage of a helm installing onto a distribution other than its
   own. Needs docker and `musl-tools`: the payloads it pushes are the release's musl-static `farhelm` and static tmux,

@@ -757,6 +757,18 @@ impl HostConnection {
         self.ended.as_ref()
     }
 
+    /// How many events have been read and not yet taken by
+    /// [`Self::next_event`]. Right after a request returns, these include
+    /// every record the host wrote ahead of its reply, since frames are
+    /// decoded in the order they arrive. Which records the host writes ahead
+    /// of a reply is the host's business: a reply to a request sent right
+    /// after `Read` can overtake the stream's first record (see
+    /// `hosts::terminal`'s adoption for the order a version-1 host does
+    /// keep).
+    pub fn queued_events(&self) -> usize {
+        self.events.len()
+    }
+
     /// Whether part of an earlier, dropped request's frame is still waiting
     /// to be written: queued bytes, nothing more. While it is, a request
     /// made now writes that out first, and dropped in the meantime it is

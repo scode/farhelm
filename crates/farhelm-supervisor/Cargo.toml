@@ -24,9 +24,9 @@ test-seams = []
 anyhow.workspace = true
 base64.workspace = true
 farhelm-proto.workspace = true
-# The emulator of each terminal that runs in a terminal host. For now only
-# `grid_input` uses it, to encode viewer input from the program's modes as the
-# emulator tracks them.
+# The emulator of each terminal that runs in a terminal host
+# (`hosts::terminal`), whose modes `grid_input` also encodes viewer input
+# from.
 farhelm-terminal-emulator.workspace = true
 getrandom.workspace = true
 libc.workspace = true
@@ -52,9 +52,6 @@ tracing.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
-# Only `emulator_parity` uses it for now, comparing the emulator with tmux; it
-# becomes a regular dependency when the supervisor runs host terminals.
-farhelm-terminal-emulator.workspace = true
 # Scratch servers share bounded cleanup and diagnostic ownership with e2e fixtures.
 farhelm-teststate.workspace = true
 # Per-test capture owns each test's dispatcher and Tokio runtime without

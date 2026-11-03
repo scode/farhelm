@@ -90,6 +90,9 @@ async-trait.workspace = true
 # (`SupervisorSeams::faults`). The feature compiles those hooks in for test
 # builds only; the shipped binary, which builds no dev-dependency, has none.
 farhelm-supervisor = { workspace = true, features = ["test-seams"] }
+# The host terminal runtime's tests seed a real host with a snapshot of the
+# supervisor's own emulator (`tests/terminal_host_runtime.rs`).
+farhelm-terminal-emulator.workspace = true
 # The integration tests route their state directories through the shared
 # naming and flock protocol; the product binary no longer depends on it.
 farhelm-teststate.workspace = true
