@@ -13,6 +13,12 @@ members = [
   "crates/farhelm-ui",
   "crates/terminal-host",
 ]
+# The vendored, patched terminal crates (vendor/README.md) are not members: they
+# stay upstream's code under upstream's formatting and lints, and the
+# workspace's clippy, fmt and test runs never select them. Without the exclusion
+# a `cargo` command run inside vendor/ would find this workspace and refuse to
+# build a package that is under it but not a member.
+exclude = ["vendor/alacritty_terminal", "vendor/vte"]
 # Application and ordinary library members, excluding `farhelm-desktop`, so that a bare `cargo
 # build`/`test`/`clippy --all-targets` — the workspace checks the
 # inventory in .agents/validation.md runs on every change, and CI runs on an ordinary
