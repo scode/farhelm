@@ -29,7 +29,10 @@
 # interaction GATE, not an assertion: it only answers "has the create
 # form visibly opened yet, so it's safe to click into it" and retries
 # until it has. It never decides pass or fail on its own — every real
-# assertion still goes through the API or tmux. Default/legacy screenshots
+# assertion still goes through the API, the supervisor's database and the
+# kernel's socket table, the embedded helm's attachment trace, or a command
+# typed into a terminal (see `session_terminal_alive`, `expect_host_terminal`,
+# `open_agent_attachments` and `drive_terminal`). Default/legacy screenshots
 # are debugging artifacts on failure; the appearance leg retains its own
 # successful startup evidence too.
 #
@@ -205,6 +208,184 @@ curl_local() {
 }
 curl_auth() {
   curl --noproxy '*' --config "$CURL_AUTH_CONFIG" "$@"
+}
+# Whether session $1 (its local id) of the main state directory still has a
+# live agent terminal, of either kind; exit status only.
+#
+# The app's supervisor runs the bare `farhelm supervisor run`, so every
+# session this script creates runs in a terminal host, while a supervisor
+# built before terminal hosts (or a session from one) runs it in tmux. The
+# session's row says which (`terminal_kind`) and where (`pane`: the host's
+# socket name, or the tmux pane), so the check follows the row: a tmux
+# terminal is alive when the private server still has its tmux session, a
+# host one when a process still listens on its socket. The socket table is
+# read rather than the socket connected to, because a host serves exactly
+# one client, its supervisor, and a socket file outlives the host that bound
+# it. The database is opened read-only beside the running supervisor.
+session_terminal_alive() {
+  python3 - "$X/state" "$1" <<'PY'
+import os, sqlite3, subprocess, sys
+state, sid = sys.argv[1], sys.argv[2]
+db = sqlite3.connect("file:" + os.path.join(state, "supervisor.db") + "?mode=ro", uri=True, timeout=5)
+row = db.execute("select terminal_kind, pane, tmux_name from sessions where id = ?", (sid,)).fetchone()
+if row is None:
+    sys.exit(1)
+kind, pane, tmux_name = row
+if kind == "tmux":
+    probe = ["tmux", "-S", os.path.join(state, "tmux.sock"), "has-session", "-t", tmux_name]
+    sys.exit(subprocess.run(probe, capture_output=True).returncode)
+if kind != "host" or not pane:
+    sys.exit(1)
+socket = os.path.join(state, "hosts", pane)
+wanted = {socket, os.path.realpath(socket)}
+LISTENING = 0x10000  # __SO_ACCEPTCON in /proc/net/unix's flags column
+with open("/proc/net/unix") as table:
+    next(table)
+    for line in table:
+        fields = line.split()
+        if len(fields) >= 8 and int(fields[3], 16) & LISTENING and fields[7] in wanted:
+            sys.exit(0)
+sys.exit(1)
+PY
+}
+# Fail unless session $1 (its local id) is a terminal-host row: the app's
+# supervisor runs the bare `farhelm supervisor run`, whose default is terminal
+# hosts, so a tmux row here means a shipped launch went back to tmux, which
+# `session_terminal_alive` alone would not notice (it follows either kind).
+expect_host_terminal() {
+  local kind
+  kind=$(python3 - "$X/state" "$1" <<'PY'
+import os, sqlite3, sys
+db = sqlite3.connect("file:" + os.path.join(sys.argv[1], "supervisor.db") + "?mode=ro", uri=True, timeout=5)
+row = db.execute("select terminal_kind from sessions where id = ?", (sys.argv[2],)).fetchone()
+print(row[0] if row else "missing")
+PY
+) || fail "reading session $1's terminal kind"
+  [ "$kind" = host ] || fail "session $1's terminal is '$kind', not a terminal host: the app's supervisor did not create it in a host"
+}
+# How many attachments to session $2's agent terminal the app writing log $1
+# has open, by its embedded helm's attachment trace: `terminal attached`
+# events minus `terminal ended` ones on the `farhelm_helm::terminal_attachments`
+# target (crates/farhelm-helm/src/terminal.rs, `ATTACHMENT_TRACE`; change both
+# together), which the launches below turn on through RUST_LOG. $2 is the API
+# id, as the page names the session in its terminal socket's URL. The fmt
+# layer may color field names, so escapes are stripped before matching.
+#
+# These events are the only outside view of the page's terminal attachments
+# for a terminal in a terminal host: such a host serves only its supervisor,
+# so the tmux client listing this script once read has no counterpart. Open
+# attachments rather than a running count, so that an attachment that came
+# and went (the page moving on to another session, a socket closed by a
+# rotation) does not count as one the page still holds.
+open_agent_attachments() {
+  python3 - "$1" "$2" <<'PY'
+import re, sys
+log, session = sys.argv[1], sys.argv[2]
+open_count = 0
+pattern = re.compile(r"farhelm_helm::terminal_attachments: terminal (attached|ended) session=(\S+) terminal=agent ")
+with open(log, errors="replace") as lines:
+    for line in lines:
+        match = pattern.search(re.sub(r"\x1b\[[0-9;]*m", "", line))
+        if match and match.group(2) == session:
+            open_count += 1 if match.group(1) == "attached" else -1
+print(open_count)
+PY
+}
+# How many `terminal attached` events for session $2's agent terminal log $1
+# holds, open or not: what tells a socket that closed and came back from one
+# that stayed, alongside `open_agent_attachments`.
+agent_attachment_starts() {
+  sed 's/\x1b\[[0-9;]*m//g' "$1" |
+    grep -cF "farhelm_helm::terminal_attachments: terminal attached session=$2 terminal=agent "
+}
+# Type `printf smoke-typed-ok >$3` and Enter into session $1's agent terminal
+# through the embedded helm at $2 (http://host:port) as a viewer that can draw
+# grids, after the stream's replay, and wait for the file: proof that the
+# supervisor serving the session can drive its terminal, which a listening
+# socket and a listed row do not show (an unreadable host is listed and still
+# listens). Speaks the browser's WebSocket by hand, as the Rust process tests
+# do: the native credential travels in Sec-WebSocket-Protocol. Requires the
+# stream to be a grid, so it also proves the terminal is in a host.
+drive_terminal() {
+  python3 - "$1" "$2" "$3" "$SMOKE_SECRET" <<'PY'
+import base64, json, os, socket, struct, sys, time
+session, base, proof, secret = sys.argv[1:5]
+host, port = base.split("//", 1)[1].rstrip("/").rsplit(":", 1)
+deadline = time.monotonic() + 60
+sock = socket.create_connection((host, int(port)), timeout=30)
+key = base64.b64encode(os.urandom(16)).decode()
+sock.sendall((f"GET /api/sessions/{session}/term?grid=1 HTTP/1.1\r\nHost: {host}:{port}\r\n"
+              f"Connection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\n"
+              f"Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Protocol: farhelm, farhelm-device-{secret}\r\n\r\n").encode())
+head = b""
+while not head.endswith(b"\r\n\r\n"):
+    byte = sock.recv(1)
+    if not byte:
+        sys.exit("the helm closed during the upgrade")
+    head += byte
+if not head.startswith(b"HTTP/1.1 101"):
+    sys.exit("upgrade refused: " + head.decode(errors="replace").splitlines()[0])
+def recv_exact(n):
+    data = b""
+    while len(data) < n:
+        part = sock.recv(n - len(data))
+        if not part:
+            sys.exit("the helm closed the terminal socket")
+        data += part
+    return data
+def message():
+    payload, opcode = b"", None
+    while True:
+        b0, b1 = recv_exact(2)
+        length = b1 & 0x7F
+        if length == 126:
+            length = struct.unpack(">H", recv_exact(2))[0]
+        elif length == 127:
+            length = struct.unpack(">Q", recv_exact(8))[0]
+        part = recv_exact(length)
+        code = b0 & 0x0F
+        if code == 8:
+            sys.exit("the helm closed the terminal socket")
+        if code in (9, 10):
+            continue
+        if code:
+            opcode = code
+        payload += part
+        if b0 & 0x80:
+            return opcode, payload
+def send(payload):
+    mask = os.urandom(4)
+    frame = bytes([0x82])
+    n = len(payload)
+    frame += bytes([0x80 | n]) if n < 126 else bytes([0x80 | 126]) + struct.pack(">H", n)
+    sock.sendall(frame + mask + bytes(b ^ mask[i % 4] for i, b in enumerate(payload)))
+notice = None
+while time.monotonic() < deadline:
+    opcode, payload = message()
+    if opcode != 1:
+        continue
+    text = json.loads(payload)
+    if text.get("type") == "stream":
+        notice = text.get("kind")
+    elif text.get("type") == "detached":
+        sys.exit(f"detached: {text}")
+    elif text.get("type") == "replay_complete":
+        break
+else:
+    sys.exit("no replay_complete within the bound")
+if notice != "grid":
+    sys.exit(f"the terminal streams as {notice!r}, not as a grid")
+send(json.dumps({"t": "text", "data": f"printf smoke-typed-ok >{proof}"}).encode())
+send(json.dumps({"t": "key", "key": "Enter", "code": "Enter", "kc": 13, "mods": 0}).encode())
+while time.monotonic() < deadline:
+    try:
+        if open(proof).read() == "smoke-typed-ok":
+            sys.exit(0)
+    except FileNotFoundError:
+        pass
+    time.sleep(0.2)  # sleep-ok: polling interval for the typed command's file, bounded by the deadline above
+sys.exit("the typed command never wrote its file")
+PY
 }
 
 # Teardown is a trap, not a function called at each exit site: registering
@@ -1077,7 +1258,7 @@ DISPLAY=$DISP \
   FARHELM_TMUX="$SENTINEL_TMUX" \
   FARHELM_SMOKE_TMUX_MARKER="$X/tmux-override-used" \
   FARHELM_SMOKE_CLIENT_LOG_MARKER="$CLIENT_LOG_MARKER" \
-  RUST_LOG="info,farhelm_ui::desktop=debug" \
+  RUST_LOG="info,farhelm_ui::desktop=debug,farhelm_helm::terminal_attachments=debug" \
   FARHELM_DESKTOP_SMOKE_READY="$DESKTOP_READY" \
   FARHELM_DESKTOP_STATE_DIR="$X/state" \
   FARHELM_DESKTOP_FARHELM="$BUILT_FARHELM" \
@@ -1267,21 +1448,23 @@ CREATE_BODY=$(python3 -c 'import json,sys; print(json.dumps({"cwd": sys.argv[1],
 SID=$(curl_auth -sf --max-time 10 -H 'content-type: application/json' -d "$CREATE_BODY" "$API/api/sessions" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])') || fail "creating the pre-restart smoke session"
 [ -n "$SID" ] || fail "the pre-restart create returned no session id"
 LOCAL_SID="${SID#*:}"
-tmux -S "$X/state/tmux.sock" has-session -t "fh-$LOCAL_SID" 2>/dev/null || fail "the created session did not reach the supervisor's tmux"
+session_terminal_alive "$LOCAL_SID" || fail "the created session has no live agent terminal"
+expect_host_terminal "$LOCAL_SID"
 sleep 1
 NEWEST_BODY=$(python3 -c 'import json,sys; print(json.dumps({"cwd": sys.argv[1], "command": {"command": "bash", "yolo": False}, "title": "aaa-newest"}))' "$X/work") || fail "encoding newest smoke session"
 SID_NEWEST=$(curl_auth -sf --max-time 10 -H 'content-type: application/json' -d "$NEWEST_BODY" "$API/api/sessions" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])') || fail "creating the newest pre-restart smoke session"
 [ -n "$SID_NEWEST" ] || fail "the newest pre-restart create returned no session id"
 LOCAL_SID_NEWEST="${SID_NEWEST#*:}"
-tmux -S "$X/state/tmux.sock" has-session -t "fh-$LOCAL_SID_NEWEST" 2>/dev/null || fail "the newest session did not reach the supervisor's tmux"
+session_terminal_alive "$LOCAL_SID_NEWEST" || fail "the newest session has no live agent terminal"
+expect_host_terminal "$LOCAL_SID_NEWEST"
 
 # The default gate deliberately does not click rows: WebKitGTK's unreliable
 # Xvfb paint is why its CI leg is non-pixel. Seed the helm's shared preference
 # (SPEC.md, Session list: one row for every client, `PUT /api/preferences`)
 # with a non-default order and the non-newest session, then observe
-# restoration through the native request trace (`sort=title`) and tmux's
-# client ownership (the remembered, non-newest session gains the page's
-# output client). A `GET` read-back after the restart checks the durable
+# restoration through the native request trace (`sort=title`) and the
+# app's terminal attachment trace (the remembered, non-newest session gains
+# the page's open attachment; `open_agent_attachments`). A `GET` read-back after the restart checks the durable
 # input survived the relaunch, as a check of the input rather than a
 # substitute for those behavioral observations.
 # The post-restart `sort=title` oracle proves nothing if the app already
@@ -1343,7 +1526,7 @@ DISPLAY=$DISP \
   FARHELM_TMUX="$SENTINEL_TMUX" \
   FARHELM_SMOKE_TMUX_MARKER="$X/tmux-override-used" \
   FARHELM_SMOKE_CLIENT_LOG_MARKER="$CLIENT_LOG_MARKER" \
-  RUST_LOG="info,farhelm_ui::desktop=debug" \
+  RUST_LOG="info,farhelm_ui::desktop=debug,farhelm_helm::terminal_attachments=debug" \
   FARHELM_DESKTOP_SMOKE_READY="$DESKTOP_READY" \
   FARHELM_DESKTOP_STATE_DIR="$X/state" \
   FARHELM_DESKTOP_FARHELM="$BUILT_FARHELM" \
@@ -1380,23 +1563,23 @@ RESTART_SELECTION=$(printf '%s' "$RESTART_PREFERENCES" | python3 -c 'import json
 RESTART_SORT=$(printf '%s' "$RESTART_PREFERENCES" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("list_sort") or "")')
 [ "$RESTART_SELECTION" = "$SID" ] || fail "restart changed the helm's remembered selection"
 [ "$RESTART_SORT" = "title" ] || fail "restart dropped the helm's remembered sort"
-tmux -S "$X/state/tmux.sock" has-session -t "fh-$LOCAL_SID" 2>/dev/null || fail "the tmux-held session did not survive the app restart"
+session_terminal_alive "$LOCAL_SID" || fail "the session's terminal did not survive the app restart"
 kill -0 "$SUPERVISOR_PID" 2>/dev/null || fail "the relaunch stopped the supervisor it should have reused"
 REUSED_PID=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pid"])' "$X/state/desktop-supervisor.json")
 [ "$REUSED_PID" = "$SUPERVISOR_PID" ] || fail "the relaunch replaced its own current supervisor (now $REUSED_PID) instead of reusing it"
 wait_for_listing_request "$X/desktop-restart.log" "sort=title"
 RESTORED_ATTACHMENT=""
 for _ in $(seq 1 30); do
-  CLIENT_SESSIONS=$(tmux -S "$X/state/tmux.sock" list-clients -F '#{session_name}' 2>/dev/null)
-  REMEMBERED_CLIENTS=$(printf '%s\n' "$CLIENT_SESSIONS" | grep -cx "fh-$LOCAL_SID")
-  NEWEST_CLIENTS=$(printf '%s\n' "$CLIENT_SESSIONS" | grep -cx "fh-$LOCAL_SID_NEWEST")
-  if [ "$REMEMBERED_CLIENTS" -gt "$NEWEST_CLIENTS" ]; then
+  REMEMBERED_CLIENTS=$(open_agent_attachments "$X/desktop-restart.log" "$SID")
+  NEWEST_CLIENTS=$(open_agent_attachments "$X/desktop-restart.log" "$SID_NEWEST")
+  if [ "$REMEMBERED_CLIENTS" -ge 1 ] && [ "$NEWEST_CLIENTS" -eq 0 ]; then
     RESTORED_ATTACHMENT=1
     break
   fi
   sleep 1
 done
-[ -n "$RESTORED_ATTACHMENT" ] || fail "the relaunched page did not attach the remembered non-newest session"
+[ -n "$RESTORED_ATTACHMENT" ] ||
+  fail "the relaunched page does not hold the remembered non-newest session (open attachments: remembered ${REMEMBERED_CLIENTS:-?}, newest ${NEWEST_CLIENTS:-?})"
 # The plain-text link asset reached the same relaunched page whose
 # terminal attachment the oracle above just proved: parity
 # (`scripts/check-desktop-assets.sh`) holds the requested and bundled
@@ -1427,10 +1610,14 @@ wait_for_client_log_marker "$X/desktop-restart.log"
 echo "== rotating the token: the internal desktop credential carries on"
 # Rotation still changes the durable token used by a standalone helm, but the
 # desktop's per-launch credential is in memory and deliberately outside that
-# authority. The webview must not re-authenticate, and its terminal client must
-# remain the same socket after rotation.
-PAGE_CLIENT_BEFORE=$(tmux -S "$X/state/tmux.sock" list-clients -t "fh-$LOCAL_SID" -F '#{client_name} #{client_created}' 2>/dev/null | sort)
-[ -n "$PAGE_CLIENT_BEFORE" ] || fail "test premise: the page has no output client on the remembered session before rotation"
+# authority. The webview must not re-authenticate, and its terminal socket must
+# remain the same socket after rotation: the attachment trace shows no end and
+# no new attachment for the remembered session across the window below (a
+# closed socket reports its end, and the page's reconnect a new attachment).
+PAGE_OPEN_BEFORE=$(open_agent_attachments "$X/desktop-restart.log" "$SID")
+PAGE_STARTS_BEFORE=$(agent_attachment_starts "$X/desktop-restart.log" "$SID")
+[ "$PAGE_OPEN_BEFORE" -ge 1 ] ||
+  fail "test premise: the page has no open attachment to the remembered session before rotation"
 "$BUILT_FARHELM" helm token rotate --state-dir "$X/state" >/dev/null || fail "rotating desktop helm token"
 ROTATED_STATUS=$(curl_auth -s -o /dev/null -w '%{http_code}' --max-time 5 "$API/api/hosts")
 [ "$ROTATED_STATUS" = 200 ] || fail "rotation revoked the desktop's native credential (status $ROTATED_STATUS)"
@@ -1441,9 +1628,10 @@ sleep 5
 AFTER_ROTATION_GENERATION=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("webview_auth_generation") or 0)' "$X/state/desktop-client.json")
 [ "$AFTER_ROTATION_GENERATION" = "$RESTART_WEBVIEW_GENERATION" ] ||
   fail "rotation made the webview authenticate again (generation $RESTART_WEBVIEW_GENERATION -> $AFTER_ROTATION_GENERATION)"
-PAGE_CLIENT_AFTER=$(tmux -S "$X/state/tmux.sock" list-clients -t "fh-$LOCAL_SID" -F '#{client_name} #{client_created}' 2>/dev/null | sort)
-[ "$PAGE_CLIENT_AFTER" = "$PAGE_CLIENT_BEFORE" ] ||
-  fail "rotation closed the page's terminal socket (clients before: '$PAGE_CLIENT_BEFORE', after: '$PAGE_CLIENT_AFTER')"
+PAGE_OPEN_AFTER=$(open_agent_attachments "$X/desktop-restart.log" "$SID")
+PAGE_STARTS_AFTER=$(agent_attachment_starts "$X/desktop-restart.log" "$SID")
+[ "$PAGE_OPEN_AFTER/$PAGE_STARTS_AFTER" = "$PAGE_OPEN_BEFORE/$PAGE_STARTS_BEFORE" ] ||
+  fail "rotation closed or replaced the page's terminal socket (open/started before: $PAGE_OPEN_BEFORE/$PAGE_STARTS_BEFORE, after: $PAGE_OPEN_AFTER/$PAGE_STARTS_AFTER)"
 ROTATED_ROWS=$(device_rows)
 [ "$ROTATED_ROWS" = 0 ] || fail "rotation left $ROTATED_ROWS device rows instead of none"
 assert_no_persisted_credentials "rotation"
@@ -1455,6 +1643,7 @@ assert_no_persisted_credentials "rotation"
 ANSWERED_BEFORE=$(grep -c '^desktop_smoke: session listing answered ' "$X/desktop-restart.log")
 ROTATED_BODY=$(python3 -c 'import json,sys; print(json.dumps({"cwd": sys.argv[1], "command": {"command": "bash", "yolo": False}, "title": "zzz-after-rotation"}))' "$X/work") || fail "encoding the post-rotation session"
 SID_ROTATED=$(curl_auth -sf --max-time 10 -H 'content-type: application/json' -d "$ROTATED_BODY" "$API/api/sessions" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])') || fail "creating the post-rotation session"
+expect_host_terminal "${SID_ROTATED#*:}"
 NATIVE_ANSWERED=""
 for _ in $(seq 1 30); do
   if [ "$(grep -c '^desktop_smoke: session listing answered ' "$X/desktop-restart.log")" -gt "$ANSWERED_BEFORE" ]; then
@@ -1640,10 +1829,11 @@ if [ "${DESKTOP_SMOKE_LEGACY_INTERACTION:-}" != 1 ]; then
   SID_KEPT=$(curl_auth -sf --max-time 10 -H 'content-type: application/json' -d "$KEPT_BODY" "$API/api/sessions" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])') || fail "creating the session kept across the replacement"
   LOCAL_SID_KEPT="${SID_KEPT#*:}"
   for _ in $(seq 1 30); do
-    tmux -S "$X/state/tmux.sock" has-session -t "fh-$LOCAL_SID_KEPT" 2>/dev/null && break
+    session_terminal_alive "$LOCAL_SID_KEPT" && break
     sleep 1
   done
-  tmux -S "$X/state/tmux.sock" has-session -t "fh-$LOCAL_SID_KEPT" 2>/dev/null || fail "the kept session never reached tmux"
+  session_terminal_alive "$LOCAL_SID_KEPT" || fail "the kept session never got a live agent terminal"
+  expect_host_terminal "$LOCAL_SID_KEPT"
   close_app_and_wait "$WID" "$(cat "$X/desktop.pid")"
 
   # An ordinary quit leaves the supervisor running too. A launch whose
@@ -1713,9 +1903,9 @@ assert any(h["kind"] == "local" and h["state"]["phase"] == "connected" for h in 
     fail "the record does not name a running replacement supervisor"
   [ "$(stat -L -c %i "/proc/$REPLACEMENT_PID/exe")" = "$(stat -c %i "$BUILT_FARHELM")" ] ||
     fail "the replacement supervisor does not run the replaced program file"
-  # Sessions survive the replacement: still in tmux, and still listed by the
-  # new supervisor through the relaunched app.
-  tmux -S "$X/state/tmux.sock" has-session -t "fh-$LOCAL_SID_KEPT" 2>/dev/null ||
+  # Sessions survive the replacement: the same terminal still alive, and
+  # still listed by the new supervisor through the relaunched app.
+  session_terminal_alive "$LOCAL_SID_KEPT" ||
     fail "the kept session did not survive the supervisor replacement"
   KEPT_LISTED=""
   for _ in $(seq 1 30); do
@@ -1726,6 +1916,11 @@ assert any(h["kind"] == "local" and h["state"]["phase"] == "connected" for h in 
     sleep 1
   done
   [ -n "$KEPT_LISTED" ] || fail "the replacement supervisor does not list the kept session"
+  # Listed and listening is not usable: an unreadable host is listed and still
+  # listens. Drive the kept terminal through the replacement: attach as a grid
+  # viewer, wait for its replay, type a command and wait for what it writes.
+  drive_terminal "$SID_KEPT" "$API" "$X/kept-typed" ||
+    fail "the kept session's terminal cannot be driven after the supervisor replacement"
   curl_auth -sf --max-time 30 -X DELETE "$API/api/sessions/$SID_KEPT" >/dev/null || fail "deleting the kept session"
   SID_KEPT=""
   kill -KILL "$(cat "$X/desktop.pid")" 2>/dev/null
@@ -1813,8 +2008,11 @@ assert any(h["kind"] == "local" and h["state"]["phase"] == "connected" for h in 
   # A real terminal host in this state directory, started the way a
   # supervisor starts one, standing in for a terminal the supervisor would
   # have started: stop_answering below must end it through the teardown's
-  # own stop_terminal_hosts, which nothing else in this smoke reaches while
-  # supervisors start no hosts. The fixture prints "<pid> <socket>".
+  # own stop_terminal_hosts. This is the leg's own assertion of what that stop
+  # does: the main state's hosts (the app's sessions run in terminal hosts) are
+  # stopped by the trap's teardown too, but that only keeps the directory when
+  # it cannot confirm them, where this leg fails. The fixture prints
+  # "<pid> <socket>".
   BUILT_FIXTURES="$TARGET_DIR/debug/farhelm-fixtures"
   [ -x "$BUILT_FIXTURES" ] || fail "farhelm-fixtures missing at $BUILT_FIXTURES"
   ANSWERING_HOST=$("$BUILT_FIXTURES" spawn-terminal-host --farhelm "$BUILT_FARHELM" \
@@ -1881,7 +2079,7 @@ assert any(h["kind"] == "local" and h["state"]["phase"] == "connected" for h in 
     *) fail "the answering state's terminal host $ANSWERING_HOST_PID still runs after teardown" ;;
   esac
 
-  echo "== PASS: embedded helm, dual auth, local supervisor, and a tmux-held session survive restart"
+  echo "== PASS: embedded helm, dual auth, local supervisor, and a session's terminal survive restart"
   PASS=1
   exit 0
 fi
@@ -1969,6 +2167,7 @@ done
 [ -n "$SID" ] || fail "create through the desktop form did not yield exactly one new session (MT-5 class regression?)"
 LOCAL_SID="${SID#*:}"
 echo "   created $SID"
+expect_host_terminal "$LOCAL_SID"
 
 # Creation is a user-initiated selection, so it exercises the same
 # preference write (`PUT /api/preferences` through native reqwest) as a row
@@ -1981,14 +2180,18 @@ for _ in $(seq 1 20); do
 done
 [ "$WRITTEN_ID" = "$SID" ] || fail "the desktop page selection did not reach the helm's preference row"
 
-echo "== typing into the terminal and asserting through tmux"
-# The create lands in the session view with the terminal mounted.
+echo "== typing into the terminal and asserting through a file the typed command writes"
+# The create lands in the session view with the terminal mounted. The typed
+# command leaves its evidence in a file rather than on the screen, so the check
+# reads the same for a terminal in a terminal host, whose screen nothing
+# outside the supervisor can read, as for a tmux pane.
 sleep 3
-DISPLAY=$DISP xdotool mousemove 700 400 click 1 sleep 0.5 type --delay 120 "echo smoke-ok"
+TYPED_PROOF="$X/legacy-typed"
+DISPLAY=$DISP xdotool mousemove 700 400 click 1 sleep 0.5 type --delay 120 "echo smoke-ok >$TYPED_PROOF"
 DISPLAY=$DISP xdotool key Return
 OK=""
 for _ in $(seq 1 10); do
-  if tmux -S "$X/state/tmux.sock" capture-pane -p -t "fh-$LOCAL_SID" 2>/dev/null | grep -q "^smoke-ok"; then
+  if grep -qx "smoke-ok" "$TYPED_PROOF" 2>/dev/null; then
     OK=1
     break
   fi

@@ -114,20 +114,22 @@ fi
 
 # Which kind of terminal the LOCAL supervisor creates new terminals in, passed
 # on as `farhelm supervisor run --new-terminals` (the supervisor's hidden
-# harness seam; SPEC_impl.md, "Terminal host"). Unset passes nothing, so the
-# supervisor keeps its own default: the main browser suite's ordinary runs
-# pass nothing, and every spec there runs against exactly the supervisor it
-# always has. Its host-terminal run (playwright.config.ts with
+# harness seam; SPEC_impl.md, "Terminal host"). Unset or empty means `tmux`,
+# although a bare `farhelm supervisor run` creates terminal hosts: the main
+# browser suite's ordinary runs leave it empty, and their specs were written
+# against tmux terminals and xterm.js, so they keep testing those for as long
+# as old terminals exist. Its host-terminal run (playwright.config.ts with
 # FARHELM_E2E_SUITE_TERMINALS=host) and the host-terminal config
 # (host-terminals/playwright.config.ts) set `host`, which makes the startup
 # session below, and every session their specs create there, a terminal in a
-# terminal host. Only the local supervisor takes it: the "remote" one keeps
-# its default, so a session created there stays an old terminal, and
-# terminal-multihost.spec.ts restarts that one with arguments of its own. A
-# value the flag would refuse is refused here, before anything starts.
+# terminal host. Only the local supervisor takes it: the "remote" one always
+# gets `tmux` (below), so a session created there stays an old terminal in
+# either run, as does a session on its replacement in
+# terminal-multihost.spec.ts. A value the flag would refuse is refused here,
+# before anything starts.
 new_terminals_args=()
 case "${FARHELM_E2E_NEW_TERMINALS:-}" in
-  '') ;;
+  '') new_terminals_args=(--new-terminals tmux) ;;
   tmux | host) new_terminals_args=(--new-terminals "$FARHELM_E2E_NEW_TERMINALS") ;;
   *)
     echo "FARHELM_E2E_NEW_TERMINALS must be tmux or host, got '$FARHELM_E2E_NEW_TERMINALS'" >&2
@@ -537,8 +539,13 @@ printf 'boot-1\n' >"$remote_boot_id_file" || exit 1
 # or the receipt this fixture reads would vanish after the first replacement.
 remote_supervisor_log="$state/remote-supervisor.log"
 remote_supervisor_rust_log="${RUST_LOG:-},farhelm_supervisor::service::handlers=debug"
+
+# `--new-terminals tmux` last, after the arguments `replacement_state` above and
+# scripts/test-start-stack-cleanup.sh recognise this supervisor by: the specs
+# that use this host (terminal-multihost.spec.ts's reboot among them) were
+# written against tmux terminals, as the local supervisor's are by default here.
 RUST_LOG="$remote_supervisor_rust_log" "$bin" supervisor run --state-dir "$remote_state" --boot-id-file "$remote_boot_id_file" \
-  >"$remote_supervisor_log" 2>&1 9>&- &
+  --new-terminals tmux >"$remote_supervisor_log" 2>&1 9>&- &
 remote_sup_pid=$!
 
 # Give both supervisors a moment to bind their sockets before the helm

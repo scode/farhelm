@@ -9,5 +9,5 @@ uninstall does not end them, which was already the case.
 
 For the curator: the hosts panel's uninstall also ends the terminal hosts in the host's data directory, between stopping
 the supervisor and ending its tmux server, and its step now reads "Stop the supervisor, its terminal hosts and its tmux
-server". That part is hidden behind the not-yet-on switch: nothing starts terminal hosts until a later change turns new
-terminals on, and that change carries its entry. The step's new wording is visible today.
+server". Since `terminal-hosts-on.md`'s change every new terminal runs in a terminal host, so that part matters to
+every host; that entry covers it.

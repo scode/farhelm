@@ -6,8 +6,10 @@
 // The band's own cases (an old agent, old tabs, Restart unavailable,
 // dismissal) need an old terminal on such a host, which this stack cannot
 // make; e2e/tests/terminal-migration.spec.ts drives them on the main stack
-// with the session rows' terminal fields seeded. This spec is the real-host
-// half: every field comes from the supervisor as it is.
+// with the session rows' terminal fields seeded, and the process test
+// `host_processes::an_old_session_after_the_switch_to_hosts_is_reported_as_one_to_move`
+// shows a real supervisor reporting those fields for such a session. This
+// spec is the real-host half: every field comes from the supervisor as it is.
 import type { APIRequestContext, Locator, Page } from "@playwright/test";
 import { expect, test } from "../tests/helpers/evidence";
 

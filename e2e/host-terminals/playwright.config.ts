@@ -2,8 +2,9 @@
 // against a real stack whose local supervisor creates new terminals in hosts.
 //
 // Separate from playwright.config.ts because the switch belongs to a whole
-// supervisor, not to one spec: the main suite's stacks run the supervisor's
-// default (tmux), and every spec there was written against it. This config
+// supervisor, not to one spec: the main suite's stacks keep their
+// supervisors on tmux (start-stack.sh passes `--new-terminals tmux` unless
+// asked otherwise), and every spec there was written against it. This config
 // boots one stack of its own through the same start-stack.sh, asking it for
 // `farhelm supervisor run --new-terminals host` (FARHELM_E2E_NEW_TERMINALS),
 // so the startup session and every session these specs create run in

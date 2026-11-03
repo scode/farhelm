@@ -624,18 +624,43 @@ pub(crate) struct SupervisorProcess {
     pub(crate) state: farhelm_teststate::TestDir,
 }
 
+/// Which kind of terminal a real-process fixture's supervisor creates: its
+/// `--new-terminals`, or none for the bare command's default (terminal hosts,
+/// what every shipped launch runs).
+#[derive(Clone, Copy)]
+enum FixtureTerminals {
+    /// The bare `farhelm supervisor run`: terminal hosts.
+    Default,
+    /// `--new-terminals tmux`: old terminals, for the tests written against
+    /// them.
+    Tmux,
+}
+
 /// Start a real `farhelm supervisor run` on a fresh state directory and
 /// wait for its socket path to appear.
+///
+/// The bare command, as every shipped launch runs it, so its sessions run in
+/// terminal hosts. A test whose subject is a tmux terminal (a byte-stream
+/// attach, which a host terminal refuses, or a read of the private tmux
+/// server) uses [`supervisor_process_tmux`] instead.
 ///
 /// This establishes that startup has published the path, not that a peer
 /// can connect or that later initialization is finished. Call
 /// [`wait_for_supervisor_ready`] before an action that requires an
 /// accepting socket; a helm started earlier may still be retrying.
 pub(crate) async fn supervisor_process() -> SupervisorProcess {
-    supervisor_process_with_env(std::iter::empty()).await
+    let state = farhelm_teststate::tempdir().expect("supervisor state dir");
+    supervisor_process_on_state(state, std::iter::empty()).await
 }
 
-/// [`supervisor_process`], with `env` applied to the CHILD's environment
+/// [`supervisor_process`] with `--new-terminals tmux`: its sessions run in
+/// tmux terminals, for the tests written against them (old terminals keep
+/// their tests for as long as they exist).
+pub(crate) async fn supervisor_process_tmux() -> SupervisorProcess {
+    supervisor_process_tmux_with_env(std::iter::empty()).await
+}
+
+/// [`supervisor_process_tmux`], with `env` applied to the CHILD's environment
 /// before spawn.
 ///
 /// Every other real-stack fixture builds a [`SupervisorStartup`] directly
@@ -648,30 +673,32 @@ pub(crate) async fn supervisor_process() -> SupervisorProcess {
 /// this is the one place in the suite that sets an environment variable on
 /// a spawned `farhelm` process rather than mutating this test process's
 /// own — the two are never confused, because `Command::env` only ever
-/// reaches the CHILD.
-pub(crate) async fn supervisor_process_with_env(
+/// reaches the CHILD. Its callers read their sessions through tmux, hence the
+/// pin.
+pub(crate) async fn supervisor_process_tmux_with_env(
     env: impl IntoIterator<Item = (&'static str, std::ffi::OsString)>,
 ) -> SupervisorProcess {
     let state = farhelm_teststate::tempdir().expect("supervisor state dir");
-    supervisor_process_on_state(state, env).await
+    spawn_supervisor_process(state, env, std::iter::empty(), FixtureTerminals::Tmux).await
 }
 
-/// [`supervisor_process_with_env`], after removing named inherited variables.
+/// [`supervisor_process_tmux_with_env`], after removing named inherited
+/// variables.
 ///
 /// Tests that exercise a child tool's configuration boundary use this rather
 /// than clearing the supervisor's whole environment: the shipped process keeps
 /// its ordinary runtime substrate, while ambient tool-specific overrides
 /// cannot leak into the fixture. Explicit child values are applied after the
 /// removals, so callers can replace an inherited variable with owned state.
-pub(crate) async fn supervisor_process_with_env_removed(
+pub(crate) async fn supervisor_process_tmux_with_env_removed(
     env: impl IntoIterator<Item = (&'static str, std::ffi::OsString)>,
     removed: impl IntoIterator<Item = std::ffi::OsString>,
 ) -> SupervisorProcess {
     let state = farhelm_teststate::tempdir().expect("supervisor state dir");
-    supervisor_process_on_state_with_env_removed(state, env, removed).await
+    spawn_supervisor_process(state, env, removed, FixtureTerminals::Tmux).await
 }
 
-/// [`supervisor_process_with_env`], on a caller-prepared state directory.
+/// [`supervisor_process`], on a caller-prepared state directory.
 ///
 /// Exists for tests that must plant on-disk state (an older build's
 /// leftovers, say) BEFORE the supervisor's own startup sequence runs over
@@ -684,21 +711,29 @@ pub(crate) async fn supervisor_process_on_state(
     state: farhelm_teststate::TestDir,
     env: impl IntoIterator<Item = (&'static str, std::ffi::OsString)>,
 ) -> SupervisorProcess {
-    supervisor_process_on_state_with_env_removed(state, env, std::iter::empty()).await
+    spawn_supervisor_process(state, env, std::iter::empty(), FixtureTerminals::Default).await
 }
 
-/// Shared spawn path for ordinary and selectively scrubbed supervisor children.
-/// Apply removals before explicit fixture values so test-owned configuration
-/// wins without changing the test process's environment or runtime substrate.
-async fn supervisor_process_on_state_with_env_removed(
+/// Shared spawn path for every real-process supervisor fixture: the kind of
+/// terminal it creates, then removals before explicit fixture values, so
+/// test-owned configuration wins without changing the test process's
+/// environment or runtime substrate.
+async fn spawn_supervisor_process(
     state: farhelm_teststate::TestDir,
     env: impl IntoIterator<Item = (&'static str, std::ffi::OsString)>,
     removed: impl IntoIterator<Item = std::ffi::OsString>,
+    terminals: FixtureTerminals,
 ) -> SupervisorProcess {
     let mut command = tokio::process::Command::new(farhelm_bin());
     command
         .args(["supervisor", "run", "--state-dir"])
         .arg(state.path());
+    match terminals {
+        FixtureTerminals::Default => {}
+        FixtureTerminals::Tmux => {
+            command.args(["--new-terminals", "tmux"]);
+        }
+    }
     for key in removed {
         command.env_remove(key);
     }

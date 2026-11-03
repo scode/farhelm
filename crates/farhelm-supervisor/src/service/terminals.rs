@@ -109,8 +109,10 @@ pub(crate) struct TmuxTerminal {
 /// ([`crate::hosts::HostTerminal`]'s own equality).
 ///
 /// A create makes a [`Terminal::Host`] when the supervisor's switch says
-/// so (`SupervisorSeams::new_terminals`, off unless a harness or the
-/// hidden `--new-terminals host` turns it on), a Restart of a host agent
+/// so (`SupervisorSeams::new_terminals`: on in a supervisor `farhelm
+/// supervisor run` starts unless `--new-terminals tmux` says otherwise, off
+/// in an in-process harness unless the test turns it on), a Restart of a
+/// host agent
 /// makes a new one, and a restarted supervisor's reload makes one for
 /// every host row whose host it finds
 /// again (`core::host_handover`): adopted, or, for a host it cannot read, a

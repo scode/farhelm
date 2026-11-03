@@ -94,6 +94,72 @@ use serde::Deserialize;
 use std::sync::Arc;
 use tracing::{error, info};
 
+// ---- The attachment trace -----------------------------------------------
+
+/// The tracing target of the attachment trace: one debug event when an
+/// admitted terminal attachment starts relaying and one when its socket's
+/// handler is done with it.
+///
+/// A dedicated target so that a log can turn exactly these on
+/// (`RUST_LOG=…,farhelm_helm::terminal_attachments=debug`) without the rest
+/// of this module's debug output. The desktop app's smoke test
+/// (`scripts/desktop-smoke.sh`) does, to tell which session the window
+/// attached and whether that attachment stayed open across a token
+/// rotation: nothing outside the process shows that for a terminal in a
+/// terminal host, which serves only its supervisor (a tmux terminal shows
+/// each viewer as a tmux client). The events' message and fields are a
+/// contract with that script; change both together.
+const ATTACHMENT_TRACE: &str = "farhelm_helm::terminal_attachments";
+
+/// One admitted attachment's trace: `terminal attached` when made, and
+/// `terminal ended` when dropped, so every way out of the socket's handler
+/// (an early return and a panic's unwinding included) reports the end
+/// exactly once.
+struct TracedAttachment {
+    session: String,
+    /// `agent`, or `tab:<id>`.
+    terminal: String,
+    /// `bytes` or `grid`.
+    stream: &'static str,
+}
+
+impl TracedAttachment {
+    /// Trace `session`'s attachment as the browser's request named it.
+    fn start(session: &str, tab: Option<&str>, stream: farhelm_proto::StreamKind) -> Self {
+        let traced = Self {
+            session: session.to_string(),
+            terminal: match tab {
+                None => "agent".to_string(),
+                Some(tab) => format!("tab:{tab}"),
+            },
+            stream: match stream {
+                farhelm_proto::StreamKind::Bytes => "bytes",
+                farhelm_proto::StreamKind::Grid => "grid",
+            },
+        };
+        tracing::debug!(
+            target: ATTACHMENT_TRACE,
+            session = %traced.session,
+            terminal = %traced.terminal,
+            stream = traced.stream,
+            "terminal attached"
+        );
+        traced
+    }
+}
+
+impl Drop for TracedAttachment {
+    fn drop(&mut self) {
+        tracing::debug!(
+            target: ATTACHMENT_TRACE,
+            session = %self.session,
+            terminal = %self.terminal,
+            stream = self.stream,
+            "terminal ended"
+        );
+    }
+}
+
 /// Initial terminal size, carried as query parameters because a WebSocket
 /// handshake is a GET with no body. Sizing the pane at attach time rather
 /// than waiting for the first `resize` message is what gets live output
@@ -704,6 +770,9 @@ async fn serve_term(
     // It goes through the same detach-racing send as everything else, so a
     // browser that never reads cannot pin the handler on it.
     let stream_kind = events.stream_kind();
+    // Held until this handler returns, so the attachment trace reports this
+    // attachment starting here and ending exactly once, however it ends.
+    let _traced = TracedAttachment::start(&session_id, q.tab.as_deref(), stream_kind);
     let mut stream_notice_first = Some(ws::Message::Text(
         stream_notice(stream_kind).to_string().into(),
     ));
@@ -1431,6 +1500,66 @@ mod tests {
             payload, b"live",
             "live output must follow the marker, not race ahead of it"
         );
+    }
+
+    /// The attachment trace reports an admitted attachment starting, with the
+    /// session as the browser named it, `terminal=agent` and the stream kind,
+    /// and reports its end once when the browser closes the socket.
+    ///
+    /// Why: the desktop smoke test tells which session the relaunched window
+    /// has open, and that a token rotation left that attachment alone, only
+    /// through these two events, since a terminal in a terminal host shows no
+    /// viewer anywhere outside the supervisor; a trace that missed the start,
+    /// or reported the end twice or never, would pass or fail those checks
+    /// for the wrong reason. Spec: after an attach of `<entry>:sess-1`'s
+    /// agent terminal, exactly one `terminal attached` event on the
+    /// `farhelm_helm::terminal_attachments` target names that session,
+    /// `agent` and `bytes` by the time the stream notice arrives, and none
+    /// says it ended; after the browser drops the socket, exactly one
+    /// `terminal ended` event names it, within a bound.
+    #[farhelm_testtrace::test]
+    async fn the_attachment_trace_reports_an_attachment_start_and_end_once() {
+        let events = crate::test_capture::current();
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(scripted_supervisor_attach(peer_side));
+        let mut harness = rest_harness::spliced_helm(client_side).await;
+        let addr = harness.serve().await;
+        let path = session_path(&harness, "/api/sessions/sess-1/term");
+        let session = path
+            .strip_prefix("/api/sessions/")
+            .and_then(|rest| rest.strip_suffix("/term"))
+            .expect("a session path")
+            .to_string();
+        let traced = |message: &str| {
+            crate::test_capture::matching(&events, message)
+                .into_iter()
+                .filter(|event| {
+                    event.target == super::ATTACHMENT_TRACE
+                        && event.field("session") == Some(session.as_str())
+                        && event.field("terminal") == Some("agent")
+                        && event.field("stream") == Some("bytes")
+                })
+                .count()
+        };
+        let (mut ws, peer) = tokio::join!(WsTestClient::connect(addr, &path), peer);
+        let (_reader, _writer, _channel) = peer.unwrap();
+        expect_stream_notice(&mut ws, "bytes").await;
+        assert_eq!(traced("terminal attached"), 1);
+        assert_eq!(traced("terminal ended"), 0);
+
+        drop(ws);
+        let ended = tokio::time::timeout(Duration::from_secs(10), async {
+            while traced("terminal ended") == 0 {
+                tokio::time::sleep(Duration::from_millis(20)).await; // sleep-ok: bounded polling for the handler's teardown, which has no other observable here
+            }
+        })
+        .await;
+        assert!(
+            ended.is_ok(),
+            "the trace never reported the attachment ending"
+        );
+        assert_eq!(traced("terminal ended"), 1);
+        assert_eq!(traced("terminal attached"), 1);
     }
 
     /// A terminal peer declaring an oversized frame is refused before its

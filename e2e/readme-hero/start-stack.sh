@@ -147,7 +147,14 @@ orphan_watch() {
 orphan_watch 9>&- &
 watcher_pid=$!
 
-HOME="$home" SHELL="$bash_shell" "$bin" supervisor run --state-dir "$state" >"$state/supervisor.log" 2>&1 9>&- &
+# Every supervisor of the fleet creates new terminals in tmux
+# (`--new-terminals tmux`), although a bare `farhelm supervisor run` creates
+# terminal hosts: the captures this stack serves were designed and approved
+# against tmux terminals drawn by xterm.js, and on a supervisor started this
+# way no session shows the band that asks for old sessions to be moved, which
+# appears only where new terminals are terminal hosts (.agents/docs-media.md).
+HOME="$home" SHELL="$bash_shell" "$bin" supervisor run --state-dir "$state" --new-terminals tmux \
+  >"$state/supervisor.log" 2>&1 9>&- &
 sup_pid=$!
 
 i=0
@@ -155,7 +162,8 @@ while IFS= read -r destination; do
   test -n "$destination" || continue
   remote_state="$state/remote-$i"
   mkdir -p "$remote_state" || exit 1
-  HOME="$home" SHELL="$bash_shell" "$bin" supervisor run --state-dir "$remote_state" >"$state/remote-$i.log" 2>&1 9>&- &
+  HOME="$home" SHELL="$bash_shell" "$bin" supervisor run --state-dir "$remote_state" --new-terminals tmux \
+    >"$state/remote-$i.log" 2>&1 9>&- &
   remote_pids+=("$!")
   remote_states+=("$remote_state")
   i=$((i + 1))

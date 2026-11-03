@@ -737,7 +737,9 @@ async function restoreRemoteSupervisor(request: APIRequestContext) {
   // The same test-only boot-id seam start-stack.sh launched it with: a
   // respawn that dropped the option would read the machine's real boot id,
   // and every session of the harness's "boot-1" would come back interrupted
-  // on a host that never rebooted.
+  // on a host that never rebooted. And the same `--new-terminals tmux`, last
+  // as there: without it the replacement would create terminal hosts, the
+  // bare command's default, where this suite was written against tmux.
   //
   // Detached and recorded in the stack's pidfile rather than held as a child
   // handle: the replacement is the stack's remote from now on, for every
@@ -749,7 +751,16 @@ async function restoreRemoteSupervisor(request: APIRequestContext) {
   try {
     replacement = spawn(
       info.farhelm,
-      ["supervisor", "run", "--state-dir", info.remote_state, "--boot-id-file", info.remote_boot_id_file],
+      [
+        "supervisor",
+        "run",
+        "--state-dir",
+        info.remote_state,
+        "--boot-id-file",
+        info.remote_boot_id_file,
+        "--new-terminals",
+        "tmux",
+      ],
       {
         stdio: ["ignore", log, log],
         detached: true,

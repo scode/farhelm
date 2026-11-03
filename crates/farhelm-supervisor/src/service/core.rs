@@ -1134,15 +1134,23 @@ pub struct SupervisorSeams {
     /// the private tmux server, or a terminal host of its own
     /// ([`NewTerminals`]).
     ///
-    /// The switch terminal hosts land behind, off ([`NewTerminals::Tmux`])
-    /// by default. This field is the one place a running supervisor keeps
-    /// it, and everything that asks reads it here (through
+    /// This field is the one place a running supervisor keeps the switch,
+    /// and everything that asks reads it here (through
     /// [`Supervisor::new_terminals`] from outside this module). Two things
     /// set it, and neither is a user setting or the environment: a real
     /// supervisor process takes it from `farhelm supervisor run`'s hidden
-    /// `--new-terminals` flag ([`SupervisorStartup::new_terminals`]), and
-    /// the in-process harnesses set it here, never through their own
-    /// process environment.
+    /// `--new-terminals` flag ([`SupervisorStartup::new_terminals`]), whose
+    /// default, terminal hosts, is what every shipped launch gets; and the
+    /// in-process harnesses set it here, never through their own process
+    /// environment.
+    ///
+    /// The two defaults differ on purpose. `Self::default()` keeps
+    /// [`NewTerminals::Tmux`], so an in-process test creates the old kind
+    /// unless it opts in to hosts: the old path keeps its tests for as long
+    /// as old terminals exist, and they were written against tmux. Opting
+    /// in also takes `host_program` (below), because a supervisor inside a
+    /// test binary has no `internal terminal-host` of its own to start
+    /// hosts from.
     pub new_terminals: NewTerminals,
     /// The program terminal hosts are started from, in place of the
     /// supervisor's own executable
@@ -1160,12 +1168,15 @@ pub struct SupervisorSeams {
 
 /// Which kind of terminal a supervisor creates new agent terminals in (the
 /// plan's D-2): [`SupervisorSeams::new_terminals`], set for a real
-/// supervisor process by `farhelm supervisor run --new-terminals`.
+/// supervisor process by `farhelm supervisor run --new-terminals`, which
+/// defaults to [`NewTerminals::Host`].
 ///
-/// Named for the two kinds rather than on and off, because once terminal
-/// hosts are the default the old kind stays selectable for the tests and
-/// media harnesses that keep using tmux, and "new terminals: tmux" reads as
-/// what it does then too.
+/// Named for the two kinds rather than on and off, because with terminal
+/// hosts the default the old kind stays selectable for the tests and media
+/// harnesses that keep using tmux, and "new terminals: tmux" reads as what
+/// it does. The derived `Default` is [`NewTerminals::Tmux`]: it is the
+/// in-process harnesses' default ([`SupervisorSeams::default`]), not the
+/// release's, which the command line's default sets.
 ///
 /// A new create, a new tab and a Restart consult it; a retried create
 /// launches in the kind its launching row already records, whatever this
@@ -5529,22 +5540,21 @@ pub struct SupervisorStartup {
     pub boot_id_file: Option<PathBuf>,
     /// Which kind of terminal this supervisor creates new agent terminals
     /// in: `farhelm supervisor run --new-terminals <tmux|host>`, a hidden
-    /// harness seam. Callers with no opinion pass [`NewTerminals::Tmux`],
-    /// the default, which is what every production launch gets today.
+    /// harness seam whose default, [`NewTerminals::Host`], is what every
+    /// production launch gets (none passes the flag).
     ///
     /// It lands in [`SupervisorSeams::new_terminals`], the one value the
     /// rest of the supervisor reads, so a real supervisor process and an
-    /// in-process harness turn terminal hosts on through the same field.
-    /// It exists so that tests can run a real `farhelm supervisor run` with
-    /// terminal hosts on (a restart or a kill of the process itself, the
-    /// browser suite's stack) before they are the default, and, once they
-    /// are, so that the tests and harnesses that keep using tmux can still
-    /// ask for it. A command-line option and never an environment
-    /// variable, for `boot_id_file`'s reasons: tests never change their
-    /// own process's environment, and a variable is one more thing a
-    /// systemd unit or an agent's shell could inherit by accident. Not a
-    /// user setting either: which kind new terminals are is decided by the
-    /// release, not by each install.
+    /// in-process harness choose the kind through the same field. The flag
+    /// exists so that the tests and harnesses that keep testing old
+    /// terminals can still ask for tmux from a real `farhelm supervisor
+    /// run`, and so that a harness can name hosts explicitly where its
+    /// meaning depends on them. A command-line option and never an
+    /// environment variable, for `boot_id_file`'s reasons: tests never
+    /// change their own process's environment, and a variable is one more
+    /// thing a systemd unit or an agent's shell could inherit by accident.
+    /// Not a user setting either: which kind new terminals are is decided
+    /// by the release, not by each install.
     pub new_terminals: NewTerminals,
 }
 
@@ -6119,9 +6129,17 @@ impl Supervisor {
         }
     }
 
-    /// Production constructor: the launch shim is this very process's
-    /// binary. Test harnesses must NOT use this — their `current_exe` is
-    /// the libtest runner, not farhelm — and use `new_with_exe` instead.
+    /// A supervisor with every process-startup option at its default, whose
+    /// launch shim is this very process's binary.
+    ///
+    /// Not what `farhelm supervisor run` uses: that builds its supervisor
+    /// through [`Self::new_for_startup`] with the options it resolved,
+    /// terminal hosts among them. What calls this today are lib tests that
+    /// need no launch (their `current_exe` is the libtest runner, so a
+    /// harness that launches agents uses `new_with_exe` instead), and new
+    /// terminals here are tmux ones, the in-process default
+    /// ([`SupervisorSeams::new_terminals`]), since that program cannot start
+    /// a host.
     pub async fn new(state_dir: &Path) -> anyhow::Result<Arc<Supervisor>> {
         Self::new_for_startup(
             state_dir,
@@ -15235,8 +15253,9 @@ impl Supervisor {
         // switch is on (a mixed session). Under the old setting a host
         // agent's session has no tmux session to add a window to, so it is
         // refused before anything is created. Only a supervisor that made
-        // host agents and was then restarted with tmux reaches that, which
-        // no shipped launch does: none passes `--new-terminals host`.
+        // host agents and was then restarted with `--new-terminals tmux`
+        // reaches that, which no shipped launch does: none passes the flag,
+        // and its default is hosts.
         let target = match (self.seams.new_terminals, &agent) {
             (NewTerminals::Tmux, Terminal::Tmux(tmux)) => NewTab::Window(tmux.clone()),
             (NewTerminals::Host, Terminal::Tmux(_) | Terminal::Host(_)) => NewTab::Host,
@@ -18048,9 +18067,9 @@ impl Supervisor {
     /// runs through.
     ///
     /// A create starts its agent in a host only under the switch
-    /// ([`SupervisorSeams::new_terminals`], which a test harness or the
-    /// hidden `--new-terminals host` turns on and no shipped launch
-    /// passes); this is how tests reach the switch points' host arms with a
+    /// ([`SupervisorSeams::new_terminals`], which every shipped supervisor
+    /// has on and which an in-process harness turns on only by choice);
+    /// this is how tests reach the switch points' host arms with a
     /// host whose child they choose (started by the test from the real
     /// `farhelm` binary, never inside the test process, since a host forks)
     /// rather than an agent's launch chain.

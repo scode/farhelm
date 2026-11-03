@@ -1263,18 +1263,22 @@ enum SupervisorCmd {
         #[arg(long, hide = true, value_name = "PATH")]
         boot_id_file: Option<PathBuf>,
         /// HARNESS SEAM: create new agent terminals in this kind of
-        /// terminal: `tmux` (a pane in the private tmux server, the
-        /// default) or `host` (a terminal host per terminal).
+        /// terminal: `host` (a terminal host per terminal, the default) or
+        /// `tmux` (a pane in the private tmux server, as every terminal was
+        /// before terminal hosts).
         ///
+        /// The default is what every shipped launch gets, since none passes
+        /// the flag: `farhelm helm setup`'s units, the desktop app and a
+        /// hand-started supervisor all create new terminals in hosts.
         /// Hidden because it is not a user setting: which kind new
-        /// terminals are is decided by the release, and this exists for
-        /// test harnesses that run a real supervisor process, today to turn
-        /// terminal hosts on before they are the default, later to keep
-        /// tmux where a harness still needs it. A flag and never an
-        /// environment variable, for `--boot-id-file`'s reasons: tests
+        /// terminals are is decided by the release. It exists for the test
+        /// harnesses that run a real supervisor process and keep testing
+        /// the old tmux terminals for as long as those still exist (the
+        /// media captures among them), which pass `tmux`. A flag and never
+        /// an environment variable, for `--boot-id-file`'s reasons: tests
         /// never change their own process's environment, and a variable is
         /// one more thing a systemd unit could inherit by accident.
-        #[arg(long, hide = true, value_enum, value_name = "KIND", default_value_t = NewTerminalsArg::Tmux)]
+        #[arg(long, hide = true, value_enum, value_name = "KIND", default_value_t = NewTerminalsArg::Host)]
         new_terminals: NewTerminalsArg,
     },
 }
@@ -2945,6 +2949,37 @@ mod tests {
             "farhelm helm setup manages systemd user units and only runs on Linux; on macOS run \
              farhelm-desktop, which starts its own helm and supervisor"
         );
+    }
+
+    /// A plain `farhelm supervisor run` creates new terminals in terminal
+    /// hosts, and `--new-terminals tmux` still asks for the old kind.
+    ///
+    /// Why: no shipped launch passes `--new-terminals` (`farhelm helm
+    /// setup`'s units, the desktop app and a hand-started supervisor run
+    /// the bare command), so this default IS the release's choice of
+    /// terminal for every user; a default that drifted back to tmux would
+    /// silently undo the move to terminal hosts, and one that lost the
+    /// `tmux` spelling would leave the harnesses that keep testing old
+    /// terminals no way to ask for them. Spec: parsing `supervisor run`
+    /// with no flag yields `NewTerminals::Host`; with `--new-terminals
+    /// tmux`, `NewTerminals::Tmux`; with `--new-terminals host`, `Host`.
+    #[farhelm_testtrace::test]
+    fn supervisor_run_defaults_to_terminal_hosts_and_can_still_ask_for_tmux() {
+        use farhelm_supervisor::service::NewTerminals;
+        let kind = |extra: &[&str]| {
+            let mut args = vec!["farhelm", "supervisor", "run", "--state-dir", "/s"];
+            args.extend_from_slice(extra);
+            let Cmd::Supervisor {
+                command: SupervisorCmd::Run { new_terminals, .. },
+            } = Cli::try_parse_from(args).expect("parses").command
+            else {
+                panic!("expected `supervisor run`");
+            };
+            new_terminals.kind()
+        };
+        assert_eq!(kind(&[]), NewTerminals::Host);
+        assert_eq!(kind(&["--new-terminals", "tmux"]), NewTerminals::Tmux);
+        assert_eq!(kind(&["--new-terminals", "host"]), NewTerminals::Host);
     }
 
     /// Both token verbs accept the state directory after the verb, matching

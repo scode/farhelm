@@ -208,7 +208,14 @@ return await (async () => {
     const sessionId = row.closest('[data-session-id]')?.dataset.sessionId;
     check(sessionId, 'owned terminal row has no session identity');
     row.click();
-    await wait(() => window.__farhelmTermReady && document.querySelector('.xterm-screen'), 'mounted DOM terminal');
+    // The app's sessions run in terminal hosts, drawn by the grid component,
+    // and this probe's terminal checks below read xterm.js (its theme, focus
+    // target, paste and input calls and buffer). Until they read the grid
+    // model instead (TODO.md, "The desktop smoke's appearance leg on grid
+    // terminals"), a grid terminal skips them and the leg checks everything
+    // else; an xterm.js terminal (a session from before terminal hosts) still
+    // gets them.
+    await wait(() => (window.__farhelmTermReady && document.querySelector('.xterm-screen')) || window.__farhelmGrid, 'mounted terminal');
     const open = async () => {
       document.querySelector('.app-settings-toggle').click();
       await wait(() => document.querySelector('.app-settings-dialog'), 'Settings dialog');
@@ -266,7 +273,7 @@ return await (async () => {
     // the round trip; reconnecting must not silently rescue a failed burst.
     const island = await wait(() => {
       const current = window.__farhelmIslands?.terminal;
-      if (!current?.term || current.ws?.readyState !== WebSocket.OPEN || !current.test?.replay?.revealed) return;
+      if (!(current?.term || current?.grid) || current.ws?.readyState !== WebSocket.OPEN || !current.test?.replay?.revealed) return;
       const url = new URL(current.ws.url, location.href);
       const parts = url.pathname.split('/');
       const matches = decodeURIComponent(parts[3] || '') === sessionId && parts[1] === 'api' && parts[2] === 'sessions'
@@ -274,6 +281,17 @@ return await (async () => {
         && !url.searchParams.has('tab');
       return matches ? current : null;
     }, 'live revealed terminal for the owned session');
+    // Which component the owned session's settled attachment holds, decided
+    // only now: the page can show one component before the stream notice
+    // picks the other.
+    evidence.terminalKind = island.grid ? 'grid' : 'xterm';
+    if (island.grid) {
+      evidence.terminalRoundtrip = {skipped: 'grid terminal: the input round trip and terminal theme checks read xterm.js (TODO.md)'};
+      const final = snapshot('terminal-final');
+      check(final.root === override, 'final opposite-system override was lost');
+      evidence.ok = true;
+      return evidence;
+    }
     const term = island.term, socket = island.ws;
     const sameAttachment = () => {
       check(window.__farhelmIslands?.terminal === island && island.term === term && island.ws === socket

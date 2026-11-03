@@ -2856,9 +2856,13 @@ async fn a_killed_supervisor_leaves_no_orphaned_sink_client() {
     let work = farhelm_teststate::tempdir().expect("workdir");
     let sock = state.path().join("tmux.sock");
     let mut supervisor_command = tokio::process::Command::new(farhelm_bin());
+    // Both supervisors here run with `--new-terminals tmux`: the subject is
+    // tmux's control-mode clients (the session sink and the reap of stale
+    // ones), which only a session in a tmux terminal has.
     supervisor_command
         .args(["supervisor", "run", "--state-dir"])
-        .arg(state.path());
+        .arg(state.path())
+        .args(["--new-terminals", "tmux"]);
     let _tmux = tmux_guard_for_supervisor_child(sock.clone(), supervisor_command.as_std());
 
     let mut supervisor = supervisor_command
@@ -3025,6 +3029,7 @@ async fn a_killed_supervisor_leaves_no_orphaned_sink_client() {
     let mut replacement = tokio::process::Command::new(farhelm_bin())
         .args(["supervisor", "run", "--state-dir"])
         .arg(state.path())
+        .args(["--new-terminals", "tmux"])
         .kill_on_drop(true)
         .spawn()
         .expect("spawn the replacement supervisor");
@@ -4125,8 +4130,8 @@ async fn a_new_tab_window_is_presized_to_the_agent_windows_geometry() {
 
 /// Every reply names the agent's and each tab's terminal as old (tmux) and
 /// reports that this supervisor does not create new terminals, when the
-/// supervisor's switch is off (the default, which every shipped supervisor
-/// runs until the switch-on release).
+/// supervisor's switch is off (the in-process default, and what
+/// `farhelm supervisor run --new-terminals tmux` gives a real supervisor).
 ///
 /// Why: the client shows the migration band and the session details'
 /// terminal kinds from exactly these fields, and a supervisor still on old

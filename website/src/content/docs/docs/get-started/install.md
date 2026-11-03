@@ -28,8 +28,10 @@ the copy it left behind.
 
 ## If the installer asks for tmux
 
-Farhelm runs every session inside tmux, and needs tmux 3.7c or newer on your Mac. The installer may tell you that your
-Mac has none, or one that is too old. If it does, install or upgrade it with Homebrew:
+Farhelm needs tmux 3.7c or newer on your Mac. New sessions no longer run inside tmux, but sessions started by earlier
+versions of Farhelm still do, so Farhelm keeps requiring it for now
+([Move sessions to new terminals](/docs/using/new-terminals/)). The installer may tell you that your Mac has none, or
+one that is too old. If it does, install or upgrade it with Homebrew:
 
 ```sh
 brew install tmux

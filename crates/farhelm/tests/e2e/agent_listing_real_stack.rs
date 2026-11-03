@@ -246,7 +246,7 @@ async fn await_cli_approval(
 #[farhelm_testtrace::test]
 async fn host_add_cli_reports_accepted_edited_destination_and_declined() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
-    let supervisor = supervisor_process().await;
+    let supervisor = supervisor_process_tmux().await;
     let helm = helm_process(supervisor.state.path(), None).await;
     let secret = device_secret(supervisor.state.path(), &helm.base).await;
     let client = client_with_secret(&secret);
@@ -347,7 +347,7 @@ async fn host_add_cli_reports_accepted_edited_destination_and_declined() {
 #[farhelm_testtrace::test]
 async fn browser_link_cli_waits_without_fencing_and_reports_each_answer() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
-    let supervisor = supervisor_process().await;
+    let supervisor = supervisor_process_tmux().await;
     let helm = helm_process(supervisor.state.path(), None).await;
     let secret = device_secret(supervisor.state.path(), &helm.base).await;
     let client = client_with_secret(&secret);
@@ -711,7 +711,7 @@ async fn the_shipped_agent_commands_are_answered_by_the_real_helm() {
     // harness slot, held for the whole test.
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
 
-    let supervisor = supervisor_process().await;
+    let supervisor = supervisor_process_tmux().await;
     let helm = helm_process(supervisor.state.path(), None).await;
     let secret = device_secret(supervisor.state.path(), &helm.base).await;
     let client = client_with_secret(&secret);
@@ -862,7 +862,7 @@ async fn the_shipped_agent_commands_are_answered_by_the_real_helm() {
 async fn the_shipped_agent_lifecycle_commands_act_through_the_real_helm() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
 
-    let supervisor = supervisor_process().await;
+    let supervisor = supervisor_process_tmux().await;
     let helm = helm_process(supervisor.state.path(), None).await;
     let secret = device_secret(supervisor.state.path(), &helm.base).await;
     let client = client_with_secret(&secret);
@@ -1053,7 +1053,7 @@ async fn the_shipped_agent_lifecycle_commands_act_through_the_real_helm() {
 async fn the_shipped_agent_creating_commands_act_through_the_real_helm() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
 
-    let supervisor = supervisor_process().await;
+    let supervisor = supervisor_process_tmux().await;
     let helm = helm_process(supervisor.state.path(), None).await;
     let secret = device_secret(supervisor.state.path(), &helm.base).await;
     let client = client_with_secret(&secret);
@@ -1331,7 +1331,7 @@ async fn the_shipped_agent_creating_commands_act_through_the_real_helm() {
 async fn an_authenticated_agent_clone_starts_a_structured_successor() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let fixture = fake_harness();
-    let supervisor = supervisor_process_with_env([
+    let supervisor = supervisor_process_tmux_with_env([
         ("HOME", fixture.login_home_with_fake_path()),
         ("SHELL", fixture.bash_shell()),
     ])
@@ -1483,7 +1483,7 @@ async fn an_authenticated_agent_clone_starts_a_structured_successor() {
 #[farhelm_testtrace::test]
 async fn keyed_agent_create_and_clone_need_fresh_approval_after_delete() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
-    let supervisor = supervisor_process().await;
+    let supervisor = supervisor_process_tmux().await;
     let helm = helm_process(supervisor.state.path(), None).await;
     let secret = device_secret(supervisor.state.path(), &helm.base).await;
     let client = client_with_secret(&secret);

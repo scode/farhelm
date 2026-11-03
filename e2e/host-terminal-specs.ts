@@ -25,8 +25,9 @@
 
 /**
  * The environment variable naming the kind of terminal the main suite's
- * stacks create: unset for the supervisor's default (tmux), `host` for
- * terminal hosts. Read by playwright.config.ts and, through the worker
+ * stacks create: unset for tmux (start-stack.sh pins the stacks' local
+ * supervisors to it, since a bare supervisor creates terminal hosts), `host`
+ * for terminal hosts. Read by playwright.config.ts and, through the worker
  * processes' inherited environment, by `onHostTerminals()` in
  * tests/helpers/term.ts. Nothing sets it from inside a test.
  */
