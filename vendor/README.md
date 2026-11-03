@@ -4,11 +4,10 @@ NOTE: Do not edit the code under `alacritty_terminal/` or `vte/` directly. Each 
 next to it in `patches/`, and the procedure below depends on that staying true. A change goes into the tree and the
 patch file together.
 
-The supervisor's terminal emulator runs on `alacritty_terminal` 0.26.0 and its parser `vte` 0.15.0. Both are used as
-published on crates.io except for a few small, additive patches: accessors that snapshot and restore need, caps on what
-hostile program output can make them store, and two history counters for the grid stream. The root `Cargo.toml` swaps
-these trees in for the crates.io versions with `[patch.crates-io]`; that section arrives with the first crate that
-depends on them, since until then cargo would warn on every build that the patch is unused.
+The supervisor's terminal emulator (`crates/farhelm-terminal-emulator/`) runs on `alacritty_terminal` 0.26.0 and its
+parser `vte` 0.15.0. Both are used as published on crates.io except for a few small patches: accessors that snapshot and
+restore need, caps on what hostile program output can make them store, two history counters for the grid stream, and two
+bug fixes. The root `Cargo.toml` swaps these trees in for the crates.io versions with `[patch.crates-io]`.
 
 ## What is here
 
@@ -46,7 +45,7 @@ files to say so, so every patched file starts with a `Modified for Farhelm` comm
 
 ## The patches
 
-Here's what each one changes and why. None changes behavior except the caps.
+Here's what each one changes and why. None changes behavior except the caps and the bug fixes.
 
 ### Snapshot accessors
 
@@ -315,6 +314,82 @@ published, unpatched crates.
 - Tests: `term::tests::history_counters`, `term::tests::history_counters_clear_and_reset` (vendored).
 - Upstream status: not yet reported. Upstreamable as is: additive.
 
+#### alacritty_terminal: a wide character on a grid one column wide
+
+- Upstream today: `Term::input` writes a wide character's spacer into the cell after it even when the grid is one column
+  wide and that cell does not exist, and panics.
+- Reproduction (1x3, wrapping on): `a 中 b`. Observed: panic, "index out of bounds: the len is 1 but the index is 1"
+  (`grid/mod.rs`). Expected: the narrow characters printed and the wide one dropped: rows `a`, `b`, blank. With wrapping
+  off (`ESC [ ? 7 l a 中 b`) upstream does not panic and already gives `b`, blank, blank; the patch keeps that.
+- xterm gives up on a character wider than the line (`charproc.c`, `dotext`: "give up - it is too big"). tmux ignores a
+  wide character that does not fit while wrapping is off (`screen-write.c`, `screen_write_cell`, "If this character
+  doesn't fit, ignore it"); with wrapping on, its `sx - width` arithmetic wraps around in a one-column pane, and the
+  character is written anyway (probed: a one-column tmux 3.7c pane shows `中`).
+- Fix: a wide character on a grid narrower than two columns is dropped, and the cursor does not move.
+- Why Farhelm needs it: one column is a valid terminal size (the terminal host accepts it), and the emulator stays the
+  size of the host's pty rather than widening itself, so any program's output could panic the supervisor's task.
+- Upstream code: `alacritty_terminal/src/term/mod.rs`, `Term::input` (the `Handler` implementation).
+- Tests: `term::tests::a_one_column_grid_drops_wide_characters` (vendored);
+  `a_one_column_terminal_drops_wide_characters`, `a_zero_size_becomes_one_cell` and
+  `narrow_terminals_survive_any_output` (`farhelm-terminal-emulator`, `tests/narrow.rs`).
+- Upstream status: not yet reported. Upstreamable as is (a panic fix); upstream may prefer printing a placeholder.
+
+#### alacritty_terminal: reflowing a wide character into one column
+
+- Upstream today: `Grid::shrink_columns` moves a wide character that does not fit at the end of a row to the next row.
+  At one column it fits on no row, so the reflow moves it on forever, allocating a row each time.
+- Reproduction (6x3, primary screen): `中文x`, then resize to 1x3. Observed: the resize never returns; in a release
+  build it reached a 3 GB address-space limit within 15 seconds and aborted on a failed allocation. Expected: the resize
+  returns, with the wide characters blanked.
+- xterm does not reflow on a resize (`screen.c`, `ScreenResize`). tmux's reflow puts a cell wider than the line on a
+  line of its own and moves on (`grid.c`, `grid_reflow_split`).
+- Fix: when shrinking to fewer than two columns, a wide character at the start of a row is replaced by a blank cell, and
+  its spacer loses its spacer flag, so the reflow advances.
+- Why Farhelm needs it: a viewer can resize a terminal to one column while it shows wide text.
+- Upstream code: `alacritty_terminal/src/grid/resize.rs`, `Grid::shrink_columns`.
+- Tests: `term::tests::a_one_column_grid_drops_wide_characters` (vendored, its resize half, on a timed thread);
+  `resizing_to_one_column_with_wide_characters` and `narrow_terminals_survive_any_output` (`tests/narrow.rs`, each
+  bounded to 10 seconds).
+- Upstream status: not yet reported. Upstreamable as is (a hang fix).
+
+#### vte: a UTF-8 character split across calls swallows the characters after it
+
+- Upstream today: when a call ends inside a multi-byte character, `advance_partial_utf8` copies up to three bytes from
+  the next call to complete it. If an invalid byte follows among them, it prints the completed character but reports
+  every valid byte it copied as consumed, so valid characters between it and the invalid byte are never printed.
+- Reproduction: `\xc3` in one call, then `\xa9 a \x80 b`. Observed: print `é`, execute `0x80`, print `b`; the `a` is
+  lost. Fed in one call: print `é`, print `a`, execute `0x80`, print `b`. Expected: the same as one call.
+- xterm decodes UTF-8 a byte at a time as it arrives (`ptydata.c`, `decodeUtf8`), and so does tmux (`input.c`,
+  `input_top_bit_set`), so where reads end cannot change what either shows.
+- Fix: consume only the completed character's bytes (`c.len_utf8() - old_bytes`), as the function's other path already
+  does; the remaining bytes are parsed normally.
+- Why Farhelm needs it: characters a program wrote silently disappeared from the live screen, but only when a read
+  happened to end inside the character before them, so a terminal rebuilt by feeding the same output in other reads
+  would show them, and the two would differ for good.
+- Upstream code: `vte/src/lib.rs`, `Parser::advance_partial_utf8`.
+- Tests: `tests::split_utf8_does_not_drop_the_characters_after_it` (vte); `the_cut_into_reads_does_not_matter`
+  (`farhelm-terminal-emulator`, `tests/boundary.rs`).
+- Upstream status: not yet reported. Upstreamable as is.
+
+#### vte: a split UTF-8 C1 control and REP (kept as upstream has it)
+
+- Upstream today: a C1 control encoded in UTF-8 (U+0080 to U+009F, `\xc2 \x80` to `\xc2 \x9f`) is executed when it
+  arrives in one call (`ground_dispatch`), but printed when it is split across two (`advance_partial_utf8`). alacritty
+  draws nothing for it either way, but `ansi::Processor` then remembers it as the character a later REP repeats.
+- Reproduction (10x1): `x \xc2 \x85 ESC [ 3 b`. Observed in one call: `xxxx`. Split after `\xc2`: `x`, since REP repeats
+  U+0085, which draws nothing. Expected: `xxxx` both ways.
+- xterm and tmux decode UTF-8 a byte at a time (previous record), so the cut cannot matter there; what each does with an
+  encoded C1 control was not checked.
+- Fix: none; kept as upstream behavior. A fix would dispatch the completed character the way the unsplit path does
+  (`ground_dispatch` on its UTF-8 encoding) in both arms of `advance_partial_utf8`.
+- Why Farhelm accepts it: it takes an encoded C1 control split across reads and then a REP, and the vendored patch is
+  kept to the bug that loses characters. The emulator documents it as the one known case where the cut into reads still
+  changes the terminal after a final flush (`Emulator::feed`).
+- Upstream code: `vte/src/lib.rs`, `Parser::advance_partial_utf8` and `Parser::ground_dispatch`.
+- Tests: `a_split_encoded_c1_control_changes_what_rep_repeats` (`farhelm-terminal-emulator`, `tests/boundary.rs`) pins
+  today's behavior.
+- Upstream status: not yet reported. Upstreamable as the one-line change above, if Farhelm or upstream wants it.
+
 ### History counters
 
 The grid stream sends scrollback to viewers as appended ranges and needs to know how many lines entered history since it
@@ -323,6 +398,31 @@ last looked. `Grid::lines_scrolled_into_history()` counts every line that scroll
 being erased, which a program does on its own with `CSI 3 J` or a full reset. Neither ever decreases. They do not
 describe a resize or reflow, which the embedder starts itself and has to treat as a change of shape. Both fields are
 skipped by serde and left out of `Grid`'s `PartialEq`, so serialized grids and grid comparisons are unchanged.
+
+### Bug fixes
+
+Two upstream bugs that ordinary program output reaches. Each fix is a few lines in the place the bug is.
+
+- A wide character on a grid one column wide. A wide character needs two cells, and upstream's `Term::input` writes its
+  spacer cell into the second column even when there is none, which panics with an index out of bounds; and
+  `Grid::shrink_columns`, reflowing a screen that holds wide characters down to one column, moves each wide character to
+  the next row, where it does not fit either, and repeats that forever, allocating rows until memory runs out. One
+  column is a valid size (the terminal host accepts it), and the emulator stays the size of the host's pty, so it cannot
+  widen itself to avoid this. `Term::input` now drops a wide character on a one-column grid without moving the cursor,
+  and the reflow blanks it and its spacer. tmux has no consistent behavior to copy here: it ignores a wide character
+  that does not fit only while wrapping is off, and with wrapping on, a one-column pane shows the character anyway.
+- A UTF-8 character split across two parser calls. When a call ends inside a multi-byte character, `vte`'s
+  `advance_partial_utf8` completes it from the next call's first bytes. If an invalid byte follows within those few
+  bytes, upstream printed the completed character but consumed the valid characters between it and the invalid byte
+  without printing them: characters the program wrote silently disappeared from the screen, and only when a read
+  happened to end inside the character before them, so a terminal rebuilt by feeding the same output in other reads
+  would keep showing them. It now consumes only the completed character's bytes, as its other path already did.
+
+  A related upstream behavior is left alone: a C1 control encoded in UTF-8 (U+0080 to U+009F) and split across two calls
+  is printed, where unsplit it is executed. alacritty draws nothing for it either way, but the parser then remembers it
+  as the character a later REP (`CSI Ps b`) repeats, so REP repeats nothing instead of the character before it. It takes
+  an encoded C1 control split across reads and then a REP to show, and the patch is kept to the bug that loses
+  characters.
 
 ## How the trees stay out of the workspace's checks
 
@@ -385,16 +485,18 @@ To check that a tree is upstream plus its patch:
 To upgrade to a new version:
 
 - Read upstream's changelog and the diff between the two versions for anything touching the patched code: the OSC buffer
-  and its dispatch in `vte/src/lib.rs`, `Processor` in `vte/src/ansi.rs`, `Cell::push_zerowidth`, `Term::set_hyperlink`,
-  `Term::set_title`, `Grid::scroll_up` and `Grid::clear_history`. A cap that upstream now enforces itself may make a
-  hunk unnecessary; a moved field may need the hunk rewritten.
+  and its dispatch and `advance_partial_utf8` in `vte/src/lib.rs`, `Processor` in `vte/src/ansi.rs`,
+  `Cell::push_zerowidth`, `Term::input`, `Term::set_hyperlink`, `Term::set_title`, `Grid::scroll_up`,
+  `Grid::shrink_columns` and `Grid::clear_history`. A cap that upstream now enforces itself may make a hunk unnecessary;
+  a moved field may need the hunk rewritten.
 - Unpack the new crate twice in the scratch directory, as `a/<name>` (left as published, minus `tests/` for
   `alacritty_terminal`) and `b/<name>`, and apply the old patch to `b` with `patch -p1 -d b`. Fix rejected hunks by
   hand, keeping each hunk small and marked `Farhelm patch`.
 - Regenerate the patch from the scratch directory with `git diff --no-index --no-prefix a/<name> b/<name>`, saved as
   `patches/<name>-<version>.diff` in place of the old file.
 - Replace `vendor/<name>/` with `b/<name>`, update the version pins in the crates that depend on it, the checksums and
-  commits above, and `THIRD_PARTY_NOTICES.md`, and run the tests above plus the supervisor's emulator tests. For an
+  commits above, and `THIRD_PARTY_NOTICES.md`, and run the tests above plus the emulator crate's
+  (`cargo nextest run -p farhelm-terminal-emulator`, recorded as `.agents/validation.md` gives it). For an
   `alacritty_terminal` upgrade, also start `pair-tests/Cargo.lock` again from a copy of the new crate's `Cargo.lock` and
   let one unlocked `cargo test` there adjust it.
 - A `vte` upgrade usually comes with an `alacritty_terminal` upgrade that requires it; upgrade them together.

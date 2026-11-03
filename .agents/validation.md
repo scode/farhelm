@@ -111,6 +111,19 @@ that its required systemd or SSH substrate ran.
   it without disturbing a shared machine", shows: loop-breaking mutants spin every test thread, and the hosts their
   tests start outlive the killed tests. Every surviving mutant is killed by a test or listed with its reason in that
   file.
+- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'terminal emulator' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p farhelm-terminal-emulator`
+  — the supervisor's terminal emulator (`crates/farhelm-terminal-emulator/`), run in-process with no pty, tmux or
+  network: the query-answer table against tmux 3.7c's recorded answers, side effects by feed mode (live, replay of seen
+  and of unseen output), the synchronized-output deadline on a hand-stepped clock (and its flush before a resize), the
+  snapshot split candidate on agent-shaped reads, a property test that whole, byte-at-a-time, chunked and
+  candidate-split feeding end in the same state once any open update is flushed, the handler's forwarding as a property
+  test against a bare `alacritty_terminal`, screen text and titles shaped like tmux's capture (tabs, modes 47 and 1047),
+  the mode accessors (mouse tracking resets as in tmux), the browser theme's colors, one-column terminals with wide
+  characters and resizes (each bounded to 10 seconds, so that a regression of the vendored reflow fix fails after about
+  1 GB of allocation instead of running until memory runs out), a screen full of tabs captured in linear time, and
+  hostile output through the vendored caps (combining floods, 8 MB OSC 52 and titles, long hyperlinks, a synchronized
+  update past vte's 2 MiB buffer). Seconds. Part of the workspace nextest run. Run it when the crate or anything under
+  `vendor/` changes.
 - `python3 scripts/record-test-run.py --kind development --selection 'vendored vte' --concurrency 'libtest default threads' --tmux none -- cargo test --manifest-path vendor/vte/Cargo.toml --features ansi`,
   `python3 scripts/record-test-run.py --kind development --selection 'vendored alacritty_terminal' --concurrency 'libtest default threads' --tmux none -- cargo test --locked --lib --manifest-path vendor/alacritty_terminal/Cargo.toml`
   and

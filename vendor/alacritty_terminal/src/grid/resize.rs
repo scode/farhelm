@@ -1,3 +1,6 @@
+// Modified for Farhelm: blanks a wide character that a reflow to one column
+// cannot hold. See vendor/README.md in the Farhelm repository.
+
 //! Grid resize and reflow.
 
 use std::cmp::{Ordering, max, min};
@@ -285,6 +288,17 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
                         }
                     },
                 };
+
+                // Farhelm patch: a grid one column wide cannot hold a wide
+                // character. The block below would move it to the next row,
+                // where it still does not fit, and repeat that forever while
+                // allocating rows. Blank the character and its spacer instead.
+                if columns < 2 && row[Column(0)].flags().contains(Flags::WIDE_CHAR) {
+                    row[Column(0)] = T::default();
+                    if let Some(spacer) = wrapped.first_mut() {
+                        spacer.flags_mut().remove(Flags::WIDE_CHAR_SPACER);
+                    }
+                }
 
                 // Insert spacer if a wide char would be wrapped into the last column.
                 if row.len() >= columns

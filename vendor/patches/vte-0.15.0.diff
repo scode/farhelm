@@ -111,18 +111,19 @@ index 592266e..b288439 100644
      #[cfg(feature = "std")]
      fn contrast() {
 diff --git a/vte/src/lib.rs b/vte/src/lib.rs
-index 1c69123..39725e5 100644
+index 1c69123..7eced20 100644
 --- a/vte/src/lib.rs
 +++ b/vte/src/lib.rs
-@@ -1,3 +1,7 @@
+@@ -1,3 +1,8 @@
 +// Modified for Farhelm: adds `is_ground()`, caps the buffered OSC payload
-+// (`OSC_PAYLOAD_LIMIT`) and reports a dropped OSC (`Perform::osc_overflow`).
-+// See vendor/README.md in the Farhelm repository.
++// (`OSC_PAYLOAD_LIMIT`), reports a dropped OSC (`Perform::osc_overflow`), and
++// stops a UTF-8 character split across calls from swallowing the characters
++// after it. See vendor/README.md in the Farhelm repository.
 +
  //! Parser for implementing virtual terminal emulators
  //!
  //! [`Parser`] is implemented according to [Paul Williams' ANSI parser state
-@@ -45,6 +49,23 @@ const MAX_INTERMEDIATES: usize = 2;
+@@ -45,6 +50,23 @@ const MAX_INTERMEDIATES: usize = 2;
  const MAX_OSC_PARAMS: usize = 16;
  const MAX_OSC_RAW: usize = 1024;
  
@@ -146,7 +147,7 @@ index 1c69123..39725e5 100644
  /// Parser for raw _VTE_ protocol which delegates actions to a [`Perform`]
  ///
  /// [`Perform`]: trait.Perform.html
-@@ -64,6 +85,13 @@ pub struct Parser<const OSC_RAW_BUF_SIZE: usize = MAX_OSC_RAW> {
+@@ -64,6 +86,13 @@ pub struct Parser<const OSC_RAW_BUF_SIZE: usize = MAX_OSC_RAW> {
      osc_raw: Vec<u8>,
      osc_params: [(usize, usize); MAX_OSC_PARAMS],
      osc_num_params: usize,
@@ -160,7 +161,7 @@ index 1c69123..39725e5 100644
      ignoring: bool,
      partial_utf8: [u8; 4],
      partial_utf8_len: usize,
-@@ -90,6 +118,18 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
+@@ -90,6 +119,18 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
          Default::default()
      }
  
@@ -179,7 +180,7 @@ index 1c69123..39725e5 100644
      #[inline]
      fn params(&self) -> &Params {
          &self.params
-@@ -548,14 +588,32 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
+@@ -548,14 +589,32 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
                  return;
              }
          }
@@ -213,7 +214,7 @@ index 1c69123..39725e5 100644
      }
  
      /// Reset escape sequence parameters and intermediates.
-@@ -588,6 +646,17 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
+@@ -588,6 +647,17 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
          }
      }
  
@@ -231,7 +232,20 @@ index 1c69123..39725e5 100644
      /// Advance the parser state from ground.
      ///
      /// The ground state is handled separately since it can only be left using
-@@ -791,6 +860,19 @@ pub trait Perform {
+@@ -698,7 +768,11 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
+                     performer.print(c);
+ 
+                     self.partial_utf8_len = 0;
+-                    return valid_bytes - old_bytes;
++                    // Farhelm patch: consume only this first character's bytes,
++                    // as the `Ok` arm above does. Upstream returned
++                    // `valid_bytes - old_bytes`, which also consumed the valid
++                    // characters copied in after it without printing them.
++                    return c.len_utf8() - old_bytes;
+                 }
+ 
+                 match err.error_len() {
+@@ -791,6 +865,19 @@ pub trait Perform {
      /// Dispatch an operating system command.
      fn osc_dispatch(&mut self, _params: &[&[u8]], _bell_terminated: bool) {}
  
@@ -251,7 +265,7 @@ index 1c69123..39725e5 100644
      /// A final character has arrived for a CSI sequence
      ///
      /// The `ignore` flag indicates that either more than two intermediates
-@@ -850,6 +932,8 @@ mod tests {
+@@ -850,6 +937,8 @@ mod tests {
      #[derive(Debug, PartialEq, Eq)]
      enum Sequence {
          Osc(Vec<Vec<u8>>, bool),
@@ -260,7 +274,7 @@ index 1c69123..39725e5 100644
          Csi(Vec<Vec<u16>>, Vec<u8>, bool, char),
          Esc(Vec<u8>, bool, u8),
          DcsHook(Vec<Vec<u16>>, Vec<u8>, bool, char),
-@@ -865,6 +949,12 @@ mod tests {
+@@ -865,6 +954,12 @@ mod tests {
              self.dispatched.push(Sequence::Osc(params, bell_terminated));
          }
  
@@ -273,14 +287,15 @@ index 1c69123..39725e5 100644
          fn csi_dispatch(&mut self, params: &Params, intermediates: &[u8], ignore: bool, c: char) {
              let params = params.iter().map(|subparam| subparam.to_vec()).collect();
              let intermediates = intermediates.to_vec();
-@@ -1539,4 +1629,150 @@ mod tests {
+@@ -1539,4 +1634,172 @@ mod tests {
          assert_eq!(dispatcher.dispatched[0], Sequence::Execute(0x18));
          assert_eq!(dispatcher.dispatched[1], Sequence::Execute(0x1A));
      }
 +
 +    // Farhelm patch tests. They run with `cargo test --manifest-path
-+    // vendor/vte/Cargo.toml` (vendor/README.md). The emulator's own tests in
-+    // the supervisor cover the same caps through the public API.
++    // vendor/vte/Cargo.toml` (vendor/README.md). The emulator crate's tests
++    // (`crates/farhelm-terminal-emulator/tests/hostile.rs`) cover the same
++    // caps through its public API.
 +
 +    /// Spec: `is_ground()` is true exactly between sequences: not inside an
 +    /// escape, CSI, OSC or DCS sequence, and not between the bytes of one
@@ -313,6 +328,27 @@ index 1c69123..39725e5 100644
 +            parser.advance(&mut dispatcher, bytes);
 +            assert_eq!(parser.is_ground(), *ground, "after {bytes:?}");
 +        }
++    }
++
++    /// Spec: a UTF-8 character split across two calls is printed, and so is
++    /// every character after it, even when an invalid byte follows within
++    /// the next three; the result is the same as from one call.
++    ///
++    /// Why: upstream printed the split character and silently dropped the
++    /// valid ones copied in after it (`advance_partial_utf8`), so what a
++    /// terminal showed depended on where reads happened to end.
++    #[test]
++    fn split_utf8_does_not_drop_the_characters_after_it() {
++        let mut whole = Dispatcher::default();
++        Parser::new().advance(&mut whole, b"\xc3\xa9a\x80b");
++
++        let mut split = Dispatcher::default();
++        let mut parser = Parser::new();
++        parser.advance(&mut split, b"\xc3");
++        parser.advance(&mut split, b"\xa9a\x80b");
++
++        assert_eq!(split.dispatched, whole.dispatched);
++        assert_eq!(split.dispatched[..2], [Sequence::Print('\u{e9}'), Sequence::Print('a')]);
 +    }
 +
 +    /// Spec: an OSC whose payload is exactly `OSC_PAYLOAD_LIMIT` bytes is

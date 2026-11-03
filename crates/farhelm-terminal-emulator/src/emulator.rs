@@ -1,0 +1,270 @@
+//! [`Emulator`]: one terminal's emulator, and the operations the supervisor
+//! drives it with.
+
+use std::time::Instant;
+
+use alacritty_terminal::Term;
+use alacritty_terminal::grid::Dimensions;
+use alacritty_terminal::term::{Config, Osc52};
+use alacritty_terminal::vte::ansi::{Processor, Timeout};
+
+use crate::effects::{self, Effects, FeedMode, Listener};
+use crate::modes::Modes;
+use crate::queries::QueryHandler;
+use crate::screen;
+use crate::sync::SyncClock;
+
+/// A terminal's size in character cells. `u16` like the terminal host's own
+/// sizes; a zero is treated as one.
+///
+/// One column is a valid size. A wide character cannot fit in it and is
+/// dropped (a vendored patch: upstream alacritty panics), and resizing a
+/// screen holding wide characters to one column blanks them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Size {
+    /// Cells per row.
+    pub columns: u16,
+    /// Rows on the screen, not counting history.
+    pub lines: u16,
+}
+
+impl Size {
+    /// alacritty's grid needs at least one cell each way; the terminal host
+    /// never reports less, but a zero must not panic the supervisor.
+    fn at_least_one_cell(self) -> Size {
+        Size {
+            columns: self.columns.max(1),
+            lines: self.lines.max(1),
+        }
+    }
+}
+
+impl Dimensions for Size {
+    fn total_lines(&self) -> usize {
+        self.screen_lines()
+    }
+
+    fn screen_lines(&self) -> usize {
+        usize::from(self.lines)
+    }
+
+    fn columns(&self) -> usize {
+        usize::from(self.columns)
+    }
+}
+
+/// One terminal's emulator: an `alacritty_terminal` [`Term`] and the vte
+/// parser that feeds it, with Farhelm's answers to terminal queries, side
+/// effects filtered by [`FeedMode`], a synchronized-output deadline on the
+/// caller's clock, and a clean-boundary check for snapshots.
+///
+/// It does no I/O and owns no timer. Its owner feeds it the program's output,
+/// writes the answers it produces to the program, wakes it at
+/// [`Emulator::sync_deadline`], and reads the screen, title and modes from it.
+pub struct Emulator {
+    term: Term<Listener>,
+    parser: Processor<SyncClock>,
+    /// The same queue `term` reports into (see `effects`).
+    listener: Listener,
+    /// Whether a synchronized update is open as far as the handler has seen,
+    /// for DECRQM 2026 (see `QueryHandler::sync_open`). Always false when the
+    /// emulator is clean, so a snapshot need not record it.
+    sync_open: bool,
+}
+
+impl Emulator {
+    /// An emulator in the state of a fresh terminal of `size`, keeping up to
+    /// `scrollback_lines` lines of history above the screen.
+    ///
+    /// The configuration is fixed, because it is part of what programs see:
+    /// the kitty keyboard protocol off (legacy key encoding, as in the browser
+    /// terminal today) and OSC 52 copy only (clipboard writes honored, reads
+    /// never answered). Both are alacritty's defaults; they are spelled out so
+    /// that a change of default upstream cannot change them.
+    pub fn new(size: Size, scrollback_lines: usize) -> Emulator {
+        let config = Config {
+            scrolling_history: scrollback_lines,
+            kitty_keyboard: false,
+            osc52: Osc52::OnlyCopy,
+            ..Config::default()
+        };
+        let listener = Listener::default();
+        Emulator {
+            term: Term::new(config, &size.at_least_one_cell(), listener.clone()),
+            parser: Processor::new(),
+            listener,
+            sync_open: false,
+        }
+    }
+
+    /// Interpret `bytes` of the program's output, received at `now`, and
+    /// deliver what that makes the terminal do to `effects`, as `mode`
+    /// allows.
+    ///
+    /// A synchronized update that was due to be flushed by `now` is flushed
+    /// first, so a late wake-up cannot let a stalled update absorb output
+    /// that arrived after its deadline.
+    ///
+    /// How the output is cut into feeds matters only while a synchronized
+    /// update is open. Once all of the output has been fed and any open
+    /// update flushed ([`Emulator::flush_sync`]), the terminal's state is the
+    /// same however it was cut. Before that, vte decides where an update ends
+    /// from each call as a whole, so whether an update is still open, and
+    /// what has been drawn, can depend on the cut, and on time through the
+    /// update's deadline. The one known exception is upstream vte's: a
+    /// UTF-8-encoded C1 control (U+0080 to U+009F) split across two feeds is
+    /// printed rather than executed, so a later REP (`CSI Ps b`) repeats it
+    /// instead of the character before it.
+    pub fn feed(&mut self, bytes: &[u8], now: Instant, mode: FeedMode, effects: &mut impl Effects) {
+        self.flush_sync_if_due(now, mode, effects);
+        let mut handler = QueryHandler {
+            term: &mut self.term,
+            listener: &self.listener,
+            sync_open: &mut self.sync_open,
+        };
+        self.parser.advance(&mut handler, bytes);
+        self.parser.sync_timeout().resolve(now);
+        effects::route(self.listener.take(), mode, effects);
+    }
+
+    /// When the open synchronized update must be drawn even though the
+    /// program has not ended it, or `None` when no update is open.
+    ///
+    /// vte gives a program 150 ms after an update starts (or restarts) to end
+    /// it. The owner wakes at this time and calls
+    /// [`Emulator::flush_sync_if_due`]; otherwise only the next feed flushes
+    /// an overdue update, and a program that went silent gets no next feed.
+    pub fn sync_deadline(&self) -> Option<Instant> {
+        self.parser.sync_timeout().deadline()
+    }
+
+    /// Flush the open synchronized update if its deadline is at or before
+    /// `now`, drawing what the program sent so far. Returns whether it did.
+    pub fn flush_sync_if_due(
+        &mut self,
+        now: Instant,
+        mode: FeedMode,
+        effects: &mut impl Effects,
+    ) -> bool {
+        match self.sync_deadline() {
+            Some(deadline) if deadline <= now => {
+                self.flush_sync(mode, effects);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Flush the open synchronized update now, if there is one.
+    ///
+    /// For when no more output can end it: the program exited, or a
+    /// recovering supervisor has replayed all the output there is. A frame is
+    /// then better drawn incomplete than not at all.
+    pub fn flush_sync(&mut self, mode: FeedMode, effects: &mut impl Effects) {
+        if !self.parser.sync_timeout().pending_timeout() {
+            return;
+        }
+        let mut handler = QueryHandler {
+            term: &mut self.term,
+            listener: &self.listener,
+            sync_open: &mut self.sync_open,
+        };
+        self.parser.stop_sync(&mut handler);
+        effects::route(self.listener.take(), mode, effects);
+    }
+
+    /// Change the terminal's size, reflowing as alacritty does, after
+    /// flushing an open synchronized update (delivering its effects to
+    /// `effects` as `mode` allows).
+    ///
+    /// Without the flush, whether an update's frame was drawn before or after
+    /// a resize would depend on timing: live, its deadline has usually
+    /// flushed it by the time the viewer resizes; in a replay of the journal,
+    /// where no time passes, it would still be held across the resize and
+    /// drawn at the new size. Flushing first makes both the same.
+    ///
+    /// So a resize during an open update draws that update's frame
+    /// incomplete, like the 150 ms safety flush does. This is an accepted
+    /// exception to "frames are not half-drawn except at the safety flush":
+    /// the program redraws after the resize anyway, and the flush is what
+    /// keeps a rebuilt terminal identical to the live one.
+    pub fn resize(&mut self, size: Size, mode: FeedMode, effects: &mut impl Effects) {
+        self.flush_sync(mode, effects);
+        self.term.resize(size.at_least_one_cell());
+    }
+
+    /// The terminal's current size.
+    pub fn size(&self) -> Size {
+        // The grid's dimensions came from a `Size`, so they fit in `u16`.
+        Size {
+            columns: self.term.columns() as u16,
+            lines: self.term.screen_lines() as u16,
+        }
+    }
+
+    /// Whether this is a clean boundary: the parser is between sequences with
+    /// no partial UTF-8 character, and no synchronized update is open.
+    ///
+    /// Only here does a snapshot of the emulator, plus the output that
+    /// follows, rebuild the same state; a fresh parser would misread the rest
+    /// of a sequence it never saw the start of. The parser being in its
+    /// ground state alone is not enough: right after an update starts the
+    /// parser is between sequences, but the update's bytes so far sit in a
+    /// buffer the terminal has not seen yet.
+    ///
+    /// To snapshot partway through a read, feed it up to
+    /// [`crate::snapshot_split_candidate`] and ask this.
+    pub fn is_clean(&self) -> bool {
+        self.parser.is_ground() && !self.parser.sync_timeout().pending_timeout()
+    }
+
+    /// How many bytes of an open synchronized update vte is holding. vte ends
+    /// an update early rather than let this reach 2 MiB.
+    pub fn sync_buffered_bytes(&self) -> usize {
+        self.parser.sync_bytes_count()
+    }
+
+    /// The program's current terminal modes.
+    pub fn modes(&self) -> Modes {
+        Modes::from_term_mode(*self.term.mode())
+    }
+
+    /// The visible screen as plain text, shaped like `tmux capture-pane -p`
+    /// output (see `screen`).
+    pub fn screen_text(&self) -> String {
+        screen::screen_text(&self.term)
+    }
+
+    /// The last `max_bytes` of [`Emulator::screen_text`] with trailing
+    /// whitespace trimmed: what the status sampler reads from tmux today.
+    pub fn screen_tail(&self, max_bytes: usize) -> String {
+        screen::screen_tail(&self.screen_text(), max_bytes).to_owned()
+    }
+
+    /// The title the program last set (OSC 0 or 2), or the empty string if it
+    /// set none or a full reset (RIS) cleared it.
+    ///
+    /// tmux reports a pane's title as `#{pane_title}`, and status detection
+    /// matches prefixes of it. These differences remain, none of them visible
+    /// to the prefixes it matches:
+    ///
+    /// - Before the program sets a title, tmux reports the host name.
+    /// - vte trims leading and trailing whitespace, which tmux keeps.
+    /// - tmux turns `#(` into `_(`, so that a title cannot run a command in
+    ///   tmux's own formats; this emulator keeps it.
+    /// - A title with invalid UTF-8: vte drops the `;`-separated parts that
+    ///   are invalid, where tmux (from its source) ignores the whole
+    ///   sequence and keeps the previous title.
+    /// - RIS clears the title here, as alacritty does; tmux keeps it.
+    ///
+    /// Titles are at most 4096 bytes (the vendored cap).
+    pub fn title(&self) -> &str {
+        self.term.title().unwrap_or("")
+    }
+
+    /// The alacritty terminal itself, for reading what the accessors above do
+    /// not cover: the grid and its history, cursor, colors.
+    pub fn term(&self) -> &Term<Listener> {
+        &self.term
+    }
+}
