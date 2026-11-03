@@ -128,7 +128,9 @@ pub(crate) enum Terminal {
     /// ([`crate::hosts::Liveness::Unavailable`]) answers every question
     /// here as "could not tell": an error from the probes, no evidence for
     /// status ([`super::status::PaneEvidence::Unattributed`]), and nothing
-    /// done to it (the plan's D-16).
+    /// done to it (the plan's D-16), except by an unconditional Delete,
+    /// which ends the session for good and the host with it
+    /// (`super::session_hosts`).
     Host(crate::hosts::HostTerminal),
 }
 

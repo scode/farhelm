@@ -12,7 +12,9 @@
 //! forks and is never started inside a test process.
 
 use super::*;
-use crate::hosts::terminal::test_host::{TestHost, adopt_test_host};
+use crate::hosts::terminal::test_host::{
+    TestHost, adopt_test_host, adopt_test_host_at, start_test_host_at,
+};
 use crate::hosts::{HostTerminal, Liveness};
 use crate::procs::ProcessIdentity;
 
@@ -913,4 +915,427 @@ async fn a_retry_finds_the_sessions_own_published_host() {
     let entry = sup.sessions.lock().await.get("s1").cloned().expect("entry");
     assert_eq!(entry.terminal, Some(Terminal::Host(host)));
     assert_eq!(test_host.received(), b"");
+}
+
+// ---- Delete with hosts it cannot read, cannot end, or that are not its own ----------
+
+/// Ask `sup` to delete `s1` under `guard`, through the control dispatcher.
+async fn delete_s1(sup: &Arc<Supervisor>, guard: farhelm_proto::DeleteGuard) -> ControlMsg {
+    control_reply(
+        sup,
+        ControlMsg::DeleteSession {
+            req_id: 1,
+            session_id: "s1".to_string(),
+            only_if_nothing_alive: guard.only_if_nothing_alive(),
+            only_if_agent_ended: guard.only_if_agent_ended(),
+            refuse_if_agent_request_in_flight: false,
+        },
+    )
+    .await
+}
+
+/// The message of a refused reply, failing the test on anything else.
+fn refusal(reply: ControlMsg, what: &str) -> String {
+    match reply {
+        ControlMsg::Error { message, .. } => message,
+        other => panic!("{what}: expected a refusal, got {other:?}"),
+    }
+}
+
+/// A socket path in `state`'s socket directory, where launch records name
+/// hosts.
+fn socket_in_state(state: &StateDir) -> std::path::PathBuf {
+    let hosts = crate::hosts::ensure_hosts_dir(state.path()).expect("the socket directory");
+    crate::hosts::HostName::random()
+        .expect("a socket name")
+        .socket_in(&hosts)
+}
+
+/// A tag naming `session_id`'s agent of launch generation 0.
+fn agent_tag(session_id: &str) -> Vec<u8> {
+    crate::hosts::HostTag {
+        session_id: session_id.to_string(),
+        created_ns: 1,
+        role: crate::hosts::HostRole::Agent { generation: 0 },
+    }
+    .encode()
+    .expect("encode the tag")
+}
+
+/// Write `s1`'s launch record for generation 0, naming `socket` and a first
+/// stage that has already ended, as a create leaves it once its host
+/// started.
+fn record_s1(state: &StateDir, socket: &Path) {
+    let mut ended = std::process::Command::new("true")
+        .spawn()
+        .expect("start a process to end");
+    let pid = ended.id();
+    ended.wait().expect("reap it");
+    let record = super::super::host_launch::LaunchHostRecord {
+        socket: crate::hosts::HostName::parse(socket.file_name().unwrap().to_str().unwrap())
+            .expect("a socket name this supervisor makes"),
+        starter: crate::hosts::HostProcess { pid, start: 0 },
+    };
+    let artifacts = crate::launch::LaunchArtifacts::for_launch(state.path(), "s1", 0);
+    std::fs::create_dir_all(artifacts.host().parent().unwrap()).expect("launch dir");
+    std::fs::write(artifacts.host(), record.encode()).expect("write the launch record");
+}
+
+/// Publish `s1` with no agent terminal, as a reload that has not found it
+/// leaves a session, over a row whose agent ran in tmux, so that only its
+/// launch records name a terminal host.
+async fn terminal_less_tmux_s1(sup: &Arc<Supervisor>) {
+    let mut row = host_row("s1", Path::new("/nonexistent/hosts/ABCDEFGH"));
+    row.terminal_kind = crate::store::TerminalKind::Tmux;
+    row.pane = "%1".to_string();
+    sup.store
+        .insert_session(row, None)
+        .await
+        .expect("insert the session's row");
+    sup.sessions.lock().await.insert(
+        "s1".to_string(),
+        Arc::new(entry_with(None, LastOutcome::Running)),
+    );
+}
+
+/// Whether the stand-in's child still runs (not a zombie, not gone).
+fn runs(pid: u32) -> bool {
+    matches!(
+        crate::procs::read_process(pid),
+        Ok(Some((_, _, crate::procs::ProcessState::Running)))
+    )
+}
+
+/// An unconditional Delete of a session whose agent host cannot be read
+/// still kills the agent's child from the identity pinned at adoption, and
+/// keeps the session when the host itself cannot be confirmed ended.
+///
+/// Why: an unreadable host says nothing about its child (the plan's D-16),
+/// but Delete ends the terminal for good, and refusing outright would leave
+/// a session nobody can delete whose host runs on. So Delete roots its
+/// sweep at the pinned child, which needs nothing from the host, and ends
+/// the host by the verified signal; and when even that cannot confirm the
+/// host ended, it must not report the session deleted while the host may
+/// still run. The stand-in's process is this test runner, which the
+/// verified signal never signals (its command line names no host socket),
+/// so this reaches the refusal deliberately. Spec: with the host made
+/// unreadable and its child running (premises checked), an unconditional
+/// Delete fails saying the session's terminal hosts could not be confirmed
+/// ended and the session was kept; the child is gone; the row and the
+/// session's entry remain.
+#[farhelm_testtrace::test]
+async fn delete_roots_an_unreadable_hosts_child_and_keeps_the_session_if_the_host_may_run() {
+    let state = StateDir::new();
+    let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        .await
+        .expect("supervisor");
+    let (entry, host, test_host) = host_entry().await;
+    sup.store
+        .insert_session(host_row("s1", test_host.socket()), None)
+        .await
+        .expect("insert the session's row");
+    sup.sessions
+        .lock()
+        .await
+        .insert("s1".to_string(), Arc::clone(&entry));
+    test_host.become_unreadable();
+    wait_for(&host, "the host becoming unreadable", |host| {
+        matches!(host.liveness(), Liveness::Unavailable { .. })
+    })
+    .await;
+    let child = test_host.child_pid();
+    assert!(runs(child), "premise: the host's child {child} runs");
+
+    let message = refusal(
+        delete_s1(&sup, farhelm_proto::DeleteGuard::Unconditional).await,
+        "a host that may still run keeps the session",
+    );
+    assert!(
+        message.contains("could not confirm that this session's terminal hosts ended"),
+        "{message}"
+    );
+    assert!(message.contains("kept for a retry"), "{message}");
+    assert!(
+        !runs(child),
+        "the child was killed from its pinned identity"
+    );
+    assert!(
+        sup.store.session("s1").await.expect("read").is_some(),
+        "the row is kept"
+    );
+    assert!(
+        sup.sessions.lock().await.contains_key("s1"),
+        "the session stays listed"
+    );
+}
+
+/// A recorded host of the session that cannot be read makes a guarded
+/// Delete refuse, and an unconditional one signal its process and keep the
+/// session when that cannot confirm the end.
+///
+/// Why: a launch record names a host of the session that may still run its
+/// agent; one that answers nothing usable cannot say whether it does (a
+/// guarded Delete must not kill what nobody agreed to), and an
+/// unconditional Delete must end it or keep the session. It ends the
+/// process the connection named, with the verified signal, and never
+/// whatever answers the socket on a new connection. The stand-in's process
+/// is this test runner, which the verified signal never signals (its
+/// command line names no host socket). Spec: with `s1` terminal-less over a
+/// tmux row and a launch record naming a stand-in in the socket directory
+/// that answers only with a protocol no supervisor speaks (premise: its
+/// child runs), a Delete guarded on the agent having ended is refused
+/// because the recorded host cannot be read, and the child still runs; an
+/// unconditional Delete fails naming the socket and saying the process is
+/// not the host there, having connected to the stand-in only to settle the
+/// record (two connections in all, one per Delete), and the row is kept.
+#[farhelm_testtrace::test]
+async fn a_recorded_host_that_cannot_be_read_is_guarded_and_signalled() {
+    let state = StateDir::new();
+    let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        .await
+        .expect("supervisor");
+    terminal_less_tmux_s1(&sup).await;
+    let socket = socket_in_state(&state);
+    let test_host = start_test_host_at(&socket, Vec::new(), true);
+    record_s1(&state, &socket);
+    let child = test_host.child_pid();
+    assert!(runs(child), "premise: the host's child {child} runs");
+
+    let refused = refusal(
+        delete_s1(&sup, farhelm_proto::DeleteGuard::AgentEnded).await,
+        "the guard cannot tell whether the recorded host's program runs",
+    );
+    assert!(refused.contains("cannot be read"), "{refused}");
+    assert!(runs(child), "a refused delete kills nothing");
+
+    let unconfirmed = refusal(
+        delete_s1(&sup, farhelm_proto::DeleteGuard::Unconditional).await,
+        "the host cannot be confirmed ended",
+    );
+    assert!(
+        unconfirmed.contains(&socket.display().to_string()),
+        "{unconfirmed}"
+    );
+    assert!(
+        unconfirmed.contains("is not the terminal host"),
+        "{unconfirmed}"
+    );
+    assert_eq!(
+        test_host.connections(),
+        2,
+        "each Delete connected once, to settle the record; the signal reconnected to nothing"
+    );
+    assert!(
+        sup.store.session("s1").await.expect("read").is_some(),
+        "the row is kept"
+    );
+}
+
+/// A launch record whose socket now serves another session's host makes
+/// Delete refuse and touch nothing.
+///
+/// Why: Delete acts only on what the session records, and a record is only
+/// as good as the socket still being the session's; a host whose tag names
+/// another session is someone else's terminal, which no Delete of this
+/// session may sweep, shut down or signal. Spec: with `s1` terminal-less
+/// over a tmux row and its launch record naming a stand-in tagged as `s2`'s
+/// agent (premise: its child runs), an unconditional Delete fails saying
+/// the socket serves a host for another terminal; the stand-in's child
+/// still runs, the stand-in was sent no input, and the row is kept.
+#[farhelm_testtrace::test]
+async fn a_record_naming_another_sessions_host_refuses_and_touches_nothing() {
+    let state = StateDir::new();
+    let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        .await
+        .expect("supervisor");
+    terminal_less_tmux_s1(&sup).await;
+    let socket = socket_in_state(&state);
+    let other = start_test_host_at(&socket, agent_tag("s2"), false);
+    record_s1(&state, &socket);
+    let child = other.child_pid();
+    assert!(runs(child), "premise: the other host's child {child} runs");
+
+    let refused = refusal(
+        delete_s1(&sup, farhelm_proto::DeleteGuard::Unconditional).await,
+        "a record naming another terminal's host refuses",
+    );
+    assert!(
+        refused.contains("serves a host for another terminal"),
+        "{refused}"
+    );
+    assert!(runs(child), "the other session's program was not swept");
+    assert_eq!(other.received(), b"", "nothing was written to it");
+    assert!(
+        sup.store.session("s1").await.expect("read").is_some(),
+        "the row is kept"
+    );
+}
+
+/// Ending a session's hosts is bounded as a whole: a host whose end does
+/// not finish in time is reported, the session is kept, and the delete
+/// lets go of everything it held.
+///
+/// Why: Delete holds the session's lifecycle claim and the supervisor-wide
+/// directory admission while it ends hosts; without an overall deadline one
+/// host whose end does not finish would hold every create and delete on the
+/// machine. The gate holds each end before it starts, standing in for an
+/// end that does not finish; it does not reproduce a process read stuck in
+/// the kernel, which no test can arrange (`hosts::process`, where such a
+/// read runs off the async workers behind the walk gate, says what then
+/// happens). Spec: with `s1` terminal-less over a tmux row, a launch record
+/// naming a stand-in tagged as `s1`'s agent, a gate that holds every host's
+/// end for good and a budget of one second, an unconditional Delete returns
+/// within ten seconds, failing with the host not confirmed ended within the
+/// budget; the row is kept; and afterwards both the directory admission and
+/// `s1`'s lifecycle claim can be taken at once.
+#[farhelm_testtrace::test]
+async fn deleting_a_sessions_hosts_gives_up_at_its_deadline_and_keeps_the_session() {
+    let state = StateDir::new();
+    let mut seams = SupervisorSeams::default();
+    let held: SinkReservationGate = Arc::new(|| Box::pin(std::future::pending()));
+    seams.faults.delete_host_end_gate = Some(held);
+    let sup = Supervisor::new_with_seams(
+        state.path(),
+        dummy_exe(),
+        SupervisorTimeouts {
+            delete_host_end: Duration::from_secs(1),
+            ..SupervisorTimeouts::default()
+        },
+        seams,
+    )
+    .await
+    .expect("supervisor");
+    terminal_less_tmux_s1(&sup).await;
+    let socket = socket_in_state(&state);
+    let _test_host = start_test_host_at(&socket, agent_tag("s1"), false);
+    record_s1(&state, &socket);
+
+    let started = std::time::Instant::now();
+    let message = refusal(
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            delete_s1(&sup, farhelm_proto::DeleteGuard::Unconditional),
+        )
+        .await
+        .expect("the delete returns within its budget"),
+        "a host whose end does not finish keeps the session",
+    );
+    assert!(started.elapsed() < Duration::from_secs(10));
+    assert!(
+        message.contains("was not confirmed ended within"),
+        "{message}"
+    );
+    assert!(
+        sup.store.session("s1").await.expect("read").is_some(),
+        "the row is kept"
+    );
+    assert!(
+        Arc::clone(&sup.working_copy_operations)
+            .try_lock_owned()
+            .is_ok(),
+        "the directory admission was released"
+    );
+    tokio::time::timeout(Duration::from_secs(1), sup.lifecycle_locks.claim("s1"))
+        .await
+        .expect("the lifecycle claim was released");
+}
+
+/// Delete leaves the launch record of the host its agent runtime holds to
+/// that runtime, and never connects to that host itself.
+///
+/// Why: every connection to a host takes it over, so one made to settle
+/// the record of the host a runtime holds would cut that runtime off,
+/// mid-shutdown at worst, and both would then fight for the host. A create
+/// leaves exactly such a record for every host it starts. The gate holds
+/// every end, so the only connections are the adoption's and any settling
+/// would make. Spec: with `s1`'s agent a stand-in host adopted from the
+/// state directory's socket directory, a launch record naming it, a gate
+/// that holds every host's end and a one-second budget, an unconditional
+/// Delete fails with the host not confirmed ended within the budget, and
+/// the stand-in has accepted exactly one connection, the adoption's.
+#[farhelm_testtrace::test]
+async fn delete_leaves_the_record_of_the_runtimes_host_to_the_runtime() {
+    let state = StateDir::new();
+    let mut seams = SupervisorSeams::default();
+    let held: SinkReservationGate = Arc::new(|| Box::pin(std::future::pending()));
+    seams.faults.delete_host_end_gate = Some(held);
+    let sup = Supervisor::new_with_seams(
+        state.path(),
+        dummy_exe(),
+        SupervisorTimeouts {
+            delete_host_end: Duration::from_secs(1),
+            ..SupervisorTimeouts::default()
+        },
+        seams,
+    )
+    .await
+    .expect("supervisor");
+    let socket = socket_in_state(&state);
+    let (host, test_host) = adopt_test_host_at(&socket, agent_tag("s1"), None).await;
+    sup.store
+        .insert_session(host_row("s1", &socket), None)
+        .await
+        .expect("insert the session's row");
+    sup.sessions.lock().await.insert(
+        "s1".to_string(),
+        Arc::new(entry_with(Some(Terminal::Host(host)), LastOutcome::Running)),
+    );
+    record_s1(&state, &socket);
+    assert_eq!(
+        test_host.connections(),
+        1,
+        "premise: the adoption connected"
+    );
+
+    let message = refusal(
+        delete_s1(&sup, farhelm_proto::DeleteGuard::Unconditional).await,
+        "the held end keeps the session",
+    );
+    assert!(
+        message.contains("was not confirmed ended within"),
+        "{message}"
+    );
+    assert_eq!(
+        test_host.connections(),
+        1,
+        "Delete connected to the host its runtime holds"
+    );
+}
+
+/// Delete removes the socket file a host killed outright left behind, once
+/// its record's socket is found gone.
+///
+/// Why: a host killed with SIGKILL leaves its socket file, and every later
+/// look at that socket costs the refusal window before it reads as gone;
+/// Delete is the last moment anything comes back for this session's host.
+/// The removal judges the socket gone again first. Spec: with `s1`
+/// terminal-less over a tmux row and its launch record naming a socket file
+/// nothing listens on any more (premise: the file is there), an
+/// unconditional Delete succeeds, the socket file is gone, and so is the
+/// row.
+#[farhelm_testtrace::test]
+async fn delete_removes_the_socket_file_a_killed_recorded_host_left() {
+    let state = StateDir::new();
+    let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        .await
+        .expect("supervisor");
+    terminal_less_tmux_s1(&sup).await;
+    let socket = socket_in_state(&state);
+    drop(std::os::unix::net::UnixListener::bind(&socket).expect("bind, then leave the file"));
+    record_s1(&state, &socket);
+    assert!(
+        socket.exists(),
+        "premise: the dead host's socket file is there"
+    );
+
+    let reply = delete_s1(&sup, farhelm_proto::DeleteGuard::Unconditional).await;
+    assert!(
+        matches!(reply, ControlMsg::SessionDeleted { .. }),
+        "{reply:?}"
+    );
+    assert!(!socket.exists(), "the leftover socket file was removed");
+    assert!(
+        sup.store.session("s1").await.expect("read").is_none(),
+        "the row is gone"
+    );
 }

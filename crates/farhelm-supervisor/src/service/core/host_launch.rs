@@ -53,12 +53,14 @@ use super::{
 };
 use crate::agent_kind::IntegrationSnapshot;
 use crate::hosts::{
-    AdoptError, Adoption, ChildSpec, ClientDeadlines, ConnectError, DEFAULT_JOURNAL_CAP, GoneHost,
-    HostConnection, HostName, HostOutcome, HostProcess, HostRole, HostTag, HostTerminal,
-    HostTerminalOptions, Liveness, SpawnError, StopLimits, Termination, terminate_verified,
+    AdoptError, Adoption, ChildSpec, ClientDeadlines, ClientError, ConnectError,
+    DEFAULT_JOURNAL_CAP, GoneHost, HostConnection, HostName, HostOutcome, HostProcess, HostRole,
+    HostTag, HostTerminal, HostTerminalOptions, Liveness, SpawnError, StopLimits, Termination,
+    terminate_verified,
 };
 use crate::launch::LaunchArtifacts;
 use crate::service::terminals::Terminal;
+use terminal_host::protocol::Info;
 
 // ---- The child's environment -------------------------------------------------------
 
@@ -271,7 +273,7 @@ impl LaunchHostRecord {
 /// The launch record at `path`: `Ok(None)` when there is none, an error
 /// when one is there and cannot be read, which says nothing about whether
 /// the launch started a host.
-async fn read_launch_record(path: &Path) -> anyhow::Result<Option<LaunchHostRecord>> {
+pub(crate) async fn read_launch_record(path: &Path) -> anyhow::Result<Option<LaunchHostRecord>> {
     match tokio::fs::read_to_string(path).await {
         Ok(text) => LaunchHostRecord::decode(&text)
             .map(Some)
@@ -280,6 +282,31 @@ async fn read_launch_record(path: &Path) -> anyhow::Result<Option<LaunchHostReco
         Err(error) => Err(anyhow::Error::new(error)
             .context(format!("reading the launch host record {}", path.display()))),
     }
+}
+
+/// What [`Supervisor::settle_launch_record`] found at a launch record's
+/// socket, once the recorded first stage can start nothing more.
+pub(crate) enum AtRecordedSocket {
+    /// Nothing serves the socket and no process names it: no host runs
+    /// there, and none can start.
+    Gone,
+    /// A host answered with its `Info`, over the connection that now owns
+    /// it (boxed, being much the largest variant). Whose host it is, its
+    /// tag says.
+    Answered {
+        connection: Box<HostConnection>,
+        info: Info,
+    },
+    /// Something may serve the socket but did not take the connection
+    /// usefully: busy, another protocol, no answer, or a process that still
+    /// names the socket without accepting. Its peer, when one is known, is
+    /// what the verified signal may end.
+    NoAnswer(ConnectError),
+    /// A host took the connection and did not report its `Info`.
+    NoInfo {
+        error: ClientError,
+        peer: Option<HostProcess>,
+    },
 }
 
 // ---- Starting a host ---------------------------------------------------------------
@@ -609,17 +636,33 @@ impl Supervisor {
         })
     }
 
-    /// End a host this supervisor started for a launch that is not being
-    /// published, confirm it ended, and remove the socket file it left.
+    /// End a host this supervisor started for `session_id`, or a host its
+    /// runtime holds for a session being deleted, confirm it ended, and
+    /// remove the socket file it left.
     ///
     /// Through its runtime's `Shutdown` first, when `host` is that runtime,
-    /// within [`RUNTIME_SHUTDOWN_BOUND`]; when that does not confirm the end,
-    /// the runtime is stopped ([`HostTerminal::abort`], so that it does not
-    /// take the host back mid-shutdown) and the host is ended by its socket,
-    /// the way `farhelm internal stop-terminal-hosts` ends one
-    /// ([`crate::hosts::end_host_at`]: `Shutdown` with take-over, then the
-    /// verified SIGTERM for a host the protocol cannot end), within that
-    /// command's per-host limits. Every wait here is bounded.
+    /// within [`RUNTIME_SHUTDOWN_BOUND`]. When that does not confirm the
+    /// end (the bound ran out, the runtime had already ended as running,
+    /// exited or unavailable, or an earlier caller stopped it), the runtime
+    /// is stopped ([`HostTerminal::abort`], so that it does not take the host
+    /// back) and the process it adopted ([`HostTerminal::adopted_process`],
+    /// fixed at adoption) is ended with the verified signal, without
+    /// connecting to the socket again: whatever serves the socket now may
+    /// have replaced the adopted host (renamed over its path), and is never
+    /// shut down or signalled for it. A replacement's socket file is left in
+    /// place ([`Self::remove_ended_socket`] removes only a socket nothing
+    /// serves).
+    ///
+    /// With no adopted process (no runtime, as for a start that may have
+    /// left a host the spawn could not hand over, or a platform that named
+    /// no peer), the socket is connected to, and only a host whose tag names
+    /// `session_id` is shut down, over that same connection; a host that
+    /// takes the connection but cannot be read is ended by the verified
+    /// signal to the process the connection named, which checks that its
+    /// command line names this socket. A host with another tag, or one whose
+    /// tag cannot be read, is never shut down, and nothing at all with no
+    /// process known is signalled: both are errors. Every wait here is
+    /// bounded.
     ///
     /// Ending the host closes its pty, which hangs up the child; the
     /// caller's process sweep is what reaches descendants that outlive the
@@ -627,10 +670,11 @@ impl Supervisor {
     ///
     /// The caller must not hold [`Self::host_scan`]: removing the socket a
     /// signal left takes it exclusively.
-    pub(super) async fn end_launch_host(
+    pub(crate) async fn end_launch_host(
         &self,
         host: Option<&HostTerminal>,
         socket: &Path,
+        session_id: &str,
     ) -> Result<(), String> {
         if let Some(host) = host {
             match tokio::time::timeout(RUNTIME_SHUTDOWN_BOUND, host.shutdown()).await {
@@ -644,23 +688,98 @@ impl Supervisor {
                 }
                 Ok(Ok(report)) => warn!(
                     socket = %socket.display(), goodbye = report.goodbye,
-                    "a launch's terminal host was not confirmed ended after Shutdown; \
-                     ending it by its socket"
+                    "a terminal host was not confirmed ended after Shutdown; ending the \
+                     process its runtime adopted"
                 ),
                 Ok(Err(liveness)) => warn!(
                     socket = %socket.display(), ?liveness,
-                    "a launch's terminal host can no longer be reached through its runtime; \
-                     ending it by its socket"
+                    "a terminal host can no longer be ended through its runtime; ending the \
+                     process its runtime adopted"
                 ),
                 Err(_) => warn!(
                     socket = %socket.display(), bound = ?RUNTIME_SHUTDOWN_BOUND,
-                    "a launch's terminal host runtime did not finish its Shutdown in time; \
-                     ending the host by its socket"
+                    "a terminal host runtime did not finish its Shutdown in time; ending the \
+                     process it adopted"
                 ),
             }
             host.abort();
+            if let Some(adopted) = host.adopted_process() {
+                return self.end_adopted_process(adopted, socket).await;
+            }
         }
-        match crate::hosts::end_host_at(socket, StopLimits::default()).await {
+        self.end_host_tagged_for(socket, session_id).await
+    }
+
+    /// End `adopted`, the process a runtime adopted as the host on `socket`,
+    /// with the verified signal and nothing else (see
+    /// [`Self::end_launch_host`]): ended once that process is seen gone,
+    /// whether by the signal or before it. Its socket file is removed only if
+    /// nothing serves it now.
+    async fn end_adopted_process(&self, adopted: HostProcess, socket: &Path) -> Result<(), String> {
+        match terminate_verified(&adopted, socket).await {
+            Ok(Termination::AlreadyGone | Termination::Terminated | Termination::Killed) => {
+                self.remove_ended_socket(socket).await;
+                Ok(())
+            }
+            Ok(Termination::StillRunning) => Err(format!(
+                "the terminal host's process {} survived SIGTERM and SIGKILL",
+                adopted.pid
+            )),
+            Err(error) => Err(format!(
+                "the terminal host's process {} could not be ended: {error}",
+                adopted.pid
+            )),
+        }
+    }
+
+    /// End the host at `socket` with no adopted process to go by (see
+    /// [`Self::end_launch_host`]): `Shutdown` only to a host whose tag
+    /// names `session_id`, over the connection that read the tag; the
+    /// verified signal to the connection's process for one that cannot be
+    /// read; gone when nothing serves the socket.
+    async fn end_host_tagged_for(&self, socket: &Path, session_id: &str) -> Result<(), String> {
+        let limits = StopLimits::default();
+        let outcome = match HostConnection::connect_with(socket, limits.client).await {
+            Err(ConnectError::Gone(gone)) => {
+                HostOutcome::Stopped(crate::hosts::Stopped::Gone(gone))
+            }
+            Err(error @ (ConnectError::Busy { peer } | ConnectError::Unavailable { peer, .. })) => {
+                match peer {
+                    Some(peer) => {
+                        crate::hosts::stop::signal(&peer, socket, &error.to_string(), limits.client)
+                            .await
+                    }
+                    None => {
+                        HostOutcome::Unconfirmed(format!("{error}, and its process is unknown"))
+                    }
+                }
+            }
+            Ok(mut connection) => match connection.info().await {
+                Ok(info) => match HostTag::decode(&info.tag) {
+                    Ok(tag) if tag.session_id == session_id => {
+                        crate::hosts::stop::shut_down(connection, socket, limits).await
+                    }
+                    Ok(tag) => HostOutcome::Unconfirmed(format!(
+                        "it is served by a host for another terminal ({tag:?}), which was left \
+                         alone"
+                    )),
+                    Err(unreadable) => HostOutcome::Unconfirmed(format!(
+                        "it is served by a host whose tag cannot be read ({unreadable}), which \
+                         was left alone"
+                    )),
+                },
+                Err(error) => match connection.peer() {
+                    Some(peer) => {
+                        crate::hosts::stop::signal(&peer, socket, &error.to_string(), limits.client)
+                            .await
+                    }
+                    None => HostOutcome::Unconfirmed(format!(
+                        "it did not report itself ({error}), and its process is unknown"
+                    )),
+                },
+            },
+        };
+        match outcome {
             HostOutcome::Stopped(_) => {
                 self.remove_ended_socket(socket).await;
                 Ok(())
@@ -677,7 +796,7 @@ impl Supervisor {
     /// [`Self::host_scan`] held exclusively, as that removal requires (no
     /// spawn in the directory meanwhile). Best effort: a file it cannot
     /// remove is only logged, since the host is gone either way.
-    async fn remove_ended_socket(&self, socket: &Path) {
+    pub(crate) async fn remove_ended_socket(&self, socket: &Path) {
         let _no_spawns = self.host_scan.write().await;
         let gone = match GoneHost::ended_at(socket, ClientDeadlines::default()) {
             Ok(Some(gone)) => gone,
@@ -748,65 +867,33 @@ impl Supervisor {
             Ok(None) => return LaunchEvidence::Absent,
             Err(error) => return LaunchEvidence::Unresolved(error),
         };
-        let socket = match std::path::absolute(&self.state_dir) {
-            Ok(state_dir) => record
-                .socket
-                .socket_in(&crate::hosts::hosts_dir(&state_dir)),
-            Err(error) => {
-                return LaunchEvidence::Unresolved(
-                    anyhow::Error::new(error).context("resolving the state directory"),
-                );
-            }
+        let socket = match self.recorded_socket(&record) {
+            Ok(socket) => socket,
+            Err(error) => return LaunchEvidence::Unresolved(error),
         };
-        if let Err(why) = self.fence_starter(record.starter, &socket).await {
-            return LaunchEvidence::Unresolved(anyhow::anyhow!(
-                "the interrupted launch's terminal host start (process {}) could not be \
-                 confirmed ended: {why}",
-                record.starter.pid
-            ));
-        }
-        // The client judges a socket gone only while no live process names
-        // it (`hosts::client`, "Never gone while a host process serves the
-        // socket"); one that does, with nothing listening yet, is
-        // "not accepting", which is what a second stage still on its way
-        // to binding looks like.
-        let strays_until = tokio::time::Instant::now() + STRAY_WAIT;
-        let mut announced = false;
-        let mut connection = loop {
-            match HostConnection::connect(&socket).await {
-                Ok(connection) => break connection,
-                Err(ConnectError::Gone(_)) => return LaunchEvidence::Absent,
-                Err(ConnectError::Unavailable {
-                    reason: crate::hosts::Unavailable::NotAccepting,
-                    peer,
-                }) if tokio::time::Instant::now() < strays_until => {
-                    tracing::debug!(socket = %socket.display(), ?peer,
-                        "a process still names the interrupted launch's host socket; waiting");
-                    if !announced {
-                        announced = true;
-                        if let Some(waiting) = self.seams.faults.launch_stray_waiting() {
-                            waiting();
-                        }
-                    }
-                    tokio::time::sleep(STARTER_POLL).await;
-                }
-                Err(error) => {
-                    return LaunchEvidence::Unresolved(anyhow::Error::new(error).context(format!(
-                        "the interrupted launch's terminal host at {} cannot be read, or a \
-                             process that may yet start it still names its socket",
-                        socket.display()
-                    )));
-                }
+        let info = match self.settle_launch_record(&record, &socket).await {
+            Err(why) => {
+                return LaunchEvidence::Unresolved(anyhow::anyhow!(
+                    "the interrupted launch's terminal host start (process {}) could not be \
+                     confirmed ended: {why}",
+                    record.starter.pid
+                ));
             }
-        };
-        let info = match connection.info().await {
-            Ok(info) => info,
-            Err(error) => {
+            Ok(AtRecordedSocket::Gone) => return LaunchEvidence::Absent,
+            Ok(AtRecordedSocket::NoAnswer(error)) => {
+                return LaunchEvidence::Unresolved(anyhow::Error::new(error).context(format!(
+                    "the interrupted launch's terminal host at {} cannot be read, or a \
+                         process that may yet start it still names its socket",
+                    socket.display()
+                )));
+            }
+            Ok(AtRecordedSocket::NoInfo { error, .. }) => {
                 return LaunchEvidence::Unresolved(anyhow::Error::new(error).context(format!(
                     "the interrupted launch's terminal host at {} did not report itself",
                     socket.display()
                 )));
             }
+            Ok(AtRecordedSocket::Answered { info, .. }) => info,
         };
         match HostTag::decode(&info.tag) {
             Ok(tag)
@@ -827,6 +914,78 @@ impl Supervisor {
                     socket.display()
                 )))
             }
+        }
+    }
+
+    /// The full path of the socket `record` names, in this supervisor's
+    /// socket directory, spelled absolute as the spawn spells it (which the
+    /// verified signal compares byte for byte).
+    pub(crate) fn recorded_socket(&self, record: &LaunchHostRecord) -> anyhow::Result<PathBuf> {
+        let state_dir = std::path::absolute(&self.state_dir)
+            .map_err(|error| anyhow::Error::new(error).context("resolving the state directory"))?;
+        Ok(record
+            .socket
+            .socket_in(&crate::hosts::hosts_dir(&state_dir)))
+    }
+
+    /// Settle what a launch record's start left at its socket, for a caller
+    /// that holds no runtime for it: a retried create
+    /// ([`Self::host_launch_evidence`]) and Delete (`service::session_hosts`).
+    ///
+    /// First the recorded first stage is fenced ([`Self::fence_starter`]:
+    /// waited for, then ended with the verified signal), so that it cannot
+    /// start a host after this answers; `Err` with why when it may still run.
+    /// Then the socket is connected to (which takes over any host there). A
+    /// socket nothing serves is not yet [`AtRecordedSocket::Gone`] while a
+    /// live process still names it on its command line: a second stage the
+    /// first stage forked before it ended still binds the socket and starts
+    /// the child before its readiness report finds the first stage gone and
+    /// it ends both, so the socket is looked at again for up to
+    /// [`STRAY_WAIT`] while such a process remains, and one that stays is
+    /// [`AtRecordedSocket::NoAnswer`] with that process as its peer.
+    pub(crate) async fn settle_launch_record(
+        &self,
+        record: &LaunchHostRecord,
+        socket: &Path,
+    ) -> Result<AtRecordedSocket, String> {
+        self.fence_starter(record.starter, socket).await?;
+        // The client judges a socket gone only while no live process names
+        // it (`hosts::client`, "Never gone while a host process serves the
+        // socket"); one that does, with nothing listening yet, is
+        // "not accepting", which is what a second stage still on its way
+        // to binding looks like.
+        let strays_until = tokio::time::Instant::now() + STRAY_WAIT;
+        let mut announced = false;
+        let mut connection = loop {
+            match HostConnection::connect(socket).await {
+                Ok(connection) => break connection,
+                Err(ConnectError::Gone(_)) => return Ok(AtRecordedSocket::Gone),
+                Err(ConnectError::Unavailable {
+                    reason: crate::hosts::Unavailable::NotAccepting,
+                    peer,
+                }) if tokio::time::Instant::now() < strays_until => {
+                    tracing::debug!(socket = %socket.display(), ?peer,
+                        "a process still names a recorded host socket; waiting");
+                    if !announced {
+                        announced = true;
+                        if let Some(waiting) = self.seams.faults.launch_stray_waiting() {
+                            waiting();
+                        }
+                    }
+                    tokio::time::sleep(STARTER_POLL).await;
+                }
+                Err(error) => return Ok(AtRecordedSocket::NoAnswer(error)),
+            }
+        };
+        match connection.info().await {
+            Ok(info) => Ok(AtRecordedSocket::Answered {
+                connection: Box::new(connection),
+                info,
+            }),
+            Err(error) => Ok(AtRecordedSocket::NoInfo {
+                error,
+                peer: connection.peer(),
+            }),
         }
     }
 

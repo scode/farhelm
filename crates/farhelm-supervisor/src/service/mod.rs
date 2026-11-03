@@ -77,6 +77,11 @@
 //! with each other; see their own module docs for what each one is holding
 //! together.
 //!
+//! `session_hosts` is `teardown`'s helper for terminal hosts: which hosts are
+//! a session's (its agent's runtime and its launch records, never a scan),
+//! the roots their children give Delete's sweep, and ending each host
+//! afterwards. Delete's guard asks it about live agents and open tabs too.
+//!
 //! `channels` owns each connection's routes and id history. The read loop and
 //! allocating handlers consult it at their existing validation boundaries, so
 //! sharing the allocation policy does not reorder protocol refusals.
@@ -106,6 +111,7 @@ pub(crate) mod notifications;
 mod report_files;
 mod report_watch;
 mod request_modes;
+mod session_hosts;
 mod spare_builder;
 mod status;
 mod sweep;

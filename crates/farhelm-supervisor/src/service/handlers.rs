@@ -1241,7 +1241,7 @@ async fn handle_delete_session(
             // Checked under the lifecycle claim, so nothing can relaunch the
             // agent or open a tab between this answer and the teardown it
             // guards. See `farhelm_proto::DeleteGuard`.
-            if let Some(alive) = mutation_sup
+            let (alive, hosts) = mutation_sup
                 .still_alive_for_delete(&entry, guard)
                 .await
                 .map_err(|error| {
@@ -1252,8 +1252,8 @@ async fn handle_delete_session(
                              nothing was deleted: {error:#}"
                         ),
                     )
-                })?
-            {
+                })?;
+            if let Some(alive) = alive {
                 return Err(RequestError::new(
                     ErrorKind::Conflict,
                     format!(
@@ -1263,7 +1263,7 @@ async fn handle_delete_session(
                 ));
             }
             mutation_sup
-                .teardown_session(&entry, &mutation_id, _directory_admission)
+                .teardown_session_with_hosts(&entry, &mutation_id, _directory_admission, hosts)
                 .await
                 .map_err(|error| {
                 let message = match error {
@@ -1279,6 +1279,14 @@ async fn handle_delete_session(
                          not be enumerated, so nothing was deleted: {error:#}"
                     ),
                     TeardownError::Sweep(error) => format!("killing process tree: {error:#}"),
+                    TeardownError::HostDiscovery(error) => format!(
+                        "could not find this session's terminal hosts, so nothing was deleted: \
+                         {error:#}"
+                    ),
+                    TeardownError::HostShutdown(message) => format!(
+                        "could not confirm that this session's terminal hosts ended, so the \
+                         session was kept for a retry: {message}"
+                    ),
                     TeardownError::FailClosed(message) => message,
                 };
                 RequestError::new(ErrorKind::Internal, message)

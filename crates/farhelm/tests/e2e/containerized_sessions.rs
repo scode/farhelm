@@ -1404,8 +1404,9 @@ async fn wait_for_exit(h: &Harness, id: &str) {
 /// `farhelm`), a containerized fake Claude behind a wrapper prefix starts;
 /// its ready line reaches the host's screen, the row is a host row and the
 /// container runs; Stop leaves the container exited and the host process
-/// running; Delete removes the container. The test then ends the host,
-/// which Delete does not yet do.
+/// running; Delete removes the container and ends the host process (Delete
+/// ends a session's terminal hosts since the change that made it do so; this
+/// test once ended the host itself afterwards, which then found it gone).
 #[farhelm_testtrace::test]
 async fn podman_agent_runs_from_a_terminal_host() {
     use std::os::unix::fs::PermissionsExt;
@@ -1504,10 +1505,8 @@ async fn podman_agent_runs_from_a_terminal_host() {
             .code(),
         Some(1)
     );
-    let report = tokio::time::timeout(Duration::from_secs(15), host.shutdown())
-        .await
-        .expect("the host's shutdown finishes in time")
-        .expect("the runtime was still running the host");
-    assert!(report.ended, "the host ended: {report:?}");
+    // Delete returns once it has confirmed the session's hosts ended; the
+    // short wait only covers the process table catching up with that.
+    wait_until_pid_gone(host_pid, 15).await;
     server.abort();
 }

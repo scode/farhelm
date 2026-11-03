@@ -1371,6 +1371,98 @@ async fn a_retry_ends_an_interrupted_first_stage_that_does_not_finish() {
     end_runtime(&host, pid).await;
 }
 
+/// An unconditional Delete of a session whose interrupted create left a
+/// first stage holding its spec, not yet bound, fences that first stage
+/// before it reports the session deleted.
+///
+/// Why: a supervisor that dies after its host's first stage has the spec
+/// leaves a first stage that can still start the host and agent on its
+/// own, with no socket bound yet. A Delete that looked only for sockets
+/// would find nothing, delete the session, and let that first stage start
+/// an agent nothing lists. The session's launch record names it, and Delete
+/// fences it as a retried create does. Spec: with a create interrupted after
+/// its first stage took the spec (held, and never released), and the
+/// supervisor restarted on the same state (premises: the recorded first
+/// stage runs and no socket exists), an unconditional delete succeeds; when
+/// it returns the first stage is gone, no host socket exists, no host
+/// process runs, and the agent never started.
+#[farhelm_testtrace::test]
+async fn deleting_a_session_fences_its_unbound_recorded_start() {
+    let state = farhelm_teststate::tempdir().expect("state");
+    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
+    let fixture = farhelm_teststate::tempdir().expect("fixture directory");
+    let gate = fixture.path().join("gate");
+    let work = farhelm_teststate::tempdir().expect("workdir");
+    let runs = work.path().join("runs");
+    let sup = Supervisor::new_with_seams(
+        state.path(),
+        farhelm_bin().into(),
+        suite_timeouts(),
+        interrupted_seams(fixture.path(), &gate, None),
+    )
+    .await
+    .expect("supervisor");
+    let client = connect_client(&sup).await;
+    client
+        .create_session_with_key(
+            work.path().to_str().unwrap(),
+            &counted_agent(&runs),
+            None,
+            80,
+            24,
+            Some("deleted-start".to_string()),
+        )
+        .await
+        .expect_err("the interrupted attempt fails");
+    let id = SessionStore::open(&state.path().join("supervisor.db"), false)
+        .await
+        .unwrap()
+        .load_all()
+        .await
+        .unwrap()
+        .pop()
+        .expect("the launching row")
+        .id;
+    let record = std::fs::read_to_string(state.path().join("launch").join(format!("{id}.0.host")))
+        .expect("the launch's host record");
+    let starter: u32 = record
+        .lines()
+        .find_map(|line| line.strip_prefix("starter "))
+        .and_then(|rest| rest.split(' ').next())
+        .and_then(|pid| pid.parse().ok())
+        .expect("the record names its first stage");
+    let sup = crate::create_idempotency::handoff_to_new_supervisor_with_seams(
+        state.path(),
+        sup,
+        client,
+        host_seams(),
+    )
+    .await;
+    assert!(
+        !process_is_gone(starter),
+        "premise: the first stage is held"
+    );
+    let socket_count = || {
+        std::fs::read_dir(state.path().join("hosts"))
+            .map(|entries| entries.count())
+            .unwrap_or(0)
+    };
+    assert_eq!(socket_count(), 0, "premise: no socket yet");
+
+    connect_client(&sup)
+        .await
+        .delete_session(&id)
+        .await
+        .expect("delete");
+    assert!(process_is_gone(starter), "the held first stage was ended");
+    assert!(
+        host_processes_in(state.path()).is_empty(),
+        "nothing that names a host socket runs after the delete"
+    );
+    assert_eq!(socket_count(), 0, "no host socket exists");
+    assert!(!runs.exists(), "the agent never started");
+}
+
 /// A create of `session`'s kind interrupted after its launching row, then
 /// retried by a supervisor with the switch the other way: the retry's
 /// session, and the supervisor that ran it (with its harness pieces).
@@ -1868,6 +1960,145 @@ async fn ending_a_host_whose_runtime_is_encoding_falls_back_in_bounded_time() {
     );
     gate.open();
     assert!(!gate.expired(), "the held encode's gate ran out");
+}
+
+/// Delete of a session whose agent's runtime is held in a snapshot encode
+/// ends the host that runtime adopted by its process, after another host
+/// was renamed over its socket before the runtime could notice, and
+/// neither shuts down nor signals that other host.
+///
+/// Why: both reviews' finding on round 3. A runtime held in an encode takes
+/// up no shutdown, so Delete's end falls back after the runtime's 15 s
+/// bound; a fallback that connected to the socket again would shut down
+/// whatever answers there (the renamed-over host, someone else's terminal)
+/// and report the session's own host ended while it still runs. The
+/// fallback goes by the process the runtime adopted, which a rename cannot
+/// change. Spec: with the switch on, every encode of a new host's runtime
+/// held at an encode gate and a checkpoint due after any output, a created
+/// session whose runtime has an encode at the gate (premise), and another
+/// session's host started and its socket renamed over the agent host's
+/// while both run (premise), an unconditional delete succeeds; when it
+/// returns the agent's host is gone, the other host still runs and answers
+/// at that socket with its own tag, and the session is no longer listed;
+/// and it does so while the encode is still held (the gate has let no
+/// encode past, which a Delete that waited for the encode would show) and
+/// only after the runtime's 15 s bound ran out (so the fallback ran). The
+/// gate is opened at the end.
+#[farhelm_testtrace::test(flavor = "multi_thread")]
+async fn delete_ends_an_encoding_runtimes_host_by_its_process_after_a_rename() {
+    use farhelm_supervisor::hosts::terminal::EncodeGate;
+    let gate = EncodeGate::closed();
+    let held = gate.clone();
+    let h = harness_with_seams(
+        SupervisorTimeouts::default(),
+        SupervisorSeams {
+            faults: FaultHooks {
+                host_terminal_options: Some(Arc::new(move |options| {
+                    options.encode_gate = Some(held.clone());
+                    options.checkpoints = farhelm_supervisor::hosts::CheckpointPolicy {
+                        min_bytes: 1,
+                        max_bytes: 1,
+                    };
+                })),
+                ..FaultHooks::default()
+            },
+            ..host_seams()
+        },
+    )
+    .await;
+    let work = farhelm_teststate::tempdir().expect("workdir");
+    let session = h
+        .client
+        .create_session(
+            work.path().to_str().unwrap(),
+            "printf 'output for a checkpoint\\n' && exec sleep 600",
+            None,
+            80,
+            24,
+        )
+        .await
+        .expect("create");
+    let encoding = gate.clone();
+    assert!(
+        tokio::task::block_in_place(move || encoding.wait_entered(Duration::from_secs(WAIT_SECS))),
+        "premise: an encode of the agent's runtime is at the gate"
+    );
+    let socket = agent_host(&h, &session.id).await.socket().to_path_buf();
+    let adopted = host_process(&socket).expect("the agent's host serves its socket");
+    let _adopted_guard = PidKillGuard::arm(adopted);
+    let other_session = uuid::Uuid::new_v4().to_string();
+    let other = farhelm_supervisor::hosts::spawn_host(
+        Path::new(farhelm_bin()),
+        h.state.path(),
+        farhelm_supervisor::hosts::ChildSpec {
+            argv: vec!["/bin/sh".into(), "-c".into(), "sleep 1000".into()],
+            cwd: "/".into(),
+            env: vec![("PATH".into(), "/usr/bin:/bin".into())],
+            size: terminal_host::protocol::Size { cols: 80, rows: 24 },
+            journal_cap: 1024 * 1024,
+            initial_snapshot: None,
+        },
+        &farhelm_supervisor::hosts::HostTag {
+            session_id: other_session.clone(),
+            created_ns: farhelm_supervisor::hosts::tag::creation_stamp(),
+            role: farhelm_supervisor::hosts::HostRole::Agent { generation: 0 },
+        },
+    )
+    .await
+    .expect("the other host starts");
+    let other_pid = host_process(&other.socket).expect("the other host serves its socket");
+    let _other_guard = PidKillGuard::arm(other_pid);
+    std::fs::rename(&other.socket, &socket).expect("rename the other host's socket over");
+    assert!(
+        !process_is_gone(adopted) && !process_is_gone(other_pid),
+        "premise: both hosts run"
+    );
+
+    let started = tokio::time::Instant::now();
+    h.client.delete_session(&session.id).await.expect("delete");
+    let took = started.elapsed();
+    assert!(
+        !gate.passed(),
+        "the Delete finished only after the held encode went on (expired: {}), after {took:?}",
+        gate.expired()
+    );
+    assert!(
+        took >= Duration::from_secs(15),
+        "the runtime's bound did not run out, so the fallback was not shown: {took:?}"
+    );
+    assert!(
+        process_is_gone(adopted),
+        "the agent's host is gone when Delete returns"
+    );
+    assert!(
+        !process_is_gone(other_pid),
+        "the other host was neither shut down nor signalled"
+    );
+    let mut connection = farhelm_supervisor::hosts::HostConnection::connect(&socket)
+        .await
+        .expect("the other host still answers at the socket");
+    let info = connection.info().await.expect("it reports its state");
+    let tag = farhelm_supervisor::hosts::HostTag::decode(&info.tag).expect("its tag reads");
+    assert_eq!(
+        tag.session_id, other_session,
+        "it is the other session's host"
+    );
+    connection
+        .shutdown()
+        .await
+        .expect("the other host takes Shutdown");
+    wait_until_pid_gone(other_pid, WAIT_SECS).await;
+    assert!(
+        h.client
+            .list_sessions()
+            .await
+            .expect("list")
+            .sessions
+            .iter()
+            .all(|info| info.id != session.id),
+        "the session is deleted"
+    );
+    gate.open();
 }
 
 /// A forked second stage that goes while a retry waits for it lets that

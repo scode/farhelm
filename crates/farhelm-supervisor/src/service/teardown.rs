@@ -9,7 +9,12 @@
 //! directory that is about to vanish; tab and past-launch scope units are
 //! enumerated from the manager because a tmux server that died first leaves
 //! no windows to read tab ids from while a scrubbed daemon keeps running
-//! inside its cgroup; the removable artifacts go before the DB row because
+//! inside its cgroup; the session's terminal hosts are found from its
+//! launch records and their children rooted with the other preflights, and
+//! ended right after the
+//! sweep, outside the attachment lock, because a host outlives its program
+//! and a wedged one can take seconds to end (`session_hosts`); the
+//! removable artifacts go before the DB row because
 //! a leftover launch spec holds credentials and this is the last moment
 //! anything comes back for it; and the row goes last because a crash that
 //! leaves a listed-but-dead session is recoverable while an unlisted-but-
@@ -55,6 +60,7 @@
 use super::connection::notify_detached;
 use super::core::{SessionEntry, Supervisor, session_tmux_name};
 use super::launch_artifacts::remove_launch_artifacts_for_session;
+use super::session_hosts::SessionHosts;
 use super::sweep::{
     ScopeKillFailure, ScopeUnits, SweepTarget, capture_process_identity, reap_process_tree,
 };
@@ -75,6 +81,18 @@ pub(crate) enum TeardownError {
     TabRediscovery(anyhow::Error),
     TabScopeEnumeration(anyhow::Error),
     Sweep(anyhow::Error),
+    /// The session's recorded terminal hosts could not be settled, or one's
+    /// program could not be rooted: a launch record that cannot be read or
+    /// decoded, a recorded first stage that could not be fenced, a socket
+    /// serving another terminal's host, a host that does not answer and
+    /// whose process is not known, or one that stopped answering before its
+    /// child was pinned. Nothing was killed yet (beyond fencing recorded
+    /// first stages).
+    HostDiscovery(anyhow::Error),
+    /// A terminal host of the session could not be confirmed ended after
+    /// the sweep, or not within the budget for ending them: it may still
+    /// run, so the session is kept.
+    HostShutdown(String),
     FailClosed(String),
 }
 
@@ -149,7 +167,9 @@ impl Supervisor {
     /// root at. A session whose agent runs in a terminal host contributes
     /// every pane of its tmux session (its tmux tabs, if it has any; see
     /// `tmux_tab_home`), since its agent is not one of them; the agent's
-    /// own root is its host's child, taken with the agent's probe. A pane
+    /// own root is its host's child, taken beside the agent's probe, and
+    /// the children of the session's other hosts are rooted by
+    /// `SessionHosts::sweep_roots`. A pane
     /// that disappears or changes hands between the listing and its probe
     /// is skipped; failing to ask tmux or to read a live pane's process
     /// fails the delete, row retained, like the agent pane's own probe.
@@ -194,6 +214,20 @@ impl Supervisor {
             }
         }
         Ok(roots)
+    }
+
+    /// [`Self::teardown_session_with_hosts`] settling the session's recorded
+    /// terminal hosts itself, as an unconditional Delete does: for tests,
+    /// which drive the teardown without the request around it.
+    #[cfg(test)]
+    pub(crate) async fn teardown_session(
+        &self,
+        entry: &SessionEntry,
+        session_id: &str,
+        directory_admission: tokio::sync::OwnedMutexGuard<()>,
+    ) -> Result<farhelm_proto::SessionDeleteOutcome, TeardownError> {
+        self.teardown_session_with_hosts(entry, session_id, directory_admission, None)
+            .await
     }
 
     /// Tear this session down completely: cancel its transfers, kill
@@ -260,11 +294,17 @@ impl Supervisor {
     /// it resolved to. Both are passed rather than one derived from the
     /// other because the caller has already done that lookup and its
     /// failure (no such session) is a different reply than anything here.
-    pub(crate) async fn teardown_session(
+    ///
+    /// `found` is the session's recorded terminal hosts as a guarded
+    /// delete's guard already settled them (`still_alive_for_delete`), under
+    /// this same lifecycle claim and directory admission, so that one Delete
+    /// settles each record once; `None` settles them here.
+    pub(crate) async fn teardown_session_with_hosts(
         &self,
         entry: &SessionEntry,
         session_id: &str,
         directory_admission: tokio::sync::OwnedMutexGuard<()>,
+        found: Option<SessionHosts>,
     ) -> Result<farhelm_proto::SessionDeleteOutcome, TeardownError> {
         // The process-tree sweep runs BEFORE any lock is held: it can
         // take seconds (a grace period plus several /proc walks), and
@@ -282,13 +322,21 @@ impl Supervisor {
         // Same dead/absent/terminal-less handling as `StopSession`:
         // the marker sweep still runs even with no live pane pid, for
         // the same leftover-reaping reason documented there.
-        let live_pane = match entry.terminal.as_ref() {
-            Some(terminal) => match terminal
+        //
+        // The pane's identity is captured right after the probe, before tab
+        // discovery, scope enumeration, and archive work can give the
+        // kernel time to recycle this pid. A vanished process leaves no
+        // root; an unreadable one fails the delete rather than sweeping
+        // without it.
+        let root_identity = match entry.terminal.as_ref() {
+            Some(terminal @ Terminal::Tmux(_)) => match terminal
                 .probe_process(self)
                 .await
                 .map_err(TeardownError::PaneProbe)?
             {
-                PaneProbe::Owned(pane) => Some(pane),
+                PaneProbe::Owned(pane) => {
+                    terminal.live_root(&pane).map_err(TeardownError::Sweep)?
+                }
                 PaneProbe::Gone => None,
                 // The headline case of the 2026-08-16 incident: a pane id
                 // recycled onto another session used to make this probe a
@@ -326,24 +374,55 @@ impl Supervisor {
                     None
                 }
             },
+            // A host terminal's root is its child as the runtime pinned it at
+            // adoption, so the sweep reaches the agent's whole tree even
+            // where a reparented descendant carries no marker. Taken from
+            // the pinned identity whatever the host now says
+            // (`HostStatus::pinned_child_root`), not through the probe:
+            // Delete ends the host below in any case, by the verified
+            // signal if it must, so a host that has gone unreadable (the
+            // plan's D-16) does not keep the session from being deleted. Its
+            // child, if still the pinned process, is still a root; only a
+            // process table that cannot be read refuses. A guarded delete
+            // refuses on such a host at its guard (`still_alive_for_delete`
+            // cannot tell whether its agent runs), so ending one this way
+            // is what an unconditional delete asks for.
+            Some(Terminal::Host(host)) => host
+                .status()
+                .pinned_child_root()
+                .map_err(|why| {
+                    TeardownError::Sweep(anyhow::anyhow!(
+                        "could not read the terminal host's child before deleting ({why}); \
+                         refusing to report its process tree cleaned up"
+                    ))
+                })?
+                .map(|root| (root.pid, root.start)),
             None => None,
-        };
-        // Capture the pane's identity before tab discovery, scope
-        // enumeration, and archive work can give the kernel time to recycle
-        // this pid. A vanished process leaves no root; an unreadable one
-        // fails the delete rather than sweeping without it. A host
-        // terminal's root is its child, pinned when the host was adopted
-        // (`Terminal::live_root`), so the sweep reaches the agent's whole
-        // tree even where a reparented descendant carries no marker.
-        let root_identity = match (live_pane, entry.terminal.as_ref()) {
-            (Some(pane), Some(terminal)) => {
-                terminal.live_root(&pane).map_err(TeardownError::Sweep)?
-            }
-            (None, _) | (_, None) => None,
         };
         // Every other live pane of the session is a root too, captured at
         // the same boundary for the same recycling reason.
         let other_roots = self.other_pane_roots(entry, session_id).await?;
+        // And so is the program of every recorded terminal host of the
+        // session that no runtime here holds: an agent host of a session
+        // with no terminal right now, or of an earlier generation, found by
+        // the session's launch records, never by a scan (`session_hosts`
+        // says what each record's socket may hold and what is done with
+        // it). Nothing has been killed yet, so a failure here is a refusal.
+        let mut hosts = match found {
+            Some(hosts) => hosts,
+            None => self
+                .session_hosts(
+                    session_id,
+                    entry.terminal.as_ref(),
+                    self.timeouts.delete_host_end,
+                )
+                .await
+                .map_err(TeardownError::HostDiscovery)?,
+        };
+        let host_roots = hosts
+            .sweep_roots()
+            .await
+            .map_err(TeardownError::HostDiscovery)?;
         // `WholeSession`: delete is the one lifecycle operation
         // that takes tabs down with the agent (SPEC.md — stop
         // leaves them running), so this
@@ -394,6 +473,9 @@ impl Supervisor {
                     .filter_map(|tab| crate::scope::tab_unit_name(session_id, &tab.id)),
             );
         }
+        // A tab in a host has no window to read its id from; its tag names
+        // the tab and says whether it runs in a scope of its own.
+        units.extend_derived(hosts.scoped_tab_units(session_id));
         // Settle a stale "no manager" verdict BEFORE enumerating. The row's
         // recorded launch unit is the durable evidence that earns one
         // re-probe, and the sweep below would spend it anyway; spending it
@@ -472,13 +554,40 @@ impl Supervisor {
         reap_process_tree(
             &self.seams.scopes,
             units,
-            root_identity.into_iter().chain(other_roots),
+            root_identity
+                .into_iter()
+                .chain(other_roots)
+                .chain(host_roots),
             session_id,
             &SweepTarget::WholeSession,
             ScopeKillFailure::Refuse,
         )
         .await
         .map_err(TeardownError::Sweep)?;
+
+        // Now end the hosts themselves, which no sweep does: a host carries
+        // no session marker and sits outside the launch's scope, and keeps
+        // running (showing the final screen) after its program ends. After
+        // the sweep, so that a program's tree is killed by the sweep rather
+        // than left to whatever its hangup does; before the attachment
+        // lock, since a wedged host can take seconds to end and nothing
+        // that serializes every session's terminal I/O may wait on it. All
+        // of them together get one budget (`delete_host_end`), counted from
+        // here, since this still holds the lifecycle claim and the
+        // supervisor-wide directory admission; settling their records
+        // before the sweep had a budget of the same length of its own. One
+        // that cannot be confirmed ended, by then or at all, keeps the row
+        // for a retry, like a sweep that could not confirm its kill; its
+        // launch record goes only with the row, below, so a retry still
+        // finds it.
+        let agent_host = match entry.terminal.as_ref() {
+            Some(Terminal::Host(host)) => Some(host.clone()),
+            Some(Terminal::Tmux(_)) | None => None,
+        };
+        hosts
+            .end(self, agent_host)
+            .await
+            .map_err(TeardownError::HostShutdown)?;
 
         // Everything from here to the row's removal is fast (one tmux
         // round trip plus the session sink's bounded orderly shutdown, see
@@ -617,9 +726,9 @@ impl Supervisor {
             //
             // A session whose agent runs in a terminal host has a tmux
             // session only if a tmux tab was opened in it, so its name is a
-            // candidate in the same way, checked before the kill. Ending
-            // the hosts themselves is a step of its own; the tmux teardown
-            // here tolerates finding nothing.
+            // candidate in the same way, checked before the kill. The
+            // session's hosts were ended right after the sweep; the tmux
+            // teardown here tolerates finding nothing.
             let tmux_name = match entry.terminal.as_ref() {
                 Some(Terminal::Tmux(terminal)) => Some(terminal.tmux_name.clone()),
                 Some(Terminal::Host(_)) => {
