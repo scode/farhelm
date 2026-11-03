@@ -365,8 +365,13 @@ pub(crate) fn fixtures_bin() -> &'static str {
 /// runs a current-thread runtime: a blocking child-process wait in a test
 /// body stalls the in-process supervisor and forwarder tasks on that same
 /// runtime, distorting exactly the concurrent behavior under test.
+///
+/// `-u`, as the supervisor's own driver passes it: without a UTF-8 locale
+/// tmux would turn separators and non-ASCII characters in format output
+/// into `_` (`TmuxDriver::command` in farhelm-supervisor says more).
 pub(crate) async fn tmux_query(sock: &std::path::Path, args: &[&str]) -> std::process::Output {
     tokio::process::Command::new("tmux")
+        .arg("-u")
         .arg("-S")
         .arg(sock)
         .args(args)

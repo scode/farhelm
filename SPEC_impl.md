@@ -2604,23 +2604,28 @@ staying in tmux until they are closed. tmux stays required, installed and versio
 transition, and this path changes only for what the switch needs and for bug fixes.
 
 Each supervisor runs a dedicated tmux server on a private socket (`~/.local/state/farhelm/tmux.sock`) with a locked-down
-generated config: status bar off, `history-limit` sized to SPEC.md's replay floor, `remain-on-exit on`. Every start,
-fresh or adopting a running server, also sets a global `pane-died` hook that signals a `wait-for` channel; the
-supervisor's ticker keeps one `tmux wait-for` client blocked on it and runs its dead-tab reap as soon as it fires, so a
-tab whose shell exits is closed right away instead of on the next tick, which remains the fallback. One tmux session per
-Farhelm session; window 0 is the agent terminal in practice, additional windows are the terminal tabs. Neither is
-identified by position: the supervisor stamps each window it creates with a tmux user option — the agent's window with
-the session id, a tab's window with a minted tab id that is also that tab's whole record. The agent terminal is
-identified by its durable pane record first, with the marker as the recovery aid for a session whose record is empty;
-tabs have no durable record at all and are rediscovered from their markers alone, because anything that reaches the
-private server can conjure windows a positional scan would adopt: a program pointed at its socket, a process the agent
-login shell's startup files started before the launch removed `TMUX`, or a session or tab launched by a version that did
-not remove it yet. Agents and tabs no longer inherit `TMUX`/`TMUX_PANE` (removed by the launch shim for agents, after
-the login shell's startup files, and by the tab helper before starting its shell; see `PRIVATE_TMUX_ENV_VARS` in
-launch.rs). That was checked statically against Claude Code 2.1.286 and Codex 0.159.3, not by running them: both wrap
-clipboard and similar escapes in tmux passthrough when `TMUX` is set, and the supervisor unwraps passthrough itself, so
-either form reaches xterm.js; Claude Code also keeps truecolor without `TMUX` instead of dropping to 256 colors (the
-private tmux advertises RGB) and stops showing its tmux scroll hint. The user's own tmux usage and config are untouched.
+generated config: status bar off, `history-limit` sized to SPEC.md's replay floor, `remain-on-exit on`. Every tmux
+command the supervisor runs passes `-u`, so tmux treats it as a UTF-8 client whatever its locale: without it, a
+supervisor whose first set of `LC_ALL`, `LC_CTYPE` and `LANG` names no UTF-8 locale (the Mac's, since an app opened from
+Finder or the Dock gets no `LANG`, or a Linux host whose user manager has none) gets format output with control
+characters and non-ASCII characters replaced by `_`, which broke every tab-separated read and every pane title holding a
+non-ASCII character (found on the Mac in v0.34.0-rc.2). Every start, fresh or adopting a running server, also sets a
+global `pane-died` hook that signals a `wait-for` channel; the supervisor's ticker keeps one `tmux wait-for` client
+blocked on it and runs its dead-tab reap as soon as it fires, so a tab whose shell exits is closed right away instead of
+on the next tick, which remains the fallback. One tmux session per Farhelm session; window 0 is the agent terminal in
+practice, additional windows are the terminal tabs. Neither is identified by position: the supervisor stamps each window
+it creates with a tmux user option — the agent's window with the session id, a tab's window with a minted tab id that is
+also that tab's whole record. The agent terminal is identified by its durable pane record first, with the marker as the
+recovery aid for a session whose record is empty; tabs have no durable record at all and are rediscovered from their
+markers alone, because anything that reaches the private server can conjure windows a positional scan would adopt: a
+program pointed at its socket, a process the agent login shell's startup files started before the launch removed `TMUX`,
+or a session or tab launched by a version that did not remove it yet. Agents and tabs no longer inherit
+`TMUX`/`TMUX_PANE` (removed by the launch shim for agents, after the login shell's startup files, and by the tab helper
+before starting its shell; see `PRIVATE_TMUX_ENV_VARS` in launch.rs). That was checked statically against Claude Code
+2.1.286 and Codex 0.159.3, not by running them: both wrap clipboard and similar escapes in tmux passthrough when `TMUX`
+is set, and the supervisor unwraps passthrough itself, so either form reaches xterm.js; Claude Code also keeps truecolor
+without `TMUX` instead of dropping to 256 colors (the private tmux advertises RGB) and stops showing its tmux scroll
+hint. The user's own tmux usage and config are untouched.
 
 The private server is an implementation detail. Direct interaction with it, by the user or by a program running in a
 session, is unsupported (SPEC.md, "Ownership during cleanup and provisioning"): Farhelm handles its own objects going

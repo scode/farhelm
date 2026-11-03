@@ -175,7 +175,8 @@ class Pane:
         self.socket_dir = pathlib.Path(tempfile.mkdtemp(prefix="fhcap-", dir="/tmp"))
         config = work_root / "tmux.conf"
         config.write_text(TMUX_CONFIG)
-        self.base = [str(tmux), "-S", str(self.socket_dir / "s"), "-f", str(config)]
+        # `-u`: without a UTF-8 locale tmux would print a title's spinner (and any non-ASCII character) as `_`.
+        self.base = [str(tmux), "-u", "-S", str(self.socket_dir / "s"), "-f", str(config)]
         self.env = env
         self.target = "agent"
 

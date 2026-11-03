@@ -26841,7 +26841,7 @@ await new Promise(() => {});
 # pinned shape; pane queries answer from files beside this script, written
 # per test with the fixture's own live pids; everything else succeeds.
 here=$(dirname "$0")
-# The driver prefixes every invocation with `-S <socket> -f <config>`,
+# The driver prefixes every invocation with `-u -S <socket> -f <config>`,
 # so the command word is found by scanning, never positionally.
 cmd=""
 for arg in "$@"; do
