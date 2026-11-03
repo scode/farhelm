@@ -113,8 +113,10 @@ jobs:
       # host started from the real `farhelm` (peer pid, `ps`-read environment
       # and command line), the client's peer pid (`LOCAL_PEERPID`), its
       # verified SIGTERM (macOS's process identity and command-line reads)
-      # and its reading of refused connections, and the test-state cleanup,
-      # whose reading of refused connections differs on macOS too.
+      # and its reading of refused connections, the test-state cleanup,
+      # whose reading of refused connections differs on macOS too, and
+      # `farhelm internal stop-terminal-hosts`, which rests on the client
+      # and the verified SIGTERM.
       - name: macOS terminal host tests
         if: ${{ !cancelled() }}
         run: |
@@ -129,7 +131,7 @@ jobs:
           python3 scripts/record-test-run.py \
             --runner nextest --kind development --selection 'macOS terminal host spawning, client and cleanup' --concurrency '4 nextest slots; retries 0' \
             --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" \
-            -- cargo nextest run -p farhelm-supervisor -p farhelm-teststate -p farhelm --lib --test terminal_host_spawn --test terminal_host_client -E 'test(/^hosts::/) | binary(terminal_host_spawn) | binary(terminal_host_client)' || status=1
+            -- cargo nextest run -p farhelm-supervisor -p farhelm-teststate -p farhelm --lib --test terminal_host_spawn --test terminal_host_client --test terminal_host_stop -E 'test(/^hosts::/) | binary(terminal_host_spawn) | binary(terminal_host_client) | binary(terminal_host_stop)' || status=1
           exit "${status:-0}"
       - name: Retain failure evidence
         if: failure()

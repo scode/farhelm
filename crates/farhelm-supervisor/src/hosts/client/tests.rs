@@ -33,10 +33,18 @@ fn deadlines() -> ClientDeadlines {
     }
 }
 
+/// A fresh socket name, random like a real host's: the process-table
+/// search behind gone and unavailable matches a socket by its name alone,
+/// so a name another test's stand-in process uses would turn gone into
+/// unavailable here.
+fn fresh_name() -> String {
+    crate::hosts::HostName::random().unwrap().to_string()
+}
+
 /// A listener at a fresh socket path.
 fn bind() -> (tempfile::TempDir, PathBuf, UnixListener) {
     let dir = tempfile::tempdir().unwrap();
-    let socket = dir.path().join("h");
+    let socket = dir.path().join(fresh_name());
     let listener = UnixListener::bind(&socket).unwrap();
     (dir, socket, listener)
 }
@@ -204,7 +212,7 @@ async fn a_missing_socket_is_gone_without_retries() {
     long.connect = Duration::from_secs(5);
     long.refusal_window = Duration::from_secs(5);
     let started = Instant::now();
-    let result = HostConnection::connect_with(&dir.path().join("h"), long).await;
+    let result = HostConnection::connect_with(&dir.path().join(fresh_name()), long).await;
     assert_eq!(result.unwrap_err(), ConnectError::Gone(Gone::NoSocket));
     assert!(
         started.elapsed() < Duration::from_secs(3),

@@ -23,9 +23,13 @@
 //!   full, Linux answers new connections with `EAGAIN` and macOS refuses
 //!   them, as if nothing listened, and neither names a peer. So before a
 //!   connect says gone, or unavailable without a peer, it looks for a live
-//!   process of this user whose command line ends with `--socket <that
-//!   path>` ([`super::process::socket_process`]); if there is one, the
-//!   result is unavailable and names it. A caller that meets an unavailable
+//!   process of this user whose command line ends with `--socket <an
+//!   absolute path with that socket's file name>`, whatever the spelling of
+//!   its directory ([`super::process::socket_process`]); if there is one,
+//!   the result is unavailable and names it. That process is a candidate,
+//!   not proven to be the host: it is signalled only once its command line
+//!   names the socket exactly. Rows of the process table the search cannot
+//!   read are passed over, as are command lines it cannot read. A caller that meets an unavailable
 //!   host should end it with that peer rather than keep reconnecting: each
 //!   attempt adds to the backlog.
 //! - **Always take over** (the plan's D-11). Every `Hello` sets `take_over`:

@@ -37,6 +37,7 @@
 //! [`agent_instructions`].
 
 use agent_client::{SessionEnv, SpawnArgs, SpawnLaunch, agent_request, spawn_session};
+use clap::builder::TypedValueParser as _;
 use clap::{Parser, Subcommand, ValueEnum};
 use farhelm_proto::AgentReply;
 use render::{host_cell, quoted, render_agent_reply, safe_cell, truncation_notice};
@@ -1313,6 +1314,35 @@ enum InternalCmd {
         #[arg(long)]
         socket: PathBuf,
     },
+    /// End every terminal host with a socket in a state directory's `hosts`
+    /// directory: `Shutdown` through the protocol, or the verified SIGTERM
+    /// for a host that cannot take it, removing the socket files of hosts
+    /// that are gone. See `farhelm_supervisor::hosts::stop`.
+    ///
+    /// Exit status 0 is the only success: every host whose socket the
+    /// listing found directly in `<state dir>/hosts` was confirmed stopped,
+    /// and that directory was listed whole as a real directory (or does not
+    /// exist). The directory is listed once, so a host a supervisor still
+    /// running there starts later is not covered. Any other status means a
+    /// host may still run: 1 when one could not be confirmed stopped or the
+    /// listing was refused or incomplete, 2 for a usage error (a relative or
+    /// empty `--state-dir` among them, and a `farhelm` from before this
+    /// command), anything else for a failure of the command itself. The
+    /// whole command takes at most `COMMAND_BUDGET` (30 seconds). One line
+    /// per host goes to stderr, for people and logs; stdout stays empty.
+    ///
+    /// The command line and the meaning of exit status 0 are part of the
+    /// contract with every helm from this release on, which runs it on
+    /// remote hosts whose installed `farhelm` may be older than the helm
+    /// (SPEC_impl.md, "Terminal host"). A caller decides whether to run it
+    /// at all by whether `<state dir>/hosts` exists.
+    StopTerminalHosts {
+        /// The state directory, as an absolute path: the command has no
+        /// default, and a relative one would depend on the caller's
+        /// working directory.
+        #[arg(long, value_parser = clap::builder::PathBufValueParser::new().try_map(absolute_state_dir))]
+        state_dir: PathBuf,
+    },
     /// The launch shim: exec a LaunchSpec's argv, recording exec failure
     /// to the spec's status file. See farhelm_supervisor::launch for why
     /// this exists (zsh terminates on failed exec; a shell-side sentinel
@@ -1514,6 +1544,22 @@ fn run_install(args: InstallArgs) -> anyhow::Result<()> {
             std::fs::write(args.staging.join("install-failure"), report)?;
             std::process::exit(refusal.status)
         }
+    }
+}
+
+/// `internal stop-terminal-hosts --state-dir`'s rule: an absolute path,
+/// which also refuses an empty one. Refused as a usage error (exit status
+/// 2), before anything is looked at: an empty value from a caller's unset
+/// variable would otherwise stop the hosts of whatever `./hosts` the
+/// working directory has.
+fn absolute_state_dir(path: PathBuf) -> Result<PathBuf, String> {
+    if path.is_absolute() {
+        Ok(path)
+    } else {
+        Err(format!(
+            "{:?} is not an absolute path; the state directory must be given as one",
+            path
+        ))
     }
 }
 
@@ -1830,6 +1876,29 @@ fn main() -> anyhow::Result<()> {
                     std::ffi::OsString::from("--socket"),
                     socket.into_os_string(),
                 ]))
+            }
+            InternalCmd::StopTerminalHosts { state_dir } => {
+                use farhelm_supervisor::hosts::stop;
+                let (lines, stopped) = match runtime() {
+                    Ok(runtime) => {
+                        let report = runtime.block_on(stop::stop_terminal_hosts(&state_dir));
+                        // Not the runtime's ordinary drop, which waits for
+                        // blocking work: a search for hosts the budget cut
+                        // off must not stretch the run past it.
+                        runtime.shutdown_background();
+                        (report.lines(), report.all_stopped())
+                    }
+                    Err(error) => (vec![format!("cannot start: {error:#}")], false),
+                };
+                let lines = lines
+                    .into_iter()
+                    .map(|line| format!("farhelm internal stop-terminal-hosts: {line}"))
+                    .collect();
+                // Bounded, and exiting right after: a stderr nobody drains
+                // must not hold the exit status back (see
+                // `write_lines_within`).
+                stop::write_lines_within(std::io::stderr(), lines, stop::REPORT_WAIT);
+                std::process::exit(if stopped { 0 } else { 1 })
             }
             InternalCmd::VersionLock { fd } => {
                 // Silent by contract: the forwarder runs this with every

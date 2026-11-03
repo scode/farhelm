@@ -22,8 +22,16 @@
 //!   before every signal: the start identity alone cannot catch a host that
 //!   died before its identity was first read, since the identity would then
 //!   be the reusing process's own; nor a "host" that was never one, such as
-//!   a stand-in listener in a test process. [`socket_process`] finds a host
-//!   by the same test when its socket does not answer at all.
+//!   a stand-in listener in a test process.
+//! - [`socket_process`], which decides that a socket that does not answer
+//!   is not gone, matches more loosely on purpose: any process of this user
+//!   naming an absolute socket path with the same file name. The two
+//!   checks err in opposite safe directions. A signal needs the exact
+//!   spelling, so a different spelling of the same directory can only
+//!   leave a host unended (and its caller unconfirmed), never signal
+//!   another process. "Not gone" needs only the name, a random 40 bits, so
+//!   a different spelling can only turn gone into unavailable, never let a
+//!   live host's socket be forgotten.
 
 use std::io;
 use std::os::unix::ffi::OsStrExt as _;
@@ -72,7 +80,7 @@ impl HostProcess {
     /// identity, not a zombie (a stopped process runs, for this purpose).
     /// An error means the process table could not be read, which callers
     /// must not take as gone.
-    fn is_running(&self) -> Result<bool, String> {
+    pub(crate) fn is_running(&self) -> Result<bool, String> {
         Ok(matches!(
             procs::read_process(self.pid)?,
             Some((_, start, ProcessState::Running)) if start == self.start
@@ -153,7 +161,8 @@ fn peer_pid(stream: &tokio::net::UnixStream) -> Option<u32> {
 }
 
 /// Whether `argv` is the command line of the host on `socket` (already made
-/// absolute): it ends with `--socket <socket>`.
+/// absolute): it ends with `--socket <socket>`, byte for byte. The test the
+/// verified signal uses.
 fn names_socket(argv: &[Vec<u8>], socket: &Path) -> bool {
     matches!(
         argv,
@@ -161,8 +170,25 @@ fn names_socket(argv: &[Vec<u8>], socket: &Path) -> bool {
     )
 }
 
-/// A live process of this user that serves `socket`: its command line ends
-/// with `--socket <socket>` (made absolute), as a host's does.
+/// Whether `argv` could be the command line of the host on a socket named
+/// `name`, however its directory is spelled: it ends with `--socket <an
+/// absolute path whose file name is name>`. The looser test
+/// [`socket_process`] uses (see the module docs for why it is safe there,
+/// and only there).
+fn may_name_socket(argv: &[Vec<u8>], name: &std::ffi::OsStr) -> bool {
+    match argv {
+        [.., flag, path] if flag == b"--socket" => {
+            let path = Path::new(std::ffi::OsStr::from_bytes(path));
+            path.is_absolute() && path.file_name() == Some(name)
+        }
+        _ => false,
+    }
+}
+
+/// A live process of this user that may serve `socket`: its command line
+/// ends with `--socket <path>`, `path` absolute with `socket`'s file name,
+/// as a host's does, whatever the spelling of its directory (see the module
+/// docs).
 ///
 /// For a socket that does not answer at all, where no connection names a
 /// peer. A host that is stopped or wedged stops accepting, so the
@@ -175,10 +201,13 @@ fn names_socket(argv: &[Vec<u8>], socket: &Path) -> bool {
 ///
 /// Walks every process of this user and reads each command line, so it is
 /// for that rare path, not for every connect. A row the walk could not read
-/// is skipped; a walk that could not run at all is an error, never "none".
+/// is skipped; a walk that could not run at all is an error, never "none",
+/// and so is a matching process whose start identity could not be read
+/// while it still ran.
 pub fn socket_process(socket: &Path) -> Result<Option<HostProcess>, String> {
-    let socket = std::path::absolute(socket)
-        .map_err(|error| format!("resolving {}: {error}", socket.display()))?;
+    let Some(name) = socket.file_name() else {
+        return Err(format!("{} names no socket", socket.display()));
+    };
     let (table, _unreadable_rows) = procs::snapshot()?;
     let own = std::process::id();
     for &pid in table.keys() {
@@ -188,14 +217,18 @@ pub fn socket_process(socket: &Path) -> Result<Option<HostProcess>, String> {
         let Some(argv) = procs::read_process_argv(pid) else {
             continue;
         };
-        if !names_socket(&argv, &socket) {
+        if !may_name_socket(&argv, name) {
             continue;
         }
         // Pinned after the command line was seen, so the identity is the
         // process that had it unless it exec'd in between, which a later
         // `terminate_verified` re-checks anyway.
-        if let Some(host) = HostProcess::current(pid) {
-            return Ok(Some(host));
+        match procs::read_process(pid).map_err(|why| format!("pinning process {pid}: {why}"))? {
+            Some((_, start, ProcessState::Running)) => {
+                return Ok(Some(HostProcess { pid, start }));
+            }
+            // Gone (or a zombie) since its command line was read.
+            _ => continue,
         }
     }
     Ok(None)
@@ -400,6 +433,14 @@ mod tests {
     use std::os::unix::process::ExitStatusExt as _;
     use std::process::{Child, Command, ExitStatus, Stdio};
 
+    /// A fresh socket name, random like a real host's. Every stand-in gets
+    /// its own: `socket_process` matches by name alone, so stand-ins of
+    /// tests running at the same time must never share one, nor share one
+    /// with the client's tests, which expect paths nothing serves.
+    fn fresh_name() -> String {
+        crate::hosts::HostName::random().unwrap().to_string()
+    }
+
     /// A stand-in host this test started, killed and reaped when it drops,
     /// whatever the test did to it (a stopped one included: SIGKILL ends a
     /// stopped process too).
@@ -522,7 +563,7 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn a_stopped_host_is_terminated_with_sigterm_and_sigcont() {
         let dir = tempfile::tempdir().unwrap();
-        let socket = dir.path().join("h");
+        let socket = dir.path().join(fresh_name());
         let mut stand_in = StandIn::start(HANDLES_TERM, &socket);
         stand_in.stop();
         let outcome = terminate_within(
@@ -545,7 +586,7 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn a_host_that_does_not_act_on_sigterm_is_killed() {
         let dir = tempfile::tempdir().unwrap();
-        let socket = dir.path().join("h");
+        let socket = dir.path().join(fresh_name());
         let mut stand_in = StandIn::start(IGNORES_TERM, &socket);
         let outcome = terminate_within(
             &stand_in.host,
@@ -570,9 +611,9 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn a_process_naming_another_socket_is_not_signalled() {
         let dir = tempfile::tempdir().unwrap();
-        let socket = dir.path().join("h");
+        let socket = dir.path().join(fresh_name());
         let mut stand_in = StandIn::start(HANDLES_TERM, &socket);
-        let other = dir.path().join("other");
+        let other = dir.path().join(fresh_name());
         let host = stand_in.host;
         let outcome = terminate_within(
             &host,
@@ -598,7 +639,7 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn another_start_identity_is_already_gone() {
         let dir = tempfile::tempdir().unwrap();
-        let socket = dir.path().join("h");
+        let socket = dir.path().join(fresh_name());
         let mut stand_in = StandIn::start(HANDLES_TERM, &socket);
         let stale = HostProcess {
             start: stand_in.host.start.wrapping_add(1),
@@ -625,7 +666,7 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn an_exited_process_is_already_gone() {
         let dir = tempfile::tempdir().unwrap();
-        let socket = dir.path().join("h");
+        let socket = dir.path().join(fresh_name());
         let mut stand_in = StandIn::start(": > \"$READY\"; read line; exit 0", &socket);
         let pid = stand_in.host.pid;
         stand_in.release();
@@ -660,9 +701,47 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn the_process_serving_a_socket_is_found_by_its_command_line() {
         let dir = tempfile::tempdir().unwrap();
-        let socket = dir.path().join("h");
+        let socket = dir.path().join(fresh_name());
         let stand_in = StandIn::start(HANDLES_TERM, &socket);
         assert_eq!(socket_process(&socket), Ok(Some(stand_in.host)));
-        assert_eq!(socket_process(&dir.path().join("other")), Ok(None));
+        assert_eq!(socket_process(&dir.path().join(fresh_name())), Ok(None));
+    }
+
+    /// Under another spelling of its directory, a host's process is found
+    /// by its socket's name, but never signalled.
+    ///
+    /// Why: the two checks must err in opposite safe directions. Deciding a
+    /// socket is not gone must not depend on how a caller spells the state
+    /// directory (a symlinked home, or `/tmp` against `/private/tmp` on
+    /// macOS), or a stopped host with a full backlog would be judged gone
+    /// and lose its socket; a signal must not rest on a name alone. Spec:
+    /// with a stand-in naming `real/<name>` and `link` a symlink to `real`,
+    /// `socket_process` through `link/<name>` names the stand-in and
+    /// `link/<another name>` names nothing; `terminate_within` through
+    /// `link/<name>` is `NotThisHost` and the stand-in still runs.
+    #[farhelm_testtrace::test]
+    async fn another_spelling_finds_the_process_but_never_signals_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real");
+        std::fs::create_dir(&real).unwrap();
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let name = fresh_name();
+        let mut stand_in = StandIn::start(HANDLES_TERM, &real.join(&name));
+
+        assert_eq!(socket_process(&link.join(&name)), Ok(Some(stand_in.host)));
+        assert_eq!(socket_process(&link.join(fresh_name())), Ok(None));
+        let outcome = terminate_within(
+            &stand_in.host,
+            &link.join(&name),
+            Duration::from_secs(1),
+            Duration::from_secs(1),
+        )
+        .await;
+        assert!(
+            matches!(outcome, Err(TerminateError::NotThisHost { .. })),
+            "{outcome:?}"
+        );
+        assert!(stand_in.alive(), "the stand-in was signalled");
     }
 }

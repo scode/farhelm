@@ -1713,18 +1713,58 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   never gone. Anything else that cannot be used (a protocol version the supervisor does not speak, a malformed answer,
   no answer within five seconds) is unavailable: the host may be running, so it is left alone. The host's pid comes from
   the connection's peer credentials, pinned to its process start identity. A socket is never judged gone, and an
-  unavailable host never lacks a pid, while a live process of the same user has a command line ending with
-  `--socket <that socket>`: a stopped or wedged host stops accepting, the connections that time out against it fill its
-  backlog, and from then on Linux answers `EAGAIN` and macOS refuses, as if nothing listened. Each host has one owning
-  connection inside the supervisor, since a second connection takes the host over from the first without notice.
-  Unacknowledged input stays within 256 KiB, a quarter of what the host holds before it stops reading its client, so a
-  program that stops reading never holds back snapshots, resizes or shutdown; input whose fate a disconnect left unknown
-  is reported, never resent.
+  unavailable host never lacks a pid, while the process table shows a live process of the same user whose command line
+  ends with `--socket <an absolute path with that socket's file name>` (rows the walk cannot read, and command lines
+  that cannot be read, are passed over): a stopped or wedged host stops accepting, the connections that time out against
+  it fill its backlog, and from then on Linux answers `EAGAIN` and macOS refuses, as if nothing listened. Only the file
+  name is compared there, whatever the spelling of its directory (a symlinked home, `/tmp` against `/private/tmp`): the
+  name is 40 random bits, and a false match can only make a socket unavailable rather than gone. Such a process is only
+  a candidate: a signal, below, needs the exact spelling. Each host has one owning connection inside the supervisor,
+  since a second connection takes the host over from the first without notice. Unacknowledged input stays within 256
+  KiB, a quarter of what the host holds before it stops reading its client, so a program that stops reading never holds
+  back snapshots, resizes or shutdown; input whose fate a disconnect left unknown is reported, never resent.
 - **Ending a host the protocol cannot end** (wedged, stopped, or speaking another version) is a SIGTERM, followed by a
   SIGCONT so that a stopped host acts on it, and after five seconds a SIGKILL, since a host only notes SIGTERM for its
   event loop and a wedged loop never looks. Each signal goes only to the pid from the connection (or the process table)
   after its start identity has been re-read and its command line still ends with `--socket <that socket>`
   (`hosts/process.rs`).
+- **Stopping every host of a state directory** is `farhelm internal stop-terminal-hosts --state-dir <dir>`
+  (`hosts/stop.rs`), for removing an install or cleaning one up with no supervisor involved. `<dir>` must be an absolute
+  path; a relative or empty one is a usage error, refused before anything is looked at. The command finds hosts by
+  place: the sockets directly inside `<dir>/hosts`, listed through one handle opened without following a symlink, which
+  is also the handle a leftover socket file is removed through. A `hosts` that is a symlink or not a directory, or that
+  cannot be opened, is refused and nothing it leads to is contacted: following it could reach another state directory's
+  hosts. For each socket it connects with take-over and sends `Shutdown`, and falls back to the verified signal above
+  for a host that does not answer, stays busy, speaks another protocol version, or took `Shutdown` and did not end. A
+  socket nothing serves counts as stopped, and the socket file a gone host left behind is removed. A host counts as
+  stopped only once its process is seen gone (its socket file, when the platform names no process), or nothing serves
+  its socket: a `Goodbye` or a closed connection is not enough, and nor is a signal's candidate turning out already gone
+  (it may have been an unrelated process with a socket of the same name elsewhere) until the socket is judged gone too.
+  Through another spelling of the state directory than the supervisor used (a symlink to it), a live host still stops
+  through the protocol, but one that cannot take `Shutdown` stays unconfirmed, since the signal needs the exact
+  spelling. A host whose socket file was deleted by hand inside an intact `hosts` directory is not found, as a tmux
+  server whose socket was deleted is not. In production the remote uninstall's stop of the supervisor's unit ends such
+  hosts with the unit's control group while the unit is still running; a host left behind by a unit that was already
+  inactive or failed, with its socket deleted by hand, is not found, as with tmux. Hosts are handled at once. The whole
+  command takes at most 30 seconds: finding and stopping the hosts at most 29, after which a listing not finished, or a
+  host still being handled, counts as not confirmed; then at most one second for its report on stderr, which it gives up
+  on rather than wait for a reader that stopped reading. (In the Mac app's version layout the version hold every
+  `farhelm` command takes first can add its own wait of up to five seconds before that.) Stdout stays empty; stderr has
+  one line per host for people and logs, which nothing may parse. It ends the hosts and nothing else: the programs in
+  them get the terminal's hangup, descendants that ignore it are left to the session's scope or the supervisor's unit as
+  with tmux, and it takes no lock, so a supervisor still running there loses its hosts. **Exit status 0 is the only
+  success**, and all it means is this: every host whose socket the listing found directly in `<dir>/hosts` was confirmed
+  stopped, and `<dir>/hosts` was listed whole as a real directory (or does not exist). The directory is listed once, so
+  a host that a supervisor still running there starts afterwards is not covered; callers stop the supervisor first.
+  Anything else means a host may still run: 1 when one could not be confirmed stopped or the listing was refused or
+  incomplete, 2 for a usage error, and anything else (such as a panic's 101) for a failure of the command itself. A
+  `farhelm` from before the command also exits 2, as for any unknown subcommand, so a caller never reads 2 as "no
+  hosts". A caller decides whether to run the command by whether `<dir>/hosts` exists: every `farhelm` that can create
+  that directory has the command. **This command line and that meaning of exit status 0 are a stable surface.** A newer
+  helm runs the command on remote hosts whose installed `farhelm` may be older than itself, so every later release keeps
+  accepting this spelling with this meaning, under the rules of "What running sessions hold across versions" (new
+  spellings beside old ones, never a new meaning for an old one; a later release may make exit 0 stronger, never
+  weaker).
 
 Test harnesses end the hosts they leave behind: `farhelm-teststate` ends every host whose socket is in a `hosts`
 directory within an owned run directory (its dead-run sweep, and every `TestDir` drop) through a small blocking client
