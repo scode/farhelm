@@ -581,3 +581,94 @@ test("a clipboard write held open with endless small or empty parts holds memory
   model.apply({ t: "clipboard", target: "clipboard", text: "y", last: true });
   assert.equal(model.takeClipboard()[0].text, "x".repeat(100000) + "y");
 });
+
+// ## History applied in slices (the history queue)
+
+/** `n` one-run history rows reading `prefix` and their line number. */
+function numbered(first, n, prefix = "") {
+  return Array.from({ length: n }, (_, i) => row([[0, String(first + i).length + prefix.length, prefix + (first + i), PLAIN]]));
+}
+
+test("deferred history is queued on arrival and applied in slices", () => {
+  // An attach's whole history must not be decoded in one task (it held the
+  // page for seconds); the renderer drains the queue in time slices. Until
+  // a row is applied it is not in history, and the screen's line numbers
+  // already count it, so anything anchored to them does not move as the
+  // queue drains.
+  const model = started(10, 3, 100);
+  model.deferHistory = true;
+  model.apply({ t: "history", cols: 10, first: 0, rows: numbered(0, 10) });
+  model.apply({ t: "history", cols: 10, first: 10, rows: numbered(10, 10) });
+  assert.equal(model.historyLength, 0);
+  assert.equal(model.historyPending, true);
+  assert.equal(model.screenBase, 20);
+  // Contiguity is checked on arrival, not when applied.
+  assert.throws(() => model.apply({ t: "history", cols: 10, first: 25, rows: [] }), grid.GridProtocolError);
+  let rows = 0;
+  assert.equal(model.drainHistory(() => ++rows >= 7), true);
+  assert.equal(model.historyLength, 7);
+  assert.equal(model.screenBase, 20);
+  assert.equal(model.historyEnd, 7);
+  assert.equal(model.drainHistory(), false);
+  assert.equal(model.historyPending, false);
+  assert.deepEqual(historyText(model), Array.from({ length: 20 }, (_, i) => String(i)));
+  assert.equal(model.historyFirst, 0);
+  assert.equal(model.takeDamage().history, true);
+});
+
+test("a queue longer than the cap drops its oldest rows unread", () => {
+  // However far applying falls behind, the queue holds at most a cap's
+  // worth: older rows would only be applied to be dropped again. A dropped
+  // row is never decoded, so a bad one there is not an error.
+  const model = started(10, 3, 5);
+  model.deferHistory = true;
+  model.apply({ t: "history", cols: 10, first: 0, rows: numbered(0, 3) });
+  model.drainHistory();
+  model.apply({ t: "history", cols: 10, first: 3, rows: [{ w: false, r: [[0, 1, "x", [0, 999, -1]]] }, ...numbered(4, 3)] });
+  model.apply({ t: "history", cols: 10, first: 7, rows: numbered(7, 4) });
+  assert.equal(model.queuedRows, 5);
+  model.drainHistory();
+  assert.deepEqual(historyText(model), ["6", "7", "8", "9", "10"]);
+  assert.equal(model.historyFirst, 6);
+  assert.equal(model.screenBase, 11);
+  // Trimming is not a reset: the kept lines keep their numbers, so a view
+  // or selection anchored to them stays (only `history` damage).
+  const damage = model.takeDamage();
+  assert.equal(damage.history, true);
+  assert.equal(damage.historyReset, false);
+});
+
+test("a history reset discards what is queued before it", () => {
+  const model = started(10, 3, 100);
+  model.deferHistory = true;
+  model.apply({ t: "history", cols: 10, first: 0, rows: numbered(0, 5) });
+  model.apply({ t: "history_reset" });
+  model.apply({ t: "history", cols: 10, first: 40, rows: numbered(40, 2) });
+  model.drainHistory();
+  assert.deepEqual(historyText(model), ["40", "41"]);
+  assert.equal(model.historyFirst, 40);
+  assert.equal(model.takeDamage().historyReset, true);
+});
+
+test("a bad history row is reported when it is applied", () => {
+  const model = started(10, 3, 100);
+  model.deferHistory = true;
+  model.apply({ t: "history", cols: 10, first: 0, rows: [...numbered(0, 2), row([[8, 3, "abc", PLAIN]])] });
+  assert.throws(() => model.drainHistory(), grid.GridProtocolError);
+});
+
+test("a real reset still voids anchors when the queue it is in is trimmed", () => {
+  // A supervisor's history_reset followed by more than a cap of history
+  // before it is applied: the trim replaces the queue's reset entry, which
+  // must stay a real reset (line numbers start over).
+  const model = started(10, 3, 10);
+  model.deferHistory = true;
+  model.apply({ t: "history", cols: 10, first: 0, rows: numbered(0, 3) });
+  model.drainHistory();
+  model.takeDamage();
+  model.apply({ t: "history_reset" });
+  model.apply({ t: "history", cols: 10, first: 50, rows: numbered(50, 11) });
+  model.drainHistory();
+  assert.equal(model.takeDamage().historyReset, true);
+  assert.equal(model.historyFirst, 51);
+});

@@ -145,7 +145,7 @@ test("Shift+Enter is an ordinary key message carrying the Shift bit", () => {
   // message; the page must neither drop the chord nor split it.
   const ev = keyEvent({ key: "Enter", code: "Enter", keyCode: 13, shiftKey: true });
   assert.equal(input.keydownAction(ev, MAC, false).action, "send");
-  assert.deepEqual(input.keyMessage(ev), { t: "key", key: "Enter", code: "Enter", kc: 13, mods: 1 });
+  assert.deepEqual(input.keyMessage(ev, MAC), { t: "key", key: "Enter", code: "Enter", kc: 13, mods: 1, mac: true });
 });
 
 test("keys whose character comes from text input are passed to the browser uncancelled", () => {
@@ -213,7 +213,7 @@ test("keys an input method is composing are ignored", () => {
 
 test("key messages carry the browser's values and refuse fields past 64 bytes", () => {
   const ev = keyEvent({ key: "ArrowUp", code: "ArrowUp", keyCode: 38, shiftKey: true, ctrlKey: true, metaKey: true });
-  assert.deepEqual(input.keyMessage(ev), { t: "key", key: "ArrowUp", code: "ArrowUp", kc: 38, mods: 13 });
+  assert.deepEqual(input.keyMessage(ev, LINUX), { t: "key", key: "ArrowUp", code: "ArrowUp", kc: 38, mods: 13, mac: false });
   assert.equal(input.keyMessage(keyEvent({ key: "x".repeat(65), keyCode: 65 })), null);
   assert.equal(input.keyMessage(keyEvent({ key: "a", code: "é".repeat(33), keyCode: 65 })), null);
 });
@@ -347,4 +347,247 @@ test("the wheel goes to the program under mouse reporting or on the alternate sc
   assert.equal(input.wheelGoesToProgram({ mouse: "click", altScreen: false }), true);
   assert.equal(input.wheelGoesToProgram({ mouse: "off", altScreen: true }), true);
   assert.equal(input.wheelGoesToProgram({ mouse: "off", altScreen: false }), false);
+});
+
+test("key messages say whether the viewer is a Mac, by xterm.js's exact platform list", () => {
+  // The supervisor's encoder picks Mac-only encodings from this flag, and
+  // the client's own decisions (Option as a third-level shift, Cmd+A) read
+  // the same list, so both sides agree with xterm.js's `Browser.isMac`:
+  // exact `navigator.platform` values, not anything containing "Mac".
+  const ev = keyEvent({ key: "a", code: "KeyA", keyCode: 65 });
+  for (const platform of ["Macintosh", "MacIntel", "MacPPC", "Mac68K"]) {
+    assert.equal(input.keyMessage(ev, platform).mac, true, platform);
+    assert.equal(input.platformOf(platform).isMac, true, platform);
+  }
+  for (const platform of ["Linux x86_64", "Win32", "iPad", "iPhone", "MacSomething", "", undefined]) {
+    assert.equal(input.keyMessage(ev, platform).mac, false, String(platform));
+    assert.equal(input.platformOf(platform).isMac, false, String(platform));
+  }
+  // Option on a Mac composes text rather than sending ESC-prefixed keys;
+  // a platform outside the list is not treated as one.
+  const option = keyEvent({ key: "\u00e5", code: "KeyA", keyCode: 65, altKey: true });
+  assert.equal(input.keydownAction(option, "MacIntel", false).action, "pass");
+  assert.equal(input.keydownAction(option, "MacSomething", false).action, "send");
+});
+
+// ## keydownAction against the vendored `_keyDown`
+//
+// The supervisor's encoder is built from `evaluateKeyboardEvent` and
+// assumes it only receives the keydowns xterm.js would send. Which those
+// are is decided by `CoreBrowserTerminal._keyDown` around that function:
+// Option on a Mac and AltGr (or Ctrl+Alt) on Windows leave the key to text
+// input (so Mac Option+F1-F12 and Option with the iOS arrow keys send
+// nothing at keydown), capital letters are left to text input, and so is
+// the key after a dead key. The sweep below runs the bundle's own
+// `_keyDown` and `_isThirdLevelShift` on a stand-in terminal and holds
+// `keydownAction` to the same decision for every key it can send.
+
+/**
+ * The vendored `_keyDown` as a callable decision: `{sent, cancelled, page,
+ * selectAll}` for one keydown, carrying the dead-key state in `state`.
+ * Composition in progress is left out (`keydownAction` ignores composing
+ * keys before this decision, as xterm.js's composition helper does; a
+ * separate test covers it).
+ */
+function vendoredKeyDown() {
+  const source = fs.readFileSync(XTERM_PATH, "utf8");
+  // The method definitions, found by their headers with the opening
+  // brace (the bare names also appear at their call sites).
+  const extract = (header) => {
+    const at = source.indexOf(header);
+    assert.notEqual(at, -1, `vendored xterm.js no longer has ${header}; re-check grid-input.js's keydownAction`);
+    return balancedBlock(source, at + header.length - 1);
+  };
+  const keyDownBody = extract("_keyDown(e){");
+  const thirdLevelBody = extract("_isThirdLevelShift(e,t){");
+  const evaluate = vendoredEvaluate();
+  const C0 = { ETX: "\x03", CR: "\r" };
+  // Test-only evaluation of the trusted vendored file, as above.
+  const keyDown = new Function("D", "E", `return function(e)${keyDownBody};`)({ evaluateKeyboardEvent: evaluate }, { C0 });
+  const isThirdLevelShift = new Function(`return function(e,t)${thirdLevelBody};`)();
+  return (ev, platform, state) => {
+    const outcome = { sent: false, cancelled: false, page: 0, selectAll: false };
+    const terminal = {
+      _customKeyEventHandler: undefined,
+      browser: input.platformOf(platform),
+      options: { macOptionIsMeta: false, scrollOnUserInput: true },
+      optionsService: { rawOptions: { screenReaderMode: false } },
+      // Outside a composition, xterm.js's helper only swallows key code
+      // 229 (an input method's key).
+      _compositionHelper: { keydown: (e) => e.keyCode !== 229 },
+      coreService: { decPrivateModes: { applicationCursorKeys: false }, triggerDataEvent: () => (outcome.sent = true) },
+      buffer: { ybase: 0, ydisp: 0 },
+      rows: 24,
+      textarea: { value: "" },
+      _onKey: { fire() {} },
+      _unprocessedDeadKey: state.dead,
+      updateCursorStyle() {},
+      _showCursor() {},
+      scrollLines: (n) => (outcome.page = Math.sign(n)),
+      selectAll: () => (outcome.selectAll = true),
+      cancel: () => (outcome.cancelled = true),
+      _isThirdLevelShift: isThirdLevelShift,
+    };
+    keyDown.call(terminal, ev);
+    state.dead = terminal._unprocessedDeadKey;
+    return outcome;
+  };
+}
+
+function withModifierState(ev, altGraph) {
+  return { ...ev, getModifierState: (name) => name === "AltGraph" && altGraph };
+}
+
+test("keydownAction sends exactly the keydowns the vendored _keyDown sends, on every platform", () => {
+  const vendored = vendoredKeyDown();
+  let compared = 0;
+  for (const platform of [LINUX, MAC, WINDOWS]) {
+    for (let keyCode = 0; keyCode < 256; keyCode++) {
+      for (const { key, code } of candidateKeys(keyCode)) {
+        for (let mods = 0; mods < 16; mods++) {
+          for (const altGraph of [false, true]) {
+            for (const deadBefore of [false, true]) {
+              const ev = withModifierState(keyEvent({
+                key,
+                code,
+                keyCode,
+                shiftKey: !!(mods & 1),
+                altKey: !!(mods & 2),
+                ctrlKey: !!(mods & 4),
+                metaKey: !!(mods & 8),
+              }), altGraph);
+              const state = { dead: deadBefore };
+              const want = vendored(ev, platform, state);
+              const got = input.keydownAction(ev, platform, deadBefore);
+              const label = `${platform} keyCode ${keyCode} key ${JSON.stringify(key)} mods ${mods} altGraph ${altGraph} dead ${deadBefore}`;
+              assert.equal(got.action === "send", want.sent, `${label}: sent`);
+              assert.equal(got.cancel, want.cancelled, `${label}: cancelled`);
+              assert.equal(got.deadKeyPending, state.dead, `${label}: dead-key state`);
+              assert.equal(got.action === "page-up", want.page < 0, `${label}: page up`);
+              assert.equal(got.action === "page-down", want.page > 0, `${label}: page down`);
+              assert.equal(got.action === "select-all", want.selectAll, `${label}: select all`);
+              compared++;
+            }
+          }
+        }
+      }
+    }
+  }
+  assert.ok(compared > 100000, "the sweep must actually cover the key space");
+});
+
+test("each of _keyDown's filters keeps its keys from being sent", () => {
+  // The same rules as the sweep, one readable case each.
+  const pass = (ev, platform, dead = false) => input.keydownAction(ev, platform, dead).action;
+  // Option+F1-F12 on a Mac: third-level shift, so nothing at keydown.
+  for (let keyCode = 112; keyCode <= 123; keyCode++) {
+    assert.equal(pass(keyEvent({ key: `F${keyCode - 111}`, code: `F${keyCode - 111}`, keyCode, altKey: true }), MAC), "pass");
+    // Elsewhere Alt+F5 is a modified function key.
+    assert.equal(pass(keyEvent({ key: `F${keyCode - 111}`, code: `F${keyCode - 111}`, keyCode, altKey: true }), LINUX), "send");
+  }
+  // Option with the iOS arrow keys (key code 0) on a Mac.
+  assert.equal(pass(keyEvent({ key: "UIKeyInputUpArrow", keyCode: 0, altKey: true }), MAC), "pass");
+  assert.equal(pass(keyEvent({ key: "UIKeyInputUpArrow", keyCode: 0 }), MAC), "send");
+  // Ctrl+Alt on Windows acts as AltGr, and so does the AltGraph modifier.
+  assert.equal(pass(keyEvent({ key: "q", code: "KeyQ", keyCode: 81, ctrlKey: true, altKey: true }), WINDOWS), "pass");
+  assert.equal(pass(keyEvent({ key: "q", code: "KeyQ", keyCode: 81, ctrlKey: true, altKey: true }), LINUX), "send");
+  assert.equal(pass(withModifierState(keyEvent({ key: "@", code: "KeyQ", keyCode: 81 }), true), WINDOWS), "pass");
+  // Capitals are left to text input.
+  assert.equal(pass(keyEvent({ key: "Q", code: "KeyQ", keyCode: 81, shiftKey: true }), LINUX), "pass");
+  // The key after a dead key (or AltGraph) is left to text input.
+  assert.equal(pass(keyEvent({ key: "e", code: "KeyE", keyCode: 69 }), LINUX, true), "pass");
+  assert.equal(input.keydownAction(keyEvent({ key: "AltGraph", code: "AltRight", keyCode: 225 }), LINUX, false).deadKeyPending, true);
+});
+
+test("a move equal to the last reported mouse event is dropped, as xterm.js's _equalEvents drops it", () => {
+  // xterm.js compares a move with the last event it reported, whatever its
+  // kind: same cell, button and Shift/Alt/Ctrl, and the same action. So a
+  // run of moves in one cell sends one, a different button or modifier is
+  // new, and a press, release or wheel step in between starts over.
+  const dedupe = input.createMouseDeduper();
+  const at = (kind, button, x, y, mods = 0) => ({ t: "mouse", kind, button, x, y, mods });
+  assert.equal(dedupe.shouldSend(at("down", 0, 2, 2)), true);
+  assert.equal(dedupe.shouldSend(at("move", 0, 2, 2)), true, "a move after a press in its cell is a different action");
+  assert.equal(dedupe.shouldSend(at("move", 0, 2, 2)), false);
+  assert.equal(dedupe.shouldSend(at("move", 1, 2, 2)), true, "another button");
+  assert.equal(dedupe.shouldSend(at("move", 1, 2, 2, 1)), true, "Shift");
+  assert.equal(dedupe.shouldSend(at("move", 1, 2, 2, 1 | 8)), false, "Meta is not compared");
+  assert.equal(dedupe.shouldSend(at("move", 1, 2, 3, 1)), true, "another row");
+  assert.equal(dedupe.shouldSend(at("wheel", 1, 2, 3, 1)), true);
+  assert.equal(dedupe.shouldSend(at("move", 1, 2, 3, 1)), true, "a wheel step in between starts over");
+  assert.equal(dedupe.shouldSend(at("move", -1, 2, 3, 1)), true, "no button held is a button of its own");
+  assert.equal(dedupe.shouldSend(at("move", -1, 2, 3, 1)), false);
+});
+
+// ## Alt-click cursor moves against the vendored moveToCellSequence
+
+/** The bundle's own `moveToCellSequence`, lifted out of its module. */
+function vendoredMoveToCell() {
+  const source = fs.readFileSync(XTERM_PATH, "utf8");
+  const header = "9686:(e,t,i)=>";
+  const at = source.indexOf(header);
+  assert.notEqual(at, -1, "vendored xterm.js no longer has moveToCellSequence's module; re-check grid-input.js's port");
+  const body = balancedBlock(source, at + header.length);
+  assert.ok(body.includes("moveToCellSequence"), "the module at that id is no longer moveToCellSequence's");
+  const exports = {};
+  // Test-only evaluation of the trusted vendored file, as above.
+  new Function("e", "t", "i", body)({}, exports, () => ({ C0: { ESC: "\x1b" } }));
+  return exports.moveToCellSequence;
+}
+
+/** A screen of `lines` (strings of `cols` characters, `wrapped[i]`: row i continues row i-1). */
+function screenService(lines, wrapped, cols, cursor, hasScrollback) {
+  return {
+    cols,
+    rows: lines.length,
+    buffer: {
+      x: cursor.x,
+      y: cursor.y,
+      hasScrollback,
+      lines: { length: lines.length, get: (row) => (row >= 0 && row < lines.length ? { isWrapped: wrapped[row] } : undefined) },
+      translateBufferLineToString: (row, trimRight, start, end) => {
+        const text = lines[row] === undefined ? "" : lines[row].slice(start, end);
+        return trimRight ? text.replace(/ +$/, "") : text;
+      },
+    },
+  };
+}
+
+test("Alt-click's arrow keys match the vendored moveToCellSequence on both screens", () => {
+  // The supervisor encodes whatever arrows the client asks for; if the
+  // count differs from xterm.js's, an Alt-click lands the shell's cursor
+  // somewhere else than today's terminal does.
+  const vendored = vendoredMoveToCell();
+  let seed = 11;
+  const random = (n) => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) % n;
+  let compared = 0;
+  for (let round = 0; round < 400; round++) {
+    const cols = 2 + random(9);
+    const rows = 1 + random(6);
+    const lines = Array.from({ length: rows }, () => Array.from({ length: cols }, () => (random(4) ? "x" : " ")).join(""));
+    const wrapped = Array.from({ length: rows }, (_, row) => row > 0 && random(3) === 0);
+    for (const hasScrollback of [false, true]) {
+      for (const app of [false, true]) {
+        const cursor = { x: random(cols), y: random(rows) };
+        const target = { x: random(cols), y: random(rows) };
+        const service = screenService(lines, wrapped, cols, cursor, hasScrollback);
+        const want = vendored(target.x, target.y, service, app);
+        const got = input.moveToCellSequence(target.x, target.y, service, app);
+        assert.equal(got, want, JSON.stringify({ lines, wrapped, cursor, target, hasScrollback, app }));
+        compared++;
+      }
+    }
+  }
+  assert.ok(compared >= 1600);
+});
+
+test("Alt-click's arrows become key messages the supervisor encodes", () => {
+  const sequence = "\x1b[D\x1b[D\x1b[A\x1b[C";
+  assert.deepEqual(input.arrowKeyMessages(sequence, "Linux x86_64"), [
+    { t: "key", key: "ArrowLeft", code: "ArrowLeft", kc: 37, mods: 0, mac: false },
+    { t: "key", key: "ArrowLeft", code: "ArrowLeft", kc: 37, mods: 0, mac: false },
+    { t: "key", key: "ArrowUp", code: "ArrowUp", kc: 38, mods: 0, mac: false },
+    { t: "key", key: "ArrowRight", code: "ArrowRight", kc: 39, mods: 0, mac: false },
+  ]);
+  assert.deepEqual(input.arrowKeyMessages("", "MacIntel"), []);
 });

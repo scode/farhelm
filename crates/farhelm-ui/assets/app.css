@@ -8186,6 +8186,83 @@ a:any-link,
   overflow: hidden;
 }
 
+/* The notice line above history that recovery lost part of; its colors are
+   set inline from the terminal's defaults, reversed like the exit line. */
+.grid-terminal-row > .grid-terminal-notice {
+  display: block;
+  padding: 0 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* A link under the pointer shows a hand, as xterm.js's links do, and an
+   underline drawn over its cells (one box per row). */
+.grid-terminal.grid-terminal-link-hover {
+  cursor: pointer;
+}
+
+/* The selection and the link underline sit over the rows and under the
+   cursor; the script positions and colors every box. */
+.grid-terminal-selection,
+.grid-terminal-link-underline {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+.grid-terminal-selection > div,
+.grid-terminal-link-underline > div {
+  position: absolute;
+}
+
+.grid-terminal-link-underline > div {
+  height: 0;
+  border-bottom: 1px solid currentColor;
+}
+
+/* The scrollback's scrollbar, in the 14px the fit reserves at the right
+   edge, after xterm.js 6.0's (VS Code's): a slider in the foreground color
+   at 20% (40% hovered, 50% dragged), shown only when there is history to
+   scroll, while the pointer is over the terminal and for a moment after a
+   scroll, fading out over 800ms. */
+.grid-terminal-scrollbar {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 14px;
+  display: none;
+  opacity: 0;
+  transition: opacity 800ms linear;
+  cursor: default;
+}
+
+.grid-terminal-scrollbar.grid-terminal-scrollbar-needed {
+  display: block;
+}
+
+.grid-terminal-scrollbar.grid-terminal-scrollbar-active {
+  opacity: 1;
+  transition: opacity 100ms linear;
+}
+
+.grid-terminal-slider {
+  position: absolute;
+  left: 0;
+  width: 14px;
+  background: currentColor;
+  opacity: 0.2;
+}
+
+.grid-terminal-slider:hover {
+  opacity: 0.4;
+}
+
+.grid-terminal-slider:active {
+  opacity: 0.5;
+}
+
 .grid-terminal-cursor {
   position: absolute;
   display: none;

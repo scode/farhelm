@@ -409,12 +409,14 @@ that its required systemd or SSH substrate ran.
   in cwd) is the oldest, most version-portable form the test runner has, whereas quoted-glob CLI arguments are newer and
   CI pins no node version.
 - `cd e2e && npx playwright test --config grid-client/playwright.config.ts` — the grid terminal component
-  (`crates/farhelm-ui/assets/grid-*.js`) on a static page fed recorded grid streams, its fit held to xterm.js's in
-  identical containers across text sizes and pixel ratios, and `terminal.js`'s attach plumbing for grid streams against
-  a fake socket, in Chromium and WebKit. No stack and no build: the page and the shipped assets are served through
-  request routing. Needs `npm install` and the browsers from the browser suite's setup below; a few minutes. Not in CI.
-  Run it when the grid assets, `terminal.js`'s stream handling or the fixtures under
-  `crates/farhelm-ui/js-tests/fixtures/grid/` change.
+  (`crates/farhelm-ui/assets/grid-*.js`) on a static page fed recorded grid streams (display, input, scrollback,
+  selection and copy, links, paste, history applied in slices), its fit and its copy across a wide character's wrap held
+  to xterm.js's, the fit in identical containers across text sizes and pixel ratios, and `terminal.js`'s plumbing for
+  grid streams against a fake socket (attach, paste interception, drop refusal, link opening, the hyperlink mismatch
+  warning, file-path hovers and downloads, tunnels, reconnect and takeover snapshots), in Chromium and WebKit. No stack
+  and no build: the page and the shipped assets are served through request routing. Needs `npm install` and the browsers
+  from the browser suite's setup below; a few minutes. Not in CI. Run it when the grid assets, `terminal.js`'s grid
+  handling or the fixtures under `crates/farhelm-ui/js-tests/fixtures/grid/` change.
 - `cd crates/farhelm-supervisor/asset-js-tests && node --test` — the OMP conversation-reporter asset's own execution
   proof: dispatch ordering against a controlled subprocess mock (including a deliberately nonserialized variant the
   proof must reject), stale-id cancellation, execution-time file recheck, the subscribed transition events, and the

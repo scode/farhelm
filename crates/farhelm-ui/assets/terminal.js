@@ -32,13 +32,17 @@
 // mounts the grid component in its place (`adoptGrid`). Byte streams never
 // see a difference.
 //
-// What the grid component does not do yet, the island does not offer for
-// it: paste and drop, selection and copy, links, the frozen screen kept
-// across a reconnect or a takeover. Those arrive with the later parity
-// tiers (see grid-terminal.js's "Seams"). Flow control's pause and resume
-// are never sent for a grid stream: the component applies every frame as
-// it arrives and draws once per animation frame, so no backlog builds up
-// on this side to measure (the supervisor coalesces screen frames itself).
+// A grid island gets today's paste interception (with drops prevented and
+// answered, not acted on: drag and drop into a grid terminal is not built
+// yet), selection copying through the page's clipboard queue, today's links
+// (web links, the hyperlink mismatch warning, file-path hovers and
+// downloads, the desktop app's tunnels; see `createGridLinks`), and the
+// frozen screen kept across a reconnect or a takeover. Not built for grid
+// terminals: drag and drop, the drag-copy notice, and showing an input
+// method's composition at the cursor. Flow control's pause and resume are
+// never sent for a grid stream: the component applies every frame as it
+// arrives and draws once per animation frame, so no backlog builds up on
+// this side to measure (the supervisor coalesces screen frames itself).
 //
 // ## One island per terminal, reconciled declaratively (PLAN_M4.md item 6)
 //
@@ -1119,9 +1123,10 @@
   // mounts. Everything that IS a user asking — take control, leaving and
   // reopening the session — clears them explicitly.
   //
-  // They also own a live xterm instance each, so whoever buries one
-  // disposes it; a departed terminal takes its tombstone with it rather
-  // than leaving it for the view's teardown.
+  // They also own a live surface each (an xterm instance, or a frozen grid
+  // component), so whoever buries one disposes it; a departed terminal
+  // takes its tombstone with it rather than leaving it for the view's
+  // teardown.
   const tombstones = new Map();
 
   /**
@@ -1135,7 +1140,241 @@
     tombstones.delete(el);
     publishTombstones();
     tomb.stopCopyOnSelect();
-    tomb.term.dispose();
+    tomb.surface.dispose();
+  }
+
+  // ------------------------------------------------------------------
+  // Grid terminal links: today's link behavior hosted on a grid terminal
+  // ------------------------------------------------------------------
+  //
+  // grid-terminal.js finds the links on a line through a provider and
+  // decides the gestures (hover, leave, the admitted click, the withheld
+  // press); what each link DOES is today's code, here: the OSC 8 target
+  // display with its mismatch warning (`showLinkTarget` with
+  // `linkHoverText`), the tunnel hint and Cmd-click tunnel, the opening
+  // rules (`activateWebLink`), and file paths through a `FileLinksAddon`
+  // (detection, the checking hover, refusals, downloads, the desktop app's
+  // opening). Those helpers read a terminal through xterm.js's buffer API,
+  // so they get an adapter over the grid (grid-buffer.js's `xtermBuffer`)
+  // and run unchanged; the addon is hosted without being activated, since
+  // the grid, not xterm.js, asks for links.
+  //
+  // Module-level rather than inside `mount()`, and reading nothing of a
+  // mount but what is passed in: a grid kept as a takeover's snapshot
+  // outlives its mount (`tombstones`) and keeps its links.
+
+  /** The link-click setting (SPEC.md "Terminal experience"), read at each use. */
+  function currentLinkClickMode() {
+    return window.farhelmTerminalLinkClickMode || "intercept";
+  }
+
+  /**
+   * Today's links for one grid terminal: `{provider, dispose}`, the
+   * provider being grid-terminal.js's `links` option. `getGrid()` returns
+   * the component (created after this, so read at use); `report(message)`
+   * shows a tunnel failure where the xterm.js path shows it.
+   */
+  function createGridLinks({ getGrid, spec, baseUrl, report }) {
+    const links = window.farhelmTerminalLinks;
+    const files = window.farhelmTerminalFiles;
+    const native = typeof window[WEBVIEW_DEVICE_SECRET] === "string";
+    // The terminal as today's helpers read it.
+    const term = {
+      get element() {
+        return getGrid().element;
+      },
+      get buffer() {
+        return { active: getGrid().xtermBuffer() };
+      },
+      getSelection: () => getGrid().selectionText(),
+    };
+    const fileLinks = new files.FileLinksAddon({
+      endpoint: baseUrl + spec.path.split("/term")[0] + "/files",
+      secret: deviceSecret,
+      native,
+      isMac: IS_MAC,
+      containerized: spec.containerized === true,
+      isClick: (event) => getGrid().isLinkClick(event),
+      coveringRects: () => files.markedCoverRects(document),
+    });
+    // Hosted, not activated: `activate` would register an xterm.js link
+    // provider, and the grid asks for links itself (see `row` below).
+    fileLinks.term = term;
+
+    const tunnelState = () => (native ? window.farhelmTunnelSessions?.[spec.sessionId] : null);
+    const tunnelHint = (uri) => {
+      const state = tunnelState();
+      const target = links.tunnelTarget(uri);
+      return state?.available && target && currentLinkClickMode() !== "program"
+        ? { port: target.port, host: state.host_name }
+        : null;
+    };
+    // The web hover's identity, so a refusal raised for it is lowered when
+    // the pointer really leaves it (the xterm.js path's `noteWebHover`).
+    let webHoverIdentity = null;
+    let webLeaveTimer = null;
+    const noteWebHover = (uri, range, text) => {
+      if (!uri && webHoverIdentity === null && webLeaveTimer === null) return;
+      const identity = uri && range && text !== null ? JSON.stringify([uri, range, text]) : null;
+      if (webLeaveTimer !== null) clearTimeout(webLeaveTimer);
+      webLeaveTimer = null;
+      if (identity === null || identity !== webHoverIdentity) fileLinks.lowerRefusal();
+      webHoverIdentity = identity;
+    };
+    const hideWebLinkTarget = () => {
+      links.hideLinkTarget(term.element);
+      if (webLeaveTimer !== null) clearTimeout(webLeaveTimer);
+      webLeaveTimer = setTimeout(() => {
+        webLeaveTimer = null;
+        webHoverIdentity = null;
+        fileLinks.lowerRefusal();
+      }, 0);
+    };
+    // OSC links always disclose their target; printed URLs only with a
+    // tunnel hint. The display must be fully visible and uncovered at the
+    // click (the addon's shared check and refusal).
+    const webDisclosureAdmits = (uri, osc) => !(osc || tunnelHint(uri)) ||
+      fileLinks.admitDisclosure(term.element.querySelector(":scope > .terminal-link-target:not(.terminal-file-target)"), true);
+    const activateWeb = (event, uri, osc) => links.activateWebLink({
+      validated: osc,
+      uri,
+      native,
+      remote: !!tunnelState()?.available,
+      button: event.button,
+      metaKey: event.metaKey,
+      ctrlKey: event.ctrlKey,
+      shiftKey: event.shiftKey,
+      altKey: event.altKey,
+      click: getGrid().isLinkClick(event),
+      selection: getGrid().hasSelection(),
+      mode: currentLinkClickMode(),
+    }, (target) => {
+      if (webDisclosureAdmits(target, osc)) links.openTerminalUrl(target);
+    }, (target) => {
+      if (!webDisclosureAdmits(target, osc)) return;
+      if (typeof window.farhelmTunnelOpen === "function") {
+        try {
+          window.farhelmTunnelOpen({ session_id: spec.sessionId, url: target, generation: tunnelState().generation });
+          return;
+        } catch {
+          // A channel that disappeared after the function check has the
+          // same visible failure as an absent bridge, never a raw open.
+        }
+      }
+      report("Tunneling is unavailable in this window. Reopen Farhelm and try again.");
+    });
+
+    /** A program's hyperlink: a web target, a file on the session host, or an inert other scheme. */
+    const oscLink = (found) => {
+      const range = window.farhelmGridBuffer.toXtermRange(found.ranges[0]);
+      const target = files.oscTarget(found.uri);
+      const link = { ...found, text: found.uri, range, web: target?.kind === "web", decorations: { underline: true, pointerCursor: true } };
+      if (target?.kind === "web") {
+        link.hover = (event) => {
+          const hoverText = links.linkHoverText(term, range, found.uri);
+          noteWebHover(found.uri, range, links.linkRangeText(term, range));
+          links.showLinkTarget(event, found.uri, term.element, hoverText.text, hoverText.kind === "fragment", tunnelHint(found.uri));
+        };
+        link.leave = hideWebLinkTarget;
+        link.activate = (event) => {
+          if (getGrid().isLinkClick(event) && !getGrid().hasSelection()) activateWeb(event, found.uri, true);
+        };
+      } else if (target?.kind === "file") {
+        link.path = target.path;
+        link.hover = (event) => fileLinks.hover(event, target.path, null, range, links.linkRowText(term, range));
+        link.leave = () => fileLinks.leave();
+        link.activate = (event) => {
+          if (getGrid().isLinkClick(event) && !getGrid().hasSelection()) fileLinks.download(target.path, event);
+        };
+      } else {
+        // xterm.js underlines any OSC 8 link; a scheme outside the
+        // allowlist does nothing on hover or click.
+        link.hover = () => noteWebHover(null, null, null);
+        link.leave = () => links.hideLinkTarget(term.element);
+        link.activate = () => {};
+      }
+      return link;
+    };
+
+    /** A URL printed as text (the web-links addon's links). */
+    const textLink = (found) => {
+      const range = window.farhelmGridBuffer.toXtermRange({ start: found.ranges[0].start, end: found.ranges[found.ranges.length - 1].end });
+      return {
+        ...found,
+        web: links.isPlainWebUrl(found.uri),
+        decorations: { underline: true, pointerCursor: true },
+        hover(event) {
+          noteWebHover(found.uri, range, links.linkRangeText(term, range));
+          const hint = tunnelHint(found.uri);
+          if (hint) links.showLinkTarget(event, found.uri, term.element, null, false, hint);
+        },
+        leave: hideWebLinkTarget,
+        activate: (event) => activateWeb(event, found.uri, false),
+      };
+    };
+
+    /**
+     * A printed path, from the addon's link for it: the same path, range
+     * and checks, with the grid's ranges. The hovered object is this one, so
+     * it is what the addon is told it is hovering, and the hand the addon
+     * shows once the check succeeds lands on it.
+     */
+    const fromAddon = (link) => {
+      const wrapped = {
+        kind: "file",
+        path: link.text,
+        web: false,
+        range: link.range,
+        ranges: [window.farhelmGridBuffer.fromXtermRange(link.range)],
+        decorations: { ...link.decorations },
+      };
+      wrapped.hover = (event) => fileLinks.hover(event, wrapped.path, wrapped, link.range);
+      wrapped.leave = () => fileLinks.leave();
+      wrapped.activate = (event) => {
+        if (getGrid().isLinkClick(event) && !getGrid().hasSelection()) fileLinks.download(wrapped.path, event);
+      };
+      return wrapped;
+    };
+
+    const provider = {
+      row(abs, done) {
+        const found = getGrid().rowLinks(abs);
+        const osc = found.filter((link) => link.kind === "osc").map(oscLink);
+        const text = found.filter((link) => link.kind === "text").map(textLink);
+        const row = abs + 1;
+        if (!fileLinks.containerized) {
+          const paths = files.bufferLinks(term, row).map((candidate) => fromAddon(fileLinks.fileLink(candidate)));
+          done([...osc, ...text, ...paths]);
+          return;
+        }
+        // A container's paths name its own filesystem: the host admits each
+        // target before it is offered, for program hyperlinks and printed
+        // paths alike (the addon's `checkoutLinks`).
+        let admittedOsc = null;
+        let admittedPaths = null;
+        const finish = () => {
+          if (admittedOsc && admittedPaths) done([...admittedOsc, ...text, ...admittedPaths]);
+        };
+        const oscNow = () => fileLinks.oscCandidates(getGrid().rowLinks(abs).filter((link) => link.kind === "osc").map(oscLink));
+        void fileLinks.checkoutLinks("osc", fileLinks.oscCandidates(osc), oscNow, (admitted) => {
+          admittedOsc = admitted;
+          finish();
+        });
+        void fileLinks.checkoutLinks("prose", fileLinks.proseCandidates(row), () => fileLinks.proseCandidates(row), (admitted) => {
+          admittedPaths = admitted.map(fromAddon);
+          finish();
+        });
+      },
+    };
+
+    return {
+      provider,
+      dispose() {
+        if (webLeaveTimer !== null) clearTimeout(webLeaveTimer);
+        webLeaveTimer = null;
+        fileLinks.dispose();
+      },
+    };
   }
 
   /**
@@ -1168,7 +1407,7 @@
       // xterm finalizes selection after mouseup dispatch. Burial can happen
       // before this callback, so never inspect a disposed or replaced screen.
       setTimeout(() => {
-        if (tombstones.get(el)?.term !== term) return;
+        if (tombstones.get(el)?.surface !== term) return;
         const hasSelection = term.hasSelection();
         const selectionText = hasSelection ? term.getSelection() : "";
         if (window.farhelmCopyOnSelect.copySelectionOnMouseUp({
@@ -1553,6 +1792,8 @@
         // The rendered screen this recovery is trying to get back, held
         // aside by the first attempt — see `runReconnect`.
         snapshot: null,
+        // Whether `snapshot` is a grid component rather than xterm.js.
+        snapshotIsGrid: false,
         snapshotLinkGesture: null,
       };
       reconnects.set(spec.el, controller);
@@ -1623,13 +1864,14 @@
   function runReconnect(controller, manual) {
     controller.attempting = true;
     const island = islands.get(controller.el);
-    // A grid island holds no screen across the attempt yet: the frozen
-    // screen, its tombstone and their copy-on-select are built on xterm.js
-    // (the later connection-behavior parity tier brings the grid's).
-    if (island && !controller.snapshot && !island.grid) {
+    // The held screen is whichever surface the island has: xterm.js, or the
+    // grid component, which `unmount` freezes (it keeps its own selection
+    // copying and links; xterm.js's need `installSnapshotCopyOnSelect`).
+    if (island && !controller.snapshot) {
       island.keepTerm = true;
-      controller.snapshot = island.term;
-      controller.snapshotLinkGesture = island.linkGesture;
+      controller.snapshot = island.grid || island.term;
+      controller.snapshotIsGrid = !!island.grid;
+      controller.snapshotLinkGesture = island.grid ? null : island.linkGesture;
     }
     farhelmTerm.unmount(controller.el);
     paintReconnect(controller);
@@ -1679,8 +1921,10 @@
     if (controller.timer !== null) clearTimeout(controller.timer);
     reconnects.delete(el);
     const held = controller.snapshot;
+    const heldIsGrid = controller.snapshotIsGrid;
     const heldLinkGesture = controller.snapshotLinkGesture;
     controller.snapshot = null;
+    controller.snapshotIsGrid = false;
     controller.snapshotLinkGesture = null;
     if (outcome === "restore" && held) {
       // The unproven replacement goes first, so the element holds only the
@@ -1692,10 +1936,11 @@
       document.getElementById(el)?.appendChild(held.element);
       held.element.classList.remove("terminal-snapshot");
       tombstones.set(el, {
-        term: held,
+        surface: held,
         path: controller.path,
         gen: controller.gen,
-        stopCopyOnSelect: installSnapshotCopyOnSelect(el, held, heldLinkGesture),
+        // A frozen grid copies selections and opens links by itself.
+        stopCopyOnSelect: heldIsGrid ? () => {} : installSnapshotCopyOnSelect(el, held, heldLinkGesture),
       });
       publishTombstones();
     } else if (held) {
@@ -1805,13 +2050,28 @@
   const ATTACH_STORE_KEY = "__farhelmAttachStore";
 
   /**
+   * What a drop on a grid terminal says. Dragging files or text into a
+   * terminal that runs in a terminal host is not built yet (the
+   * maintainer's call for the grid client's first release, with a TODO
+   * entry); paste works, including for copied files.
+   */
+  const DROP_UNSUPPORTED_TEXT =
+    "Dropping into this terminal is not supported yet; copy and paste instead";
+
+  /**
    * Register one island's paste/drop interception on its own element and
    * return the handle `unmount()` uses to take it all back down, or `null`
    * when there is nothing to install (no policy, or the element is gone).
    *
    * `spec.status` names the DOM node this writes progress and failures
    * into; `policy` is `attachments::attachment_policy`'s JSON;
-   * `isConnected` reports whether this island's socket is open right now.
+   * `pasteText(text)` hands text to the terminal as a paste (xterm.js's
+   * `term.paste`, or the grid component's `paste`, which sends `paste`
+   * messages); `isConnected` reports whether this island's socket is open
+   * right now. `acceptDrops: false` (grid terminals, whose drag and drop is
+   * not built yet) still prevents every drop, so the page cannot navigate
+   * to a dropped file, but answers it with `DROP_UNSUPPORTED_TEXT` instead of
+   * acting on it.
    * Everything below is scoped to this one island: its own listeners, its
    * own in-flight and queued uploads, its own `AbortController`, its own
    * readers. The one exception is the list of messages on the status line,
@@ -1846,7 +2106,7 @@
    *   message and an upload that OUTLIVES its socket reports the published
    *   path instead of pasting into the void.
    */
-  function installAttachments(spec, baseUrl, policy, term, dismissSelectionSoon, isConnected) {
+  function installAttachments(spec, baseUrl, policy, pasteText, dismissSelectionSoon, isConnected, acceptDrops = true) {
     // No policy at all means no interception rather than an exception:
     // `sync()` is called from Rust, and a caller that predates item 7
     // (or a future one that turns this off) must still get a working
@@ -1962,8 +2222,10 @@
     /**
      * Insert text into this terminal through the same call xterm's own
      * paste handler makes, so bracketed paste and the pane's other modes
-     * are handled by the code that already handles them. Sanitizing here
-     * also covers dropped text and paths inserted after an upload.
+     * are handled by the code that already handles them (for a grid
+     * terminal, the supervisor's emulator handles them for its `paste`
+     * messages). Sanitizing here also covers dropped text and paths inserted
+     * after an upload.
      *
      * The selection sweep rides along because an intercepted paste never
      * reaches the listener that normally does it (this island's own
@@ -1972,7 +2234,7 @@
      */
     function insert(text) {
       if (disposed || !text) return;
-      term.paste(window.farhelmTermBytes.sanitizePastedText(text));
+      pasteText(window.farhelmTermBytes.sanitizePastedText(text));
       dismissSelectionSoon();
     }
 
@@ -2419,6 +2681,16 @@
 
     const onDrop = (ev) => {
       ev.preventDefault();
+      if (!acceptDrops) {
+        // Still this island's drop (prevented above, so the page-wide guard
+        // leaves it alone rather than calling the terminal disconnected),
+        // and never silently lost. Earlier failures stay: this drop acts on
+        // nothing, so it supersedes nothing; a repeat replaces its own line.
+        const earlier = errors.indexOf(DROP_UNSUPPORTED_TEXT);
+        if (earlier >= 0) errors.splice(earlier, 1);
+        fail(DROP_UNSUPPORTED_TEXT);
+        return;
+      }
       const payload = payloadFrom("drag", ev.dataTransfer, null);
       const flavor = interpret(payload);
       // Nothing this island knows how to act on. Returning before
@@ -2444,7 +2716,8 @@
     // way HTML drag and drop is wired up wrong.
     const onDragOver = (ev) => {
       ev.preventDefault();
-      if (ev.dataTransfer) ev.dataTransfer.dropEffect = "copy";
+      // Without drops, the cursor says so instead of promising a copy.
+      if (ev.dataTransfer) ev.dataTransfer.dropEffect = acceptDrops ? "copy" : "none";
     };
 
     el.addEventListener("paste", onPaste, true);
@@ -3308,6 +3581,7 @@
           window.farhelmGridModel &&
           window.farhelmGridStyle &&
           window.farhelmGridInput &&
+          window.farhelmGridBuffer &&
           window.farhelmGridTerminal &&
           fontSettled &&
           document.getElementById(spec.el)
@@ -4318,12 +4592,18 @@
           revealed = true;
           if (grid) {
             // Draw now, while still hidden, so the first visible frame is
-            // the current screen. A grid has no scrolled-back view yet, so
-            // it is always at the tail.
+            // the current screen, at the tail. History may still be being
+            // applied (grid-terminal.js, "Scrollback"); the screen does not
+            // wait for it.
+            grid.scrollToBottom();
             grid.flush();
             testHook.replay.revealed = true;
             testHook.replay.revealedInWriteCallback = !!fromWriteCallback;
-            testHook.replay.viewportAtTailOnReveal = true;
+            // True by construction for a grid: the reveal itself puts the
+            // view at the bottom and paints before showing it, so this
+            // observation, which tests xterm.js's write-then-scroll, has
+            // nothing to catch here.
+            testHook.replay.viewportAtTailOnReveal = grid.viewport().following;
           } else {
             term.scrollToBottom();
             const buffer = term.buffer.active;
@@ -5008,11 +5288,13 @@
          * Only the surface changes: the socket, the catch-up, the heartbeat
          * and every ending keep running exactly as for bytes. What is torn
          * down is what only makes sense for xterm.js: its terminal (which
-         * removes its element from `el`), the copy-on-select and link
-         * listeners, and the paste and drop interception, whose grid
-         * versions come with the later parity tiers. The island's record is
-         * updated in place so `stepFontSize`, focus, `unmount` and the test
-         * registry reach the grid from now on.
+         * removes its element from `el`), its copy-on-select and link
+         * listeners, and its paste and drop interception, which is installed
+         * again for the grid (pasting through `paste` messages, drops
+         * refused). The grid brings its own selection copying and links
+         * (`createGridLinks`). The island's record is updated in place so
+         * `stepFontSize`, focus, `unmount` and the test registry reach the
+         * grid from now on.
          */
         function adoptGrid() {
           // Whether xterm.js held the keyboard: an attach that stayed silent
@@ -5020,26 +5302,60 @@
           // focused before the notice arrives, and disposing xterm.js would
           // drop that focus on the page.
           const hadFocus = el.contains(document.activeElement);
+          // Today's links on the grid (`createGridLinks`); a tunnel that
+          // cannot open explains itself where the xterm.js path's does.
+          const gridLinks = createGridLinks({
+            getGrid: () => created,
+            spec,
+            baseUrl,
+            report: (message) => {
+              if (attachments) attachments.reportError(message);
+              else paintBanner(spec.banner, message, false);
+            },
+          });
           // Built before anything is torn down, so a component that fails
           // to build leaves the untouched xterm.js surface in place for the
           // failure's ending to reveal. It starts at xterm.js's size, the
-          // one the socket URL carried and the program already has.
-          const created = window.farhelmGridTerminal.create(el, {
-            fontSize: terminalFontSize,
-            fontFamily: TERMINAL_FONT_FAMILY,
-            theme: window.farhelmTerminalTheme,
-            platform: navigator.platform,
-            size: { cols: term.cols, rows: term.rows },
-            send: sendGridInput,
-            onResize: sendResize,
-            // A program's OSC 52 write, honored as the xterm.js path's
-            // `clipboardProvider` honors it: the system clipboard only (the
-            // browser has no primary selection), through the page's one
-            // clipboard queue, silently best-effort.
-            onClipboard: (text, target) => {
-              if (target === "clipboard") enqueueClipboardWrite(text);
-            },
-          });
+          // one the socket URL carried and the program already has. The
+          // links it hosts are disposed with it, or here if it never was.
+          let created;
+          try {
+            created = window.farhelmGridTerminal.create(el, {
+              fontSize: terminalFontSize,
+              fontFamily: TERMINAL_FONT_FAMILY,
+              theme: window.farhelmTerminalTheme,
+              platform: navigator.platform,
+              size: { cols: term.cols, rows: term.rows },
+              send: sendGridInput,
+              onResize: sendResize,
+              // A program's OSC 52 write, honored as the xterm.js path's
+              // `clipboardProvider` honors it: the system clipboard only (the
+              // browser has no primary selection), through the page's one
+              // clipboard queue, silently best-effort.
+              onClipboard: (text, target) => {
+                if (target === "clipboard") enqueueClipboardWrite(text);
+              },
+              // A completed local selection, through the same queue (this
+              // file's header, "Copy to the system clipboard").
+              onCopy: enqueueClipboardWrite,
+              links: gridLinks.provider,
+              linkPress: (event, link) => window.farhelmTerminalLinks.interceptLinkPress({
+                button: event.button,
+                tracking: true,
+                forced: false,
+                webLink: link.web,
+                mode: currentLinkClickMode(),
+              }),
+              onDispose: () => gridLinks.dispose(),
+              // A bad history row found while history is applied after the
+              // frame that carried it: the same ending as a bad frame.
+              onProtocolError: streamFailed,
+              sanitizePaste: window.farhelmTermBytes.sanitizePastedText,
+            });
+          } catch (err) {
+            gridLinks.dispose();
+            throw err;
+          }
           if (stopCopyOnSelect) stopCopyOnSelect();
           stopCopyOnSelect = null;
           if (attachments) attachments.dispose();
@@ -5048,8 +5364,21 @@
           webLeaveTimer = null;
           term.dispose();
           grid = created;
+          // Paste interception as for xterm.js (SPEC.md "Attachments"): the
+          // same classification, uploads and status line, inserting through
+          // the grid's `paste` messages. Drops are prevented and answered,
+          // not acted on (see `installAttachments`).
+          attachments = installAttachments(
+            spec,
+            baseUrl,
+            attach,
+            (text) => grid.paste(text),
+            () => grid.clearSelection(),
+            () => ws.readyState === WebSocket.OPEN,
+            false,
+          );
           if (islandEntry) {
-            Object.assign(islandEntry, { kind: "grid", grid, term: null, fit: null, attachments: null, stopCopyOnSelect: null });
+            Object.assign(islandEntry, { kind: "grid", grid, term: null, fit: null, attachments, stopCopyOnSelect: null, linkGesture: null });
           }
           publishIsland(spec.el, { kind: "grid", grid, ws, test: testHook });
           if (spec.primary) {
@@ -5680,7 +6009,7 @@
           spec,
           baseUrl,
           attach,
-          term,
+          (text) => term.paste(text),
           dismissSelectionSoon,
           () => ws.readyState === WebSocket.OPEN,
         );
@@ -5973,16 +6302,19 @@
       // screen to OUTLIVE its teardown (`runReconnect`). Recovery owns
       // disposal or restoration from here (`cancelReconnect`); the normal
       // island teardown still closes its socket and removes its listeners.
-      if (island.grid) {
-        // A grid island disposed its xterm.js surface when it adopted the
-        // grid, and keeps no frozen screen (see `runReconnect`).
-        island.grid.dispose();
-      } else if (island.keepTerm) {
+      if (island.keepTerm) {
         // Move the frozen screen beside the mount point: hiding the new
         // replay must not hide its predecessor too. The pane still owns
         // visibility, so a background tab cannot paint over the active one.
-        island.term.element.classList.add("terminal-snapshot");
-        document.getElementById(el)?.parentElement.appendChild(island.term.element);
+        // A grid is frozen first: its socket is gone, and as a snapshot it
+        // sends nothing (a grid island disposed its xterm.js surface when it
+        // adopted the grid, so the grid is the screen to keep).
+        const surface = island.grid || island.term;
+        if (island.grid) island.grid.freeze();
+        surface.element.classList.add("terminal-snapshot");
+        document.getElementById(el)?.parentElement.appendChild(surface.element);
+      } else if (island.grid) {
+        island.grid.dispose();
       } else {
         island.term.dispose();
       }
