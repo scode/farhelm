@@ -452,6 +452,21 @@ that its required systemd or SSH substrate ran.
   and no build: the page and the shipped assets are served through request routing. Needs `npm install` and the browsers
   from the browser suite's setup below; a few minutes. Not in CI. Run it when the grid assets, `terminal.js`'s grid
   handling or the fixtures under `crates/farhelm-ui/js-tests/fixtures/grid/` change.
+- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'helm terminal relay' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p farhelm-helm --lib -E 'test(/^terminal::tests::/) | test(/^client::tests::/)'`
+  — the helm's terminal WebSocket (`crates/farhelm-helm/src/terminal.rs`) and its supervisor client
+  (`crates/farhelm-helm/src/client.rs`), in-process against stand-in supervisors: attach, takeover, refusals, the stream
+  notice, replay-complete ordering, heartbeat, pause and resume, frame and queue bounds, the stall detach, teardown, and
+  the client's requests, uploads and relays. For grid streams: only `grid=1` asking for them on both routes, a grid
+  stream relayed unread both ways (a 200 KiB frame sent before the reply, a browser message of exactly the 64 KiB input
+  bound arriving as one frame, resize, pause and resume after it), a message over that bound ending the attachment with
+  nothing forwarded after it (on the socket, and in the client whoever sends next), a slow browser pausing its grid
+  stream and resuming it once it catches up with no frame lost, at 32 KiB messages with a writer queue's worth arriving
+  after the pause and at 1 MiB rows with 8 arriving after it, the queue's pause and resume marks, event and byte bounds
+  and frame bounds, an ended attachment never paused again, a grid-capable attach answered with bytes keeping a byte
+  stream's bounds and never paused by the helm, and a wedged browser's handler ended by the stall detach for a
+  bytes-only and a grid attach (premise: parked mid-send with the attachment live; oracle: the handler's own teardown
+  `Detach` and the socket's close). Under a minute. Part of the workspace nextest run. Run it when the helm's terminal
+  relay, its client's terminal queue or the protocol's attach fields change.
 - `cd crates/farhelm-supervisor/asset-js-tests && node --test` — the OMP conversation-reporter asset's own execution
   proof: dispatch ordering against a controlled subprocess mock (including a deliberately nonserialized variant the
   proof must reject), stale-id cancellation, execution-time file recheck, the subscribed transition events, and the

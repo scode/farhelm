@@ -28,8 +28,10 @@ use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore, mpsc, oneshot, watch};
 use tokio::time::Instant;
 use tracing::warn;
 
-/// Input chunk size. Well under `MAX_FRAME_LEN`, and matched to the
-/// supervisor's replay chunking so both directions behave alike.
+/// Input chunk size for byte streams. Well under `MAX_FRAME_LEN`, and
+/// matched to the supervisor's replay chunking so both directions behave
+/// alike. Grid input is never chunked: each browser message is one grid
+/// message and goes up as one frame ([`SupervisorClient::send_grid_input`]).
 const INPUT_CHUNK: usize = 32 * 1024;
 
 /// Depth of one attached terminal's [`TermEvent`] queue.
@@ -66,15 +68,127 @@ const INPUT_CHUNK: usize = 32 * 1024;
 /// bounded writer — so a healthy terminal never approaches this in steady
 /// state; it only fills when the consumer has genuinely stopped.
 ///
-/// Honest caveat: this still bounds EVENTS, not bytes, but every incoming
-/// terminal data frame is capped at `farhelm_proto::MAX_TERMINAL_DATA_LEN`.
-/// The queue therefore admits at most 256 × 64 KiB, about 16 MiB, of terminal
-/// payload even when a supervisor ignores flow control. Smaller live-pane
-/// notifications use less memory; the cap is the worst-case guarantee, not a
-/// promise that every attachment reaches it. A consumer that stops draining
-/// still trips the detach as soon as the event count fills, preserving the
-/// head-of-line protection this queue exists to provide.
+/// This is a byte stream's bound. Bytes are bounded too, by
+/// [`TERM_QUEUE_BYTES`], which for a byte stream never binds first: every
+/// incoming byte-stream data frame is capped at
+/// `farhelm_proto::MAX_TERMINAL_DATA_LEN`, so 256 frames are at most the same
+/// 16 MiB. A consumer that stops draining still trips the detach as soon as
+/// either bound fills, preserving the head-of-line protection this queue
+/// exists to provide. A grid stream has its own, larger event bound
+/// ([`GRID_EVENT_QUEUE`]).
 const TERM_EVENT_QUEUE: usize = 256;
+
+/// Depth of a grid stream's event queue, and of a grid-capable attach's
+/// until the reply says which stream it got.
+///
+/// A grid stream is bounded by bytes ([`TERM_QUEUE_BYTES`]), not by this:
+/// its catch-up is the whole scrollback (about 3,000 messages of about
+/// 32 KiB for 12,000 lines of truecolor output, measured while building the
+/// supervisor's sender), most of its live messages are a few hundred bytes,
+/// and what can still arrive after the helm pauses it ([`GRID_PAUSE_BYTES`])
+/// is counted in frames: the supervisor's writer queue alone holds 64, and a
+/// link's buffers more. At [`TERM_EVENT_QUEUE`]'s 256 those frames, not the
+/// bytes, would end a grid attachment whose browser is still reading. The
+/// limit only bounds the per-event overhead (a few dozen bytes each) of a
+/// queue whose payload the byte budget already bounds.
+const GRID_EVENT_QUEUE: usize = 4096;
+
+/// Most payload bytes one attached terminal's event queue may hold before
+/// the terminal is detached as stalled, like a full event queue.
+///
+/// Exactly the most a byte stream could ever queue (256 frames of
+/// `MAX_TERMINAL_DATA_LEN`), so byte streams behave as they did before the
+/// bound existed. It is a grid stream's real memory bound: its frames can
+/// be 16 times larger, and its event bound is far higher.
+const TERM_QUEUE_BYTES: usize = TERM_EVENT_QUEUE * farhelm_proto::MAX_TERMINAL_DATA_LEN;
+
+/// How full a grid stream's queue may get before the helm asks the
+/// supervisor to stop sending (`ControlMsg::PauseOutput`): 2 MiB, or 512
+/// events, whichever comes first.
+///
+/// # Why the helm pauses grid streams
+///
+/// A byte stream's browser measures its own backlog and sends pause and
+/// resume, which the helm forwards. The grid client sends neither: it
+/// applies each message as it arrives, so its backlog is never in the page
+/// but here, in this queue, while the socket to the browser drains. Without
+/// a pause from this end the supervisor's sender would never see its writer
+/// queue fill (this side reads the connection without waiting on any one
+/// terminal), and a browser slower than the supervisor's link, at a large
+/// catch-up or a flood, would overflow the queue and be detached as stalled.
+/// A paused grid stream sends nothing, history included, until the resume,
+/// then the history lines it owes (or a history reset) and one screen update
+/// from where the viewer is, so pausing costs screen frames, never output
+/// (`farhelm_proto::grid`, "Flow control").
+///
+/// # The marks, and the slowest browser that is not detached
+///
+/// The supervisor ends an attachment that stays paused past its stall
+/// timeout (60 s), counted from the pause, whoever sent it. That is what
+/// ends a browser which stopped reading, and it is also the floor below
+/// which a browser that reads is ended: after the pause it must drain the
+/// queue from its peak to the resume mark within the timeout. The peak is
+/// the pause mark plus what was already on its way when the pause was
+/// decided: up to the supervisor's writer queue (64 frames, about 2 MiB at
+/// its sender's 32 KiB packing), what the link holds (a unix socket's buffer
+/// of a few hundred KiB locally; over ssh, its channel window and socket
+/// buffers, a few MiB more), and the sender's 8 ms cycles while the pause
+/// crosses. With the resume mark 512 KiB below the pause mark, the browser
+/// must drain 512 KiB plus that in-flight data within 60 s:
+///
+/// - about 47 KB/s locally during a scrollback catch-up, the realistic
+///   case for a pause: the sender then fills its writer queue
+///   (512 KiB + 2.2 MiB);
+/// - about 10 KB/s when little was in flight, as in live output that a
+///   browser falls behind slowly;
+/// - about 110 KB/s over ssh, if its channel window and socket buffers hold
+///   about 4 MiB more on top of a full writer queue (512 KiB + about
+///   6 MiB); the figure moves with however much the link actually holds.
+///
+/// The resume's own wait comes out of the same 60 s: it is sent through the
+/// helm's shared writer queue, behind whatever input, uploads and other
+/// terminals' control messages are already there, and the supervisor's
+/// deadline runs until it arrives.
+///
+/// A slower browser is ended as stalled, which the browser shows as any
+/// stall, waiting for the user to reconnect. For comparison, a byte stream's
+/// browser pauses at 4 MiB of unparsed output and resumes at 1 MiB, against
+/// the same deadline counted the same way: it must parse at least 3 MiB plus
+/// what was in flight within 60 s (52 KB/s and up, of parsing rather than of
+/// network), and a byte stream whose browser is slow on the network is never
+/// paused at all; it overflows this queue and is detached at once.
+///
+/// Rearming the supervisor's deadline while the browser keeps draining would
+/// remove the floor, but needs the helm to report progress and the
+/// supervisor to act on it: a protocol and supervisor change, for a floor
+/// these marks already keep low. Not done.
+///
+/// The pause mark leaves 14 MiB of the byte budget, and 3,584 events, for
+/// what arrives after it. That covers the cases above many times over at the
+/// sender's packing. It does not cover the extreme: a row too large for one
+/// packed message goes alone in a message of up to 1 MiB, and a writer queue
+/// full of such rows (output that makes huge rows, such as long lines of
+/// distinct wide or combining characters, or rows of many links) can exceed
+/// the budget, which ends the attachment as stalled; the browser shows it as
+/// any stall until the user reconnects. The budget stays the hard bound;
+/// per-attachment credits that would avoid this are not built.
+const GRID_PAUSE_BYTES: usize = 2 * 1024 * 1024;
+/// See [`GRID_PAUSE_BYTES`]: an eighth of [`GRID_EVENT_QUEUE`], for streams
+/// of small messages, which reach it before the byte mark.
+const GRID_PAUSE_EVENTS: usize = GRID_EVENT_QUEUE / 8;
+
+/// How far a paused grid stream's queue must drain, in events AND in bytes,
+/// before the helm resumes it (`ControlMsg::ResumeOutput`): to 1.5 MiB and
+/// 384 events.
+///
+/// A quarter below the pause marks. Close to them, because everything a
+/// browser must drain between the pause and the resume counts against the
+/// supervisor's stall deadline ([`GRID_PAUSE_BYTES`]); far enough below that
+/// each pause moves at least 512 KiB, rather than a pause and a resume for
+/// every message of a queue hovering at a mark.
+const GRID_RESUME_BYTES: usize = GRID_PAUSE_BYTES / 4 * 3;
+/// See [`GRID_RESUME_BYTES`].
+const GRID_RESUME_EVENTS: usize = GRID_PAUSE_EVENTS / 4 * 3;
 
 /// Depth of the single outbound queue to the supervisor.
 ///
@@ -562,7 +676,8 @@ pub struct PeerHello {
 /// What an attached terminal receives from the supervisor side.
 #[derive(Debug)]
 pub enum TermEvent {
-    /// Raw terminal bytes (replay first, then live output).
+    /// One data frame: raw terminal bytes (replay first, then live output),
+    /// or for a grid stream one grid message (`farhelm_proto::grid`).
     Data(Vec<u8>),
     /// This attach's INITIAL catch-up is over: every byte the supervisor
     /// replays for THIS attach's own catch-up phase precedes this event in
@@ -592,6 +707,17 @@ pub enum TermEvent {
     /// The attachment ended: taken over by another client, or the
     /// session's terminal went away.
     Detached(Detach),
+}
+
+impl TermEvent {
+    /// The payload bytes this event holds while it waits in a terminal's
+    /// queue, as [`TERM_QUEUE_BYTES`] counts them.
+    fn queued_bytes(&self) -> usize {
+        match self {
+            TermEvent::Data(bytes) => bytes.len(),
+            TermEvent::ReplayComplete | TermEvent::Detached(_) => 0,
+        }
+    }
 }
 
 /// Why one attachment ended: the supervisor's user-legible `reason`, and the
@@ -661,6 +787,195 @@ struct AttachPolicy {
 struct TerminalHandle {
     events: mpsc::Sender<TermEvent>,
     detach: watch::Sender<Option<Detach>>,
+    /// The queue's byte and frame bounds, shared with the [`TermStream`].
+    gauge: Arc<QueueGauge>,
+}
+
+/// A handle leaves the terminals map exactly when its attachment ends, on
+/// every path (a detach, a takeover, a stall, a closed connection), so this
+/// is where the helm's pause of a grid stream stops: the stream may still
+/// be drained after the end, and the supervisor must not be sent pauses and
+/// resumes for an attachment it has already let go. The gauge is marked
+/// released too, so a reply processed after the end cannot start the pause
+/// again ([`QueueGauge::start_grid_flow`]). A decision made just before the
+/// end can still arrive after the `Detach`; the supervisor ignores pause and
+/// resume for a channel it no longer has.
+impl Drop for TerminalHandle {
+    fn drop(&mut self) {
+        let mut state = self.gauge.state();
+        state.released = true;
+        state.grid_flow = None;
+    }
+}
+
+/// What one attachment's event queue holds, shared by the demultiplexer that
+/// fills it and the [`TermStream`] that drains it, and the bounds and grid
+/// flow control that depend on it.
+///
+/// It enforces the queue's bounds: events ([`TERM_EVENT_QUEUE`] for a byte
+/// stream, [`GRID_EVENT_QUEUE`] for a grid stream, the `mpsc` queue's own
+/// capacity being the larger of the two for any attach that can take
+/// grids), the bytes those events carry ([`TERM_QUEUE_BYTES`]), and the
+/// largest data frame the attachment admits. Once the supervisor has said
+/// the stream is a grid, it also decides the helm's own pause
+/// ([`GRID_PAUSE_BYTES`]). A std
+/// mutex rather than atomics because the fields are read and changed
+/// together and every hold is a few comparisons; nothing awaits under it.
+struct QueueGauge(std::sync::Mutex<GaugeState>);
+
+/// The fields behind [`QueueGauge`]'s lock.
+struct GaugeState {
+    /// Events queued and not yet taken by the stream.
+    events: usize,
+    /// Their payload bytes ([`TermEvent::queued_bytes`]).
+    bytes: usize,
+    /// The largest data frame admitted. An attach that can take grids
+    /// admits up to `GRID_MAX_MESSAGE` until the reply says which stream
+    /// it got, because a grid stream's first frames can arrive before that
+    /// reply; a byte stream then narrows to `MAX_TERMINAL_DATA_LEN`.
+    max_data: usize,
+    /// The most events admitted, narrowed the same way: [`GRID_EVENT_QUEUE`]
+    /// until a byte stream's reply makes it [`TERM_EVENT_QUEUE`].
+    max_events: usize,
+    /// The helm's pause of a grid stream; `None` for a byte stream, whose
+    /// browser owns its pause and resume, and once the attachment ended.
+    grid_flow: Option<GridFlow>,
+    /// The attachment ended (its [`TerminalHandle`] was dropped); the pause
+    /// never starts after this.
+    released: bool,
+}
+
+/// The helm's pause state for one grid stream.
+struct GridFlow {
+    /// What this side last decided: paused from either pause mark until the
+    /// queue drains to both resume marks.
+    paused: bool,
+    /// Where each decision goes, for the task that tells the supervisor
+    /// (`SupervisorClient::spawn_grid_flow`). A watch, so decisions made
+    /// faster than the supervisor's writer queue takes them collapse into
+    /// the latest, and arrive in order.
+    tell: watch::Sender<bool>,
+}
+
+/// What a queue holds, without the flow's watch: enough to read a
+/// [`TermStream`] in a test failure or a log line.
+impl std::fmt::Debug for QueueGauge {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let state = self.state();
+        f.debug_struct("QueueGauge")
+            .field("events", &state.events)
+            .field("bytes", &state.bytes)
+            .field("max_data", &state.max_data)
+            .field("max_events", &state.max_events)
+            .field("released", &state.released)
+            .field(
+                "grid_paused",
+                &state.grid_flow.as_ref().map(|flow| flow.paused),
+            )
+            .finish()
+    }
+}
+
+impl QueueGauge {
+    /// A gauge for an attach that can take `streams`: a byte stream's
+    /// bounds, or until the reply a grid stream's.
+    fn new(streams: ViewerStreams) -> Arc<QueueGauge> {
+        let (max_data, max_events) = match streams {
+            ViewerStreams::BytesOnly => (farhelm_proto::MAX_TERMINAL_DATA_LEN, TERM_EVENT_QUEUE),
+            ViewerStreams::BytesOrGrid => (farhelm_proto::grid::GRID_MAX_MESSAGE, GRID_EVENT_QUEUE),
+        };
+        Arc::new(QueueGauge(std::sync::Mutex::new(GaugeState {
+            events: 0,
+            bytes: 0,
+            max_data,
+            max_events,
+            grid_flow: None,
+            released: false,
+        })))
+    }
+
+    fn state(&self) -> std::sync::MutexGuard<'_, GaugeState> {
+        self.0.lock().expect("terminal queue gauge mutex poisoned")
+    }
+
+    /// Count `event` in, or refuse it because it would break a bound: a
+    /// data frame larger than the attachment admits, more events than it
+    /// admits, or more queued bytes than [`TERM_QUEUE_BYTES`]. Called before
+    /// the event is queued, so the stream can never take an event this has
+    /// not counted.
+    fn admit(&self, event: &TermEvent) -> bool {
+        let size = event.queued_bytes();
+        let mut state = self.state();
+        if size > state.max_data
+            || state.events >= state.max_events
+            || state.bytes + size > TERM_QUEUE_BYTES
+        {
+            return false;
+        }
+        state.events += 1;
+        state.bytes += size;
+        state.steer();
+        true
+    }
+
+    /// Count `event` out: the stream took it, or it was admitted and then
+    /// could not be queued after all.
+    fn release(&self, event: &TermEvent) {
+        let mut state = self.state();
+        state.events = state.events.saturating_sub(1);
+        state.bytes = state.bytes.saturating_sub(event.queued_bytes());
+        state.steer();
+    }
+
+    /// The supervisor answered with a byte stream: admit only frames, and
+    /// only as many events, as a byte stream may have from here on. Events
+    /// already queued past the narrower bound stay, as the next admission
+    /// refuses.
+    fn settle_bytes(&self) {
+        let mut state = self.state();
+        state.max_data = farhelm_proto::MAX_TERMINAL_DATA_LEN;
+        state.max_events = TERM_EVENT_QUEUE;
+    }
+
+    /// The supervisor answered with a grid stream: start the helm's own
+    /// pause and resume, returning where its decisions go, or `None` when
+    /// the attachment already ended between the reply's arrival and this
+    /// call. Frames that arrived before the reply already count, so this
+    /// decides once at start.
+    fn start_grid_flow(&self) -> Option<watch::Receiver<bool>> {
+        let mut state = self.state();
+        if state.released {
+            return None;
+        }
+        let (tell, decisions) = watch::channel(false);
+        state.grid_flow = Some(GridFlow {
+            paused: false,
+            tell,
+        });
+        state.steer();
+        Some(decisions)
+    }
+}
+
+impl GaugeState {
+    /// Pause a grid stream whose queue reached either pause mark, and resume
+    /// it once the queue is at or below both resume marks. Nothing for a
+    /// byte stream.
+    fn steer(&mut self) {
+        let (events, bytes) = (self.events, self.bytes);
+        let Some(flow) = self.grid_flow.as_mut() else {
+            return;
+        };
+        let paused = if flow.paused {
+            events > GRID_RESUME_EVENTS || bytes > GRID_RESUME_BYTES
+        } else {
+            events >= GRID_PAUSE_EVENTS || bytes >= GRID_PAUSE_BYTES
+        };
+        if paused != flow.paused {
+            flow.paused = paused;
+            flow.tell.send_replace(paused);
+        }
+    }
 }
 
 /// The receiving half of one attachment: bounded terminal events plus the
@@ -678,6 +993,10 @@ pub struct TermStream {
     ended: bool,
     /// What the data events carry, from the supervisor's `Attached` reply.
     stream: farhelm_proto::StreamKind,
+    /// The queue's accounting, shared with the demultiplexer's
+    /// [`TerminalHandle`]: every event taken here is counted out, which is
+    /// what resumes a grid stream the helm paused.
+    gauge: Arc<QueueGauge>,
 }
 
 impl TermStream {
@@ -704,7 +1023,7 @@ impl TermStream {
         }
         loop {
             match self.events.try_recv() {
-                Ok(event) => return Some(event),
+                Ok(event) => return Some(self.taken(event)),
                 Err(mpsc::error::TryRecvError::Empty) => {}
                 // The queue closed. That happens at the same moment the
                 // handle is dropped, which is the same moment the reason
@@ -720,7 +1039,7 @@ impl TermStream {
             }
             tokio::select! {
                 event = self.events.recv() => match event {
-                    Some(event) => return Some(event),
+                    Some(event) => return Some(self.taken(event)),
                     None => return self.end_with_reason(),
                 },
                 changed = self.detach.changed() => {
@@ -753,7 +1072,13 @@ impl TermStream {
     /// behind a detach they have ALREADY observed. `Err` means nothing is
     /// buffered right now, not that the stream has ended.
     pub fn try_recv(&mut self) -> Result<TermEvent, mpsc::error::TryRecvError> {
-        self.events.try_recv()
+        self.events.try_recv().map(|event| self.taken(event))
+    }
+
+    /// Count an event out of the queue as it is handed over.
+    fn taken(&self, event: TermEvent) -> TermEvent {
+        self.gauge.release(&event);
+        event
     }
 
     /// A separate view of the detach signal, for consumers that must be
@@ -1848,6 +2173,11 @@ impl SupervisorClient {
     /// it is bounded, visible to the user as a detach banner, and
     /// recoverable by reattaching, whereas the alternative is an
     /// unbounded, invisible stall of everything else.
+    ///
+    /// A grid stream's browser sends no pause of its own, so for those the
+    /// helm pauses the supervisor itself well before the queue fills
+    /// (`GRID_PAUSE_BYTES`); the detach stays the backstop for a browser
+    /// that stopped reading, and for a supervisor that ignores the pause.
     async fn dispatch(self: &Arc<Self>, frame: Frame) -> anyhow::Result<()> {
         match frame.kind {
             FrameKind::Data => {
@@ -2129,9 +2459,10 @@ impl SupervisorClient {
     }
 
     /// Push one event onto `channel`'s bounded queue, applying the same
-    /// stall-detach rule to queue overflow and an oversized incoming data
-    /// frame. The size check happens before `try_send`, so frames that arrive
-    /// before `Attached` cannot consume queue capacity beyond the byte bound.
+    /// stall-detach rule to queue overflow (in events or in bytes) and an
+    /// oversized incoming data frame. The size checks happen before
+    /// `try_send` ([`QueueGauge::admit`]), so frames that arrive before
+    /// `Attached` cannot consume queue capacity beyond the byte bounds.
     /// The two queue producers remain uniform: raw `Data` off the wire and
     /// the `ReplayComplete` marker synthesized from a `ControlMsg` (PLAN_M5.md
     /// item 4). A channel `dispatch` does not know about — the attachment
@@ -2147,17 +2478,14 @@ impl SupervisorClient {
     async fn route_terminal_event(&self, channel: u32, event: TermEvent) {
         let mut terms = self.terminals.lock().await;
         if let std::collections::hash_map::Entry::Occupied(entry) = terms.entry(channel) {
-            if matches!(
-                &event,
-                TermEvent::Data(bytes)
-                    if bytes.len() > farhelm_proto::MAX_TERMINAL_DATA_LEN
-            ) {
+            if !entry.get().gauge.admit(&event) {
                 self.detach_stalled_terminal(channel, entry.remove());
                 return;
             }
             match entry.get().events.try_send(event) {
                 Ok(()) => {}
-                Err(mpsc::error::TrySendError::Full(_)) => {
+                Err(mpsc::error::TrySendError::Full(event)) => {
+                    entry.get().gauge.release(&event);
                     self.detach_stalled_terminal(channel, entry.remove());
                 }
                 Err(mpsc::error::TrySendError::Closed(_)) => {
@@ -3654,14 +3982,23 @@ impl SupervisorClient {
         policy: AttachPolicy,
     ) -> anyhow::Result<(u32, TermStream)> {
         let channel = allocate_channel(&self.next_channel)?;
-        let (events_tx, events_rx) = mpsc::channel(TERM_EVENT_QUEUE);
+        // Until the reply, the frames already arriving may be a grid
+        // stream's whenever this attach can take one, so the queue has a
+        // grid stream's room; the gauge narrows a byte stream's bounds
+        // once the reply says so.
+        let (events_tx, events_rx) = mpsc::channel(match policy.streams {
+            ViewerStreams::BytesOnly => TERM_EVENT_QUEUE,
+            ViewerStreams::BytesOrGrid => GRID_EVENT_QUEUE,
+        });
         let (detach_tx, detach_rx) = watch::channel(None);
+        let gauge = QueueGauge::new(policy.streams);
         let mut stream = TermStream {
             events: events_rx,
             detach: detach_rx,
             ended: false,
             // Set from the reply below; nothing reads it before that.
             stream: farhelm_proto::StreamKind::Bytes,
+            gauge: Arc::clone(&gauge),
         };
         // Register before sending Attach: replay data frames may arrive
         // before the Attached reply is processed. The insert cannot clobber
@@ -3672,6 +4009,7 @@ impl SupervisorClient {
             TerminalHandle {
                 events: events_tx,
                 detach: detach_tx,
+                gauge,
             },
         );
 
@@ -3713,6 +4051,18 @@ impl SupervisorClient {
                 ))
             }
             ControlMsg::Attached { stream: kind, .. } => {
+                // Frames the demultiplexer routed between the reply and
+                // here were admitted under the attach-time bound; the byte
+                // budget still holds them, and a supervisor sends no byte
+                // stream frame over `MAX_TERMINAL_DATA_LEN` anyway.
+                match kind {
+                    farhelm_proto::StreamKind::Bytes => stream.gauge.settle_bytes(),
+                    farhelm_proto::StreamKind::Grid => {
+                        if let Some(decisions) = stream.gauge.start_grid_flow() {
+                            self.spawn_grid_flow(channel, decisions);
+                        }
+                    }
+                }
                 stream.stream = kind;
                 Ok((channel, stream))
             }
@@ -3761,6 +4111,95 @@ impl SupervisorClient {
                 break;
             }
         }
+    }
+
+    /// Forward one grid input message (`farhelm_proto::grid::GridInput`)
+    /// as exactly one data frame, unread, while the attachment lasts.
+    ///
+    /// Never chunked, unlike [`Self::send_input`]: on a grid stream one
+    /// data frame is one message, and a message cut in two is two malformed
+    /// ones. A message over `GRID_MAX_INPUT_MESSAGE` (64 KiB, which the
+    /// grid client never sends) is not forwarded. It ends the attachment
+    /// here instead, as the supervisor would end it, with the detach notice
+    /// published to the attachment's stream and the supervisor released.
+    /// Refusing here keeps a browser's message, which can be up to
+    /// `MAX_FRAME_LEN`, from becoming a frame the shared connection's writer
+    /// cannot encode, which would end every attachment on it.
+    ///
+    /// `Err` means nothing was forwarded and the attachment is over: this
+    /// message ended it, or it had already ended (a takeover, a stall, an
+    /// earlier oversized message), so nothing sent after an oversized
+    /// message is ever forwarded, whoever calls next. Input accepted after
+    /// some was lost can turn a command into a different one. The caller
+    /// stops reading its browser.
+    pub async fn send_grid_input(&self, channel: u32, message: Vec<u8>) -> Result<(), Detach> {
+        let mut terminals = self.terminals.lock().await;
+        if !terminals.contains_key(&channel) {
+            return Err(Detach::other("the terminal attachment has ended"));
+        }
+        if message.len() > farhelm_proto::grid::GRID_MAX_INPUT_MESSAGE {
+            let detach = Detach::other(format!(
+                "terminal input failed: a grid input message of {} bytes is over the {} byte bound",
+                message.len(),
+                farhelm_proto::grid::GRID_MAX_INPUT_MESSAGE
+            ));
+            if let Some(handle) = terminals.remove(&channel) {
+                signal_detached(&handle, detach.clone());
+                self.release_upstream(channel);
+            }
+            return Err(detach);
+        }
+        // Not held across the send: the demultiplexer takes this lock for
+        // every frame it routes, and the send can wait for writer capacity.
+        drop(terminals);
+        let _ = self
+            .writer_tx
+            .send(Frame::data(channel, message).into())
+            .await;
+        Ok(())
+    }
+
+    /// Tell the supervisor each pause and resume the helm decides for one
+    /// grid stream (`GRID_PAUSE_BYTES`), in order.
+    ///
+    /// A task of its own because the decisions are made where waiting is
+    /// not allowed (the demultiplexer, and the stream's own `recv`) and
+    /// sending waits for room in the writer queue. The watch collapses a
+    /// burst of decisions into the latest, and only a change from what the
+    /// supervisor was last told is sent, so a resume never overtakes the
+    /// pause before it. The task ends with the attachment (the gauge, which
+    /// owns the watch's sender, is dropped by both its holders) or with the
+    /// connection.
+    ///
+    /// A browser's own pause and resume for the same channel are forwarded
+    /// as they are, beside these, and the supervisor keeps one paused flag
+    /// per attachment, so the two could undo each other. The grid client
+    /// never sends them; a client that did would only lose the helm's
+    /// pause, leaving the queue's bounds and the stall detach in force.
+    fn spawn_grid_flow(&self, channel: u32, mut decisions: watch::Receiver<bool>) {
+        let writer_tx = self.writer_tx.clone();
+        tokio::spawn(async move {
+            let mut told = false;
+            while decisions.changed().await.is_ok() {
+                let paused = *decisions.borrow_and_update();
+                if paused == told {
+                    continue;
+                }
+                let message = if paused {
+                    ControlMsg::PauseOutput { channel }
+                } else {
+                    ControlMsg::ResumeOutput { channel }
+                };
+                if writer_tx
+                    .send(Frame::control(&message).into())
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
+                told = paused;
+            }
+        });
     }
 
     /// Set the session's terminal size. Fire-and-forget by design: a
@@ -4357,11 +4796,14 @@ mod tests {
     ) -> TermStream {
         let (events_tx, events_rx) = mpsc::channel(capacity);
         let (detach_tx, detach_rx) = watch::channel(None);
+        // A byte stream's bounds, as a bytes-only attach sets them.
+        let gauge = QueueGauge::new(ViewerStreams::BytesOnly);
         client.terminals.lock().await.insert(
             channel,
             TerminalHandle {
                 events: events_tx,
                 detach: detach_tx,
+                gauge: Arc::clone(&gauge),
             },
         );
         TermStream {
@@ -4369,6 +4811,7 @@ mod tests {
             detach: detach_rx,
             ended: false,
             stream: farhelm_proto::StreamKind::Bytes,
+            gauge,
         }
     }
 
@@ -5989,6 +6432,428 @@ mod tests {
         );
 
         peer.await.unwrap();
+    }
+
+    /// A grid stream's queue gauge: the pause and resume marks with their
+    /// gap, the event and byte bounds, the frame bound before and after the
+    /// reply, and no pause once the attachment has ended.
+    ///
+    /// Why: these numbers decide whether a browser behind a slow link is
+    /// paused (cheap, no output lost) or detached as stalled (a visible
+    /// failure), how slow a reading browser may be before the supervisor's
+    /// stall deadline ends it, and whether a hostile program's output can
+    /// hold more of the helm's memory than a byte stream could. The socket
+    /// tests see only that a pause and a resume happen; this pins where.
+    /// Spec: with grid flow started, the 512th queued event pauses; draining
+    /// to 385 does not resume, to 384 does. 2 MiB of queued bytes pauses on
+    /// its own; 1.5 MiB plus 1 KiB keeps it paused, 1.5 MiB resumes. A gauge
+    /// already above a mark when the flow starts pauses at once. A
+    /// grid-capable gauge admits 4096 events and refuses the next, admits a
+    /// 1 MiB frame and refuses one byte more, and refuses the frame that
+    /// would take it past 16 MiB; narrowed to a byte stream it admits 256
+    /// events and frames up to 64 KiB. Once the attachment's handle is
+    /// dropped, a running flow decides nothing more and a new one does not
+    /// start.
+    #[farhelm_testtrace::test]
+    fn the_grid_queue_gauge_pauses_resumes_and_bounds_at_its_marks() {
+        let kib = |n: usize| TermEvent::Data(vec![0; n * 1024]);
+
+        let gauge = QueueGauge::new(ViewerStreams::BytesOrGrid);
+        let decisions = gauge
+            .start_grid_flow()
+            .expect("a live attachment's flow starts");
+        for queued in 1..GRID_PAUSE_EVENTS {
+            assert!(gauge.admit(&kib(1)));
+            assert!(!*decisions.borrow(), "paused early, at {queued} events");
+        }
+        assert!(gauge.admit(&kib(1)));
+        assert!(
+            *decisions.borrow(),
+            "not paused at {GRID_PAUSE_EVENTS} events"
+        );
+        for _ in GRID_RESUME_EVENTS + 1..GRID_PAUSE_EVENTS {
+            gauge.release(&kib(1));
+        }
+        assert!(
+            *decisions.borrow(),
+            "resumed above the resume mark, at {} events",
+            GRID_RESUME_EVENTS + 1
+        );
+        gauge.release(&kib(1));
+        assert!(
+            !*decisions.borrow(),
+            "not resumed at {GRID_RESUME_EVENTS} events"
+        );
+
+        let gauge = QueueGauge::new(ViewerStreams::BytesOrGrid);
+        let decisions = gauge.start_grid_flow().unwrap();
+        for _ in 0..3 {
+            assert!(gauge.admit(&kib(512)));
+        }
+        assert!(gauge.admit(&kib(511)));
+        assert!(!*decisions.borrow(), "paused below the byte mark");
+        assert!(gauge.admit(&kib(1)));
+        assert!(*decisions.borrow(), "not paused at the byte mark");
+        assert!(gauge.admit(&kib(1)));
+        gauge.release(&kib(512));
+        assert!(*decisions.borrow(), "resumed above the byte resume mark");
+        gauge.release(&kib(1));
+        assert!(!*decisions.borrow(), "not resumed at the byte resume mark");
+
+        let gauge = QueueGauge::new(ViewerStreams::BytesOrGrid);
+        for _ in 0..GRID_PAUSE_EVENTS {
+            assert!(gauge.admit(&kib(1)));
+        }
+        assert!(
+            *gauge.start_grid_flow().unwrap().borrow(),
+            "frames queued before the reply must count when the flow starts"
+        );
+
+        let gauge = QueueGauge::new(ViewerStreams::BytesOrGrid);
+        for _ in 0..GRID_EVENT_QUEUE {
+            assert!(gauge.admit(&TermEvent::ReplayComplete));
+        }
+        assert!(
+            !gauge.admit(&TermEvent::ReplayComplete),
+            "a grid stream's event bound must hold"
+        );
+
+        let at_most = farhelm_proto::grid::GRID_MAX_MESSAGE;
+        let gauge = QueueGauge::new(ViewerStreams::BytesOrGrid);
+        assert!(!gauge.admit(&TermEvent::Data(vec![0; at_most + 1])));
+        for _ in 0..TERM_QUEUE_BYTES / at_most {
+            assert!(gauge.admit(&TermEvent::Data(vec![0; at_most])));
+        }
+        assert!(
+            !gauge.admit(&TermEvent::Data(vec![0])),
+            "the byte budget must hold however few events are queued"
+        );
+
+        let gauge = QueueGauge::new(ViewerStreams::BytesOrGrid);
+        gauge.settle_bytes();
+        let limit = farhelm_proto::MAX_TERMINAL_DATA_LEN;
+        assert!(!gauge.admit(&TermEvent::Data(vec![0; limit + 1])));
+        for _ in 0..TERM_EVENT_QUEUE {
+            assert!(gauge.admit(&TermEvent::Data(vec![0; 1])));
+        }
+        assert!(
+            !gauge.admit(&TermEvent::Data(vec![0; 1])),
+            "a byte stream keeps its event bound after a grid-capable attach"
+        );
+
+        let gauge = QueueGauge::new(ViewerStreams::BytesOrGrid);
+        let decisions = gauge.start_grid_flow().unwrap();
+        let (events, _events_rx) = mpsc::channel(1);
+        let (detach, _detach_rx) = watch::channel(None);
+        drop(TerminalHandle {
+            events,
+            detach,
+            gauge: Arc::clone(&gauge),
+        });
+        for _ in 0..GRID_PAUSE_EVENTS {
+            assert!(gauge.admit(&kib(1)));
+        }
+        assert!(
+            decisions.has_changed().is_err(),
+            "an ended attachment's flow must decide nothing more"
+        );
+        assert!(
+            gauge.start_grid_flow().is_none(),
+            "a reply handled after the end must not start the pause again"
+        );
+    }
+
+    /// Answer the next `Attach` a scripted peer reads with stream `kind`,
+    /// returning its channel; the attach must have asked for grids.
+    async fn answer_attach(
+        reader: &mut FrameReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>,
+        writer: &mut FrameWriter<tokio::io::WriteHalf<tokio::io::DuplexStream>>,
+        kind: farhelm_proto::StreamKind,
+    ) -> u32 {
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::Attach {
+            req_id,
+            channel,
+            grid,
+            ..
+        } = request
+        else {
+            panic!("expected an Attach, got {request:?}");
+        };
+        assert!(grid, "fixture premise: the attach asked for grids");
+        writer
+            .write_control(&ControlMsg::Attached {
+                req_id,
+                channel,
+                stream: kind,
+            })
+            .await
+            .unwrap();
+        channel
+    }
+
+    /// The next frame the scripted peer reads, as a control message.
+    async fn next_control(
+        reader: &mut FrameReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>,
+        what: &str,
+    ) -> ControlMsg {
+        let frame = timeout(Duration::from_secs(5), reader.read_frame())
+            .await
+            .unwrap_or_else(|_| panic!("the supervisor never received {what}"))
+            .unwrap()
+            .expect("connection closed");
+        assert_eq!(
+            frame.kind,
+            FrameKind::Control,
+            "expected {what}, got {frame:?}"
+        );
+        parse_control(&frame).unwrap()
+    }
+
+    /// A scripted supervisor connection with the client's handshake done.
+    async fn scripted_connection() -> (
+        Arc<SupervisorClient>,
+        FrameReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>,
+        FrameWriter<tokio::io::WriteHalf<tokio::io::DuplexStream>>,
+    ) {
+        let (client_side, peer_side) = tokio::io::duplex(4 * 1024 * 1024);
+        let (r, w) = tokio::io::split(client_side);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            (reader, writer)
+        });
+        let client = SupervisorClient::start(r, w).await.unwrap();
+        let (reader, writer) = peer.await.unwrap();
+        (client, reader, writer)
+    }
+
+    /// A grid-capable attach answered `kind` by the scripted peer.
+    async fn grid_capable_attach(
+        client: &SupervisorClient,
+        reader: &mut FrameReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>,
+        writer: &mut FrameWriter<tokio::io::WriteHalf<tokio::io::DuplexStream>>,
+        kind: farhelm_proto::StreamKind,
+    ) -> (u32, TermStream) {
+        let attach = client.attach_terminal(
+            "session",
+            80,
+            24,
+            TerminalSelector::default(),
+            "",
+            ViewerStreams::BytesOrGrid,
+        );
+        let answer = answer_attach(reader, writer, kind);
+        let (attached, channel) = tokio::join!(attach, answer);
+        let (_, stream) = attached.unwrap();
+        assert_eq!(stream.stream_kind(), kind);
+        (channel, stream)
+    }
+
+    /// A grid stream admits grid-sized frames, is paused by the helm before
+    /// its byte budget runs out, and is detached as stalled once it does.
+    ///
+    /// Why: the bounds and the pause are decided per attachment from the
+    /// supervisor's reply, on the shared demultiplexer, and this drives that
+    /// whole path rather than the gauge alone: a reply that did not start
+    /// the helm's pause would pass the gauge's own test. Spec: answered
+    /// `grid`, a 1 MiB frame reaches the stream whole; then, with the stream
+    /// not drained, 17 more 1 MiB frames make the supervisor receive
+    /// `PauseOutput` and then `Detach` for the channel, and the stream ends
+    /// with the stalled detach.
+    #[farhelm_testtrace::test]
+    async fn a_grid_stream_is_paused_and_bounded_by_its_reply() {
+        let (client, mut reader, mut writer) = scripted_connection().await;
+        let most = farhelm_proto::grid::GRID_MAX_MESSAGE;
+        let (channel, mut stream) = grid_capable_attach(
+            &client,
+            &mut reader,
+            &mut writer,
+            farhelm_proto::StreamKind::Grid,
+        )
+        .await;
+        writer
+            .write_frame(&Frame::data(channel, vec![b'g'; most]))
+            .await
+            .unwrap();
+        assert!(
+            matches!(
+                timeout(Duration::from_secs(5), stream.recv()).await,
+                Ok(Some(TermEvent::Data(bytes))) if bytes.len() == most
+            ),
+            "a grid frame of the grid bound must reach the stream whole"
+        );
+        for _ in 0..=TERM_QUEUE_BYTES / most {
+            writer
+                .write_frame(&Frame::data(channel, vec![b'g'; most]))
+                .await
+                .unwrap();
+        }
+        assert_eq!(
+            next_control(&mut reader, "the pause").await,
+            ControlMsg::PauseOutput { channel }
+        );
+        assert_eq!(
+            next_control(&mut reader, "the overflow's detach").await,
+            ControlMsg::Detach { channel }
+        );
+        let last = timeout(Duration::from_secs(5), async {
+            loop {
+                match stream.recv().await {
+                    Some(TermEvent::Data(_)) => {}
+                    other => return other,
+                }
+            }
+        })
+        .await
+        .expect("the grid stream never ended");
+        assert!(
+            matches!(&last, Some(TermEvent::Detached(detach))
+                if detach.code == farhelm_proto::DetachCode::Stalled),
+            "{last:?}"
+        );
+    }
+
+    /// A grid-capable attach answered with a byte stream keeps a byte
+    /// stream's bounds and is never paused by the helm.
+    ///
+    /// Why: the attach starts with a grid stream's bounds, because a grid
+    /// stream's frames can come before the reply, so the reply is what must
+    /// narrow them, and only a grid reply may start the helm's pause: a byte
+    /// stream's browser sends its own pause and resume, which a second owner
+    /// of the same flag would undo. Every browser bundle with the grid client
+    /// attaches this way, tmux terminals included. Spec: answered `bytes`,
+    /// 32 frames of 64 KiB (2 MiB, a grid stream's pause mark) and then one
+    /// of 64 KiB + 1, with the stream not drained; the first thing the
+    /// supervisor receives is a `Detach` for the channel, with no
+    /// `PauseOutput` before it, and the stream ends with the stalled detach.
+    #[farhelm_testtrace::test]
+    async fn a_byte_stream_reply_keeps_byte_bounds_and_is_never_paused_by_the_helm() {
+        let (client, mut reader, mut writer) = scripted_connection().await;
+        let (channel, mut stream) = grid_capable_attach(
+            &client,
+            &mut reader,
+            &mut writer,
+            farhelm_proto::StreamKind::Bytes,
+        )
+        .await;
+        let limit = farhelm_proto::MAX_TERMINAL_DATA_LEN;
+        for _ in 0..GRID_PAUSE_BYTES / limit {
+            writer
+                .write_frame(&Frame::data(channel, vec![b'b'; limit]))
+                .await
+                .unwrap();
+        }
+        writer
+            .write_frame(&Frame::data(channel, vec![b'b'; limit + 1]))
+            .await
+            .unwrap();
+        assert_eq!(
+            next_control(&mut reader, "the oversized frame's detach").await,
+            ControlMsg::Detach { channel },
+            "a byte stream must not be paused by the helm, and must keep its frame bound"
+        );
+        let last = timeout(Duration::from_secs(5), async {
+            loop {
+                match stream.recv().await {
+                    Some(TermEvent::Data(_)) => {}
+                    other => return other,
+                }
+            }
+        })
+        .await
+        .expect("the byte stream never ended");
+        assert!(
+            matches!(&last, Some(TermEvent::Detached(detach))
+                if detach.code == farhelm_proto::DetachCode::Stalled),
+            "{last:?}"
+        );
+    }
+
+    /// Grid input is one frame per message, a message over the input bound
+    /// ends the attachment, and nothing is forwarded after that, whoever
+    /// sends it.
+    ///
+    /// Why: the WebSocket test of the same rule shows the helm's handler
+    /// stops reading; this shows the client refuses on its own, so the rule
+    /// does not rest on the handler's loop, or on which message it reads
+    /// first. Spec: on a grid stream, a 40 KiB message reaches the
+    /// supervisor as one identical data frame; one of 64 KiB + 1 is refused
+    /// with a reason beginning "terminal input failed", the supervisor
+    /// receives a `Detach`, and the stream ends with that reason; a small
+    /// message after it is refused too, so the next frame the supervisor
+    /// receives is the `Resize` sent after both.
+    #[farhelm_testtrace::test]
+    async fn grid_input_after_an_oversized_message_is_never_forwarded() {
+        let (client, mut reader, mut writer) = scripted_connection().await;
+        let (channel, mut stream) = grid_capable_attach(
+            &client,
+            &mut reader,
+            &mut writer,
+            farhelm_proto::StreamKind::Grid,
+        )
+        .await;
+
+        let message = vec![b'm'; 40 * 1024];
+        client
+            .send_grid_input(channel, message.clone())
+            .await
+            .expect("a message within the bound is forwarded");
+        let frame = timeout(Duration::from_secs(5), reader.read_frame())
+            .await
+            .expect("the input never arrived")
+            .unwrap()
+            .expect("connection closed");
+        assert_eq!(
+            (frame.kind, frame.channel, frame.body == message),
+            (FrameKind::Data, channel, true),
+            "one message must be one identical data frame"
+        );
+
+        let refused = client
+            .send_grid_input(
+                channel,
+                vec![b'x'; farhelm_proto::grid::GRID_MAX_INPUT_MESSAGE + 1],
+            )
+            .await
+            .expect_err("a message over the bound must not be forwarded");
+        assert!(
+            refused.reason.starts_with("terminal input failed"),
+            "{refused:?}"
+        );
+        assert_eq!(
+            next_control(&mut reader, "the refused attachment's detach").await,
+            ControlMsg::Detach { channel }
+        );
+        assert!(
+            client
+                .send_grid_input(channel, br#"{"t":"text","data":"after"}"#.to_vec())
+                .await
+                .is_err(),
+            "input after the attachment ended must be refused"
+        );
+        client.resize("session", channel, 90, 30).await;
+        assert_eq!(
+            next_control(&mut reader, "the resize").await,
+            ControlMsg::Resize {
+                session_id: "session".to_string(),
+                channel,
+                cols: 90,
+                rows: 30,
+            },
+            "nothing may be forwarded between the refusal and the resize"
+        );
+        assert!(
+            matches!(
+                timeout(Duration::from_secs(5), stream.recv()).await,
+                Ok(Some(TermEvent::Detached(detach))) if detach == refused
+            ),
+            "the stream must end with the refusal's reason"
+        );
     }
 
     /// The marker shares `Data`'s bounded-queue pressure rule rather than

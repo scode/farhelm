@@ -46,9 +46,42 @@
 //! `PONG_TEXT_MESSAGE` for the heartbeat, `REPLAY_COMPLETE_TEXT_MESSAGE` for
 //! the marker that separates replayed scrollback from live output, and the
 //! stream notice (`stream_notice`), which opens every attached socket and
-//! says which kind of data follows. `?grid=1` is how the browser says it
-//! can take grid streams; the helm does not pass that on yet
-//! (`GRID_RELAY_READY`).
+//! says which kind of data follows.
+//!
+//! ## Grid streams
+//!
+//! `?grid=1` is how the browser says it can draw grid streams, and it
+//! reaches the supervisor as `ControlMsg::Attach`'s `grid`. A terminal in a
+//! terminal host is then streamed as a grid, and a tmux terminal still as
+//! bytes, so a browser that asks learns which from the stream notice. The
+//! two kinds share this whole pump; they differ in three places, none of
+//! which reads a grid message:
+//!
+//! - Outbound frames can be up to `GRID_MAX_MESSAGE` (1 MiB) rather than
+//!   64 KiB, and the per-terminal queue holds up to 4,096 of them rather
+//!   than 256, bounded by its 16 MiB of bytes (the client's
+//!   `GRID_EVENT_QUEUE` and `TERM_QUEUE_BYTES`).
+//! - Each inbound binary message is one grid input message and goes up as
+//!   one data frame (`SupervisorClient::send_grid_input`) instead of being
+//!   cut into 32 KiB chunks; one over `GRID_MAX_INPUT_MESSAGE` ends the
+//!   attachment.
+//! - The grid client sends no pause or resume of its own, so the helm
+//!   pauses and resumes the supervisor from its own queue's fill (the
+//!   client's `GRID_PAUSE_BYTES`, which also works out how slow a browser
+//!   that still reads may be). A pause that outlives the supervisor's stall
+//!   timeout, from a browser that stopped reading, is the same stall detach
+//!   a byte stream gets.
+//!
+//! Version skew, which needs nothing of its own here: the protocol version
+//! must match, so a supervisor from before grid streams (protocol 67 or
+//! older) fails the handshake as Needs update, and a helm that old sees a
+//! grid-capable supervisor as Too new. Within protocol 68, a supervisor
+//! that cannot stream a host terminal as a grid yet refuses that attach
+//! with its own clear error and streams tmux terminals as bytes whatever
+//! `grid` says, so asking costs nothing; and a protocol-68 helm from before
+//! this relay never asks, so a supervisor that streams grids refuses it a
+//! host terminal (the permanent refusal for clients that cannot draw grids)
+//! and streams it tmux terminals as bytes as always.
 
 use crate::auth::AuthenticatedSocket;
 use crate::sessions::{default_cols, default_rows, resolve_session_ref, route_session};
@@ -114,8 +147,7 @@ pub(crate) struct TermQuery {
     /// destroy exactly the distinction that refusal depends on.
     lease: Option<String>,
     /// `?grid=1`: the browser can render grid streams, forwarded as
-    /// `ControlMsg::Attach`'s `grid` once the helm can relay them (see
-    /// [`GRID_RELAY_READY`]). Only the exact value `1` means yes;
+    /// `ControlMsg::Attach`'s `grid`. Only the exact value `1` means yes;
     /// absent, or any other value, is a client that cannot, which is what
     /// every browser bundle from before grid streams is. Kept as a string
     /// rather than a `bool` because the query decoder reads only
@@ -125,20 +157,6 @@ pub(crate) struct TermQuery {
     grid: Option<String>,
 }
 
-/// Whether this helm passes a browser's `?grid=1` on to the supervisor.
-///
-/// Not yet. Grid messages can be up to 1 MiB (`GRID_MAX_MESSAGE`), and this
-/// helm still stall-detaches any incoming terminal frame over 64 KiB, bounds
-/// its per-terminal queue in frames rather than bytes, and cuts browser
-/// input into 32 KiB frames, which would split one grid input message into
-/// two invalid ones. A helm that asked for grids now would break host
-/// terminals in exactly those cases, and since the fix does not change the
-/// protocol version, a helm built before it could meet a supervisor that
-/// sends grids. Asking for nothing instead gets the supervisor's clear
-/// refusal for host terminals, the designed degradation. The change that
-/// makes this helm a grid relay turns this on.
-const GRID_RELAY_READY: bool = false;
-
 impl TermQuery {
     /// Whether the browser said it can render grid streams.
     fn asks_for_grid(&self) -> bool {
@@ -146,9 +164,9 @@ impl TermQuery {
     }
 
     /// What this attach tells the supervisor the viewer can take: grids
-    /// only when the browser asked and this helm can relay them.
+    /// exactly when the browser asked.
     fn streams(&self) -> ViewerStreams {
-        if GRID_RELAY_READY && self.asks_for_grid() {
+        if self.asks_for_grid() {
             ViewerStreams::BytesOrGrid
         } else {
             ViewerStreams::BytesOnly
@@ -328,8 +346,8 @@ async fn attach_from_query(
 /// PLAN_M2_5.md step 4; the server accepts them now.
 ///
 /// `?grid=1` says the browser can render grid streams (see
-/// `TermQuery::asks_for_grid`; not passed on yet, see [`GRID_RELAY_READY`]),
-/// and every attached socket carries the
+/// `TermQuery::asks_for_grid` and this module's "Grid streams"), and every
+/// attached socket carries the
 /// `{"type":"stream","kind":"bytes"|"grid"}` notice saying which one the
 /// supervisor chose (see `stream_notice`). The browser can rely on this
 /// order: the stream notice comes before the first binary frame and before
@@ -512,7 +530,8 @@ fn serve_term_upgrade(
 const WS_TEARDOWN_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Client-to-helm control messages on a terminal socket. Text frames only
-/// — binary is always terminal input — and an unparseable one is ignored
+/// — binary is always terminal input (bytes, or one grid input message) —
+/// and an unparseable one is ignored
 /// rather than fatal, so adding a message type does not break older
 /// clients. See `term_ws`'s docs for the wire shapes.
 #[derive(Deserialize)]
@@ -684,8 +703,9 @@ async fn serve_term(
     // because the supervisor starts the replay before its `Attached` reply.
     // It goes through the same detach-racing send as everything else, so a
     // browser that never reads cannot pin the handler on it.
+    let stream_kind = events.stream_kind();
     let mut stream_notice_first = Some(ws::Message::Text(
-        stream_notice(events.stream_kind()).to_string().into(),
+        stream_notice(stream_kind).to_string().into(),
     ));
     let mut outbound = tokio::spawn(async move {
         loop {
@@ -774,9 +794,26 @@ async fn serve_term(
     let inbound = tokio::spawn(async move {
         while let Some(msg) = ws_rx.next().await {
             match msg {
-                Ok(ws::Message::Binary(bytes)) => {
-                    client_inbound.send_input(channel, bytes.to_vec()).await;
-                }
+                Ok(ws::Message::Binary(bytes)) => match stream_kind {
+                    farhelm_proto::StreamKind::Bytes => {
+                        client_inbound.send_input(channel, bytes.to_vec()).await;
+                    }
+                    farhelm_proto::StreamKind::Grid => {
+                        // The attachment is over: this message was over
+                        // the bound and ended it (the reason is published
+                        // for the outbound half to deliver), or it had
+                        // already ended. Stop reading the browser.
+                        // `send_grid_input` forwards nothing for an ended
+                        // attachment either way.
+                        if client_inbound
+                            .send_grid_input(channel, bytes.to_vec())
+                            .await
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                },
                 Ok(ws::Message::Text(text)) => match serde_json::from_str::<WsClientMsg>(&text) {
                     Ok(WsClientMsg::Resize { cols, rows }) => {
                         client_inbound
@@ -1429,65 +1466,112 @@ mod tests {
     }
 
     /// A browser that stops reading must not pin the WebSocket handler:
-    /// the stall detach has to terminate it even while a send to that
-    /// browser is blocked.
+    /// the stall detach has to end it even while a send to that browser is
+    /// blocked, for both stream kinds.
     ///
-    /// This is the teardown half of the detach-not-block design, and
-    /// until now it was only argued. The failure it guards is specific
-    /// and quiet: `serve_term` parked in `ws_tx.send()` to a browser that
-    /// stopped reading cannot observe a detach that arrives through the
-    /// terminal's data queue, because that queue is full — which is
-    /// precisely why the terminal was detached. Handler, socket, queued
-    /// frames, and the notification task would then stay alive for as
-    /// long as the wedge lasted, which is exactly the unbounded pin the
-    /// stall detach exists to end.
+    /// This is the teardown half of the detach-not-block design. The
+    /// failure it guards is specific and quiet: `serve_term` parked in
+    /// `ws_tx.send()` to a browser that stopped reading cannot observe a
+    /// detach that arrives through the terminal's data queue, because that
+    /// queue is backed up behind the very send it is parked in. Handler,
+    /// socket, queued frames, and the notification task would then stay
+    /// alive for as long as the wedge lasted, which is exactly the unbounded
+    /// pin the stall detach exists to end.
     ///
-    /// The assertion is made on the supervisor side: it sees the `Detach`
-    /// control frame only after `serve_term` has abandoned the blocked notice
-    /// send and begun attachment cleanup. The browser is deliberately never
-    /// read again, so a regression that restores the unbounded notice send
-    /// hangs here instead of passing.
+    /// The premise is a handler parked mid-send with its attachment still
+    /// live. The browser socket's receive buffer is kept small, so the
+    /// server's sends block after a few MiB, and the flood stops short of
+    /// the helm's own overflow detach, which would end the attachment by
+    /// another path. For a byte stream, construction establishes only the
+    /// second half: 200 frames are fewer than the queue's 256, so the
+    /// overflow detach cannot fire. That the handler is parked mid-send is
+    /// not asserted; it rests on 12.5 MiB being more than the small receive
+    /// buffer and the kernel's send buffer (4 MiB by Linux's default) hold,
+    /// and a run where it was not parked would still pass, through the
+    /// ordinary detach path. For a grid stream it is observed: the stand-in
+    /// stops at the helm's own `PauseOutput`, sent only once the attachment's
+    /// queue reached its pause mark (so the handler is not draining it), and
+    /// that pause must be the first thing it hears, so no overflow detach
+    /// came first.
+    ///
+    /// The oracle is the handler's own end. The client acknowledges the
+    /// supervisor's stalled `Detached` with one `Detach` of its own at once,
+    /// in addition to the handler's; a second
+    /// `Detach` comes only from `serve_term`'s teardown, after its outbound
+    /// half got past the blocked send (racing the detach signal) and past
+    /// the notice it then tries to send to the same browser (bounded by the
+    /// grace). The browser is not read before that, so a regression in
+    /// either hangs here instead of passing. Spec: for a bytes-only attach
+    /// and for a grid attach, after the stalled `Detached` the supervisor
+    /// receives exactly two `Detach` frames for the channel and nothing
+    /// else, within twice the teardown grace plus headroom, and the browser
+    /// socket then closes.
     #[farhelm_testtrace::test]
     async fn a_wedged_browser_is_torn_down_by_the_stall_detach() {
+        for kind in [
+            farhelm_proto::StreamKind::Bytes,
+            farhelm_proto::StreamKind::Grid,
+        ] {
+            wedged_browser_is_torn_down_by_the_stall_detach(kind).await;
+        }
+    }
+
+    /// One stream kind's run of [`a_wedged_browser_is_torn_down_by_the_stall_detach`].
+    async fn wedged_browser_is_torn_down_by_the_stall_detach(kind: farhelm_proto::StreamKind) {
+        let (path, kind_text) = match kind {
+            farhelm_proto::StreamKind::Bytes => ("/api/sessions/sess-1/term", "bytes"),
+            farhelm_proto::StreamKind::Grid => ("/api/sessions/sess-1/term?grid=1", "grid"),
+        };
         let (client_side, peer_side) = tokio::io::duplex(1024 * 1024);
-        let peer = tokio::spawn(scripted_supervisor_attach(peer_side));
+        let peer = tokio::spawn(scripted_supervisor_attach_as(peer_side, kind));
         let mut harness = rest_harness::spliced_helm(client_side).await;
         let addr = harness.serve().await;
-        // Concurrently, for the same reason as the test above.
+        let path = session_path(&harness, path);
         let (mut ws, peer) = tokio::join!(
-            connect_session(&harness, addr, "/api/sessions/sess-1/term"),
+            WsTestClient::connect_with_receive_buffer(addr, &path, SMALL_RECEIVE_BUFFER),
             peer
         );
-        let (mut reader, mut writer, channel) = peer.unwrap();
+        let (reader, mut writer, channel) = peer.unwrap();
 
         // Read exactly one frame, proving the socket works, and then stop
-        // reading forever — the wedged browser.
+        // reading until the handler has ended — the wedged browser.
         writer
             .write_frame(&Frame::data(channel, b"first".to_vec()))
             .await
             .unwrap();
-        expect_stream_notice(&mut ws, "bytes").await;
+        expect_stream_notice(&mut ws, kind_text).await;
         let (opcode, payload) = tokio::time::timeout(Duration::from_secs(5), ws.recv())
             .await
             .expect("no first frame")
             .expect("socket closed early");
         assert_eq!((opcode, payload.as_slice()), (2, &b"first"[..]));
 
-        // Flood until the kernel buffers, the WS sink, and the helm's
-        // per-terminal queue are all full, so `serve_term` is genuinely
-        // parked mid-send rather than idle.
-        for _ in 0..2_000 {
-            if writer
-                .write_frame(&Frame::data(channel, vec![b'x'; 4096]))
-                .await
-                .is_err()
-            {
-                break;
+        let mut reader = match kind {
+            farhelm_proto::StreamKind::Bytes => {
+                for _ in 0..200 {
+                    writer
+                        .write_frame(&Frame::data(
+                            channel,
+                            vec![b'x'; farhelm_proto::MAX_TERMINAL_DATA_LEN],
+                        ))
+                        .await
+                        .unwrap();
+                }
+                reader
             }
-        }
+            farhelm_proto::StreamKind::Grid => {
+                let flood = flood_until_heard(reader, &mut writer, channel, 32 * 1024, 0).await;
+                assert!(
+                    is_control(&flood.heard, &ControlMsg::PauseOutput { channel }),
+                    "fixture premise: the grid stream must be paused, and not detached, before \
+                     the stall detach is injected: {:?} after {} frames",
+                    flood.heard,
+                    flood.written
+                );
+                flood.reader
+            }
+        };
 
-        // The supervisor detaches it as stalled. This must tear the
-        // handler down even though the send above cannot complete.
         writer
             .write_control(&ControlMsg::Detached {
                 channel,
@@ -1497,35 +1581,54 @@ mod tests {
             .await
             .unwrap();
 
-        // Do NOT resume reading from the browser socket: that would let the
-        // notice send complete and hide the defect. The supervisor-side
-        // Detach proves that serve_term got past the blocked notice and
-        // performed the required attachment cleanup.
         // The bound is deliberately wider than one grace period: a blocked
         // notice consumes one grace before the handler can detach upstream,
         // then the detach round trip still needs headroom on a loaded machine.
-        let detached = tokio::time::timeout(
+        //
+        // Two, because the client acknowledges the supervisor's `Detached`
+        // with a `Detach` of its own (`SupervisorClient::dispatch`) and the
+        // handler's teardown sends another (`detach_bounded`), and only the
+        // second shows the handler got past the blocked send. A cleanup that
+        // drops either of them as a duplicate must change this oracle, or the
+        // test would wait for a frame that never comes.
+        let mut others = Vec::new();
+        let ended = tokio::time::timeout(
             super::WS_TEARDOWN_GRACE * 2 + Duration::from_secs(5),
             async {
-                loop {
+                let mut detaches = 0;
+                while detaches < 2 {
                     let frame = reader
                         .read_frame()
                         .await
                         .expect("the supervisor connection must remain readable")
                         .expect("the supervisor connection closed before detach");
-                    let message = farhelm_proto::io::parse_control(&frame).unwrap();
-                    if matches!(message, ControlMsg::Detach { channel: got } if got == channel) {
-                        return;
+                    if is_control(&frame, &ControlMsg::Detach { channel }) {
+                        detaches += 1;
+                    } else {
+                        others.push(frame);
                     }
                 }
             },
         )
         .await;
         assert!(
-            detached.is_ok(),
-            "the supervisor did not observe terminal detach within the teardown grace — `serve_term` \
-             is still pinned on a notice send to a browser that stopped reading"
+            ended.is_ok(),
+            "the {kind_text} stream's handler never detached in teardown — `serve_term` is still \
+             pinned on a send to a browser that stopped reading"
         );
+        assert!(
+            others.is_empty(),
+            "nothing but the two detaches may follow the stall: {others:?}"
+        );
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while let Some((opcode, _)) = ws.recv().await {
+                if opcode == 8 {
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("the ended handler must close the browser socket");
     }
 
     /// A panic in the browser-to-supervisor task must still leave the
@@ -1575,6 +1678,20 @@ mod tests {
         FrameWriter<tokio::io::WriteHalf<tokio::io::DuplexStream>>,
         u32,
     ) {
+        scripted_supervisor_attach_as(peer_side, farhelm_proto::StreamKind::Bytes).await
+    }
+
+    /// [`scripted_supervisor_attach`], answering with stream `kind`. A grid
+    /// answer requires the attach to have asked for grids, as a real
+    /// supervisor's would.
+    async fn scripted_supervisor_attach_as(
+        peer_side: tokio::io::DuplexStream,
+        kind: farhelm_proto::StreamKind,
+    ) -> (
+        FrameReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>,
+        FrameWriter<tokio::io::WriteHalf<tokio::io::DuplexStream>>,
+        u32,
+    ) {
         let (r, w) = tokio::io::split(peer_side);
         let mut reader = FrameReader::new(r);
         let mut writer = FrameWriter::new(w);
@@ -1584,16 +1701,23 @@ mod tests {
         let request =
             farhelm_proto::io::parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
         let ControlMsg::Attach {
-            req_id, channel, ..
+            req_id,
+            channel,
+            grid,
+            ..
         } = request
         else {
             panic!("expected an Attach, got {request:?}");
         };
+        assert!(
+            grid || kind == farhelm_proto::StreamKind::Bytes,
+            "fixture premise: a grid answer needs an attach that asked for grids"
+        );
         writer
             .write_control(&ControlMsg::Attached {
                 req_id,
                 channel,
-                stream: farhelm_proto::StreamKind::Bytes,
+                stream: kind,
             })
             .await
             .unwrap();
@@ -1677,10 +1801,11 @@ mod tests {
 
     /// The grid notice names the kind the way the browser matches on it.
     ///
-    /// Why: no supervisor answers `grid` to this helm yet (it does not ask),
-    /// so the socket tests cannot reach this notice; the browser's grid
-    /// client switches on exactly this text. Spec: the notice for each kind
-    /// is `{"type":"stream","kind":"bytes"}` or `{"type":"stream","kind":"grid"}`.
+    /// Why: the browser's `terminal.js` switches between xterm.js and its
+    /// grid client on exactly this text, so the spelling is pinned apart
+    /// from the socket tests that also see it. Spec: the notice for each
+    /// kind is `{"type":"stream","kind":"bytes"}` or
+    /// `{"type":"stream","kind":"grid"}`.
     #[farhelm_testtrace::test]
     fn the_stream_notice_names_each_kind() {
         assert_eq!(
@@ -1766,21 +1891,20 @@ mod tests {
             .unwrap();
     }
 
-    /// Only `?grid=1` asks for grid streams, the request reaches the
-    /// supervisor only once the helm can relay grids, and no value of `grid`
-    /// refuses the socket; all of it on both terminal routes.
+    /// Only `?grid=1` asks for grid streams, and no value of `grid` refuses
+    /// the socket; both on both terminal routes.
     ///
     /// Why: `grid` decides whether the supervisor may answer with a stream
     /// only the grid client can draw, so a stray value must not turn a
-    /// bundle that cannot draw grids into one that claims it can, and a helm
-    /// that cannot relay grids must not ask for them for anyone (see
-    /// `GRID_RELAY_READY`). The query is parsed before the upgrade, where a
-    /// parse failure would refuse the terminal with a bare HTTP error instead
-    /// of the on-socket notice every other failure gets. And the automatic
-    /// reconnect's route (`/term/unowned`) has its own call into the client,
-    /// which must carry the same capability. Spec: on both routes, absent,
-    /// `0` and `true` attach with `grid: false`; `1` attaches with
-    /// `grid: GRID_RELAY_READY`; each socket opens with the stream notice.
+    /// bundle that cannot draw grids into one that claims it can, and the
+    /// grid client's `grid=1` must arrive, or a terminal in a terminal host
+    /// cannot be shown at all. The query is parsed before the upgrade, where
+    /// a parse failure would refuse the terminal with a bare HTTP error
+    /// instead of the on-socket notice every other failure gets. And the
+    /// automatic reconnect's route (`/term/unowned`) has its own call into
+    /// the client, which must carry the same capability. Spec: on both
+    /// routes, absent, `0` and `true` attach with `grid: false` and `1` with
+    /// `grid: true`; each socket opens with the stream notice.
     #[farhelm_testtrace::test]
     async fn only_grid_1_asks_for_grid_streams_on_both_routes() {
         for route in [
@@ -1829,21 +1953,20 @@ mod tests {
                 let path = format!("{route}{query}");
                 let (mut ws, peer) = tokio::join!(connect_session(&harness, addr, &path), peer);
                 let (grid, _reader, _writer) = peer.unwrap();
-                assert_eq!(grid, super::GRID_RELAY_READY && asks, "for {path:?}");
+                assert_eq!(grid, asks, "for {path:?}");
                 expect_stream_notice(&mut ws, "bytes").await;
             }
         }
     }
 
     /// `TermQuery::asks_for_grid` reads only the exact value `1`, and the
-    /// capability sent upstream is that answer gated on the relay.
+    /// capability sent upstream is that answer.
     ///
-    /// Why: while `GRID_RELAY_READY` is off, the socket test above cannot
-    /// tell a parser that reads `?grid=1` from one that ignores it; this one
-    /// can, so the parsing is in place and tested when the gate opens.
-    /// Spec: `1` asks; absent, `0`, `true` and `yes` do not; the viewer's
-    /// streams are bytes or grids exactly when the query asks and the gate
-    /// is open.
+    /// Why: the socket test above covers the values a browser plausibly
+    /// sends; this one covers the parser on its own, without a supervisor
+    /// round trip per value. Spec: `1` asks; absent, `0`, `true` and `yes`
+    /// do not; the viewer's streams are bytes or grids exactly when the
+    /// query asks.
     #[farhelm_testtrace::test]
     fn only_the_exact_value_1_asks_for_grids() {
         for (value, asks) in [
@@ -1861,13 +1984,419 @@ mod tests {
                 grid: value.map(str::to_string),
             };
             assert_eq!(q.asks_for_grid(), asks, "for {value:?}");
-            let expected = if super::GRID_RELAY_READY && asks {
+            let expected = if asks {
                 crate::ViewerStreams::BytesOrGrid
             } else {
                 crate::ViewerStreams::BytesOnly
             };
             assert_eq!(q.streams(), expected, "for {value:?}");
         }
+    }
+
+    /// Read the supervisor side until `want` names a frame, returning every
+    /// frame read before it; a bounded wait, so a frame that never comes
+    /// fails the test instead of hanging it.
+    async fn read_until(
+        reader: &mut FrameReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>,
+        what: &str,
+        want: impl Fn(&Frame) -> bool,
+    ) -> Vec<Frame> {
+        let mut before = Vec::new();
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let frame = reader
+                    .read_frame()
+                    .await
+                    .expect("the supervisor connection must stay readable")
+                    .expect("the supervisor connection closed");
+                if want(&frame) {
+                    return;
+                }
+                before.push(frame);
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("the supervisor never received {what}; got {before:?}"));
+        before
+    }
+
+    /// Whether `frame` is the control message `expected`.
+    fn is_control(frame: &Frame, expected: &ControlMsg) -> bool {
+        frame.kind == farhelm_proto::FrameKind::Control
+            && farhelm_proto::io::parse_control(frame).ok().as_ref() == Some(expected)
+    }
+
+    /// A grid stream crosses the helm unread in both directions: frames
+    /// larger than a byte stream's bound reach the browser whole, each
+    /// browser message reaches the supervisor as one frame, and the control
+    /// messages keep their byte-stream meaning.
+    ///
+    /// Why: a grid channel carries one message per data frame both ways
+    /// (`farhelm_proto::grid`, "Framing"), so a frame the helm cut, joined or
+    /// refused is a protocol error at the far end; a byte stream's 64 KiB
+    /// frame bound and 32 KiB input chunks would do exactly that to ordinary
+    /// grid traffic (a long row, a long paste part). The large frame is sent
+    /// before the `Attached` reply, as a supervisor starts streaming before
+    /// its reply is read, so the bound in force before the reply is the one
+    /// under test. Spec: `?grid=1` answered with a grid stream; the browser
+    /// receives `{"type":"stream","kind":"grid"}`, a 200 KiB data frame byte
+    /// for byte, then `replay_complete`; a binary message of exactly the
+    /// 64 KiB input bound reaches the supervisor as one identical data
+    /// frame, and the resize, pause and resume sent after it follow as
+    /// `Resize`, `PauseOutput` and `ResumeOutput` for the channel.
+    #[farhelm_testtrace::test]
+    async fn a_grid_stream_is_relayed_unread_in_both_directions() {
+        let early: Vec<u8> = (0..200 * 1024).map(|i| (i % 251) as u8).collect();
+        let early_sent = early.clone();
+        let (client_side, peer_side) = tokio::io::duplex(1024 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request =
+                farhelm_proto::io::parse_control(&reader.read_frame().await.unwrap().unwrap())
+                    .unwrap();
+            let ControlMsg::Attach {
+                req_id,
+                channel,
+                grid,
+                ..
+            } = request
+            else {
+                panic!("expected an Attach, got {request:?}");
+            };
+            assert!(grid, "the browser's grid=1 must reach the supervisor");
+            writer
+                .write_frame(&Frame::data(channel, early_sent))
+                .await
+                .unwrap();
+            writer
+                .write_control(&ControlMsg::Attached {
+                    req_id,
+                    channel,
+                    stream: farhelm_proto::StreamKind::Grid,
+                })
+                .await
+                .unwrap();
+            writer
+                .write_control(&ControlMsg::ReplayComplete { channel })
+                .await
+                .unwrap();
+            (reader, writer, channel)
+        });
+        let mut harness = rest_harness::spliced_helm(client_side).await;
+        let addr = harness.serve().await;
+        let (mut ws, peer) = tokio::join!(
+            connect_session(&harness, addr, "/api/sessions/sess-1/term?grid=1"),
+            peer
+        );
+        let (mut reader, _writer, channel) = peer.unwrap();
+
+        expect_stream_notice(&mut ws, "grid").await;
+        let (opcode, payload) = tokio::time::timeout(Duration::from_secs(5), ws.recv())
+            .await
+            .expect("the large grid frame never arrived")
+            .expect("socket closed before the large grid frame");
+        assert_eq!(opcode, 2, "grid messages travel as binary frames");
+        assert!(
+            payload == early,
+            "the grid frame must arrive whole and unchanged"
+        );
+        let (opcode, payload) = tokio::time::timeout(Duration::from_secs(5), ws.recv())
+            .await
+            .expect("no replay-complete marker arrived")
+            .expect("socket closed before the marker");
+        assert_eq!(
+            (
+                opcode,
+                serde_json::from_slice::<serde_json::Value>(&payload).unwrap()
+            ),
+            (1, serde_json::json!({"type": "replay_complete"}))
+        );
+
+        let input: Vec<u8> = (0..farhelm_proto::grid::GRID_MAX_INPUT_MESSAGE)
+            .map(|i| b'a' + (i % 26) as u8)
+            .collect();
+        ws.send_frame(true, 2, &input).await;
+        ws.send_text(r#"{"type":"resize","cols":90,"rows":30}"#)
+            .await;
+        ws.send_text(r#"{"type":"pause"}"#).await;
+        ws.send_text(r#"{"type":"resume"}"#).await;
+
+        let frame = tokio::time::timeout(Duration::from_secs(5), reader.read_frame())
+            .await
+            .expect("the browser's grid input never reached the supervisor")
+            .unwrap()
+            .expect("connection closed");
+        assert_eq!(
+            (frame.kind, frame.channel, frame.body.len()),
+            (farhelm_proto::FrameKind::Data, channel, input.len()),
+            "one browser message must be one data frame on the attachment's channel"
+        );
+        assert!(frame.body == input, "the input must arrive unchanged");
+        for expected in [
+            ControlMsg::Resize {
+                session_id: "sess-1".to_string(),
+                channel,
+                cols: 90,
+                rows: 30,
+            },
+            ControlMsg::PauseOutput { channel },
+            ControlMsg::ResumeOutput { channel },
+        ] {
+            let frame = tokio::time::timeout(Duration::from_secs(5), reader.read_frame())
+                .await
+                .expect("a control message after the input never arrived")
+                .unwrap()
+                .expect("connection closed");
+            assert!(
+                is_control(&frame, &expected),
+                "expected {expected:?}, got {frame:?}"
+            );
+        }
+    }
+
+    /// A grid input message over the input bound ends the attachment, as
+    /// the supervisor would, and nothing the browser sends after it is
+    /// forwarded.
+    ///
+    /// Why: the helm cannot cut a grid message into frames, and forwarding a
+    /// browser message whole can exceed what the connection's writer can
+    /// encode, which would end every attachment sharing the connection;
+    /// dropping it and carrying on would deliver later input without what
+    /// came before it. Spec: on a grid stream, a binary message of 64 KiB + 1
+    /// and then a small one, in one write; the browser gets a `detached`
+    /// notice with code `other` whose reason begins "terminal input failed",
+    /// then the close; the supervisor receives a `Detach` for the channel and
+    /// no data frame.
+    #[farhelm_testtrace::test]
+    async fn an_oversized_grid_input_message_ends_the_attachment() {
+        let (client_side, peer_side) = tokio::io::duplex(1024 * 1024);
+        let peer = tokio::spawn(scripted_supervisor_attach_as(
+            peer_side,
+            farhelm_proto::StreamKind::Grid,
+        ));
+        let mut harness = rest_harness::spliced_helm(client_side).await;
+        let addr = harness.serve().await;
+        let (mut ws, peer) = tokio::join!(
+            connect_session(&harness, addr, "/api/sessions/sess-1/term?grid=1"),
+            peer
+        );
+        let (mut reader, _writer, channel) = peer.unwrap();
+        expect_stream_notice(&mut ws, "grid").await;
+
+        // One write, so the message after the oversized one is already
+        // there when the helm reads the first: what is not forwarded is
+        // decided by the helm, not by which of them arrived first.
+        let oversized = vec![b'x'; farhelm_proto::grid::GRID_MAX_INPUT_MESSAGE + 1];
+        ws.send_frames(&[(2, &oversized), (2, br#"{"t":"text","data":"after"}"#)])
+            .await;
+
+        let (opcode, payload) = tokio::time::timeout(Duration::from_secs(5), ws.recv())
+            .await
+            .expect("no detach notice arrived")
+            .expect("socket closed before the detach notice");
+        assert_eq!(opcode, 1, "the detach notice is a text frame");
+        let notice: serde_json::Value = serde_json::from_slice(&payload).unwrap();
+        assert_eq!(notice["type"], "detached", "{notice}");
+        assert_eq!(notice["code"], "other", "{notice}");
+        assert!(
+            notice["reason"]
+                .as_str()
+                .unwrap()
+                .starts_with("terminal input failed"),
+            "{notice}"
+        );
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while let Some((opcode, _)) = ws.recv().await {
+                if opcode == 8 {
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("the socket must close after the notice");
+
+        let before = read_until(&mut reader, "the Detach", |frame| {
+            is_control(frame, &ControlMsg::Detach { channel })
+        })
+        .await;
+        assert!(
+            before.is_empty(),
+            "nothing may reach the supervisor before the Detach: {before:?}"
+        );
+        // The socket has closed, so `serve_term` has sent everything it ever
+        // will; what is left to read is at most its own second `Detach`.
+        while let Ok(frame) =
+            tokio::time::timeout(Duration::from_millis(200), reader.read_frame()).await
+        {
+            let frame = frame.unwrap().expect("connection closed");
+            assert_eq!(
+                frame.kind,
+                farhelm_proto::FrameKind::Control,
+                "no input may be forwarded after the oversized message: {frame:?}"
+            );
+        }
+    }
+
+    /// The receive buffer a test's wedged or slow browser asks for: small,
+    /// so the server's sends block after the kernel's own send buffer
+    /// rather than after megabytes of loopback autotuning.
+    const SMALL_RECEIVE_BUFFER: u32 = 16 * 1024;
+
+    /// What [`flood_until_heard`] saw.
+    struct Flood {
+        reader: FrameReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>,
+        /// The first frame the stand-in heard from the helm.
+        heard: Frame,
+        /// Data frames written, numbered from 0 in their first four bytes.
+        written: u32,
+    }
+
+    /// Write numbered data frames of `size` bytes on `channel` until the
+    /// helm says anything, then `after` more, the way a supervisor's sender
+    /// stops at a pause while what is already queued on its connection still
+    /// goes out.
+    ///
+    /// The stand-in reads on a task of its own and the writer stops at its
+    /// signal. The writer yields after each frame so the reader and the
+    /// helm run between frames on this single-threaded runtime; a bound on
+    /// the frames written turns a helm that never answers into a failure
+    /// rather than a hang.
+    async fn flood_until_heard(
+        mut reader: FrameReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>,
+        writer: &mut FrameWriter<tokio::io::WriteHalf<tokio::io::DuplexStream>>,
+        channel: u32,
+        size: usize,
+        after: u32,
+    ) -> Flood {
+        const MOST_FRAMES: u32 = 4096;
+        let (heard_tx, heard_rx) = tokio::sync::watch::channel(false);
+        let watcher = tokio::spawn(async move {
+            let heard = tokio::time::timeout(Duration::from_secs(30), reader.read_frame())
+                .await
+                .expect("the supervisor never heard from the helm while the browser was behind")
+                .unwrap()
+                .expect("connection closed");
+            heard_tx.send_replace(true);
+            (reader, heard)
+        });
+        let mut written = 0u32;
+        let mut stop_at = None;
+        while stop_at.is_none_or(|stop| written < stop) {
+            assert!(
+                written < MOST_FRAMES,
+                "the helm said nothing after {written} frames"
+            );
+            if stop_at.is_none() && *heard_rx.borrow() {
+                stop_at = Some(written + after);
+                continue;
+            }
+            let mut body = vec![0u8; size];
+            body[..4].copy_from_slice(&written.to_be_bytes());
+            writer
+                .write_frame(&Frame::data(channel, body))
+                .await
+                .unwrap();
+            written += 1;
+            tokio::task::yield_now().await;
+        }
+        let (reader, heard) = watcher.await.unwrap();
+        Flood {
+            reader,
+            heard,
+            written,
+        }
+    }
+
+    /// A grid stream whose browser falls behind is paused by the helm, and
+    /// resumed once the browser catches up, without losing a frame, at the
+    /// supervisor's message size and with its writer queue's worth still
+    /// arriving after the pause.
+    ///
+    /// Why: the grid client sends no pause of its own, and the helm reads
+    /// the supervisor connection without waiting on any one terminal, so
+    /// without this pause a browser slower than the supervisor fills its
+    /// terminal's queue and is detached as stalled at the first large
+    /// catch-up or flood. What was already on its way when the pause went
+    /// out still arrives, and must fit. Spec: a stand-in supervisor writes
+    /// 32 KiB frames (its sender's packing) to a browser that is not
+    /// reading, and 64 more (its writer queue) once it hears from the helm;
+    /// what it hears first is `PauseOutput` for the channel, not a `Detach`.
+    /// The browser then reads every frame written, in order, after which the
+    /// supervisor receives `ResumeOutput` for the channel and nothing before
+    /// it.
+    #[farhelm_testtrace::test]
+    async fn a_slow_browser_pauses_and_resumes_its_grid_stream() {
+        slow_browser_pauses_and_resumes(32 * 1024, 64).await;
+    }
+
+    /// The same, with rows at the format's largest message and several of
+    /// them still arriving after the pause.
+    ///
+    /// Why: a row that does not fit the supervisor's 32 KiB packing goes
+    /// alone in a message of up to 1 MiB, so what follows a pause can be
+    /// megabytes in a few frames, which is what the helm's byte budget has
+    /// to absorb while its event count barely moves. Spec: as above with
+    /// 1 MiB frames and 8 of them after the stand-in hears from the helm.
+    #[farhelm_testtrace::test]
+    async fn a_slow_browser_survives_large_rows_arriving_after_the_pause() {
+        slow_browser_pauses_and_resumes(farhelm_proto::grid::GRID_MAX_MESSAGE, 8).await;
+    }
+
+    /// One run of the slow-browser tests: frames of `size`, and `after`
+    /// more once the helm has spoken.
+    async fn slow_browser_pauses_and_resumes(size: usize, after: u32) {
+        let (client_side, peer_side) = tokio::io::duplex(1024 * 1024);
+        let peer = tokio::spawn(scripted_supervisor_attach_as(
+            peer_side,
+            farhelm_proto::StreamKind::Grid,
+        ));
+        let mut harness = rest_harness::spliced_helm(client_side).await;
+        let addr = harness.serve().await;
+        let path = session_path(&harness, "/api/sessions/sess-1/term?grid=1");
+        let (mut ws, peer) = tokio::join!(
+            WsTestClient::connect_with_receive_buffer(addr, &path, SMALL_RECEIVE_BUFFER),
+            peer
+        );
+        let (reader, mut writer, channel) = peer.unwrap();
+
+        let flood = flood_until_heard(reader, &mut writer, channel, size, after).await;
+        let (mut reader, written) = (flood.reader, flood.written);
+        assert!(
+            is_control(&flood.heard, &ControlMsg::PauseOutput { channel }),
+            "a browser falling behind must pause its grid stream before anything else: {:?} \
+             after {written} frames",
+            flood.heard
+        );
+
+        expect_stream_notice(&mut ws, "grid").await;
+        for expected in 0..written {
+            let (opcode, payload) = tokio::time::timeout(Duration::from_secs(10), ws.recv())
+                .await
+                .unwrap_or_else(|_| panic!("frame {expected} of {written} never arrived"))
+                .unwrap_or_else(|| panic!("socket closed before frame {expected} of {written}"));
+            assert_eq!(opcode, 2, "frame {expected} is not a binary frame");
+            assert_eq!(
+                (
+                    payload.len(),
+                    u32::from_be_bytes(payload[..4].try_into().unwrap())
+                ),
+                (size, expected),
+                "frames must arrive whole and in order"
+            );
+        }
+        let before = read_until(&mut reader, "ResumeOutput", |frame| {
+            is_control(frame, &ControlMsg::ResumeOutput { channel })
+        })
+        .await;
+        assert!(
+            before.is_empty(),
+            "nothing but the resume may follow the pause here: {before:?}"
+        );
     }
 
     /// The heartbeat's ping is answered BY THE HELM and never relayed

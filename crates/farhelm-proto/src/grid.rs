@@ -1,10 +1,9 @@
 //! Grid streams: how a terminal that runs in a terminal host reaches its
 //! viewer, as a grid of styled runs rather than raw terminal bytes.
 //!
-//! NOTE: nothing sends these messages yet, and until the helm can relay them
-//! it never asks for them (see "Attach and the stream kind"). This module is
-//! the contract the supervisor's sender, its input encoder, the helm's relay
-//! and the browser's grid client are built against.
+//! NOTE: nothing sends these messages until terminal hosts are switched on.
+//! This module is the contract the supervisor's sender, its input encoder,
+//! the helm's relay and the browser's grid client are built against.
 //!
 //! # Why this shape
 //!
@@ -41,18 +40,22 @@
 //! that refusal is permanent behavior, not a placeholder. `ReplayComplete`,
 //! `Detached`, `Resize`, `PauseOutput`/`ResumeOutput` and the stall detach
 //! keep their meaning for both stream kinds; for grid streams, pause means
-//! "stop sending screen frames" and the supervisor coalesces (see "Flow
-//! control"). The grid client itself sends no pause or resume: it applies
+//! "send nothing until the resume", history included, and the supervisor
+//! coalesces (see "Flow control"). The grid client itself sends no pause or
+//! resume: it applies
 //! messages as they arrive and draws at most once per animation frame, so no
-//! backlog builds up in the page.
+//! backlog builds up in the page. Its backlog builds up in the helm instead,
+//! which pauses and resumes the supervisor from its own queue.
 //!
-//! Until the helm can relay grid streams (a data-frame limit and a
-//! byte-bounded queue fit for [`GRID_MAX_MESSAGE`] on grid channels, and each
-//! browser input message forwarded as one frame), it sends `grid: false`
-//! whatever the browser asked; the change that makes the helm a grid relay
-//! passes the request through. The helm also refuses an `Attached` that names
-//! `grid` for an attach that did not ask for it, rather than tell a browser
-//! that cannot draw grids to expect one.
+//! The helm passes the browser's request through as `grid`, and relays a
+//! grid channel with what it needs that a byte channel does not: frames up
+//! to [`GRID_MAX_MESSAGE`] (a byte channel's are at most
+//! [`crate::MAX_TERMINAL_DATA_LEN`]) in a queue bounded in bytes as well as
+//! frames, each browser input message forwarded as one frame, and its own
+//! pause and resume, since the grid client sends none (see "Flow control").
+//! The helm also refuses an `Attached` that names `grid` for an attach that
+//! did not ask for it, rather than tell a browser that cannot draw grids to
+//! expect one.
 //!
 //! The helm tells the browser the stream kind in a
 //! `{"type":"stream","kind":"grid"|"bytes"}` text frame, so the client picks
@@ -275,14 +278,27 @@
 //! proceed (the shared writer queue is full, or the client paused): it stops
 //! sending screen updates and, when it can send again, sends one update from
 //! what it last sent to the current screen (any number of revisions skipped).
-//! History is different: lines that entered history while the client was
-//! behind are sent as `history` appends; if more lines arrived than the
+//! A paused stream is sent nothing until the resume, history included,
+//! beyond finishing a screen update or clipboard write already under way.
+//! The helm relies on that to bound what it holds for an attachment it
+//! paused.
+//! History is different from the screen in what it catches up, not in when:
+//! lines that entered history while the client was behind are sent as
+//! `history` appends once it can send again; if more lines arrived than the
 //! history cap holds (some were evicted before they were sent), or history
 //! changed shape, it sends `history_reset` and the current history instead.
 //! Clipboard writes are bounded too: while behind, the sender keeps only the
 //! latest unsent write per target (a newer write replaces an older one not
 //! yet started), and always finishes a write whose first part has gone out.
 //! The stall timeout and stall detach stay as they are.
+//!
+//! The helm reads the connection without waiting on any one attachment, so
+//! a browser that falls behind never fills the supervisor's writer queue;
+//! the helm's queue for that attachment fills instead. So the helm pauses
+//! a grid stream (`PauseOutput`) once its queue for it passes a mark, and
+//! resumes it once the browser has drained it, and a pause that outlives
+//! the stall timeout, from a browser that stopped reading, ends the
+//! attachment as a byte stream's does.
 //!
 //! # What this module checks
 //!
@@ -336,18 +352,17 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 ///
 /// Larger than [`crate::MAX_TERMINAL_DATA_LEN`] because a row cannot be split
 /// across messages and one 1000-column row with its links can exceed 64 KiB.
-/// NOTE: the helm still applies `MAX_TERMINAL_DATA_LEN` to every incoming
-/// terminal data frame, which is one reason it does not ask for grid streams
-/// yet (module docs, "Attach and the stream kind").
+/// The helm admits frames up to this bound on an attachment that asked for
+/// grids, and holds at most as many bytes per attachment as a byte stream's
+/// worst case (module docs, "Attach and the stream kind").
 pub const GRID_MAX_MESSAGE: usize = 1024 * 1024;
 
 /// Most bytes of JSON in one client-to-supervisor grid message: the same
 /// bound every terminal data frame already has.
 ///
-/// NOTE: the helm cuts browser input into 32 KiB data frames today
-/// (`INPUT_CHUNK` in its client), which would split a larger grid message
-/// across frames; that is the other reason it does not ask for grid streams
-/// yet.
+/// The helm forwards each browser message on a grid channel as one data
+/// frame, never cut into its 32 KiB input chunks, and ends the attachment on
+/// a message over this bound rather than forward it.
 pub const GRID_MAX_INPUT_MESSAGE: usize = crate::MAX_TERMINAL_DATA_LEN;
 
 /// Largest `cols` or `rows` a grid has; the smallest is 1. Also bounds every

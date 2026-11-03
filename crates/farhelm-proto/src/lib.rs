@@ -3567,8 +3567,8 @@ pub enum ControlMsg {
         /// sent a stream the client cannot draw; that refusal is permanent
         /// behavior. tmux terminals stream bytes whatever this says.
         /// `#[serde(default)]` (false) is every client before version 68,
-        /// and what the helm sends until it can relay grid streams (the
-        /// [`grid`] module docs, "Attach and the stream kind").
+        /// and a browser that did not ask for grids (the [`grid`] module
+        /// docs, "Attach and the stream kind").
         #[serde(default)]
         grid: bool,
     },
