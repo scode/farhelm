@@ -755,6 +755,19 @@ fn pen_changes(from: &Pen, to: &Pen) -> Vec<String> {
     params
 }
 
+/// The SGR sequence that takes a plain template to `template`'s style, or
+/// nothing when it is plain. For printing lines whose styles carry from one
+/// line into the next (`super::super::LineStyles::Carried`): the style a line
+/// ended with is set again after the reset that ends the line.
+pub(crate) fn sgr_setting(template: &Cell) -> String {
+    let params = pen_changes(&Pen::plain(), &Pen::of(template));
+    if params.is_empty() {
+        String::new()
+    } else {
+        format!("\x1b[{}m", params.join(";"))
+    }
+}
+
 /// SGR parameters that reset the template and set all of `pen` (without an
 /// underline color: see [`Writer::set_pen`]).
 fn pen_reset(pen: &Pen) -> Vec<String> {

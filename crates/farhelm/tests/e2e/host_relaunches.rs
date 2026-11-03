@@ -41,10 +41,10 @@ use std::path::{Path, PathBuf};
 
 /// The last line the agent's first run prints, which stays on its visible
 /// screen: never in the restarted terminal.
-const OLD_SCREEN_MARK: &str = "OLD SCREEN MARK";
+pub(crate) const OLD_SCREEN_MARK: &str = "OLD SCREEN MARK";
 
 /// What every later run of the agent prints.
-const RESUMED: &str = "RESUMED RUN";
+pub(crate) const RESUMED: &str = "RESUMED RUN";
 
 /// Write the history agent (module docs) into `dir` and return the command
 /// that runs it. Its first run leaves a marker beside it, which is how
@@ -53,7 +53,7 @@ const RESUMED: &str = "RESUMED RUN";
 /// first run, once stopped (SIGTERM or SIGHUP), prints 30 numbered
 /// `last words` lines before it exits, enough that the first ones scroll
 /// into history: the old program's last output.
-fn history_agent_with(dir: &Path, last_words: bool) -> String {
+pub(crate) fn history_agent_with(dir: &Path, last_words: bool) -> String {
     let marker = dir.join("agent-ran");
     let runs = dir.join("runs");
     let wait = if last_words {
@@ -128,7 +128,7 @@ async fn history_session_with(
 }
 
 /// The lines in `host`'s history (above its screen), oldest first, as text.
-async fn history_text(host: &HostTerminal) -> String {
+pub(crate) async fn history_text(host: &HostTerminal) -> String {
     host.read(|emulator| {
         use farhelm_terminal_emulator::alacritty_terminal::grid::Dimensions as _;
         use farhelm_terminal_emulator::alacritty_terminal::index::{Column, Line};
@@ -148,7 +148,7 @@ async fn history_text(host: &HostTerminal) -> String {
 }
 
 /// The socket names in `state`'s host socket directory, sorted.
-fn host_sockets_in(state: &Path) -> Vec<String> {
+pub(crate) fn host_sockets_in(state: &Path) -> Vec<String> {
     let Ok(entries) = std::fs::read_dir(state.join("hosts")) else {
         return Vec::new();
     };
@@ -168,7 +168,7 @@ fn host_sockets_in(state: &Path) -> Vec<String> {
 }
 
 /// The launch host records in `state`'s launch directory, by file name.
-fn host_records_in(state: &Path) -> Vec<String> {
+pub(crate) fn host_records_in(state: &Path) -> Vec<String> {
     let Ok(entries) = std::fs::read_dir(state.join("launch")) else {
         return Vec::new();
     };
@@ -183,14 +183,14 @@ fn host_records_in(state: &Path) -> Vec<String> {
 }
 
 /// The launch record of `session_id`'s launch `generation`.
-fn record_path(state: &Path, session_id: &str, generation: i64) -> PathBuf {
+pub(crate) fn record_path(state: &Path, session_id: &str, generation: i64) -> PathBuf {
     state
         .join("launch")
         .join(format!("{session_id}.{generation}.host"))
 }
 
 /// A socket's name, for comparing with a row's `pane`.
-fn socket_name(socket: &Path) -> String {
+pub(crate) fn socket_name(socket: &Path) -> String {
     socket
         .file_name()
         .expect("a socket path names a file")
@@ -204,7 +204,7 @@ fn socket_name(socket: &Path) -> String {
 /// `unusable`, the stand-in whose "host" binds the socket and never answers
 /// (`host_creates::silent_host_program`), writing its listener's pid to
 /// `listener_pid`.
-fn failing_host_program(dir: &Path, flag: &Path, unusable: Option<&Path>) -> PathBuf {
+pub(crate) fn failing_host_program(dir: &Path, flag: &Path, unusable: Option<&Path>) -> PathBuf {
     let failing = match unusable {
         Some(listener_pid) => {
             let silent_dir = dir.join("silent");
@@ -228,7 +228,7 @@ fn failing_host_program(dir: &Path, flag: &Path, unusable: Option<&Path>) -> Pat
 }
 
 /// A crash seam that fires once, at `stage`.
-fn crash_once_at(stage: HostRestartStage) -> (HostRestartFault, Arc<AtomicBool>) {
+pub(crate) fn crash_once_at(stage: HostRestartStage) -> (HostRestartFault, Arc<AtomicBool>) {
     let fired = Arc::new(AtomicBool::new(false));
     let seam: HostRestartFault = {
         let fired = Arc::clone(&fired);
@@ -255,7 +255,7 @@ fn crashing_seams(crash: HostRestartFault) -> SupervisorSeams {
 
 /// Require that the host process `pid` ended and its socket file at
 /// `socket` went with it.
-async fn assert_host_ended(pid: u32, socket: &Path) {
+pub(crate) async fn assert_host_ended(pid: u32, socket: &Path) {
     wait_until_pid_gone(pid, WAIT_SECS).await;
     assert!(
         std::fs::symlink_metadata(socket).is_err(),
@@ -793,7 +793,8 @@ async fn interrupted_restart(stage: HostRestartStage) -> Interrupted {
         }
         HostRestartStage::GenerationClaimed
         | HostRestartStage::Confirmation
-        | HostRestartStage::ReplacementUnwound => {
+        | HostRestartStage::ReplacementUnwound
+        | HostRestartStage::OldWindowRemoval => {
             unreachable!("only crashes after the new host started are run here")
         }
     }

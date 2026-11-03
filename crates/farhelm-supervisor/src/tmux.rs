@@ -4029,6 +4029,191 @@ impl TmuxDriver {
             .await
     }
 
+    /// The newest lines of `pane`'s history (the lines above its visible
+    /// screen), with their styles, and the pane's size: what a Restart that
+    /// moves an old tmux terminal into a terminal host seeds the new host
+    /// with (`service::core::host_restart`, "From a tmux pane").
+    ///
+    /// The history only, never the visible screen: SPEC.md's Restart keeps
+    /// the scrollback and never paints the previous run's last frame back,
+    /// as `respawn-pane` keeps a pane's history and clears its grid. That
+    /// holds on the alternate screen too, because tmux keeps the primary
+    /// screen's history in the pane's grid while the alternate screen shows
+    /// (only the visible rows are swapped out), so the same range is the
+    /// primary history either way.
+    ///
+    /// The pane's size and history length are read first, and `lines_for`
+    /// says from the size how many history rows to take: what the seed can
+    /// hold at that size, so that tmux never renders, and the supervisor
+    /// never reads, lines the seed would leave out. Then
+    /// `capture-pane -p -e -J -S -<lines> -E -1`: SGR styles, hyperlinks and
+    /// line drawing (SO/SI) inline, written where they change (tmux starts
+    /// from the default rendition at the first row it captures, so a style
+    /// set before the range is written again there), wrapped rows joined into
+    /// one line each (so the new terminal wraps them as a line it can
+    /// reflow, not as hard breaks), oldest first, every line ending in `\n`
+    /// (tmux 3.7c ends the range's last row with one even when it wraps into
+    /// the visible screen, whose rest is not taken). A history longer than
+    /// the rows taken is reported cut.
+    ///
+    /// Both reads check, inside tmux and in the same command (`if-shell
+    /// -F`), that the pane is still `pane` in `session` (a qualified target
+    /// names the session it was given, not the pane's own, so
+    /// `#{session_name}` read through it cannot tell a pane that moved). The
+    /// capture also checks that the pane still has history (an empty
+    /// history's `-E -1` would take the first visible row) and is still the
+    /// size read: a viewer can resize it between the two reads, and the rows
+    /// taken (and the size reported with them) are for the size read. When
+    /// that guard fails, the facts are read again and `lines_for` asked
+    /// again, up to [`PANE_HISTORY_ATTEMPTS`] times; a pane whose size keeps
+    /// changing is a [`PaneHistoryError::Failed`], which the caller can retry.
+    /// A capture that passed its guard starts with a header line the pane
+    /// cannot forge (it comes before any of the pane's rows), which is how a
+    /// passed guard is told from a failed one.
+    ///
+    /// `max_bytes` is a hard safety bound on what the supervisor keeps: over
+    /// it, the newest whole lines are kept and the history is reported cut.
+    /// Styles and a line-drawing shift in force at that cut were written in
+    /// a line left out, so the kept lines show them only from their next
+    /// change. The capture is read incrementally, compacted once it holds
+    /// twice the bound, so the supervisor's peak is about `2 * max_bytes`;
+    /// tmux builds the whole capture in its own server first, so its time
+    /// and memory are bounded only by the rows taken. `budget` bounds the
+    /// wait for it, not tmux's work: a capture given up on still runs to its
+    /// end inside the tmux server, which serves no other client meanwhile.
+    ///
+    /// [`PaneHistoryError::NotThisSessions`] for a pane that is not
+    /// `session`'s any more; [`PaneHistoryError::TimedOut`] for a capture
+    /// that did not finish within `budget`; [`PaneHistoryError::Failed`] for
+    /// any other failure.
+    pub(crate) async fn capture_pane_history(
+        &self,
+        session: &str,
+        pane: &str,
+        mut lines_for: impl FnMut(u16, u16) -> u64,
+        max_bytes: usize,
+        budget: std::time::Duration,
+    ) -> Result<PaneHistory, PaneHistoryError> {
+        let target = pane_in_session(session, pane);
+        let identity = launch_excerpt_identity(session, pane);
+        let quoted = |args: &[&str]| {
+            args.iter()
+                .map(|arg| shell_quote(arg))
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        let facts_query = quoted(&[
+            "display-message",
+            "-p",
+            "-t",
+            pane,
+            "#{pane_width}\t#{pane_height}\t#{history_size}",
+        ]);
+        let refused = quoted(&["display-message", "-p", PANE_HISTORY_REFUSED]);
+        let header = quoted(&["display-message", "-p", PANE_HISTORY_HEADER]);
+        let expected_head = format!("{PANE_HISTORY_HEADER}\n");
+        for _ in 0..PANE_HISTORY_ATTEMPTS {
+            let facts = self
+                .run(&[
+                    "if-shell",
+                    "-F",
+                    "-t",
+                    pane,
+                    &identity,
+                    &facts_query,
+                    &refused,
+                ])
+                .await
+                .context("reading a pane's size and history length")
+                .map_err(PaneHistoryError::Failed)?;
+            let facts = facts.trim_end_matches('\n');
+            if facts == PANE_HISTORY_REFUSED {
+                return Err(PaneHistoryError::NotThisSessions);
+            }
+            let facts: Vec<&str> = facts.split('\t').collect();
+            let [cols, rows, history] = facts[..] else {
+                return Err(PaneHistoryError::Failed(anyhow::anyhow!(
+                    "tmux described the pane in an unexpected shape: {facts:?}"
+                )));
+            };
+            let parse = |what: &str, value: &str| {
+                value
+                    .parse::<u16>()
+                    .with_context(|| format!("tmux reported the pane's {what} as {value:?}"))
+            };
+            let (cols, rows) = (
+                parse("width", cols).map_err(PaneHistoryError::Failed)?,
+                parse("height", rows).map_err(PaneHistoryError::Failed)?,
+            );
+            let history: u64 = history
+                .parse()
+                .with_context(|| format!("tmux reported the pane's history as {history:?}"))
+                .map_err(PaneHistoryError::Failed)?;
+            let lines = lines_for(cols, rows);
+            let mut result = PaneHistory {
+                cols,
+                rows,
+                text: Vec::new(),
+                cut: history > lines,
+            };
+            if history == 0 || lines == 0 {
+                return Ok(result);
+            }
+            let start = format!("-{lines}");
+            let capture = quoted(&[
+                "capture-pane",
+                "-p",
+                "-e",
+                "-J",
+                "-t",
+                &target,
+                "-S",
+                &start,
+                "-E",
+                "-1",
+            ]);
+            let condition = format!(
+                "#{{&&:{identity},#{{&&:#{{e|>:#{{history_size}},0}},#{{&&:#{{==:#{{pane_width}},{cols}}},#{{==:#{{pane_height}},{rows}}}}}}}}}"
+            );
+            let guarded = format!("{header} ; {capture}");
+            let captured = self
+                .run_capture_within(
+                    &["if-shell", "-F", "-t", pane, &condition, &guarded],
+                    budget,
+                    HistoryCapture::default(),
+                    |capture, chunk| capture.take(chunk, expected_head.len(), max_bytes),
+                )
+                .await
+                .context("capturing a pane's history")
+                .map_err(|error| {
+                    if error.downcast_ref::<CaptureTimedOut>().is_some() {
+                        PaneHistoryError::TimedOut(error)
+                    } else {
+                        PaneHistoryError::Failed(error)
+                    }
+                })?;
+            if captured.head != expected_head.as_bytes() {
+                // The guard failed: the pane changed size, lost its history or
+                // moved between the two reads. Read it again.
+                continue;
+            }
+            let mut text = captured.tail;
+            let cut = captured.cut || text.len() > max_bytes;
+            if cut {
+                text.drain(..text.len().saturating_sub(max_bytes));
+                // The oldest line kept may have lost its start; drop it whole.
+                let first_end = text.iter().position(|&byte| byte == b'\n');
+                text.drain(..first_end.map_or(text.len(), |end| end + 1));
+            }
+            result.text = text;
+            result.cut |= cut;
+            return Ok(result);
+        }
+        Err(PaneHistoryError::Failed(anyhow::anyhow!(
+            "the pane {pane} kept changing (its size, most likely) while its history was read"
+        )))
+    }
+
     /// Quote only this generation's dead terminal, atomically with validation.
     ///
     /// The supported tmux queue drains a synchronous `if-shell -F` branch
@@ -4269,6 +4454,21 @@ impl TmuxDriver {
     async fn run_capture<T>(
         &self,
         args: &[&str],
+        retained: T,
+        reduce: impl FnMut(&mut T, &[u8]),
+    ) -> anyhow::Result<T> {
+        self.run_capture_within(args, self.pane_list_timeout, retained, reduce)
+            .await
+    }
+
+    /// [`Self::run_capture`] within `timeout` rather than
+    /// [`PANE_LIST_TIMEOUT`]: for the one capture whose size is a whole
+    /// history ([`Self::capture_pane_history`]), which tmux builds in full
+    /// before it writes any of it.
+    async fn run_capture_within<T>(
+        &self,
+        args: &[&str],
+        timeout: std::time::Duration,
         mut retained: T,
         mut reduce: impl FnMut(&mut T, &[u8]),
     ) -> anyhow::Result<T> {
@@ -4297,7 +4497,7 @@ impl TmuxDriver {
         // exactly this pattern in a since-removed capture path. One
         // allocation per capture keeps the futures small.
         let mut chunk = vec![0u8; CAPTURE_READ_CHUNK];
-        let drained = tokio::time::timeout(self.pane_list_timeout, async {
+        let drained = tokio::time::timeout(timeout, async {
             loop {
                 let n = stdout
                     .read(&mut chunk)
@@ -4320,10 +4520,9 @@ impl TmuxDriver {
             let _ = child.wait().await;
             let _ = stderr_task.await;
             let (rendered_args, _) = redacted_tmux_args(args);
-            anyhow::bail!(
-                "tmux {rendered_args} did not finish within {:?}",
-                self.pane_list_timeout
-            );
+            return Err(anyhow::Error::new(CaptureTimedOut(format!(
+                "tmux {rendered_args} did not finish within {timeout:?}"
+            ))));
         };
         drained?;
         let stderr_bytes = stderr_task.await.unwrap_or_default();
@@ -4761,6 +4960,105 @@ fn normalize_capture(out: &[u8]) -> Vec<u8> {
         normalized.push(b);
     }
     normalized
+}
+
+/// What [`TmuxDriver::capture_pane_history`]'s fact query prints when the
+/// pane is not the named session's: a word no size line can be.
+const PANE_HISTORY_REFUSED: &str = "farhelm-pane-not-in-session";
+
+/// The line [`TmuxDriver::capture_pane_history`]'s capture prints before the
+/// pane's rows when its guard passed. The pane's own output cannot stand in
+/// for it: it comes first, and the pane's rows only after it.
+const PANE_HISTORY_HEADER: &str = "farhelm-pane-history";
+
+/// How many times [`TmuxDriver::capture_pane_history`] reads a pane's facts
+/// again when its capture finds the pane changed since they were read: a
+/// viewer's resize can land in between, but not three times running unless
+/// the pane is being resized continuously, and then the read fails rather
+/// than chase it.
+pub(crate) const PANE_HISTORY_ATTEMPTS: usize = 3;
+
+/// A capture that [`TmuxDriver::run_capture_within`] gave up on at its time
+/// limit, its tmux client killed: an error a caller can tell from other
+/// failures by downcasting. tmux itself may still be building the capture.
+#[derive(Debug)]
+struct CaptureTimedOut(String);
+
+impl std::fmt::Display for CaptureTimedOut {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for CaptureTimedOut {}
+
+/// What [`TmuxDriver::capture_pane_history`] keeps of a capture as it reads
+/// it: the first bytes, which are the guard's header when it passed, and the
+/// newest of the rest, bounded.
+#[derive(Default)]
+struct HistoryCapture {
+    head: Vec<u8>,
+    tail: Vec<u8>,
+    /// Whether older bytes were dropped to stay within the bound.
+    cut: bool,
+}
+
+impl HistoryCapture {
+    /// Take `chunk`: its first bytes into `head` until it holds `head_len`,
+    /// the rest into `tail`, compacted to the newest `max_bytes` once it
+    /// holds twice that.
+    fn take(&mut self, mut chunk: &[u8], head_len: usize, max_bytes: usize) {
+        let missing = head_len.saturating_sub(self.head.len()).min(chunk.len());
+        self.head.extend_from_slice(&chunk[..missing]);
+        chunk = &chunk[missing..];
+        self.tail.extend_from_slice(chunk);
+        if self.tail.len() > max_bytes.saturating_mul(2) {
+            self.tail.drain(..self.tail.len() - max_bytes);
+            self.cut = true;
+        }
+    }
+}
+
+/// Why [`TmuxDriver::capture_pane_history`] read no history.
+#[derive(Debug)]
+pub(crate) enum PaneHistoryError {
+    /// The pane is not the named session's any more (gone, or its id taken
+    /// by another session's pane): it holds nothing of that session's.
+    NotThisSessions,
+    /// tmux refused, answered in a shape that would not parse, or the pane
+    /// kept changing while it was read: the history may still be there.
+    Failed(anyhow::Error),
+    /// The capture did not finish within its time limit: the history is
+    /// there, and a capture of fewer rows may finish.
+    TimedOut(anyhow::Error),
+}
+
+/// A tmux pane's history and size, as [`TmuxDriver::capture_pane_history`]
+/// reads them for a Restart that moves the pane's session into a terminal
+/// host.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PaneHistory {
+    /// The pane's width in columns when it was read.
+    pub(crate) cols: u16,
+    /// The pane's height in rows when it was read.
+    pub(crate) rows: u16,
+    /// The history as `capture-pane -p -e -J` prints it: one line per
+    /// `\n`, oldest first, with SGR styles and hyperlinks inline. Empty for
+    /// a pane with no history.
+    pub(crate) text: Vec<u8>,
+    /// Whether older lines were left out: rows the caller did not ask for,
+    /// or lines beyond the byte bound.
+    pub(crate) cut: bool,
+}
+
+impl PaneHistory {
+    /// The history's lines, oldest first, without their `\n`s: what
+    /// `farhelm_terminal_emulator::history_seed_from_lines_until` prints.
+    pub(crate) fn lines(&self) -> impl Iterator<Item = &[u8]> {
+        let text = self.text.strip_suffix(b"\n").unwrap_or(&self.text);
+        text.split(|&byte| byte == b'\n')
+            .take(if self.text.is_empty() { 0 } else { usize::MAX })
+    }
 }
 
 /// Strip the terminator from a control-mode notification line.
@@ -7807,6 +8105,564 @@ mod tests {
             last_words.contains("SCROLLED-AWAY-MARKER"),
             "test premise: the marker must still be within scrollback reach, or the assertion \
              above proves nothing about WHERE the tail stopped:\n{last_words}"
+        );
+    }
+
+    /// How long the history captures in these tests may take: generous, so
+    /// a loaded runner never turns a slow capture into a failure here.
+    const HISTORY_BUDGET: std::time::Duration = std::time::Duration::from_secs(20);
+
+    /// Start `name` at `cols` x `rows` running `script` under `sh -c`, and
+    /// wait until its screen shows `ready`: the premise that everything the
+    /// script prints before it is in the pane.
+    async fn history_fixture(
+        server: &ScratchServer,
+        name: &str,
+        cols: u16,
+        rows: u16,
+        script: &str,
+        ready: &str,
+    ) -> String {
+        let argv = ["sh".to_string(), "-c".to_string(), script.to_string()];
+        let pane = server
+            .driver
+            .create_session(name, "/", cols, rows, &[], &argv)
+            .await
+            .expect("create the fixture session");
+        tail_containing(&server.driver, name, &pane, ready).await;
+        pane
+    }
+
+    /// The history of `name`'s `pane`, taking at most `lines` rows and
+    /// keeping at most `max_bytes`.
+    async fn history_of(
+        server: &ScratchServer,
+        name: &str,
+        pane: &str,
+        lines: u64,
+        max_bytes: usize,
+    ) -> PaneHistory {
+        server
+            .driver
+            .capture_pane_history(name, pane, |_, _| lines, max_bytes, HISTORY_BUDGET)
+            .await
+            .expect("capture the pane's history")
+    }
+
+    /// `history`'s lines as text, escapes kept.
+    fn history_lines(history: &PaneHistory) -> Vec<String> {
+        history
+            .lines()
+            .map(|line| String::from_utf8_lossy(line).into_owned())
+            .collect()
+    }
+
+    /// The emulator a Restart seed of `history` restores to, built as the
+    /// move builds it (tmux capture mode, at the pane's size, within what a
+    /// seed can hold there).
+    fn seeded(history: &PaneHistory) -> farhelm_terminal_emulator::Emulator {
+        let size = farhelm_terminal_emulator::Size {
+            columns: history.cols,
+            lines: history.rows,
+        };
+        let seed = farhelm_terminal_emulator::history_seed_from_lines_until(
+            size,
+            12_000,
+            history.lines(),
+            terminal_host::protocol::MAX_SNAPSHOT,
+            farhelm_terminal_emulator::LineStyles::Carried,
+            history.cut,
+            &farhelm_terminal_emulator::Cancel::never(),
+        )
+        .expect("never cancelled")
+        .snapshot;
+        farhelm_terminal_emulator::Emulator::restore(&seed.blob, 12_000)
+            .expect("the seed restores")
+            .emulator
+    }
+
+    /// The text of each history row of `emulator`, oldest first, trailing
+    /// blanks trimmed.
+    fn history_rows(emulator: &farhelm_terminal_emulator::Emulator) -> Vec<String> {
+        use farhelm_terminal_emulator::alacritty_terminal::grid::Dimensions as _;
+        use farhelm_terminal_emulator::alacritty_terminal::index::{Column, Line};
+        let grid = emulator.term().grid();
+        (1..=grid.history_size())
+            .rev()
+            .map(|back| {
+                let row = &grid[Line(-(back as i32))];
+                (0..grid.columns())
+                    .map(|column| row[Column(column)].c)
+                    .filter(|c| *c != '\0')
+                    .collect::<String>()
+                    .trim_end()
+                    .to_owned()
+            })
+            .collect()
+    }
+
+    /// The history a Restart seeds a terminal host from is the pane's
+    /// scrollback alone, styled, with wrapped rows joined, at the pane's
+    /// size.
+    ///
+    /// Why: SPEC.md's Restart keeps the scrollback and never paints the
+    /// previous run's visible frame back, so moving a tmux session into a
+    /// host must take exactly the rows above the screen; styles keep the
+    /// history looking as it did, and a wrapped row taken as two lines would
+    /// become a hard break the new terminal can never reflow. Spec: a 40x10
+    /// pane prints a red line, a 60-column line, then `line 01` to
+    /// `line 30` and `SCREEN-LAST`, with the red never ended; its history
+    /// capture reports 40x10, holds the red line with its SGR, the 60-column
+    /// line whole on one line with no SGR of its own (tmux writes a style only
+    /// where it changes, so the red carries into it unwritten), and
+    /// `line 01`, not cut; neither `line 30` nor `SCREEN-LAST` (on screen) is
+    /// in it; restored from a seed, the 60-column line is red.
+    #[farhelm_testtrace::test]
+    async fn pane_history_is_the_scrollback_alone_styled_and_joined() {
+        let server = ScratchServer::start().await;
+        let long = "W".repeat(60);
+        let pane = history_fixture(
+            &server,
+            "fh-history",
+            40,
+            10,
+            &format!(
+                "printf '\\033[31mRED-LINE\\n{long}\\n'; i=1; while [ $i -le 30 ]; do \
+                 printf 'line %02d\\n' $i; i=$((i+1)); done; printf 'SCREEN-LAST'; sleep 300"
+            ),
+            "SCREEN-LAST",
+        )
+        .await;
+        let history = history_of(&server, "fh-history", &pane, 12_000, 1024 * 1024).await;
+        assert_eq!((history.cols, history.rows, history.cut), (40, 10, false));
+        let lines = history_lines(&history);
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("\x1b[31m") && line.contains("RED-LINE")),
+            "{lines:?}"
+        );
+        assert!(
+            lines.iter().any(|line| line.trim_end() == long),
+            "the wrapped line is one line, the red carried into it unwritten: {lines:?}"
+        );
+        assert!(
+            lines.iter().any(|line| line.contains("line 01")),
+            "{lines:?}"
+        );
+        for on_screen in ["line 30", "SCREEN-LAST"] {
+            assert!(
+                !lines.iter().any(|line| line.contains(on_screen)),
+                "{on_screen:?} is on the screen, not in history: {lines:?}"
+            );
+        }
+        let emulator = seeded(&history);
+        let rows = history_rows(&emulator);
+        let wrapped = rows
+            .iter()
+            .position(|row| row.starts_with('W'))
+            .expect("the wrapped line's first row");
+        use farhelm_terminal_emulator::alacritty_terminal::index::{Column, Line};
+        use farhelm_terminal_emulator::alacritty_terminal::vte::ansi::{Color, NamedColor};
+        assert_eq!(
+            emulator.term().grid()[Line(wrapped as i32 - rows.len() as i32)][Column(0)].fg,
+            Color::Named(NamedColor::Red),
+            "the carried red is kept"
+        );
+    }
+
+    /// A pane with no history gives none, a history over the byte bound keeps
+    /// its newest whole lines and says it was cut, and a pane that is not
+    /// the named session's is told apart from a failed read.
+    ///
+    /// Why: tmux's `-E -1` on an empty history would take the first visible
+    /// row (the previous frame) into the seed; a byte cut through the oldest
+    /// line would start the new history with half a line, and a cut not
+    /// said would make the history look complete; and a pane id reused under
+    /// another session must never seed a session with another's terminal,
+    /// while the move refuses on a read that failed but goes on without a
+    /// seed for a pane that is not the session's. Spec: a pane that printed
+    /// one line yields no lines, not cut; the 30-line history captured with
+    /// a 64-byte bound is cut, at most 64 bytes, begins with a whole
+    /// `line NN` and ends with the newest history line; the same pane named
+    /// under another session is `NotThisSessions`.
+    #[farhelm_testtrace::test]
+    async fn pane_history_is_empty_cut_whole_or_not_this_sessions() {
+        let server = ScratchServer::start().await;
+        let quiet = history_fixture(
+            &server,
+            "fh-quiet",
+            40,
+            10,
+            "echo QUIET-LINE; sleep 300",
+            "QUIET-LINE",
+        )
+        .await;
+        let empty = history_of(&server, "fh-quiet", &quiet, 12_000, 1024).await;
+        assert_eq!(empty.lines().count(), 0, "{empty:?}");
+        assert!(!empty.cut);
+
+        let busy = history_fixture(
+            &server,
+            "fh-busy",
+            40,
+            10,
+            "i=1; while [ $i -le 30 ]; do printf 'line %02d\\n' $i; i=$((i+1)); done; \
+             printf BUSY-END; sleep 300",
+            "BUSY-END",
+        )
+        .await;
+        let screen = server
+            .driver
+            .capture_pane_tail("fh-busy", &busy, 64 * 1024)
+            .await
+            .expect("the busy pane's screen");
+        let cut = history_of(&server, "fh-busy", &busy, 12_000, 64).await;
+        assert!(cut.cut && cut.text.len() <= 64, "{cut:?}");
+        let lines: Vec<String> = history_lines(&cut)
+            .iter()
+            .map(|line| line.trim_end().to_owned())
+            .collect();
+        assert!(
+            lines
+                .first()
+                .is_some_and(|line| line.len() == 7 && line.starts_with("line ")),
+            "{lines:?}"
+        );
+        let newest = lines.last().expect("some lines kept").clone();
+        assert!(
+            !screen.contains(&newest),
+            "the newest kept line is history, not the screen: {newest:?} in {screen}"
+        );
+        let next = format!(
+            "line {:02}",
+            newest[5..].parse::<u32>().expect("a numbered line") + 1
+        );
+        assert!(
+            screen.contains(&next),
+            "the line after the newest kept one is the screen's first: {next:?} in {screen}"
+        );
+
+        let refused = server
+            .driver
+            .capture_pane_history("fh-quiet", &busy, |_, _| 12_000, 1024, HISTORY_BUDGET)
+            .await;
+        assert!(
+            matches!(refused, Err(PaneHistoryError::NotThisSessions)),
+            "{refused:?}"
+        );
+    }
+
+    /// A pane resized between the read of its size and the capture is read
+    /// again at its new size, and one that keeps changing, or a capture that
+    /// runs out of time, is a failure the caller can tell and retry.
+    ///
+    /// Why: the rows taken are what a seed holds at the size read, so a
+    /// capture after a viewer's resize would render rows for another width
+    /// in the tmux server and report the old size with them; the guard
+    /// re-checks the size inside tmux, in the capture's own command. A pane
+    /// that never holds still must not be chased forever, and the move
+    /// treats a timeout (worth a smaller capture) apart from other failures.
+    /// Spec: a 40x10 pane with 30 numbered lines, whose `lines_for` resizes
+    /// it to 50x12 on its first call, is captured at 50x12 after `lines_for`
+    /// was asked twice, holding `line 01`; one whose `lines_for` resizes it on
+    /// every call is `Failed` after `PANE_HISTORY_ATTEMPTS` calls; and one
+    /// whose tmux server is stopped (SIGSTOP) between the two reads is
+    /// `TimedOut` after a one-second budget.
+    #[farhelm_testtrace::test]
+    async fn pane_history_reads_again_after_a_resize_and_tells_its_failures_apart() {
+        let server = ScratchServer::start().await;
+        let pane = history_fixture(
+            &server,
+            "fh-resized",
+            40,
+            10,
+            "i=1; while [ $i -le 30 ]; do printf 'line %02d\\n' $i; i=$((i+1)); done; \
+             printf RESIZE-END; sleep 300",
+            "RESIZE-END",
+        )
+        .await;
+        let resize = |cols: u16, rows: u16| {
+            let status = std::process::Command::new(&server.driver.program)
+                .arg("-S")
+                .arg(&server.driver.socket)
+                .args(["resize-window", "-t", &pane])
+                .args(["-x", &cols.to_string(), "-y", &rows.to_string()])
+                .status()
+                .expect("run tmux");
+            assert!(status.success(), "premise: the pane was resized");
+        };
+
+        let mut asked = 0;
+        let history = server
+            .driver
+            .capture_pane_history(
+                "fh-resized",
+                &pane,
+                |_, _| {
+                    asked += 1;
+                    if asked == 1 {
+                        resize(50, 12);
+                    }
+                    12_000
+                },
+                1024 * 1024,
+                HISTORY_BUDGET,
+            )
+            .await
+            .expect("the capture after the resize");
+        assert_eq!((history.cols, history.rows, asked), (50, 12, 2));
+        assert!(
+            history_lines(&history)
+                .iter()
+                .any(|line| line.contains("line 01")),
+            "{history:?}"
+        );
+
+        let mut asked = 0;
+        let changing = server
+            .driver
+            .capture_pane_history(
+                "fh-resized",
+                &pane,
+                |_, _| {
+                    asked += 1;
+                    resize(if asked % 2 == 1 { 40 } else { 50 }, 12);
+                    12_000
+                },
+                1024 * 1024,
+                HISTORY_BUDGET,
+            )
+            .await;
+        assert!(
+            matches!(changing, Err(PaneHistoryError::Failed(_))),
+            "{changing:?}"
+        );
+        assert_eq!(asked, PANE_HISTORY_ATTEMPTS);
+
+        // A tmux server stopped (SIGSTOP) between the two reads cannot answer
+        // the capture; continued when this drops, whatever the test does.
+        struct Continued(i32);
+        impl Drop for Continued {
+            fn drop(&mut self) {
+                // SAFETY: `kill` has no memory-safety preconditions; the pid
+                // is this test's own scratch tmux server.
+                unsafe { libc::kill(self.0, libc::SIGCONT) };
+            }
+        }
+        let server_pid = std::process::Command::new(&server.driver.program)
+            .arg("-S")
+            .arg(&server.driver.socket)
+            .args(["display-message", "-p", "#{pid}"])
+            .output()
+            .expect("run tmux");
+        let server_pid: i32 = String::from_utf8_lossy(&server_pid.stdout)
+            .trim()
+            .parse()
+            .expect("premise: the scratch server's pid");
+        let mut stopped = None;
+        let timed_out = server
+            .driver
+            .capture_pane_history(
+                "fh-resized",
+                &pane,
+                |_, _| {
+                    // SAFETY: as in `Continued::drop`.
+                    assert_eq!(unsafe { libc::kill(server_pid, libc::SIGSTOP) }, 0);
+                    stopped = Some(Continued(server_pid));
+                    12_000
+                },
+                1024 * 1024,
+                std::time::Duration::from_secs(1),
+            )
+            .await;
+        drop(stopped);
+        assert!(
+            matches!(timed_out, Err(PaneHistoryError::TimedOut(_))),
+            "{timed_out:?}"
+        );
+    }
+
+    /// The capture takes only the rows the seed can hold, newest first, and
+    /// starts them from the default rendition, writing a style set before
+    /// the range again at its first row.
+    ///
+    /// Why: tmux renders the whole requested range in its own server before
+    /// writing any of it, so asking for rows the seed would leave out costs
+    /// tmux and the supervisor for nothing; and since tmux writes a style
+    /// only where it changes, a range that began mid-style without writing
+    /// it would lose the color of every line up to the next change. Spec: a
+    /// 40x10 pane that sets red, then prints `line 01` to `line 30` and
+    /// `RANGE-END`, captured at 5 rows, gives exactly `line 17` to `line 21`
+    /// (the newest five history rows), the first starting with the red's
+    /// SGR, and says it was cut; restored from a seed, their first cells are
+    /// red.
+    #[farhelm_testtrace::test]
+    async fn pane_history_takes_the_newest_rows_from_the_default_rendition() {
+        use farhelm_terminal_emulator::alacritty_terminal::index::{Column, Line};
+        use farhelm_terminal_emulator::alacritty_terminal::vte::ansi::{Color, NamedColor};
+        let server = ScratchServer::start().await;
+        let pane = history_fixture(
+            &server,
+            "fh-range",
+            40,
+            10,
+            "printf '\\033[31m'; i=1; while [ $i -le 30 ]; do printf 'line %02d\\n' $i; \
+             i=$((i+1)); done; printf '\\033[0mRANGE-END'; sleep 300",
+            "RANGE-END",
+        )
+        .await;
+        let history = history_of(&server, "fh-range", &pane, 5, 1024 * 1024).await;
+        assert!(history.cut, "rows were left out: {history:?}");
+        let lines = history_lines(&history);
+        let text: Vec<String> = lines
+            .iter()
+            .map(|line| line.replace("\x1b[31m", "").trim_end().to_owned())
+            .collect();
+        assert_eq!(
+            text,
+            ["line 17", "line 18", "line 19", "line 20", "line 21"]
+        );
+        assert!(lines[0].starts_with("\x1b[31m"), "{lines:?}");
+        let emulator = seeded(&history);
+        let grid = emulator.term().grid();
+        for back in 1..=5 {
+            assert_eq!(
+                grid[Line(-back)][Column(0)].fg,
+                Color::Named(NamedColor::Red),
+                "history row -{back}"
+            );
+        }
+    }
+
+    /// A wide pane's history of short lines is captured only as far as a
+    /// seed at that width can hold, however small the capture would be.
+    ///
+    /// Why: the seed's scratch emulator allocates a whole row of cells per
+    /// history line, so a 5,000-column pane's thousands of short lines (a
+    /// capture of a few kilobytes) would cost tens of millions of cells;
+    /// the capture asks tmux for no more rows than the restore budget keeps
+    /// (`farhelm_terminal_emulator::seed_history_capacity`). The seed itself
+    /// is not built here: it would allocate the whole budget. Spec: a
+    /// 5000x5 pane printing 4,000 short lines, captured with the capacity at
+    /// its size, gives no more lines than the capacity (which is below
+    /// 4,000 and fits the budget), the newest of them the last printed into
+    /// history, and says it was cut.
+    #[farhelm_testtrace::test]
+    async fn pane_history_of_a_wide_pane_is_bounded_by_the_seed() {
+        let server = ScratchServer::start().await;
+        let pane = history_fixture(
+            &server,
+            "fh-wide",
+            5000,
+            5,
+            "i=1; while [ $i -le 4000 ]; do printf 'w%04d\\n' $i; i=$((i+1)); done; \
+             printf WIDE-END; sleep 300",
+            "WIDE-END",
+        )
+        .await;
+        let capacity = |cols: u16, rows: u16| {
+            farhelm_terminal_emulator::seed_history_capacity(
+                farhelm_terminal_emulator::Size {
+                    columns: cols,
+                    lines: rows,
+                },
+                12_000,
+            )
+            .unwrap_or(0) as u64
+        };
+        let expected = capacity(5000, 5);
+        assert!(
+            (1..4000).contains(&expected)
+                && (expected + 10) * 5000 <= farhelm_terminal_emulator::MAX_RESTORE_CELLS,
+            "premise: the capacity is below the history and within the budget: {expected}"
+        );
+        let history = server
+            .driver
+            .capture_pane_history("fh-wide", &pane, capacity, 1024 * 1024, HISTORY_BUDGET)
+            .await
+            .expect("capture the wide pane's history");
+        assert_eq!((history.cols, history.rows), (5000, 5));
+        let lines = history_lines(&history);
+        assert!(history.cut);
+        assert_eq!(lines.len() as u64, expected);
+        assert_eq!(
+            lines.last().map(|line| line.trim_end()),
+            Some("w3996"),
+            "the newest history row (the screen holds 3997 to 4000 and the end)"
+        );
+    }
+
+    /// What a tmux pane drew in its history comes back from a Restart seed
+    /// as it was: line drawing (shifted across a line end), a wide character
+    /// that wrapped at the last column, a history row that wraps into the
+    /// screen (only its history part), and a hyperlink on its first row.
+    ///
+    /// Why: these are the pane contents a seed built from tmux's escaped
+    /// capture can get wrong without anything else noticing: tmux writes
+    /// line drawing as SO/SI around ASCII codes with no designation, so an
+    /// emulator that does not assume DEC Special Graphics in G1 shows
+    /// letters; a wide character that did not fit at the last column must
+    /// start the next row; and the capture's last line may continue on the
+    /// screen, whose part must not be taken. A hyperlink spanning rows keeps
+    /// only its first row (tmux closes it at each row's end and does not
+    /// reopen it), the documented limit. Spec: a 10x4 pane prints
+    /// `ESC ( 0` `lqqk`, newline, `xq` `ESC ( B` ` ok`, `123456789漢`, a link
+    /// to `http://x.test/` around `ONE` newline `TWO`, `L1`, and then
+    /// `AAAAAAAAAABBBBBBBBBB`, `Z`, `Y`, `DONE` (the screen holding the
+    /// `B` half and the rest); the seed's history rows include
+    /// `┌──┐`, `│─ ok`, `123456789` followed by a row starting `漢`, `ONE`
+    /// whose first cell links to `http://x.test/` and `TWO` whose first cell
+    /// links nowhere, and end with `AAAAAAAAAA`, with no `B` anywhere in the
+    /// history.
+    #[farhelm_testtrace::test]
+    async fn pane_history_seeds_line_drawing_wide_characters_and_links() {
+        use farhelm_terminal_emulator::alacritty_terminal::index::{Column, Line};
+        let server = ScratchServer::start().await;
+        let pane = history_fixture(
+            &server,
+            "fh-draw",
+            10,
+            4,
+            "printf '\\033(0lqqk\\nxq\\033(B ok\\n'; printf '123456789\u{6f22}\\n'; \
+             printf '\\033]8;;http://x.test/\\033\\\\ONE\\nTWO\\033]8;;\\033\\\\\\n'; \
+             printf 'L1\\nAAAAAAAAAABBBBBBBBBB\\nZ\\nY\\nDONE'; sleep 300",
+            "DONE",
+        )
+        .await;
+        let history = history_of(&server, "fh-draw", &pane, 12_000, 1024 * 1024).await;
+        let emulator = seeded(&history);
+        let rows = history_rows(&emulator);
+        let at = |text: &str| {
+            rows.iter()
+                .position(|row| row == text)
+                .unwrap_or_else(|| panic!("no history row {text:?}: {rows:?}"))
+        };
+        assert_eq!(
+            rows[at("\u{250c}\u{2500}\u{2500}\u{2510}") + 1],
+            "\u{2502}\u{2500} ok"
+        );
+        assert!(
+            rows[at("123456789") + 1].starts_with('\u{6f22}'),
+            "the wide character starts the next row: {rows:?}"
+        );
+        let grid = emulator.term().grid();
+        let line = |index: usize| Line(index as i32 - rows.len() as i32);
+        let link = |index: usize| {
+            grid[line(index)][Column(0)]
+                .hyperlink()
+                .map(|link| link.uri().to_owned())
+        };
+        assert_eq!(link(at("ONE")).as_deref(), Some("http://x.test/"));
+        assert_eq!(
+            link(at("TWO")),
+            None,
+            "tmux keeps a link on its first row only"
+        );
+        assert_eq!(rows.last().map(String::as_str), Some("AAAAAAAAAA"));
+        assert!(
+            rows.iter().all(|row| !row.contains('B')),
+            "the screen's part of the wrapped row is not history: {rows:?}"
         );
     }
 

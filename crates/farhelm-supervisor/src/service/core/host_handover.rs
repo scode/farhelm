@@ -267,6 +267,7 @@ impl Supervisor {
         self.stopping
             .store(true, std::sync::atomic::Ordering::SeqCst);
         self.readoption_wake.notify_one();
+        self.stop_began.notify_waiters();
         // Without the map nothing here can be reached: other holders of a
         // runtime's handle exist (a pending hold, an attachment, a create in
         // flight), but nothing else lists them. The stop's final close tries

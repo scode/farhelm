@@ -18,8 +18,9 @@ use farhelm_terminal_emulator::alacritty_terminal::term::TermMode;
 use farhelm_terminal_emulator::alacritty_terminal::term::cell::Flags;
 use farhelm_terminal_emulator::alacritty_terminal::vte::ansi::{Color, NamedColor};
 use farhelm_terminal_emulator::{
-    Cancel, Emulator, FORMAT_VERSION, MAX_RESTORE_CELLS, MIN_SNAPSHOT_LIMIT, MouseEncoding,
-    NotClean, Size, SnapshotError, SnapshotStopped, WidthTable, history_seed_from_lines,
+    Cancel, Emulator, FORMAT_VERSION, LineStyles, MAX_RESTORE_CELLS, MIN_SNAPSHOT_LIMIT,
+    MouseEncoding, NotClean, Size, SnapshotError, SnapshotStopped, WidthTable,
+    history_seed_from_lines, history_seed_from_lines_until, seed_history_capacity,
 };
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -1223,6 +1224,240 @@ fn a_seed_from_too_many_lines_is_trimmed() {
             .unwrap()
             .emulator
             .history_trimmed()
+    );
+}
+
+/// A seed from lines whose caller left out older ones says its history was
+/// trimmed, and a seed whose cancel has fired yields nothing.
+///
+/// Why: restarting a tmux terminal into a terminal host reads the pane's
+/// history up to a byte bound and keeps the newest lines, so a seed from a
+/// cut capture must not look complete; and the supervisor builds the seed on
+/// its blocking pool, where only the cancel keeps an orderly stop from
+/// waiting for it. Spec: `history_seed_from_lines_until` with `cut_before`
+/// restores to a trimmed history holding the lines; without it, to an
+/// untrimmed one equal to `history_seed_from_lines`'s; with a cancel already
+/// fired, `SnapshotStopped::Cancelled`.
+#[test]
+fn a_seed_from_cut_lines_is_trimmed_and_a_cancelled_one_yields_nothing() {
+    let lines: Vec<String> = (0..10).map(|n| format!("line {n}")).collect();
+    let size = Size {
+        columns: 20,
+        lines: 3,
+    };
+    let bytes = || lines.iter().map(|line| line.as_bytes());
+    let cut = history_seed_from_lines_until(
+        size,
+        100,
+        bytes(),
+        MAX,
+        LineStyles::PerLine,
+        true,
+        &Cancel::never(),
+    )
+    .expect("never cancelled")
+    .snapshot;
+    let restored = Emulator::restore(&cut.blob, 100).unwrap().emulator;
+    assert!(restored.history_trimmed(), "the cut is said");
+    assert_eq!(restored.term().grid().history_size(), 10);
+    let whole = history_seed_from_lines_until(
+        size,
+        100,
+        bytes(),
+        MAX,
+        LineStyles::PerLine,
+        false,
+        &Cancel::never(),
+    )
+    .expect("never cancelled")
+    .snapshot;
+    assert_eq!(
+        whole.blob,
+        history_seed_from_lines(size, 100, bytes(), MAX).blob,
+        "uncut and uncancelled, it is the plain seed"
+    );
+    assert!(
+        !Emulator::restore(&whole.blob, 100)
+            .unwrap()
+            .emulator
+            .history_trimmed()
+    );
+    let fired = Cancel::new(Arc::new(AtomicBool::new(true)), None);
+    assert_eq!(
+        history_seed_from_lines_until(size, 100, bytes(), MAX, LineStyles::PerLine, false, &fired)
+            .map(|_| ()),
+        Err(SnapshotStopped::Cancelled)
+    );
+}
+
+/// A seed from lines whose styles carry from line to line, as tmux's capture
+/// writes them, keeps a style across a line end, and never lets a
+/// background spill past the end of the line that set it.
+///
+/// Why: `tmux capture-pane -e` writes an SGR sequence only where the style
+/// changes, so a colored region spanning lines carries its color into the
+/// next lines with nothing written there; read line by line it would lose
+/// it. And a line feed while a background is set fills the new row with that
+/// background, which would color the next line's empty cells. Spec: at 20x3
+/// with `LineStyles::Carried`, lines `\e[31mred one`, `red two`,
+/// `\e[39m\e[44mblue`, `\e[49mplain` restore to a history whose second
+/// line starts red, whose third line is blue-backed at column 0 and default
+/// at column 10, and whose fourth line has the default background at
+/// column 0 and column 10.
+#[test]
+fn a_seed_from_carried_styles_keeps_them_across_line_ends() {
+    let lines: Vec<&[u8]> = vec![
+        b"\x1b[31mred one",
+        b"red two",
+        b"\x1b[39m\x1b[44mblue",
+        b"\x1b[49mplain",
+    ];
+    let size = Size {
+        columns: 20,
+        lines: 3,
+    };
+    let seed = history_seed_from_lines_until(
+        size,
+        100,
+        lines,
+        MAX,
+        LineStyles::Carried,
+        false,
+        &Cancel::never(),
+    )
+    .expect("never cancelled")
+    .snapshot;
+    let emulator = restore(&seed.blob).emulator;
+    let grid = emulator.term().grid();
+    assert_eq!(grid.history_size(), 4);
+    let row = |n: i32| &grid[Line(n - 4)];
+    assert_eq!(row(0)[Column(0)].fg, Color::Named(NamedColor::Red));
+    assert_eq!(
+        (row(1)[Column(0)].c, row(1)[Column(0)].fg),
+        ('r', Color::Named(NamedColor::Red)),
+        "the red carried into the next line"
+    );
+    assert_eq!(row(2)[Column(0)].fg, Color::Named(NamedColor::Foreground));
+    assert_eq!(row(2)[Column(0)].bg, Color::Named(NamedColor::Blue));
+    assert_eq!(row(2)[Column(10)].bg, Color::Named(NamedColor::Background));
+    assert_eq!(row(3)[Column(0)].bg, Color::Named(NamedColor::Background));
+    assert_eq!(
+        row(3)[Column(10)].bg,
+        Color::Named(NamedColor::Background),
+        "the blue line's background did not fill the next row"
+    );
+}
+
+/// Line drawing in a tmux capture (SO around the plain codes, the shift
+/// held across a line end, no designation) restores as box-drawing cells.
+///
+/// Why: tmux writes DEC line graphics as SO, the ASCII code of each glyph
+/// and SI, assuming G1 is DEC Special Graphics, and never designates it; a
+/// fresh emulator's G1 is ASCII, so every border an ncurses program drew in
+/// an old session would come back as letters. Spec: with
+/// `LineStyles::Carried`, lines `\x0elqqk`, `x\x0f text` restore to a
+/// history whose first line is `┌──┐` and whose second line starts with
+/// `│` followed by ` text` in ASCII; with `LineStyles::PerLine` the same
+/// lines stay letters (the designation is the tmux mode's alone).
+#[test]
+fn a_tmux_capture_seed_draws_its_line_graphics() {
+    let lines: Vec<&[u8]> = vec![b"\x0elqqk", b"x\x0f text"];
+    let size = Size {
+        columns: 20,
+        lines: 3,
+    };
+    let text_of = |styles| {
+        let seed = history_seed_from_lines_until(
+            size,
+            100,
+            lines.clone(),
+            MAX,
+            styles,
+            false,
+            &Cancel::never(),
+        )
+        .expect("never cancelled")
+        .snapshot;
+        let emulator = restore(&seed.blob).emulator;
+        let grid = emulator.term().grid();
+        (-(grid.history_size() as i32)..0)
+            .map(|line| {
+                (0..grid.columns())
+                    .map(|column| grid[Line(line)][Column(column)].c)
+                    .collect::<String>()
+                    .trim_end()
+                    .to_owned()
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(text_of(LineStyles::Carried), ["┌──┐", "│ text"]);
+    assert_eq!(text_of(LineStyles::PerLine), ["lqqk", "x text"]);
+}
+
+/// A seed's history is bounded by what its restore can hold at the
+/// terminal's size, before anything is printed, and a size whose screens
+/// alone exceed that budget cannot be seeded.
+///
+/// Why: the scratch emulator a seed is printed into allocates a full row of
+/// cells for every history line, however short, so a wide terminal's
+/// history of short lines (a small capture) could otherwise allocate
+/// gigabytes in the shared supervisor before the encoder left most of it
+/// out. Spec: `seed_history_capacity` gives the scrollback cap for 80x24, a
+/// whole number of thousands below it for 10,000 columns that keeps the
+/// screens and history within `MAX_RESTORE_CELLS`, 0 for 10,000x400 (the
+/// screens fit, a first step of history does not), and `None` for a zero
+/// side, a side over `MAX_SIDE`, and 3,000x3,000 (screens over the budget);
+/// a seed of more lines than the capacity at a small cap keeps the newest,
+/// says its history was trimmed, and reports the 30 lines it holds; a seed of
+/// no lines reports none.
+#[test]
+fn a_seeds_history_is_bounded_by_its_restore_budget() {
+    let size = |columns, lines| Size { columns, lines };
+    assert_eq!(seed_history_capacity(size(80, 24), 12_000), Some(12_000));
+    let wide = seed_history_capacity(size(10_000, 10), 12_000).expect("a wide terminal");
+    assert!(wide < 12_000 && wide.is_multiple_of(1000), "{wide}");
+    assert!(
+        (wide as u64 + 2 * 10) * 10_000 <= MAX_RESTORE_CELLS,
+        "{wide} lines (whole steps of alacritty's allocation) and both screens fit the budget"
+    );
+    for refused in [size(0, 24), size(80, 0), size(10_001, 1), size(3000, 3000)] {
+        assert_eq!(seed_history_capacity(refused, 12_000), None, "{refused:?}");
+    }
+    assert_eq!(
+        seed_history_capacity(size(10_000, 400), 12_000),
+        Some(0),
+        "screens that fit with no room for a step of history"
+    );
+    let lines: Vec<String> = (0..50).map(|n| format!("line {n}")).collect();
+    let seed = history_seed_from_lines_until(
+        size(20, 3),
+        30,
+        lines.iter().map(|line| line.as_bytes()),
+        MAX,
+        LineStyles::Carried,
+        false,
+        &Cancel::never(),
+    )
+    .expect("never cancelled");
+    assert_eq!(seed.history_lines, 30, "the seed says what it holds");
+    let restored = Emulator::restore(&seed.snapshot.blob, 100)
+        .unwrap()
+        .emulator;
+    assert_eq!(restored.term().grid().history_size(), 30);
+    assert!(restored.history_trimmed());
+    let empty = history_seed_from_lines_until(
+        size(20, 3),
+        30,
+        std::iter::empty(),
+        MAX,
+        LineStyles::Carried,
+        false,
+        &Cancel::never(),
+    )
+    .expect("never cancelled");
+    assert_eq!(
+        empty.history_lines, 0,
+        "a seed of no lines exists and holds no history"
     );
 }
 

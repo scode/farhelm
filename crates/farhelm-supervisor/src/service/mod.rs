@@ -130,8 +130,8 @@ pub use core::{
     ForwarderCleanupGate, HostRestartFault, HostRestartStage, NaturalDetachGate, NewTerminals,
     ReclaimDiscoveryGate, ReclaimListingFault, STALL_DETACH_TIMEOUT, SampleFault, SampleRead,
     SessionSnapshot, StateDirOwnership, Supervisor, SupervisorSeams, SupervisorTimeouts,
-    TabOpenFault, TabOpenStage, TabSettleGate, UPLOAD_DISK_STAGE_TIMEOUT, UPLOAD_PROGRESS_TIMEOUT,
-    WRITER_STALL_TIMEOUT, hook_log_path,
+    TabOpenFault, TabOpenStage, TabSettleGate, TmuxSeedFault, UPLOAD_DISK_STAGE_TIMEOUT,
+    UPLOAD_PROGRESS_TIMEOUT, WRITER_STALL_TIMEOUT, hook_log_path,
 };
 pub use core::{
     HOST_CHECKPOINT_BUDGET, ORPHAN_RECLAIM_BUDGET, SHUTDOWN_OUTPUT_BUDGET, STATE_DIR_CLAIM_WAIT,
