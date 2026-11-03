@@ -139,8 +139,9 @@ test("a supervisor still on old terminals shows no band and no terminal kinds", 
 });
 
 /** The band's first case: an old agent terminal on a host that creates new
- * ones is told to restart when convenient, or, when Restart is unavailable,
- * to clone or replace; the details name the kind; × hides the band for the
+ * ones is told to restart, replace or delete it when convenient, or, when
+ * Restart is unavailable, to replace or delete it, with a note on why; the
+ * details name the kind; × hides the band for the
  * rest of the visit, a refresh included, and the next visit brings it back.
  * Why: the band is the only reminder an old session gets, so it must be
  * easy to put aside and must not stay away. */
@@ -161,8 +162,11 @@ test("an old session's band hides until the next visit and offers only what the 
     await expect(band(page)).toHaveAttribute("role", "status");
     await expect(band(page)).toHaveAttribute("data-migration", "agent");
     await expect(band(page)).toContainText("This session still runs in an old terminal.");
-    await expect(band(page)).toContainText("restart this session");
+    await expect(band(page)).toContainText("a future Farhelm release will stop supporting old terminals");
+    await expect(band(page)).toContainText("Please restart (the conversation will resume), replace or delete");
     await expect(band(page)).toContainText("when convenient");
+    // The session's own sentence is the bold one, not the shared lead.
+    await expect(band(page).locator("strong")).toHaveText("This session still runs in an old terminal.");
     const link = band(page).getByRole("link", { name: "What's changing ↗" });
     await expect(link).toHaveAttribute("href", "https://farhelm.io/docs/using/new-terminals/");
     // The band sits between the top row and the terminal, taking space.
@@ -182,15 +186,15 @@ test("an old session's band hides until the next visit and offers only what the 
     await expect(kinds(page)).toHaveText(/Old terminal/);
 
     // Restart becomes unavailable meanwhile; the next visit shows the band
-    // again, offering Clone and Replace only.
+    // again, asking for Replace or Delete only and saying why.
     seed = { ...seed, restart_offer: "no_conversation_reporting" };
     await attachSession(page, neighbor.id);
     await expect(band(page)).toHaveCount(0);
     await attachSession(page, session.id);
     await expect(band(page)).toBeVisible();
-    await expect(band(page)).not.toContainText("restart this session");
-    await expect(band(page)).toContainText("clone or replace it when convenient");
-    await expect(band(page)).toContainText("fresh conversation");
+    await expect(band(page)).not.toContainText("Please restart");
+    await expect(band(page)).toContainText("Please replace or delete this session when convenient.");
+    await expect(band(page).locator(".migration-band-note")).toContainText("This session cannot be restarted");
     await expect(page.locator(".restart-primary")).toHaveAttribute("aria-disabled", "true");
 
     // A reload is a visit too.
@@ -226,7 +230,7 @@ test("a new agent with an old tab is told to reopen that tab", async ({ page, re
     await expect(band(page)).toBeVisible();
     await expect(band(page)).toHaveAttribute("data-migration", "tabs");
     await expect(band(page)).toContainText("Terminal 2 is still an old terminal.");
-    await expect(band(page)).toContainText("restarting it does not move");
+    await expect(band(page)).toContainText("Restarting the session does not move tabs");
     await expect(band(page)).toContainText("close it and open a new tab.");
     await expect(kinds(page)).toHaveText(/Old and new terminals/);
     await expect(kinds(page)).toHaveAttribute(

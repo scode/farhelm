@@ -7,15 +7,16 @@ of tmux too; [Move sessions to new terminals](https://farhelm.io/docs/using/new-
 how to move your existing sessions.
 
 Further caveats, for the curator to keep with the entry: sessions that were already running keep working in tmux until
-they are restarted, cloned or replaced, and show a note at the top saying so; the bar under the terminal says which of a
-session's terminals are old and which are new. tmux is still required. In the new terminals, typing with an input method
-works but the text being composed is not shown at the cursor; dropping a file onto the terminal is refused with a
-message saying to paste it instead; a plain drag over a program that uses the mouse copies nothing and no longer shows
-the notice saying how to select instead; and an emoji followed by the emoji variation selector (as in "❤️") takes one
-column where tmux gave it two, so a program that counts two finds the rest of that row one column off. Helms and hosts
-must be on releases that speak the same version of their connection: a helm from an earlier release shows a host updated
-to this release as **too new** until the helm is updated, and this release's helm shows a host still on an earlier
-release as **needs update** until that host is updated.
+they are restarted, cloned or replaced, and show a note at the top saying so and that a future release will stop
+supporting old terminals; the bar under the terminal says which of a session's terminals are old and which are new.
+tmux is still required. In the new terminals, typing with an input method works but the text being composed is not
+shown at the cursor; dropping a file onto the terminal is refused with a message saying to paste it instead; a plain
+drag over a program that uses the mouse copies nothing and no longer shows the notice saying how to select instead; and
+an emoji followed by the emoji variation selector (as in "❤️") takes one column where tmux gave it two, so a program
+that counts two finds the rest of that row one column off. Helms and hosts must be on releases that speak the same
+version of their connection: a helm from an earlier release shows a host updated to this release as **too new** until
+the helm is updated, and this release's helm shows a host still on an earlier release as **needs update** until that
+host is updated.
 
 For the curator: this is the switch-on of the terminal-host stack. Each new terminal runs in a small Farhelm process of
 its own (a terminal host) that keeps it running with its screen and history across supervisor restarts and updates, and
