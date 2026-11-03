@@ -3388,3 +3388,32 @@ with no ambient `FARHELM_*`. Run UUIDs address retained temporary evidence, whic
 Class: unknown
 
 Cause: hypothesis
+
+## 2026-11-03 — shutdown racing an in-flight reconciliation (crates/farhelm-helm/src/manager.rs)
+
+`manager::tests::a_shutdown_beats_a_reconciliation_that_is_already_running` was the only failure among 4,528 executed
+cases in release workflow `41708367537`, x86 Linux job `126169955714`, retained run
+`84126a98-f218-47be-b99e-70c7c0d4ff1c`, at clean tag commit `e69d8067569340e0d98d06f790714a13866694e8`. It failed in
+0.013 s, counting two connection attempts where it expected one. The trace shows the peer connection closing, followed
+by another dial; it does not show reconciliation inserting another actor. The manager cancelled the supervising task,
+whose drop guard would cancel its actor only when the runtime polled that task again. Retiring the published client
+could wake the actor first, allowing a retry in that window. The fix in the PR adding this entry also puts a
+cancellation guard on the host's registry handle, requesting cancellation before connection retirement wakes the actor.
+One exact local reproduction and 30 further exact repetitions all passed before the fix, so the scheduling cause is a
+code-based hypothesis rather than a reproduced failure. The release ran the workspace except farhelm and farhelm-desktop
+with four nextest slots and no retries on a four-CPU x86_64 Linux hosted runner (kernel 7.0.0-1017-azure, Python
+3.12.3); load and concurrent test identities are unavailable. Recorded tmux 3.7c executable SHA256 was
+`9aec124826ef267181eeb8fdd3fe3ddd847388addae1dd0304e8444af9e30bc2`, locale C.UTF-8, with only `FARHELM_TEST_TRACE_DIR`
+in the child and no ambient `FARHELM_*` names. The local runs selected this exact test with four available slots and no
+retries; their UUIDs are `4aa8354a-cc03-474f-941c-9d0bf7893bb6` and repetition batch
+`2e57da7e-9d71-4b8a-baa3-7abadefd406d`. Hosted artifacts expire; private local evidence expires with temporary cleanup.
+
+```text
+assertion `left == right` failed: no resurrected actor may still be dialing
+  left: 2
+ right: 1
+```
+
+Class: product
+
+Cause: hypothesis
