@@ -149,7 +149,8 @@ gives its manual command. Also not here: `scripts/test-start-stack-cleanup.sh`, 
 every stack it boots through that same cleanup. The focused macOS CI job's terminal host step (the host crate, its entry
 test in the CLI, and the supervisor's spawning, its client, its host terminal runtime, discovery, the test-state cleanup
 and the stop command) runs only with `gh workflow run ci.yml --ref <branch> -f suite=uninstall-macos`; its Linux side is
-part of the sweep's workspace nextest.
+part of the sweep's workspace nextest. The same goes for that job's desktop supervisor record and stop tests and the
+stop's macOS process-exit check (`managed_supervisor::`, `procs::tests::finished_exiting`).
 
 The workspace nextest selection includes Linux `containerized_sessions` coverage. Rootless Podman and the offline
 `docker.io/library/ubuntu:24.04` image are required; tests never pull. An intentional opt-out uses

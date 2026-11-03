@@ -12,3 +12,8 @@ and nothing starts it at login; opening the app does. The supervisor's log moved
 `supervisor.log` in the state directory (`~/.local/state/farhelm/supervisor.log`). This also applies to the Linux
 desktop app. The update handover (an older app's supervisor being replaced by the new version's) is first exercised by
 the next release's brick test.
+
+Also for curation (a fix to this unreleased change): when the app has to stop a supervisor that stopped responding,
+it now waits until that supervisor has fully exited before starting another, so the new one no longer starts
+read-only and leaves the app unable to start; if the old one is still exiting after a few seconds, the app asks to
+be opened again.
