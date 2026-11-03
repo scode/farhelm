@@ -2566,9 +2566,31 @@ impl TmuxDriver {
     /// paths pointing at a directory that does not exist). Routing it
     /// here anyway is what keeps "every invocation runs the chosen
     /// program" a property of the code rather than a claim in a comment.
+    ///
+    /// `-u` makes every client a UTF-8 client whatever the supervisor's
+    /// environment. Without it, tmux decides from the first of `LC_ALL`,
+    /// `LC_CTYPE` and `LANG` that is set (or treats any client with `TMUX`
+    /// set as UTF-8), and a client it judges not UTF-8 gets
+    /// `display-message -p` and `list-* -F` output, and command errors,
+    /// with control characters replaced by `_` and each non-ASCII
+    /// character by one `_` per column: the tab separators this module
+    /// splits on arrive as `80_24_0`, and a pane title loses its spinner
+    /// glyph. That is the Mac's normal case, since an app opened from Finder
+    /// or the Dock starts with no `LANG`, and the supervisor it starts
+    /// inherits that; it is also any Linux host whose user manager has no
+    /// UTF-8 locale, or `LC_ALL=C`. It broke every old-to-new Restart on a
+    /// Mac ("tmux described the pane in an unexpected shape", 2026-11-03,
+    /// v0.34.0-rc.2). `-u` changes only that sanitizing (and the client's
+    /// own `#{client_utf8}` and `#{client_flags}`), not control-mode
+    /// `%output`, input or sizing, so a client behaves exactly as one under a
+    /// UTF-8 locale does and hosts that had one are unchanged.
     fn command(&self) -> Command {
         let mut cmd = Command::new(&self.program);
-        cmd.arg("-S").arg(&self.socket).arg("-f").arg(&self.config);
+        cmd.arg("-u")
+            .arg("-S")
+            .arg(&self.socket)
+            .arg("-f")
+            .arg(&self.config);
         cmd
     }
 
@@ -6228,7 +6250,7 @@ mod tests {
     /// so the earlier version of these tests proved only that a refusal
     /// happened, not that the right question was asked. This one also
     /// pins the funnel: the probe is built by `TmuxDriver::command`, so
-    /// the exact argument vector must be `-S <socket> -f <config> -V`, and
+    /// the exact argument vector must be `-u -S <socket> -f <config> -V`, and
     /// an invocation that lost the private isolation flags — the one
     /// mistake this module's whole `command()` discipline exists to
     /// prevent — fails here rather than silently touching a real server.
@@ -6238,7 +6260,8 @@ mod tests {
             path,
             &format!(
                 "#!/bin/sh\n\
-                 if [ \"$#\" -eq 5 ] && [ \"$1\" = -S ] && [ \"$3\" = -f ] && [ \"$5\" = -V ]; \
+                 if [ \"$#\" -eq 6 ] && [ \"$1\" = -u ] && [ \"$2\" = -S ] && [ \"$4\" = -f ] && \
+                 [ \"$6\" = -V ]; \
                  then echo '{version}'; exit 0; fi\n\
                  echo \"unexpected invocation: $*\" >&2\n\
                  exit 2\n"
@@ -6287,7 +6310,10 @@ mod tests {
     /// the floor is enforced against one binary and the sessions run on
     /// another — and it does NOT displace the private `-S`/`-f`
     /// arguments, because an override that quietly dropped those would
-    /// point Farhelm at the user's own tmux server and configuration.
+    /// point Farhelm at the user's own tmux server and configuration. The
+    /// `-u` before them is kept too, for the reason
+    /// [`a_client_without_a_utf8_locale_still_reads_tab_separated_fields`]
+    /// gives.
     #[farhelm_testtrace::test]
     fn an_overridden_driver_keeps_the_program_and_the_private_arguments() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -6301,6 +6327,7 @@ mod tests {
         assert_eq!(
             args,
             vec![
+                std::ffi::OsStr::new("-u"),
                 std::ffi::OsStr::new("-S"),
                 driver.socket.as_os_str(),
                 std::ffi::OsStr::new("-f"),
@@ -8199,6 +8226,69 @@ mod tests {
                     .to_owned()
             })
             .collect()
+    }
+
+    /// A tmux client the driver runs reads tab-separated format output
+    /// intact even when the supervisor has no UTF-8 locale.
+    ///
+    /// Why: tmux replaces control characters in `display-message -p` and
+    /// `list-* -F` output with `_` for a client it does not think speaks
+    /// UTF-8, and a Mac supervisor started by the desktop app has no
+    /// `LANG` at all. The pane-history read (and so every old-to-new
+    /// Restart on a Mac) failed on `139_42_0` in v0.34.0-rc.2 while every
+    /// Linux test, run under a UTF-8 locale, passed. The driver's `-u`
+    /// ([`TmuxDriver::command`]) is the fix; dropping it brings the failure
+    /// back only where nothing else tells tmux the client is UTF-8, which
+    /// is what this test recreates for the client alone (the test process's
+    /// own environment is left as it is). `TMUX` is removed too because
+    /// tmux takes any client with it set as UTF-8: run from inside a tmux
+    /// pane, the premise would fail for that reason. Spec: with `LANG`,
+    /// `LC_ALL`, `LC_CTYPE` and `TMUX` removed from the client, a client
+    /// without `-u` reads an 80x24 pane's `#{pane_width}<tab>#{pane_height}`
+    /// as `80_24` (the premise), and the driver's own command reads it as
+    /// `80<tab>24`.
+    #[farhelm_testtrace::test]
+    async fn a_client_without_a_utf8_locale_still_reads_tab_separated_fields() {
+        let server = ScratchServer::start().await;
+        let pane = history_fixture(
+            &server,
+            "fh-locale",
+            80,
+            24,
+            "echo LOCALE-READY; sleep 300",
+            "LOCALE-READY",
+        )
+        .await;
+        let target = pane_in_session("fh-locale", &pane);
+        let format = "#{pane_width}\t#{pane_height}";
+        let read = |mut command: Command| {
+            let target = target.clone();
+            async move {
+                let out = command
+                    .env_remove("LANG")
+                    .env_remove("LC_ALL")
+                    .env_remove("LC_CTYPE")
+                    .env_remove("TMUX")
+                    .args(["display-message", "-p", "-t", &target, format])
+                    .output()
+                    .await
+                    .expect("run tmux");
+                assert!(out.status.success(), "{out:?}");
+                String::from_utf8(out.stdout).expect("UTF-8 output")
+            }
+        };
+
+        let mut bare = Command::new(&server.driver.program);
+        bare.arg("-S")
+            .arg(&server.driver.socket)
+            .arg("-f")
+            .arg(&server.driver.config);
+        assert_eq!(
+            read(bare).await,
+            "80_24\n",
+            "premise: without -u and a UTF-8 locale, tmux sanitizes the tab"
+        );
+        assert_eq!(read(server.driver.command()).await, "80\t24\n");
     }
 
     /// The history a Restart seeds a terminal host from is the pane's

@@ -206,9 +206,14 @@ impl TmuxServer {
 
     /// Run one tmux command against this server, bounded, and return its
     /// standard output. Panics with tmux's error output if it fails.
+    ///
+    /// `-u` for the reason `TmuxDriver::command` gives: without a UTF-8
+    /// locale, tmux would turn the newline in `STATE_FORMAT` and any
+    /// non-ASCII title character into `_`.
     pub(super) fn tmux(&self, args: &[&str]) -> String {
         let mut command = Command::new("tmux");
         command
+            .arg("-u")
             .arg("-S")
             .arg(&self.socket)
             .arg("-f")

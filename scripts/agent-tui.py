@@ -95,7 +95,10 @@ class Run:
         tmux_file = directory / "tmux"
         if not tmux_file.exists():
             sys.exit(f"agent-tui: {directory} is not a run directory from `agent-tui.py start`")
-        self.base = [tmux_file.read_text().strip(), "-S", str(directory / "s"), "-f", str(directory / "tmux.conf")]
+        # `-u`: without a UTF-8 locale tmux would print a title's spinner (and any non-ASCII character) as `_`.
+        self.base = [
+            tmux_file.read_text().strip(), "-u", "-S", str(directory / "s"), "-f", str(directory / "tmux.conf")
+        ]
 
     def tmux(self, *args: str, check: bool = True) -> str:
         done = subprocess.run(

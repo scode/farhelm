@@ -26,3 +26,11 @@ note at the top of old sessions and the bar's terminal kinds came with `terminal
 session by restarting it with `old-session-restarts.md`; the stack's other kind:none fragments point here too. The four
 gaps are `TODO.md` near-term entries; re-check the list against `TODO.md` at release time and drop any that were
 fixed.
+
+For the curator: in v0.34.0-rc.1 and rc.2, restarting an old session on a Mac failed with "tmux described the pane in an
+unexpected shape" and left it in tmux, because the supervisor the app starts has no UTF-8 locale and tmux then mangled
+the output Farhelm reads (a Linux host whose supervisor has no UTF-8 locale had the same problem); fixed before the
+stable release, so the entry needs nothing for it. The same mangling turned non-ASCII characters in a tmux pane's title
+into `_`, and Codex's status reading uses a spinner in the title, so old Codex sessions on a Mac may have shown as idle
+while Codex streamed a reply, in earlier releases too. That last part is read from the code, not observed; verify
+before mentioning it.

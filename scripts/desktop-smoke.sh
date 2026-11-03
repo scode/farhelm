@@ -705,7 +705,7 @@ mkdir -p "$(dirname "$SENTINEL_TMUX")"
 # calls this wrapper with `-V` too (immediately before the managed
 # supervisor it is about to spawn), and the managed supervisor's own
 # `ensure_server` (crates/farhelm-supervisor/src/tmux.rs) issues a SECOND
-# `-V` — this one prefixed with its private-server `-S <socket> -f
+# `-V` — this one prefixed with its private-server `-u -S <socket> -f
 # <config>` — before it ever touches the server. A marker that only
 # recorded "was this program run at all", or even "was it run with
 # anything other than exactly `-V`", would already be satisfied by that
@@ -1355,8 +1355,8 @@ curl_auth -sf --max-time 5 "$API/api/hosts" >/dev/null || fail "the other-progra
 # A nonempty marker alone is not enough: the desktop's own tmux preflight
 # calls this same wrapper with plain `-V` before the managed supervisor
 # spawns, AND the supervisor's own `ensure_server` (crates/farhelm-supervisor/
-# src/tmux.rs) issues its own private-server version check — `-S <socket> -f
-# <config> -V` — before it ever touches the server. That second probe line
+# src/tmux.rs) issues its own private-server version check — `-u -S <socket>
+# -f <config> -V` — before it ever touches the server. That second probe line
 # still ENDS in `-V`, so a check for "any logged line that is not exactly
 # `-V`" is satisfied by it alone and proves nothing about whether the
 # supervisor went on to actually use this tmux. Require a line naming a
