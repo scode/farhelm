@@ -1,8 +1,10 @@
 //! Terminal identity and the output-reap and sink lifecycles built around it.
 //!
 //! `TerminalId`/`Terminal` name which of a session's terminals (the agent
-//! or one of its tabs) a request means and what backs it (today always a
-//! tmux pane, `TmuxTerminal`);
+//! or one of its tabs) a request means and what backs it (a tmux pane,
+//! `TmuxTerminal`, or a terminal host, `crate::hosts::HostTerminal`), and
+//! `tmux_tab_home` says where a session's tmux tabs live whatever backs its
+//! agent;
 //! `AttachmentKey`/`ActiveAttach`/`InputRoute` are the bookkeeping an
 //! `Attach` installs and every later `Resize`/`Detach`/input frame looks
 //! up by, with `AttachBackend` holding an attachment's kind-specific
@@ -14,11 +16,12 @@
 //! barriers and per-session sink opening, handoff, reaping, and readiness.
 
 use super::core::{
-    RequestError, SessionEntry, Supervisor, error_kind, truncate_for_error,
+    RequestError, SessionEntry, Supervisor, error_kind, session_tmux_name, truncate_for_error,
     unknown_pane_owner_refusal,
 };
+use super::sweep::capture_process_identity;
 use crate::store::LastOutcome;
-use crate::tmux::{InputClient, PaneProbe, ReplayStreamCandidate, SessionSink};
+use crate::tmux::{InputClient, PaneProbe, PaneProcess, ReplayStreamCandidate, SessionSink};
 use anyhow::Context;
 use farhelm_proto::{ErrorKind, Frame, RestartOffer, TerminalSelector};
 use std::collections::{HashMap, HashSet};
@@ -85,33 +88,56 @@ pub(crate) struct TmuxTerminal {
 /// One of a session's terminals, by the kind of process that backs it.
 ///
 /// This is the seam that moving terminals out of tmux turns on: every
-/// place that holds a `Terminal` is a place where behavior must be decided
-/// per kind, and the compiler is what finds those places. It has one
-/// variant today so that adding the second (a terminal-host-backed
-/// terminal) fails to compile at every such decision point instead of
-/// silently treating the new kind as tmux. That only works while every
-/// consumer matches exhaustively, so there is deliberately no `_` arm
+/// place that holds a `Terminal` is a place where behavior is decided per
+/// kind, and the compiler is what finds those places. That only works while
+/// every consumer matches exhaustively, so there is deliberately no `_` arm
 /// anywhere and no `as_tmux()`-style accessor returning an `Option`: either
-/// would hand a new kind whatever the tmux path does without anyone
+/// would hand one kind whatever the other kind's path does without anyone
 /// deciding that it should.
 ///
 /// The methods below are thin exhaustive dispatches for the operations
-/// several sites perform. Everything else destructures where it decides:
-/// `let Terminal::Tmux(tmux) = terminal;`, a closure parameter pattern
-/// such as `|Terminal::Tmux(tmux)|`, or a `match` whose arms are
-/// `Some(Terminal::Tmux(..))` and `None`. Each is irrefutable or
-/// exhaustive today and a compile error the moment a second variant
-/// exists, which is exactly the error the seam is for. A `let ... else` or
-/// an `if let` on a variant would be a silent catch-all, so neither is
+/// several sites perform. Everything else matches where it decides, with
+/// one arm per kind (`Some(Terminal::Tmux(..))`, `Some(Terminal::Host(..))`
+/// and `None` for an `Option`). A `let ... else` or an `if let` on a
+/// variant would be a silent catch-all for the other kind, so neither is
 /// used on a `Terminal`.
 ///
 /// `PartialEq` is what Attach's revalidation uses to ask whether a
 /// session still has the terminal it resolved before the lock was taken.
+/// Two host terminals are equal when they share one runtime
+/// ([`crate::hosts::HostTerminal`]'s own equality).
+///
+/// Nothing in production makes a [`Terminal::Host`] yet: the switch that
+/// creates agent terminals in hosts, and the startup discovery that finds
+/// them again, come later. Every arm for it here and at the decision points
+/// is the final one all the same, so those later changes only add the
+/// constructors.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Terminal {
     /// A tmux pane in the session's tmux session: every terminal before
     /// terminal hosts.
     Tmux(TmuxTerminal),
+    /// A terminal in a terminal host of its own, through the supervisor's
+    /// runtime for it (`crate::hosts::terminal`, whose module docs say what
+    /// the runtime does and which of its answers can be relied on).
+    ///
+    /// Unlike a tmux pane, a host terminal is never addressed by the
+    /// session's tmux session: it has a socket of its own, and the session's
+    /// tmux session (if it exists at all) holds only tmux tabs
+    /// ([`tmux_tab_home`]). A host that cannot be read
+    /// ([`crate::hosts::Liveness::Unavailable`]) answers every question
+    /// here as "could not tell": an error from the probes, no evidence for
+    /// status ([`super::status::PaneEvidence::Unattributed`]), and nothing
+    /// done to it (the plan's D-16).
+    #[cfg_attr(
+        not(any(test, feature = "test-seams")),
+        expect(
+            dead_code,
+            reason = "creating agents in hosts and discovering them at startup construct it; \
+                      until then only the test seams do"
+        )
+    )]
+    Host(crate::hosts::HostTerminal),
 }
 
 impl Terminal {
@@ -121,24 +147,121 @@ impl Terminal {
     /// a tab's process reap each ask before acting. [`PaneProbe`]'s
     /// three-way answer, and why each caller owns its own reading of it,
     /// are [`crate::tmux::TmuxDriver::pane_process`]'s contract.
+    ///
+    /// A host terminal answers from its runtime
+    /// ([`crate::hosts::HostStatus::probe`]): never `ForeignOwner` (a host's
+    /// owner is its tag, not a name that could be recycled), and an error
+    /// for a host that cannot be read, which every caller already treats as
+    /// "could not tell" and refuses on.
     pub(crate) async fn probe_process(&self, sup: &Supervisor) -> anyhow::Result<PaneProbe> {
         match self {
             Terminal::Tmux(tmux) => sup.tmux.pane_process(&tmux.tmux_name, &tmux.pane).await,
+            Terminal::Host(host) => host.probe(),
+        }
+    }
+
+    /// The `(pid, start time)` root a kill or process-tree sweep starts
+    /// from, for a process [`Self::probe_process`] just reported: `None`
+    /// for a dead or vanished one, an error when the process table cannot
+    /// be read (an unexamined root is unconfirmed, never gone, so the
+    /// callers refuse rather than sweep without it).
+    ///
+    /// Stop, Restart and Delete each read it right after their probe, at
+    /// the same liveness boundary, so that the durable writes and sweeps
+    /// that follow act on the process the probe authorized and never on one
+    /// that took its pid since. For tmux that means reading the pane's pid
+    /// now ([`capture_process_identity`]); a host terminal's child was
+    /// pinned to its start identity when the runtime adopted the host, so
+    /// its root is that pinned identity, checked against the process table
+    /// again ([`crate::hosts::HostStatus::live_root`]) rather than read
+    /// afresh from a bare pid.
+    pub(crate) fn live_root(&self, process: &PaneProcess) -> anyhow::Result<Option<(u32, u64)>> {
+        let Some(pid) = process.live_pid() else {
+            return Ok(None);
+        };
+        match self {
+            Terminal::Tmux(_) => capture_process_identity(pid),
+            // The probe and the root both come from the pinned child, so a
+            // different pid means the terminal's state is not what the
+            // probe saw; that is unexamined, never "no root".
+            Terminal::Host(host) => match host.live_root()? {
+                Some(root) if root.pid == pid => Ok(Some((root.pid, root.start))),
+                Some(root) => Err(anyhow::anyhow!(
+                    "the terminal host's child is {} where its probe saw {pid}; refusing to \
+                     sweep without a root",
+                    root.pid
+                )),
+                None => Ok(None),
+            },
+        }
+    }
+
+    /// For a terminal whose process [`Self::probe_process`] reported dead,
+    /// wait up to `bound` for the terminal to hold everything the process
+    /// left (its final output and its exit status), and say whether it
+    /// does.
+    ///
+    /// A tmux pane is reported dead only once tmux has the pane's final
+    /// state, so it holds it already. A host terminal's probe says dead as
+    /// soon as the child is reaped, which can be before the host's exit
+    /// record, sent after the child's drained output, has been processed;
+    /// only the record makes the screen final and gives the exit code
+    /// ([`crate::hosts::HostStatus::evidence`]). A caller that makes a
+    /// durable classification from the dead terminal (a launch that never
+    /// started, quoted from the screen) needs this to be true first: a
+    /// durable error is never revised, so one made from a partial screen
+    /// and a missing code would stay wrong. `false` for a host whose record
+    /// does not come in time, or that cannot be read.
+    pub(crate) async fn holds_final_state(&self, bound: Duration) -> bool {
+        match self {
+            Terminal::Tmux(_) => true,
+            Terminal::Host(host) => {
+                let settled = |host: &crate::hosts::HostTerminal| {
+                    matches!(
+                        host.evidence(),
+                        crate::hosts::HostEvidence::Owned { dead: true, .. }
+                    )
+                };
+                let mut status = host.subscribe();
+                tokio::time::timeout(bound, async {
+                    while !settled(host) {
+                        if status.changed().await.is_err() {
+                            return settled(host);
+                        }
+                    }
+                    true
+                })
+                .await
+                .unwrap_or(false)
+            }
         }
     }
 
     /// The refusal for a [`PaneProbe::ForeignOwner`] answer from
     /// [`Self::probe_process`] whose owner this supervisor does not know.
     /// The wording and why it refuses are [`unknown_pane_owner_refusal`]'s.
+    ///
+    /// A host terminal's probe never gives that answer; its arm words the
+    /// same refusal for completeness, naming the host's socket.
     pub(crate) fn unknown_owner_refusal(&self, owner: &str) -> String {
         match self {
             Terminal::Tmux(tmux) => unknown_pane_owner_refusal(&tmux.pane, owner, &tmux.tmux_name),
+            Terminal::Host(host) => format!(
+                "the terminal host at {} reported its program as owned by {}, which this \
+                 supervisor does not recognize; refusing to act on it",
+                host.socket().display(),
+                truncate_for_error(owner)
+            ),
         }
     }
 
     /// Resize this terminal to a viewer's size. Callers treat a resize as
     /// fire-and-forget and only log a failure (an attach sizes the terminal
     /// once, and every later `Resize` frame lands here too).
+    ///
+    /// A host terminal takes the size when its host's resize record comes
+    /// back ([`crate::hosts::HostTerminal::resize`]), so this returns before
+    /// the program sees it, as the tmux resize does not promise more either.
     pub(crate) async fn resize(
         &self,
         sup: &Supervisor,
@@ -151,6 +274,7 @@ impl Terminal {
                     .resize_window(&tmux.tmux_name, &tmux.pane, cols, rows)
                     .await
             }
+            Terminal::Host(host) => Ok(host.resize(terminal_host::protocol::Size { cols, rows })?),
         }
     }
 
@@ -159,22 +283,36 @@ impl Terminal {
     /// survives the physical terminal's disappearance.
     ///
     /// This is the one dispatch that collapses the kind into a bare string,
-    /// and the column has no kind of its own yet: every reader that
-    /// interprets the value (reload's pane provenance, spare-checkout
-    /// claims, the hook's foreground-pane anchor) pairs it with the row's
-    /// tmux name and looks it up as a tmux pane id. So a second kind must
-    /// not simply return its own identifier here. Until the row records
-    /// which kind of terminal it describes, anything a non-tmux arm wrote
-    /// would be read back as a tmux pane, and a recycled id would then
-    /// attribute some other session's pane to this one.
+    /// so the string is only meaningful beside the row's
+    /// [`crate::store::StoredSession::terminal_kind`]: a tmux pane id for a
+    /// tmux row, the host's socket name (the file name inside the state
+    /// directory's socket directory, never a path) for a host row (the
+    /// plan's D-14). A reader that interprets the column checks the kind
+    /// first; one that took a host's socket name for a pane id would find
+    /// no such pane, and could then record a live session as exited.
+    ///
+    /// Socket names are short base32 names this supervisor mints
+    /// (`crate::hosts::names`), always valid UTF-8 and never empty, so the
+    /// empty fallback below is unreachable; an empty `pane` would read as a
+    /// launch never confirmed, which is the conservative misreading.
     pub(crate) fn recorded_pane(&self) -> &str {
         match self {
             Terminal::Tmux(tmux) => &tmux.pane,
+            Terminal::Host(host) => host
+                .socket()
+                .file_name()
+                .and_then(std::ffi::OsStr::to_str)
+                .unwrap_or_default(),
         }
     }
 
     /// The last `max_bytes` of this terminal's visible screen as plain
     /// text, which the status sampler hands to the agent's screen reader.
+    ///
+    /// A host terminal reads its emulator, whose screen text is shaped like
+    /// tmux's capture (`farhelm_terminal_emulator::Emulator::screen_tail`),
+    /// which is what the screen readers were written against. The read is
+    /// in memory and cannot fail.
     pub(crate) async fn screen_tail(
         &self,
         sup: &Supervisor,
@@ -186,6 +324,7 @@ impl Terminal {
                     .capture_pane_tail(&tmux.tmux_name, &tmux.pane, max_bytes)
                     .await
             }
+            Terminal::Host(host) => Ok(host.screen_tail(max_bytes)),
         }
     }
 
@@ -194,13 +333,40 @@ impl Terminal {
     pub(crate) async fn title(&self, sup: &Supervisor) -> anyhow::Result<String> {
         match self {
             Terminal::Tmux(tmux) => sup.tmux.pane_title(&tmux.tmux_name, &tmux.pane).await,
+            Terminal::Host(host) => Ok(host.title()),
         }
     }
 }
 
+/// Where a session's tmux tabs are rediscovered, given its agent terminal:
+/// the name of the session's tmux session, and the agent pane that
+/// rediscovery must exclude ([`tabs_from_pane_states`]: the recorded agent
+/// window is never a tab, whatever is written on it).
+///
+/// For a tmux agent both come from its terminal, as they always have. A
+/// host agent has no window in the session's tmux session, so there is
+/// nothing to exclude, and the session's tmux session is the one its row
+/// names, which is always the name minted from its id
+/// ([`session_tmux_name`]). That session may not exist at all: a session
+/// whose agent was created in a host has tmux tabs only if one was opened
+/// in tmux, and finding none there is the ordinary answer. Tabs that are
+/// themselves hosts are found by their tags, not here.
+pub(crate) fn tmux_tab_home<'a>(
+    session_id: &str,
+    agent: &'a Terminal,
+) -> (std::borrow::Cow<'a, str>, Option<&'a str>) {
+    match agent {
+        Terminal::Tmux(tmux) => (
+            std::borrow::Cow::Borrowed(tmux.tmux_name.as_str()),
+            Some(tmux.pane.as_str()),
+        ),
+        Terminal::Host(_) => (std::borrow::Cow::Owned(session_tmux_name(session_id)), None),
+    }
+}
+
 /// Test-only shorthands, so the many tests that build or inspect a tmux
-/// terminal do not each spell the enum out. A second variant changes
-/// `expect_tmux` (it gains a panicking arm) rather than every fixture.
+/// terminal do not each spell the enum out. `expect_tmux` panics on a host
+/// terminal: it asserts the fixture, it does not decide anything.
 #[cfg(test)]
 impl Terminal {
     /// A tmux terminal from its two handles.
@@ -214,6 +380,7 @@ impl Terminal {
     pub(crate) fn expect_tmux(&self) -> &TmuxTerminal {
         match self {
             Terminal::Tmux(tmux) => tmux,
+            Terminal::Host(host) => panic!("expected a tmux terminal, found {host:?}"),
         }
     }
 }
@@ -657,16 +824,17 @@ async fn resolve_terminal_inner(
     match terminal {
         TerminalId::Agent => Ok(agent.clone()),
         TerminalId::Tab(id) => {
-            // Tabs are rediscovered from the agent's tmux session's window
-            // markers, so a tab lookup is tmux's to answer.
-            let Terminal::Tmux(agent) = agent;
+            // Tmux tabs are rediscovered from the session's tmux session's
+            // window markers, whatever the agent's kind (`tmux_tab_home`),
+            // so a tab lookup is tmux's to answer.
+            let (tmux_name, agent_pane) = tmux_tab_home(&entry.info.id, agent);
             let states = sup.tmux.pane_states().await.map_err(|e| {
                 RequestError::new(
                     error_kind(&e),
                     format!("could not ask tmux which terminal tabs this session has: {e:#}"),
                 )
             })?;
-            tabs_from_pane_states(states.values(), &agent.tmux_name, Some(&agent.pane))
+            tabs_from_pane_states(states.values(), &tmux_name, agent_pane)
                 .into_iter()
                 .find(|tab| tab.id == *id)
                 // An exited-but-unreaped tab answers exactly like a reaped
@@ -683,7 +851,7 @@ async fn resolve_terminal_inner(
                 })
                 .map(|tab| {
                     Terminal::Tmux(TmuxTerminal {
-                        tmux_name: agent.tmux_name.clone(),
+                        tmux_name: tmux_name.to_string(),
                         pane: tab.pane,
                     })
                 })

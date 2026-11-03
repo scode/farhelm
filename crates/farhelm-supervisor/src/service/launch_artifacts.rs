@@ -7,8 +7,9 @@
 //! `crate::launch` owns their on-disk shape, the shim-side write, and the
 //! raw sentinel read through `LaunchArtifacts`; what lives here is their
 //! service side — the async read wrapper, outcome classification, and the
-//! removal and sweep helpers. A never-started error may also retain a bounded terminal excerpt,
-//! using the launch's process-local fence and tmux's atomic capture guard.
+//! removal and sweep helpers. A never-started error may also retain a bounded terminal excerpt:
+//! for tmux, using the launch's process-local fence and tmux's atomic capture guard; for a host
+//! terminal, from its emulator's screen.
 //! This never runs on the list path. See `service::sweep` for the process-tree
 //! side of a launch's failure classification.
 
@@ -23,14 +24,31 @@ use tracing::{debug, warn};
 
 /// Append terminal evidence only after the caller has proved never-started.
 ///
-/// The fence belongs to this entry's launch, not its reusable pane. Reload and
-/// ambiguous starts deliberately have none. tmux revalidates ownership,
-/// generation and deadness in the same synchronous command group as capture;
-/// an obsolete observer can therefore never quote a later launch's output.
+/// For tmux, the fence belongs to this entry's launch, not its reusable pane.
+/// Reload and ambiguous starts deliberately have none. tmux revalidates
+/// ownership, generation and deadness in the same synchronous command group
+/// as capture; an obsolete observer can therefore never quote a later
+/// launch's output.
+///
+/// A host terminal needs no fence: a host runs one child for its whole life,
+/// so everything on its screen is this launch's output, and the entry's
+/// host is this generation's. Its excerpt is the visible screen its emulator
+/// holds, quoted only once the host's exit record has been processed
+/// (`crate::hosts::HostStatus::evidence` says dead), which the host sends
+/// after the child's drained output, so the quote is the final screen. A
+/// caller that proved the launch never started from the earlier process
+/// probe (Stop) waits for that record first
+/// (`super::terminals::Terminal::holds_final_state`); without it, this
+/// quotes nothing rather than a screen that may still be missing the line
+/// that explains the failure. A Restart seeds a new host with the old
+/// terminal's history but a blank screen, so the visible screen never
+/// quotes the previous run. There is no "Pane is dead" banner to leave out:
+/// the client shows the exit state itself, outside the terminal's content.
 ///
 /// `capture_available` belongs to one observer pass. Any failed capture spends
 /// the rest of its budget, including a timeout, while ordinary classification
 /// keeps progressing. A missing fence or refused guard costs no capture error.
+/// A host terminal's read is in memory, cannot fail, and is not budgeted.
 /// Stop uses a separate budget and calls this only for a pane already dead.
 pub(crate) async fn append_launch_excerpt(
     sup: &super::core::Supervisor,
@@ -38,6 +56,26 @@ pub(crate) async fn append_launch_excerpt(
     mut detail: String,
     capture_available: &mut bool,
 ) -> String {
+    let terminal = match entry.terminal.as_ref() {
+        Some(Terminal::Tmux(terminal)) => terminal,
+        Some(Terminal::Host(host)) => {
+            let final_screen = matches!(
+                host.evidence(),
+                crate::hosts::HostEvidence::Owned { dead: true, .. }
+            );
+            // The screen is bounded by the terminal's size, so it is read
+            // whole; the excerpt keeps only its last few lines.
+            if final_screen
+                && let Some(excerpt) =
+                    crate::tmux::launch_excerpt_of_text(&host.screen_tail(usize::MAX))
+            {
+                detail.push_str("; last terminal output: ");
+                detail.push_str(&excerpt);
+            }
+            return detail;
+        }
+        None => return detail,
+    };
     if !*capture_available {
         return detail;
     }
@@ -47,13 +85,12 @@ pub(crate) async fn append_launch_excerpt(
         .lock()
         .expect("launch-excerpt mutex poisoned")
         .clone();
-    let (Some(fence), Some(terminal)) = (fence, entry.terminal.as_ref()) else {
-        return detail;
-    };
     // Both halves are tmux's: the fence is a window option and a history
     // sample stamped on the pane (`LaunchExcerptFence`), and the excerpt is
     // tmux's guarded capture of that pane.
-    let Terminal::Tmux(terminal) = terminal;
+    let Some(fence) = fence else {
+        return detail;
+    };
     match sup
         .tmux
         .capture_launch_excerpt(&terminal.tmux_name, &terminal.pane, &fence)

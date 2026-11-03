@@ -4724,6 +4724,42 @@ impl SessionStore {
             .await
     }
 
+    /// Test fixture: record that session `id`'s agent terminal is of
+    /// `kind`, with `pane` in the `pane` column as that kind reads it (a tmux
+    /// pane id, or a host's socket name).
+    ///
+    /// Production writes the kind with the launch that creates the
+    /// terminal; until terminals are created in hosts, the tests of the
+    /// host arms install a host-backed session over a created one
+    /// (`Supervisor::install_host_agent_for_test`) and need its row to say
+    /// so. Compiled only for tests and the `test-seams` feature so it cannot
+    /// become a production way to change a row's kind.
+    #[cfg(any(test, feature = "test-seams"))]
+    pub async fn set_terminal_for_test(
+        &self,
+        id: &str,
+        kind: TerminalKind,
+        pane: &str,
+    ) -> anyhow::Result<()> {
+        let id = id.to_string();
+        let pane = pane.to_string();
+        self.conn
+            .call(
+                "terminal kind write task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<()> {
+                    let changed = conn
+                        .execute(
+                            "UPDATE sessions SET terminal_kind = ?2, pane = ?3 WHERE id = ?1",
+                            rusqlite::params![id, kind.column(), pane],
+                        )
+                        .context("writing a session's terminal kind")?;
+                    anyhow::ensure!(changed == 1, "no session {id} to write a terminal kind for");
+                    Ok(())
+                },
+            )
+            .await
+    }
+
     /// Offer one witnessed [`Transition`] to a session, returning the
     /// outcome that is COMMITTED afterwards — whether or not this call is
     /// what put it there.

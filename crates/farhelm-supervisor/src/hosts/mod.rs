@@ -34,8 +34,11 @@
 //!   queries answered, the child's liveness, input, resizes and shutdown,
 //!   and adapters to the types the supervisor decides with for tmux panes.
 //!
-//! Nothing in the supervisor calls this yet; the switch that creates new
-//! terminals in hosts comes later, and so does running discovery at startup.
+//! The service's terminal switch points handle a session whose terminal is
+//! a [`terminal::HostTerminal`] (`service::terminals::Terminal::Host`), but
+//! nothing in production makes one yet: the switch that creates new
+//! terminals in hosts comes later, and so does running discovery at
+//! startup. Until then only the supervisor's test seams adopt a host.
 //! The module is public, rather than crate-private, because the tests that
 //! start real hosts live beside the real `farhelm` binary
 //! (`crates/farhelm/tests/terminal_host_spawn.rs`, `terminal_host_client.rs`,

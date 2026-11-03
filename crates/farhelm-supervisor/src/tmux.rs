@@ -258,6 +258,19 @@ impl LaunchExcerptReducer {
     }
 }
 
+/// The never-started excerpt of plain screen text that needs no capture: a
+/// host terminal's screen as its emulator holds it.
+///
+/// The same reduction a tmux capture goes through ([`LaunchExcerptReducer`]):
+/// the last [`LAUNCH_EXCERPT_LINES`] non-blank lines, presentation-unsafe
+/// characters escaped, at most [`LAUNCH_EXCERPT_BYTES`]. A host has no "Pane
+/// is dead" banner to leave out, so every row of the text counts.
+pub(crate) fn launch_excerpt_of_text(text: &str) -> Option<String> {
+    let mut reducer = LaunchExcerptReducer::default();
+    reducer.push_text(text);
+    reducer.finish()
+}
+
 /// Keep bounded suffixes at UTF-8 boundaries, including during a single long row.
 fn push_excerpt_tail(tail: &mut String, text: &str) {
     tail.push_str(text);

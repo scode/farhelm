@@ -53,12 +53,12 @@
 //! `DeleteSession` itself.
 //!
 use super::connection::notify_detached;
-use super::core::{SessionEntry, Supervisor};
+use super::core::{SessionEntry, Supervisor, session_tmux_name};
 use super::launch_artifacts::remove_launch_artifacts_for_session;
 use super::sweep::{
     ScopeKillFailure, ScopeUnits, SweepTarget, capture_process_identity, reap_process_tree,
 };
-use super::terminals::{ActiveAttach, AttachmentKey, SinkReapWait, Terminal};
+use super::terminals::{ActiveAttach, AttachmentKey, SinkReapWait, Terminal, tmux_tab_home};
 use super::uploads::abort_session_uploads;
 use crate::tmux::PaneProbe;
 
@@ -146,18 +146,22 @@ impl Supervisor {
     /// A session with no recorded terminal (a restart gap, or a reload that
     /// has not seen its pane yet) contributes every pane found under its
     /// durable tmux name, agent pane included, since none is recorded to
-    /// root at. A pane that disappears or changes hands between the listing
-    /// and its probe is skipped; failing to ask tmux or to read a live
-    /// pane's process fails the delete, row retained, like the agent pane's
-    /// own probe.
+    /// root at. A session whose agent runs in a terminal host contributes
+    /// every pane of its tmux session (its tmux tabs, if it has any; see
+    /// `tmux_tab_home`), since its agent is not one of them; the agent's
+    /// own root is its host's child, taken with the agent's probe. A pane
+    /// that disappears or changes hands between the listing and its probe
+    /// is skipped; failing to ask tmux or to read a live pane's process
+    /// fails the delete, row retained, like the agent pane's own probe.
     async fn other_pane_roots(
         &self,
         entry: &SessionEntry,
         session_id: &str,
     ) -> Result<Vec<(u32, u64)>, TeardownError> {
         let (tmux_name, agent_pane) = match entry.terminal.as_ref() {
-            Some(Terminal::Tmux(terminal)) => {
-                (terminal.tmux_name.clone(), Some(terminal.pane.as_str()))
+            Some(terminal @ (Terminal::Tmux(_) | Terminal::Host(_))) => {
+                let (tmux_name, agent_pane) = tmux_tab_home(session_id, terminal);
+                (tmux_name.into_owned(), agent_pane)
             }
             None => match self
                 .store
@@ -327,10 +331,15 @@ impl Supervisor {
         // Capture the pane's identity before tab discovery, scope
         // enumeration, and archive work can give the kernel time to recycle
         // this pid. A vanished process leaves no root; an unreadable one
-        // fails the delete rather than sweeping without it.
-        let root_identity = match live_pane.and_then(|pane| pane.live_pid()) {
-            Some(pid) => capture_process_identity(pid).map_err(TeardownError::Sweep)?,
-            None => None,
+        // fails the delete rather than sweeping without it. A host
+        // terminal's root is its child, pinned when the host was adopted
+        // (`Terminal::live_root`), so the sweep reaches the agent's whole
+        // tree even where a reparented descendant carries no marker.
+        let root_identity = match (live_pane, entry.terminal.as_ref()) {
+            (Some(pane), Some(terminal)) => {
+                terminal.live_root(&pane).map_err(TeardownError::Sweep)?
+            }
+            (None, _) | (_, None) => None,
         };
         // Every other live pane of the session is a root too, captured at
         // the same boundary for the same recycling reason.
@@ -372,12 +381,12 @@ impl Supervisor {
         // invisible agent lore/2026-07-27-m2-process-tree-stop.md
         // ends on.
         let mut units = ScopeUnits::recorded(entry.scope.clone());
-        if let Some(terminal) = entry.terminal.as_ref() {
+        if entry.terminal.is_some() {
             // Strict: "we could not ask tmux" is not "there
             // are no tabs", and a delete that assumed the
             // latter would skip live tab scopes.
             let tabs = self
-                .session_tabs_including_dead(terminal)
+                .session_tabs_including_dead(entry)
                 .await
                 .map_err(TeardownError::TabRediscovery)?;
             units.extend_derived(
@@ -605,8 +614,31 @@ impl Supervisor {
             // never started) must still delete cleanly, so the kill runs
             // only when tmux confirms the session is there. A server that
             // is not running at all is the same answer as "not there".
+            //
+            // A session whose agent runs in a terminal host has a tmux
+            // session only if a tmux tab was opened in it, so its name is a
+            // candidate in the same way, checked before the kill. Ending
+            // the hosts themselves is a step of its own; the tmux teardown
+            // here tolerates finding nothing.
             let tmux_name = match entry.terminal.as_ref() {
                 Some(Terminal::Tmux(terminal)) => Some(terminal.tmux_name.clone()),
+                Some(Terminal::Host(_)) => {
+                    let tmux_name = session_tmux_name(session_id);
+                    match self
+                        .tmux
+                        .has_session_for_terminal_less_delete(&tmux_name)
+                        .await
+                    {
+                        Ok(true) => Some(tmux_name),
+                        Ok(false) => None,
+                        Err(error) => {
+                            return Err(format!(
+                                "checking whether the session's tmux session exists before \
+                                 delete: {error:#}"
+                            ));
+                        }
+                    }
+                }
                 None => match self.store.tmux_name(session_id).await {
                     Ok(Some(tmux_name)) => match self
                         .tmux

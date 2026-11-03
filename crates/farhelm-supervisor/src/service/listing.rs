@@ -130,13 +130,17 @@ pub(crate) async fn list_all(sup: &Supervisor) -> anyhow::Result<ListReply> {
     // From the whole snapshot, not the cut: whether a renamed pane now
     // belongs to another farhelm session depends on every session this
     // supervisor holds, including the ones past the reply's cap.
+    //
+    // A host terminal holds no tmux name; its session's minted name is
+    // counted all the same (`KnownTmuxNames::from_sessions`), which is the
+    // tmux session its tmux tabs, if any, live in.
     let known = KnownTmuxNames::from_sessions(snapshot.iter().map(|entry| {
         (
             entry.info.id.as_str(),
-            entry.terminal.as_ref().map(|terminal| {
-                let Terminal::Tmux(tmux) = terminal;
-                tmux.tmux_name.as_str()
-            }),
+            match &entry.terminal {
+                Some(Terminal::Tmux(tmux)) => Some(tmux.tmux_name.as_str()),
+                Some(Terminal::Host(_)) | None => None,
+            },
         )
     }));
     let listed: Vec<Listed> = snapshot
@@ -167,12 +171,20 @@ pub(crate) async fn list_all(sup: &Supervisor) -> anyhow::Result<ListReply> {
     // `Internal` error by a private tmux server that happens
     // to ALSO be down for an unrelated reason.
     //
-    // Whether an entry needs the query is decided per terminal kind, not by
-    // `is_some()`: a catch-all would count a terminal tmux does not hold as
-    // one that needs tmux, and bring back the spurious failure above for a
-    // listing that tmux could not have changed.
+    // Whether an entry needs the query is decided per terminal kind, by an
+    // exhaustive match rather than `is_some()`, even though every kind needs
+    // it today: a new kind of terminal then has to decide whether it does.
+    //
+    // A host agent's status needs no tmux (its runtime answers), but its
+    // session's tmux tabs, if any, are listed from the same map
+    // (`tmux_tab_home`), so it asks too, and a failed query fails the
+    // listing for it as for a tmux terminal: "we could not ask" is never
+    // "there are none", and a client takes a successful reply's tab list as
+    // the truth (a session migrated into a host can still have live tmux
+    // tabs). A private server that is simply not running reads as an empty
+    // map, not an error, so a fleet of host terminals without tmux lists.
     let needs_tmux = entries.iter().any(|entry| match &entry.terminal {
-        Some(Terminal::Tmux(_)) => true,
+        Some(Terminal::Tmux(_) | Terminal::Host(_)) => true,
         None => false,
     });
     let pane_states = if needs_tmux {

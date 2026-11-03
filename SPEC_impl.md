@@ -1876,6 +1876,31 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   tested). It asks the same after restoring a snapshot that left out the screens or was drawn with another character
   width table. A redraw cannot bring back the scrollback in the gap, or a mode the lost output set until the program
   sets it again; a program that redraws on `SIGWINCH` sets its modes again as it does.
+- **The terminal switch points** (`service/terminals.rs`'s `Terminal`, one variant per kind, matched exhaustively
+  wherever behavior differs) answer for a session whose agent runs in a host from its runtime, never from tmux. Status
+  reads the same three classes of evidence for both kinds: a running child is live, a processed exit record is an exit
+  with its code, a host that has ended is gone, and a host that cannot be read is unattributed, which records nothing
+  durable at all (not even a launch sentinel, unlike a renamed tmux pane), lists an unsettled session as unknown, and
+  makes Stop, Restart, Delete and prompt delivery refuse, also when it becomes unreadable between a verb's liveness
+  check and its taking the kill root. The ticker samples a host's screen and title from the emulator once the runtime
+  has caught up with the host's journal, and the shared notifier wakes its reap pass, so a host agent's exit is recorded
+  as promptly as a pane's. A failed tmux query holds up only tmux terminals: host terminals are still observed and
+  sampled. A listing or session reply still fails on a failed tmux query for a host agent too, since its tmux tabs (a
+  migrated session can have some) come from that query, and "could not ask" is never "there are none". Stop and Delete
+  take their kill root from the child as pinned at adoption, re-checked against the process table; the host itself
+  carries no session marker and sits outside the launch's scope, so Stop leaves it running and showing the final screen.
+  A launch that never started is classified, and quoted from the emulator's screen with no fence (a host runs one child)
+  and no "Pane is dead" line, only once the host's exit record has been processed, since the child can be reaped before
+  its last output arrives; a Stop that finds the child gone waits two seconds for the record and otherwise records a
+  plain exit, which the observer can still turn into the launch's error (the launch shim's own failure report quotes no
+  screen and is recorded at once). A hook report is anchored at the host's child; while the session's entry is not yet
+  published the report waits for a later pass rather than being refused. Prompts check bracketed paste in the emulator's
+  modes and send the paste in parts of one input sequence, submitting only once all of it was written. The orderly
+  stop's hold wait compares the "held" mark with the child's pid. An attach is refused for a client that cannot show
+  grids, permanently, with `InvalidRequest`. A host agent's session has no tmux session of its own; tmux tabs of such a
+  session are looked for in the tmux session its row names, which is always `fh-` and its id. Nothing in production
+  makes a host terminal yet, so until the switch, Restart of a host agent is refused before anything is stopped, tabs
+  cannot be opened beside one, and Delete does not yet end the host itself.
 
 Test harnesses end the hosts they leave behind: `farhelm-teststate` ends every host whose socket is in a `hosts`
 directory within an owned run directory (its dead-run sweep, and every `TestDir` drop) through a small blocking client

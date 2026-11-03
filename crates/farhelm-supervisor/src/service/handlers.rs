@@ -30,10 +30,7 @@ use super::launch_artifacts::{
 };
 use super::listing::list_all;
 use super::status::{KnownTmuxNames, dead_pane_exit_code, entry_info};
-use super::sweep::{
-    ScopeKillFailure, ScopeUnits, SweepTarget, capture_process_identity, reap_process_tree,
-    stop_live_agent,
-};
+use super::sweep::{ScopeKillFailure, ScopeUnits, SweepTarget, reap_process_tree, stop_live_agent};
 use super::teardown::TeardownError;
 use super::terminals::{
     ActiveAttach, AttachBackend, AttachmentKey, DETACH_REASON_REPLACED, DETACH_REASON_TAKEOVER,
@@ -531,9 +528,16 @@ async fn session_info_now(
     // probe nor the registry snapshot is worth taking.
     // Matched per kind, not as `Some(_)`: whether tmux must be asked depends
     // on the terminal's kind, and a catch-all would send a terminal tmux
-    // does not hold into the tmux query.
+    // does not hold into the tmux query. A host agent's status comes from
+    // its runtime, but its session's tmux tabs, if any, from the pane map,
+    // so it asks too, as the list does (`listing::list_all`), and a failed
+    // query fails the reply as it does for tmux: "we could not ask" is never
+    // "there are none", and a client takes the reply's tab list as the truth.
+    // The registry snapshot classifies only tmux panes and is not needed for
+    // it.
     let (pane_states, known) = match &entry.terminal {
         Some(Terminal::Tmux(_)) => (sup.tmux.pane_states().await?, sup.known_tmux_names().await),
+        Some(Terminal::Host(_)) => (sup.tmux.pane_states().await?, KnownTmuxNames::default()),
         None => (HashMap::new(), KnownTmuxNames::default()),
     };
     sup.with_checkout_metadata(entry_info(entry, &pane_states, &known))
@@ -860,18 +864,25 @@ async fn handle_stop_session(
         // Bind the identity at the same liveness boundary as the stop
         // decision. The stop intent and sweep may wait on durable I/O; a
         // bare pid carried through that work could name a replacement.
-        let alive_identity = match alive_pane
-            .and_then(|pane| pane.live_pid())
-            .map(capture_process_identity)
-        {
-            None => None,
-            Some(Ok(identity)) => identity,
-            // Unreadable is unconfirmed, never gone: refuse the stop rather
-            // than sweep without its root (see `capture_process_identity`).
-            Some(Err(error)) => {
-                reply_error(&tx, req_id, ErrorKind::Internal, format!("{error:#}")).await;
-                return;
-            }
+        //
+        // The root comes from the terminal (`Terminal::live_root`): a tmux
+        // pane's pid read now, or a host child's pid with the start
+        // identity pinned when its host was adopted. Either way the sweep
+        // below starts from the child; a host itself carries no session
+        // marker and sits outside the launch's scope, so the stop leaves it
+        // running, showing the final screen (the plan's D-17).
+        let alive_identity = match (alive_pane, entry.terminal.as_ref()) {
+            (Some(pane), Some(terminal)) => match terminal.live_root(&pane) {
+                Ok(identity) => identity,
+                // Unreadable is unconfirmed, never gone: refuse the stop
+                // rather than sweep without its root (see
+                // `capture_process_identity`).
+                Err(error) => {
+                    reply_error(&tx, req_id, ErrorKind::Internal, format!("{error:#}")).await;
+                    return;
+                }
+            },
+            (None, _) | (_, None) => None,
         };
 
         // What this stop records, and why the two branches differ.
@@ -923,6 +934,11 @@ async fn handle_stop_session(
                 .lock()
                 .expect("outcome mutex poisoned")
                 .clone();
+            // The shim's sentinel is read first, and needs no wait for the
+            // terminal: the shim writes it before the child ends, and it
+            // quotes no screen. (Waiting first would also lose it for good
+            // if the host became unreadable meanwhile, since nothing is
+            // observed from an unreadable host.)
             let sentinel = if sentinel_could_still_apply(&current) {
                 read_launch_sentinel(&sup.state_dir, &session_id, entry.generation).await
             } else {
@@ -940,6 +956,32 @@ async fn handle_stop_session(
                 // for the same reason a sentinel does: an agent that
                 // never started did not "run and finish".
                 Ok(None) => {
+                    // The never-started classification reads the dead
+                    // terminal (its exit code, and the excerpt quoted from
+                    // its screen), is durable, and is never revised, so it
+                    // is made only from a terminal that holds the process's
+                    // final state. A host terminal's probe can say dead
+                    // before the host's exit record (and the output before
+                    // it) has arrived; that is waited for, briefly. If it
+                    // does not come, the stop records a plain exit, which
+                    // the observer may still turn into the launch's error
+                    // once the record is in (a launch failure outranks an
+                    // unannotated exit), rather than an error with a partial
+                    // screen and no exit code.
+                    let final_state = match (&pane_state, entry.terminal.as_ref()) {
+                        (Some(pane), Some(terminal)) if pane.dead => {
+                            terminal.holds_final_state(HOST_EXIT_RECORD_WAIT).await
+                        }
+                        (Some(_), Some(_)) | (None, _) | (_, None) => true,
+                    };
+                    if !final_state {
+                        warn!(
+                            session = %session_id,
+                            "the terminal host had not reported its child's exit; not \
+                             classifying a launch that never started from it, and leaving that \
+                             to the observer"
+                        );
+                    }
                     // pane_process supplies only liveness. Reuse the richer
                     // exit-code probe for either classification rather than
                     // querying again after a negative launch-evidence read.
@@ -950,7 +992,7 @@ async fn handle_stop_session(
                         &session_id,
                         entry.generation,
                         entry.scope.is_some(),
-                        pane_state.is_some_and(|state| state.dead),
+                        final_state && pane_state.is_some_and(|state| state.dead),
                         exit_code,
                     )
                     .await
@@ -1275,6 +1317,28 @@ async fn handle_delete_session(
     });
 }
 
+/// How long a Stop that found a host terminal's child dead waits for the
+/// host's exit record before it records a plain exit instead of classifying
+/// a launch that never started (`Terminal::holds_final_state`). The host
+/// sends the record as soon as it has drained the child's output, normally
+/// within milliseconds of reaping it; two seconds is ample on a loaded
+/// machine and short beside the stop's own sweeps, which run under the same
+/// lifecycle claim.
+pub(crate) const HOST_EXIT_RECORD_WAIT: Duration = Duration::from_secs(2);
+
+/// The refusal of an `Attach` without `grid` to a terminal that runs in a
+/// terminal host.
+///
+/// A host terminal's screen is the supervisor's emulator, so a viewer needs
+/// a client that renders the terminal from the supervisor's grid rather than
+/// from the program's own output bytes (`farhelm_proto::grid`, "Attach and
+/// the stream kind"). The refusal is `InvalidRequest`: sending the same
+/// request again never works, and a client that can show a grid sends a
+/// different one. It is permanent behavior: a client that cannot show grids
+/// always gets it.
+pub(crate) const ATTACH_NEEDS_GRID_CLIENT: &str =
+    "this terminal runs in a terminal host and needs a client that can show grid terminals";
+
 /// Every request-shape check the attach can make lives here,
 /// ahead of the first lookup and far ahead of the takeover: a
 /// malformed attach must cost the session's current client
@@ -1299,6 +1363,7 @@ async fn handle_attach(
     selector: TerminalSelector,
     lease: String,
     if_unowned: bool,
+    grid: bool,
 ) {
     if !channels.can_begin_stream(channel) || lease.len() > MAX_LEASE_BYTES {
         let message = if channel == 0 {
@@ -1387,7 +1452,30 @@ async fn handle_attach(
     // death observation, output, replay rendering, teardown) dispatches on
     // those per kind. Resize and the revalidation below keep the
     // `Terminal` itself.
-    let Terminal::Tmux(tmux) = &terminal;
+    //
+    // A host terminal has no byte stream a client could render: its screen
+    // lives in the supervisor's emulator, and reaches a viewer only as a
+    // grid (`farhelm_proto::grid`). A client that cannot show one is
+    // refused, permanently (`ATTACH_NEEDS_GRID_CLIENT`). One that can is
+    // refused too until this supervisor streams grids, which adds that
+    // branch here; that refusal is not retryable either (the same request
+    // fails the same way against this supervisor), so it is not `Internal`,
+    // which clients read as transient. Either refusal comes before the
+    // attach takes anything over or opens anything, so the session's
+    // current client keeps its attachments.
+    let tmux = match &terminal {
+        Terminal::Tmux(tmux) => tmux,
+        Terminal::Host(_) => {
+            let message = if grid {
+                "this terminal runs in a terminal host, and this supervisor cannot stream it as \
+                 a grid yet"
+            } else {
+                ATTACH_NEEDS_GRID_CLIENT
+            };
+            reply_error(tx, req_id, ErrorKind::InvalidRequest, message.to_string()).await;
+            return;
+        }
+    };
 
     // Reserve one writer slot BEFORE taking any lock, so this
     // handler's eventual reply — success or failure — can be enqueued
@@ -1758,8 +1846,8 @@ async fn handle_attach(
     // stalled-terminal detach. And it must not AWAIT here, because
     // `attachments` is held: `permit` makes the enqueue
     // infallible and instant.
-    // Bytes: this path attaches tmux terminals only (see the dispatch's note
-    // on `Attach::grid`).
+    // Bytes: this path attaches tmux terminals only (host terminals were
+    // refused above).
     permit.send(reply_frame(&ControlMsg::Attached {
         req_id,
         channel,
@@ -2885,11 +2973,9 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             terminal: selector,
             lease,
             if_unowned,
-            // Every terminal this supervisor can attach is a tmux terminal,
-            // which streams bytes whatever the client can render. The
-            // capability starts to matter with host terminals, which only a
-            // grid-capable client may attach.
-            grid: _,
+            // A tmux terminal streams bytes whatever the client can render;
+            // a host terminal only to a grid-capable client (`handle_attach`).
+            grid,
         } => {
             handle_attach(
                 sup,
@@ -2903,6 +2989,7 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
                 selector,
                 lease,
                 if_unowned,
+                grid,
             )
             .await
         }
