@@ -1,6 +1,8 @@
 //! The supervisor's terminal switch points with a real terminal host behind
-//! a session's agent: exit recording, Stop, Restart's refusal, Delete (its
-//! guard, its process roots and ending the session's hosts) and attach.
+//! a session's agent: exit recording, Stop, Restart's stop first, Delete (its
+//! guard, its process roots and ending the session's hosts) and attach. What
+//! Restart's new host keeps, and how a failed or interrupted one is unwound,
+//! is in `host_relaunches.rs`.
 //!
 //! Each test here wants a host child of its own choosing rather than an
 //! agent's launch chain, so it creates an ordinary session and moves its
@@ -329,41 +331,90 @@ async fn stop_kills_a_host_agents_tree_and_leaves_the_host_showing_its_screen() 
     end_host(&installed).await;
 }
 
-/// Restart of a host agent is refused before anything is stopped or
-/// changed.
+/// Restart of a running host agent stops the agent's whole tree before the
+/// new host starts.
 ///
-/// Why: a restart that read a host agent as gone would relaunch beside it,
-/// two agents on one conversation (the inventory's top risk 6); and a host
-/// runs one child, so the agent can only restart into a new host, which
-/// this supervisor cannot start yet. A refusal that stopped the agent first
-/// would leave the user a stopped session they never asked for. Spec: with
-/// the host's child and an unmarked grandchild running, a consented Restart
-/// fails saying the agent runs in a terminal host and nothing was stopped;
-/// both processes still run; the stored outcome is still running and the
-/// session still lists as live.
+/// Why: a restart that read a host agent as gone, or started the new host
+/// before the stop, would run two agents on one conversation, however
+/// briefly (the inventory's top risk 6); and the agent's processes carry no
+/// marker here, so only a stop rooted at the host's child reaches its
+/// grandchild, which ignores the hangup that ending the old host gives. The
+/// order is observed where it matters: the new host's start records, as it
+/// begins, whether the old processes still run. Spec: with the host's child
+/// and an unmarked grandchild that ignores SIGHUP running (checked first), a
+/// consented Restart (under a supervisor that starts hosts through a wrapper
+/// around the built `farhelm`, the row's kind deciding, not the create
+/// switch) succeeds; the wrapper recorded, when the new host's start began,
+/// both processes gone; the session's agent terminal is a new host at
+/// another socket showing the resumed agent's ready marker; the old host's
+/// process is gone; the row is running.
 #[farhelm_testtrace::test]
-async fn restart_of_a_host_agent_is_refused_before_anything_stops() {
-    let h = harness().await;
-    let (session, work) = resumable_basic_session(&h).await;
-    let installed = install_host(&h, &session.id, &tree_script(work.path())).await;
-    let (child, grand) = tree_pids(work.path()).await;
+async fn restart_of_a_host_agent_stops_its_tree_before_a_new_host_starts() {
+    let fixture = farhelm_teststate::tempdir().expect("fixture directory");
+    let work = farhelm_teststate::tempdir().expect("workdir");
+    let at_start = fixture.path().join("at-start");
+    let program = crate::host_creates::script(
+        &fixture.path().join("farhelm"),
+        &format!(
+            "state=''\n\
+             for file in {child} {grand}; do\n\
+             \x20 if kill -0 \"$(cat \"$file\")\" 2>/dev/null; then state=\"$state alive\"; \
+             else state=\"$state gone\"; fi\n\
+             done\n\
+             printf '%s\\n' \"$state\" >> {at_start}\n\
+             exec {farhelm} \"$@\"",
+            child = shell_words::quote(work.path().join("child.pid").to_str().unwrap()),
+            grand = shell_words::quote(work.path().join("grand.pid").to_str().unwrap()),
+            at_start = shell_words::quote(at_start.to_str().unwrap()),
+            farhelm = shell_words::quote(farhelm_bin()),
+        ),
+    );
+    let h = harness_with_seams(
+        SupervisorTimeouts::default(),
+        SupervisorSeams {
+            host_program: Some(program),
+            ..SupervisorSeams::default()
+        },
+    )
+    .await;
+    let session = create_resumable_session(
+        &h,
+        &work.path().to_string_lossy(),
+        &fixture_cmd("fake-agent --script basic"),
+        80,
+        24,
+    )
+    .await;
+    wait_for_agent_ready(&h.state.path().join("tmux.sock"), &session.id).await;
+    let installed = install_host(&h, &session.id, &hangup_immune_tree_script(work.path())).await;
+    let tree = hangup_immune_tree(work.path()).await;
 
-    let refused = h
-        .client
+    h.client
         .restart_session(&session.id, true)
         .await
-        .expect_err("a host agent cannot be restarted into a new host yet");
-    let refused = format!("{refused:#}");
-    assert!(refused.contains("terminal host"), "{refused}");
-    assert!(refused.contains("nothing was stopped"), "{refused}");
-    assert!(
-        !process_is_gone(child) && !process_is_gone(grand),
-        "the agent's tree still runs"
+        .expect("the restart succeeds");
+    assert_eq!(
+        std::fs::read_to_string(&at_start).expect("the new host's start recorded the old tree"),
+        " gone gone\n",
+        "the old child and grandchild were gone when the new host's start began"
     );
+    assert!(process_is_gone(tree.child) && process_is_gone(tree.grand));
+    let new = h
+        .sup
+        .agent_host_for_test(&session.id)
+        .await
+        .expect("the session's agent terminal is a host");
+    assert_ne!(new.socket(), installed.socket, "a new host");
+    wait_for_screen(&new, AGENT_READY_MARKER).await;
+    wait_until_pid_gone(installed.pid, WAIT_SECS).await;
     assert_eq!(stored_outcome(&h, &session.id).await, LastOutcome::Running);
-    let info = listed_info(&h, &session.id).await;
-    assert!(info.status.is_live(), "{:?}", info.status);
-    end_host(&installed).await;
+    let new_pid = host_process(new.socket()).expect("the new host's process");
+    let report = tokio::time::timeout(Duration::from_secs(WAIT_SECS), new.shutdown())
+        .await
+        .expect("the new host's shutdown finishes in time")
+        .expect("the runtime was still running the host");
+    assert!(report.ended, "the new host ended: {report:?}");
+    wait_until_pid_gone(new_pid, WAIT_SECS).await;
 }
 
 // ---- Delete --------------------------------------------------------------------------

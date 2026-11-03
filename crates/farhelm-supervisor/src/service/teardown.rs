@@ -1671,7 +1671,8 @@ mod tests {
         )
         .await;
 
-        let result = super::super::sweep::stop_live_agent(&sup, &id, &entry, None).await;
+        let result =
+            super::super::sweep::stop_live_agent(&sup, &id, &entry, std::iter::empty()).await;
 
         assert!(
             matches!(result, Err(super::super::sweep::StopFailure::Sweep(_))),
@@ -1696,7 +1697,8 @@ mod tests {
         )
         .await;
 
-        let result = super::super::sweep::stop_live_agent(&sup, &id, &entry, None).await;
+        let result =
+            super::super::sweep::stop_live_agent(&sup, &id, &entry, std::iter::empty()).await;
 
         assert!(
             matches!(result, Err(super::super::sweep::StopFailure::Sweep(_))),

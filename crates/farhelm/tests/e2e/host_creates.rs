@@ -2,7 +2,8 @@
 //! internal switch turned on (`SupervisorSeams::new_terminals`): what the
 //! host and its child are given, how the create's launch identity holds
 //! when the create is interrupted, races Delete or its host fails to start,
-//! and that Stop's sweep spares the host.
+//! and that Stop's sweep spares the host. Restart of a created host agent is
+//! in `host_relaunches.rs`.
 //!
 //! Every supervisor here is the e2e suite's in-process one with the switch
 //! on and `host_program` pointing at the built `farhelm`: the supervisor
@@ -22,7 +23,7 @@
 
 use crate::harness::*;
 use crate::host_terminals::{
-    WAIT_SECS, host_process, listed_info, stored_outcome, wait_for_liveness, wait_for_screen,
+    WAIT_SECS, host_process, listed_info, wait_for_liveness, wait_for_screen,
 };
 use farhelm_supervisor::hosts::{HostTerminal, Liveness, StopLimits};
 use farhelm_supervisor::service::NewTerminals;
@@ -902,7 +903,7 @@ async fn a_start_that_dies_after_readiness_leaves_nothing() {
 /// listener is bound instead of exiting 0: a start that did not finish,
 /// whose socket the spawn's own cleanup cannot end (the listener never
 /// answers its `Shutdown`), so the spawn reports that a host may remain.
-fn silent_host_program(
+pub(crate) fn silent_host_program(
     dir: &Path,
     pid_file: &Path,
     signallable: bool,
@@ -1045,52 +1046,6 @@ async fn an_unusable_host_that_cannot_be_ended_keeps_the_launching_record() {
     // SAFETY: ending the test's own stand-in listener.
     unsafe { libc::kill(listener as libc::pid_t, libc::SIGKILL) };
     wait_until_pid_gone(listener, WAIT_SECS).await;
-}
-
-/// Restart is refused for an agent created in a host, before anything
-/// stops.
-///
-/// Why: Restart of a host agent needs a new host seeded with its history,
-/// which does not exist yet, and a refusal that stopped the agent first
-/// would leave the user a stopped session they never asked for. (Tabs beside
-/// a host agent open in hosts of their own: `host_tabs.rs`.) Spec: for a
-/// created host agent, a consented Restart fails saying the agent runs in a
-/// terminal host and nothing was stopped, and the agent still runs.
-#[farhelm_testtrace::test]
-async fn restart_stays_refused_for_a_created_host_agent() {
-    let h = host_harness().await;
-    let (session, _work) = resumable_basic_session_in_host(&h).await;
-    let host = agent_host(&h, &session.id).await;
-    let child = host.status().child_pid;
-
-    let refused = h
-        .client
-        .restart_session(&session.id, true)
-        .await
-        .expect_err("no restart into a new host yet");
-    let refused = format!("{refused:#}");
-    assert!(refused.contains("nothing was stopped"), "{refused}");
-    assert!(!process_is_gone(child), "the agent runs on");
-    assert_eq!(stored_outcome(&h, &session.id).await, LastOutcome::Running);
-    let host_pid = host_process(host.socket()).expect("the host's process serves its socket");
-    end_runtime(&host, host_pid).await;
-}
-
-/// [`resumable_basic_session`] for a harness whose creates start in hosts:
-/// the same fake agent, waited for on the host's screen rather than in
-/// tmux.
-async fn resumable_basic_session_in_host(h: &Harness) -> (SessionInfo, farhelm_teststate::TestDir) {
-    let work = farhelm_teststate::tempdir().expect("workdir");
-    let session = create_resumable_session(
-        h,
-        &work.path().to_string_lossy(),
-        &fixture_cmd("fake-agent --script basic"),
-        80,
-        24,
-    )
-    .await;
-    wait_for_screen(&agent_host(h, &session.id).await, AGENT_READY_MARKER).await;
-    (session, work)
 }
 
 /// A start whose first stage dies after binding a socket the spawn cannot

@@ -503,20 +503,47 @@ impl Emulator {
     /// snapshot. It works at any boundary, since it keeps nothing of the
     /// parser.
     pub fn history_seed(&self, max_bytes: usize) -> Snapshot {
+        match self.history_seed_until(max_bytes, &Cancel::never()) {
+            Ok(seed) => seed,
+            Err(SnapshotStopped::Cancelled | SnapshotStopped::NotClean) => {
+                unreachable!("a cancel that never fires, and a seed needs no clean boundary")
+            }
+        }
+    }
+
+    /// [`Self::history_seed`], giving up once `cancel` fires
+    /// ([`SnapshotStopped::Cancelled`], with nothing kept; never
+    /// `NotClean`, since a seed keeps nothing of the parser). Not cancelled,
+    /// it yields exactly what [`Self::history_seed`] does.
+    ///
+    /// For a supervisor that encodes the seed on its blocking pool, which
+    /// nothing interrupts from outside: an orderly stop fires the cancel so
+    /// that its exit does not wait for a whole encode (the same reason
+    /// [`Self::snapshot_until`] exists).
+    pub fn history_seed_until(
+        &self,
+        max_bytes: usize,
+        cancel: &Cancel,
+    ) -> Result<Snapshot, SnapshotStopped> {
         let history = self.primary_grid().history_size();
         let min_skip = history.saturating_sub(self.restorable_history());
-        let never = Cancel::never();
         let with_history =
-            |skip, mode| v1::encode_history(self, skip, self.trimmed_for(skip > 0), mode, &never);
+            |skip, mode| v1::encode_history(self, skip, self.trimmed_for(skip > 0), mode, cancel);
         // Without history a seed is a few dozen bytes, which only a
         // `max_bytes` far below `MIN_SNAPSHOT_LIMIT` refuses; it is returned
-        // even then. A cancel that never fires never stops it.
-        let fitted = match fit_history(min_skip, history, max_bytes, with_history) {
-            Ok(fitted) => fitted,
-            Err(CancelledEncode) => unreachable!("a cancel that never fires"),
-        };
-        fitted.unwrap_or_else(|| Snapshot {
-            blob: with_history(history, v1::Mode::KEEP).blob,
+        // even then.
+        let cancelled = |_: CancelledEncode| SnapshotStopped::Cancelled;
+        if let Some(fitted) =
+            fit_history(min_skip, history, max_bytes, with_history).map_err(cancelled)?
+        {
+            return Ok(fitted);
+        }
+        let last_resort = with_history(history, v1::Mode::KEEP);
+        if last_resort.cancelled {
+            return Err(SnapshotStopped::Cancelled);
+        }
+        Ok(Snapshot {
+            blob: last_resort.blob,
             dropped_history_lines: history,
             dropped_screens: false,
             dropped_titles: 0,
@@ -802,6 +829,55 @@ mod cancel_tests {
                     fire_after + 1,
                     "{limit}: the encode stopped at the look that fired, looking no more"
                 );
+            }
+        }
+    }
+    /// A Restart seed's encode stops at whichever look its cancel fires on,
+    /// and one whose cancel never fires is the plain seed.
+    ///
+    /// Why: a supervisor encodes the seed on its blocking pool, which nothing
+    /// interrupts from outside, so only the cancel keeps an orderly stop from
+    /// waiting out a seed of a full scrollback. Spec: for 500 lines of
+    /// history, at the full limit and at one that makes the encoder fit the
+    /// history, a seed whose cancel fires on look `k`, for each `k` an
+    /// uncancelled seed takes, yields `SnapshotStopped::Cancelled` having
+    /// looked exactly `k + 1` times; an uncancelled one restores to all the
+    /// history it does not say it left out, above a blank screen.
+    #[test]
+    fn a_cancel_landing_at_any_look_stops_a_seed() {
+        let emulator = with_history(500);
+        for limit in [16 * 1024 * 1024, 4096] {
+            let count = Arc::new(AtomicUsize::new(0));
+            let uncancelled = emulator
+                .history_seed_until(limit, &Cancel::after_looks(Arc::clone(&count), usize::MAX))
+                .expect("never cancelled");
+            let looks = count.load(Ordering::Relaxed);
+            assert!(looks > 0, "{limit}: the seed looked at its cancel");
+            // The seed itself is pinned by the golden fixtures; here, that an
+            // uncancelled one is a whole seed: it restores, to the history it
+            // kept (all of it but what it says it left out) above a blank
+            // screen.
+            let restored = Emulator::restore(&uncancelled.blob, 10_000)
+                .expect("an uncancelled seed restores")
+                .emulator;
+            assert_eq!(
+                restored.primary_grid().history_size() + uncancelled.dropped_history_lines,
+                emulator.primary_grid().history_size(),
+                "{limit}: the seed keeps the history it does not say it left out"
+            );
+            assert!(
+                restored.screen_text().trim().is_empty(),
+                "{limit}: a blank screen"
+            );
+            for fire_after in 0..looks {
+                let count = Arc::new(AtomicUsize::new(0));
+                let cancel = Cancel::after_looks(Arc::clone(&count), fire_after);
+                assert_eq!(
+                    emulator.history_seed_until(limit, &cancel).map(|_| ()),
+                    Err(SnapshotStopped::Cancelled),
+                    "{limit}: a cancel on look {fire_after} of {looks}"
+                );
+                assert_eq!(count.load(Ordering::Relaxed), fire_after + 1);
             }
         }
     }

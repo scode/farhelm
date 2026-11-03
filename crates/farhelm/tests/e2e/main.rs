@@ -92,6 +92,8 @@ mod tcp_relays;
 #[cfg(target_os = "linux")]
 mod host_creates;
 #[cfg(target_os = "linux")]
+mod host_relaunches;
+#[cfg(target_os = "linux")]
 mod host_restarts;
 #[cfg(target_os = "linux")]
 mod host_tabs;

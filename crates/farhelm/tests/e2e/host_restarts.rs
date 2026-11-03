@@ -131,7 +131,7 @@ pub(crate) async fn wait_until_caught_up(host: &HostTerminal) {
 }
 
 /// The session's durable row, read from the store the supervisors write.
-async fn stored_row(state: &Path, session_id: &str) -> StoredSession {
+pub(crate) async fn stored_row(state: &Path, session_id: &str) -> StoredSession {
     SessionStore::open(&state.join("supervisor.db"), false)
         .await
         .expect("open the store")
@@ -142,7 +142,7 @@ async fn stored_row(state: &Path, session_id: &str) -> StoredSession {
 }
 
 /// The session as `client`'s supervisor lists it.
-async fn listed(client: &SupervisorClient, session_id: &str) -> SessionInfo {
+pub(crate) async fn listed(client: &SupervisorClient, session_id: &str) -> SessionInfo {
     client
         .list_sessions()
         .await

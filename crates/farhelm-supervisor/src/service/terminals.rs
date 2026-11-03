@@ -21,7 +21,7 @@ use super::core::{
     unknown_pane_owner_refusal,
 };
 use super::sweep::capture_process_identity;
-use crate::store::LastOutcome;
+use crate::store::{LastOutcome, TerminalKind};
 use crate::tmux::{InputClient, PaneProbe, PaneProcess, ReplayStreamCandidate, SessionSink};
 use anyhow::Context;
 use farhelm_proto::{ErrorKind, Frame, RestartOffer, TerminalSelector};
@@ -760,23 +760,43 @@ enum TabResolution {
 /// [`RestartOffer`]: only a session whose conversation was captured can be
 /// promised a resume, and SPEC.md makes Restart unavailable otherwise, so
 /// such a session is pointed at Replace instead.
-fn missing_terminal_message(id: &str, outcome: &LastOutcome, offer: RestartOffer) -> String {
+///
+/// A session whose agent ran in a terminal host (`kind`, from its row) has
+/// no tmux server to name, and has no terminal when its host has ended
+/// (killed, or gone with the machine), never started (a launch kept as a
+/// launching record), or may run but is not held (an earlier host the
+/// claim-window fallback could not read at this supervisor's start, or a
+/// replacement that could not be confirmed ended): it is told that, and,
+/// outside a reboot too, the way out, since a Restart of a host session
+/// with no terminal starts the agent in a new host (`core::host_restart`)
+/// whenever its conversation can be resumed. Where the host may run, that
+/// Restart may be refused until the host is settled, or start without its
+/// history.
+fn missing_terminal_message(
+    id: &str,
+    outcome: &LastOutcome,
+    offer: RestartOffer,
+    kind: TerminalKind,
+) -> String {
     let id = truncate_for_error(id);
-    if matches!(outcome, LastOutcome::Interrupted) {
-        let restart = if offer.can_restart() {
-            "restart offers to resume the conversation"
-        } else {
-            "its conversation cannot be resumed, so replace starts it over"
-        };
-        format!(
-            "session {id} has no terminal: its host rebooted and the terminal did not survive; \
-             {restart}"
-        )
+    let way_out = if offer.can_restart() {
+        "restart offers to resume the conversation"
     } else {
-        format!(
+        "its conversation cannot be resumed, so replace starts it over"
+    };
+    match (outcome, kind) {
+        (LastOutcome::Interrupted, _) => format!(
+            "session {id} has no terminal: its host rebooted and the terminal did not survive; \
+             {way_out}"
+        ),
+        (_, TerminalKind::Host) => format!(
+            "session {id} has no terminal on this host: its terminal host has ended, never \
+             started, or could not be reached; {way_out}, in a new terminal"
+        ),
+        (_, TerminalKind::Tmux) => format!(
             "session {id} has no terminal on this host: the supervisor (or its tmux server) \
              restarted and the terminal did not survive"
-        )
+        ),
     }
 }
 
@@ -813,7 +833,8 @@ async fn resolve_terminal_inner(
         };
     }
     // The restart-gap case (PLAN_M2.md): this entry was reloaded from
-    // SQLite at startup and its tmux session was gone by then. Reporting
+    // SQLite at startup and its terminal (a tmux session, or a terminal
+    // host) was not found or could not be used by then. Reporting
     // `NotFound` — rather than fabricating a dead terminal to attach to —
     // is the same "do not guess" discipline SPEC.md applies elsewhere; the
     // session stays visible in the list either way. It is also the gate
@@ -823,6 +844,19 @@ async fn resolve_terminal_inner(
     // durable outcome (`missing_terminal_message`), because a reboot's
     // interruption and an ordinary restart gap are different facts and the
     // user is about to act on which one it was.
+    // The row's terminal kind words the refusal; read only when there is
+    // no terminal, and taken as tmux when the row cannot be read (the
+    // wording that names no host).
+    let kind = match &entry.terminal {
+        Some(_) => TerminalKind::Tmux,
+        None => sup
+            .store
+            .session(&entry.info.id)
+            .await
+            .ok()
+            .flatten()
+            .map_or(TerminalKind::Tmux, |row| row.terminal_kind),
+    };
     let agent = entry.terminal.as_ref().ok_or_else(|| {
         // Two per-entry mutexes, taken one after the other and never
         // nested: each hold is a read of one small value, which is the
@@ -844,7 +878,7 @@ async fn resolve_terminal_inner(
         );
         RequestError::new(
             ErrorKind::NotFound,
-            missing_terminal_message(&entry.info.id, &outcome, offer),
+            missing_terminal_message(&entry.info.id, &outcome, offer, kind),
         )
     })?;
     match terminal {
@@ -2943,8 +2977,12 @@ mod tests {
     /// SPEC.md says the supervisor cannot know after a reboot.
     #[farhelm_testtrace::test]
     fn missing_terminal_wording_follows_the_durable_outcome() {
-        let resumable =
-            missing_terminal_message("s-1", &LastOutcome::Interrupted, RestartOffer::Resume);
+        let resumable = missing_terminal_message(
+            "s-1",
+            &LastOutcome::Interrupted,
+            RestartOffer::Resume,
+            TerminalKind::Tmux,
+        );
         assert!(resumable.contains("host rebooted"), "{resumable}");
         assert!(
             resumable.contains("restart offers to resume"),
@@ -2957,7 +2995,12 @@ mod tests {
             RestartOffer::NotCaptured,
             RestartOffer::NoConversationReporting,
         ] {
-            let text = missing_terminal_message("s-1", &LastOutcome::Interrupted, offer);
+            let text = missing_terminal_message(
+                "s-1",
+                &LastOutcome::Interrupted,
+                offer,
+                TerminalKind::Tmux,
+            );
             assert!(text.contains("host rebooted"), "{text}");
             assert!(
                 text.contains("replace starts it over") && !text.contains("restart offers"),
@@ -2977,7 +3020,12 @@ mod tests {
                 detail: "exec failed".to_string(),
             },
         ] {
-            let text = missing_terminal_message("s-1", &other, RestartOffer::NotCaptured);
+            let text = missing_terminal_message(
+                "s-1",
+                &other,
+                RestartOffer::NotCaptured,
+                TerminalKind::Tmux,
+            );
             assert!(
                 text.contains("has no terminal on this host"),
                 "{other:?}: {text}"
@@ -2989,13 +3037,72 @@ mod tests {
         }
         for text in [
             resumable,
-            missing_terminal_message("s-1", &LastOutcome::Running, RestartOffer::NotCaptured),
+            missing_terminal_message(
+                "s-1",
+                &LastOutcome::Running,
+                RestartOffer::NotCaptured,
+                TerminalKind::Tmux,
+            ),
         ] {
             assert!(
                 !text.contains("after the agent ended"),
                 "no wording may order the agent's end against the restart: {text}"
             );
         }
+    }
+
+    /// A host session with no terminal is told its terminal host ended,
+    /// never started, or could not be reached, never a tmux server, and is
+    /// given the way out a Restart now takes.
+    ///
+    /// Why: a host session has no tmux server, and its Restart with no
+    /// terminal starts a new host (`core::host_restart`), so the refusal
+    /// must neither name tmux nor send the user to Replace when Restart
+    /// would resume the conversation; and a host row is terminal-less also
+    /// while its host may run unreadable, so the text must not say it
+    /// ended. Spec: for a host row's outcomes other than `Interrupted`, the
+    /// text says its terminal host has ended, never started, or could not
+    /// be reached, names no tmux, and offers to resume the conversation in
+    /// a new terminal when the conversation was captured and points at
+    /// replace otherwise; an `Interrupted` host session is told of the
+    /// reboot as a tmux one is.
+    #[farhelm_testtrace::test]
+    fn a_host_session_without_a_terminal_is_told_its_host_ended() {
+        for outcome in [
+            LastOutcome::Launching,
+            LastOutcome::Running,
+            LastOutcome::Exited {
+                exit_code: Some(0),
+                annotation: None,
+            },
+        ] {
+            let resumable =
+                missing_terminal_message("s-1", &outcome, RestartOffer::Resume, TerminalKind::Host);
+            assert!(
+                resumable
+                    .contains("terminal host has ended, never started, or could not be reached")
+                    && resumable.contains("restart offers to resume the conversation")
+                    && !resumable.contains("tmux"),
+                "{outcome:?}: {resumable}"
+            );
+            let fresh = missing_terminal_message(
+                "s-1",
+                &outcome,
+                RestartOffer::NotCaptured,
+                TerminalKind::Host,
+            );
+            assert!(
+                fresh.contains("replace starts it over") && !fresh.contains("restart offers"),
+                "{outcome:?}: {fresh}"
+            );
+        }
+        let rebooted = missing_terminal_message(
+            "s-1",
+            &LastOutcome::Interrupted,
+            RestartOffer::Resume,
+            TerminalKind::Host,
+        );
+        assert!(rebooted.contains("host rebooted"), "{rebooted}");
     }
 
     /// Records whether a gated test future was cancelled before release.

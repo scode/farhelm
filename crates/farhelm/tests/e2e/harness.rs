@@ -1198,9 +1198,22 @@ pub(crate) async fn create_resumable_session(
     cols: u16,
     rows: u16,
 ) -> SessionInfo {
+    create_resumable_session_on(&h.client, &h.sup, cwd, invocation, cols, rows).await
+}
+
+/// [`create_resumable_session`] through `client` on `sup`, for a test that
+/// builds its supervisors itself rather than through a [`Harness`] (one that
+/// restarts the supervisor on the same state directory, say).
+pub(crate) async fn create_resumable_session_on(
+    client: &SupervisorClient,
+    sup: &Supervisor,
+    cwd: &str,
+    invocation: &str,
+    cols: u16,
+    rows: u16,
+) -> SessionInfo {
     let line = shell_words::quote(&format!("exec {invocation}")).into_owned();
-    let created = h
-        .client
+    let created = client
         .create_session_with_extras(
             cwd,
             declared_command(
@@ -1217,8 +1230,7 @@ pub(crate) async fn create_resumable_session(
         )
         .await
         .expect("create a resumable session");
-    h.sup
-        .record_conversation_for_test(&created.id, RESUMABLE_TEST_CONVERSATION)
+    sup.record_conversation_for_test(&created.id, RESUMABLE_TEST_CONVERSATION)
         .await;
     created
 }

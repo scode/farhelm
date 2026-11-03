@@ -311,8 +311,8 @@ pub(crate) enum AtRecordedSocket {
 
 // ---- Starting a host ---------------------------------------------------------------
 
-/// A create's agent started in a host: what [`Supervisor::spawn_agent_in_host`]
-/// produced.
+/// A launch's agent started in a host, a create's or a Restart's: what
+/// [`Supervisor::spawn_agent_in_host`] produced.
 pub(super) struct SpawnedInHost {
     /// The runtime adopted for the new host, reporting to the supervisor's
     /// liveness notifier.
@@ -412,9 +412,9 @@ impl Supervisor {
     /// The host's child runs exactly the command a tmux pane would
     /// ([`Self::prepare_launch`]), in `cwd`, at `cols` x `rows` (clamped
     /// as tmux clamps them), with the environment of [`host_child_env`]
-    /// and the default journal cap. `initial_snapshot` seeds its terminal;
-    /// a create has none, and Restart's later move to hosts is what it is
-    /// for. The host is started from this supervisor's own program
+    /// and the default journal cap. `initial_snapshot` seeds its terminal:
+    /// a create has none, and a Restart gives the old terminal's history
+    /// (`host_restart`). The host is started from this supervisor's own program
     /// ([`Self::host_program`]) at a socket name drawn here; before its
     /// first stage is given the spec, the launch record (module docs) is
     /// written, and a start whose first stage cannot be pinned or whose
@@ -802,20 +802,7 @@ impl Supervisor {
     /// remove is only logged, since the host is gone either way.
     pub(crate) async fn remove_ended_socket(&self, socket: &Path) {
         let _no_spawns = self.host_scan.write().await;
-        let gone = match GoneHost::ended_at(socket, ClientDeadlines::default()) {
-            Ok(Some(gone)) => gone,
-            Ok(None) => return,
-            Err(error) => {
-                warn!(socket = %socket.display(), %error,
-                    "could not look at an ended terminal host's socket file");
-                return;
-            }
-        };
-        match gone.remove_socket().await {
-            crate::hosts::SocketRemoval::Removed | crate::hosts::SocketRemoval::AlreadyGone => {}
-            other => warn!(socket = %socket.display(), outcome = ?other,
-                "left an ended terminal host's socket file in place"),
-        }
+        remove_ended_socket_file(socket).await;
     }
 
     /// Whether session `session_id`'s first launch (generation 0) started a
@@ -1044,6 +1031,27 @@ async fn fence_starter(
         Ok(Termination::AlreadyGone | Termination::Terminated | Termination::Killed) => Ok(()),
         Ok(Termination::StillRunning) => Err("it survived SIGTERM and SIGKILL".into()),
         Err(error) => Err(error.to_string()),
+    }
+}
+
+/// [`Supervisor::remove_ended_socket`] without taking the lock it takes:
+/// for a caller that already keeps host spawns out of the socket directory
+/// (holding `host_scan` exclusively, or running before any supervisor
+/// exists, as the constructor's reload does).
+pub(super) async fn remove_ended_socket_file(socket: &Path) {
+    let gone = match GoneHost::ended_at(socket, ClientDeadlines::default()) {
+        Ok(Some(gone)) => gone,
+        Ok(None) => return,
+        Err(error) => {
+            warn!(socket = %socket.display(), %error,
+                "could not look at an ended terminal host's socket file");
+            return;
+        }
+    };
+    match gone.remove_socket().await {
+        crate::hosts::SocketRemoval::Removed | crate::hosts::SocketRemoval::AlreadyGone => {}
+        other => warn!(socket = %socket.display(), outcome = ?other,
+            "left an ended terminal host's socket file in place"),
     }
 }
 
