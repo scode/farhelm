@@ -164,6 +164,7 @@ mod launch_controls;
 mod launch_sequence;
 mod list;
 mod menu_panel;
+mod migration;
 mod modal_dialog;
 mod modal_isolation;
 mod ntfy_settings;
@@ -497,6 +498,20 @@ pub struct Session {
     /// session with no tabs.
     #[serde(default)]
     pub tabs: Vec<Tab>,
+    /// Which kind of terminal the session's agent runs in now (old, in tmux,
+    /// or new, in a terminal host), straight off the wire
+    /// (`SessionInfo::agent_terminal`). `None` when the supervisor holds no
+    /// terminal for the agent, when the helm predates the field, or for a
+    /// kind this build does not know: decoded leniently, like
+    /// [`SessionAgentKind`], so a newer helm's word cannot fail the listing.
+    #[serde(default, deserialize_with = "farhelm_proto::lenient_terminal_kind")]
+    pub agent_terminal: Option<farhelm_proto::TerminalKind>,
+    /// Whether the session's supervisor creates new terminals in terminal
+    /// hosts (`SessionInfo::supervisor_creates_host_terminals`). The
+    /// migration band appears only while this is true (`migration` module);
+    /// false from a helm that predates the field, which shows nothing.
+    #[serde(default)]
+    pub supervisor_creates_host_terminals: bool,
     /// Which registered host this session lives on — the join key into the
     /// hosts panel, and what a create alongside it names (PLAN_M6.md item
     /// 5).
@@ -2457,7 +2472,10 @@ mod tests {
     /// A tab with the given id — the whole of `Tab`, which is why this is
     /// a one-liner rather than a builder.
     fn tab(id: &str) -> Tab {
-        Tab { id: id.into() }
+        Tab {
+            id: id.into(),
+            kind: None,
+        }
     }
 
     /// A `Session` JSON with no `annotation` key (every session that was
@@ -3171,6 +3189,8 @@ mod tests {
             pinned: false,
             notifications: Vec::new(),
             notifications_read_through: 0,
+            agent_terminal: None,
+            supervisor_creates_host_terminals: false,
         };
 
         assert_eq!(
@@ -3240,6 +3260,8 @@ mod tests {
             pinned: false,
             notifications: Vec::new(),
             notifications_read_through: 0,
+            agent_terminal: None,
+            supervisor_creates_host_terminals: false,
         };
 
         assert_eq!(

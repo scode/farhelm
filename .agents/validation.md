@@ -259,25 +259,27 @@ that its required systemd or SSH substrate ran.
   given nothing until finished, killed having read nothing when dropped, a taken name refused), a retry that finds the
   session's own published host with no other evidence. The e2e tests (`crates/farhelm/tests/e2e/host_creates.rs`) run
   in-process supervisors with the switch on, starting hosts from the built `farhelm`: the row recorded as a host row
-  with the socket's name, no tmux session, Stop ending the agent and sparing the host; the host's command line and empty
-  environment holding no credential or marker while its child has the markers; the agent in its launch scope with the
-  host outside it (with a user manager, else `SKIPPED`); the login shell's environment compared with a real tmux pane's
-  under the same command (equal but for `TMUX` and `TMUX_PANE`), and a startup file's tmux autostart held back in both;
-  a wrapper prefix running in the host; a create interrupted after its host started retried without a second agent; a
-  first stage that outlived an interrupted create (holding its spec, before binding) waited for by the retry, which then
-  finds its host, or ended by the verified signal when it does not finish, with one host and one agent either way, and
-  fenced the same way by an unconditional Delete of that session after a restart, which then leaves no host and no
-  agent; a process the interrupted first stage forked that still names the socket (a stand-in second stage) leaving the
-  retry unresolved while it stays, and letting the same retry relaunch when it ends during the retry's wait; a launch
-  error's cleanup after a restart keeping the host record of a host that still runs; a cleanup whose runtime is held by
-  a snapshot encode (an encode gate) falling back to ending the host by its socket after the runtime's 15 s bound, while
-  the encode is still held (the gate shows no encode passed or expired); a create that lost to Delete ending its host; a
-  start whose first stage dies after readiness leaving nothing, and one the spawn reports may have left a host, which
-  the create ends and removes the socket of; stand-in hosts that cannot be used, ended by the verified signal and rolled
-  back, or kept as a launching record when the signal must not touch them; and a retry keeping its row's kind with the
-  switch flipped either way across a restart. Needs the pinned tmux first on `PATH` and Python 3 at `/usr/bin/python3`
-  (the stand-in hosts). Linux only, two or three minutes (several tests wait out client deadlines); part of the
-  workspace nextest run. The container launch kind's test is in the containerized suite above
+  with the socket's name, no tmux session, Stop ending the agent and sparing the host; the create reply, its keyed
+  replay and the listing naming the agent's terminal as a host and reporting the switch on (what the client's migration
+  band and session details read); the host's command line and empty environment holding no credential or marker while
+  its child has the markers; the agent in its launch scope with the host outside it (with a user manager, else
+  `SKIPPED`); the login shell's environment compared with a real tmux pane's under the same command (equal but for
+  `TMUX` and `TMUX_PANE`), and a startup file's tmux autostart held back in both; a wrapper prefix running in the host;
+  a create interrupted after its host started retried without a second agent; a first stage that outlived an interrupted
+  create (holding its spec, before binding) waited for by the retry, which then finds its host, or ended by the verified
+  signal when it does not finish, with one host and one agent either way, and fenced the same way by an unconditional
+  Delete of that session after a restart, which then leaves no host and no agent; a process the interrupted first stage
+  forked that still names the socket (a stand-in second stage) leaving the retry unresolved while it stays, and letting
+  the same retry relaunch when it ends during the retry's wait; a launch error's cleanup after a restart keeping the
+  host record of a host that still runs; a cleanup whose runtime is held by a snapshot encode (an encode gate) falling
+  back to ending the host by its socket after the runtime's 15 s bound, while the encode is still held (the gate shows
+  no encode passed or expired); a create that lost to Delete ending its host; a start whose first stage dies after
+  readiness leaving nothing, and one the spawn reports may have left a host, which the create ends and removes the
+  socket of; stand-in hosts that cannot be used, ended by the verified signal and rolled back, or kept as a launching
+  record when the signal must not touch them; and a retry keeping its row's kind with the switch flipped either way
+  across a restart. Needs the pinned tmux first on `PATH` and Python 3 at `/usr/bin/python3` (the stand-in hosts). Linux
+  only, two or three minutes (several tests wait out client deadlines); part of the workspace nextest run. The container
+  launch kind's test is in the containerized suite above
   (`containerized_sessions::podman_agent_runs_from_a_terminal_host`). Run it when the create path, the launch spec's
   composition, the host spawn or the launch identity's rollback or evidence changes.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'restarting host agents' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(/host_handover::tests::/) | test(a_terminal_less_host_row_restarts_in_a_host_never_in_tmux) | test(/a_restart_seed_|_seed_of_an?_|a_seed_whose_runtime|a_stop_during_a_restarts_seed|a_restart_without_consent_touches_no_program|a_restart_asks_again_for_consent/) | test(a_failed_host_restart_after_a_stop_began_restores_a_placeholder) | test(restart_of_a_host_agent_stops_its_tree_before_a_new_host_starts) | test(/^host_relaunches::/)'`
@@ -611,11 +613,13 @@ that its required systemd or SSH substrate ran.
   with `FARHELM_E2E_NEW_TERMINALS=host`, which starts the stack's local supervisor with `--new-terminals host`, so the
   startup session runs in a host; the main suite's stacks pass nothing and keep the supervisor's default. In Chromium
   and WebKit, one worker: the session's terminal mounts as the grid component (never xterm.js), draws the fake agent's
-  ready line, and draws the agent's echo of a line typed into it. Needs what the browser suite needs (`cargo build`, the
-  web build, `npm install` and the browsers, the pinned tmux first on `PATH`), and runs through the recorder's generic
-  mode, since its Playwright mode pins the main config; a minute or two. Not in CI, and not part of the full browser
-  suite. Run it when the grid client's handling of a live stack, the helm's grid relay, the supervisor's grid streams or
-  the stack script's supervisor arguments change.
+  ready line, and draws the agent's echo of a line typed into it (`grid-terminal.spec.ts`); the helm lists the session's
+  agent and a tab opened beside it as new terminals with the switch reported on, and the session details name them so
+  with no migration band (`migration.spec.ts`). Needs what the browser suite needs (`cargo build`, the web build,
+  `npm install` and the browsers, the pinned tmux first on `PATH`), and runs through the recorder's generic mode, since
+  its Playwright mode pins the main config; a minute or two. Not in CI, and not part of the full browser suite. Run it
+  when the grid client's handling of a live stack, the helm's grid relay, the supervisor's grid streams or the stack
+  script's supervisor arguments change.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'helm terminal relay' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p farhelm-helm --lib -E 'test(/^terminal::tests::/) | test(/^client::tests::/)'`
   — the helm's terminal WebSocket (`crates/farhelm-helm/src/terminal.rs`) and its supervisor client
   (`crates/farhelm-helm/src/client.rs`), in-process against stand-in supervisors: attach, takeover, refusals, the stream

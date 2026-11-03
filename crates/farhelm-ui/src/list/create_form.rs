@@ -9842,7 +9842,10 @@ mod tests {
     fn marking_a_replace_with_records_the_source_and_its_state() {
         let session = Session {
             status: SessionStatus::Exited { exit_code: Some(1) },
-            tabs: vec![crate::Tab { id: "t1".into() }],
+            tabs: vec![crate::Tab {
+                id: "t1".into(),
+                kind: None,
+            }],
             ..row_specimen("s1")
         };
         let clone = prefill_from(&session, 4);

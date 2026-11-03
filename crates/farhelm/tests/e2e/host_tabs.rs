@@ -402,7 +402,9 @@ async fn a_host_tab_beside_a_host_agent_opens_attaches_and_closes() {
 /// session created with the switch off, with one tmux tab, and two host tabs
 /// opened after a restart with the switch on (each at the agent window's
 /// size): the session lists the tmux tab, then the two host tabs in opening
-/// order. A takeover by a client attaching one host tab displaces a client
+/// order, each reporting its kind (tmux, host, host) beside the tmux agent's
+/// and the switch now on, which is the mixed session the client's migration
+/// band asks to reopen its old tab. A takeover by a client attaching one host tab displaces a client
 /// holding the tmux agent and the other host tab, both. Another session has
 /// a host tab of its own. Once the agent is stopped, a Delete guarded on
 /// nothing alive is refused for 3 open tabs and ends nothing; an
@@ -438,6 +440,32 @@ async fn a_mixed_session_lists_tmux_tabs_first_and_its_delete_ends_its_tab_hosts
         vec![tmux_tab.id.clone(), first.id.clone(), second.id.clone()],
         "tmux tabs first, then host tabs in the order they were opened"
     );
+    // Each tab reports the kind of terminal it was found as, in the open
+    // reply and in the listing: what the client's migration band names an
+    // old tab by, and its session details show.
+    assert_eq!(tmux_tab.kind, Some(farhelm_proto::TerminalKind::Tmux));
+    assert_eq!(first.kind, Some(farhelm_proto::TerminalKind::Host));
+    let listed = client
+        .list_sessions()
+        .await
+        .expect("list")
+        .sessions
+        .into_iter()
+        .find(|listed| listed.id == session.id)
+        .expect("the session is listed");
+    assert_eq!(
+        listed.tabs.iter().map(|tab| tab.kind).collect::<Vec<_>>(),
+        vec![
+            Some(farhelm_proto::TerminalKind::Tmux),
+            Some(farhelm_proto::TerminalKind::Host),
+            Some(farhelm_proto::TerminalKind::Host),
+        ]
+    );
+    assert_eq!(
+        listed.agent_terminal,
+        Some(farhelm_proto::TerminalKind::Tmux)
+    );
+    assert!(listed.supervisor_creates_host_terminals);
     let hosts = [
         tab_host(&sup, &session.id, &first.id).await,
         tab_host(&sup, &session.id, &second.id).await,

@@ -706,6 +706,12 @@ pub(crate) fn SessionView(
     // was closed. `poll_sequence` below is the counter both sides read.
     let mut opened_tabs = use_signal(Vec::<(String, u64)>::new);
     let mut closed_tabs = use_signal(HashSet::<String>::new);
+    // The kind each optimistic open's reply gave (old or new terminal), by
+    // tab id, so the migration band and the session details can name a tab
+    // the strip already shows before any detail read lists it
+    // (`tabs::visible_tab_infos`). An entry goes when its tab leaves
+    // `opened_tabs`: at an accepted detail read, and when the tab is closed.
+    let mut opened_tab_kinds = use_signal(HashMap::<String, farhelm_proto::TerminalKind>::new);
     // How many detail reads have been STARTED by this view. Incremented at
     // each fetch's launch, so a read's own index is the value it took
     // before incrementing, and an optimistic open recording the current
@@ -898,6 +904,9 @@ pub(crate) fn SessionView(
                     opened_tabs.write().retain(|(id, observed_from)| {
                         !live.contains(id.as_str()) && index < *observed_from
                     });
+                    opened_tab_kinds
+                        .write()
+                        .retain(|id, _| opened_tabs.peek().iter().any(|(opened, _)| opened == id));
                     closed_tabs.write().retain(|id| live.contains(id.as_str()));
                     occurrences.observe(&fresh);
                     workspace_occurrences.observe(&fresh);
@@ -1481,6 +1490,9 @@ pub(crate) fn SessionView(
                     // not have.
                     let observed_from = poll_sequence.peek().to_owned();
                     opened_tabs.write().push((tab.id.clone(), observed_from));
+                    if let Some(kind) = tab.kind {
+                        opened_tab_kinds.write().insert(tab.id.clone(), kind);
+                    }
                     selected.set(Some(tab.id));
                 }
                 // The supervisor's own words, verbatim: a vanished working
@@ -1513,7 +1525,10 @@ pub(crate) fn SessionView(
         let base = close_base.clone();
         let session_id = close_session_id.clone();
         spawn(async move {
-            let tab = crate::Tab { id: tab_id.clone() };
+            let tab = crate::Tab {
+                id: tab_id.clone(),
+                kind: None,
+            };
             match close_tab(&base, &session_id, &tab).await {
                 Ok(()) => {
                     // Acting on a response already in hand, not guessing:
@@ -1532,6 +1547,7 @@ pub(crate) fn SessionView(
                     // at which point the stale optimistic entry would
                     // resurrect a tab that does not exist.
                     opened_tabs.write().retain(|(id, _)| id != &tab_id);
+                    opened_tab_kinds.write().remove(&tab_id);
                     if selected.read().as_deref() == Some(tab_id.as_str()) {
                         selected.set(None);
                     }
@@ -1804,6 +1820,15 @@ pub(crate) fn SessionView(
     // captures its own dialog's warning from the same render, below.
     let restart_prompt_stops = crate::status::restart_prompt_stops_agent(&shown.status);
     let tabs = visible_tabs(&shown.tabs, &opened_tabs.read(), &closed_tabs.read());
+    // The same tabs with their kinds, for the surfaces that name tabs by the
+    // strip's labels (the migration band, the details' terminal kinds). They
+    // take only this type, never `shown.tabs` (`tabs::VisibleTabs`).
+    let visible_tab_infos = crate::tabs::visible_tab_infos(
+        &shown.tabs,
+        &opened_tabs.read(),
+        &opened_tab_kinds.read(),
+        &closed_tabs.read(),
+    );
     // Both of these are DERIVED rather than written back to their signals
     // when they go stale, and that is safe precisely because tab ids are
     // never reused (farhelm-proto's `TabInfo::id`): an id that has left the
@@ -2452,6 +2477,10 @@ pub(crate) fn SessionView(
                     }
                 }
             }
+            // The move to new terminals (`migration`): first below the top
+            // row, so it is the first notice a visit to an old session shows,
+            // and given the header's own reading of whether Restart can run.
+            crate::migration::MigrationBand { session: shown.clone(), tabs: visible_tab_infos.clone(), restart_available }
             // names what the offer is NOW), so truncating them would hide the
             // one sentence that says what to do next. Conditional, so they
             // cost the steady state nothing.
@@ -2978,6 +3007,15 @@ pub(crate) fn SessionView(
                 }
                 if let Some(checkout) = &shown.working_copy {
                     crate::icons::ManagedCheckoutMark { checkout: checkout.clone(), cwd: shown.cwd.clone() }
+                }
+                // Which kind each terminal is, once kinds can differ
+                // (`migration::terminal_kinds`); the label is short, the
+                // description names every terminal.
+                if let Some(kinds) = crate::migration::terminal_kinds(&shown, &visible_tab_infos) {
+                    span { class: "session-details-terminals", "data-tooltip": "{kinds.description}",
+                        "{kinds.label}"
+                        span { class: "visually-hidden", ": {kinds.description}" }
+                    }
                 }
                 button {
                     r#type: "button",
@@ -3915,6 +3953,8 @@ mod tests {
             pinned: false,
             notifications: Vec::new(),
             notifications_read_through: 0,
+            agent_terminal: None,
+            supervisor_creates_host_terminals: false,
         }
     }
 
@@ -4458,6 +4498,8 @@ mod tests {
                 pinned: false,
                 notifications: Vec::new(),
                 notifications_read_through: 0,
+                agent_terminal: None,
+                supervisor_creates_host_terminals: false,
             }
         }
         // The view shows B (learned from its own read); the parent's
@@ -4517,6 +4559,8 @@ mod tests {
                 pinned: false,
                 notifications: Vec::new(),
                 notifications_read_through: 0,
+                agent_terminal: None,
+                supervisor_creates_host_terminals: false,
             }
         }
 
@@ -4614,6 +4658,8 @@ mod tests {
             pinned: false,
             notifications: Vec::new(),
             notifications_read_through: 0,
+            agent_terminal: None,
+            supervisor_creates_host_terminals: false,
         };
         assert_eq!(
             status_badge_destination(&unknown),
@@ -4689,6 +4735,8 @@ mod tests {
                 pinned: false,
                 notifications: Vec::new(),
                 notifications_read_through: 0,
+                agent_terminal: None,
+                supervisor_creates_host_terminals: false,
             }
         }
         assert!(
@@ -4765,6 +4813,8 @@ mod tests {
             pinned: false,
             notifications: Vec::new(),
             notifications_read_through: 0,
+            agent_terminal: None,
+            supervisor_creates_host_terminals: false,
         };
         assert!(seen_effect_eligible(&already_seen));
         assert_eq!(

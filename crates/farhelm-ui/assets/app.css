@@ -3326,6 +3326,41 @@ a:any-link,
 .claude-trust-band-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .claude-trust-band-actions button { padding: 4px 8px; }
 .checkout-claude-trust { margin-top: 18px; }
+
+/* The move to new terminals (`migration.rs`): a flow row above the terminal
+   like the trust hint, but loud, in the filled amber the other "act on this"
+   bands use, because it is the only reminder an old session gets. Amber, not
+   red: nothing is broken, and the band says to move "when convenient". */
+.migration-band {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--warn-border);
+  background: var(--warn-bg);
+  color: var(--warn-bright);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.migration-band-copy { flex: 1 1 320px; min-width: 0; }
+.migration-band-copy strong { color: var(--warn-bright); }
+.migration-band-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.migration-band-link { color: var(--warn-bright); font-weight: 600; white-space: nowrap; }
+.migration-band-dismiss { padding: 2px 8px; }
+
+/* The session details' terminal kinds: quiet, like the age beside it, and
+   the first thing to give way when the bar runs out of room. */
+.session-details-terminals {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-dim);
+  font-size: 12px;
+}
 .claude-trust-caution {
   background: var(--warn-bg-dim);
   border: 1px solid var(--warn-border);

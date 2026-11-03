@@ -4122,3 +4122,41 @@ async fn a_new_tab_window_is_presized_to_the_agent_windows_geometry() {
     );
     h.client.detach(chan).await;
 }
+
+/// Every reply names the agent's and each tab's terminal as old (tmux) and
+/// reports that this supervisor does not create new terminals, when the
+/// supervisor's switch is off (the default, which every shipped supervisor
+/// runs until the switch-on release).
+///
+/// Why: the client shows the migration band and the session details'
+/// terminal kinds from exactly these fields, and a supervisor still on old
+/// terminals must show neither (the README and docs screenshots run such a
+/// supervisor). Spec: the create reply carries `agent_terminal: tmux` and
+/// no switch; an opened tab's reply and the listing carry `kind: tmux` for
+/// it; the listing carries `agent_terminal: tmux` and
+/// `supervisor_creates_host_terminals: false`.
+#[farhelm_testtrace::test]
+async fn replies_name_tmux_terminals_and_report_the_switch_off() {
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+    let _cleanup = MarkerCleanupGuard::new(session.id.clone());
+    assert_eq!(
+        session.agent_terminal,
+        Some(farhelm_proto::TerminalKind::Tmux),
+        "the create reply names the agent's terminal"
+    );
+    assert!(!session.supervisor_creates_host_terminals);
+
+    let tab = h.client.open_tab(&session.id).await.expect("open a tab");
+    assert_eq!(tab.kind, Some(farhelm_proto::TerminalKind::Tmux));
+    let info = listed(&h.client, &session.id).await;
+    assert_eq!(info.agent_terminal, Some(farhelm_proto::TerminalKind::Tmux));
+    assert_eq!(
+        info.tabs
+            .iter()
+            .map(|listed| (listed.id.as_str(), listed.kind))
+            .collect::<Vec<_>>(),
+        vec![(tab.id.as_str(), Some(farhelm_proto::TerminalKind::Tmux))]
+    );
+    assert!(!info.supervisor_creates_host_terminals);
+}

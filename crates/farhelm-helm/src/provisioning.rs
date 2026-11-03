@@ -4798,6 +4798,7 @@ mod tests {
         session.tabs = (0..tabs)
             .map(|index| farhelm_proto::TabInfo {
                 id: format!("{title}-tab-{index}"),
+                kind: None,
             })
             .collect();
         session

@@ -16,7 +16,7 @@
 //! listing be reasoned about, and tested, without a socket in sight.
 
 use super::core::{SessionEntry, Supervisor};
-use super::status::{KnownTmuxNames, entry_info};
+use super::status::{KnownTmuxNames, entry_info, report_new_terminals};
 use super::terminals::Terminal;
 use farhelm_proto::{LIST_SESSIONS_CAP, SessionInfo};
 use std::collections::HashMap;
@@ -206,7 +206,12 @@ pub(crate) async fn list_all(sup: &Supervisor) -> anyhow::Result<ListReply> {
             Listed::Held(held) => held.as_ref().clone(),
         })
         .collect();
-    let sessions = sup.store.project_checkout_metadata(sessions).await?;
+    let mut sessions = sup.store.project_checkout_metadata(sessions).await?;
+    // Every row, held ones included: the switch is this supervisor's, not
+    // the entry's (`report_new_terminals`).
+    for session in &mut sessions {
+        report_new_terminals(sup.new_terminals(), session);
+    }
     *sup.last_listed.lock().expect("last-listed mutex poisoned") = sessions
         .iter()
         .map(|row| (row.id.clone(), row.clone()))
@@ -249,6 +254,8 @@ mod tests {
             github_repo: None,
             working_copy: None,
             notifications: Vec::new(),
+            agent_terminal: None,
+            supervisor_creates_host_terminals: false,
         }
     }
 
