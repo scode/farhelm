@@ -24,6 +24,10 @@ libc.workspace = true
 # bug.
 serde_json.workspace = true
 shell-words.workspace = true
+# `spawn-terminal-host` drives the supervisor's async host spawn and builds
+# the host's child spec from the host crate's own types.
+terminal-host.workspace = true
+tokio.workspace = true
 
 [dev-dependencies]
 farhelm-proto.workspace = true

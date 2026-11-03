@@ -137,10 +137,12 @@ desktop smoke, including the public-to-local session identity boundary), `script
 sweep's workspace nextest runs the same tests on the same pinned tmux), the macOS-only uninstall acceptance (the
 rehearsal's macOS leg runs it in step 4), and the emulator parity's `#[ignore]`d replay of recorded agent sessions
 (`emulator_parity::recordings`), which needs private recordings kept outside the repository; `.agents/validation.md`
-gives its manual command. The focused macOS CI job's terminal host step (the host crate, its entry test in the CLI, and
-the supervisor's spawning, its client, discovery, the test-state cleanup and the stop command) runs only with
-`gh workflow run ci.yml --ref <branch> -f suite=uninstall-macos`; its Linux side is part of the sweep's workspace
-nextest.
+gives its manual command. Also not here: `scripts/test-start-stack-cleanup.sh`, a by-hand check of
+`e2e/start-stack.sh`'s cleanup that `.agents/validation.md` names for changes to it; the sweep's browser phase stops
+every stack it boots through that same cleanup. The focused macOS CI job's terminal host step (the host crate, its entry
+test in the CLI, and the supervisor's spawning, its client, discovery, the test-state cleanup and the stop command) runs
+only with `gh workflow run ci.yml --ref <branch> -f suite=uninstall-macos`; its Linux side is part of the sweep's
+workspace nextest.
 
 The workspace nextest selection includes Linux `containerized_sessions` coverage. Rootless Podman and the offline
 `docker.io/library/ubuntu:24.04` image are required; tests never pull. An intentional opt-out uses

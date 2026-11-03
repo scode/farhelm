@@ -262,6 +262,7 @@ stop_answering() {
     ANSWERING_SUPERVISOR_PID=""
   fi
   if [ -n "$ANSWERING_STATE" ]; then
+    stop_terminal_hosts "$ANSWERING_STATE"
     timeout 10 tmux -S "$ANSWERING_STATE/tmux.sock" kill-server 2>/dev/null
     ANSWERING_STATE=""
   fi
@@ -269,6 +270,48 @@ stop_answering() {
 PASS=""
 APPEARANCE_STATES=()
 APPEARANCE_PROFILES=()
+# State directories whose terminal hosts could not be confirmed stopped.
+# Teardown keeps the whole run directory when any is listed, pass or fail.
+HOSTS_NOT_STOPPED=()
+
+# Ends every terminal host whose socket is in state directory $1, after the
+# supervisor that may have started them is gone: hosts outlive their
+# supervisor by design (its stop leaves them running), so nothing else ends
+# them. `farhelm internal stop-terminal-hosts` is the command an uninstall
+# runs (SPEC_impl.md, "Terminal host"); it exits 0 only when every host is
+# confirmed gone, and needs an absolute state directory. A directory with no
+# `hosts` entry never had a host and costs nothing. Anything else is listed
+# in HOSTS_NOT_STOPPED: removing that directory would delete the sockets
+# that are the only way left to reach and end those hosts, so teardown keeps
+# it, and the rerun command is printed. The command's per-host lines are
+# appended to a log in the run directory. Bounded twice: by the command's
+# own 30 s budget, and by `timeout` against a wedge.
+stop_terminal_hosts() {
+  local dir="$1"
+  [ -e "$dir/hosts" ] || [ -L "$dir/hosts" ] || return 0
+  case "$dir" in
+    /*) ;;
+    *) dir="$PWD/$dir" ;;
+  esac
+  if [ -n "${BUILT_FARHELM:-}" ] &&
+    timeout 60 "$BUILT_FARHELM" internal stop-terminal-hosts --state-dir "$dir" \
+      </dev/null >/dev/null 2>>"$X/stop-terminal-hosts.log"; then
+    return 0
+  fi
+  HOSTS_NOT_STOPPED+=("$dir")
+  echo "terminal hosts in $dir could not be confirmed stopped (see $X/stop-terminal-hosts.log);" \
+    "retry with: ${BUILT_FARHELM:-farhelm} internal stop-terminal-hosts --state-dir $dir" >&2
+  return 1
+}
+
+# Records state directory $1 as not scanned for terminal hosts, because the
+# supervisor that could still start one there was not confirmed gone. Like
+# a failed stop, it keeps the run directory, with or without a `hosts`
+# entry yet: that supervisor may still make one.
+hosts_left_unscanned() {
+  HOSTS_NOT_STOPPED+=("$1")
+  echo "the supervisor in $1 was not confirmed stopped, so its terminal hosts were not stopped either" >&2
+}
 
 # Whether state directory $1 holds nothing but an empty `helm-token.lock` (or
 # nothing at all): what a launch that refused before writing any state
@@ -344,10 +387,15 @@ teardown() {
     [ -f "$X/$p.pid" ] && kill "$(cat "$X/$p.pid")" 2>/dev/null
   done
   # The app's supervisor outlives the app, so it is stopped here by its
-  # record, before its tmux server goes.
-  stop_recorded_supervisor "$X/state"
-  for state in "${APPEARANCE_STATES[@]}"; do
-    stop_recorded_supervisor "$state"
+  # record, before its tmux server goes. Then its terminal hosts, which a
+  # supervisor's stop leaves running, but only once that supervisor is
+  # confirmed gone: one still running could start a host after the scan.
+  for state in "$X/state" "${APPEARANCE_STATES[@]}"; do
+    if stop_recorded_supervisor "$state"; then
+      stop_terminal_hosts "$state"
+    else
+      hosts_left_unscanned "$state"
+    fi
   done
   tmux -S "$X/state/tmux.sock" kill-server 2>/dev/null
   for state in "${APPEARANCE_STATES[@]}"; do
@@ -367,7 +415,9 @@ teardown() {
       awk '{print $1}' | xargs -r -n1 systemctl --user stop 2>/dev/null
   fi
 
-  if [ -n "$PASS" ] && [ -n "$APPEARANCE_MODE" ]; then
+  if [ "${#HOSTS_NOT_STOPPED[@]}" -gt 0 ]; then
+    echo "state kept at $X: terminal hosts may still run in ${HOSTS_NOT_STOPPED[*]}" >&2
+  elif [ -n "$PASS" ] && [ -n "$APPEARANCE_MODE" ]; then
     # The profile is disposable fixture state; the retained images and JSON are
     # the evidence. A failure keeps everything for diagnosis instead.
     for state in "${APPEARANCE_STATES[@]}" "${APPEARANCE_PROFILES[@]}"; do
@@ -1760,6 +1810,21 @@ assert any(h["kind"] == "local" and h["state"]["phase"] == "connected" for h in 
   [ -S "$ANSWERING_STATE/supervisor.sock" ] ||
     fail "the hand-started answering supervisor never created its socket (see $ANSWERING_SUPERVISOR_LOG)"
 
+  # A real terminal host in this state directory, started the way a
+  # supervisor starts one, standing in for a terminal the supervisor would
+  # have started: stop_answering below must end it through the teardown's
+  # own stop_terminal_hosts, which nothing else in this smoke reaches while
+  # supervisors start no hosts. The fixture prints "<pid> <socket>".
+  BUILT_FIXTURES="$TARGET_DIR/debug/farhelm-fixtures"
+  [ -x "$BUILT_FIXTURES" ] || fail "farhelm-fixtures missing at $BUILT_FIXTURES"
+  ANSWERING_HOST=$("$BUILT_FIXTURES" spawn-terminal-host --farhelm "$BUILT_FARHELM" \
+    --state-dir "$ANSWERING_STATE") || fail "starting a terminal host in the answering state directory"
+  read -r ANSWERING_HOST_PID ANSWERING_HOST_SOCKET <<<"$ANSWERING_HOST"
+  case "$(ps -ww -p "$ANSWERING_HOST_PID" -o args= 2>/dev/null)" in
+    *"internal terminal-host --socket $ANSWERING_HOST_SOCKET") ;;
+    *) fail "the planted terminal host is not running as one: $ANSWERING_HOST" ;;
+  esac
+
   # A path inside this run's own private directory, deliberately never
   # created — the same reasoning as the missing-tmux preflight leg above
   # applies here: a global path like `/nonexistent/tmux` could exist on
@@ -1801,6 +1866,20 @@ assert any(h["kind"] == "local" and h["state"]["phase"] == "connected" for h in 
     fail "the bad FARHELM_TMUX candidate must never be invoked when a supervisor already answers"
 
   stop_answering
+  [ "${#HOSTS_NOT_STOPPED[@]}" -eq 0 ] ||
+    fail "teardown could not confirm the answering state's terminal host stopped: ${HOSTS_NOT_STOPPED[*]}"
+  # Bounded: the stop already confirmed the host gone; this only lets the
+  # kernel finish the exit.
+  for _ in $(seq 1 50); do
+    case "$(ps -o stat= -p "$ANSWERING_HOST_PID" 2>/dev/null)" in
+      '' | Z*) break ;;
+    esac
+    sleep 0.1
+  done
+  case "$(ps -o stat= -p "$ANSWERING_HOST_PID" 2>/dev/null)" in
+    '' | Z*) ;;
+    *) fail "the answering state's terminal host $ANSWERING_HOST_PID still runs after teardown" ;;
+  esac
 
   echo "== PASS: embedded helm, dual auth, local supervisor, and a tmux-held session survive restart"
   PASS=1

@@ -166,8 +166,8 @@ checkout_git_config="$state/checkout-git-config"
 # Assigned BEFORE the trap below, not where it is first used. The cleanup
 # expands it, so a signal arriving while it was still unset expanded to
 # `tmux -S /tmux.sock kill-server` — a command aimed at a path outside this
-# run entirely. Set-then-trap is the ordering that makes that
-# unconstructible rather than unlikely.
+# run entirely, as the terminal-host stop's `/hosts` would be. Set-then-trap
+# is the ordering that makes that unconstructible rather than unlikely.
 remote_state="$state/remote"
 # Where terminal-multihost.spec.ts records a replacement "remote" supervisor
 # it starts after taking the original down. The replacement is detached from
@@ -255,6 +255,88 @@ printf '%s\n' "export PATH=$structured_bin:\$PATH" \
 bash_shell=$(command -v bash) || exit 1
 [ -n "$bash_shell" ] && [ -x "$bash_shell" ] || exit 1
 
+# End every terminal host whose socket is in state dir $1 (an absolute
+# path), writing the command's per-host lines to $2; succeed only when none
+# may still run. `farhelm internal stop-terminal-hosts` is the same command
+# an uninstall runs (SPEC_impl.md, "Terminal host"): it shuts each host down
+# through its protocol, or ends it with a signal checked against the host's
+# identity, and exits 0 only when every one is confirmed gone. It touches
+# nothing outside that one state dir's `hosts` directory, so another stack's
+# hosts are never reached.
+#
+# A state dir without a `hosts` entry never had a host, and costs nothing
+# (no process starts). One with it gets the command, and anything but exit 0
+# means a host may still run. The lines go to a file in the run's own dir,
+# not to stderr: this runs from the cleanup, possibly after Playwright died,
+# and a write to a pipe nobody reads would fail the command for nothing.
+# `9>&-` keeps the run's liveness lock out of a child, as for every other
+# spawn here.
+stop_terminal_hosts() {
+  local dir="$1" log="$2"
+  [ -e "$dir/hosts" ] || [ -L "$dir/hosts" ] || return 0
+  "$bin" internal stop-terminal-hosts --state-dir "$dir" </dev/null >/dev/null 2>"$log" 9>&-
+}
+
+# Whether pid $1 may still run. Gone means confirmed gone: `kill -0` fails,
+# or `ps` reports a zombie (it can start nothing, and this shell may not have
+# reaped its own child yet when it looks). A `ps` that fails or prints
+# nothing while `kill -0` still succeeds (no `ps`, a fork that failed under
+# load) confirms nothing, so the process counts as running, which keeps the
+# wait below going and, at its deadline, the directory.
+still_running() {
+  local stat
+  kill -0 "$1" 2>/dev/null || return 1
+  stat="$(ps -p "$1" -o stat= 2>/dev/null)" || stat=""
+  case "$stat" in
+    Z*) return 1 ;;
+    '') kill -0 "$1" 2>/dev/null || return 1 ;;
+  esac
+  return 0
+}
+
+# What pid $1 is to THIS stack, printed as one word: `ours` when it runs a
+# supervisor on this stack's remote state dir (the replacement's pid comes
+# from a file, and a stale one may have been reused by an unrelated
+# process), `other` when it is confirmed gone or confirmed to run something
+# else, and `unknown` when it may still run but could not be inspected. A
+# replacement is signalled only when `ours`, and counts as gone only when
+# `other`.
+replacement_state() {
+  local args
+  if args="$(ps -p "$1" -o args= 2>/dev/null)" && [ -n "$args" ]; then
+    case "$args" in
+      *" supervisor run --state-dir $remote_state "*) echo ours ;;
+      *) echo other ;;
+    esac
+  elif kill -0 "$1" 2>/dev/null; then
+    echo unknown
+  else
+    echo other
+  fi
+}
+
+# Wait about $1 seconds (between $1 - 1 and $1: bash's SECONDS counts whole
+# seconds) for every process here that can start a terminal host (the
+# helm, both supervisors, a replacement remote) to be gone, and say whether
+# they all are. The cleanup has already signalled them. A clock rather than
+# a count of polls, because each poll runs `ps`, which a loaded machine
+# makes slow, and the bound has to fit inside Playwright's grace.
+creators_gone() {
+  local end=$((SECONDS + $1)) pid alive
+  while :; do
+    alive=false
+    for pid in ${helm_pid:-} ${sup_pid:-} ${remote_sup_pid:-}; do
+      still_running "$pid" && alive=true
+    done
+    if [ -n "${replacement:-}" ] && [ "$(replacement_state "$replacement")" != other ]; then
+      alive=true
+    fi
+    [ "$alive" = false ] && return 0
+    [ "$SECONDS" -ge "$end" ] && return 1
+    sleep 0.1
+  done
+}
+
 # Trap installed BEFORE anything is spawned: a TERM during the socket
 # wait below would otherwise exit with no trap and orphan the supervisor
 # plus its daemonized tmux server, which nothing reaps until a later
@@ -274,28 +356,60 @@ cleanup() {
   # Signalled only after confirming the recorded pid still runs a supervisor
   # on THIS stack's remote state dir: a stale file's pid may have been reused
   # by an unrelated process.
+  replacement=""
   if [ -f "$remote_replacement_pid" ]; then
-    replacement=""
     read -r replacement <"$remote_replacement_pid" 2>/dev/null
     case "$replacement" in
-      '' | *[!0-9]*) ;;
+      '' | *[!0-9]*) replacement="" ;;
       *)
-        case "$(ps -p "$replacement" -o args= 2>/dev/null)" in
-          *" supervisor run --state-dir $remote_state "*) kill "$replacement" 2>/dev/null ;;
+        # An `unknown` one is not signalled (it might not be ours) but is
+        # still waited for below, since it might be.
+        case "$(replacement_state "$replacement")" in
+          ours) kill "$replacement" 2>/dev/null ;;
+          other) replacement="" ;;
         esac
         ;;
     esac
   fi
   rm -f "$stack_info"
   rm -f "$auth_state"
-  # The tmux servers daemonize out of this process group, so killing a
-  # supervisor does not reap its own; each needs its own shutdown, and the
-  # "remote" has one of its own precisely because its state dir is
-  # isolated.
-  tmux -S "$state/tmux.sock" kill-server 2>/dev/null
-  tmux -S "$remote_state/tmux.sock" kill-server 2>/dev/null
-  rm -rf "$state"
-  stack_mark "cleanup: done"
+  # Terminal hosts outlive their supervisor by design (a supervisor's stop
+  # leaves them running), so each state dir's hosts are ended here, before
+  # the directory that holds their sockets goes. The scan that finds them
+  # is only final once nothing can start another: the TERMs above do not
+  # wait, and a helm or supervisor still finishing a request could start a
+  # host after the scan, whose socket the removal below would then delete.
+  # So the helm and every supervisor must be seen gone first, within a
+  # bound that fits inside Playwright's grace. One that is still running
+  # keeps the directory, unscanned and with its tmux servers, for the sweep,
+  # which kills those too.
+  hosts_stopped=true
+  if creators_gone 3; then
+    # The tmux servers daemonize out of this process group, so killing a
+    # supervisor does not reap its own; each needs its own shutdown, and
+    # the "remote" has one of its own precisely because its state dir is
+    # isolated. Only now that no supervisor can start another one, and
+    # before the host stop, which can take a while: Playwright SIGKILLs
+    # this whole group 5 s after its TERM, and a cheap step must not wait
+    # behind a slow one.
+    tmux -S "$state/tmux.sock" kill-server 2>/dev/null
+    tmux -S "$remote_state/tmux.sock" kill-server 2>/dev/null
+    stop_terminal_hosts "$state" "$state/stop-terminal-hosts.log" || hosts_stopped=false
+    stop_terminal_hosts "$remote_state" "$state/stop-terminal-hosts-remote.log" || hosts_stopped=false
+  else
+    hosts_stopped=false
+    stack_mark "cleanup: the helm or a supervisor is still running; its terminal hosts cannot be counted yet"
+  fi
+  # A host that may still run keeps the directory: removing it would delete
+  # the host's socket, the only way left to reach and end it. Kept, with
+  # this script's lock released at exit, it is a dead run to the sweep
+  # (farhelm-teststate), which ends its hosts and removes it later.
+  if [ "$hosts_stopped" = true ]; then
+    rm -rf "$state"
+    stack_mark "cleanup: done"
+  else
+    stack_mark "cleanup: terminal hosts not confirmed stopped (see $state/stop-terminal-hosts*.log); keeping $state for the sweep"
+  fi
 }
 trap cleanup EXIT
 # The marker records when the trap RAN, which is not when the signal

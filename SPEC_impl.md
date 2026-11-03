@@ -1803,7 +1803,12 @@ directory within an owned run directory (its dead-run sweep, and every `TestDir`
 directory for a later sweep when it cannot confirm a host ended or could not read the whole tree. A socket that only
 refuses connections counts as left by a killed host after three seconds of refusals, never sooner, since on macOS a live
 host with a full backlog refuses too, and then only when no process of the same user still serves that socket by its
-command line.
+command line. The e2e fixtures and the supervisor's own unit tests keep their state in such directories. The shell
+harnesses (the browser suite's `e2e/start-stack.sh` and the desktop smoke) instead run
+`farhelm internal stop-terminal-hosts` on each state directory that has a `hosts` entry, but only once the supervisor
+that could start another host there is seen gone (the stack waits for its helm too). They keep the directory when that
+supervisor is not gone within its bound or the command does not exit 0. The stack's directory is then left to the sweep;
+the desktop smoke's run directory stays for a person to retry.
 
 ### Terminal snapshots
 
