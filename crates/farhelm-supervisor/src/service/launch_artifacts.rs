@@ -13,6 +13,7 @@
 //! side of a launch's failure classification.
 
 use super::core::{SessionEntry, Supervisor};
+use super::terminals::Terminal;
 use crate::launch::LaunchArtifacts;
 use crate::store::{LastOutcome, SessionStore};
 use anyhow::Context;
@@ -49,6 +50,10 @@ pub(crate) async fn append_launch_excerpt(
     let (Some(fence), Some(terminal)) = (fence, entry.terminal.as_ref()) else {
         return detail;
     };
+    // Both halves are tmux's: the fence is a window option and a history
+    // sample stamped on the pane (`LaunchExcerptFence`), and the excerpt is
+    // tmux's guarded capture of that pane.
+    let Terminal::Tmux(terminal) = terminal;
     match sup
         .tmux
         .capture_launch_excerpt(&terminal.tmux_name, &terminal.pane, &fence)

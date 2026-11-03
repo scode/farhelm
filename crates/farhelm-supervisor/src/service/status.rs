@@ -164,7 +164,8 @@ fn terminal_evidence<'a>(
     known: &KnownTmuxNames,
 ) -> PaneEvidence<'a> {
     terminal.map_or(PaneEvidence::Absent, |terminal| {
-        pane_evidence(&terminal.pane, &terminal.tmux_name, pane_states, known)
+        let Terminal::Tmux(tmux) = terminal;
+        pane_evidence(&tmux.pane, &tmux.tmux_name, pane_states, known)
     })
 }
 
@@ -458,15 +459,12 @@ pub(crate) fn entry_info(
         .terminal
         .as_ref()
         .map(|terminal| {
-            tabs_from_pane_states(
-                pane_states.values(),
-                &terminal.tmux_name,
-                Some(&terminal.pane),
-            )
-            .into_iter()
-            .filter(|tab| !tab.dead)
-            .map(|tab| TabInfo { id: tab.id })
-            .collect()
+            let Terminal::Tmux(tmux) = terminal;
+            tabs_from_pane_states(pane_states.values(), &tmux.tmux_name, Some(&tmux.pane))
+                .into_iter()
+                .filter(|tab| !tab.dead)
+                .map(|tab| TabInfo { id: tab.id })
+                .collect()
         })
         .unwrap_or_default();
     let (mut status, mut annotation) = session_status(entry, pane_states, known);
@@ -529,7 +527,7 @@ pub(crate) async fn dead_pane_exit_code(
     terminal: Option<&Terminal>,
     session_id: &str,
 ) -> Option<i32> {
-    let terminal = terminal?;
+    let Terminal::Tmux(terminal) = terminal?;
     match sup.tmux.pane_states().await {
         Ok(states) => states
             .get(&terminal.pane)
@@ -759,7 +757,7 @@ pub(crate) async fn observe_entry_with_capture_budget(
                 pane: entry
                     .terminal
                     .as_ref()
-                    .map(|terminal| terminal.pane.clone()),
+                    .map(|terminal| terminal.recorded_pane().to_owned()),
             });
             return Ok(EntryObservation {
                 sentinel: Some(detail),

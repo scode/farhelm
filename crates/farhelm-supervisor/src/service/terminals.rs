@@ -1,18 +1,24 @@
 //! Terminal identity and the output-reap and sink lifecycles built around it.
 //!
 //! `TerminalId`/`Terminal` name which of a session's terminals (the agent
-//! or one of its tabs) a request means and which tmux handles back it;
+//! or one of its tabs) a request means and what backs it (today always a
+//! tmux pane, `TmuxTerminal`);
 //! `AttachmentKey`/`ActiveAttach`/`InputRoute` are the bookkeeping an
 //! `Attach` installs and every later `Resize`/`Detach`/input frame looks
-//! up by. `SessionSinkHandle`/`run_session_sink` are the per-tmux-session
+//! up by, with `AttachBackend` holding an attachment's kind-specific
+//! clients the way `Terminal` holds a terminal's handles.
+//! `SessionSinkHandle`/`run_session_sink` are the per-tmux-session
 //! control client every attachment shares, supervised independently of
 //! any one attachment's lifetime. The `Supervisor` extension methods below
 //! own the lifecycle transitions around those types: output-client cleanup
 //! barriers and per-session sink opening, handoff, reaping, and readiness.
 
-use super::core::{RequestError, SessionEntry, Supervisor, error_kind, truncate_for_error};
+use super::core::{
+    RequestError, SessionEntry, Supervisor, error_kind, truncate_for_error,
+    unknown_pane_owner_refusal,
+};
 use crate::store::LastOutcome;
-use crate::tmux::{InputClient, ReplayStreamCandidate, SessionSink};
+use crate::tmux::{InputClient, PaneProbe, ReplayStreamCandidate, SessionSink};
 use anyhow::Context;
 use farhelm_proto::{ErrorKind, Frame, RestartOffer, TerminalSelector};
 use std::collections::{HashMap, HashSet};
@@ -58,10 +64,158 @@ pub(crate) const TAB_LAUNCH_SETTLE_STEP: Duration = Duration::from_millis(25);
 /// The same struct describes the AGENT's terminal and a TAB's, because
 /// nothing below this level distinguishes them; which terminal a given
 /// value describes is the caller's [`TerminalId`], not a field here.
-#[derive(Clone)]
-pub(crate) struct Terminal {
+///
+/// Code that is tmux machinery by definition takes this type directly
+/// rather than a [`Terminal`], because no other kind of terminal can ever
+/// reach it and so there is nothing to decide there: Restart's spawn
+/// targets and failure handles (a respawned pane, a replacement window)
+/// and the tab open and close steps that drive a tmux window. Shared
+/// machinery whose present source merely happens to be tmux is not in that
+/// set and keeps the [`Terminal`] (or, for an attachment, an
+/// [`AttachBackend`]): the screen sampler, the tab process reaper, and an
+/// attachment's input, death observation and output lifecycle all apply
+/// to every kind of terminal, and stripping the kind before them would
+/// hide their tmux calls from the compiler.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct TmuxTerminal {
     pub(crate) tmux_name: String,
     pub(crate) pane: String,
+}
+
+/// One of a session's terminals, by the kind of process that backs it.
+///
+/// This is the seam that moving terminals out of tmux turns on: every
+/// place that holds a `Terminal` is a place where behavior must be decided
+/// per kind, and the compiler is what finds those places. It has one
+/// variant today so that adding the second (a terminal-host-backed
+/// terminal) fails to compile at every such decision point instead of
+/// silently treating the new kind as tmux. That only works while every
+/// consumer matches exhaustively, so there is deliberately no `_` arm
+/// anywhere and no `as_tmux()`-style accessor returning an `Option`: either
+/// would hand a new kind whatever the tmux path does without anyone
+/// deciding that it should.
+///
+/// The methods below are thin exhaustive dispatches for the operations
+/// several sites perform. Everything else destructures where it decides:
+/// `let Terminal::Tmux(tmux) = terminal;`, a closure parameter pattern
+/// such as `|Terminal::Tmux(tmux)|`, or a `match` whose arms are
+/// `Some(Terminal::Tmux(..))` and `None`. Each is irrefutable or
+/// exhaustive today and a compile error the moment a second variant
+/// exists, which is exactly the error the seam is for. A `let ... else` or
+/// an `if let` on a variant would be a silent catch-all, so neither is
+/// used on a `Terminal`.
+///
+/// `PartialEq` is what Attach's revalidation uses to ask whether a
+/// session still has the terminal it resolved before the lock was taken.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Terminal {
+    /// A tmux pane in the session's tmux session: every terminal before
+    /// terminal hosts.
+    Tmux(TmuxTerminal),
+}
+
+impl Terminal {
+    /// Whether this terminal's process is running, dead, gone, or (for
+    /// tmux) now reported under another tmux session: the liveness question
+    /// Stop, Restart, Delete (and its consent guard), prompt delivery and
+    /// a tab's process reap each ask before acting. [`PaneProbe`]'s
+    /// three-way answer, and why each caller owns its own reading of it,
+    /// are [`crate::tmux::TmuxDriver::pane_process`]'s contract.
+    pub(crate) async fn probe_process(&self, sup: &Supervisor) -> anyhow::Result<PaneProbe> {
+        match self {
+            Terminal::Tmux(tmux) => sup.tmux.pane_process(&tmux.tmux_name, &tmux.pane).await,
+        }
+    }
+
+    /// The refusal for a [`PaneProbe::ForeignOwner`] answer from
+    /// [`Self::probe_process`] whose owner this supervisor does not know.
+    /// The wording and why it refuses are [`unknown_pane_owner_refusal`]'s.
+    pub(crate) fn unknown_owner_refusal(&self, owner: &str) -> String {
+        match self {
+            Terminal::Tmux(tmux) => unknown_pane_owner_refusal(&tmux.pane, owner, &tmux.tmux_name),
+        }
+    }
+
+    /// Resize this terminal to a viewer's size. Callers treat a resize as
+    /// fire-and-forget and only log a failure (an attach sizes the terminal
+    /// once, and every later `Resize` frame lands here too).
+    pub(crate) async fn resize(
+        &self,
+        sup: &Supervisor,
+        cols: u16,
+        rows: u16,
+    ) -> anyhow::Result<()> {
+        match self {
+            Terminal::Tmux(tmux) => {
+                sup.tmux
+                    .resize_window(&tmux.tmux_name, &tmux.pane, cols, rows)
+                    .await
+            }
+        }
+    }
+
+    /// The value this terminal contributes to the session row's `pane`
+    /// column, which outcome transitions carry so a launch's provenance
+    /// survives the physical terminal's disappearance.
+    ///
+    /// This is the one dispatch that collapses the kind into a bare string,
+    /// and the column has no kind of its own yet: every reader that
+    /// interprets the value (reload's pane provenance, spare-checkout
+    /// claims, the hook's foreground-pane anchor) pairs it with the row's
+    /// tmux name and looks it up as a tmux pane id. So a second kind must
+    /// not simply return its own identifier here. Until the row records
+    /// which kind of terminal it describes, anything a non-tmux arm wrote
+    /// would be read back as a tmux pane, and a recycled id would then
+    /// attribute some other session's pane to this one.
+    pub(crate) fn recorded_pane(&self) -> &str {
+        match self {
+            Terminal::Tmux(tmux) => &tmux.pane,
+        }
+    }
+
+    /// The last `max_bytes` of this terminal's visible screen as plain
+    /// text, which the status sampler hands to the agent's screen reader.
+    pub(crate) async fn screen_tail(
+        &self,
+        sup: &Supervisor,
+        max_bytes: usize,
+    ) -> anyhow::Result<String> {
+        match self {
+            Terminal::Tmux(tmux) => {
+                sup.tmux
+                    .capture_pane_tail(&tmux.tmux_name, &tmux.pane, max_bytes)
+                    .await
+            }
+        }
+    }
+
+    /// The title this terminal's program last set, which some screen
+    /// readers consult beside the screen (Codex keeps its spinner there).
+    pub(crate) async fn title(&self, sup: &Supervisor) -> anyhow::Result<String> {
+        match self {
+            Terminal::Tmux(tmux) => sup.tmux.pane_title(&tmux.tmux_name, &tmux.pane).await,
+        }
+    }
+}
+
+/// Test-only shorthands, so the many tests that build or inspect a tmux
+/// terminal do not each spell the enum out. A second variant changes
+/// `expect_tmux` (it gains a panicking arm) rather than every fixture.
+#[cfg(test)]
+impl Terminal {
+    /// A tmux terminal from its two handles.
+    pub(crate) fn tmux(tmux_name: String, pane: String) -> Terminal {
+        Terminal::Tmux(TmuxTerminal { tmux_name, pane })
+    }
+
+    /// The tmux handles of a terminal the test knows is tmux-backed. This
+    /// is an assertion about the fixture, which is why it exists only under
+    /// `cfg(test)`: production code matches instead (see [`Terminal`]).
+    pub(crate) fn expect_tmux(&self) -> &TmuxTerminal {
+        match self {
+            Terminal::Tmux(tmux) => tmux,
+        }
+    }
 }
 
 /// Which of a session's terminals something addresses — the second half
@@ -503,6 +657,9 @@ async fn resolve_terminal_inner(
     match terminal {
         TerminalId::Agent => Ok(agent.clone()),
         TerminalId::Tab(id) => {
+            // Tabs are rediscovered from the agent's tmux session's window
+            // markers, so a tab lookup is tmux's to answer.
+            let Terminal::Tmux(agent) = agent;
             let states = sup.tmux.pane_states().await.map_err(|e| {
                 RequestError::new(
                     error_kind(&e),
@@ -524,9 +681,11 @@ async fn resolve_terminal_inner(
                     TabResolution::LiveOnly => !tab.dead,
                     TabResolution::DeadIncluded => true,
                 })
-                .map(|tab| Terminal {
-                    tmux_name: agent.tmux_name.clone(),
-                    pane: tab.pane,
+                .map(|tab| {
+                    Terminal::Tmux(TmuxTerminal {
+                        tmux_name: agent.tmux_name.clone(),
+                        pane: tab.pane,
+                    })
                 })
                 .ok_or_else(|| {
                     RequestError::new(
@@ -764,7 +923,8 @@ async fn shutdown_session_sink_until_safe(
 ///
 /// # Lifetime by refcount, deliberately
 ///
-/// Every [`ActiveAttach`] holds an `Arc` of this. [`Supervisor::sinks`]
+/// Every attachment to a tmux pane holds an `Arc` of this, through its
+/// [`TmuxAttach::sink`] lease. [`Supervisor::sinks`]
 /// normally holds the registered live sink's `Weak`; final-owner release
 /// replaces that slot with `Reaping`, while ANY unconfirmed reap — including
 /// an unregistered client that lost a concurrent first-attach race — replaces
@@ -1363,10 +1523,6 @@ where
 /// takeover can tell the old client it was detached.
 pub(crate) struct ActiveAttach {
     pub(crate) channel: u32,
-    /// Exact tmux identity and latched death signal for this attachment alone.
-    /// A replacement attachment must get a fresh latch, even on the same pane.
-    pub(crate) pane_death: PaneDeath,
-
     /// The client identity this attachment was made under
     /// (`ControlMsg::Attach::lease`), stored verbatim — including the
     /// empty legacy lease, whose meaning is entirely in
@@ -1397,16 +1553,6 @@ pub(crate) struct ActiveAttach {
     /// may hand work to a longer-lived reaper, but the receiver stays the same,
     /// so request cancellation cannot erase the per-terminal handoff barrier.
     pub(crate) forwarder_cleanup: OutputReapReceiver,
-    /// A second control-mode client, dedicated to this attachment's input,
-    /// opened alongside the replay stream in the attach handler. `send`
-    /// on it only returns once tmux has actually executed the command —
-    /// see [`InputClient`] — which is what lets a failed send here mean
-    /// "this attachment's input is broken" rather than "the bytes went
-    /// somewhere unconfirmed". Dropped (and so killed, via
-    /// `kill_on_drop`) whenever this `ActiveAttach` is removed from the
-    /// map, on every teardown path: takeover, detach, connection loss, and
-    /// the input-failure branch below.
-    pub(crate) input: InputClient,
     /// When this attachment's client asked for its output to stop
     /// (`ControlMsg::PauseOutput`), or `None` while output may flow. Read
     /// by the forwarder task.
@@ -1430,6 +1576,58 @@ pub(crate) struct ActiveAttach {
     /// `set_attachment_paused`), for the same reason: pause spam would
     /// otherwise restart the hard maximum indefinitely.
     pub(crate) pause: watch::Sender<Option<tokio::time::Instant>>,
+    /// The per-attachment state that talks to the terminal's backing
+    /// process: input delivery, death observation, and the session-wide
+    /// output guarantee this attachment depends on. Kind-specific, so
+    /// everything that uses it dispatches through [`AttachBackend`]'s
+    /// methods; the fields above are the same for every kind.
+    ///
+    /// Teardown drops it only after joining [`Self::forwarder`]: for tmux
+    /// it holds this attachment's share of the session sink, which must
+    /// outlive the output client it keeps safe (see [`TmuxAttach::sink`]).
+    /// Last, so that an attachment dropped whole also releases that share
+    /// after everything else.
+    pub(crate) backend: AttachBackend,
+}
+
+/// An attachment's kind-specific state, by the kind of terminal it is
+/// attached to.
+///
+/// The attachment's counterpart of [`Terminal`]: the attach handler builds
+/// one from the terminal it resolved, and from then on input delivery
+/// (the connection's data frames), death observation (the ticker) and the
+/// test seams reach the backing process only through the exhaustive
+/// dispatches below. A second kind of terminal therefore fails to compile
+/// here, at each of those operations, rather than inheriting tmux's
+/// clients by default. The forwarder's output stream is the same seam on
+/// the other side of the attachment (`connection::AttachOutput`); it is a
+/// separate type only because the forwarder task, not the attachment map,
+/// owns it.
+pub(crate) enum AttachBackend {
+    /// An attachment to a tmux pane.
+    Tmux(TmuxAttach),
+}
+
+/// The tmux clients and latch behind one attachment to a tmux pane.
+///
+/// Field order is drop order: the death latch and the input client go
+/// before the sink share. Every teardown path drops the three together,
+/// by dropping the [`AttachBackend`] once the forwarder has been joined
+/// (see [`ActiveAttach::backend`]).
+pub(crate) struct TmuxAttach {
+    /// Exact tmux identity and latched death signal for this attachment alone.
+    /// A replacement attachment must get a fresh latch, even on the same pane.
+    pub(crate) pane_death: PaneDeath,
+    /// A second control-mode client, dedicated to this attachment's input,
+    /// opened alongside the replay stream in the attach handler. `send`
+    /// on it only returns once tmux has actually executed the command —
+    /// see [`InputClient`] — which is what lets a failed send here mean
+    /// "this attachment's input is broken" rather than "the bytes went
+    /// somewhere unconfirmed". Dropped (and so killed, via
+    /// `kill_on_drop`) with the backend on every teardown path: takeover,
+    /// detach, connection loss, and the input-failure branch of the
+    /// connection's data-frame routing.
+    pub(crate) input: InputClient,
     /// This attachment's share of its SESSION's sink client.
     ///
     /// Holding it keeps the shared sink alive. Orderly teardown consumes
@@ -1440,7 +1638,48 @@ pub(crate) struct ActiveAttach {
     /// session entry deliberately — a session with no attachment needs no
     /// sink, and a sink outliving its last viewer would be a control client
     /// attached to a session nobody is watching.
+    ///
+    /// Never read: holding it and dropping it are its whole use, and
+    /// teardown drops it by dropping the [`AttachBackend`].
+    #[allow(
+        dead_code,
+        reason = "held for its drop, which releases this attachment's share of the sink"
+    )]
     pub(crate) sink: SessionSinkLease,
+}
+
+impl AttachBackend {
+    /// Deliver one data frame of viewer input to the terminal, returning
+    /// only once its delivery is confirmed. An `Err` means this
+    /// attachment's input is broken, and the caller tears the attachment
+    /// down: accepting later frames after silently losing one can turn a
+    /// command into a different command.
+    pub(crate) async fn send_input(&mut self, bytes: &[u8]) -> anyhow::Result<()> {
+        match self {
+            AttachBackend::Tmux(tmux) => tmux.input.send(bytes).await,
+        }
+    }
+
+    /// The death latch to set, if `states` (a pane-state probe that started
+    /// at `probe_started`) proves this attachment's terminal dead. The
+    /// evidence rules are [`PaneDeath::observed_in`]'s.
+    pub(crate) fn observed_death(
+        &self,
+        states: &HashMap<String, crate::tmux::PaneState>,
+        probe_started: tokio::time::Instant,
+    ) -> Option<watch::Sender<bool>> {
+        match self {
+            AttachBackend::Tmux(tmux) => tmux.pane_death.observed_in(states, probe_started),
+        }
+    }
+
+    /// The process id of the client carrying this attachment's input, for
+    /// the test seam that kills it to exercise input-failure teardown.
+    pub(crate) fn input_client_pid(&self) -> Option<u32> {
+        match self {
+            AttachBackend::Tmux(tmux) => tmux.input.pid(),
+        }
+    }
 }
 
 /// One attachment's death observation, retained across pauses and replays.

@@ -4325,12 +4325,12 @@ impl TmuxDriver {
     /// `pane_process` call for each row would multiply one subprocess
     /// spawn into N — paid on every poll the UI makes, per session. One
     /// `list-panes -a` query instead returns every pane's state at once,
-    /// keyed by `#{pane_id}` (`Terminal::pane`'s own value) rather than
+    /// keyed by `#{pane_id}` (`TmuxTerminal::pane`'s own value) rather than
     /// session name: a session's window can hold more than one pane (a
     /// future split, say), and keying by session name would let a second
     /// pane silently overwrite the first pane's entry in the returned map
     /// — pane id is the only identifier this module ever uses to address
-    /// one specific pane (see `Terminal`'s own docs), so it is the only
+    /// one specific pane (see `TmuxTerminal`'s own docs), so it is the only
     /// key that cannot collide between panes sharing a session.
     ///
     /// `#{session_name}` rides along in the same query, carried in each

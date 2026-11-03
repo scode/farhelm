@@ -17,6 +17,7 @@
 
 use super::core::{SessionEntry, Supervisor};
 use super::status::{KnownTmuxNames, entry_info};
+use super::terminals::Terminal;
 use farhelm_proto::{LIST_SESSIONS_CAP, SessionInfo};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -132,10 +133,10 @@ pub(crate) async fn list_all(sup: &Supervisor) -> anyhow::Result<ListReply> {
     let known = KnownTmuxNames::from_sessions(snapshot.iter().map(|entry| {
         (
             entry.info.id.as_str(),
-            entry
-                .terminal
-                .as_ref()
-                .map(|terminal| terminal.tmux_name.as_str()),
+            entry.terminal.as_ref().map(|terminal| {
+                let Terminal::Tmux(tmux) = terminal;
+                tmux.tmux_name.as_str()
+            }),
         )
     }));
     let listed: Vec<Listed> = snapshot
@@ -165,7 +166,16 @@ pub(crate) async fn list_all(sup: &Supervisor) -> anyhow::Result<ListReply> {
     // simply empty) listing from being turned into a spurious
     // `Internal` error by a private tmux server that happens
     // to ALSO be down for an unrelated reason.
-    let pane_states = if entries.iter().any(|entry| entry.terminal.is_some()) {
+    //
+    // Whether an entry needs the query is decided per terminal kind, not by
+    // `is_some()`: a catch-all would count a terminal tmux does not hold as
+    // one that needs tmux, and bring back the spurious failure above for a
+    // listing that tmux could not have changed.
+    let needs_tmux = entries.iter().any(|entry| match &entry.terminal {
+        Some(Terminal::Tmux(_)) => true,
+        None => false,
+    });
+    let pane_states = if needs_tmux {
         // An error here is reached only for a genuinely
         // UNCLASSIFIED tmux failure: `TmuxDriver::pane_states`
         // itself now tolerates a vanished private tmux server

@@ -1189,7 +1189,7 @@ mod tests {
 
     /// The common case: a live pane and a dead one with a parseable exit
     /// code, keyed by PANE id (`%N`) exactly as `service.rs`'s
-    /// `session_status` looks them up via `Terminal::pane` — not by
+    /// `session_status` looks them up via `TmuxTerminal::pane` — not by
     /// session name, which two panes in the same session's window could
     /// share (see `pane_states`'s own docs on why keying by session name
     /// would let one pane's entry silently clobber another's).

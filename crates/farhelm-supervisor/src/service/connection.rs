@@ -490,8 +490,9 @@ where
                         let mut attachments = sup.attachments.lock().await;
                         // Borrow the matched `ActiveAttach` directly and
                         // send on it in place, rather than cloning a
-                        // handle out of the map: `InputClient` owns a
-                        // child process and its pipes, so unlike the old
+                        // handle out of the map: its backend's input
+                        // client (tmux's `InputClient`) owns a child
+                        // process and its pipes, so unlike the old
                         // `InputWriter` there is nothing cheap to clone.
                         // The borrow (via `a`) ends when this match
                         // expression finishes evaluating, which is what
@@ -500,7 +501,7 @@ where
                         // hold — no gap where a takeover could interleave.
                         let send_result = match attachments.get_mut(&route.key) {
                             Some(a) if a.channel == frame.channel && a.notify.same_channel(&tx) => {
-                                Some(a.input.send(&frame.body).await)
+                                Some(a.backend.send_input(&frame.body).await)
                             }
                             _ => None,
                         };
@@ -535,7 +536,7 @@ where
                                         channel,
                                         notify,
                                         forwarder,
-                                        sink,
+                                        backend,
                                         ..
                                     } = old;
                                     if let Err(cleanup) = sup.record_forwarder_join(
@@ -549,7 +550,7 @@ where
                                             "terminal output cleanup remains unconfirmed after input failure"
                                         );
                                     }
-                                    drop(sink);
+                                    drop(backend);
                                     notify_detached(
                                         &notify,
                                         channel,
@@ -726,11 +727,11 @@ where
     let mut forwarders = tokio::task::JoinSet::new();
     for (key, attachment) in mine {
         let ActiveAttach {
-            forwarder, sink, ..
+            forwarder, backend, ..
         } = attachment;
         forwarders.spawn(async move {
             let joined = forwarder.await;
-            drop(sink);
+            drop(backend);
             (key, joined)
         });
     }
@@ -1237,7 +1238,7 @@ pub(crate) struct Forwarder {
     pub(crate) terminal: TerminalId,
     pub(crate) channel: u32,
     pub(crate) tx: mpsc::Sender<Frame>,
-    pub(crate) stream: OutputStream,
+    pub(crate) stream: AttachOutput,
     pub(crate) pause_rx: watch::Receiver<Option<tokio::time::Instant>>,
     /// A ticker observation stays latched while this task is replaying or
     /// honoring client flow control, including an exit during initial replay.
@@ -1245,6 +1246,187 @@ pub(crate) struct Forwarder {
     pub(crate) stall_timeout: Duration,
     /// Publishes process cleanup independently of the request awaiting this task.
     pub(crate) cleanup: watch::Sender<OutputReapOutcome>,
+}
+
+/// One attachment's output source, by the kind of terminal it streams.
+///
+/// The forwarder's half of the attachment seam (`terminals::AttachBackend`
+/// is the attachment map's half): everything the forwarder does with its
+/// stream (the live read, the death-recovery pause, the safe shutdown, and
+/// both replays: capturing them and rendering them into client bytes) goes
+/// through the exhaustive dispatches below, so a second kind of terminal
+/// fails to compile at each of those steps rather than being pumped, or
+/// replayed, as if it were a tmux control client. What the forwarder does
+/// AROUND them (client pause and resume, the stall bound, the replay
+/// marker, detach verdicts) is the same for every kind and stays in
+/// [`Forwarder`].
+///
+/// The plan's host terminals stream grid diffs rather than bytes, through
+/// a sender per attachment, and that sender may end up beside this type
+/// rather than as a variant of it. Whichever change settles its shape
+/// either gives this enum that variant or folds the enum back into the
+/// tmux stream it wraps.
+pub(crate) enum AttachOutput {
+    /// A tmux control-mode client streaming one pane, with its attach
+    /// replay (see [`TmuxOutput`]).
+    Tmux(TmuxOutput),
+}
+
+/// A tmux attachment's output: the pane's control-mode stream and the
+/// attach replay captured when that stream was installed.
+///
+/// The replay rides here, rather than beside the forwarder, so that the
+/// screen it carries keeps its kind until it is rendered for the client
+/// (see [`AttachOutput::take_attach_replay`]).
+pub(crate) struct TmuxOutput {
+    stream: OutputStream,
+    /// `None` once [`Forwarder::run`] has taken it, which it does before
+    /// it reads anything from `stream`.
+    attach_replay: Option<TmuxReplay>,
+}
+
+impl TmuxOutput {
+    /// Pair an installed stream with the replay its candidate captured
+    /// (`ReplayStreamCandidate::install` returns all three).
+    pub(crate) fn new(modes: PaneModes, content: Vec<u8>, stream: OutputStream) -> Self {
+        Self {
+            stream,
+            attach_replay: Some(TmuxReplay { modes, content }),
+        }
+    }
+}
+
+/// Which replay the forwarder is writing, and so what the client's
+/// terminal already shows when it arrives.
+///
+/// PLAN_M2_5.md is explicit: never replay into a populated terminal. Each
+/// kind's renderer decides what that requires of it; the forwarder only
+/// says which case it is in.
+#[derive(Clone, Copy)]
+enum ReplayOccasion {
+    /// The attach's own replay, into a terminal the client just created
+    /// (empty by construction).
+    Attach,
+    /// A catch-up mid-stream (after a flow-control cut or a pane death),
+    /// into a terminal already showing everything received before the
+    /// stream was cut.
+    Recovery,
+}
+
+/// One captured tmux screen: the pane's modes and its content bytes, as
+/// the snapshot machinery returns them.
+struct TmuxReplay {
+    modes: PaneModes,
+    content: Vec<u8>,
+}
+
+impl TmuxReplay {
+    /// Encode this screen for the client: optional reset, the
+    /// pre-content mode sequences, the captured content, then the
+    /// post-content sequences.
+    ///
+    /// Order is load-bearing (see `PaneModes`): the alternate-screen
+    /// switch must precede the content because it CLEARS the buffer it
+    /// switches to, and cursor placement must follow it because writing
+    /// content moves the cursor.
+    ///
+    /// The occasion is the only difference between the attach replay and
+    /// a catch-up, and the whole correctness argument for the second. A
+    /// [`ReplayOccasion::Recovery`] lands in a terminal already showing
+    /// the pre-cut output, and `\x1bc` (RIS) is what makes that case
+    /// equivalent to an attach: it clears screen AND scrollback, so the
+    /// catch-up's end state is a fresh reattach's end state rather than
+    /// the old content with a second copy of history appended under it.
+    fn render(self, occasion: ReplayOccasion) -> RenderedReplay {
+        let mut segments = Vec::with_capacity(4);
+        match occasion {
+            ReplayOccasion::Attach => {}
+            ReplayOccasion::Recovery => segments.push(b"\x1bc".to_vec()),
+        }
+        segments.push(self.modes.pre_content_sequences().into_bytes());
+        segments.push(self.content);
+        segments.push(self.modes.post_content_sequences().into_bytes());
+        RenderedReplay { segments }
+    }
+}
+
+/// A replay encoded for the client, in the order it must be written.
+///
+/// Kept as separate segments, each written as its own run of data frames
+/// by [`Forwarder::send_replay`], so that frame boundaries fall where they
+/// always have: a reset or a mode sequence never shares a frame with
+/// content.
+struct RenderedReplay {
+    segments: Vec<Vec<u8>>,
+}
+
+impl AttachOutput {
+    /// The attach replay, rendered for a terminal the client just created.
+    ///
+    /// Taken exactly once, by [`Forwarder::run`] before its first write; a
+    /// second call renders nothing, since the screen it captured has
+    /// already been handed out.
+    fn take_attach_replay(&mut self) -> RenderedReplay {
+        match self {
+            AttachOutput::Tmux(output) => match output.attach_replay.take() {
+                Some(replay) => replay.render(ReplayOccasion::Attach),
+                None => RenderedReplay {
+                    segments: Vec::new(),
+                },
+            },
+        }
+    }
+
+    /// Ask the terminal for an ordered recovery boundary after its process
+    /// died, without borrowing the stream's in-flight read: the forwarder
+    /// keeps polling the same `next_output` future while this runs. For
+    /// tmux this is the external `%pause` that [`OutputStream::request_pause`]
+    /// documents.
+    fn request_pause(
+        &self,
+    ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + 'static {
+        match self {
+            AttachOutput::Tmux(output) => output.stream.request_pause(),
+        }
+    }
+
+    /// The next live output event, `Ok(None)` once the terminal's output
+    /// has ended. Not cancellation-safe to abandon and then reuse the
+    /// stream; see [`OutputStream::next_output`].
+    async fn next_output(&mut self) -> anyhow::Result<Option<OutputEvent>> {
+        match self {
+            AttachOutput::Tmux(output) => output.stream.next_output().await,
+        }
+    }
+
+    /// Resume after the terminal cut this stream (an [`OutputEvent::Paused`])
+    /// and return the replay that catches the client up, rendered for a
+    /// terminal that already shows the output from before the cut.
+    async fn resume_paused_with_replay(&mut self) -> anyhow::Result<RenderedReplay> {
+        match self {
+            AttachOutput::Tmux(output) => {
+                let (modes, content) = output.stream.resume_paused_with_replay().await?;
+                Ok(TmuxReplay { modes, content }.render(ReplayOccasion::Recovery))
+            }
+        }
+    }
+
+    /// Close this stream at its safe boundary. `Err` carries the cleanup
+    /// that could not be confirmed yet: a future that keeps retrying until
+    /// it is, which the forwarder runs on a task of its own so that its
+    /// per-terminal barrier stays published until then (for tmux, see
+    /// [`OutputStream::shutdown`] and [`crate::tmux::OutputReaper`]).
+    async fn shutdown(
+        self,
+    ) -> Result<(), impl std::future::Future<Output = Result<(), Arc<str>>> + Send + 'static> {
+        match self {
+            AttachOutput::Tmux(output) => output
+                .stream
+                .shutdown()
+                .await
+                .map_err(|reaper| reaper.run()),
+        }
+    }
 }
 
 impl Forwarder {
@@ -1261,17 +1443,14 @@ impl Forwarder {
     /// emitted once the initial replay has been enqueued in full and
     /// before `pump` can enqueue a single live byte. Nothing else in this
     /// task may be inserted between the second and third steps.
-    pub(crate) async fn run(
-        mut self,
-        modes: PaneModes,
-        prefill: Vec<u8>,
-        mut shutdown: watch::Receiver<bool>,
-    ) {
-        // The attach replay never resets: the client's terminal is brand
-        // new. Only the catch-up path passes `true` — see `send_replay`.
+    pub(crate) async fn run(mut self, mut shutdown: watch::Receiver<bool>) {
+        // The attach replay is rendered for a brand-new client terminal
+        // (`ReplayOccasion::Attach`); only the catch-up path renders a
+        // recovery — see `catch_up_after_tmux_pause`.
+        let attach_replay = self.stream.take_attach_replay();
         let end = {
             let forwarding = async {
-                match self.send_replay(modes, prefill, false).await {
+                match self.send_replay(attach_replay).await {
                     Ok(()) => match self.send_replay_complete().await {
                         Ok(()) => self.pump().await,
                         Err(end) => end,
@@ -1302,7 +1481,7 @@ impl Forwarder {
                 tokio::spawn(async move {
                     let outcome = match result {
                         Ok(()) => Ok(()),
-                        Err(reaper) => reaper.run().await,
+                        Err(reap) => reap.await,
                     };
                     if let Some(gate) = cleanup_gate {
                         gate().await;
@@ -1374,39 +1553,18 @@ impl Forwarder {
         }
     }
 
-    /// Write one replay to the client: optional reset, the pre-content
-    /// mode sequences, the captured content, then the post-content
-    /// sequences.
+    /// Write one rendered replay to the client, segment by segment, under
+    /// the same client pause and stall deadline as live output.
     ///
-    /// Order is load-bearing (see `PaneModes`): the alternate-screen
-    /// switch must precede the content because it CLEARS the buffer it
-    /// switches to, and cursor placement must follow it because writing
-    /// content moves the cursor.
-    ///
-    /// `reset_first` is the only difference between the two callers, and
-    /// the whole correctness argument for the second. An ATTACH replays
-    /// into a terminal the client just created (empty by construction),
-    /// while a post-stall CATCH-UP replays into one already showing
-    /// everything received before tmux cut the stream. PLAN_M2_5.md is
-    /// explicit: never replay into a populated terminal. `\x1bc` (RIS) is
-    /// what makes the second case equivalent to the first — it clears
-    /// screen AND scrollback, so the catch-up's end state is a fresh
-    /// reattach's end state rather than the old content with a second copy
-    /// of history appended under it.
-    async fn send_replay(
-        &mut self,
-        modes: PaneModes,
-        content: Vec<u8>,
-        reset_first: bool,
-    ) -> Result<(), ForwarderEnd> {
-        if reset_first {
-            self.send_bytes(b"\x1bc".to_vec()).await?;
+    /// What the bytes are (the reset policy, mode sequences and their
+    /// order) is the terminal kind's decision and was made when the replay
+    /// was rendered (for tmux, [`TmuxReplay::render`]); this only delivers
+    /// them, for the attach replay and every catch-up alike.
+    async fn send_replay(&mut self, replay: RenderedReplay) -> Result<(), ForwarderEnd> {
+        for segment in replay.segments {
+            self.send_bytes(segment).await?;
         }
-        self.send_bytes(modes.pre_content_sequences().into_bytes())
-            .await?;
-        self.send_bytes(content).await?;
-        self.send_bytes(modes.post_content_sequences().into_bytes())
-            .await
+        Ok(())
     }
 
     /// Tell the client its attach's catch-up is over: every byte this
@@ -1634,12 +1792,12 @@ impl Forwarder {
     /// The diagnostic records whether this pump requested a death pause;
     /// natural flow control can already have queued a pause at that boundary.
     ///
-    /// The client's terminal is reset first because the replay assumes an
-    /// empty one — see [`Self::send_replay`]. Within `HISTORY_LIMIT`
-    /// this is lossless; past it, it degrades to the history floor, which
-    /// is the same floor the browser's own scrollback is capped at, so
-    /// the end state stays observably equivalent to lossless slow
-    /// delivery (PLAN_M2_5.md).
+    /// The rendered recovery resets the client's terminal first, because
+    /// the replay assumes an empty one — see [`TmuxReplay::render`].
+    /// Within `HISTORY_LIMIT` this is lossless; past it, it degrades to the
+    /// history floor, which is the same floor the browser's own scrollback
+    /// is capped at, so the end state stays observably equivalent to
+    /// lossless slow delivery (PLAN_M2_5.md).
     ///
     /// A failure here is fatal to the attachment rather than ignorable: a
     /// pane left paused delivers nothing ever again, so pretending
@@ -1664,11 +1822,11 @@ impl Forwarder {
             reason = if death_requested { "pane_death_requested" } else { "tmux_flow_control" },
             "tmux paused the pane for this client; catching up by reset and replay"
         );
-        let (modes, content) = match self.stream.resume_paused_with_replay().await {
+        let replay = match self.stream.resume_paused_with_replay().await {
             Ok(replay) => replay,
             Err(e) => return Err(ForwarderEnd::StreamFailed(format!("{e:#}"))),
         };
-        self.send_replay(modes, content, true).await
+        self.send_replay(replay).await
     }
 }
 
@@ -1796,12 +1954,13 @@ fn detach_stalled(
             // Signal-and-await like every other teardown, even though the
             // forwarder is the very task that asked for this: it has
             // already handed its control client to safe shutdown and is about
-            // to return, so this only joins that completion. Destructuring the removed
-            // `ActiveAttach` also kills its input client, then orderly
-            // reaps the sink when this was the session's last attachment.
+            // to return, so this only joins that completion. Dropping the
+            // removed attachment's backend after that join kills its input
+            // client, then orderly reaps the sink when this was the
+            // session's last attachment.
             sup.begin_forwarder_shutdown(key.clone(), &old);
             let ActiveAttach {
-                forwarder, sink, ..
+                forwarder, backend, ..
             } = old;
             if let Err(cleanup) = sup.record_forwarder_join(key.clone(), forwarder.await) {
                 warn!(
@@ -1811,7 +1970,7 @@ fn detach_stalled(
                     "stalled terminal output cleanup remains unconfirmed"
                 );
             }
-            drop(sink);
+            drop(backend);
         }
         drop(attachments);
         let _ = tx
@@ -1859,7 +2018,7 @@ fn detach_naturally(
             .expect("the identity-checked attachment remains under the lock");
         sup.begin_forwarder_shutdown(key.clone(), &old);
         let ActiveAttach {
-            forwarder, sink, ..
+            forwarder, backend, ..
         } = old;
         if let Err(cleanup) = sup.record_forwarder_join(key.clone(), forwarder.await) {
             warn!(
@@ -1869,7 +2028,7 @@ fn detach_naturally(
                 "naturally ended terminal output cleanup remains unconfirmed"
             );
         }
-        drop(sink);
+        drop(backend);
         drop(attachments);
         notify_detached(&tx, channel, reason, DetachCode::Other);
     });
@@ -1978,7 +2137,7 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn pane_death_recovers_missing_final_output_after_client_resume() {
         use super::super::core::{SupervisorSeams, SupervisorTimeouts};
-        use super::super::terminals::PaneDeath;
+        use super::super::terminals::{AttachBackend, PaneDeath, TmuxAttach};
         use std::sync::atomic::AtomicBool;
 
         let state = StateDir::new();
@@ -2020,13 +2179,13 @@ mod tests {
                 terminal: TerminalId::Agent,
                 channel: 7,
                 tx: tx.clone(),
-                stream,
+                stream: AttachOutput::Tmux(TmuxOutput::new(modes, prefill, stream)),
                 pause_rx,
                 death_rx,
                 stall_timeout: Duration::from_secs(60),
                 cleanup,
             }
-            .run(modes, prefill, shutdown_rx),
+            .run(shutdown_rx),
         );
         let key = AttachmentKey::new("final-output", TerminalId::Agent);
         let attached_input = sup
@@ -2047,10 +2206,12 @@ mod tests {
                 forwarder,
                 forwarder_shutdown: shutdown.clone(),
                 forwarder_cleanup: cleanup_rx,
-                input: attached_input,
                 pause: pause.clone(),
-                pane_death: death,
-                sink,
+                backend: AttachBackend::Tmux(TmuxAttach {
+                    pane_death: death,
+                    input: attached_input,
+                    sink,
+                }),
             },
         );
         let mut transcript = Vec::new();
