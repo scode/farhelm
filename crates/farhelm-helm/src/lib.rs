@@ -146,6 +146,11 @@ mod events;
 mod feedback;
 mod ntfy;
 
+/// `/api/tensorlake` and the Tensorlake API client: the account side of
+/// Tensorlake sandbox hosts (the API key, Farhelm's own ssh key for
+/// sandboxes, and the helm tag their names carry).
+mod tensorlake;
+
 /// The changed-only fleet invalidation feed shared by the manager and REST edge.
 mod feed;
 
@@ -557,6 +562,10 @@ struct AppState {
     feedback: feedback::FeedbackForwarder,
     /// The manager's fleet sender, also used by explicit test-send requests.
     ntfy: ntfy::Alerts,
+    /// The Tensorlake account: stored API key, API client and Farhelm's ssh
+    /// key. A field rather than a global so each test helm has its own, and
+    /// so a test can put a stub API behind it.
+    tensorlake: tensorlake::Tensorlake,
     /// Acting agent requests waiting for the user's answer (see
     /// `approvals`). A field rather than a global so each helm in a test
     /// process has its own table, and so a test can shorten the wait.
@@ -599,6 +608,7 @@ impl AppState {
         release_build: bool,
         mode: ServingMode,
     ) -> anyhow::Result<AppState> {
+        let tensorlake = tensorlake::Tensorlake::production(store.clone(), &state_dir)?;
         let provisioning = provisioning::ProvisioningService::production(
             store.clone(),
             Arc::clone(&manager),
@@ -606,7 +616,10 @@ impl AppState {
             payload_selection,
             release_build,
         )?;
-        Ok(Self::with_provisioning(manager, store, provisioning, mode))
+        Ok(AppState {
+            tensorlake,
+            ..Self::with_provisioning(manager, store, provisioning, mode)
+        })
     }
 
     /// Assemble state with an injected provisioning service. The ordinary
@@ -622,6 +635,9 @@ impl AppState {
             _automatic_updates: provisioning::AutomaticUpdates::start(&provisioning),
             mode,
             ntfy: manager.ntfy.clone(),
+            // No state directory reaches this seam, so no ssh key and no
+            // API; `new` replaces it with the production service.
+            tensorlake: tensorlake::Tensorlake::detached(store.clone()),
             manager,
             store: store.clone(),
             auth: auth::AuthState::for_mode(store, mode),
@@ -839,6 +855,22 @@ fn api_router(state: Arc<AppState>) -> Router {
                 .layer(axum::extract::DefaultBodyLimit::max(16 * 1024)),
         )
         .route("/api/ntfy-alerts/test", axum::routing::post(ntfy::test))
+        .route(
+            "/api/tensorlake",
+            axum::routing::get(tensorlake::get)
+                .put(tensorlake::put)
+                .layer(axum::extract::DefaultBodyLimit::max(16 * 1024)),
+        )
+        .route(
+            "/api/tensorlake/test",
+            axum::routing::post(tensorlake::test),
+        )
+        // Creating Farhelm's ssh key is its own explicit request, so merely
+        // reading the settings never writes a credential.
+        .route(
+            "/api/tensorlake/ssh-key",
+            axum::routing::post(tensorlake::create_ssh_key),
+        )
         // API paths are reserved before the public SPA fallback is installed.
         // Without this catch-all, an extensionless GET typo receives
         // index.html and looks successful until JSON decoding fails; other

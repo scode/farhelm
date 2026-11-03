@@ -908,20 +908,20 @@ write. Normal hint copy and actions still require an explicitly disabled trust s
 show the local save error alone, under the existing question, managed-checkout, agent-pane and occurrence-dismissal
 gates, without claiming trust is off. The dialog uses the host dialogs' framed header and footer, with a gear tile and a
 separately named × close control. Only the body scrolls, containing a section-button sidebar and the selected panel. The
-order is Sessions, Appearance, Hosts, Terminal, Checkouts, Agent trust, Notifications and, when the updater is active,
-App. Each section button pairs an existing decorative icon with its full sentence-case label; icons inherit the selected
-button's inverse color. The solid selection fill marks the open section. Terminal holds web-link choices and desktop
-tunnel consent and file types; checkouts holds the explicit-save folder and command; agent trust holds all four agents'
-blocks; notifications groups device sounds and helm-wide ntfy alerts. Inactive panels stay mounted with hidden,
-preserving field drafts, outcomes and pending saves. The sound asset's document-wide input query initializes even hidden
-inputs. No section choice is persisted. At 620px and below, a presentation-only signal reveals either the selected panel
-or the section list; the back button reads '‹ Settings'. Section selection focuses its heading, while back focuses the
-selected section button after the rendering frame. Neither adds a normal Tab stop or overrides platform button
-navigation. Both close controls stay visible. It uses the shared focus/isolation helper with its own selector; gear
-opening selects sessions and focuses its first switch. Existing trust props instead select agent trust before mount,
-focus the agent's switch and scroll its block into view. Escape or either close control releases isolation and returns
-focus to the gear. The host setup and removal permanent answers each name that gear as the way to turn confirmation back
-on.
+order is Sessions, Appearance, Hosts, Tensorlake, Terminal, Checkouts, Agent trust, Notifications and, when the updater
+is active, App. Each section button pairs an existing decorative icon with its full sentence-case label; icons inherit
+the selected button's inverse color. The solid selection fill marks the open section. Terminal holds web-link choices
+and desktop tunnel consent and file types; checkouts holds the explicit-save folder and command; agent trust holds all
+four agents' blocks; notifications groups device sounds and helm-wide ntfy alerts. Inactive panels stay mounted with
+hidden, preserving field drafts, outcomes and pending saves. The sound asset's document-wide input query initializes
+even hidden inputs. No section choice is persisted. At 620px and below, a presentation-only signal reveals either the
+selected panel or the section list; the back button reads '‹ Settings'. Section selection focuses its heading, while
+back focuses the selected section button after the rendering frame. Neither adds a normal Tab stop or overrides platform
+button navigation. Both close controls stay visible. It uses the shared focus/isolation helper with its own selector;
+gear opening selects sessions and focuses its first switch. Existing trust props instead select agent trust before
+mount, focus the agent's switch and scroll its block into view. Escape or either close control releases isolation and
+returns focus to the gear. The host setup and removal permanent answers each name that gear as the way to turn
+confirmation back on.
 
 The all-hosts checkout folder uses a shared explicit-save field rather than the preference queue: invalid path text must
 have a visible refusal, and a draft is not configuration. `GET`/`PUT /api/checkout-root` is an ordinary protected route
@@ -5676,6 +5676,54 @@ most 4096 visible ASCII bytes. The form saves explicitly and shows its outcome; 
 `/api/ntfy-alerts/test` posts with saved settings even while disabled, bypasses queue/policy/cap, and waits on one owned
 send under the same timeout. Modal dismissal does not retract a save or test; component state is updated only while
 mounted.
+
+## Tensorlake account
+
+`crates/farhelm-helm/src/tensorlake/` holds the account side of Tensorlake sandbox hosts. Protected GET/PUT
+`/api/tensorlake` read and save an independent schema-70 singleton, `tensorlake_account`, whose JSON holds the API key
+and the create-without-asking choice; like ntfy's row it is outside the queued shared preferences. Replies carry
+`api_key_set`, never the key. A save names only the fields its control owns: an absent or blank `api_key` keeps the
+stored key, a non-blank one is trimmed and replaces it (visible ASCII, at most 4096 bytes), `clear_api_key` removes it,
+asking for both is refused, and an absent `create_without_asking` keeps the stored choice. The save is resolved against
+the stored row inside one database operation, so two windows saving different fields cannot undo each other. Refusals,
+malformed JSON included, use fixed messages. POST `/api/tensorlake/test` lists every page of sandboxes with the stored
+key and answers the count, a 400 without a key, or a 502 with the classified failure.
+
+The REST client is a `TensorlakeApi` trait with one implementation per caller: reqwest against
+`https://api.tensorlake.ai` in production, the same client pointed at a loopback stub in unit tests, an offline
+implementation for test-built helms, and the browser suite's fake. Every call takes the key explicitly; `ApiKey` has no
+`Debug` or `Display`. The trait carries the calls the follow-up host PRs use (list, get, create with an image or
+snapshot source, suspend, resume, terminate, snapshot, get, list and delete snapshots); only listing has a caller so
+far. Requests follow no redirects and are not retried; a call has a 30-second bound and a create ten minutes. A create
+that times out may still be waiting for capacity on Tensorlake's side and start later, so a timeout does not mean "not
+created": callers reconcile by the sandbox name they chose. The create request always states `auto_resume`, because
+Tensorlake's default lets proxied traffic, a gateway ssh connection included, wake a suspended sandbox; with it off such
+traffic gets a prompt 409 instead, which keeps resuming the user's decision. Path arguments are single percent-encoded
+segments. Replies decode leniently: unknown fields are ignored, most fields are optional, and an unknown status decodes
+as `Unknown` (so an unknown snapshot status cannot tell "still working" from a new kind of failure, and pollers bound
+their wait). Failures are classified as auth (401, 403), not found (404), conflict (409), refused (400, 422), other
+status, transport and undecodable reply. Server messages are kept for display, bounded, whitespace-collapsed, stripped
+of presentation-unsafe characters, and have the key replaced should a server echo it.
+
+The helm tag is the first eight bytes of SHA-256 over a fixed domain prefix and the registry namespace, written as four
+base-36 digits; a unit test pins its value for a fixed namespace, because changing the derivation would rename every
+helm's sandboxes. Farhelm's SSH key lives in `<state>/tensorlake/ssh-key/` (`id_ed25519` and `id_ed25519.pub`).
+`GET /api/tensorlake` only reports it (ready, not created, or unreadable); Settings mounts every section when it opens,
+so a read that generated the key would leave one on every helm. POST `/api/tensorlake/ssh-key`, the section's **Create
+SSH key**, runs `ssh-keygen -q -t ed25519 -N "" -C farhelm-<tag>` without a shell into a fresh temporary directory
+beside it, sets the private key to 0600, and renames the directory into place, so a crash leaves either no key or a
+whole one; leftover temporary directories are removed at the next generation. A key directory without a readable pair is
+reported, never regenerated, and a create keeps an existing key. A key that cannot be read is a state in the settings
+reply, not a failed read; a failed create answers its reason. The registration command carries the public key line,
+quoted as one POSIX shell word, rather than the file's path, which would only mean something on the helm's machine. A
+production helm whose HTTPS client cannot be built (no CA certificates) answers every Tensorlake call with a reason that
+says so.
+
+The browser suite's fake is enabled like the provisioning backend's: `FARHELM_E2E_TENSORLAKE_DIR`, read once at helm
+startup in non-test builds, must name a directory that canonicalizes inside the helm's state directory and holds the
+`farhelm-e2e-tensorlake-v1` marker; startup warns. Specs write `config.json` (the key it accepts, the account's
+sandboxes, failures to inject per operation) and read `events.jsonl`, one line per call recording only whether the key
+matched. Operations the specs do not exercise yet answer 501.
 
 ## Feedback forwarding
 

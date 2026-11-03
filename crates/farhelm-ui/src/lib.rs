@@ -185,6 +185,7 @@ mod sounds;
 mod ssh_help;
 mod status;
 mod tabs;
+mod tensorlake_settings;
 #[cfg(native_desktop)]
 mod tunnels;
 mod welcome;

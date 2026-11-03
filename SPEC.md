@@ -1680,53 +1680,68 @@ answer; a client that has already loaded its preferences keeps its previous beha
 automatic session selection rereads the shared visits immediately before choosing, template shortcuts read their
 bindings on each invocation and the desktop helm reads the current file-opening list for each hover and open request.
 The gear at the foot of the host rail opens a settings dialog. Its left sidebar lists **Sessions**, **Appearance**,
-**Hosts**, **Terminal**, **Checkouts**, **Agent trust** and **Notifications**, followed by **App** only in a desktop app
-whose updater is active. Each section has an icon; the selected one uses the solid selection fill. One selected section
-appears beside the list, with a matching heading; notifications keeps **Sounds** and **ntfy alerts** sub-headings. The
-header and footer stay pinned while the body scrolls. At 620px wide and below, the dialog shows either the selected
-section or the list; **‹ Settings** returns to the list. The gear always opens sessions and focuses its first switch,
-including at phone width. Trust hints instead open agent trust at the relevant switch and scroll its block into view.
-Section buttons follow the platform's normal Tab rules. Switching sections preserves unsaved fields, outcome lines and
-pending saves; closing discards unsaved fields. Escape and either close control return focus to the gear. **Appearance**
-chooses **System**, **Dark** or **Light** for this device, with System as the default. System follows the device's
-current appearance, including changes while Farhelm stays open; an explicit choice overrides it. The browser or desktop
-webview remembers the choice locally, independently of the helm. The resolved palette applies before application content
-appears, and changes immediately without reloading. The terminal keeps its dark colors in both palettes. Sessions has an
-off-by-default **Skip session confirmations** switch. Its help names Delete, Replace, Restart and tab Close and excludes
-YOLO, host and trash questions (see Lifecycle operations). Beside it, **Name sessions on quick launch** is on by
-default, including when the helm has never stored a choice. Turning it off disables the naming prompt for quick
-launches. Beside it, **Color terminal frames by host** starts off and colors every session's thin terminal frame to
-match its host icon when turned on. The **Hosts** section has the switches `Set up new hosts without asking` and
-`Remove hosts without asking`, on when the respective confirmation is skipped. Turning one off restores that
+**Hosts**, **Tensorlake**, **Terminal**, **Checkouts**, **Agent trust** and **Notifications**, followed by **App** only
+in a desktop app whose updater is active. Each section has an icon; the selected one uses the solid selection fill. One
+selected section appears beside the list, with a matching heading; notifications keeps **Sounds** and **ntfy alerts**
+sub-headings. The header and footer stay pinned while the body scrolls. At 620px wide and below, the dialog shows either
+the selected section or the list; **‹ Settings** returns to the list. The gear always opens sessions and focuses its
+first switch, including at phone width. Trust hints instead open agent trust at the relevant switch and scroll its block
+into view. Section buttons follow the platform's normal Tab rules. Switching sections preserves unsaved fields, outcome
+lines and pending saves; closing discards unsaved fields. Escape and either close control return focus to the gear.
+**Appearance** chooses **System**, **Dark** or **Light** for this device, with System as the default. System follows the
+device's current appearance, including changes while Farhelm stays open; an explicit choice overrides it. The browser or
+desktop webview remembers the choice locally, independently of the helm. The resolved palette applies before application
+content appears, and changes immediately without reloading. The terminal keeps its dark colors in both palettes.
+Sessions has an off-by-default **Skip session confirmations** switch. Its help names Delete, Replace, Restart and tab
+Close and excludes YOLO, host and trash questions (see Lifecycle operations). Beside it, **Name sessions on quick
+launch** is on by default, including when the helm has never stored a choice. Turning it off disables the naming prompt
+for quick launches. Beside it, **Color terminal frames by host** starts off and colors every session's thin terminal
+frame to match its host icon when turned on. The **Hosts** section has the switches `Set up new hosts without asking`
+and `Remove hosts without asking`, on when the respective confirmation is skipped. Turning one off restores that
 confirmation; turning one on makes the same choice as the host dialog's permanent answer. Changes take effect
 immediately in the current client. Each switch explains the current behavior, and each host dialog's permanent answer
 points to the gear as the place to undo it. Hosts also has **Update remote hosts automatically**, off unless explicitly
 enabled, with help explaining that the helm updates remote hosts as soon as updates are available, with no window open,
 and never updates its own machine this way. This shared choice survives helm restarts; other clients read it on reload,
 while the helm acts on a committed change immediately. A failed save restores the last known value and shows an adjacent
-error, then reconciles only this field with the helm if the request's outcome is uncertain. The **Terminal** section
-chooses whether web links open in Farhelm without passing the click on (the default), open in Farhelm and also pass the
-click on, or only pass the click on. The latter two choices explain the risk of a second browser tab and that a program
-without mouse reporting cannot act on a click. This choice covers every client of the helm and takes effect in every
-mounted terminal of the current client immediately; other open clients pick it up when they reload, like the host
-choices. In the desktop app, the **Terminal** section also has tunnel consent and a free-form, comma-separated **File
-types to open with Cmd-click** field (Ctrl-click outside macOS). It defaults to `md, txt, json`; saving an empty list
-disables opening while downloads still save. This field requires an explicit, acknowledged save, but its value lives in
-the shared preference row. The dialog shows one prominent warning beside the field for each listed type outside `md`,
-`txt`, `json` and `log`; HTML-like types have a browser-specific warning, and all other unrecognized types have a
-generic warning. The warnings follow the draft as typed, including when another entry is malformed. A refused save
-leaves the draft and current helm policy unchanged and shows the reason inline. Under **Notifications**, sounds has
-three device switches (see Status), and **ntfy alerts** has an off-by-default switch, server URL (default
-`https://ntfy.sh`), topic, optional access token, and priority (Min, Low, Default, High, Urgent; default Default). These
-are explicitly saved helm configuration, shared by every client, outside the preference row. Save refusals appear
-inline. The stored token is never returned: the form shows whether one exists and allows replacing or clearing it.
-Changing to another server clears a saved token unless a new one is entered, and the form says so before saving. **Send
-test** uses the saved configuration, even while disabled, and reports success or failure inline. The **Checkouts**
-section holds the explicitly saved all-hosts checkout folder and, below it, a monospace multi-line post-clone command
-field and the default-on **Keep a checkout ready for faster launches** switch (see
-[Managed checkouts](#managed-checkouts)). The switch's help explains one extra checkout's disk space per repository and
-host, promptless login-shell preparation, earlier file times and Git hooks/filters, and discard on the next create or
-after 30 days unused; it links the full earlier-clone caveats. The folder's help explains expansion on each host,
+error, then reconciles only this field with the helm if the request's outcome is uncertain. The **Tensorlake** section
+holds the helm's Tensorlake account, for hosts that are Tensorlake sandboxes. Its API key is explicitly saved helm
+configuration, shared by every client and kept outside the preference row like the ntfy token: the helm stores it
+unencrypted in its state directory, and the section says so plainly. The key is never returned; the form shows only
+whether one is saved. Pasting a key and pressing **Save** stores or replaces it (surrounding whitespace is dropped), a
+blank field keeps the saved key, and **Clear** removes it. **Test** lists the account's sandboxes with the saved key and
+reports how many it can see, or why Tensorlake refused, inline. Test uses the saved key, never unsaved text in the
+field. Until Farhelm's own Tensorlake SSH key (see [Security](#security)) exists, the section offers **Create SSH key**;
+opening Settings never creates it. Once it exists, the section shows the one-time command that registers it with the
+user's Tensorlake account, `tl sbx ssh keys add --name farhelm-<tag> '<public key>'`, with a **Copy** button. The
+command carries the public key's text, so it works on any machine where Tensorlake's `tl` CLI is signed in. The section
+says that Farhelm cannot check the registration, because an API key cannot list SSH keys. `<tag>` is the helm tag: four
+lowercase letters or digits derived from the helm's registry, stable for the life of its state, which the names of the
+sandboxes this helm creates also carry. The off-by-default **Create Tensorlake sandboxes without asking** switch saves
+only when the helm acknowledges it and shows only the stored choice; `Set up new hosts without asking` never covers
+creating a sandbox. The section also notes that on Tensorlake's Usage Credits plan Tensorlake suspends a sandbox after
+24 hours without a connection from Farhelm. The **Terminal** section chooses whether web links open in Farhelm without
+passing the click on (the default), open in Farhelm and also pass the click on, or only pass the click on. The latter
+two choices explain the risk of a second browser tab and that a program without mouse reporting cannot act on a click.
+This choice covers every client of the helm and takes effect in every mounted terminal of the current client
+immediately; other open clients pick it up when they reload, like the host choices. In the desktop app, the **Terminal**
+section also has tunnel consent and a free-form, comma-separated **File types to open with Cmd-click** field (Ctrl-click
+outside macOS). It defaults to `md, txt, json`; saving an empty list disables opening while downloads still save. This
+field requires an explicit, acknowledged save, but its value lives in the shared preference row. The dialog shows one
+prominent warning beside the field for each listed type outside `md`, `txt`, `json` and `log`; HTML-like types have a
+browser-specific warning, and all other unrecognized types have a generic warning. The warnings follow the draft as
+typed, including when another entry is malformed. A refused save leaves the draft and current helm policy unchanged and
+shows the reason inline. Under **Notifications**, sounds has three device switches (see Status), and **ntfy alerts** has
+an off-by-default switch, server URL (default `https://ntfy.sh`), topic, optional access token, and priority (Min, Low,
+Default, High, Urgent; default Default). These are explicitly saved helm configuration, shared by every client, outside
+the preference row. Save refusals appear inline. The stored token is never returned: the form shows whether one exists
+and allows replacing or clearing it. Changing to another server clears a saved token unless a new one is entered, and
+the form says so before saving. **Send test** uses the saved configuration, even while disabled, and reports success or
+failure inline. The **Checkouts** section holds the explicitly saved all-hosts checkout folder and, below it, a
+monospace multi-line post-clone command field and the default-on **Keep a checkout ready for faster launches** switch
+(see [Managed checkouts](#managed-checkouts)). The switch's help explains one extra checkout's disk space per repository
+and host, promptless login-shell preparation, earlier file times and Git hooks/filters, and discard on the next create
+or after 30 days unused; it links the full earlier-clone caveats. The folder's help explains expansion on each host,
 first-use folder creation, and that command-line host overrides keep their folder. The command's help explains that it
 runs in each new checkout on its host, after cloning and before the agent starts, that changes affect future checkouts
 only, and that command-line host overrides keep their command. The installed desktop app's dialog also has an **App**
@@ -3485,7 +3500,10 @@ fails that verification is not installed, and the app then says that it can no l
 reinstalled with the installer, which, like any fresh install, trusts get.farhelm.io over TLS alone. When ntfy alerts
 are configured, the helm also posts waiting alerts and explicit test alerts to the saved server and topic, with the
 optional access token (see Status). This connection sends session titles and host display names; it follows no
-redirects. Settings allow HTTP for a private server, which sends those values and any token without TLS protection.
+redirects. Settings allow HTTP for a private server, which sends those values and any token without TLS protection. When
+a Tensorlake API key is saved, the helm calls Tensorlake's REST API at `https://api.tensorlake.ai` with it as a bearer
+token, for the Tensorlake actions the user takes (Settings' **Test** lists the account's sandboxes). These requests
+follow no redirects and are not retried, and the key appears in no reply, error message or log.
 
 - **Client to helm**: a standalone helm serves its web UI over plain HTTP bound to loopback only, with a required token.
   The helm refuses to bind non-loopback addresses in v1; TLS serving is post-v1. Reaching the UI from another machine
@@ -3548,16 +3566,20 @@ Further requirements:
   automatically for provisioning, updates, and all supervisor communication. How the SSH connection itself is possible
   (a tailnet, a LAN, whatever) is the user's business. No public relay, no third-party rendezvous service.
 - Provisioning rides the user's existing SSH access — their keys, agent, and config. Farhelm stores no SSH credentials
-  of its own. Confirmed 2026-10-01: the config governs reaching and authenticating to the host (keys, the agent used to
-  authenticate, ProxyJump, Match blocks), not what rides Farhelm's connections. Whatever the config says, Farhelm's own
-  ssh connections, the supervisor connection and every provisioning step alike, disable SSH agent, X11 and port
-  forwarding, and override the settings that would replace or wrap Farhelm's own remote command: a `RemoteCommand`, a
-  forced terminal, and a `LocalCommand`. A remote host therefore cannot reach the helm machine's ssh agent, display or
-  local ports through SSH forwarding on a connection that stays up around the clock. Explicit localhost tunnels are a
-  separate, consented raw-TCP relay inside Farhelm's protocol, from the Mac to the session host's loopback only.
-  Accepted: right after an upgrade, a helm started within a minute of the previous version stopping (the desktop app
-  reopened, or a helm run by hand) can attach to a shared ssh connection the previous version left open, and port
-  forwards that connection set up last until it closes.
+  of its own, with one exception for Tensorlake sandboxes: Tensorlake's SSH gateway admits only keys registered with the
+  user's Tensorlake account, and only a user login, not an API key, can register one. For those hosts alone the helm
+  keeps an ed25519 key pair of its own in its state directory (private key mode 0600, no passphrase), generated with
+  `ssh-keygen` only when the user asks for it in Settings and never replaced while it exists; Settings then shows the
+  command that registers it. Farhelm never offers this key to any other host. Confirmed 2026-10-01: the config governs
+  reaching and authenticating to the host (keys, the agent used to authenticate, ProxyJump, Match blocks), not what
+  rides Farhelm's connections. Whatever the config says, Farhelm's own ssh connections, the supervisor connection and
+  every provisioning step alike, disable SSH agent, X11 and port forwarding, and override the settings that would
+  replace or wrap Farhelm's own remote command: a `RemoteCommand`, a forced terminal, and a `LocalCommand`. A remote
+  host therefore cannot reach the helm machine's ssh agent, display or local ports through SSH forwarding on a
+  connection that stays up around the clock. Explicit localhost tunnels are a separate, consented raw-TCP relay inside
+  Farhelm's protocol, from the Mac to the session host's loopback only. Accepted: right after an upgrade, a helm started
+  within a minute of the previous version stopping (the desktop app reopened, or a helm run by hand) can attach to a
+  shared ssh connection the previous version left open, and port forwards that connection set up last until it closes.
 - Agent credentials (e.g. Claude subscription auth) live on the host running the agent, in the agent's own standard
   configuration. The system must not extract, proxy, or repurpose agent OAuth credentials. Claude Code authenticates
   directly with a consumer subscription, unmodified.

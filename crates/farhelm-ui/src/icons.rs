@@ -99,6 +99,11 @@ pub(crate) enum ActionGlyph {
     /// Settings for trust decisions; this does not assert session permissions.
     AgentTrust,
     App,
+    /// Account credentials: Settings' Tensorlake section, which holds an API
+    /// key and an SSH key. A key rather than a cloud, because the cloud is
+    /// the remote hosts' default mark and the section is about the account,
+    /// not about hosts. Farhelm's own drawing, not Tensorlake's logo.
+    Key,
     Launch,
     Copy,
     Document,
@@ -277,6 +282,13 @@ pub(crate) fn ActionIcon(
             rsx! {
                 rect { x: "2", y: "2", width: "10", height: "10", rx: "1" }
                 path { d: "M2 4.5h10M4 3.3h.01M5.8 3.3h.01" }
+            },
+        ),
+        ActionGlyph::Key => (
+            "key",
+            rsx! {
+                circle { cx: "4.5", cy: "7", r: "2.5" }
+                path { d: "M7 7h5.5M10.5 7v2.2M12.5 7v1.6" }
             },
         ),
         ActionGlyph::Launch => (

@@ -26,6 +26,9 @@
 //! The desktop download-opening list uses an acknowledged save too: the helm
 //! decides what opens, while this dialog warns about listed types it does not
 //! recognize as safe.
+//! The Tensorlake section is helm configuration with the ntfy contract (an
+//! explicitly saved, write-only API key) plus an acknowledged switch; its
+//! component owns both (`tensorlake_settings.rs`).
 //!
 //! Section changes hide mounted panels rather than replacing their component
 //! trees. Explicit-save fields keep their drafts and pending work, and device
@@ -55,10 +58,11 @@ pub(crate) const RETURN_FOCUS: &str =
 
 /// Stable panel keys preserve draft and focus ownership; labels are presentation.
 /// The App entry still follows updater availability rather than platform alone.
-const SETTINGS_SECTIONS: [(&str, &str); 8] = [
+const SETTINGS_SECTIONS: [(&str, &str); 9] = [
     ("sessions", "Sessions"),
     ("appearance", "Appearance"),
     ("hosts", "Hosts"),
+    ("tensorlake", "Tensorlake"),
     ("terminal", "Terminal"),
     ("checkouts", "Checkouts"),
     ("agent-trust", "Agent trust"),
@@ -75,6 +79,7 @@ fn settings_section_icon(section: &str) -> Element {
         "sessions" => rsx! { ActionIcon { glyph: ActionGlyph::Sessions } },
         "appearance" => rsx! { ActionIcon { glyph: ActionGlyph::Appearance } },
         "hosts" => rsx! { ActionIcon { glyph: ActionGlyph::Hosts } },
+        "tensorlake" => rsx! { ActionIcon { glyph: ActionGlyph::Key } },
         "terminal" => rsx! { ActionIcon { glyph: ActionGlyph::Terminal } },
         "checkouts" => rsx! { FolderIcon {} },
         "agent-trust" => rsx! { ActionIcon { glyph: ActionGlyph::AgentTrust } },
@@ -598,6 +603,18 @@ pub(crate) fn SettingsDialog(
                             }
                         }
                         section {
+                            id: "settings-tensorlake",
+                            class: "host-settings-section app-settings-panel",
+                            aria_label: "Tensorlake",
+                            hidden: selected() != "tensorlake",
+                            h3 {
+                                class: "host-settings-section-title",
+                                tabindex: "-1",
+                                "Tensorlake"
+                            }
+                            crate::tensorlake_settings::TensorlakeSettings {}
+                        }
+                        section {
                             id: "settings-terminal",
                             class: "host-settings-section app-settings-panel",
                             aria_label: "Terminal",
@@ -752,9 +769,9 @@ pub(crate) fn SettingsDialog(
                     // its footer names it.
                     span { class: "dialog-footer-hint",
                         if cfg!(native_desktop) {
-                            "Most choices save immediately; ntfy alerts, checkout fields and file types use Save."
+                            "Most choices save immediately; the Tensorlake API key, ntfy alerts, checkout fields and file types use Save."
                         } else {
-                            "Most choices save immediately; ntfy alerts and checkout fields use Save."
+                            "Most choices save immediately; the Tensorlake API key, ntfy alerts and checkout fields use Save."
                         }
                     }
                     crate::modal_dialog::DialogActions {

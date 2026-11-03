@@ -334,7 +334,7 @@ pub struct FolderHistoryEntry {
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 69;
+const SCHEMA_VERSION: i64 = 70;
 
 /// Shared visits are bounded independently of fleet size. Stale references
 /// remain ordinary history entries until later visits push them out.
@@ -357,6 +357,18 @@ const NTFY_ALERTS_SCHEMA: &str = r#"CREATE TABLE ntfy_alerts (
     config TEXT NOT NULL
 ) STRICT;
 INSERT INTO ntfy_alerts VALUES (1, '{"settings":{"enabled":false,"server_url":"https://ntfy.sh","topic":"","priority":"default","token_set":false},"token":null}');"#;
+
+/// The Tensorlake account singleton (schema 70): the API key and the "create
+/// Tensorlake sandboxes without asking" choice, as the JSON
+/// `tensorlake::config::Config` stores. Kept apart from the replayed
+/// preferences for the same reason as ntfy's row: explicit saves validate,
+/// and no read may return the key. Starts with no key and the choice off.
+/// Shared by the fresh schema and the 69→70 step so both produce the same DDL.
+const TENSORLAKE_ACCOUNT_SCHEMA: &str = r#"CREATE TABLE tensorlake_account (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    config TEXT NOT NULL
+) STRICT;
+INSERT INTO tensorlake_account VALUES (1, '{"api_key":null,"create_without_asking":false}');"#;
 
 /// The two profile tables exactly as schema 15 created them and schema 36
 /// dropped them: the helm-owned catalog and the remembered default.
@@ -2202,6 +2214,8 @@ pub struct HelmStore {
 /// - 69: durable announcement queue/history and the build that created a new
 ///   database. Upgraded databases have no creation baseline; migration must not
 ///   mistake the upgrade's build for their original installation.
+/// - 70: a dedicated Tensorlake account singleton with no API key and sandbox
+///   creation asking first; like ntfy's row, its key is never part of a read.
 fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -2509,10 +2523,11 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
               {NTFY_ALERTS_SCHEMA}
               {REGISTRY_NAMESPACE_SCHEMA}
               {announcement_schema}
+              {TENSORLAKE_ACCOUNT_SCHEMA}
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 69;",
+              PRAGMA user_version = 70;",
             announcement_schema = crate::announcements::SCHEMA,
         ))
         .context("creating schema")?;
@@ -4067,6 +4082,23 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
         tx.execute_batch("PRAGMA user_version = 69;")
             .context("migrating helm.db to schema version 69")?;
         version = 69;
+    }
+    if version == 69 {
+        // Rewound migration fixtures can already contain the current table.
+        // Genuine schema-69 databases acquire an account with no key and
+        // sandbox creation asking first.
+        let present: bool = tx.query_row(
+            "SELECT count(*) != 0 FROM sqlite_master WHERE name = 'tensorlake_account'",
+            [],
+            |row| row.get(0),
+        )?;
+        if !present {
+            tx.execute_batch(TENSORLAKE_ACCOUNT_SCHEMA)
+                .context("creating the Tensorlake account table")?;
+        }
+        tx.execute_batch("PRAGMA user_version = 70;")
+            .context("migrating helm.db to schema version 70")?;
+        version = 70;
     }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to

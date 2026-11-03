@@ -156,12 +156,12 @@ async function sweepTextFields(page: Page, root: string): Promise<{ checked: num
         checked += 1;
       }
       const attributes = {
-        // Two deliberate exceptions. The ntfy token keeps `new-password`
-        // because browsers ignore `off` when filling saved logins, which
-        // would put the helm's own web token into it.
+        // Two deliberate exceptions. The ntfy token and the Tensorlake API
+        // key keep `new-password` because browsers ignore `off` when filling
+        // saved logins, which would put the helm's own web token into them.
         autocomplete: field.matches(".feedback-dialog .feedback-contact")
           ? "email"
-          : field.matches(".ntfy-token")
+          : field.matches(".ntfy-token, .tensorlake-key")
           ? "new-password"
           : "off",
         autocorrect: "off",
@@ -328,15 +328,15 @@ test("sidebar surfaces give every control hover text", async ({ page, request })
   // Hidden panels remain mounted but have no painted controls. Visit each
   // pane so header buttons cannot satisfy a missing section's sweep premise.
   const settingsSections: [SettingsSection, number][] = [
-    ["sessions", 3], ["hosts", 2], ["terminal", 3],
+    ["sessions", 3], ["hosts", 2], ["tensorlake", 5], ["terminal", 3],
     ["checkouts", 3], ["agent trust", 7], ["notifications", 5],
   ];
   for (const [section, minimum] of settingsSections) {
     await selectSettingsSection(page, section);
     const root = `.app-settings-panel[aria-label="${settingsSectionLabels[section]}"]`;
     await expectCovered(page, `settings ${section}`, root, minimum);
-    if (section === "checkouts" || section === "notifications") {
-      await expectTextFieldsCovered(page, `settings ${section}`, root, section === "checkouts" ? 2 : 3);
+    if (section === "checkouts" || section === "notifications" || section === "tensorlake") {
+      await expectTextFieldsCovered(page, `settings ${section}`, root, { checkouts: 2, notifications: 3, tensorlake: 1 }[section]);
     }
   }
   // The phone adds a back control and a list-only state. Audit both without

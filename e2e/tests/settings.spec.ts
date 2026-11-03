@@ -28,7 +28,7 @@ import {
 } from "./helpers/fleet";
 
 /** The web fixture has no updater, so its navigation omits the app pane. */
-const webSettingsSections: SettingsSection[] = ["sessions", "Appearance", "hosts", "terminal", "checkouts", "agent trust", "notifications"];
+const webSettingsSections: SettingsSection[] = ["sessions", "Appearance", "hosts", "tensorlake", "terminal", "checkouts", "agent trust", "notifications"];
 
 /** A checked switch's inverse outline must be drawn against its own fill.
  * Real native Tab focus and a supported gap click protect the failure premise:
@@ -877,7 +877,7 @@ test("settings keeps both close controls pinned around its grouped scrolling bod
     await page.setViewportSize({ width, height: 560 });
     await gear.click();
     await expect(dialog.getByRole("checkbox", { name: "Skip session confirmations", exact: true })).toBeFocused();
-    await expect(dialog.getByRole("checkbox", { includeHidden: true })).toHaveCount(19);
+    await expect(dialog.getByRole("checkbox", { includeHidden: true })).toHaveCount(20);
     await page.evaluate(() => document.fonts.ready);
     await selectSettingsSection(page, "agent trust");
     await expect(dismiss).toHaveAttribute("data-tooltip", "Close settings; unsaved fields are discarded");
@@ -925,7 +925,7 @@ test("settings keeps both close controls pinned around its grouped scrolling bod
   await page.setViewportSize({ width: 1280, height: 5000 });
   await gear.click();
   await selectSettingsSection(page, "agent trust");
-  await expect(dialog.getByRole("checkbox", { includeHidden: true })).toHaveCount(19);
+  await expect(dialog.getByRole("checkbox", { includeHidden: true })).toHaveCount(20);
   const tall = await body.evaluate((el) => ({ content: el.scrollHeight, height: el.clientHeight }));
   expect(tall.height).toBeGreaterThan(0);
   expect(tall.content, "a tall window must fit the settings without scrolling").toBeLessThanOrEqual(tall.height);
@@ -952,7 +952,7 @@ test("settings navigation keeps mounted panes and follows the narrow list path",
   await expect(navigation.getByRole("button")).toHaveText(webSettingsSections.map(section => settingsSectionLabels[section]));
   await expect(navigation.getByRole("button", { name: "App", exact: true })).toHaveCount(0);
   await expect(panels).toHaveCount(webSettingsSections.length);
-  await expect(dialog.getByRole("checkbox", { includeHidden: true })).toHaveCount(19);
+  await expect(dialog.getByRole("checkbox", { includeHidden: true })).toHaveCount(20);
   await expect(dialog.getByRole("checkbox", { name: "Skip session confirmations", exact: true })).toBeFocused();
   for (const section of webSettingsSections) {
     const panel = await selectSettingsSection(page, section);
@@ -1945,7 +1945,7 @@ test("settings dismisses a row menu, isolates the page and returns focus on Esca
     const dialog = page.getByRole("dialog", { name: "Settings", exact: true });
     await expect(dialog).toBeVisible();
     await expect(page.locator('[role="menu"]')).toHaveCount(0);
-    await expect(dialog.getByRole("checkbox", { includeHidden: true })).toHaveCount(19);
+    await expect(dialog.getByRole("checkbox", { includeHidden: true })).toHaveCount(20);
     const setup = dialog.getByRole("checkbox", { name: "Set up new hosts without asking", exact: true });
     await expect(dialog.getByRole("checkbox", { name: "Skip session confirmations", exact: true })).toBeFocused();
     await selectSettingsSection(page, "hosts");
@@ -1998,7 +1998,7 @@ test("settings dismisses a row menu, isolates the page and returns focus on Esca
         expect(alignment.overflowing).toBe(false);
         for (const left of [...alignment.choices, ...alignment.help]) expect(left).toBeCloseTo(alignment.heading, 0);
       }
-      expect(measuredSwitches, "every mounted switch must be measured in its visible pane").toBe(19);
+      expect(measuredSwitches, "every mounted switch must be measured in its visible pane").toBe(20);
     }
     // Space exercises the native input rather than Playwright's checked-state
     // setter, and the real helm reply proves the preference writer still runs.

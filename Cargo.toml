@@ -162,8 +162,8 @@ percent-encoding = "2"
 # reqwest's upstream defaults, deliberately: rustls with its default crypto
 # provider (aws-lc-rs) and the operating system's certificate store (through
 # rustls-platform-verifier), plus HTTP/2 and system proxy settings. Farhelm only
-# speaks HTTPS from the machine running the helm (release downloads, feedback)
-# and from the desktop app's updater, never from a remote host, and release
+# speaks HTTPS from the machine running the helm (release downloads, feedback,
+# Tensorlake's API) and from the desktop app's updater, never from a remote host, and release
 # integrity rests on the signed `SHA256SUMS`, not on TLS, so there is no reason
 # to diverge from what most reqwest users run.
 #
@@ -174,7 +174,8 @@ percent-encoding = "2"
 # bundle, building ANY reqwest client fails ("No CA certificates were loaded
 # from the system"), even one that only talks to loopback. The helm survives
 # it: the feedback forwarder logs the error and reports that it cannot send,
-# and provisioning fails with "building the release download HTTP client".
+# and provisioning fails with "building the release download HTTP client";
+# Tensorlake calls fail saying to check that CA certificates are installed.
 # The fix on such a machine is installing its CA certificates package. The
 # desktop app is unaffected because it only ships for macOS, whose verifier
 # always has the system keychain. If this turns out to matter in practice,

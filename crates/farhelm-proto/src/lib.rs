@@ -131,6 +131,9 @@ pub mod yolo;
 /// caps both enforce (see the module's own docs).
 pub mod feedback;
 pub mod ntfy;
+/// The helm's Tensorlake account settings as the UI reads and writes them
+/// (see the module's own docs).
+pub mod tensorlake;
 
 /// The one list of characters that must never be shown as themselves when
 /// peer-supplied text reaches a human (see the module's own docs).
