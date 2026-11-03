@@ -521,8 +521,12 @@ pub(crate) fn entry_info(
     // exited, and the ticker's reap may lag this reply by a tick — hiding
     // the corpse here is what keeps the listing honest in that window.
     //
-    // Tabs are windows in the SESSION's tmux session whatever the agent's
-    // kind (`tmux_tab_home`).
+    // Tmux tabs are windows in the SESSION's tmux session whatever the
+    // agent's kind (`tmux_tab_home`), and come first, in window order. Tabs
+    // in terminal hosts follow, in the order they were opened, from the
+    // session's own cell, whatever the agent terminal (a session can have
+    // both kinds: SPEC_impl.md, "Terminal host"); an exited one is hidden
+    // the same way until the reap ends its host.
     info.tabs = entry
         .terminal
         .as_ref()
@@ -535,6 +539,10 @@ pub(crate) fn entry_info(
                 .collect()
         })
         .unwrap_or_default();
+    info.tabs.extend(super::core::listed_host_tabs(
+        &entry.session.host_tabs,
+        false,
+    ));
     let (mut status, mut annotation) = session_status(entry, pane_states, known);
     let launch_error = entry
         .run

@@ -31,12 +31,20 @@ const MAX_CONTROL_LINE: usize = farhelm_proto::MAX_FRAME_LEN as usize * 4 + 1024
 /// expanded to the "no status" branch and every clean exit read back as
 /// `Exited { exit_code: None }`. A constant prefix cannot be falsy.
 ///
-/// No window user options here, deliberately — see
+/// No window user option VALUES here, deliberately — see
 /// [`PANE_MARKER_FORMAT`], which fetches them separately precisely
-/// because they are the fields a pane can write.
+/// because they are the fields a pane can write. The one option this
+/// format touches is whether the window carries a tab marker at all,
+/// through tmux's own conditional, which expands to the literal `1` or `0`
+/// whatever the option holds, so a pane-written value cannot put a newline
+/// (or anything else) into this query's output through it. It says only
+/// whether the marker query can matter ([`marker_query_needed`]); the
+/// marker itself, and whether it is a valid one, is still read and judged
+/// by the separate query. (A minted tab id is a UUID, never the `0` or
+/// empty string tmux's conditional reads as false.)
 pub(super) const PANE_FACT_FORMAT: &str = concat!(
     "#{pane_id} #{window_id} #{window_index} #{pane_dead} ",
-    "s#{pane_dead_status} #{session_name}"
+    "s#{pane_dead_status} #{?#{@farhelm-tab},1,0} #{session_name}"
 );
 
 /// The PANE-WRITABLE half of pane discovery: the two farhelm window
@@ -121,13 +129,14 @@ fn parse_marker(value: &str) -> Option<String> {
 /// it treat the whole listing as uncertain. tmux at Farhelm's floor refuses
 /// a newline in a session name, so the flag is defence in depth rather than
 /// a guard against a known attack.
-pub(super) fn parse_pane_facts_flagged(out: &str) -> (HashMap<String, PaneState>, bool) {
+pub(super) fn parse_pane_facts_flagged(out: &str) -> PaneFacts {
     let mut states: HashMap<String, PaneState> = HashMap::new();
     let mut seen_twice: HashSet<String> = HashSet::new();
+    let mut tab_marked = false;
     for line in out.lines() {
         // `splitn` on the LAST field: a session name may contain spaces,
         // so everything past the fixed prefix belongs to it verbatim.
-        let mut fields = line.splitn(6, ' ');
+        let mut fields = line.splitn(7, ' ');
         let Some(pane_ordinal) = fields.next().and_then(|id| tmux_ordinal(id, '%')) else {
             continue;
         };
@@ -158,6 +167,11 @@ pub(super) fn parse_pane_facts_flagged(out: &str) -> (HashMap<String, PaneState>
         } else {
             None
         };
+        let marked = match fields.next() {
+            Some("0") => false,
+            Some("1") => true,
+            _ => continue,
+        };
         let Some(session_name) = fields.next().filter(|name| !name.is_empty()) else {
             continue;
         };
@@ -165,6 +179,7 @@ pub(super) fn parse_pane_facts_flagged(out: &str) -> (HashMap<String, PaneState>
             seen_twice.insert(pane_id);
             continue;
         }
+        tab_marked |= marked;
         states.insert(
             pane_id,
             PaneState {
@@ -184,19 +199,51 @@ pub(super) fn parse_pane_facts_flagged(out: &str) -> (HashMap<String, PaneState>
     for pane in seen_twice {
         states.remove(&pane);
     }
-    (states, duplicated)
+    PaneFacts {
+        states,
+        duplicated,
+        tab_marked,
+    }
+}
+
+/// What [`parse_pane_facts_flagged`] read from [`PANE_FACT_FORMAT`]'s
+/// output.
+pub(super) struct PaneFacts {
+    /// Every pane whose row parsed, by pane id.
+    pub(super) states: HashMap<String, PaneState>,
+    /// Whether a pane listed twice was dropped (see the parser's docs).
+    pub(super) duplicated: bool,
+    /// Whether any listed pane's window carries a tab marker of any value:
+    /// a window that may be a tab, whose marker the second query must then
+    /// read ([`marker_query_needed`]).
+    pub(super) tab_marked: bool,
 }
 
 /// The map alone, for tests that do not care about the duplicate flag.
 #[cfg(test)]
 pub(super) fn parse_pane_facts(out: &str) -> HashMap<String, PaneState> {
-    parse_pane_facts_flagged(out).0
+    parse_pane_facts_flagged(out).states
 }
 
-/// Whether any tmux session in `states` holds panes from more than one
-/// window — the cheap precondition [`super::TmuxDriver::pane_states`] uses to
-/// decide whether the marker query can matter at all.
-pub(super) fn any_session_has_several_windows(states: &HashMap<String, PaneState>) -> bool {
+/// Whether the marker query ([`PANE_MARKER_FORMAT`]) can matter for this
+/// listing: the cheap precondition [`super::TmuxDriver::pane_states`] uses
+/// to skip it. It matters when some window carries a tab marker
+/// (`tab_marked`, [`PaneFacts::tab_marked`]), and when some session holds
+/// panes from more than one window, where the agent marker tells the
+/// agent's window from the others.
+///
+/// Decided from the tab marker's presence rather than from window counts or
+/// positions alone, because neither tells a tab from an agent: a tmux
+/// session whose agent moved into a terminal host can hold a single window
+/// that is a tab, and tmux gives a new window the lowest free index, so
+/// that tab can sit at index 0 once the window there closed (a tmux
+/// Restart's replacement agent window does that to the old agent window's
+/// index). A server whose sessions each hold one unmarked window, the
+/// ordinary tab-less deployment, still pays one query.
+pub(super) fn marker_query_needed(states: &HashMap<String, PaneState>, tab_marked: bool) -> bool {
+    if tab_marked {
+        return true;
+    }
     let mut first_window: HashMap<&str, &str> = HashMap::new();
     states.values().any(|state| {
         first_window
@@ -1199,7 +1246,7 @@ mod tests {
     /// before `@9` as a string.
     #[farhelm_testtrace::test]
     fn parse_pane_facts_reads_live_and_dead_panes() {
-        let out = "%0 @0 0 0 s fh-alive\n%1 @4 2 1 s3 fh-dead\n";
+        let out = "%0 @0 0 0 s 0 fh-alive\n%1 @4 2 1 s3 0 fh-dead\n";
         let states = parse_pane_facts(out);
         assert_eq!(
             states.get("%0"),
@@ -1225,7 +1272,7 @@ mod tests {
     /// compares it verbatim.
     #[farhelm_testtrace::test]
     fn parse_pane_facts_takes_a_session_name_with_spaces_whole() {
-        let states = parse_pane_facts("%0 @0 0 0 s a session with spaces\n");
+        let states = parse_pane_facts("%0 @0 0 0 s 0 a session with spaces\n");
         assert_eq!(states["%0"].session_name, "a session with spaces");
     }
 
@@ -1235,7 +1282,7 @@ mod tests {
     /// fabricate a death that has not happened.
     #[farhelm_testtrace::test]
     fn parse_pane_facts_ignores_status_of_a_live_pane() {
-        let states = parse_pane_facts("%0 @0 0 0 s7 fh-live\n");
+        let states = parse_pane_facts("%0 @0 0 0 s7 0 fh-live\n");
         assert_eq!(
             states.get("%0"),
             Some(&PaneState::for_test("fh-live", "%0", "@0"))
@@ -1255,7 +1302,7 @@ mod tests {
     /// one turned every clean exit into "no code".
     #[farhelm_testtrace::test]
     fn parse_pane_facts_tolerates_an_unparseable_dead_status() {
-        let states = parse_pane_facts("%0 @0 0 1 s fh-signalled\n");
+        let states = parse_pane_facts("%0 @0 0 1 s 0 fh-signalled\n");
         assert_eq!(
             states.get("%0"),
             Some(&PaneState::for_test("fh-signalled", "%0", "@0").dead_with(None))
@@ -1268,7 +1315,8 @@ mod tests {
     /// "missing means Exited" contract exists to avoid. Covers each field
     /// in turn: a truncated row, a pane id that is not `%N`, a window id
     /// that is not `@N`, a non-numeric window index, an unrecognized
-    /// `pane_dead`, and an empty session name.
+    /// `pane_dead`, a tab flag that is not `0` or `1`, and a missing
+    /// session name.
     #[farhelm_testtrace::test]
     fn parse_pane_facts_skips_every_malformed_row_shape() {
         let states = parse_pane_facts(
@@ -1278,7 +1326,9 @@ mod tests {
              %2 window0 0 0 s fh\n\
              %3 @0 index 0 s fh\n\
              %4 @0 0 maybe s fh\n\
-             %5 @0 0 2 s fh\n",
+             %5 @0 0 2 s fh\n\
+             %6 @0 0 0 s yes fh\n\
+             %7 @0 0 0 s 0\n",
         );
         assert!(
             states.is_empty(),
@@ -1300,8 +1350,9 @@ mod tests {
     /// releasing a checkout still in use.
     #[farhelm_testtrace::test]
     fn parse_pane_facts_drops_a_pane_that_appears_twice() {
-        let states =
-            parse_pane_facts("%0 @0 0 0 s fh-real\n%0 @9 9 0 s fh-forged\n%1 @1 1 0 s fh-real\n");
+        let states = parse_pane_facts(
+            "%0 @0 0 0 s 0 fh-real\n%0 @9 9 0 s 0 fh-forged\n%1 @1 1 0 s 0 fh-real\n",
+        );
         assert!(
             !states.contains_key("%0"),
             "a duplicated pane id must yield NO entry, not the first or last one: {states:?}"
@@ -1310,13 +1361,13 @@ mod tests {
             states.contains_key("%1"),
             "an unaffected pane must survive its neighbour's forgery"
         );
-        let (_, duplicated) = parse_pane_facts_flagged("%0 @0 0 0 s fh-real\n");
+        let duplicated = parse_pane_facts_flagged("%0 @0 0 0 s 0 fh-real\n").duplicated;
         assert!(
             !duplicated,
             "a listing with one row per pane is not flagged"
         );
-        let (_, duplicated) =
-            parse_pane_facts_flagged("%0 @0 0 0 s fh-real\n%0 @9 9 0 s fh-forged\n");
+        let duplicated =
+            parse_pane_facts_flagged("%0 @0 0 0 s 0 fh-real\n%0 @9 9 0 s 0 fh-forged\n").duplicated;
         assert!(duplicated, "the dropped duplicate is flagged");
     }
 
@@ -1401,26 +1452,44 @@ mod tests {
 
     /// The second query is skipped when it cannot matter — the
     /// optimization that keeps a tab-less deployment paying exactly the
-    /// one subprocess it always paid.
+    /// one subprocess it always paid — and never when a window carries a
+    /// tab marker, whatever its position.
+    ///
+    /// Why: a session whose agent moved into a terminal host can be left
+    /// with one window that is a tab, at index 0 (tmux reuses the lowest
+    /// free index), which a rule on window counts or positions would skip,
+    /// and the tab would vanish from its listing, lookup and close. Spec:
+    /// one unmarked window per session skips; two windows in one session
+    /// need it; a split (two panes, one window) does not; one lone window
+    /// at index 0 whose row says it carries a tab marker needs it.
     #[farhelm_testtrace::test]
-    fn the_marker_query_is_skipped_only_when_no_session_has_two_windows() {
+    fn the_marker_query_is_skipped_only_when_no_window_can_be_a_tab() {
         let one_each: HashMap<String, PaneState> = [("%0", "fh-a", "@0"), ("%1", "fh-b", "@1")]
             .into_iter()
             .map(|(pane, session, window)| {
                 (pane.to_string(), PaneState::for_test(session, pane, window))
             })
             .collect();
-        assert!(!any_session_has_several_windows(&one_each));
+        assert!(!marker_query_needed(&one_each, false));
 
         let mut with_a_tab = one_each.clone();
         with_a_tab.insert("%2".to_string(), PaneState::for_test("fh-a", "%2", "@2"));
-        assert!(any_session_has_several_windows(&with_a_tab));
+        assert!(marker_query_needed(&with_a_tab, false));
 
         // Two panes in ONE window (a split) is not two windows.
         let mut split: HashMap<String, PaneState> = HashMap::new();
         split.insert("%0".to_string(), PaneState::for_test("fh-a", "%0", "@0"));
         split.insert("%1".to_string(), PaneState::for_test("fh-a", "%1", "@0"));
-        assert!(!any_session_has_several_windows(&split));
+        assert!(!marker_query_needed(&split, false));
+
+        // A lone tab at index 0, its marker flagged by the fact query.
+        let facts = parse_pane_facts_flagged("%3 @3 0 0 s 1 fh-host-agent\n");
+        assert!(facts.tab_marked);
+        assert_eq!(facts.states["%3"].window_index, 0);
+        assert!(marker_query_needed(&facts.states, facts.tab_marked));
+        let facts = parse_pane_facts_flagged("%3 @3 0 0 s 0 fh-tmux-agent\n");
+        assert!(!facts.tab_marked);
+        assert!(!marker_query_needed(&facts.states, facts.tab_marked));
     }
 
     /// Parser-level robustness only: an empty string must parse as an

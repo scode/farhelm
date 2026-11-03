@@ -34,6 +34,14 @@ use host_launch::{HostLeft, HostSpawnFailure, SpawnedInHost};
 mod host_handover;
 use host_handover::{GoneHosts, HostDiscovery, RowHost};
 
+/// Terminal tabs that run in terminal hosts: opening, closing and reaping
+/// them, and finding them again after a restart (see its own docs).
+mod host_tabs;
+pub(crate) use host_tabs::{
+    HostTab, HostTabs, NewTab, find_host_tab, host_tab_cell, host_tabs_of, listed_host_tabs,
+    reap_due_host_tabs,
+};
+
 /// The tracing target every event from this module and its `vendor` children
 /// uses: this module's own path.
 ///
@@ -872,6 +880,11 @@ fault_hooks! {
     /// past Delete's deadline for ending them and show what the deadline
     /// does. `None` in production.
     delete_host_end_gate: SinkReservationGate,
+    /// Called before a tab's close ends its host (`host_tabs`); an error
+    /// stands for an end that could not be confirmed (a host that survives
+    /// its signals, a process table that cannot be read), so a test can show
+    /// what the reap does with such a tab. `None` in production.
+    tab_host_end_fault: Arc<dyn Fn() -> Result<(), String> + Send + Sync>,
 }
 
 /// The injectable seams a `Supervisor` is built with. All default to
@@ -1067,9 +1080,9 @@ pub struct SupervisorSeams {
     /// takes (and [`Supervisor::new`], which delegates to it), sets
     /// [`STATE_DIR_CLAIM_WAIT`].
     pub state_dir_claim_wait: Duration,
-    /// Which kind of terminal a create starts its agent in: a pane in the
-    /// private tmux server, or a terminal host of its own
-    /// ([`NewTerminals`]).
+    /// Which kind of terminal a create starts its agent in, and a new tab
+    /// opens in: a pane in the private tmux server, or a terminal host of
+    /// its own ([`NewTerminals`]).
     ///
     /// The internal switch the terminal-host stack lands behind, off
     /// ([`NewTerminals::Tmux`]) by default. Nothing a user or the
@@ -1101,13 +1114,15 @@ pub struct SupervisorSeams {
 /// media harnesses that keep using tmux, and "new terminals: tmux" reads as
 /// what it does then too.
 ///
-/// Only a new create consults it; a retried create launches in the kind its
-/// launching row already records. A terminal never changes kind while it lives,
-/// and nothing here moves one: a Restart of a tmux session stays in tmux
-/// under either setting until Restart learns to move a session into a host
-/// (the plan's D-23), a Restart of a host agent is refused until Restart can
-/// start a new host, and tabs beside a host agent are refused until tabs
-/// can be hosts.
+/// A new create and a new tab consult it; a retried create launches in the
+/// kind its launching row already records. A terminal never changes kind
+/// while it lives, and nothing here moves one: a Restart of a tmux session
+/// stays in tmux under either setting until Restart learns to move a session
+/// into a host (the plan's D-23), and a Restart of a host agent is refused
+/// until Restart can start a new host. Under `Host` every new tab is a host,
+/// beside a tmux agent too (a mixed session, whose old tmux tabs stay where
+/// they are); under `Tmux` a host agent's session cannot get a tab, since it
+/// has no tmux session to open one in.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum NewTerminals {
     /// A pane in the supervisor's private tmux server, as every terminal was
@@ -1120,14 +1135,27 @@ pub enum NewTerminals {
 
 /// Where an [`TabOpenFault`] can fail a tab open.
 ///
-/// One variant, because one stage has an unwind worth proving: the window
-/// exists and its shell is already running, but the tab has no identity
-/// yet. Nothing else can reach that state on demand — the tmux call that
-/// creates the window either works or leaves nothing behind.
+/// One stage per kind of tab, because each has one unwind worth proving:
+/// the terminal exists and its shell is already running, but the tab has
+/// no identity yet. Nothing else can reach that state on demand — the tmux
+/// call that creates the window, and the start of a tab's host, either work
+/// or leave nothing behind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TabOpenStage {
     /// Immediately after `new-window`, before the window is marked.
     BeforeMarking,
+    /// For a tab in a terminal host: once its host reported ready (its
+    /// child started) and before the supervisor's runtime adopts it. The
+    /// host may remain and its shell may have started processes, with no
+    /// runtime to root a sweep at, which is the unwind the open must still
+    /// get right (`host_tabs`).
+    BeforeAdoption,
+    /// For a tab in a terminal host: once its shell has settled alive, just
+    /// before the tab is published in its session. The host and its record
+    /// exist and the shell runs, but nothing names the tab yet, which is the
+    /// state a failed open must unwind (`host_tabs`) and nothing else
+    /// reaches.
+    BeforePublishing,
 }
 
 /// A failure injected into an `OpenTab` at one of its stages.
@@ -4541,6 +4569,20 @@ pub(crate) struct SessionCells {
     /// ([`Supervisor::reload_notification_cell`]), never edited in place, so
     /// it cannot drift from what a supervisor restart would load.
     pub(crate) notifications: Arc<std::sync::Mutex<Vec<crate::store::StoredSessionNotification>>>,
+    /// The session's terminal tabs that run in terminal hosts, each with the
+    /// runtime that drives its host ([`host_tabs::HostTab`]).
+    ///
+    /// SESSION-scoped like the cells above: a tab is the session's, not one
+    /// launch's, and SPEC.md keeps tabs open across Restart and Stop alike, so
+    /// a relaunch must share this cell rather than start an empty one (which
+    /// would lose every tab host's runtime while its host runs on). A tmux
+    /// tab needs no cell, since it is rediscovered from its window marker on
+    /// every read; a host tab has no window, and this is where its runtime
+    /// lives between the open that started it (or the reload that adopted
+    /// it) and the close or Delete that ends it. Read synchronously by
+    /// `status::entry_info` for the tab strip, which is why it is a leaf
+    /// `std::sync::Mutex` held across no await, like `notifications`.
+    pub(crate) host_tabs: HostTabs,
 }
 
 /// An empty [`SessionCells::notifications`] cell, for an entry the store has
@@ -4651,12 +4693,20 @@ pub(crate) fn notification_cell()
 ///   before `sessions`: a create starting its agent in a terminal host
 ///   holds it shared from just before the host's first stage starts until
 ///   the host's entry is inserted into `sessions`, or until it gives the
-///   host up (it releases it before ending the host). It is taken
+///   host up (it releases it before ending the host). A tab open in a
+///   terminal host (`host_tabs`) holds it shared the same way, under the
+///   session's lifecycle claim, from just before the tab host's first stage
+///   starts until the tab is published in its session's cell (under
+///   `sessions`), or until its shell is found not alive or the open gives
+///   the host up, whichever is first. It is taken
 ///   exclusively, with nothing else of this table taken while it is held,
-///   to remove the socket file of a host just ended (by a create, or by
-///   Delete under its lifecycle claim), and by `serve`'s reload around its
-///   scan of the socket directory and the adoptions that follow (which
-///   learns the hosts to skip from `sessions` before taking it).
+///   to remove the socket file of a host just ended (by a create, a tab's
+///   close or failed open, or by Delete under its lifecycle claim), and by
+///   `serve`'s reload around its scan of the socket directory and the
+///   adoptions that follow, twice: once for the agent hosts
+///   (`host_handover::attribute_host_rows`) and once for the tab hosts
+///   (`host_tabs::adopt_tab_hosts`), each learning the hosts to skip from
+///   `sessions` before taking it.
 ///   Re-adoption does not take it: it contacts only the one socket a launch
 ///   recorded, which no spawn can be starting. Never held while a lifecycle
 ///   claim, `attachments`, or a tmux call is acquired.
@@ -4877,8 +4927,8 @@ pub struct Supervisor {
     ///
     /// Today every create also holds directory admission
     /// (`working_copy_operations`) across its launch, so two creates never
-    /// overlap here anyway; this lock is what keeps that true once tabs and
-    /// Restart spawn hosts without it. An `Arc` so the spawn's guard can be
+    /// overlap here anyway; this lock is what keeps that true now that tab
+    /// opens (`host_tabs`) spawn hosts without it, and once Restart does. An `Arc` so the spawn's guard can be
     /// owned by the value it returns.
     pub(crate) host_scan: Arc<tokio::sync::RwLock<()>>,
     /// Held by what puts adopted hosts into the session map, apart from a
@@ -6243,6 +6293,7 @@ impl Supervisor {
                 // No supervisor exists yet, so nothing can spawn a host.
                 no_spawns: None,
                 gone: Arc::clone(&gone_hosts),
+                tabs: HashMap::new(),
             },
         )
         .await?;
@@ -6670,7 +6721,24 @@ impl Supervisor {
         // Host rows' terminals, from discovery (the docs' "Host rows"). After
         // the boot classification, so a row a reboot interrupted is matched
         // with what it now is.
+        let tab_discovery = host_tabs::TabDiscovery {
+            owns_state_dir: hosts.owns_state_dir,
+            options: hosts.options.clone(),
+            held: hosts.tabs.clone(),
+            no_spawns: hosts.no_spawns.clone(),
+            gone: Arc::clone(&hosts.gone),
+            faults: seams.faults.clone(),
+        };
         let mut row_hosts = host_handover::attribute_host_rows(state_dir, hosts, &rows).await;
+        // And every session's tabs in terminal hosts, whatever its agent's
+        // kind: a tmux session can have them too (`host_tabs`, "After a
+        // restart"). Each goes into its session's cell below.
+        let mut tab_hosts = host_tabs::adopt_tab_hosts(
+            state_dir,
+            tab_discovery,
+            &rows.iter().map(|row| row.id.clone()).collect(),
+        )
+        .await;
         let pane_states = tmux.pane_states().await?;
         // Two passes over the rows: decide every transition against the
         // freshly loaded outcomes, commit them together, then build the
@@ -7164,6 +7232,7 @@ impl Supervisor {
             let scope = launch_scope_unit(&row.id, row.generation, row.launch_scoped);
             let launch_cleanup_done = cleaned_launches.contains(&row.id);
             let launch_boot_ended = row.launch_boot_ended;
+            let host_tabs = tab_hosts.remove(&row.id).unwrap_or_default();
             let launch_error = if matches!(outcome, LastOutcome::Error { .. }) {
                 None
             } else {
@@ -7264,6 +7333,7 @@ impl Supervisor {
                         last_activity_at: activity_stamp(row.last_activity_at),
                         last_work_started_at: activity_stamp(row.last_work_started_at),
                         notifications: notification_cell(),
+                        host_tabs: host_tab_cell(host_tabs),
                     },
                     snapshot,
                     canonical_cwd: row.canonical_cwd,
@@ -7414,6 +7484,7 @@ impl Supervisor {
             adopted: HashMap::new(),
             no_spawns: None,
             gone: GoneHosts::default(),
+            tabs: HashMap::new(),
         };
         Self::reload_sessions_with_hosts(state_dir, store, tmux, seams, may_write, hosts).await
     }
@@ -8019,18 +8090,30 @@ impl Supervisor {
         // reload is adopting.
         let adoption = self.host_adoption.lock().await;
         let (sessions, may_record) = {
-            let adopted = self
-                .sessions
-                .lock()
-                .await
-                .iter()
-                .filter_map(|(id, entry)| match &entry.terminal {
-                    Some(Terminal::Host(host)) => {
-                        Some((id.clone(), (entry.generation, host.clone())))
-                    }
-                    Some(Terminal::Tmux(_)) | None => None,
-                })
-                .collect();
+            let (adopted, tabs) = {
+                let sessions = self.sessions.lock().await;
+                let adopted = sessions
+                    .iter()
+                    .filter_map(|(id, entry)| match &entry.terminal {
+                        Some(Terminal::Host(host)) => {
+                            Some((id.clone(), (entry.generation, host.clone())))
+                        }
+                        Some(Terminal::Tmux(_)) | None => None,
+                    })
+                    .collect();
+                // The constructor's tab runtimes, kept the same way.
+                let tabs = sessions
+                    .iter()
+                    .map(|(id, entry)| {
+                        (
+                            id.clone(),
+                            host_tabs::host_tabs_of(&entry.session.host_tabs),
+                        )
+                    })
+                    .filter(|(_, tabs)| !tabs.is_empty())
+                    .collect();
+                (adopted, tabs)
+            };
             Self::reload_sessions_with_hosts(
                 &self.state_dir,
                 &self.store,
@@ -8043,6 +8126,7 @@ impl Supervisor {
                     adopted,
                     no_spawns: Some(Arc::clone(&self.host_scan)),
                     gone: Arc::clone(&self.gone_hosts),
+                    tabs,
                 },
             )
             .await?
@@ -10379,6 +10463,7 @@ impl Supervisor {
                     last_activity_at: activity_stamp(info.last_activity_at),
                     last_work_started_at: activity_stamp(info.last_work_started_at),
                     notifications: notification_cell(),
+                    host_tabs: host_tab_cell(Vec::new()),
                 },
                 snapshot: snapshot.clone(),
                 canonical_cwd: canonical_cwd.map(str::to_string),
@@ -11910,6 +11995,7 @@ impl Supervisor {
                     last_activity_at: activity_stamp(info.last_activity_at),
                     last_work_started_at: activity_stamp(info.last_work_started_at),
                     notifications: notification_cell(),
+                    host_tabs: host_tab_cell(Vec::new()),
                 },
                 snapshot,
                 canonical_cwd: canonical_cwd.clone(),
@@ -13624,10 +13710,13 @@ impl Supervisor {
         // pre-restart snapshot after an operation that changed one window.
         let tabs = if existing_session.is_some() {
             match self
-                .replacement_session_tabs(&TmuxTerminal {
-                    tmux_name: tmux_name.clone(),
-                    pane: pane.clone(),
-                })
+                .replacement_session_tabs(
+                    entry,
+                    &TmuxTerminal {
+                        tmux_name: tmux_name.clone(),
+                        pane: pane.clone(),
+                    },
+                )
                 .await
             {
                 Ok(tabs) => tabs,
@@ -14147,8 +14236,10 @@ impl Supervisor {
     /// running its program is a live agent (a leftover of an earlier
     /// generation included, which a delete whose confirmation said the agent
     /// had ended must not kill), a tab host still running its program is an
-    /// open tab beside the tmux ones, and a recorded host that does not
-    /// answer usefully is "cannot tell". A record that cannot be settled
+    /// open tab beside the tmux ones (so is a tab runtime the session holds
+    /// whose shell runs, `SessionCells::host_tabs`), and a recorded host that
+    /// does not answer usefully, or a tab runtime that can no longer read its
+    /// host, is "cannot tell". A record that cannot be settled
     /// (one that does not decode, a socket serving another terminal's host,
     /// a first stage that could not be fenced) fails the check.
     ///
@@ -14207,6 +14298,7 @@ impl Supervisor {
             .session_hosts(
                 &entry.info.id,
                 entry.terminal.as_ref(),
+                host_tabs::host_tabs_of(&entry.session.host_tabs),
                 self.timeouts.delete_host_end,
             )
             .await
@@ -14221,10 +14313,11 @@ impl Supervisor {
             return Ok((None, Some(hosts)));
         }
         // Markers read unconditionally, not through `session_tabs`: that
-        // listing skips the marker read when no session has more than one
-        // window, and after the agent's own window is gone a surviving tab
-        // can be the session's only window (see `pane_states_with_markers`).
-        // Missing it here would let an "unconfirmed" delete kill that tab.
+        // listing skips the marker read when it cannot matter, and this
+        // guard must never depend on that judgment being right (after the
+        // agent's own window is gone a surviving tab can be the session's
+        // only window; see `pane_states_with_markers`). Missing it here
+        // would let an "unconfirmed" delete kill that tab.
         // Tmux tabs are windows in the session's tmux session, whatever the
         // agent's kind (`tmux_tab_home`); a session with no agent terminal
         // has no tmux session recorded to look in, as before hosts.
@@ -14279,23 +14372,28 @@ impl Supervisor {
     /// enumerates per-tab scopes and a hidden corpse still owns one; see
     /// [`Self::session_tabs_including_dead`].
     ///
-    /// The tabs are the session's tmux tabs, wherever its agent runs
-    /// (`tmux_tab_home`). For an entry without a terminal, no tabs: with no
-    /// agent terminal there is no tmux session recorded to look in, as
-    /// `entry_info` says.
+    /// The tmux tabs are the session's windows, wherever its agent runs
+    /// (`tmux_tab_home`); for an entry without a terminal, none, since with
+    /// no agent terminal there is no tmux session recorded to look in, as
+    /// `entry_info` says. The tabs in terminal hosts follow them, in the
+    /// order they were opened (`host_tabs::listed_host_tabs`), whatever the
+    /// agent terminal: they are the session's runtimes, not anything tmux
+    /// holds.
     pub(crate) async fn session_tabs(&self, entry: &SessionEntry) -> anyhow::Result<Vec<TabInfo>> {
-        let Some(terminal) = entry.terminal.as_ref() else {
-            return Ok(Vec::new());
+        let mut tabs = match entry.terminal.as_ref() {
+            Some(terminal) => {
+                let (tmux_name, agent_pane) = tmux_tab_home(&entry.info.id, terminal);
+                let states = self.tmux.pane_states().await?;
+                tabs_from_pane_states(states.values(), &tmux_name, agent_pane)
+                    .into_iter()
+                    .filter(|tab| !tab.dead)
+                    .map(|tab| TabInfo { id: tab.id })
+                    .collect()
+            }
+            None => Vec::new(),
         };
-        let (tmux_name, agent_pane) = tmux_tab_home(&entry.info.id, terminal);
-        let states = self.tmux.pane_states().await?;
-        Ok(
-            tabs_from_pane_states(states.values(), &tmux_name, agent_pane)
-                .into_iter()
-                .filter(|tab| !tab.dead)
-                .map(|tab| TabInfo { id: tab.id })
-                .collect(),
-        )
+        tabs.extend(host_tabs::listed_host_tabs(&entry.session.host_tabs, false));
+        Ok(tabs)
     }
 
     /// Rediscover tabs after adding a replacement agent window.
@@ -14306,9 +14404,12 @@ impl Supervisor {
     /// Clearing that untrusted marker on cloned facts lets the restart reply
     /// keep naming the tab; close and teardown continue to use the ordinary
     /// agent-prioritized resolver and therefore do not inherit this
-    /// presentation-only exception.
+    /// presentation-only exception. The session's tabs in terminal hosts,
+    /// which no window replacement touches, follow the tmux ones as in
+    /// [`Self::session_tabs`].
     async fn replacement_session_tabs(
         &self,
+        entry: &SessionEntry,
         replacement: &TmuxTerminal,
     ) -> anyhow::Result<Vec<TabInfo>> {
         let states = self.tmux.pane_states_with_markers().await?;
@@ -14328,7 +14429,7 @@ impl Supervisor {
             state.agent = None;
             candidates.push(state);
         }
-        Ok(tabs_from_pane_states(
+        let mut tabs: Vec<TabInfo> = tabs_from_pane_states(
             candidates.iter(),
             &replacement.tmux_name,
             Some(&replacement.pane),
@@ -14336,7 +14437,9 @@ impl Supervisor {
         .into_iter()
         .filter(|tab| !tab.dead)
         .map(|tab| TabInfo { id: tab.id })
-        .collect())
+        .collect();
+        tabs.extend(host_tabs::listed_host_tabs(&entry.session.host_tabs, false));
+        Ok(tabs)
     }
 
     /// [`Self::session_tabs`] with dead tabs INCLUDED — the teardown
@@ -14347,21 +14450,25 @@ impl Supervisor {
     /// death-to-reap window. The unit GLOB swept afterwards usually
     /// catches strays anyway, but the explicit list must not depend on it
     /// — the glob is the belt for units tmux can no longer name at all.
+    /// A tab in a terminal host is listed too, exited or not, until its
+    /// close or Delete ends its host.
     pub(crate) async fn session_tabs_including_dead(
         &self,
         entry: &SessionEntry,
     ) -> anyhow::Result<Vec<TabInfo>> {
-        let Some(terminal) = entry.terminal.as_ref() else {
-            return Ok(Vec::new());
+        let mut tabs = match entry.terminal.as_ref() {
+            Some(terminal) => {
+                let (tmux_name, agent_pane) = tmux_tab_home(&entry.info.id, terminal);
+                let states = self.tmux.pane_states().await?;
+                tabs_from_pane_states(states.values(), &tmux_name, agent_pane)
+                    .into_iter()
+                    .map(|tab| TabInfo { id: tab.id })
+                    .collect()
+            }
+            None => Vec::new(),
         };
-        let (tmux_name, agent_pane) = tmux_tab_home(&entry.info.id, terminal);
-        let states = self.tmux.pane_states().await?;
-        Ok(
-            tabs_from_pane_states(states.values(), &tmux_name, agent_pane)
-                .into_iter()
-                .map(|tab| TabInfo { id: tab.id })
-                .collect(),
-        )
+        tabs.extend(host_tabs::listed_host_tabs(&entry.session.host_tabs, true));
+        Ok(tabs)
     }
 
     /// Find a pane through which the dead agent window can be removed after
@@ -14613,17 +14720,23 @@ impl Supervisor {
     }
 
     /// Open a terminal tab: a new tmux window on the session's tmux
-    /// session, running the user's login shell in the session's working
-    /// directory (PLAN_M4.md item 2, `ControlMsg::OpenTab`'s contract).
+    /// session, or under the internal switch (`SupervisorSeams::
+    /// new_terminals`) a terminal host of its own (`host_tabs`), running the
+    /// user's login shell in the session's working directory (PLAN_M4.md
+    /// item 2, `ControlMsg::OpenTab`'s contract). The steps below are the
+    /// tmux window's; a host tab's are the same in kind, and its own module
+    /// says how each is done for a host.
     ///
     /// ## Ordering, and what each step buys
     ///
     /// 1. **Resolve the session's agent terminal.** Not because a tab
-    ///    needs it, but because it is where the tmux session name lives —
-    ///    and its absence IS the restart-first refusal: a session whose
-    ///    terminal no longer exists has no tmux session to add
-    ///    a window to, and building a tab-only substrate for an agent-less
-    ///    session is not a state this system has.
+    ///    needs it, but because it is where the tmux session name lives
+    ///    (and, for a host tab, the size to start at) — and its absence IS
+    ///    the restart-first refusal: a session whose terminal no longer
+    ///    exists has no tmux session to add a window to, and building a
+    ///    tab-only substrate for an agent-less session is not a state this
+    ///    system has. For a host agent the same question is asked of its
+    ///    host.
     /// 2. **Check the working directory.** The same `ensure_cwd_usable`
     ///    precondition restart makes, so the two refusals read the same
     ///    (M3's error shape, reused unchanged per PLAN_M4.md item 1).
@@ -14697,38 +14810,68 @@ impl Supervisor {
                 ),
             )
         };
-        // A tab opens as a new window in the agent's tmux session, sized
-        // from the agent's pane. A session whose agent runs in a terminal
-        // host has neither: its tabs open in terminal hosts of their own,
-        // which this build cannot start yet, so the request is refused
-        // before anything is created.
-        let agent = match entry.terminal.clone() {
-            Some(Terminal::Tmux(agent)) => agent,
-            Some(Terminal::Host(_)) => {
+        let Some(agent) = entry.terminal.clone() else {
+            return Err(restart_first());
+        };
+        // The gate is "the agent's terminal still exists", asked of its
+        // kind. A tmux agent's is its tmux session, which can be gone
+        // WITHOUT the entry knowing — this process may have been serving
+        // since before an external `kill-session`, or since before the whole
+        // tmux server died. Both are the same fact for a caller ("there is no
+        // terminal substrate here") and get the same restart-first advice; a
+        // raw tmux diagnostic would be honest and useless. Anything else
+        // propagates as itself, because "we could not ask" is not "it is
+        // gone". A host agent has no tmux session at all (a session created
+        // in a host has one only while it has tmux tabs, and losing the last
+        // of those ends it), so its gate is its host: one still running,
+        // with its program or its final screen, takes tabs as a tmux session
+        // with a dead agent pane does, one that has ended is the restart
+        // gap, and one that cannot be read is "could not tell" (the plan's
+        // D-16), which refuses rather than open a tab beside it.
+        match &agent {
+            Terminal::Tmux(tmux) => match self.tmux.has_session(&tmux.tmux_name).await {
+                Ok(true) => {}
+                Ok(false) => return Err(restart_first()),
+                Err(e) if self.tmux.is_definitively_empty(&e) => return Err(restart_first()),
+                Err(e) => return Err(RequestError::new(error_kind(&e), format!("{e:#}"))),
+            },
+            Terminal::Host(host) => match host.liveness() {
+                crate::hosts::Liveness::Running { .. } | crate::hosts::Liveness::Exited { .. } => {}
+                crate::hosts::Liveness::Gone => return Err(restart_first()),
+                crate::hosts::Liveness::Unavailable { reason, .. } => {
+                    return Err(RequestError::new(
+                        ErrorKind::Conflict,
+                        format!(
+                            "session {}'s agent terminal host cannot be read ({reason}), so no \
+                             terminal tab can be opened beside it",
+                            truncate_for_error(session_id)
+                        ),
+                    ));
+                }
+            },
+        }
+        // What the new tab is: a window in the agent's tmux session, or a
+        // terminal host of its own, as the supervisor's switch says
+        // (`SupervisorSeams::new_terminals`), whatever the agent's own kind,
+        // so a tmux agent gets host tabs beside its old tmux ones once the
+        // switch is on (a mixed session). Under the old setting a host
+        // agent's session has no tmux session to add a window to, so it is
+        // refused before anything is created; no shipped supervisor can
+        // reach that, since only the switch makes host agents.
+        let target = match (self.seams.new_terminals, &agent) {
+            (NewTerminals::Tmux, Terminal::Tmux(tmux)) => NewTab::Window(tmux.clone()),
+            (NewTerminals::Host, Terminal::Tmux(_) | Terminal::Host(_)) => NewTab::Host,
+            (NewTerminals::Tmux, Terminal::Host(_)) => {
                 return Err(RequestError::new(
                     ErrorKind::Conflict,
                     format!(
-                        "session {}'s agent runs in a terminal host, and this supervisor cannot \
-                         open terminal tabs beside one yet",
+                        "session {}'s agent runs in a terminal host, and this supervisor opens \
+                         terminal tabs in tmux, where the session has nothing to open one in",
                         truncate_for_error(session_id)
                     ),
                 ));
             }
-            None => return Err(restart_first()),
         };
-        // The tmux session can also be gone WITHOUT the entry knowing —
-        // this process may have been serving since before an external
-        // `kill-session`, or since before the whole tmux server died. Both
-        // are the same fact for a caller ("there is no terminal substrate
-        // here") and get the same restart-first advice; a raw tmux
-        // diagnostic would be honest and useless. Anything else propagates
-        // as itself, because "we could not ask" is not "it is gone".
-        match self.tmux.has_session(&agent.tmux_name).await {
-            Ok(true) => {}
-            Ok(false) => return Err(restart_first()),
-            Err(e) if self.tmux.is_definitively_empty(&e) => return Err(restart_first()),
-            Err(e) => return Err(RequestError::new(error_kind(&e), format!("{e:#}"))),
-        }
         // The container bind uses the accepted canonical checkout. A copied
         // host symlink spelling need not exist inside that filesystem, and a
         // later symlink edit must not retarget a tab's working directory.
@@ -14793,15 +14936,16 @@ impl Supervisor {
                     .await
                     .map_err(|error| RequestError::new(error_kind(&error), format!("{error:#}")))?;
             }
-            let opened = sup
-                .open_tab_window(
-                    &session_id,
-                    &session_token,
-                    &agent,
-                    &cwd,
-                    container.as_ref(),
-                )
-                .await;
+            let opened = match &target {
+                NewTab::Window(tmux) => {
+                    sup.open_tab_window(&session_id, &session_token, tmux, &cwd, container.as_ref())
+                        .await
+                }
+                NewTab::Host => {
+                    sup.open_host_tab(&entry, &session_token, &agent, &cwd, container.as_ref())
+                        .await
+                }
+            };
             // Hinted here on the owned task rather than by the handler that
             // awaits it: that waiter can be abandoned while this finishes.
             if opened.is_ok() {
@@ -14816,6 +14960,75 @@ impl Supervisor {
                 format!("the terminal-tab open task failed: {join}"),
             )),
         }
+    }
+
+    /// The `systemd-run --user --scope` prefix a new tab's command runs
+    /// under, empty when it opens without a scope of its own, and the unit's
+    /// name when one could be named. Shared by both kinds of tab: the scope
+    /// is decided per OPEN the way an agent's is decided per launch, and
+    /// since a tab has no durable row, the unit NAME is re-derived at close
+    /// from the same two ids, while whether this open selected a scope at
+    /// all is recorded with the tab (a tmux tab's window marker,
+    /// `TAB_SCOPED_WINDOW_OPTION`; a host tab's client tag).
+    async fn tab_scope_prefix(
+        &self,
+        session_id: &str,
+        tab_id: &str,
+    ) -> (Vec<String>, Option<String>) {
+        let unit = crate::scope::tab_unit_name(session_id, tab_id);
+        let prefix = match unit.as_deref() {
+            Some(unit) => match self.seams.scopes.launch_prefix(unit).await {
+                Some(prefix) => prefix,
+                // Loud for the agent path's reason: the tab still opens
+                // (never worse than a host with no manager at all), but
+                // close falls back to the marker sweep, and a silent
+                // downgrade of a containment guarantee is exactly what
+                // this project does not do.
+                None => {
+                    warn!(
+                        session = %session_id, tab = %tab_id, unit,
+                        "this host's systemd user manager is not usable, so this tab opens \
+                         without a cgroup scope and its close falls back to the process-tree \
+                         sweep"
+                    );
+                    Vec::new()
+                }
+            },
+            None => Vec::new(),
+        };
+        (prefix, unit)
+    }
+
+    /// The command a new tab runs, inside `scope_prefix`, and a name for
+    /// its shell for the dead-at-open refusal: the tab helper, which enters
+    /// `cwd` and execs the user's login shell, or for a containerized
+    /// session the helper that execs `bash` in the session's container. The
+    /// helper runs at once and immediately execs the shell. It starts
+    /// through the forwarder in the app's version layout, so its version is
+    /// claimed from before it runs (see `Self::session_farhelm_exe`). The
+    /// same for both kinds of tab: a tmux window and a tab host run it
+    /// alike.
+    async fn tab_command(
+        &self,
+        cwd: &str,
+        container: Option<&crate::container::ContainerRuntime>,
+        scope_prefix: Vec<String>,
+    ) -> Result<(Vec<String>, String), RequestError> {
+        Ok(match container {
+            Some(runtime) => (
+                crate::launch::container_tab_window_command(
+                    runtime,
+                    &self.session_farhelm_exe,
+                    scope_prefix,
+                )
+                .map_err(|error| RequestError::new(error_kind(&error), format!("{error:#}")))?,
+                "bash in the session container".to_string(),
+            ),
+            None => {
+                let shell = self.launch_shell().await;
+                (self.tab_window_command(&shell, cwd, scope_prefix), shell)
+            }
+        })
     }
 
     /// [`Self::open_tab`]'s side-effecting half, split out so the whole of
@@ -14900,32 +15113,7 @@ impl Supervisor {
         container: Option<&crate::container::ContainerRuntime>,
     ) -> Result<TabInfo, RequestError> {
         let tab_id = uuid::Uuid::new_v4().to_string();
-        // The scope, decided per OPEN the way an agent's is decided per
-        // launch. A tab has no durable row, so the unit NAME is re-derived
-        // at close from the same two ids, and whether this open selected a
-        // scope at all is recorded on the window itself
-        // (`TAB_SCOPED_WINDOW_OPTION`).
-        let unit = crate::scope::tab_unit_name(session_id, &tab_id);
-        let scope_prefix: Vec<String> = match unit.as_deref() {
-            Some(unit) => match self.seams.scopes.launch_prefix(unit).await {
-                Some(prefix) => prefix,
-                // Loud for the agent path's reason: the tab still opens
-                // (never worse than a host with no manager at all), but
-                // close falls back to the marker sweep, and a silent
-                // downgrade of a containment guarantee is exactly what
-                // this project does not do.
-                None => {
-                    warn!(
-                        session = %session_id, tab = %tab_id, unit,
-                        "this host's systemd user manager is not usable, so this tab opens \
-                         without a cgroup scope and its close falls back to the process-tree \
-                         sweep"
-                    );
-                    Vec::new()
-                }
-            },
-            None => Vec::new(),
-        };
+        let (scope_prefix, unit) = self.tab_scope_prefix(session_id, &tab_id).await;
         // The selection this open made, in the form close reads it back:
         // written onto the window below, and handed straight to every
         // failed-open unwind, which must not depend on the marker having
@@ -14936,24 +15124,7 @@ impl Supervisor {
             TabScopeMarker::Scoped
         };
         let env = self.tab_environment(session_id, session_token, &tab_id);
-        // The tab helper runs now and immediately execs the shell. It starts
-        // through the forwarder in the app's version layout, so its version is
-        // claimed from before it runs (see `Self::session_farhelm_exe`).
-        let (window_cmd, shell) = match container {
-            Some(runtime) => (
-                crate::launch::container_tab_window_command(
-                    runtime,
-                    &self.session_farhelm_exe,
-                    scope_prefix,
-                )
-                .map_err(|error| RequestError::new(error_kind(&error), format!("{error:#}")))?,
-                "bash in the session container".to_string(),
-            ),
-            None => {
-                let shell = self.launch_shell().await;
-                (self.tab_window_command(&shell, cwd, scope_prefix), shell)
-            }
-        };
+        let (window_cmd, shell) = self.tab_command(cwd, container, scope_prefix).await?;
         let (window, pane) = self
             .tmux
             .new_window(&agent.tmux_name, cwd, &env, &window_cmd)
@@ -15265,23 +15436,15 @@ impl Supervisor {
         // resize already treat it as gone.
         let terminal =
             resolve_terminal_for_close(self, &entry, &TerminalId::Tab(tab_id.to_string())).await?;
-        // Closing a tab reaps its shell and kills its tmux window. Tabs
-        // resolve only to tmux windows in this build (`resolve_terminal`
-        // finds no others), so a host tab is refused rather than handed to
-        // window teardown it has no window for.
+        // Closing a tmux tab reaps its shell and kills its window, below; a
+        // tab in a terminal host has no window, and is closed by ending its
+        // host (`host_tabs`).
         let terminal = match terminal {
             Terminal::Tmux(terminal) => terminal,
             Terminal::Host(host) => {
-                return Err(RequestError::new(
-                    ErrorKind::Conflict,
-                    format!(
-                        "terminal tab {} of session {} runs in a terminal host ({}), which this \
-                         supervisor cannot close yet",
-                        truncate_for_error(tab_id),
-                        truncate_for_error(session_id),
-                        host.socket().display()
-                    ),
-                ));
+                return self
+                    .close_host_tab_claimed(lifecycle, &entry, tab_id, host, only_if_dead)
+                    .await;
             }
         };
         // The agent window the close must never take for a tab: a tmux
@@ -15777,6 +15940,22 @@ impl Supervisor {
             },
             TabReapAnchor::MarkerOnly => None,
         };
+        self.reap_tab_processes(session_id, tab_id, tab_scope, root_identity)
+            .await
+    }
+
+    /// [`Self::reap_tab_tree`] past its root: the tab's scope unit (by the
+    /// provenance `tab_scope` gives it) and the marker sweep for `tab_id`,
+    /// rooted at `root_identity` when the caller has a live, pinned root.
+    /// Also for a failed tab-host open whose runtime never existed
+    /// (`host_tabs`), which has no root it could trust and passes `None`.
+    async fn reap_tab_processes(
+        &self,
+        session_id: &str,
+        tab_id: &str,
+        tab_scope: TabScopeMarker,
+        root_identity: Option<(u32, u64)>,
+    ) -> anyhow::Result<()> {
         // Which provenance the tab's scope name gets decides what a negative
         // "no user manager" verdict does to it. A tab that was opened scoped
         // gets the scope manager's one re-probe, and if the manager still
@@ -16873,6 +17052,7 @@ impl Supervisor {
                     last_activity_at: activity_stamp(row.last_activity_at),
                     last_work_started_at: activity_stamp(row.last_work_started_at),
                     notifications: notification_cell(),
+                    host_tabs: host_tab_cell(Vec::new()),
                 },
                 snapshot,
                 canonical_cwd: row.canonical_cwd.clone(),
@@ -17503,6 +17683,48 @@ impl Supervisor {
         id: &str,
         socket: &Path,
     ) -> anyhow::Result<crate::hosts::HostTerminal> {
+        self.move_agent_into_host_for_test(id, socket, false).await
+    }
+
+    /// [`Self::install_host_agent_for_test`] for a session whose tmux tabs
+    /// stay: only the created agent's window is killed, so the session
+    /// keeps its tmux session with its tabs in it, as a session whose agent
+    /// moved into a host while its old tabs stayed in tmux has (a mixed
+    /// session). Compiled only for tests and the `test-seams` feature.
+    #[cfg(any(test, feature = "test-seams"))]
+    pub async fn migrate_agent_to_host_for_test(
+        &self,
+        id: &str,
+        socket: &Path,
+    ) -> anyhow::Result<crate::hosts::HostTerminal> {
+        self.move_agent_into_host_for_test(id, socket, true).await
+    }
+
+    /// The host runtime of session `id`'s tab `tab_id`, when that tab runs
+    /// in a terminal host: for tests that observe a tab host the supervisor
+    /// started (its screen, its size, its socket) or type into it, without a
+    /// second connection that would take the host over. Compiled only for
+    /// tests and the `test-seams` feature.
+    #[cfg(any(test, feature = "test-seams"))]
+    pub async fn tab_host_for_test(
+        &self,
+        id: &str,
+        tab_id: &str,
+    ) -> Option<crate::hosts::HostTerminal> {
+        let entry = self.sessions.lock().await.get(id).cloned()?;
+        find_host_tab(&entry.session.host_tabs, tab_id).map(|tab| tab.host)
+    }
+
+    /// The two helpers above: adopt the host at `socket` as session `id`'s
+    /// agent terminal, and end the created tmux agent: its whole tmux
+    /// session, or with `keep_tabs` only its window.
+    #[cfg(any(test, feature = "test-seams"))]
+    async fn move_agent_into_host_for_test(
+        &self,
+        id: &str,
+        socket: &Path,
+        keep_tabs: bool,
+    ) -> anyhow::Result<crate::hosts::HostTerminal> {
         let host = crate::hosts::HostTerminal::adopt(
             socket,
             crate::hosts::Adoption::Fresh,
@@ -17538,6 +17760,9 @@ impl Supervisor {
             .set_terminal_for_test(id, crate::store::TerminalKind::Host, &socket_name)
             .await?;
         match replaced {
+            Some(Terminal::Tmux(tmux)) if keep_tabs => {
+                self.tmux.kill_window(&tmux.tmux_name, &tmux.pane).await?;
+            }
             Some(Terminal::Tmux(tmux)) => self.tmux.kill_session(&tmux.tmux_name).await?,
             Some(Terminal::Host(_)) | None => {}
         }
@@ -21521,6 +21746,7 @@ pub(crate) mod tests {
                 last_activity_at: crate::service::core::activity_stamp(1_700_000_000),
                 last_work_started_at: crate::service::core::activity_stamp(1_700_000_000_000),
                 notifications: notification_cell(),
+                host_tabs: host_tab_cell(Vec::new()),
             },
             snapshot: IntegrationSnapshot {
                 kind: AgentKind::Generic,
@@ -22208,8 +22434,12 @@ pub(crate) mod tests {
     /// used the ordinary tab listing, which skips the marker read when no
     /// session has more than one window, so with the agent's window gone a
     /// lone surviving tab was invisible and the guard let the delete kill
-    /// it. Spec: with the agent pane gone and one live tab left as the
-    /// session's only window, `still_alive_for_delete` reports the tab under
+    /// it. The ordinary listing now reads the markers whenever any window
+    /// carries one (`marker_query_needed`), so it sees the lone tab too; this
+    /// test keeps pinning the guard's own answer, which must not depend on
+    /// which listing it uses. Spec: with the agent pane gone and one live tab
+    /// left as the session's only window, `still_alive_for_delete` reports the
+    /// tab under
     /// `DeleteGuard::NothingAlive`, and reports nothing under `AgentEnded`
     /// (a prompt that warned about tabs covers closing this one) or
     /// `Unconditional`.
@@ -22237,7 +22467,8 @@ pub(crate) mod tests {
             .await
             .expect("remove the agent pane");
         // Premises: the agent pane is gone, the tab keeps the tmux session
-        // alive, and the ordinary listing no longer finds that tab.
+        // alive as its only window, and the ordinary listing still finds that
+        // tab (it once did not; see the docstring).
         assert!(
             !sup.tmux
                 .pane_states()
@@ -22251,12 +22482,13 @@ pub(crate) mod tests {
                 .await
                 .expect("session liveness")
         );
-        assert!(
+        assert_eq!(
             sup.session_tabs(&entry)
                 .await
                 .expect("ordinary listing")
-                .is_empty(),
-            "fixture premise: the ordinary listing misses the lone tab"
+                .len(),
+            1,
+            "fixture premise: the lone tab is the session's only window and the ordinary listing finds it"
         );
 
         let (alive, _) = sup

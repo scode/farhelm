@@ -33,7 +33,7 @@ use anyhow::{Context, bail};
 #[cfg(test)]
 use control_codec::tmux_ordinal;
 use control_codec::{
-    PANE_FACT_FORMAT, PANE_MARKER_FORMAT, any_session_has_several_windows, join_pane_markers,
+    PANE_FACT_FORMAT, PANE_MARKER_FORMAT, join_pane_markers, marker_query_needed,
     parse_pane_facts_flagged,
 };
 use farhelm_proto::text::shell_quote;
@@ -2071,7 +2071,9 @@ pub struct PaneState {
     /// Only one consumer: the last-resort agent-window fallback for a
     /// session that carries no markers at all (a session created by a
     /// build that predates them). Position is exactly what that fallback
-    /// wants and exactly what nothing else may use.
+    /// wants and exactly what nothing else may use: tmux gives a new window
+    /// the lowest free index, so once a session's first window closes, a
+    /// tab can sit at index 0.
     pub window_index: u64,
     /// This pane's window's [`TAB_WINDOW_OPTION`] marker, when it carries
     /// one whose SYNTAX matches an id this supervisor mints.
@@ -4448,12 +4450,16 @@ impl TmuxDriver {
     /// [`PANE_MARKER_FORMAT`] for the fabrication that separation closes.
     ///
     /// That second round trip is skipped entirely when no session on the
-    /// server has more than one window, which keeps the pre-tabs cost of
-    /// this call — one subprocess, paid on every `ListSessions` poll —
-    /// exactly what it was. The skip is sound because a tab IS an
-    /// additional window: a session with one window can have no tab, and
-    /// the one consumer of the AGENT marker (reload's pane-less recovery)
-    /// falls back to the single window it would have chosen anyway.
+    /// server has more than one window and no window carries a tab marker
+    /// (the fact query says whether one does, as a fixed `1` or `0`, never
+    /// the marker's value: `control_codec::marker_query_needed`), which
+    /// keeps the pre-tabs cost of this call — one subprocess, paid on every
+    /// `ListSessions` poll — exactly what it was. The skip is sound because
+    /// a window without a tab marker is never a tab, whatever its position
+    /// (a lone tab, which a session whose agent moved to a terminal host can
+    /// hold, may sit at any index, 0 included), and the one consumer of the
+    /// AGENT marker (reload's pane-less recovery) falls back to the single
+    /// window it would have chosen anyway.
     pub async fn pane_states(&self) -> anyhow::Result<HashMap<String, PaneState>> {
         self.pane_states_checked(false).await
     }
@@ -4492,11 +4498,12 @@ impl TmuxDriver {
                 return Err(e).context("querying pane states");
             }
         };
-        let (mut states, duplicated) = parse_pane_facts_flagged(&facts);
-        if refuse_duplicates && duplicated {
+        let parsed = parse_pane_facts_flagged(&facts);
+        let mut states = parsed.states;
+        if refuse_duplicates && parsed.duplicated {
             anyhow::bail!("querying pane states: tmux listed a pane twice");
         }
-        if !any_session_has_several_windows(&states) {
+        if !marker_query_needed(&states, parsed.tab_marked) {
             return Ok(states);
         }
         match self

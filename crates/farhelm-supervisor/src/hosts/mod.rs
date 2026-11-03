@@ -36,12 +36,14 @@
 //!
 //! The service's terminal switch points handle a session whose terminal is
 //! a [`terminal::HostTerminal`] (`service::terminals::Terminal::Host`). A
-//! create starts its agent in a host only under the supervisor's internal
-//! switch (`service::SupervisorSeams::new_terminals`), which no shipped
-//! supervisor turns on yet. A restarted supervisor finds the hosts of its
-//! host rows again with [`registry`] and adopts them
+//! create starts its agent in a host, and a new tab opens in one, only under
+//! the supervisor's internal switch
+//! (`service::SupervisorSeams::new_terminals`), which no shipped supervisor
+//! turns on yet. A restarted supervisor finds the hosts of its host rows
+//! again with [`registry`] and adopts them
 //! ([`terminal::HostTerminal::adopt_found`]), in
-//! `service::core::host_handover`.
+//! `service::core::host_handover`, and its sessions' tab hosts in
+//! `service::core::host_tabs`.
 //! The module is public, rather than crate-private, because the tests that
 //! start real hosts live beside the real `farhelm` binary
 //! (`crates/farhelm/tests/terminal_host_spawn.rs`, `terminal_host_client.rs`,

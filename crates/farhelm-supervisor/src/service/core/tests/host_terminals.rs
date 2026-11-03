@@ -2589,3 +2589,103 @@ async fn delete_never_signals_an_unrecorded_placeholders_unreadable_socket() {
     drop(foreign);
     let _ = std::fs::remove_file(&socket);
 }
+
+// ---- Tabs in terminal hosts ---------------------------------------------------------
+
+/// Closing a host tab whose runtime reads its host gone, while the process
+/// the runtime adopted still runs, keeps the tab, its record and the mark
+/// for the reap to try again, rather than forgetting a host that may run.
+///
+/// Why: a runtime judges its host gone from the socket alone (a missing
+/// file), which is not proof the host process ended; a close that trusted
+/// it would remove the record and forget the tab, leaving a running host
+/// that nothing lists, closes, reaps or deletes (the round-1 review's
+/// finding). The close must confirm the adopted process gone first, by the
+/// verified signal, which here (the stand-in's process is the test runner,
+/// whose command line names no socket) refuses. Spec: with `s1` holding a
+/// host tab whose stand-in host was adopted (premise: its adopted process is
+/// this test process) and whose launch record names its socket, the socket
+/// file is removed and the connection dropped, so the runtime reads the
+/// host gone; closing the tab fails saying the host could not be confirmed
+/// ended; the tab is still in the session's cell, marked as a failed end
+/// with a retry time; and its record is still there.
+#[farhelm_testtrace::test]
+async fn closing_a_tab_whose_runtime_reads_gone_confirms_its_process_first() {
+    let state = StateDir::new();
+    let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        .await
+        .expect("supervisor");
+    terminal_less_tmux_s1(&sup).await;
+    let tab_id = "7d2e9f40-1c3b-4a5d-8e6f-0a1b2c3d4e5f";
+    let socket = socket_in_state(&state);
+    let tag = crate::hosts::HostTag {
+        session_id: "s1".to_string(),
+        created_ns: 1,
+        role: crate::hosts::HostRole::Tab {
+            tab_id: tab_id.to_string(),
+            scoped: false,
+        },
+    }
+    .encode()
+    .expect("encode the tag");
+    let (host, test_host) = adopt_test_host_at(&socket, tag, None).await;
+    let adopted = host
+        .adopted_process()
+        .expect("premise: the runtime knows the process it adopted");
+    assert_eq!(
+        adopted.pid,
+        std::process::id(),
+        "premise: the stand-in's process"
+    );
+    let mut ended = std::process::Command::new("true")
+        .spawn()
+        .expect("start a process to end");
+    let starter = ended.id();
+    ended.wait().expect("reap it");
+    let record = crate::launch::tab_host_record_path(state.path(), "s1", tab_id);
+    std::fs::write(
+        &record,
+        super::super::host_launch::LaunchHostRecord {
+            socket: crate::hosts::HostName::parse(socket.file_name().unwrap().to_str().unwrap())
+                .expect("a socket name this supervisor makes"),
+            starter: crate::hosts::HostProcess {
+                pid: starter,
+                start: 0,
+            },
+        }
+        .encode(),
+    )
+    .expect("write the tab's record");
+    let entry = sup.sessions.lock().await.get("s1").cloned().expect("s1");
+    entry.session.host_tabs.lock().unwrap().push(HostTab {
+        tab_id: tab_id.to_string(),
+        created_ns: 1,
+        scoped: false,
+        host: host.clone(),
+        end_failed: false,
+        failed_ends: 0,
+        retry_at: None,
+    });
+
+    std::fs::remove_file(&socket).expect("remove the socket file");
+    test_host.drop_connection();
+    wait_for(&host, "the runtime reading its host gone", |host| {
+        matches!(host.liveness(), Liveness::Gone)
+    })
+    .await;
+    let refused = sup
+        .close_tab("s1", tab_id)
+        .await
+        .expect_err("a host whose process may run is not taken for ended");
+    assert!(
+        refused.message.contains("could not be confirmed ended"),
+        "{}",
+        refused.message
+    );
+    let kept = super::super::host_tabs::host_tabs_of(&entry.session.host_tabs);
+    assert!(
+        matches!(kept.as_slice(), [tab] if tab.tab_id == tab_id && tab.end_failed && tab.retry_at.is_some()),
+        "the tab is kept and marked for a retry: {kept:?}"
+    );
+    assert!(record.exists(), "the tab's record is kept");
+}

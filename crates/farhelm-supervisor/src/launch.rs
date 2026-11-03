@@ -894,8 +894,46 @@ pub fn spec_path_for_launch(state_dir: &Path, id: &str, generation: i64) -> Path
     LaunchArtifacts::for_launch(state_dir, id, generation).spec
 }
 
-/// Split a launch artifact NAME back into the session id and
-/// generation that produced it, or `None` when it is not one of ours.
+/// Which of a session's terminals a launch-directory artifact belongs to,
+/// as [`parse_launch_file_name`] reads it from the file's name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LaunchFileOf<'a> {
+    /// One launch of the session's agent, by its launch generation
+    /// (`store::StoredSession::generation`): every artifact the launch path
+    /// writes (spec, sentinel, waypoint, the session hold's marks and a host
+    /// launch's record).
+    Launch(i64),
+    /// One of the session's terminal tabs that runs in a terminal host, by
+    /// its tab id: that host's launch record, `<id>.tab-<tab id>.host`
+    /// ([`tab_host_record_path`]), the only artifact a tab has.
+    Tab(&'a str),
+}
+
+/// The stem prefix that tells a tab host's launch record
+/// (`<id>.tab-<tab id>.host`) from a launch's (`<id>.<generation>.host`):
+/// a generation is a number, so it never starts with it.
+const TAB_RECORD_PREFIX: &str = "tab-";
+
+/// Where the launch record of a terminal tab that runs in a terminal host
+/// lives: `<state_dir>/launch/<id>.tab-<tab id>.host`.
+///
+/// The record is the agent launch's record (`service::core::host_launch`,
+/// "The launch record") under a name of its own: a tab has no launch
+/// generation, and its id is what identifies it. It is written before the
+/// tab host's first stage is given its spec and removed only once that host
+/// is confirmed ended, so Delete finds every tab host of a session that no
+/// runtime holds by the same listing it finds agent hosts by, and a
+/// restarted supervisor finds each tab host's socket again
+/// (`service::core::host_tabs`). Tab ids are UUIDs the supervisor mints, so
+/// they hold no `.`, which [`parse_launch_file_name`] splits on.
+pub(crate) fn tab_host_record_path(state_dir: &Path, id: &str, tab_id: &str) -> PathBuf {
+    state_dir
+        .join("launch")
+        .join(format!("{id}.{TAB_RECORD_PREFIX}{tab_id}.host"))
+}
+
+/// Split a launch artifact NAME back into the session id and the terminal
+/// it belongs to ([`LaunchFileOf`]), or `None` when it is not one of ours.
 ///
 /// Recognizes the `.json` spec, `.status` sentinel and `.waypoint` derived
 /// from [`spec_path_for_launch`], and the session hold's marks below. Sweeps
@@ -910,8 +948,11 @@ pub fn spec_path_for_launch(state_dir: &Path, id: &str, generation: i64) -> Path
 /// (`crate::session_hold`'s `.held` and `.launched`), and a launch in a
 /// terminal host its host record (`.host`, [`LaunchArtifacts::host`]), so
 /// every sweep and delete that enumerates this directory removes them with
-/// their launch.
-pub fn parse_launch_file_name(name: &str) -> Option<(&str, i64)> {
+/// their launch. A terminal tab in a host leaves only its host record, named
+/// by its tab id rather than a generation ([`tab_host_record_path`]); the
+/// tab form is recognized for `.host` alone, since nothing else is ever
+/// written for a tab.
+pub fn parse_launch_file_name(name: &str) -> Option<(&str, LaunchFileOf<'_>)> {
     let (rest, extension) = name.rsplit_once('.')?;
     if !matches!(
         extension,
@@ -919,9 +960,17 @@ pub fn parse_launch_file_name(name: &str) -> Option<(&str, i64)> {
     ) {
         return None;
     }
-    let (id, generation) = rest.rsplit_once('.')?;
-    let generation = generation.parse().ok()?;
-    (!id.is_empty()).then_some((id, generation))
+    let (id, owner) = rest.rsplit_once('.')?;
+    if id.is_empty() {
+        return None;
+    }
+    match owner.strip_prefix(TAB_RECORD_PREFIX) {
+        Some(tab_id) if extension == "host" && !tab_id.is_empty() => {
+            Some((id, LaunchFileOf::Tab(tab_id)))
+        }
+        Some(_) => None,
+        None => Some((id, LaunchFileOf::Launch(owner.parse().ok()?))),
+    }
 }
 
 /// Read one LAUNCH's exec-failure sentinel, if one exists.

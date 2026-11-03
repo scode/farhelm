@@ -94,6 +94,8 @@ mod host_creates;
 #[cfg(target_os = "linux")]
 mod host_restarts;
 #[cfg(target_os = "linux")]
+mod host_tabs;
+#[cfg(target_os = "linux")]
 mod host_terminals;
 #[cfg(target_os = "linux")]
 mod replay_marker;

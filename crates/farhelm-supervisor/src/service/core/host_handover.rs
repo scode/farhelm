@@ -98,8 +98,13 @@
 //! the constructor found gone (socket names are never reused, so a gone one
 //! stays gone). Hosts the scan finds that no row claims (a tab's, an
 //! orphan's, an older generation's) are left as they were: their
-//! connections close with the registry. Reclaiming orphans and adopting tabs
-//! are later changes'.
+//! connections close with the registry. A session's tab hosts are adopted
+//! beside this, from its tab records (`host_tabs`, "After a restart");
+//! reclaiming orphans is a later change's.
+//!
+//! The orderly stop's checkpoints and closes cover the sessions' tab hosts
+//! too: they outlive the supervisor the same way, and a runtime left open
+//! would keep its encodes running past the stop.
 //!
 //! ## Adopting again
 //!
@@ -193,14 +198,7 @@ impl Supervisor {
             let sessions = self.sessions.lock().await;
             self.stopping
                 .store(true, std::sync::atomic::Ordering::SeqCst);
-            let mut all: Vec<HostTerminal> = Vec::new();
-            for entry in sessions.values() {
-                match &entry.terminal {
-                    Some(Terminal::Host(host)) if !all.contains(host) => all.push(host.clone()),
-                    Some(Terminal::Host(_) | Terminal::Tmux(_)) | None => {}
-                }
-            }
-            all
+            gather_host_terminals(&sessions)
         })
         .await;
         self.stopping
@@ -309,14 +307,7 @@ impl Supervisor {
     pub(crate) async fn close_host_terminals(&self, deadline: tokio::time::Instant) {
         let gathered = tokio::time::timeout_at(deadline, async {
             let sessions = self.sessions.lock().await;
-            let mut all: Vec<HostTerminal> = Vec::new();
-            for entry in sessions.values() {
-                match &entry.terminal {
-                    Some(Terminal::Host(host)) if !all.contains(host) => all.push(host.clone()),
-                    Some(Terminal::Host(_) | Terminal::Tmux(_)) | None => {}
-                }
-            }
-            all
+            gather_host_terminals(&sessions)
         })
         .await;
         match gathered {
@@ -364,6 +355,28 @@ impl Supervisor {
     pub async fn checkpoint_hosts_for_test(&self, budget: Duration) -> bool {
         self.checkpoint_hosts_for_exit(budget).await
     }
+}
+
+/// Every host terminal runtime the session map holds, each once: the
+/// sessions' agent terminals that are hosts, and their tabs in hosts
+/// (`host_tabs`), whose hosts outlive the supervisor the same way and need
+/// the same checkpoint and the same close.
+fn gather_host_terminals(
+    sessions: &HashMap<String, Arc<super::SessionEntry>>,
+) -> Vec<HostTerminal> {
+    let mut all: Vec<HostTerminal> = Vec::new();
+    for entry in sessions.values() {
+        match &entry.terminal {
+            Some(Terminal::Host(host)) if !all.contains(host) => all.push(host.clone()),
+            Some(Terminal::Host(_) | Terminal::Tmux(_)) | None => {}
+        }
+    }
+    for host in super::host_tabs::tab_runtimes(sessions.values()) {
+        if !all.contains(&host) {
+            all.push(host);
+        }
+    }
+    all
 }
 
 /// Stop every runtime of `hosts` (which cancels their encodes) and wait,
@@ -431,6 +444,14 @@ pub(super) struct HostDiscovery {
     /// Sockets found gone earlier, never scanned again; those found gone
     /// now are added.
     pub(super) gone: GoneHosts,
+    /// The tabs in terminal hosts this supervisor already holds, by session
+    /// (`SessionCells::host_tabs`): kept by the reload as agent terminals in
+    /// `adopted` are, and never scanned. [`attribute_host_rows`] only skips
+    /// their sockets (its scan reaches every socket not skipped, and taking
+    /// a tab host over would cut its runtime off); the reload hands the
+    /// same tabs to `host_tabs::adopt_tab_hosts`, which keeps them and finds
+    /// a session's other tab hosts from its tab records.
+    pub(super) tabs: HashMap<String, Vec<super::HostTab>>,
 }
 
 /// Which host, if any, is each host row's agent terminal, adopting every
@@ -461,6 +482,7 @@ pub(super) async fn attribute_host_rows(
         adopted,
         no_spawns,
         gone,
+        tabs,
     } = discovery;
     let mut found = HashMap::new();
     let host_rows: Vec<&StoredSession> = rows
@@ -479,7 +501,8 @@ pub(super) async fn attribute_host_rows(
     // one a runtime drives would take the host over from it, and it would
     // take the host back. Gone sockets stay gone.
     let mut skip: HashSet<OsString> = gone.lock().unwrap_or_else(|e| e.into_inner()).clone();
-    for (_, host) in adopted.values() {
+    let tab_hosts = tabs.values().flatten().map(|tab| &tab.host);
+    for host in adopted.values().map(|(_, host)| host).chain(tab_hosts) {
         if let Some(name) = host.socket().file_name() {
             skip.insert(name.to_os_string());
         }
@@ -666,7 +689,7 @@ pub(super) async fn host_may_remain(
 /// `state_dir`'s socket directory, absolute, as a spawn names its socket:
 /// what a handle reports and the process-table checks compare is that
 /// spelling.
-fn absolute_hosts_dir(state_dir: &Path) -> std::path::PathBuf {
+pub(super) fn absolute_hosts_dir(state_dir: &Path) -> std::path::PathBuf {
     match std::path::absolute(state_dir) {
         Ok(state_dir) => crate::hosts::hosts_dir(&state_dir),
         Err(_) => crate::hosts::hosts_dir(state_dir),
@@ -781,7 +804,7 @@ fn unavailable(hosts_dir: &Path, named: &NamedSocket, reason: Unavailability) ->
 }
 
 /// Why discovery found a host unavailable, as a runtime's reason.
-fn unavailability(why: &WhyUnavailable) -> Unavailability {
+pub(super) fn unavailability(why: &WhyUnavailable) -> Unavailability {
     match why {
         WhyUnavailable::Connect(reason) => Unavailability::Connect(reason.clone()),
         WhyUnavailable::Busy => Unavailability::Busy,

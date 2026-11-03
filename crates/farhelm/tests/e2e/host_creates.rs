@@ -95,7 +95,7 @@ fn host_processes(h: &Harness) -> Vec<u32> {
 }
 
 /// [`host_processes`] for the state directory `state`.
-fn host_processes_in(state: &Path) -> Vec<u32> {
+pub(crate) fn host_processes_in(state: &Path) -> Vec<u32> {
     let dir = state.join("hosts");
     let dir = dir.as_os_str().as_encoded_bytes();
     let Ok(entries) = std::fs::read_dir("/proc") else {
@@ -169,7 +169,7 @@ async fn wait_for_file(path: &Path, secs: u64) -> Vec<u8> {
 /// returning, as `hosts::spawn`'s tests do: exec'ing a file just written
 /// races `ETXTBSY` against another thread's fork that still holds the
 /// descriptor that wrote it.
-fn script(path: &Path, body: &str) -> PathBuf {
+pub(crate) fn script(path: &Path, body: &str) -> PathBuf {
     use std::io::Write as _;
     use std::os::unix::fs::OpenOptionsExt as _;
     let mut file = std::fs::OpenOptions::new()
@@ -1047,18 +1047,17 @@ async fn an_unusable_host_that_cannot_be_ended_keeps_the_launching_record() {
     wait_until_pid_gone(listener, WAIT_SECS).await;
 }
 
-/// Restart and opening a tab are refused for an agent created in a host,
-/// before anything stops.
+/// Restart is refused for an agent created in a host, before anything
+/// stops.
 ///
 /// Why: Restart of a host agent needs a new host seeded with its history,
-/// and a tab beside a host agent needs a tab host; neither exists yet, and
-/// a refusal that stopped the agent first would leave the user a stopped
-/// session they never asked for. Spec: for a created host agent, a
-/// consented Restart fails saying the agent runs in a terminal host and
-/// nothing was stopped, opening a tab fails saying tabs cannot be opened
-/// beside one yet, and the agent still runs.
+/// which does not exist yet, and a refusal that stopped the agent first
+/// would leave the user a stopped session they never asked for. (Tabs beside
+/// a host agent open in hosts of their own: `host_tabs.rs`.) Spec: for a
+/// created host agent, a consented Restart fails saying the agent runs in a
+/// terminal host and nothing was stopped, and the agent still runs.
 #[farhelm_testtrace::test]
-async fn restart_and_tabs_stay_refused_for_a_created_host_agent() {
+async fn restart_stays_refused_for_a_created_host_agent() {
     let h = host_harness().await;
     let (session, _work) = resumable_basic_session_in_host(&h).await;
     let host = agent_host(&h, &session.id).await;
@@ -1071,15 +1070,6 @@ async fn restart_and_tabs_stay_refused_for_a_created_host_agent() {
         .expect_err("no restart into a new host yet");
     let refused = format!("{refused:#}");
     assert!(refused.contains("nothing was stopped"), "{refused}");
-    let refused = h
-        .client
-        .open_tab(&session.id)
-        .await
-        .expect_err("no tab beside a host agent yet");
-    assert!(
-        format!("{refused:#}").contains("cannot open terminal tabs beside one yet"),
-        "{refused:#}"
-    );
     assert!(!process_is_gone(child), "the agent runs on");
     assert_eq!(stored_outcome(&h, &session.id).await, LastOutcome::Running);
     let host_pid = host_process(host.socket()).expect("the host's process serves its socket");

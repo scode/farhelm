@@ -407,13 +407,16 @@ impl Supervisor {
         // with no terminal right now, or of an earlier generation, found by
         // the session's launch records, never by a scan (`session_hosts`
         // says what each record's socket may hold and what is done with
-        // it). Nothing has been killed yet, so a failure here is a refusal.
+        // it), and of every tab runtime the session holds, which
+        // `session_hosts` keeps with them. Nothing has been killed yet, so a
+        // failure here is a refusal.
         let mut hosts = match found {
             Some(hosts) => hosts,
             None => self
                 .session_hosts(
                     session_id,
                     entry.terminal.as_ref(),
+                    super::core::host_tabs_of(&entry.session.host_tabs),
                     self.timeouts.delete_host_end,
                 )
                 .await

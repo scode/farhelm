@@ -368,7 +368,7 @@ impl Supervisor {
     /// The program this supervisor starts hosts from: its own executable
     /// ([`crate::hosts::own_host_program`]), or the test seam's
     /// replacement for an in-process supervisor.
-    fn host_program(&self) -> PathBuf {
+    pub(super) fn host_program(&self) -> PathBuf {
         #[cfg(any(test, feature = "test-seams"))]
         {
             if let Some(program) = &self.seams.host_program {
@@ -383,7 +383,7 @@ impl Supervisor {
     /// production; a supervisor whose launch shell is a test seam still
     /// gives the user's login shell, as tmux does whatever command a pane
     /// runs, so a test can compare the two kinds' environments.
-    async fn host_shell_variable(&self, launch_shell: &str) -> String {
+    pub(super) async fn host_shell_variable(&self, launch_shell: &str) -> String {
         match &self.seams.launch_shell {
             Some(_) => crate::launch::resolve_shell().await,
             None => launch_shell.to_string(),
@@ -393,7 +393,7 @@ impl Supervisor {
     /// The private tmux server's version, which tmux gives every pane as
     /// `TERM_PROGRAM_VERSION`; `None`, logged, when tmux cannot be asked,
     /// which costs a host's child only that variable.
-    async fn pane_term_program_version(&self, id: &str) -> Option<String> {
+    pub(super) async fn pane_term_program_version(&self, id: &str) -> Option<String> {
         match self.tmux.server_version().await {
             Ok(version) => Some(version),
             Err(error) => {
@@ -715,7 +715,11 @@ impl Supervisor {
     /// [`Self::end_launch_host`]): ended once that process is seen gone,
     /// whether by the signal or before it. Its socket file is removed only if
     /// nothing serves it now.
-    async fn end_adopted_process(&self, adopted: HostProcess, socket: &Path) -> Result<(), String> {
+    pub(super) async fn end_adopted_process(
+        &self,
+        adopted: HostProcess,
+        socket: &Path,
+    ) -> Result<(), String> {
         match terminate_verified(&adopted, socket).await {
             Ok(Termination::AlreadyGone | Termination::Terminated | Termination::Killed) => {
                 self.remove_ended_socket(socket).await;
@@ -936,9 +940,11 @@ impl Supervisor {
 
     /// Settle what a launch record's start left at its socket, for a caller
     /// that holds no runtime for it: a retried create
-    /// ([`Self::host_launch_evidence`]) and Delete (`service::session_hosts`).
+    /// ([`Self::host_launch_evidence`]) and Delete (`service::session_hosts`);
+    /// a reload settles a tab host's record the same way, through
+    /// [`settle_launch_record_with`].
     ///
-    /// First the recorded first stage is fenced ([`Self::fence_starter`]:
+    /// First the recorded first stage is fenced ([`fence_starter`]:
     /// waited for, then ended with the verified signal), so that it cannot
     /// start a host after this answers; `Err` with why when it may still run.
     /// Then the socket is connected to (which takes over any host there). A
@@ -954,73 +960,90 @@ impl Supervisor {
         record: &LaunchHostRecord,
         socket: &Path,
     ) -> Result<AtRecordedSocket, String> {
-        self.fence_starter(record.starter, socket).await?;
-        // The client judges a socket gone only while no live process names
-        // it (`hosts::client`, "Never gone while a host process serves the
-        // socket"); one that does, with nothing listening yet, is
-        // "not accepting", which is what a second stage still on its way
-        // to binding looks like.
-        let strays_until = tokio::time::Instant::now() + STRAY_WAIT;
-        let mut announced = false;
-        let mut connection = loop {
-            match HostConnection::connect(socket).await {
-                Ok(connection) => break connection,
-                Err(ConnectError::Gone(_)) => return Ok(AtRecordedSocket::Gone),
-                Err(ConnectError::Unavailable {
-                    reason: crate::hosts::Unavailable::NotAccepting,
-                    peer,
-                }) if tokio::time::Instant::now() < strays_until => {
-                    tracing::debug!(socket = %socket.display(), ?peer,
-                        "a process still names a recorded host socket; waiting");
-                    if !announced {
-                        announced = true;
-                        if let Some(waiting) = self.seams.faults.launch_stray_waiting() {
-                            waiting();
-                        }
-                    }
-                    tokio::time::sleep(STARTER_POLL).await;
-                }
-                Err(error) => return Ok(AtRecordedSocket::NoAnswer(error)),
-            }
-        };
-        match connection.info().await {
-            Ok(info) => Ok(AtRecordedSocket::Answered {
-                connection: Box::new(connection),
-                info,
-            }),
-            Err(error) => Ok(AtRecordedSocket::NoInfo {
-                error,
-                peer: connection.peer(),
-            }),
-        }
+        settle_launch_record_with(record, socket, &self.seams.faults).await
     }
+}
 
-    /// Make sure a recorded first stage can fork nothing more: `Ok` once it
-    /// is gone, by itself within [`STARTER_WAIT`] or by the verified signal
-    /// after it; `Err` with why it may still run.
-    async fn fence_starter(&self, starter: HostProcess, socket: &Path) -> Result<(), String> {
-        let deadline = tokio::time::Instant::now() + STARTER_WAIT;
-        let mut announced = false;
-        loop {
-            if !starter.is_running()? {
-                return Ok(());
-            }
-            if !announced {
-                announced = true;
-                if let Some(waiting) = self.seams.faults.launch_starter_waiting() {
-                    waiting();
+/// [`Supervisor::settle_launch_record`] with the test hooks given as
+/// `faults` rather than read from a supervisor: for a reload, which settles a
+/// tab host's interrupted start before it accepts that the start left
+/// nothing (`host_tabs`, "After a restart"). The constructor's reload runs
+/// before any supervisor exists; `serve`'s reload calls it the same way.
+pub(crate) async fn settle_launch_record_with(
+    record: &LaunchHostRecord,
+    socket: &Path,
+    faults: &super::FaultHooks,
+) -> Result<AtRecordedSocket, String> {
+    fence_starter(record.starter, socket, faults).await?;
+    // The client judges a socket gone only while no live process names
+    // it (`hosts::client`, "Never gone while a host process serves the
+    // socket"); one that does, with nothing listening yet, is
+    // "not accepting", which is what a second stage still on its way
+    // to binding looks like.
+    let strays_until = tokio::time::Instant::now() + STRAY_WAIT;
+    let mut announced = false;
+    let mut connection = loop {
+        match HostConnection::connect(socket).await {
+            Ok(connection) => break connection,
+            Err(ConnectError::Gone(_)) => return Ok(AtRecordedSocket::Gone),
+            Err(ConnectError::Unavailable {
+                reason: crate::hosts::Unavailable::NotAccepting,
+                peer,
+            }) if tokio::time::Instant::now() < strays_until => {
+                tracing::debug!(socket = %socket.display(), ?peer,
+                        "a process still names a recorded host socket; waiting");
+                if !announced {
+                    announced = true;
+                    if let Some(waiting) = faults.launch_stray_waiting() {
+                        waiting();
+                    }
                 }
+                tokio::time::sleep(STARTER_POLL).await;
             }
-            if tokio::time::Instant::now() >= deadline {
-                break;
+            Err(error) => return Ok(AtRecordedSocket::NoAnswer(error)),
+        }
+    };
+    match connection.info().await {
+        Ok(info) => Ok(AtRecordedSocket::Answered {
+            connection: Box::new(connection),
+            info,
+        }),
+        Err(error) => Ok(AtRecordedSocket::NoInfo {
+            error,
+            peer: connection.peer(),
+        }),
+    }
+}
+
+/// Make sure a recorded first stage can fork nothing more: `Ok` once it is
+/// gone, by itself within [`STARTER_WAIT`] or by the verified signal after
+/// it; `Err` with why it may still run.
+async fn fence_starter(
+    starter: HostProcess,
+    socket: &Path,
+    faults: &super::FaultHooks,
+) -> Result<(), String> {
+    let deadline = tokio::time::Instant::now() + STARTER_WAIT;
+    let mut announced = false;
+    loop {
+        if !starter.is_running()? {
+            return Ok(());
+        }
+        if !announced {
+            announced = true;
+            if let Some(waiting) = faults.launch_starter_waiting() {
+                waiting();
             }
-            tokio::time::sleep(STARTER_POLL).await;
         }
-        match terminate_verified(&starter, socket).await {
-            Ok(Termination::AlreadyGone | Termination::Terminated | Termination::Killed) => Ok(()),
-            Ok(Termination::StillRunning) => Err("it survived SIGTERM and SIGKILL".into()),
-            Err(error) => Err(error.to_string()),
+        if tokio::time::Instant::now() >= deadline {
+            break;
         }
+        tokio::time::sleep(STARTER_POLL).await;
+    }
+    match terminate_verified(&starter, socket).await {
+        Ok(Termination::AlreadyGone | Termination::Terminated | Termination::Killed) => Ok(()),
+        Ok(Termination::StillRunning) => Err("it survived SIGTERM and SIGKILL".into()),
+        Err(error) => Err(error.to_string()),
     }
 }
 

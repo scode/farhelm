@@ -4,7 +4,8 @@
 //! or one of its tabs) a request means and what backs it (a tmux pane,
 //! `TmuxTerminal`, or a terminal host, `crate::hosts::HostTerminal`), and
 //! `tmux_tab_home` says where a session's tmux tabs live whatever backs its
-//! agent;
+//! agent (its tabs in terminal hosts live in its session cells,
+//! `service::core::host_tabs`, and `resolve_terminal` looks there first);
 //! `AttachmentKey`/`ActiveAttach`/`InputRoute` are the bookkeeping an
 //! `Attach` installs and every later `Resize`/`Detach`/input frame looks
 //! up by, with `AttachBackend` holding an attachment's kind-specific
@@ -397,10 +398,12 @@ impl Terminal {
 ///
 /// The two variants differ in how much they cost to resolve, which is
 /// worth knowing before adding a caller: `Agent` is answered from the
-/// session entry, while `Tab` costs a tmux round trip, because a tab is
-/// rediscovered from window markers rather than stored (`SessionInfo::tabs`
-/// — tabs are not durable metadata, so there is nothing to cache that a
-/// second client could not invalidate).
+/// session entry, while a tmux `Tab` costs a tmux round trip, because a tab
+/// window is rediscovered from window markers rather than stored
+/// (`SessionInfo::tabs` — tabs are not durable metadata, so there is nothing
+/// to cache that a second client could not invalidate). A tab in a terminal
+/// host is answered from the session's own cell
+/// (`SessionCells::host_tabs`), which holds its runtime, with no tmux call.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum TerminalId {
     /// The session's agent terminal: the one terminal every session has
@@ -777,12 +780,38 @@ fn missing_terminal_message(id: &str, outcome: &LastOutcome, offer: RestartOffer
     }
 }
 
+/// The refusal for a tab selector that names no tab of `entry`'s session.
+fn no_such_tab(entry: &SessionEntry, id: &str) -> RequestError {
+    RequestError::new(
+        ErrorKind::NotFound,
+        format!(
+            "session {} has no terminal tab {}: it was closed, or a reboot erased it",
+            truncate_for_error(&entry.info.id),
+            truncate_for_error(id),
+        ),
+    )
+}
+
 async fn resolve_terminal_inner(
     sup: &Supervisor,
     entry: &SessionEntry,
     terminal: &TerminalId,
     resolution: TabResolution,
 ) -> Result<Terminal, RequestError> {
+    // A tab in a terminal host is the session's own runtime
+    // (`SessionCells::host_tabs`), found without asking tmux and whatever
+    // the agent terminal: such a tab outlives its agent's terminal as a
+    // tmux window does, and needs no tmux session to exist. An exited one
+    // reads as gone here as a dead tmux window does below, for the same
+    // reason, until the reap (or a close) ends its host.
+    if let TerminalId::Tab(id) = terminal
+        && let Some(tab) = super::core::find_host_tab(&entry.session.host_tabs, id)
+    {
+        return match resolution {
+            TabResolution::LiveOnly if tab.finished() => Err(no_such_tab(entry, id)),
+            TabResolution::LiveOnly | TabResolution::DeadIncluded => Ok(Terminal::Host(tab.host)),
+        };
+    }
     // The restart-gap case (PLAN_M2.md): this entry was reloaded from
     // SQLite at startup and its tmux session was gone by then. Reporting
     // `NotFound` — rather than fabricating a dead terminal to attach to —
@@ -823,7 +852,7 @@ async fn resolve_terminal_inner(
         TerminalId::Tab(id) => {
             // Tmux tabs are rediscovered from the session's tmux session's
             // window markers, whatever the agent's kind (`tmux_tab_home`),
-            // so a tab lookup is tmux's to answer.
+            // so a tab lookup that is not a host tab's is tmux's to answer.
             let (tmux_name, agent_pane) = tmux_tab_home(&entry.info.id, agent);
             let states = sup.tmux.pane_states().await.map_err(|e| {
                 RequestError::new(
@@ -852,17 +881,7 @@ async fn resolve_terminal_inner(
                         pane: tab.pane,
                     })
                 })
-                .ok_or_else(|| {
-                    RequestError::new(
-                        ErrorKind::NotFound,
-                        format!(
-                            "session {} has no terminal tab {}: it was closed, or a reboot \
-                             erased it",
-                            truncate_for_error(&entry.info.id),
-                            truncate_for_error(id),
-                        ),
-                    )
-                })
+                .ok_or_else(|| no_such_tab(entry, id))
         }
     }
 }

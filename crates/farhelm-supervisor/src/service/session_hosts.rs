@@ -18,7 +18,15 @@
 //! - **The agent's runtime**, when the session's agent terminal is a host
 //!   (`Terminal::Host`). The caller roots the sweep at its child as pinned
 //!   at adoption (`hosts::HostStatus::pinned_child_root`) and hands the
-//!   runtime to [`SessionHosts::end`]. A startup placeholder
+//!   runtime to [`SessionHosts::end`].
+//! - **The tab runtimes**: the session's tabs in terminal hosts
+//!   (`SessionCells::host_tabs`), handed to [`Supervisor::session_hosts`]
+//!   beside the agent's terminal and held in the result: their children are
+//!   sweep roots as pinned at adoption, their tags' scopes are named, the
+//!   guard counts the ones whose shell runs as open tabs (and one that cannot
+//!   be read as "cannot tell"), and [`SessionHosts::end`] ends them by the
+//!   agent runtime's path. A tab's startup placeholder holds no runtime and
+//!   is settled from its record like the rest. A startup placeholder
 //!   (`hosts::HostTerminal::is_placeholder`, for a host a restarted
 //!   supervisor could not adopt) is no runtime: it holds no connection and
 //!   adopted no process, so its socket is settled from the session's launch
@@ -31,22 +39,24 @@
 //!   signalling anything, since a process that merely names the socket on
 //!   its command line is not shown to be the session's.
 //! - **The session's launch records** (`<state>/launch/<id>.<generation>.host`,
-//!   `service::core::host_launch`), written before every host start the
-//!   supervisor makes for the session and kept until that host is confirmed
-//!   ended (the startup sweep of the launch directory keeps them too). Each
-//!   one no runtime holds (an agent host of a session with no terminal right
-//!   now, an earlier generation's host left by a crash, a start a crashed
-//!   supervisor left half done) is settled the way a retried create settles
-//!   its own ([`Supervisor::settle_launch_record`]): its recorded first
-//!   stage is fenced first, so that nothing can start a host there once
-//!   Delete has looked, and then its socket is looked at.
+//!   `service::core::host_launch`, and a tab host's
+//!   `<state>/launch/<id>.tab-<tab id>.host`, `service::core::host_tabs`),
+//!   written before every host start the supervisor makes for the session
+//!   and kept until that host is confirmed ended (the startup sweep of the
+//!   launch directory keeps them too). Each one no runtime holds (an agent
+//!   host of a session with no terminal right now, an earlier generation's
+//!   host left by a crash, a start a crashed supervisor left half done, a tab
+//!   host a restarted supervisor could not adopt) is settled the way a
+//!   retried create settles its own ([`Supervisor::settle_launch_record`]):
+//!   its recorded first stage is fenced first, so that nothing can start a
+//!   host there once Delete has looked, and then its socket is looked at.
 //!
 //! What a record's socket holds decides what Delete does with it:
 //!
 //! - **nothing** (and no process names it): nothing to end; a socket file a
 //!   killed host left is removed, judged gone again first;
 //! - **a host whose tag names this session**: the guard counts it (its
-//!   program running is a live agent, or an open tab once tabs are hosts),
+//!   program running is a live agent, or an open tab),
 //!   its child is pinned over the connection as a sweep root, and it is
 //!   ended over that same connection;
 //! - **a host whose tag names anything else**: Delete refuses and keeps the
@@ -70,7 +80,8 @@
 //! # Ending them
 //!
 //! [`SessionHosts::end`] ends every host of the session at once: the
-//! agent's runtime the way a failed create ends its own host
+//! agent's runtime and the tab runtimes the way a failed create ends its own
+//! host
 //! (`Supervisor::end_launch_host`: its `Shutdown`, else the verified signal
 //! to the process the runtime adopted, never whatever serves the socket
 //! now, so a process renamed over the socket is left alone while the host
@@ -113,12 +124,12 @@ use std::time::Duration;
 use anyhow::Context as _;
 use tracing::debug;
 
-use super::core::{AtRecordedSocket, Supervisor, read_launch_record};
+use super::core::{AtRecordedSocket, HostTab, Supervisor, read_launch_record};
 use super::terminals::Terminal;
 use crate::hosts::stop::{HostOutcome, StopLimits, shut_down, signal};
 use crate::hosts::terminal::{Child, pin_child};
 use crate::hosts::{
-    ConnectError, HostConnection, HostName, HostProcess, HostRole, HostTag, HostTerminal,
+    ConnectError, HostConnection, HostName, HostProcess, HostRole, HostTag, HostTerminal, Liveness,
 };
 use terminal_host::protocol::Info;
 
@@ -187,6 +198,9 @@ impl RecordedHost {
 pub(crate) struct SessionHosts {
     session_id: String,
     hosts: Vec<RecordedHost>,
+    /// The session's tab runtimes (not startup placeholders), whose records
+    /// were left to them, as the agent's runtime's is.
+    tabs: Vec<HostTab>,
     /// The budget [`Self::end`] gets for ending the hosts, counted from
     /// when it starts: the same length as settling's own, which it does not
     /// share, so that the sweep and the rest of the teardown between the
@@ -196,7 +210,9 @@ pub(crate) struct SessionHosts {
 
 impl Supervisor {
     /// Settle every launch record of `session_id` whose socket no runtime
-    /// here holds (module docs, "Which hosts").
+    /// here holds (module docs, "Which hosts"): neither `agent`'s, when the
+    /// session's agent terminal is a host runtime, nor one of `tabs`, the
+    /// session's tabs in terminal hosts, whose runtimes the result holds.
     ///
     /// Called under the session's lifecycle claim and directory admission,
     /// so nothing starts a host for this session meanwhile. A session with
@@ -209,6 +225,7 @@ impl Supervisor {
         &self,
         session_id: &str,
         agent: Option<&Terminal>,
+        tabs: Vec<HostTab>,
         budget: Duration,
     ) -> anyhow::Result<SessionHosts> {
         let deadline = tokio::time::Instant::now() + budget;
@@ -222,13 +239,24 @@ impl Supervisor {
             Some(Terminal::Host(host)) => (host.socket().file_name().map(ToOwned::to_owned), None),
             Some(Terminal::Tmux(_)) | None => (None, None),
         };
+        // A tab's runtime holds its host as the agent's does; a tab's
+        // placeholder, like the agent's, is settled from its record.
+        let tabs: Vec<HostTab> = tabs
+            .into_iter()
+            .filter(|tab| !tab.host.is_placeholder())
+            .collect();
+        let held_tabs: Vec<&std::ffi::OsStr> = tabs
+            .iter()
+            .filter_map(|tab| tab.host.socket().file_name())
+            .collect();
         let mut records = Vec::new();
         for path in self.launch_records_of(session_id).await? {
             let record = read_launch_record(&path)
                 .await?
                 .with_context(|| format!("the launch host record {} went away", path.display()))?;
             let socket = self.recorded_socket(&record)?;
-            if socket.file_name() != held.as_deref() {
+            let name = socket.file_name();
+            if name != held.as_deref() && !name.is_some_and(|name| held_tabs.contains(&name)) {
                 records.push((path, record, socket));
             }
         }
@@ -290,6 +318,7 @@ impl Supervisor {
         Ok(SessionHosts {
             session_id: session_id.to_owned(),
             hosts,
+            tabs,
             budget,
         })
     }
@@ -464,11 +493,26 @@ impl SessionHosts {
     /// whose child has been reaped gives no root, never its old pid; an
     /// unreadable host gives none (module docs).
     ///
+    /// A tab runtime's child is a root as its runtime pinned it at
+    /// adoption, checked against the process table whatever the host now
+    /// says, as the agent runtime's is (the teardown's reasoning there).
+    ///
     /// An error when a host stops answering, or says its child runs while
     /// the child cannot be read: a child that may still run without a root
     /// is unexamined, and the caller refuses rather than sweep without it.
     pub(crate) async fn sweep_roots(&mut self) -> anyhow::Result<Vec<(u32, u64)>> {
         let mut roots = Vec::new();
+        for tab in &self.tabs {
+            match tab.host.status().pinned_child_root() {
+                Ok(Some(root)) => roots.push((root.pid, root.start)),
+                Ok(None) => {}
+                Err(why) => anyhow::bail!(
+                    "could not read the child of terminal tab {}'s host before deleting ({why}); \
+                     refusing to report its process tree cleaned up",
+                    tab.tab_id
+                ),
+            }
+        }
         for host in &mut self.hosts {
             let RecordedHost::Ours {
                 socket, connection, ..
@@ -498,9 +542,14 @@ impl SessionHosts {
 
     /// The scope units of the session's tab hosts whose tags say their
     /// program runs in a scope of its own: named this way since a tab in a
-    /// host has no tmux window to read its id from. None before tabs can be
-    /// hosts.
+    /// host has no tmux window to read its id from. A tab runtime's tag was
+    /// read at its open or adoption ([`HostTab::scoped`]).
     pub(crate) fn scoped_tab_units(&self, session_id: &str) -> Vec<String> {
+        let held = self
+            .tabs
+            .iter()
+            .filter(|tab| tab.scoped)
+            .filter_map(|tab| crate::scope::tab_unit_name(session_id, &tab.tab_id));
         self.hosts
             .iter()
             .filter_map(|host| match host {
@@ -520,21 +569,35 @@ impl SessionHosts {
                 | RecordedHost::Gone { .. }
                 | RecordedHost::Unreadable { .. } => None,
             })
+            .chain(held)
             .collect()
     }
 
     /// Why Delete's guard cannot let anything through, if it cannot: a
-    /// recorded host of the session that does not answer usefully, so that
-    /// whether its program runs cannot be told.
+    /// recorded host of the session that does not answer usefully, or a tab
+    /// runtime that can no longer read its host, so that whether its program
+    /// runs cannot be told.
     pub(crate) fn untold(&self) -> Option<String> {
-        self.hosts.iter().find_map(|host| match host {
-            RecordedHost::Unreadable { socket, why, .. } => Some(format!(
-                "this session's terminal host at {} cannot be read ({why}), so whether its \
-                 program is still running cannot be told",
-                socket.display()
-            )),
-            RecordedHost::Gone { .. } | RecordedHost::Ours { .. } => None,
-        })
+        self.hosts
+            .iter()
+            .find_map(|host| match host {
+                RecordedHost::Unreadable { socket, why, .. } => Some(format!(
+                    "this session's terminal host at {} cannot be read ({why}), so whether its \
+                     program is still running cannot be told",
+                    socket.display()
+                )),
+                RecordedHost::Gone { .. } | RecordedHost::Ours { .. } => None,
+            })
+            .or_else(|| {
+                self.tabs.iter().find_map(|tab| match tab.host.liveness() {
+                    Liveness::Unavailable { reason, .. } => Some(format!(
+                        "terminal tab {}'s host cannot be read ({reason}), so whether its shell \
+                         is still running cannot be told",
+                        tab.tab_id
+                    )),
+                    Liveness::Running { .. } | Liveness::Exited { .. } | Liveness::Gone => None,
+                })
+            })
     }
 
     /// Why the session's agent counts as alive for Delete's guard, if it
@@ -564,10 +627,21 @@ impl SessionHosts {
     }
 
     /// How many of the session's tab hosts still run their program, as
-    /// their `Info` said: open tabs, for Delete's guard. None before tabs
-    /// can be hosts.
+    /// their `Info` said, or as a tab runtime's processed exit record has
+    /// not yet said otherwise: open tabs, for Delete's guard.
     pub(crate) fn live_tabs(&self) -> usize {
-        self.hosts
+        let held = self
+            .tabs
+            .iter()
+            .filter(|tab| {
+                matches!(
+                    tab.host.evidence(),
+                    crate::hosts::HostEvidence::Owned { dead: false, .. }
+                )
+            })
+            .count();
+        held + self
+            .hosts
             .iter()
             .filter(|host| {
                 matches!(
@@ -588,9 +662,11 @@ impl SessionHosts {
             .count()
     }
 
-    /// End every host here, and `agent` (the agent terminal's runtime, when
-    /// the session has one), at once, and confirm each ended, all within the
-    /// budget counted from this call (module docs, "Ending them").
+    /// End every host here, the tab runtimes' included, and `agent` (the
+    /// agent terminal's runtime, when the session has one), at once, and
+    /// confirm each ended, all within the budget counted from this call
+    /// (module docs, "Ending them"). A tab runtime is ended the way the
+    /// agent's is.
     ///
     /// `Err` lists every host that could not be confirmed ended, or was not
     /// within the budget, which may still run; the caller keeps the session
@@ -645,6 +721,15 @@ impl SessionHosts {
             endings.push(Box::pin(async move {
                 gate().await;
                 sup.end_launch_host(Some(&agent), &socket, session_id).await
+            }));
+        }
+        for tab in self.tabs {
+            let socket = tab.host.socket().to_path_buf();
+            sockets.push(socket.clone());
+            endings.push(Box::pin(async move {
+                gate().await;
+                sup.end_launch_host(Some(&tab.host), &socket, session_id)
+                    .await
             }));
         }
         let limits = StopLimits::default();

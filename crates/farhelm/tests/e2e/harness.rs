@@ -2479,7 +2479,7 @@ impl Drop for PidKillGuard {
 /// spaces and parentheses — the same rule the supervisor's own `parse_stat`
 /// follows, restated here rather than shared because a test reaching into
 /// private production internals to check production would prove less.
-fn proc_starttime(pid: u32) -> Option<u64> {
+pub(crate) fn proc_starttime(pid: u32) -> Option<u64> {
     let raw = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
     let tail = &raw[raw.rfind(')')? + 1..];
     tail.split_whitespace().nth(19)?.parse().ok()

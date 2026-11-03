@@ -715,7 +715,7 @@ impl LaunchArtifacts {
                     || !sessions
                         .keys()
                         .any(|session_id| staged_name_belongs_to(&name, session_id))
-            } else if let Some((id, generation)) = crate::launch::parse_launch_file_name(&name) {
+            } else if let Some((id, owner)) = crate::launch::parse_launch_file_name(&name) {
                 // Names are `<id>.<generation>.json|status|waypoint|held|launched|host`:
                 // launch files are per-LAUNCH (`launch::spec_path_for_launch`), the
                 // last two the session hold's marks. Two rules:
@@ -743,14 +743,16 @@ impl LaunchArtifacts {
                 // session's Delete, or with a confirmed end of its host. A
                 // record of a session no longer on record stays until a
                 // startup reclaim (a later change) ends its host and then
-                // removes it.
-                if name.ends_with(".host") {
-                    false
-                } else {
-                    match sessions.get(id) {
+                // removes it. A terminal tab's host record
+                // (`<id>.tab-<tab id>.host`) is such a record too.
+                match owner {
+                    // The parser yields a tab only for a `.host` record.
+                    crate::launch::LaunchFileOf::Tab(_) => false,
+                    crate::launch::LaunchFileOf::Launch(_) if name.ends_with(".host") => false,
+                    crate::launch::LaunchFileOf::Launch(generation) => match sessions.get(id) {
                         None => !name.ends_with(".status"),
                         Some(current) => generation < *current,
-                    }
+                    },
                 }
             } else {
                 false
@@ -847,7 +849,10 @@ mod tests {
     /// are UUIDs (no dots), so splitting the last two dot-separated
     /// components apart is unambiguous — and anything that does not parse
     /// must come back `None` rather than being guessed at, since the sweep
-    /// deletes what it recognizes.
+    /// deletes what it recognizes. A tab host's record round-trips to its
+    /// session and tab id, which is how Delete's record listing and the
+    /// startup sweep recognize it; the tab form is accepted only for a
+    /// `.host` record with a tab id, the one artifact a tab ever has.
     #[farhelm_testtrace::test]
     fn launch_file_names_round_trip_through_the_parser() {
         let state = std::path::Path::new("/state");
@@ -860,8 +865,39 @@ mod tests {
             let name = path.file_name().unwrap().to_string_lossy();
             assert_eq!(
                 crate::launch::parse_launch_file_name(&name),
-                Some(("sess-1", 7)),
+                Some(("sess-1", crate::launch::LaunchFileOf::Launch(7))),
                 "{name} must parse back into the launch that produced it"
+            );
+        }
+        let tab = crate::launch::tab_host_record_path(
+            state,
+            "sess-1",
+            "7d2e9f40-1c3b-4a5d-8e6f-0a1b2c3d4e5f",
+        );
+        assert_eq!(
+            tab,
+            std::path::Path::new(
+                "/state/launch/sess-1.tab-7d2e9f40-1c3b-4a5d-8e6f-0a1b2c3d4e5f.host"
+            )
+        );
+        assert_eq!(
+            crate::launch::parse_launch_file_name(&tab.file_name().unwrap().to_string_lossy()),
+            Some((
+                "sess-1",
+                crate::launch::LaunchFileOf::Tab("7d2e9f40-1c3b-4a5d-8e6f-0a1b2c3d4e5f")
+            )),
+            "a tab host's record must parse back into its session and tab"
+        );
+        for not_a_tab_record in [
+            "sess-1.tab-x.json",
+            "sess-1.tab-x.status",
+            "sess-1.tab-.host",
+            ".tab-x.host",
+        ] {
+            assert_eq!(
+                crate::launch::parse_launch_file_name(not_a_tab_record),
+                None,
+                "{not_a_tab_record}"
             );
         }
         assert_eq!(crate::launch::parse_launch_file_name("sess-1.json"), None);
@@ -993,7 +1029,8 @@ mod tests {
     /// host runs on. Spec: with host records of a superseded launch, the
     /// current launch and a session no longer on record, beside a
     /// superseded spec and an unknown session's spec, the sweep removes both
-    /// specs and keeps all three host records.
+    /// specs and keeps all three host records, and the tab host records of
+    /// a live session and of one no longer on record.
     #[farhelm_testtrace::test]
     async fn sweep_launch_dir_keeps_every_host_record() {
         let tmp = tempfile::tempdir().unwrap();
@@ -1005,6 +1042,8 @@ mod tests {
             "live.2.host",
             "gone.0.host",
             "gone.0.json",
+            "live.tab-a1.host",
+            "gone.tab-b2.host",
         ] {
             std::fs::write(launch_dir.join(name), b"x").unwrap();
         }
@@ -1014,6 +1053,8 @@ mod tests {
             ("live.1.host", true),
             ("live.2.host", true),
             ("gone.0.host", true),
+            ("live.tab-a1.host", true),
+            ("gone.tab-b2.host", true),
             ("live.1.json", false),
             ("gone.0.json", false),
         ] {
