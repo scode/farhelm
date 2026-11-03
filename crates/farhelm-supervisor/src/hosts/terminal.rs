@@ -262,8 +262,10 @@
 //!   resize would do nothing). It does the
 //!   same after restoring a snapshot that left out the screens or was drawn
 //!   with another character width table. What a redraw cannot bring back
-//!   stays lost: the scrollback in the gap, and a mode the lost bytes set,
-//!   until the program sets it again as part of its redraw.
+//!   stays lost: the scrollback in the gap, and a mode or other terminal
+//!   setting the lost bytes made, until the program sets it again, which
+//!   nothing makes it do on a resize and which many programs do only at
+//!   startup (SPEC_impl.md, "Terminal host", the gap paragraph).
 //! - **Unavailable is final for a runtime, not for a host.** A runtime that
 //!   ends unavailable leaves its host alone and never tries it again. Some
 //!   reasons are lasting (a protocol or snapshot format this build does not
