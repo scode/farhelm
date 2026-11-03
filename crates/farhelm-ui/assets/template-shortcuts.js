@@ -126,11 +126,12 @@
   /** Decide when an editor keeps the sequence prefix's normal meaning.
    * Outside the launcher, text editing always wins. Its own fields yield the
    * prefix only when they hold a selection, so Cmd-X still cuts selected text.
-   * xterm's implementation textarea is not an ordinary editor.
+   * The terminals' input proxies (xterm's implementation textarea and the
+   * grid terminal's input) are not ordinary editors.
    */
   function prefixReservedForTextEditing(target, context, doc) {
     if (!(target instanceof Element)) return false;
-    if (target.matches(".xterm-helper-textarea")) return false;
+    if (target.matches(".xterm-helper-textarea, .grid-terminal-input")) return false;
     const input = target.closest("input, textarea");
     if (!input && !target.isContentEditable) return false;
     if (context !== "launcher") return true;

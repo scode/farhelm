@@ -18,12 +18,13 @@
     return null;
   }
 
-  /** Browser Delete remains an editing chord outside xterm's input proxy.
-   * The proxy is the terminal program's keyboard entry point, so consuming the
+  /** Browser Delete remains an editing chord outside the terminals' input
+   * proxies (xterm.js's helper textarea and the grid terminal's input). A
+   * proxy is the terminal program's keyboard entry point, so consuming the
    * chord there is essential. Other controls and editable descendants keep it.
    */
   function sessionActionTextField(target) {
-    if (!target?.closest || target.closest(".xterm-helper-textarea")) return false;
+    if (!target?.closest || target.closest(".xterm-helper-textarea, .grid-terminal-input")) return false;
     return !!target.closest('input, textarea, select, [role="textbox"]') || !!target.isContentEditable;
   }
 

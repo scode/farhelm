@@ -99,6 +99,8 @@ Generic recorder wrapping is fine but not required for these; record each result
 - `python3 scripts/check-agents-md.py` and `python3 scripts/check-agents-md.py --self-test` (includes both Claude
   instruction-file names in the repository inventory and mixed-case specification pointers)
 - `cd website && bun install --frozen-lockfile && bun run build`, and `cd website/feedback-tests && node --test`
+- `cd e2e && npx playwright test --config grid-client/playwright.config.ts` (the grid terminal's static-page specs,
+  which boot no stack and which neither the sweep nor CI runs)
 - `dist generate --check`
 - `python3 releasing/check-changelog.py format` and `python3 releasing/check-changelog.py --self-test`
 - `python3 releasing/finalize-release-notes.py --self-test`

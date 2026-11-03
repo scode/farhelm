@@ -8128,6 +8128,140 @@ a:any-link,
   background: var(--terminal-bg);
 }
 
+/* ===== Grid terminals ============================================= */
+
+/* The component new terminals get instead of xterm.js (grid-terminal.js).
+   Only structure lives here: every color, the font and the cell metrics
+   are set inline by the script, from the terminal theme and the measured
+   cell, so nothing here varies per style or per program. That is
+   deliberate: a stylesheet rule per style invalidates the whole page, which
+   the renderer benchmark showed collapsing WebKit (grid-style.js's header). */
+/* The 4px padding is the one xterm.js's own element gets from `.terminal`
+   (it carries that class too): the fit subtracts it in both components, so
+   a pane gets the same rows and columns and its text the same inset. */
+.grid-terminal {
+  position: relative;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  padding: 4px;
+  overflow: hidden;
+  cursor: text;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* xterm.js's `enable-mouse-events`: the program owns the mouse. */
+.grid-terminal.grid-terminal-mouse {
+  cursor: default;
+}
+
+.grid-terminal-screen {
+  position: relative;
+  overflow: hidden;
+  white-space: pre;
+  font-kerning: none;
+}
+
+.grid-terminal-row {
+  display: block;
+  overflow: hidden;
+  white-space: pre;
+}
+
+/* Spans fill the row's height so a background reaches the next row with no
+   seam, like xterm.js's DOM renderer. Cells are already in visual order, so
+   each span reads its characters left to right with no bidi reordering. */
+.grid-terminal-row > span {
+  display: inline-block;
+  height: 100%;
+  vertical-align: top;
+  unicode-bidi: bidi-override;
+  direction: ltr;
+}
+
+/* Exact-width boxes for wide and non-ASCII text (grid-model.js's
+   `layoutRun`); a glyph that does not fit is clipped, never pushes. */
+.grid-terminal-row > .grid-terminal-box {
+  overflow: hidden;
+}
+
+.grid-terminal-cursor {
+  position: absolute;
+  display: none;
+  box-sizing: content-box;
+  overflow: hidden;
+  white-space: pre;
+  pointer-events: none;
+  unicode-bidi: bidi-override;
+  direction: ltr;
+}
+
+/* xterm.js's cursor blink: one second, two visible changes, only while the
+   terminal has focus (the script adds the class only then). The window's
+   inactive pause below stops it like every other animation. */
+.grid-terminal-cursor.grid-terminal-cursor-blink {
+  animation: grid-terminal-cursor-blink 1s step-end infinite;
+}
+
+@keyframes grid-terminal-cursor-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* The exit status of an ended program, which the client shows itself
+   (there is no tmux "Pane is dead" line). The script places it directly
+   below the last row, never over one, and sets its colors from the
+   terminal's defaults. */
+.grid-terminal-exit {
+  display: none;
+  position: absolute;
+  padding: 0 4px;
+  white-space: pre;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+/* The keyboard's target, parked like xterm.js's helper textarea: focusable,
+   never visible. */
+.grid-terminal-input {
+  position: absolute;
+  left: -9999em;
+  top: 0;
+  width: 0;
+  height: 0;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  opacity: 0;
+  z-index: -5;
+  overflow: hidden;
+  resize: none;
+  white-space: nowrap;
+}
+
+/* The span fallback of the character measurement, shaped like xterm.js's
+   `.xterm-char-measure-element`. The glyph measure (which characters may
+   flow inline) adds the row spans' bidi settings, so it measures in their
+   context. */
+.grid-terminal-measure {
+  display: inline-block;
+  position: absolute;
+  left: -9999em;
+  top: 0;
+  visibility: hidden;
+  white-space: pre;
+  font-kerning: none;
+  line-height: normal;
+}
+
+.grid-terminal-glyph-measure {
+  unicode-bidi: bidi-override;
+  direction: ltr;
+}
+
 .status {
   padding: 2em;
   font-size: 14px;

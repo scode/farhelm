@@ -36,10 +36,12 @@ test("browsers reserve Ctrl-Shift-Backspace and Ctrl-Shift-L and keep Cmd chords
   }
 });
 
-test("browser Delete leaves ordinary editors alone and consumes xterm input", () => {
+test("browser Delete leaves ordinary editors alone and consumes terminal input", () => {
+  // Both terminal components' input proxies, xterm.js's and the grid's,
+  // must be named together: a grid terminal is the same keyboard entry point.
   const target = (terminal, control, isContentEditable = false) => ({
     isContentEditable,
-    closest(selector) { return selector === ".xterm-helper-textarea" ? terminal : control; },
+    closest(selector) { return selector === ".xterm-helper-textarea, .grid-terminal-input" ? terminal : control; },
   });
   assert.equal(sessionActionTextField(target(true, true)), false);
   assert.equal(sessionActionTextField(target(false, true)), true);

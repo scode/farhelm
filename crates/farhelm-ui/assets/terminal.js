@@ -1,14 +1,44 @@
-// The xterm.js islands. Dioxus owns everything around the terminals; this
-// file owns their content path: WebSocket bytes go straight into
-// term.write() and keystrokes go straight back, bypassing the reactive
-// layer entirely (SPEC_impl.md: the bypass is load-bearing — PTY-rate
-// output through a vdom would be a performance disaster).
+// The terminal islands. Dioxus owns everything around the terminals; this
+// file owns their content path: WebSocket frames go straight into the
+// terminal component and keystrokes go straight back, bypassing the
+// reactive layer entirely (SPEC_impl.md: the bypass is load-bearing —
+// PTY-rate output through a vdom would be a performance disaster).
 //
 // Loaded as plain scripts (xterm.js, addon-fit.js, term-bytes.js,
-// clipboard-name.js, shift-enter-key.js, clipboard-writer.js, this — that is REGISTRATION order;
-// Dioxus injects scripts asynchronously, so mountWhenReady gates on the
-// globals themselves, never on order) — no bundler, no CDN: the UI must be
-// fully self-contained.
+// clipboard-name.js, shift-enter-key.js, clipboard-writer.js, the grid-*.js
+// files, this — that is REGISTRATION order; Dioxus injects scripts
+// asynchronously, so mountWhenReady gates on the globals themselves, never
+// on order) — no bundler, no CDN: the UI must be fully self-contained.
+//
+// ## Two kinds of stream, one island
+//
+// Terminals that run in tmux send BYTES, which xterm.js parses and draws.
+// Terminals that run in a terminal host send a GRID: the supervisor runs
+// the emulator and sends rows of styled runs, which the grid component
+// (grid-terminal.js and its pure helpers) draws, and input goes back as
+// small JSON messages the supervisor encodes. Which one an attachment
+// carries is the terminal's, not the page's, so the page asks for either
+// (`grid=1` on the socket URL) and the helm says which it got in a
+// `{"type":"stream","kind":...}` text frame before any data. No notice at
+// all is an older helm, which only has byte streams.
+//
+// Everything about the CONNECTION is shared by both kinds and lives in
+// `mount()` unchanged: the catch-up and its reveal, the heartbeat,
+// detaches, banners, the reconnect ladder, resize. Only the surface
+// differs. Because the size in the socket URL has to come from a measured
+// terminal before the kind is known, every mount builds the xterm.js
+// surface first, exactly as it always has; a grid notice then disposes it
+// (nothing has been written to it yet: the notice precedes all data) and
+// mounts the grid component in its place (`adoptGrid`). Byte streams never
+// see a difference.
+//
+// What the grid component does not do yet, the island does not offer for
+// it: paste and drop, selection and copy, links, the frozen screen kept
+// across a reconnect or a takeover. Those arrive with the later parity
+// tiers (see grid-terminal.js's "Seams"). Flow control's pause and resume
+// are never sent for a grid stream: the component applies every frame as
+// it arrives and draws once per animation frame, so no backlog builds up
+// on this side to measure (the supervisor coalesces screen frames itself).
 //
 // ## One island per terminal, reconciled declaratively (PLAN_M4.md item 6)
 //
@@ -376,6 +406,10 @@
   // digits, so not "", "1e1" or "0x10") means the default; a number outside
   // the range is clamped into it, so an old or hand-edited value can never
   // produce an unreadable terminal.
+  // The terminal font, the same for both kinds of terminal (see "Font
+  // settling before mount" for why it is a mount precondition).
+  const TERMINAL_FONT_FAMILY = '"JetBrains Mono", monospace';
+
   const FONT_SIZE_KEY = "farhelm.terminal-font-size";
   const FONT_SIZE_DEFAULT = 14;
   const FONT_SIZE_MIN = 9;
@@ -922,6 +956,23 @@
   }
 
   const islands = new Map();
+
+  /**
+   * The DOM element of an island's terminal, whichever component it holds:
+   * the grid component once a grid stream adopted it, else xterm.js's.
+   * Everything outside `mount()` that reaches an island's surface goes
+   * through these two, so a grid island never has a disposed xterm.js
+   * instance touched on its behalf.
+   */
+  function surfaceElement(island) {
+    return island.grid ? island.grid.element : island.term.element;
+  }
+
+  /** Put keyboard focus in an island's terminal (see `surfaceElement`). */
+  function focusSurface(island) {
+    if (island.grid) island.grid.focus();
+    else island.term.focus();
+  }
 
   // `mountWhenReady()` calls still waiting for xterm's globals and their
   // target DOM element to exist, keyed the same way. At most one per
@@ -1572,7 +1623,10 @@
   function runReconnect(controller, manual) {
     controller.attempting = true;
     const island = islands.get(controller.el);
-    if (island && !controller.snapshot) {
+    // A grid island holds no screen across the attempt yet: the frozen
+    // screen, its tombstone and their copy-on-select are built on xterm.js
+    // (the later connection-behavior parity tier brings the grid's).
+    if (island && !controller.snapshot && !island.grid) {
       island.keepTerm = true;
       controller.snapshot = island.term;
       controller.snapshotLinkGesture = island.linkGesture;
@@ -2693,9 +2747,9 @@
      */
     focusSelected() {
       const selected = focusedEl === null ? null : islands.get(focusedEl);
-      const element = selected?.term.element;
+      const element = selected ? surfaceElement(selected) : null;
       if (element && getComputedStyle(element).visibility === 'visible' && !keyboardHeldElsewhere()) {
-        selected.term.focus();
+        focusSurface(selected);
       }
     },
 
@@ -2723,6 +2777,12 @@
           // size still applies to this page.
         }
         for (const island of islands.values()) {
+          // The grid component re-measures, redraws and refits itself, and
+          // reports its new size the same way a refit xterm.js does.
+          if (island.grid) {
+            island.grid.setFontSize(next);
+            continue;
+          }
           island.term.options.fontSize = next;
           island.fit.fit();
         }
@@ -2736,7 +2796,7 @@
       const active = document.activeElement;
       if (active && active.closest && active.closest(".terminal-text-size")) {
         const focused = focusedEl === null ? null : islands.get(focusedEl);
-        if (focused && !keyboardHeldElsewhere()) focused.term.focus();
+        if (focused && !keyboardHeldElsewhere()) focusSurface(focused);
       }
     },
 
@@ -2909,7 +2969,7 @@
         focusedEl = focusEl;
         focusOrigin = document.activeElement;
         const island = focusEl === null ? null : islands.get(focusEl);
-        if (island && !keyboardHeldElsewhere()) island.term.focus();
+        if (island && !keyboardHeldElsewhere()) focusSurface(island);
       }
 
       for (const spec of specs) {
@@ -3243,6 +3303,12 @@
           window.farhelmClipboardWriter &&
           window.farhelmTerminalLinks &&
           window.farhelmTerminalFiles &&
+          // The grid component, so an attachment that turns out to carry
+          // a grid stream can adopt it without waiting on a script.
+          window.farhelmGridModel &&
+          window.farhelmGridStyle &&
+          window.farhelmGridInput &&
+          window.farhelmGridTerminal &&
           fontSettled &&
           document.getElementById(spec.el)
         ) {
@@ -3302,6 +3368,11 @@
       // visible to its `catch`).
       let term = null;
       let ws = null;
+      // The grid component, once this attachment's stream notice says
+      // `grid` (`adoptGrid`); null for a byte stream. Hoisted with `term`
+      // so every path that tears this mount down can dispose whichever
+      // surface it holds.
+      let grid = null;
       // Declared out here with `term`/`ws` for the same reason, and it is
       // not cosmetic: both of these REGISTER something with the browser
       // that outlives a throw, so the catch block has to be able to reach
@@ -3543,7 +3614,7 @@
           // once at construction" undersells it), so a family present from
           // the start means the metrics are correct from the FIRST frame:
           // no later re-fit, no resize, no tmux reflow, no blank redraw.
-          fontFamily: '"JetBrains Mono", monospace',
+          fontFamily: TERMINAL_FONT_FAMILY,
           // OSC 8 file targets need all-scheme dispatch. That makes this
           // handler the security boundary: only http(s) reaches the existing
           // opener; files go through host lookup, and other schemes do nothing.
@@ -3723,8 +3794,13 @@
         // on capability.
         const path = (ifUnowned && spec.pathUnowned) || spec.path;
         const sep = path.indexOf("?") === -1 ? "?" : "&";
+        // `grid=1`: this page can draw a grid stream, so a terminal that
+        // runs in a terminal host can be attached at all (the supervisor
+        // refuses a client that cannot). A tmux terminal still sends bytes,
+        // and an older helm ignores the parameter. See "Two kinds of
+        // stream, one island" in this file's header.
         ws = new WebSocket(
-          `${base}${path}${sep}cols=${term.cols}&rows=${term.rows}`,
+          `${base}${path}${sep}cols=${term.cols}&rows=${term.rows}&grid=1`,
           deviceProtocols(),
         );
         ws.binaryType = "arraybuffer";
@@ -3767,6 +3843,11 @@
         // late-firing callback from a torn-down mount only ever touches
         // its OWN already-orphaned object.
         const testHook = {
+          // Which kind of stream this attachment carries: null until the
+          // helm's notice (or the first frame of an older helm, which means
+          // "bytes"), then "bytes" or "grid". A test waits on it before
+          // reaching for the surface in `window.__farhelmIslands`.
+          stream: null,
           paused: false,
           pauseCount: 0,
           resumeCount: 0,
@@ -3796,11 +3877,14 @@
           // - `writesWhileHidden`: how many `term.write()` calls this
           //   island made before the terminal was revealed. The whole
           //   milestone is that this is ONE for a replay of any depth.
-          // - `revealReason`: which of the phase's EIGHT endings fired —
+          // - `revealReason`: which of the phase's NINE endings fired —
           //   `marker`, `detached`, `closed`, `error`, `size`, `chunks`,
-          //   `idle`, `unconnected` — and `null` until one does. The last
-          //   one is the odd one out: it ends the phase WITHOUT presenting
-          //   a usable terminal (see `armIdleTimer`).
+          //   `idle`, `unconnected`, `protocol` — and `null` until one
+          //   does. `unconnected` ends the phase WITHOUT presenting a
+          //   usable terminal (see `armIdleTimer`), and so does
+          //   `protocol`, a grid stream that broke the format (see
+          //   `streamFailed`). A grid stream never ends on `size` or
+          //   `chunks`: it buffers nothing.
           // - `revealed`: set INSIDE the reveal, so a test that waits on
           //   it is guaranteed the two fields below have been written.
           //   `revealReason` is not that signal: it is recorded when the
@@ -3808,7 +3892,9 @@
           //   ahead of the reveal itself.
           // - `revealedInWriteCallback`: whether the reveal came from the
           //   flush write's completion callback, i.e. after xterm.js had
-          //   consumed the whole replay, rather than optimistically.
+          //   consumed the whole replay, rather than optimistically. A grid
+          //   stream applies every frame as it arrives, so its reveal is
+          //   always after the whole replay and reports true.
           // - `viewportAtTailOnReveal`: whether the FIRST VISIBLE FRAME
           //   was at the tail, captured at the instant of the reveal.
           //
@@ -4230,16 +4316,32 @@
           // painted, rather than disposing it when the marker only arrives.
           if (recoveryConfirmed) cancelReconnect(spec.el, "confirmed");
           revealed = true;
-          term.scrollToBottom();
-          const buffer = term.buffer.active;
-          testHook.replay.revealed = true;
-          testHook.replay.revealedInWriteCallback = !!fromWriteCallback;
-          testHook.replay.viewportAtTailOnReveal = buffer.viewportY === buffer.baseY;
+          if (grid) {
+            // Draw now, while still hidden, so the first visible frame is
+            // the current screen. A grid has no scrolled-back view yet, so
+            // it is always at the tail.
+            grid.flush();
+            testHook.replay.revealed = true;
+            testHook.replay.revealedInWriteCallback = !!fromWriteCallback;
+            testHook.replay.viewportAtTailOnReveal = true;
+          } else {
+            term.scrollToBottom();
+            const buffer = term.buffer.active;
+            testHook.replay.revealed = true;
+            testHook.replay.revealedInWriteCallback = !!fromWriteCallback;
+            testHook.replay.viewportAtTailOnReveal = buffer.viewportY === buffer.baseY;
+          }
           showTerminal(el, spec.connecting);
           clearDropRefusals(spec.status);
           if (takesFocus()) {
-            term.focus();
+            focusTerminal();
           }
+        }
+
+        /** Focus whichever surface this mount holds (see `adoptGrid`). */
+        function focusTerminal() {
+          if (grid) grid.focus();
+          else term.focus();
         }
 
         /**
@@ -4310,7 +4412,7 @@
          */
         function focusAfterAvailability() {
           if (revealed && alive && !ended && ws.readyState === WebSocket.OPEN && takesFocus()) {
-            term.focus();
+            focusTerminal();
           }
         }
 
@@ -4437,7 +4539,10 @@
           testHook.replay.bufferedBytes = 0;
           testHook.replay.bufferedChunks = 0;
           if (total === 0) {
-            reveal(false);
+            // A grid stream never buffers: every frame it received is
+            // already applied, which is what a write callback proves for
+            // bytes.
+            reveal(grid !== null);
             return;
           }
           const joined = new Uint8Array(total);
@@ -4612,7 +4717,14 @@
             // is deliberately no session-wide takeover message), so each
             // island banners its own, independently.
             const msg = JSON.parse(ev.data);
+            if (msg.type === "stream") {
+              noteStreamKind(msg.kind);
+              return;
+            }
             if (msg.type === "replay_complete") {
+              // The end of a replay with no notice before it is an older
+              // helm (see `noteStreamKind` for the ordering contract).
+              if (streamKind === null) noteStreamKind("bytes");
               // Evidence in its own right, recorded before the phase is
               // ended so a marker that arrives LATE — after an
               // evidence-free idle gave up on this attach — still confirms
@@ -4691,6 +4803,9 @@
             }
             return;
           }
+          // Data with no notice before it is an older helm, which only has
+          // byte streams (see `noteStreamKind`).
+          if (streamKind === null) noteStreamKind("bytes");
           const bytes = new Uint8Array(ev.data);
           // An empty frame is nothing to write and, during a catch-up,
           // nothing to count: letting one re-arm the idle watchdog would
@@ -4704,6 +4819,10 @@
           // reason the catch-up watchdog excludes it — a peer must not be
           // able to manufacture proof of an attachment at no cost.
           noteAttachProved();
+          if (grid) {
+            receiveGrid(bytes);
+            return;
+          }
           if (catchingUp) {
             // Held, not written: this is the whole no-visible-re-scroll
             // feature (see this file's header). Both bounds are checked
@@ -4826,8 +4945,173 @@
               ? "Connection error"
               : reason === "unconnected"
               ? UNCONNECTED_TEXT
+              : reason === "protocol"
+              ? streamFailure
               : "Connection closed",
           );
+        }
+
+        // ------------------------------------------------------------
+        // The stream kind, and the grid surface (this file's header,
+        // "Two kinds of stream, one island")
+        // ------------------------------------------------------------
+
+        // "bytes" or "grid" once known, null before the first frame.
+        let streamKind = null;
+        // This mount's record in `islands`, once the mount has finished;
+        // `adoptGrid` updates it in place.
+        let islandEntry = null;
+        // What the banner says when a grid stream broke the format and
+        // recovery cannot run (see `streamFailed`).
+        let streamFailure = "Terminal stream error";
+
+        /**
+         * Settle which component this attachment's stream needs.
+         *
+         * The ordering contract with the helm: on every attachment, the
+         * `{"type":"stream"}` notice is sent before the first binary data
+         * frame and before `replay_complete`. Other text frames (`pong`, a
+         * `detached` notice for a refused attach) may come before or after
+         * it and settle nothing. An older helm sends no notice, so the
+         * first binary frame or `replay_complete` without one means bytes.
+         *
+         * A grid notice therefore finds the xterm.js surface untouched
+         * (nothing has been written to it) and replaces it. A notice that
+         * contradicts the kind already settled means the helm broke that
+         * contract, and nothing can draw the stream.
+         */
+        function noteStreamKind(kind) {
+          if (streamKind !== null) {
+            if (kind !== streamKind) streamFailed(new Error("the stream kind changed mid-attachment"));
+            return;
+          }
+          if (kind === "bytes") {
+            streamKind = "bytes";
+          } else if (kind === "grid") {
+            streamKind = "grid";
+            try {
+              adoptGrid();
+            } catch (err) {
+              streamFailed(err);
+              return;
+            }
+          } else {
+            streamFailed(new Error("the helm sent a stream kind this page cannot draw"));
+            return;
+          }
+          testHook.stream = streamKind;
+        }
+
+        /**
+         * Replace this mount's xterm.js surface with the grid component.
+         *
+         * Only the surface changes: the socket, the catch-up, the heartbeat
+         * and every ending keep running exactly as for bytes. What is torn
+         * down is what only makes sense for xterm.js: its terminal (which
+         * removes its element from `el`), the copy-on-select and link
+         * listeners, and the paste and drop interception, whose grid
+         * versions come with the later parity tiers. The island's record is
+         * updated in place so `stepFontSize`, focus, `unmount` and the test
+         * registry reach the grid from now on.
+         */
+        function adoptGrid() {
+          // Whether xterm.js held the keyboard: an attach that stayed silent
+          // past the catch-up's idle bound has already been revealed and
+          // focused before the notice arrives, and disposing xterm.js would
+          // drop that focus on the page.
+          const hadFocus = el.contains(document.activeElement);
+          // Built before anything is torn down, so a component that fails
+          // to build leaves the untouched xterm.js surface in place for the
+          // failure's ending to reveal. It starts at xterm.js's size, the
+          // one the socket URL carried and the program already has.
+          const created = window.farhelmGridTerminal.create(el, {
+            fontSize: terminalFontSize,
+            fontFamily: TERMINAL_FONT_FAMILY,
+            theme: window.farhelmTerminalTheme,
+            platform: navigator.platform,
+            size: { cols: term.cols, rows: term.rows },
+            send: sendGridInput,
+            onResize: sendResize,
+            // A program's OSC 52 write, honored as the xterm.js path's
+            // `clipboardProvider` honors it: the system clipboard only (the
+            // browser has no primary selection), through the page's one
+            // clipboard queue, silently best-effort.
+            onClipboard: (text, target) => {
+              if (target === "clipboard") enqueueClipboardWrite(text);
+            },
+          });
+          if (stopCopyOnSelect) stopCopyOnSelect();
+          stopCopyOnSelect = null;
+          if (attachments) attachments.dispose();
+          attachments = null;
+          if (webLeaveTimer !== null) clearTimeout(webLeaveTimer);
+          webLeaveTimer = null;
+          term.dispose();
+          grid = created;
+          if (islandEntry) {
+            Object.assign(islandEntry, { kind: "grid", grid, term: null, fit: null, attachments: null, stopCopyOnSelect: null });
+          }
+          publishIsland(spec.el, { kind: "grid", grid, ws, test: testHook });
+          if (spec.primary) {
+            delete window.__farhelmTerm;
+            window.__farhelmGrid = grid;
+          }
+          // The grid fits exactly as xterm.js does and starts at the size
+          // the URL carried, so this reports nothing in the same pane; it
+          // resizes only if the pane changed meanwhile. (The resize sent at
+          // `onopen` is unchanged for both kinds. It retries an attach-time
+          // sizing that failed, and a resize to the size the terminal already
+          // has is a no-op: tmux ignores it, and the grid format requires the
+          // supervisor to neither resize, reflow, redraw nor reset history
+          // for it.)
+          grid.fit();
+          if (hadFocus || (revealed && takesFocus())) grid.focus();
+        }
+
+        /** Hand one grid data frame to the component (see `onmessage`). */
+        function receiveGrid(bytes) {
+          try {
+            grid.receive(bytes);
+          } catch (err) {
+            streamFailed(err);
+            return;
+          }
+          // The catch-up's watchdog measures silence for grid streams too;
+          // nothing is buffered, so the size and frame-count bounds have
+          // nothing to count.
+          if (catchingUp) armIdleTimer();
+        }
+
+        /**
+         * End this attachment over a stream nothing can draw: a grid frame
+         * that broke the format, or a stream notice this page cannot honor.
+         * The format's answer is "report a protocol error and reconnect":
+         * the ending goes through `socketEnded` like any transport failure,
+         * so the ladder retries when recovery can run, and the banner names
+         * the problem when it cannot. The message is this file's or the
+         * decoder's own wording, never peer text.
+         */
+        function streamFailed(err) {
+          if (ended || !alive) return;
+          console.error("farhelm: terminal stream error", spec.el, err);
+          const detail = err && typeof err.message === "string" ? err.message : String(err);
+          streamFailure = `Terminal stream error: ${detail}`;
+          socketEnded("protocol");
+          ws.close();
+        }
+
+        /**
+         * Send one grid input message as a binary data frame (the helm
+         * relays it unchanged). Dropped while the socket is not open, as
+         * keystrokes to xterm.js are.
+         */
+        function sendGridInput(message) {
+          if (ws.readyState !== WebSocket.OPEN) return;
+          const bytes = window.farhelmGridInput.encodeInput(message);
+          if (bytes) ws.send(bytes);
+          // The builders keep messages within the bound; one that is not is
+          // a bug here, reported rather than sent for the peer to refuse.
+          else console.error("farhelm: grid input message over the 64 KiB bound", message.t);
         }
 
         // A detach notice is immediately followed by the server closing
@@ -5413,11 +5697,12 @@
         });
 
         const sendResize = () => {
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(
-              JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }),
-            );
-          }
+          if (ws.readyState !== WebSocket.OPEN) return;
+          // Either surface's fitted size; a grid that has not measured
+          // anything yet has none to report.
+          const size = grid ? grid.size() : { cols: term.cols, rows: term.rows };
+          if (!size.cols || !size.rows) return;
+          ws.send(JSON.stringify({ type: "resize", cols: size.cols, rows: size.rows }));
         };
         term.onResize(sendResize);
         // A resize between socket construction and open would otherwise
@@ -5459,12 +5744,15 @@
           armHeartbeat();
           sendResize();
         };
+        // Refit whichever surface this mount holds: the grid once it has
+        // been adopted, else xterm.js through its fit addon.
+        const refit = () => (grid ? grid.fit() : fit.fit());
         // Named (not inline) so unmount() can remove exactly this
         // listener: an anonymous closure captured here would be
         // unreachable later, leaking one stale listener (closing over
         // this disposed term/fit pair) per mount/unmount cycle, each
         // still firing on every future window resize.
-        onWindowResize = () => fit.fit();
+        onWindowResize = () => refit();
         window.addEventListener("resize", onWindowResize);
         // A window resize is not the only thing that changes a terminal's
         // box, and since tabs it is not even the common one: the tab
@@ -5486,7 +5774,7 @@
         // window listener above still covers the resize case, so the
         // degradation is partial rather than fatal.
         paneObserver = typeof ResizeObserver === "function"
-          ? new ResizeObserver(() => fit.fit())
+          ? new ResizeObserver(() => refit())
           : null;
         if (paneObserver) paneObserver.observe(el);
 
@@ -5522,8 +5810,12 @@
           // before mount succeeded.
           window.__farhelmTest = testHook;
         }
-        publishIsland(spec.el, { term, ws, test: testHook });
-        islands.set(spec.el, {
+        publishIsland(spec.el, { kind: "bytes", term, ws, test: testHook });
+        islandEntry = {
+          // "bytes" until a grid notice adopts the grid component, which
+          // then also fills `grid` and clears `term` (see `adoptGrid`).
+          kind: "bytes",
+          grid: null,
           ws,
           term,
           linkGesture,
@@ -5554,7 +5846,8 @@
           path: spec.path,
           gen: spec.gen,
           primary: !!spec.primary,
-        });
+        };
+        islands.set(spec.el, islandEntry);
         return { term, ws };
       } catch (err) {
         // Roll back completely: `islands` is only written on the last line
@@ -5577,6 +5870,7 @@
         // this line is about to destroy, and a still-armed heartbeat would
         // close a socket this line already closed.
         if (disposeDeferred) disposeDeferred();
+        if (grid) grid.dispose();
         // A mount that failed before `disposeDeferred` existed closes its
         // banner hold here instead; see `bannerHoldClosed`.
         bannerHoldClosed = true;
@@ -5679,7 +5973,11 @@
       // screen to OUTLIVE its teardown (`runReconnect`). Recovery owns
       // disposal or restoration from here (`cancelReconnect`); the normal
       // island teardown still closes its socket and removes its listeners.
-      if (island.keepTerm) {
+      if (island.grid) {
+        // A grid island disposed its xterm.js surface when it adopted the
+        // grid, and keeps no frozen screen (see `runReconnect`).
+        island.grid.dispose();
+      } else if (island.keepTerm) {
         // Move the frozen screen beside the mount point: hiding the new
         // replay must not hide its predecessor too. The pane still owns
         // visibility, so a background tab cannot paint over the active one.
@@ -5706,6 +6004,7 @@
         delete window.__farhelmTest;
       }
       delete window.__farhelmTerm;
+      delete window.__farhelmGrid;
       delete window.__farhelmWs;
       delete window.__farhelmTermReady;
     },
