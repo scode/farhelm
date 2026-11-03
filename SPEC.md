@@ -506,11 +506,12 @@ installation must produce an actionable refusal before changes begin.
 
 The command shows the files and services it intends to remove and the data it will retain, then asks for confirmation.
 `--yes` skips that confirmation, not ownership checks. Without an interactive confirmation channel, the command requires
-`--yes` rather than proceeding implicitly. `--dry-run` reports the proposed actions and any blockers without changing
-files, stopping processes, or disabling services. Confirmed 2026-10-11: those blockers are ownership, recognition and
-ambiguity refusals, not predictions about locks held at preview time, such as an open desktop app or a running
-installer. The preview warns that an install or upgrade running now makes uninstall refuse; the real run refuses with a
-clear message for any held lock.
+`--yes` rather than proceeding implicitly. `--dry-run` reports the proposed actions (including stopping the desktop
+app's own supervisor; see [Operator prerequisites and failure behavior](#operator-prerequisites-and-failure-behavior))
+and any blockers without changing files, stopping processes, or disabling services. Confirmed 2026-10-11: those blockers
+are ownership, recognition and ambiguity refusals, not predictions about locks held at preview time, such as an open
+desktop app or a running installer. The preview warns that an install or upgrade running now makes uninstall refuse; the
+real run refuses with a clear message for any held lock.
 
 Removal covers the recognized installer-created macOS app bundle and its terminal link, the installed CLI on Linux, and
 Linux user services owned by `farhelm helm setup` for this installation. Recognize services through the existing setup
@@ -539,7 +540,15 @@ manually started Farhelm processes. Sessions may survive a supervisor exit, so q
 not enough. A one-time stop/restart when upgrading to the first uninstall-capable release is acceptable.
 
 Basic uninstall operates on files. It does not walk processes, discover runtime sockets, reconstruct session ownership,
-or introduce a runtime registry. The runtime facts it reads on macOS are locks: whether the supervisor's and helm's
+or introduce a runtime registry. One deliberate exception: on macOS it stops the supervisor the desktop app started, if
+that supervisor is still running, because a supervisor the app started can keep running after the app has quit, and
+would otherwise make the uninstall refuse until the user found a process they never started themselves. It stops only
+the process the app recorded starting, after checking that the live process is exactly that one and that it runs a
+program inside the app being removed; a supervisor started any other way is never stopped and refuses as before, with a
+message saying to stop it. The stop is the supervisor's orderly one, never a kill; a supervisor that does not exit
+within a bounded wait refuses the uninstall with nothing removed. It happens after confirmation and after an open app
+has been ruled out, so an uninstall that refuses because the app is open stops nothing, and `--dry-run` lists the stop
+without performing it. The other runtime facts it reads on macOS are locks: whether the supervisor's and helm's
 state-directory locks are held, to keep an open desktop app from running against an installation being removed (see
 Concurrent and interrupted runs), and whether any version of Farhelm kept in the app is locked by a program still
 running it. A version in use refuses with nothing removed, naming the version and an `lsof` command that shows what

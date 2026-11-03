@@ -4673,6 +4673,23 @@ like theirs (a 0700 directory holding only `pid`), so an installer that finds it
 it as stale after a crash. On Linux uninstall checks no runtime locks: it stops setup's services itself, after which
 only a process the user started by hand could hold them, which stopping is already the operator's job.
 
+On macOS the runtime locks are taken in two steps, because a supervisor the desktop app started can outlive the app and
+uninstall stops it (SPEC.md, "Operator prerequisites and failure behavior"). The helm locks of both state directories
+(the one the shell selects and the default one, which the app uses whatever the shell says) come first, before the
+re-check: an open app holds its helm's, so uninstall refuses there with nothing stopped. After the re-check, uninstall
+stops each supervisor the plan listed: the one named by the app's record in that state directory
+(`farhelm_supervisor::managed_supervisor`, the file `desktop-supervisor.json`), counted only when the record matches a
+live process by pid, start identity and running image (the executable's path, and on Linux the running image's device
+and inode, which macOS does not expose cheaply), and the recorded program file (by device and inode, so neither a `..`
+spelling nor another app put at the same place counts) is one of the version programs of the app being removed. The
+record is re-read first and must still equal the planned one, so a record replaced after confirmation is not followed to
+a process the user was not shown. The stop is SIGTERM with a grace longer than the supervisor's own output-client
+shutdown budget, never a kill; a supervisor still running after it, or a stop that cannot be confirmed because the
+process could not be read or signalled, refuses with nothing removed and keeps the record. The record of a supervisor
+confirmed gone is removed. Only then does uninstall take the supervisor locks; a holder at that point is reported as
+usually a supervisor uninstall did not stop, with an `lsof` command that shows which. A refusal after the stop says the
+supervisor was stopped and that opening Farhelm starts it again.
+
 The confirmation preview is flushed before mutation, and subsequent progress is buffered so an output-pipe failure does
 not interrupt removal midway. Filesystem and service failures retain the CLI, report concrete paths and operation
 errors, and ask the user to resolve the failure and retry. Tests inject failures at deletion boundaries and run the
