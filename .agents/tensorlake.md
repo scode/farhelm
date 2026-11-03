@@ -59,9 +59,12 @@ Observed on fresh sandboxes in October 2026; verify rather than assume, since Te
 - The stock image is Ubuntu 24.04 (`tensorlake/ubuntu-minimal`). The user is `tl-user` (uid 1000) with passwordless
   `sudo`. Node 24 (24.16 when observed, against 24.20 on the development machine) and Python 3.12 are installed; Rust,
   tmux, Playwright browsers and an SSH server are not.
-- PID 1 is Tensorlake's own init, not systemd, and nothing boots a systemd user manager. The supervisor puts sessions in
-  transient systemd user scopes and falls back to an early-return mode without them, which the evidence rules do not
-  accept as a pass (`.agents/validation.md`), so the shard runner starts one itself (below).
+- On a sandbox created from the stock image, PID 1 is Tensorlake's own init, not systemd, and nothing boots a systemd
+  user manager. The template's packages pull in `systemd-sysv`, which installs `/sbin/init`, and clones of the template
+  boot it (observed November 2026), so on a clone PID 1 is a real systemd with logind. The supervisor puts sessions in
+  transient systemd user scopes; without a user manager it runs them unscoped and scope-dependent tests return early,
+  which the evidence rules do not accept as a pass (`.agents/validation.md`), so the shard runner makes sure a user
+  manager runs (below).
 - The glibc matches Ubuntu 24.04 development machines (2.39), so the locally built debug `farhelm` and
   `farhelm-fixtures`, and the pinned tmux in `.ci-tmux/`, run there unchanged. Pushing them saves a Rust toolchain and a
   half-hour build on every sandbox. If the development machine moves to a newer Ubuntu, this stops being true: build on
@@ -82,8 +85,9 @@ exists:
    `build-essential ca-certificates curl git rsync systemd dbus dbus-user-session openssh-server python3`. Before
    running apt, make sure `/run/systemd/system` does not exist and run `dpkg --configure -a`: when that directory
    exists, libc6's install script believes systemd is running, calls it, and fails with "Failed to connect to bus",
-   leaving dpkg half-configured. The shard runner creates that directory, so a sandbox that has run a shard needs it
-   removed before any later apt run.
+   leaving dpkg half-configured. On a sandbox without systemd as PID 1 (the template sandbox), the shard runner creates
+   that directory, so one that has run a shard needs it removed before any later apt run. On a clone, where PID 1 is
+   systemd, the directory is systemd's own: leave it, and package scripts reach the running manager.
 3. Push and unpack the source tree, binaries and web bundle, and a one-commit Git checkout (the script's `pack`). The
    recorder identifies the tested commit through Git and finds the pinned tmux through the checkout; without `.git` it
    refuses with "Git checkout unavailable" and "repository pinned tmux path is unavailable". The checkout is a shallow
@@ -92,7 +96,8 @@ exists:
    `npx playwright install chromium webkit`. `install-deps` needs root and the caller's PATH to find npx.
 5. Give `tl-user` passwordless SSH to itself: an ed25519 key, the public key in `authorized_keys`, and `ssh-keygen -A`
    for host keys. The harness registers its second supervisor as an ssh-to-localhost host; without self-ssh the
-   multi-host specs skip.
+   multi-host specs skip. Also create the empty file `/var/lib/systemd/linger/tl-user` (what `loginctl enable-linger`
+   records), so that logind on a clone starts `tl-user`'s user manager at boot (`bootstrap.sh` does it right after apt).
 6. Run one small shard as a probe (a couple of quick specs on both engines) and check that `summary.txt` says the user
    manager is `running` and self-ssh is `ok`.
 7. Remove the probe's output, `tl sbx checkpoint <name>`, wait until `tl sbx checkpoint ls` shows the snapshot
@@ -100,8 +105,21 @@ exists:
 
 ## What every shard does first
 
-Processes do not survive from one exec to the next, but their files do, and services must live inside the exec that runs
-the tests. `run-shard.sh` therefore, every time:
+When PID 1 is systemd (a clone), `run-shard.sh` waits for logind and runs `loginctl enable-linger`, so logind keeps the
+user manager running without a login session, in place of the first two steps below. It starts no `sshd` there, since
+`ssh.socket` already serves port 22; it still records localhost's host keys and checks self-ssh. Lingering matters:
+without it every ssh-to-localhost login starts a user manager that logind stops ten seconds after the session ends,
+taking every session scope in it along. The hand-built manager is fatal on a clone: the self-ssh login makes logind
+start the real `user@1000.service` in the cgroup the script took over, and when logind stops it, systemd kills every
+process in it, the test run included.
+
+On either kind of sandbox, the shard fails before running any test, with `setup failed:` in `summary.txt`, when
+lingering cannot be enabled or the user manager is not `running` or `degraded`: the supervisor would otherwise run
+sessions without scopes and the specs could still pass. `summary.txt` records PID 1, the lingering result and the
+manager's state.
+
+When PID 1 is Tensorlake's init (the template sandbox during its probe), an earlier exec's files stay, its processes
+cannot be relied on, and services must live inside the exec that runs the tests. `run-shard.sh` therefore, every time:
 
 - Removes leftovers from an earlier exec: a stale session-bus socket (it refuses connections) and the previous user
   manager's cgroup tree. Cgroup v2 refuses to move a process into a group that has child groups with controllers enabled
@@ -109,7 +127,7 @@ the tests. `run-shard.sh` therefore, every time:
 - Starts a systemd user manager: creates `/run/systemd/system` (all `sd_booted()` checks for), `/run/user/1000`, a
   delegated cgroup `user.slice/user-1000.slice/user@1000.service` with `+cpu +memory +pids` enabled in its parents and
   owned by `tl-user`, moves its own shell into it, starts a session bus, then `/usr/lib/systemd/systemd --user`, and
-  waits for `systemctl --user is-system-running` to say `running`.
+  waits for `systemctl --user is-system-running` to say `running` or `degraded`.
 - Starts `sshd` (it needs `/run/sshd`) and adds localhost's host keys to `known_hosts`.
 
 ## Tensorlake CLI traps
@@ -118,7 +136,9 @@ the tests. `run-shard.sh` therefore, every time:
 - `tl sbx exec` forwards no stdin, and its own options (`-t`, `-e`, `-w`) go before the sandbox name; everything after
   the name is the command. `tl` also parses options after the name as its own, so `tl sbx exec NAME df -h` prints `tl`'s
   help: wrap such commands in `sh -c '...'`.
-- Keep a whole shard in one attached exec. Anything backgrounded is frozen when the sandbox idles and gone by the next
-  exec.
+- Keep a whole shard in one attached exec. What an exec leaves running is frozen when the sandbox idles and cannot be
+  relied on afterwards. Do not rely on it being gone either: an `sshd` started by one exec was still running in the next
+  one on the template sandbox (November 2026), and on a clone the lingering user manager and any user scopes belong to
+  systemd and outlive the exec.
 - Snapshots survive termination, including the automatic suspend snapshots the platform makes when a named sandbox
   idles. Sweep them by the IDs in your ledger (`sandbox-tests.ts sweep --scratch <dir> --keep <template>`).

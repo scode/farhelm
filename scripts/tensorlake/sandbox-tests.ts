@@ -129,8 +129,9 @@ function allProjects() {
 
 const specLines = (spec: string) => Deno.readTextFileSync(`${REPO}/e2e/tests/${spec}.spec.ts`).split("\n").length;
 
-/** One shard on its own clone: run it in one attached exec (services and processes do not outlive an exec), bring back
- * the summary and console output, and for a failed shard its retained run directories, then terminate the clone.
+/** One shard on its own clone: run it in one attached exec (what an exec leaves running cannot be relied on
+ * afterwards), bring back the summary and console output, and for a failed shard its retained run directories, then
+ * terminate the clone.
  * `extra` holds Playwright arguments for every shard (a grep, a repeat count), passed after `--`. */
 async function shard(
   scratch: string,
