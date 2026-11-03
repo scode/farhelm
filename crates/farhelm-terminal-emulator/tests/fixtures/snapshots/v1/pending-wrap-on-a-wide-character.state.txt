@@ -1,0 +1,21 @@
+screens dropped false
+size 6x3
+mode TermMode(SHOW_CURSOR | LINE_WRAP | ALTERNATE_SCROLL | URGENCY_HINTS)
+scroll region 0..3
+tab stops 0
+active charset G0
+title None
+title stack []
+cursor style CursorStyle { shape: Block, blinking: false }
+REP character Some('中')
+clean true
+history trimmed no
+primary saved cursor 0,0 template ' ' fg Foreground bg Background charsets Ascii Ascii Ascii Ascii
+primary cursor 0,5 wrap pending template ' ' fg Foreground bg Background charsets Ascii Ascii Ascii Ascii
+primary history 0
+primary    0 |abcd中 |
+primary    0,4: '中' fg Foreground bg Background flags Flags(WIDE_CHAR)
+primary    0,5: ' ' fg Foreground bg Background flags Flags(WIDE_CHAR_SPACER)
+primary    1 |      |
+primary    2 |      |
+alternate saved cursor 0,0 template ' ' fg Foreground bg Background charsets Ascii Ascii Ascii Ascii

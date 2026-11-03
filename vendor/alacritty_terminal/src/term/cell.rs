@@ -1,8 +1,12 @@
 // Modified for Farhelm: caps the zero-width characters stored per cell
-// (`MAX_ZEROWIDTH_CHARS`). See vendor/README.md in the Farhelm repository.
+// (`MAX_ZEROWIDTH_CHARS`), charges cell extras and hyperlinks to their
+// terminal's extra storage (`ExtraStorage`), and leaves a cell's extra alone
+// when a change to it changes nothing. See vendor/README.md in the Farhelm
+// repository.
 
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
 use bitflags::bitflags;
 #[cfg(feature = "serde")]
@@ -87,6 +91,177 @@ impl From<Hyperlink> for VteHyperlink {
     }
 }
 
+/// Farhelm patch: the extra storage of one terminal, in bytes, shared by the
+/// cell extras and hyperlinks charged to it, and never more than
+/// `MAX_EXTRA_STORAGE_BYTES`.
+///
+/// A hyperlink made through [`ExtraStorage::link`] is charged its `id` and URI
+/// lengths plus `HYPERLINK_COST`; a cell extra (the allocation holding a
+/// cell's combining characters, underline color and hyperlink) is charged
+/// `CELL_EXTRA_COST`, and so is every copy made of a shared extra when one
+/// cell's attributes change. Each charge is given back when what it was
+/// charged for is dropped, so what is used is what the terminal's live extras
+/// cost.
+///
+/// The bound is hard: every change that would allocate a new extra goes
+/// through this type's setters, which check for room first. A change there is
+/// no room for degrades the cell instead: an added combining character or
+/// underline color is dropped, and an attribute removed from an extra other
+/// cells share (which would need a copy) takes the cell's whole extra with it,
+/// so the cell loses its other extras too. A program cannot make the storage
+/// grow past the limit, whatever it saves and restores.
+///
+/// Extras and links made by upstream's own constructors are not charged to
+/// anything; the terminal never makes one.
+#[derive(Debug, Default, Clone)]
+pub struct ExtraStorage {
+    used: Arc<AtomicUsize>,
+}
+
+impl ExtraStorage {
+    /// The bytes charged to this storage by extras and links still alive.
+    pub fn used(&self) -> usize {
+        self.used.load(Ordering::Relaxed)
+    }
+
+    /// Whether `bytes` more fit under `MAX_EXTRA_STORAGE_BYTES`.
+    pub fn has_room(&self, bytes: usize) -> bool {
+        self.used().saturating_add(bytes) <= crate::term::MAX_EXTRA_STORAGE_BYTES
+    }
+
+    /// A new link charged to this storage, or `None` if it and the cell extra
+    /// that will carry it would take the storage past
+    /// `MAX_EXTRA_STORAGE_BYTES`.
+    pub fn link(&self, link: VteHyperlink) -> Option<Hyperlink> {
+        let mut inner = HyperlinkInner::new(link.id, link.uri);
+        let bytes = inner.id.len() + inner.uri.len() + crate::term::HYPERLINK_COST;
+        if !self.has_room(bytes + crate::term::CELL_EXTRA_COST) {
+            return None;
+        }
+        inner.charge = Some(self.charge(bytes));
+        Some(Hyperlink { inner: Arc::new(inner) })
+    }
+
+    /// Add `character` to `cell`'s combining characters, or drop it if that
+    /// needs a new extra and there is no room for one.
+    pub fn push_zerowidth(&self, cell: &mut Cell, character: char) {
+        if !Self::change_allocates(cell) || self.has_room(crate::term::CELL_EXTRA_COST) {
+            cell.push_zerowidth(character);
+            self.adopt(cell);
+        }
+    }
+
+    /// Set `cell`'s underline color. Without room for the extra the change
+    /// needs, the color falls back to the default; and when that removal
+    /// would itself need a copy of a shared extra, the cell's whole extra is
+    /// dropped (see the type docs).
+    pub fn set_underline_color(&self, cell: &mut Cell, color: Option<Color>) {
+        if cell.underline_color() == color {
+            return;
+        }
+        let drops = color.is_none()
+            && cell.extra.as_ref().is_none_or(|extra| {
+                extra.zerowidth.is_empty() && extra.hyperlink.is_none()
+            });
+        if drops || !Self::change_allocates(cell) || self.has_room(crate::term::CELL_EXTRA_COST)
+        {
+            cell.set_underline_color(color);
+            self.adopt(cell);
+        } else {
+            cell.extra = None;
+        }
+    }
+
+    /// Set `cell`'s hyperlink (made with [`ExtraStorage::link`], or `None`).
+    /// Without room for the extra the change needs, the cell's whole extra
+    /// is dropped, the link with it (see the type docs).
+    pub fn set_hyperlink(&self, cell: &mut Cell, hyperlink: Option<Hyperlink>) {
+        if cell.hyperlink() == hyperlink {
+            return;
+        }
+        let drops = hyperlink.is_none()
+            && cell.extra.as_ref().is_none_or(|extra| {
+                extra.zerowidth.is_empty() && extra.underline_color.is_none()
+            });
+        if drops || !Self::change_allocates(cell) || self.has_room(crate::term::CELL_EXTRA_COST)
+        {
+            cell.set_hyperlink(hyperlink);
+            self.adopt(cell);
+        } else {
+            cell.extra = None;
+        }
+    }
+
+    /// [`Cell::clear_wide`], dropping the cell's whole extra when clearing its
+    /// combining characters would need a copy of a shared extra and there is
+    /// no room for one.
+    pub fn clear_wide(&self, cell: &mut Cell) {
+        let clears = cell.zerowidth().is_some_and(|zerowidth| !zerowidth.is_empty());
+        if clears && Self::change_allocates(cell) && !self.has_room(crate::term::CELL_EXTRA_COST) {
+            cell.extra = None;
+        }
+        cell.clear_wide();
+        self.adopt(cell);
+    }
+
+    /// Whether changing `cell`'s extra makes a new one: it has none, or
+    /// shares it with other cells (and copies it on write).
+    fn change_allocates(cell: &Cell) -> bool {
+        cell.extra.as_ref().is_none_or(|extra| Arc::strong_count(extra) > 1)
+    }
+
+    /// Charge `cell`'s extra to this storage if nothing is charged for it yet
+    /// and no other cell shares it: a fresh extra that one of [`Cell`]'s
+    /// setters made, after its caller checked for room.
+    fn adopt(&self, cell: &mut Cell) {
+        if let Some(extra) = cell.extra.as_mut().and_then(Arc::get_mut) {
+            if extra.charge.is_none() {
+                extra.charge = Some(self.charge(crate::term::CELL_EXTRA_COST));
+            }
+        }
+    }
+
+    fn charge(&self, bytes: usize) -> StorageCharge {
+        self.used.fetch_add(bytes, Ordering::Relaxed);
+        StorageCharge { bytes, used: self.used.clone() }
+    }
+}
+
+/// Farhelm patch: one extra's or link's charge to an [`ExtraStorage`], given
+/// back on drop. A copy is charged again, to the same storage.
+#[derive(Debug)]
+struct StorageCharge {
+    bytes: usize,
+    used: Arc<AtomicUsize>,
+}
+
+impl Clone for StorageCharge {
+    fn clone(&self) -> Self {
+        self.used.fetch_add(self.bytes, Ordering::Relaxed);
+        StorageCharge { bytes: self.bytes, used: self.used.clone() }
+    }
+}
+
+impl Drop for StorageCharge {
+    fn drop(&mut self) {
+        self.used.fetch_sub(self.bytes, Ordering::Relaxed);
+    }
+}
+
+// The charge is bookkeeping, not part of a link's or extra's identity: they
+// stay equal (and hash alike) whatever they are charged to.
+impl PartialEq for StorageCharge {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl Eq for StorageCharge {}
+
+impl Hash for StorageCharge {
+    fn hash<H: Hasher>(&self, _: &mut H) {}
+}
+
 #[derive(Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 struct HyperlinkInner {
@@ -95,6 +270,10 @@ struct HyperlinkInner {
 
     /// Resource identifier of the hyperlink.
     uri: String,
+
+    /// Farhelm patch: what this link is charged to, if anything.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    charge: Option<StorageCharge>,
 }
 
 impl HyperlinkInner {
@@ -108,7 +287,7 @@ impl HyperlinkInner {
             },
         };
 
-        Self { id, uri }
+        Self { id, uri, charge: None }
     }
 }
 
@@ -141,6 +320,10 @@ pub struct CellExtra {
     zerowidth: Vec<char>,
     underline_color: Option<Color>,
     hyperlink: Option<Hyperlink>,
+
+    /// Farhelm patch: what this extra is charged to, if anything.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    charge: Option<StorageCharge>,
 }
 
 /// Content and attributes of a single cell in the terminal grid.
@@ -189,7 +372,9 @@ impl Cell {
     #[inline(never)]
     pub fn clear_wide(&mut self) {
         self.flags.remove(Flags::WIDE_CHAR);
-        if let Some(extra) = self.extra.as_mut() {
+        // Farhelm patch: only with combining characters to clear, so that an
+        // extra shared with other cells is not copied for nothing.
+        if let Some(extra) = self.extra.as_mut().filter(|extra| !extra.zerowidth.is_empty()) {
             Arc::make_mut(extra).zerowidth = Vec::new();
         }
         self.c = ' ';
@@ -205,7 +390,10 @@ impl Cell {
                 .is_none_or(|extra| extra.zerowidth.is_empty() && extra.hyperlink.is_none())
         {
             self.extra = None;
-        } else {
+        } else if self.underline_color() != color {
+            // Farhelm patch: the `if`. Setting the color it has already would
+            // copy an extra shared with other cells for nothing, once per
+            // repeat.
             let extra = self.extra.get_or_insert(Default::default());
             Arc::make_mut(extra).underline_color = color;
         }
@@ -227,7 +415,9 @@ impl Cell {
 
         if should_drop {
             self.extra = None;
-        } else {
+        } else if self.extra.as_ref().is_none_or(|extra| extra.hyperlink != hyperlink) {
+            // Farhelm patch: the condition, for the reason in
+            // `set_underline_color`.
             let extra = self.extra.get_or_insert(Default::default());
             Arc::make_mut(extra).hyperlink = hyperlink;
         }

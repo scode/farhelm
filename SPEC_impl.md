@@ -1713,6 +1713,54 @@ directory for a later sweep when it cannot confirm a host ended or could not rea
 refuses connections counts as left by a killed host after three seconds of refusals, never sooner, since on macOS a live
 host with a full backlog refuses too.
 
+### Terminal snapshots
+
+The supervisor interprets a host terminal's output with its own emulator (`crates/farhelm-terminal-emulator/`,
+`alacritty_terminal` with the patches in `vendor/`), and gives the host snapshots of it, so that a restarted supervisor
+rebuilds the emulator from the host's latest snapshot plus the output since. The host drops output once it accepts a
+snapshot, so there is no replaying from the start. Hence the compatibility rule: **every snapshot format ever shipped
+stays readable by every later supervisor, forever.** A blob starts with magic bytes and a format version; a shipped
+version never changes, and a new format is a new version whose reader sits beside the old ones. Each version keeps
+golden fixtures (`tests/fixtures/snapshots/v<N>/`: blobs from scripted states, the state each must restore to, and a
+check that the encoder still writes them byte for byte), added to and never regenerated. A blob of an unknown version (a
+newer supervisor's, after a downgrade) or one that does not decode is an error, and the terminal shows as unavailable;
+the supervisor never guesses at a state.
+
+Version 1 is an escape-sequence stream that rebuilds the state in a fresh emulator, plus fixups written directly for the
+few states no sequence produces; a snapshot spike proved the round trip at arbitrary clean boundaries before the format
+was fixed, and the crate's property tests keep proving it. A snapshot is taken only at a clean boundary (the parser
+between sequences and no synchronized update open); elsewhere it is refused and the previous snapshot stays. A blob
+records the character width table it was painted with: the Unicode version its crate names, and a fingerprint of the
+width it gives every character, which is what tells two tables apart (the crate has changed widths without changing the
+version). A reader with another table restores it anyway and asks the program to redraw, since refusing would make every
+running terminal unavailable after a dependency upgrade.
+
+A blob is untrusted on the way back: a corrupt or forged one costs a typed error, never a panic, unbounded memory or
+unbounded work. Before anything is allocated, screens too large for the restore's cell bound are refused, and history
+beyond it is dropped (and marked trimmed) the way a smaller scrollback drops it, so the bound stays each build's own
+policy rather than a rule of the format. Before any of the stream is fed, it must hold only the sequences version 1
+writes, and the work replaying them takes, counted with grid-wide operations and scrolls, must stay within a limit set
+by the stream's length and the grids' size. Fixups must hold only cells live output can make.
+
+A snapshot never fails for size. When it would exceed the host's `MAX_SNAPSHOT` (16 MiB), it drops the oldest
+title-stack entries first, as many as it must; with no titles left, the oldest history lines, and marks the history
+trimmed. The mark survives later snapshots and restores, the blob carrying how many more lines must enter history before
+it ends, so that the viewer can say history was trimmed until the program clears its history or the history has turned
+over. Only if no history is left either does it drop the screens' contents (the supervisor then asks for a redraw).
+Ordinary terminals stay far below the limit: 12,000 lines of 200 columns encode to about 3.6 MiB. Restart seeds the new
+host the same way, with a snapshot of the old terminal's history above a blank screen in default modes.
+
+The memory budget for one supervisor-side terminal at Farhelm's full scrollback (12,000 lines, 200 columns) is 80 MiB
+for ordinary output (measured: 56 MiB, about 24 bytes a cell), and hostile output is bounded at about 190 MiB: the grid
+(56 MiB), at most 64 MiB of cell extras (combining characters, underline colors and hyperlinks varied from cell to cell,
+under a vendored per-terminal cap that no path can exceed; past it marks are dropped, colors fall back to the default
+and links end), 38 MiB measured outside the grid (title stack, an unterminated OSC, the update buffer: 34 MiB of buffers
+and the allocator's overhead) and about 32 MiB while a snapshot is taken (twice the blob). Measured hostile cases reach
+120 MiB; without the cap the same output takes 387 MiB, or about 6 GB with hyperlinks. A supervisor therefore holds at
+least 12 terminals per GiB doing ordinary work and at least 5 per GiB if all of them are hostile at once. The crate docs
+("Memory budget") have the measurements and the arithmetic. Each terminal host process is bounded on its own by its
+journal cap and `MAX_SNAPSHOT`.
+
 ## Terminal substrate: private tmux server
 
 Each supervisor runs a dedicated tmux server on a private socket (`~/.local/state/farhelm/tmux.sock`) with a locked-down
