@@ -1371,16 +1371,34 @@ submission and focus-return behavior.
   is accepted. The supervisor applies the same rule from its own reading at the moment of the restart, so an agent that
   started working after the user clicked is refused rather than stopped unconfirmed, and the next attempt asks unless
   session confirmations are skipped (below). Replace keeps its confirmation whatever the agent is doing unless session
-  confirmations are skipped (below). Restart reuses the session's terminal when it still exists — whatever scrollback
-  the terminal itself retained is still there — and creates a fresh one when the terminal no longer exists, such as
-  after a reboot. Restart does NOT preserve the previous run's last visible screen: the pane is blank until the new
-  agent draws, and a full-screen program's final frame (which was never in scrollback to begin with) is gone. Losing it
-  is accepted. Farhelm must never capture a terminal's screen and paint it back into a relaunched terminal ahead of the
-  new process — a frame with no process behind it looks live, accepts typing, and is overwritten when the real program
-  draws, which is worse than blank. Restart touches the agent terminal only; terminal tabs are unaffected. Restart may
-  carry changed launch settings (Restart with, below); the launch kind, agent type, host, and working directory remain
-  fixed. If a harness rejects a changed model or other setting while resuming, that is an ordinary launch failure;
-  restart again with settings the harness accepts.
+  confirmations are skipped (below). Restart keeps whatever scrollback the session's agent terminal retained. On a host
+  that does not create new terminals (see [Terminal experience](#terminal-experience)), an old terminal that still
+  exists is reused. On a host that does, Restart moves the agent to a new terminal that starts with the old terminal's
+  scrollback above a blank screen in default modes. A new terminal is always replaced by a new one for each run,
+  whichever kind the host creates, with its scrollback carried over the same way. What is carried over is the
+  scrollback's text with its colors, styles and links, up to the new terminal's limits, the oldest lines left out first
+  (the terminal then says that some earlier output could not be recovered); a link that spans several rows of an old
+  terminal's scrollback stays clickable only on its first row. Moving an old terminal stops the agent first and then
+  reads the old terminal's scrollback. If that read, or copying what it read, fails, the Restart is refused and nothing
+  else changes: the agent stays stopped in its old terminal, with its scrollback, and Restart can be tried again; for
+  when it keeps failing, the refusal says that Clone or Replace also start the agent in a new terminal, without its
+  scrollback, and that Delete removes the session. If the new terminal does not start and Farhelm confirms that the
+  failed start has ended, the session goes back to its old terminal, its agent stopped, and Restart can be tried again.
+  When Farhelm cannot confirm that, the session is left with no terminal and its next Restart starts an empty one; an
+  old terminal being moved then keeps its scrollback on the host, unshown, until the session is deleted. The new
+  terminal starts empty instead, with a log entry, in two cases: an old terminal too large for a new terminal to hold
+  any of its scrollback (the new one then starts at the default size, and the old one stays on the host, unshown, until
+  the session is deleted), and a new terminal whose scrollback cannot be read or copied. When the terminal no longer
+  exists (the process that kept it ended, such as a new terminal's terminal host, or after a reboot), Restart starts
+  with an empty one. Restart does NOT preserve the previous run's last visible screen: the terminal is blank until the
+  new agent draws, and a full-screen program's final frame (which was never in scrollback to begin with) is gone. Losing
+  it is accepted. Farhelm must never capture a terminal's screen and paint it back into a relaunched terminal ahead of
+  the new process — a frame with no process behind it looks live, accepts typing, and is overwritten when the real
+  program draws, which is worse than blank. Restart touches the agent terminal only: the session's open terminal tabs
+  keep running in their own terminals, old ones included, until they are closed. Restart may carry changed launch
+  settings (Restart with, below); the launch kind, agent type, host, and working directory remain fixed. If a harness
+  rejects a changed model or other setting while resuming, that is an ordinary launch failure; restart again with
+  settings the harness accepts.
 - **Restart with** opens the session launcher in restart mode before resuming the session's own or a user-named
   conversation. It edits model, effort, permissions, wrapper prefix and conversation for an agent launch, or command,
   resume command and YOLO assertion for a command launch. Launch kind, agent type, host, folder or destination, session
@@ -1507,11 +1525,11 @@ withholds from its own user, such as a non-dumpable `ssh-agent` or a setuid prog
 process title, which overwrites the environment the marker is read from (nginx with its default settings, or Postgres
 started through `pg_ctl`, for example). A server that stays in the foreground under the agent remains in the terminal's
 process tree and is still reaped. Likewise, with no cgroup to consult, a create retried after a supervisor crash that
-also lost the session's tmux may launch again while detached processes from the first attempt keep running. macOS offers
-no cgroup equivalent that an unprivileged process can use, so these are accepted limits of such hosts, not defects to
-engineer around. The same limit applies to a terminal tab's processes when the tab is closed, reaped, or deleted.
-Detached services started by shell initialization before the agent launches are outside the cleanup guarantee: they may
-serve the user's login environment beyond this session.
+also lost the session's terminal may launch again while detached processes from the first attempt keep running. macOS
+offers no cgroup equivalent that an unprivileged process can use, so these are accepted limits of such hosts, not
+defects to engineer around. The same limit applies to a terminal tab's processes when the tab is closed, reaped, or
+deleted. Detached services started by shell initialization before the agent launches are outside the cleanup guarantee:
+they may serve the user's login environment beyond this session.
 
 Confirmed 2026-09-28: when Farhelm cannot confirm that the cleanup an operation needs has finished, the operation fails
 visibly instead of reporting success or carrying on. Restart does not relaunch, and Stop, Delete and closing a tab
@@ -1563,15 +1581,18 @@ limits on hosts without a usable systemd user manager; see above). This is delib
 leaves detached services started by shell initialization before the agent outside its cleanup guarantee (see above),
 though cleanup may still reach one that stays in the agent's process tree. The agent's launch has normally already run
 the same startup files, so a tab usually finds such a service running and only reuses it, with one routine exception:
-the launch runs those files while `TMUX` still names Farhelm's private tmux server and removes it only afterwards (see
+the launch runs those files while `TMUX` is still set and removes it only afterwards (see
 [Ownership during cleanup and provisioning](#ownership-during-cleanup-and-provisioning)), so a tmux autostart guarded by
 `TMUX` being unset does not fire there. When the user's tmux server is not already running, the first tab's startup
 files therefore routinely start it, and the tab owns it; when they `exec tmux`, detaching from it ends the tab and the
-server with it. A tab whose process exits on its own is reaped automatically and silently: the tab disappears as if
-closed, its dead pane's scrollback is discarded, and no notice or exit code is shown. This is deliberately NOT the agent
-terminal's contract — an exited agent stays viewable with its scrollback — because a tab's shell exiting is the user
-being done with the tab. A shell that dies before the tab's open completes still refuses the open loudly, with the
-shell's last words as the error.
+server with it. In an old terminal the launch's `TMUX` names Farhelm's private tmux server; in a new one (see
+[Terminal experience](#terminal-experience)) it names a socket that cannot exist, so a startup file that runs a tmux
+command because `TMUX` is set gets an error that it cannot connect instead of reaching the private server. A tab whose
+process exits on its own is reaped automatically and silently: the tab disappears as if closed, its dead pane's
+scrollback is discarded, and no notice or exit code is shown. This is deliberately NOT the agent terminal's contract —
+an exited agent stays viewable with its scrollback — because a tab's shell exiting is the user being done with the tab.
+A shell that dies before the tab's open completes still refuses the open loudly, with the shell's last words as the
+error.
 
 When a session's terminal contents no longer exist on a reachable host after a reboot, opening it shows the session's
 metadata and says why there is no terminal, rather than an empty pane.
@@ -2093,13 +2114,55 @@ whatever the agent renders is what you see. There is no composer, no message abs
   a day later, and the buffer is still there. Farhelm avoids storing terminal output except where it directly helps the
   user, such as error reporting. When an agent never starts, its durable error may include the failed launch's last five
   nonblank lines, bounded to 500 UTF-8 bytes after unsafe characters are escaped. Farhelm omits the excerpt when it
-  cannot safely attribute the text to that launch. In rare cases the excerpt can still include text from the previous
-  run in the same terminal, for example when the terminal was narrowed while a full-screen program from that run was
-  showing and the session was restarted before it exited; accepted 2026-10-21. This is an error detail, not a separate
+  cannot safely attribute the text to that launch. In rare cases an old terminal's excerpt can still include text from
+  the previous run in the same terminal (a new terminal never shows a previous run's screen, since each run gets a
+  terminal of its own), for example when the terminal was narrowed while a full-screen program from that run was showing
+  and the session was restarted before it exited; accepted 2026-10-21. This is an error detail, not a separate
   conversation history: a host reboot loses the terminal's contents, and recovering the conversation is the agent's job
   (resume). A stopped or exited session's terminal stays viewable while its host is up, since the terminal outlives the
-  process. Viewable means what the terminal itself holds: a full-screen program's last frame is not retained after it
-  exits, and no snapshot of it is taken or stored.
+  process. Viewable means what the terminal itself holds. A full-screen program that leaves its full-screen display as
+  it exits leaves nothing of its last frame; one that does not (because it was killed, say) leaves that frame showing in
+  a new terminal, which keeps it across supervisor restarts like the rest of the terminal. No picture of a screen is
+  ever taken to be painted into another terminal (see Restart under [Lifecycle operations](#lifecycle-operations)).
+- A new terminal runs in a **terminal host**: a small process of its own on the host, instead of the host's private tmux
+  server, that keeps the terminal and its program running across supervisor restarts and updates (the two kinds of
+  terminal are described below). A new terminal keeps its scrollback to the same floor as an old one (below), and keeps
+  it across supervisor restarts and updates as well as client disconnects: its terminal host holds the program's output
+  while no supervisor reads it (up to a bound, next), and the next supervisor rebuilds the terminal from it. That output
+  is held in memory only, never on disk. A viewer that attaches or reconnects is sent the current screen and then the
+  whole scrollback once, oldest first; from then on it is sent only what changes: the screen as it is now, and the lines
+  that entered the scrollback, appended. The scrollback stays while a full-screen program shows and is there when the
+  program exits. When the scrollback changes in a way an append cannot show (a resize rewraps it, the program erases it
+  or redefines one of the terminal's palette colors, or lines the viewer was still owed fell off the scrollback's far
+  end), the viewer is sent the whole scrollback again once the change has settled, so a window dragged to a new size
+  sends it once, or for a long drag once during it and once when it stops, not at every step.
+- A terminal host keeps a bounded amount of the program's output beyond the supervisor's latest checkpoint of the
+  terminal: 32 MiB by default, a few minutes of an agent redrawing as fast as it can, hours of a shell. When more than
+  that arrives while no supervisor reads it (a supervisor that crashed and is not started again soon; on the Mac nothing
+  starts it again until the app is opened), the oldest of it is dropped, which leaves a **gap**; the program runs on
+  unhindered. A gap can also happen while a supervisor runs, rarely: a single escape sequence longer than the bound, or
+  output the supervisor cannot checkpoint as fast as it arrives (a full scrollback colored cell by cell, arriving at
+  about a megabyte a second). The dropped output is everything since the latest checkpoint that no longer fits, so it
+  can include output a supervisor had already shown before it crashed. After a gap the terminal carries on from its
+  state before the lost output (after a supervisor restart, its latest checkpoint) with the output kept after it, the
+  supervisor asks the program to redraw by making its terminal one row smaller and back, and the terminal shows "Some
+  earlier output could not be recovered" above its scrollback until the supervisor next restarts. What a gap cannot
+  bring back: the lines the lost output put into the scrollback; the screen, until the program redraws it (agents and
+  other full-screen programs redraw when their terminal is resized; a shell at its prompt does not, so its screen can
+  show older contents with newer output drawn over them); any mode the lost output changed, such as the alternate
+  screen, mouse reporting, bracketed paste or application cursor keys, and the same for the other terminal settings it
+  made, such as the title, redefined colors, line-drawing characters, the scroll region and the cursor's style. A
+  program sets these again only when it chooses to, and many set their modes only when they start, so such a setting can
+  stay wrong until the program is restarted; meanwhile keys, pastes and mouse input can reach the program encoded for
+  the wrong mode. A query in the lost output that no supervisor had answered before the bytes were lost is never
+  answered (the program waits out its own timeout), and a clipboard write there is not carried out during the recovery;
+  either may already have happened, if a supervisor saw that output before it crashed. A gap never restarts a program or
+  throws away a working terminal. Separately, a checkpoint too large for the terminal host (16 MiB, far more than a full
+  scrollback of ordinary output takes) can leave out old title-stack entries, the oldest scrollback lines and, if that
+  is not enough, the screen's contents. The running terminal is not affected, but a recovery from that checkpoint
+  rebuilds the terminal without them: it shows the same notice when scrollback was left out, which then stays until the
+  program clears its scrollback or the scrollback has turned over, and asks the program to redraw when the screen was
+  left out.
 - Opening a session attaches to it — and opening a CLIENT counts as opening a session. A freshly loaded client and a
   client whose open session disappears use the same choice: the first currently listed session in the helm's shared
   visit history, excluding the session just removed, else the newest-created listed session. While history is empty, the
@@ -2156,11 +2219,11 @@ whatever the agent renders is what you see. There is no composer, no message abs
   persistent caret. An unavailable plain Restart does not hide an independently available Restart with; the menu remains
   available to inspect reasons.
 - While terminals move out of tmux, each of a session's terminals (the agent's and each tab's) is old, in the host's
-  private tmux server, or new, in a terminal process of its own, and never changes kind while it lives. Once a host
-  creates new terminals, everything started there gets one (a new session, Restart, Clone, Replace, a new tab), and
-  existing terminals stay as they are until the user moves them. While the session's host creates new terminals, a
-  session that still has an old terminal shows a loud band at the top of the session view, below the top row, linking to
-  the docs page that explains the move. When the agent's terminal is old, it asks the user to restart the session when
+  private tmux server, or new, in a terminal host of its own, and never changes kind while it lives. Once a host creates
+  new terminals, everything started there gets one (a new session, Restart, Clone, Replace, a new tab), and existing
+  terminals stay as they are until the user moves them. While the session's host creates new terminals, a session that
+  still has an old terminal shows a loud band at the top of the session view, below the top row, linking to the docs
+  page that explains the move. When the agent's terminal is old, it asks the user to restart the session when
   convenient, or, when Restart is unavailable for the session, to clone or replace it, which starts a fresh conversation
   unless the user picks one to continue. When the agent's terminal is new but some tabs are old, it names those tabs as
   the tab strip labels them and asks the user to close them and open new ones when convenient, since restarting the
@@ -2172,15 +2235,29 @@ whatever the agent renders is what you see. There is no composer, no message abs
   terminals shows neither the band nor the kinds, so its sessions look as they always have.
 - One attached client per session, enforced by the supervisor: attaching from a second client visibly detaches the
   first, which keeps a non-live snapshot and an explicit take-control action. No shared-input mirroring in v1.
-- A viewer that is slow is served slowly, for as long as it takes. Honoring that can briefly slow the agent's OUTPUT — a
-  paused viewer may leave the agent's writes blocking for as long as the flow-control window allows — but never
-  indefinitely and never silently: the delay is bounded by that window and, in the limit, by the stall timeout below,
-  after which the viewer is detached and the agent runs unimpeded. No viewer can stop a session's work outright, and no
-  viewer can slow one it is not attached to.
-- A viewer that stops consuming output entirely for a sustained interval (a wedged tab, a machine asleep past its
-  connection's lifetime) is detached with a visible stall reason rather than honored forever — the same surface as a
+- A viewer that is slow is served slowly, down to a floor below which it is detached as stalled. No viewer can stop a
+  session's work outright, and no viewer can slow one it is not attached to. The stall timeout is about a minute,
+  counted from the moment output to the viewer paused. The two kinds of terminal differ (SPEC_impl.md, "Helm ↔
+  supervisor transport: system ssh + stdio protocol", has the arithmetic):
+  - In an old terminal, honoring a slow viewer can briefly slow the agent's OUTPUT — a paused viewer may leave the
+    agent's writes blocking for as long as the flow-control window allows — but never indefinitely and never silently:
+    the delay is bounded by that window and, in the limit, by the stall timeout, after which the viewer is detached and
+    the agent runs unimpeded. Output to a viewer pauses only when its browser falls behind in drawing it, and a paused
+    viewer must then draw at least about 50 KB/s to stay attached. A viewer that is slow on the network is not paused at
+    all: once the output waiting for it at the helm fills a fixed backlog, it is detached as stalled at once.
+  - In a new terminal no viewer slows the agent at all: the terminal takes in everything the program writes whatever its
+    viewers do, and a viewer that falls behind is sent the screen as it is when it can take more, skipping the screens
+    in between, while every line that entered the scrollback meanwhile is still sent, appended. Output to a viewer
+    pauses when a backlog builds up for it at the helm, wherever it is slow (sooner when the backlog is many small
+    messages), and one that has not caught up within the stall timeout is detached as stalled. In practice a paused
+    viewer must take in a full scrollback at about 50 KB/s locally, or about 110 KB/s over ssh (the figure moves with
+    how much the link holds), and live output that falls behind slowly at about 10 KB/s.
+- A viewer that stops consuming output entirely (a wedged tab, a machine asleep past its connection's lifetime) is
+  detached with a visible stall reason rather than honored forever, as the floors above describe — the same surface as a
   takeover detach, with reattach behaving exactly as any reconnect does. Flow control never drops terminal output:
-  whatever bound it degrades to is the same replay floor above, never a silent gap.
+  whatever bound it degrades to is the same replay floor above, never a silent gap. A new terminal's skipped screens are
+  no exception, since the screen a viewer is sent is the program's current one and the scrollback arrives whole, and no
+  viewer can cause a new terminal's gap (above): those come only from the supervisor falling behind the program.
 - A terminal that loses its CONNECTION recovers by itself, without the session ever being closed and reopened by hand.
   That covers the connection dropping visibly and the connection dying silently — a sleeping laptop or a timed-out
   network path leaves a terminal that looks connected and carries nothing, which is checked for rather than left for the
@@ -2214,12 +2291,13 @@ whatever the agent renders is what you see. There is no composer, no message abs
   above the release pointer and clamped inside the window. It stays for 30 seconds, or until its × is clicked or the
   next mouse press in that terminal. Dismissal preserves terminal focus and sends no input to the program; the rest of
   the notice is pointer-transparent. For a Codex session's agent terminal the notice names Codex's own copy key instead.
-  It is guidance about the program, not a report of a clipboard failure. Clipboard operations are explicitly best-effort
-  and silent on failure — permission policy, secure-context requirements, and an engine's own clipboard behavior are
-  outside this system's control — a deliberate, named exception to the Errors and diagnostics section's
-  surface-every-error rule below, not a lapse in it. Farhelm assumes the host's system clipboard works. A broken, hung
-  or slow clipboard is not something Farhelm adds complexity to support well: copies may be dropped while it is in that
-  state, but nothing else in Farhelm may stall because of it.
+  It is guidance about the program, not a report of a clipboard failure. A new terminal does not show this notice yet
+  (TODO.md); the forcing modifier selects there all the same. Clipboard operations are explicitly best-effort and silent
+  on failure — permission policy, secure-context requirements, and an engine's own clipboard behavior are outside this
+  system's control — a deliberate, named exception to the Errors and diagnostics section's surface-every-error rule
+  below, not a lapse in it. Farhelm assumes the host's system clipboard works. A broken, hung or slow clipboard is not
+  something Farhelm adds complexity to support well: copies may be dropped while it is in that state, but nothing else
+  in Farhelm may stall because of it.
 - Dragging across a terminal link never opens its target, downloads a file or opens a saved file, including while a
   program has mouse reporting on. Small pointer jitter still counts as a click.
 - Links in terminal output open their http(s) target on click, with no confirmation or prompt of any kind, unless the
@@ -2320,7 +2398,9 @@ on the clipboard or in a drag; pasted text that merely looks like a path is stil
 — the client transfers the file to the session's host and inserts the resulting host-side path into the terminal input
 at the cursor, so the agent picks it up with no manual copying. Plain text passes through as ordinary terminal input.
 Dropped directories are rejected with a visible error in v1. Interception is unconditional for files and images — remote
-and local sessions alike, regardless of any native paste handling the agent would have had in a plain local terminal.
+and local sessions alike, regardless of any native paste handling the agent would have had in a plain local terminal. A
+new terminal (see [Terminal experience](#terminal-experience)) does not take drops yet: it refuses one with a message
+saying to copy and paste instead, which does the same (TODO.md).
 
 Files land in a per-session attachments directory under the supervisor's own data area, never in the working directory —
 dropping untracked files into a workspace would be exactly the kind of implicit mutation this system promises not to
@@ -2458,7 +2538,9 @@ Sessions depend on exactly one thing staying up: their host. Every other compone
 Local sessions have full behavioral parity with remote ones; what differs in v1 is availability, not behavior. The Mac's
 supervisor is started by the app and keeps running after the app quits (or is started manually — see Topology); nothing
 starts it at login or restarts it after a crash before the app is opened again. Per the rule above, its sessions keep
-running while the supervisor is down and reattach when it returns. Sessions persist across app restarts.
+running while the supervisor is down and reattach when it returns. While no supervisor runs, a new terminal keeps only a
+bounded amount of its program's output; past that bound the oldest of it is lost, as
+[Terminal experience](#terminal-experience) describes under gaps. Sessions persist across app restarts.
 
 Conversation tracking keeps working while a host's supervisor is down: when an agent reports which conversation it is in
 (a new session, a `/clear`), the report waits on the host and the supervisor applies it when it returns, so a later
@@ -2877,10 +2959,11 @@ before delivery can still receive the message. Waiting, unknown, starting, stopp
 other than Claude or Codex, are refused with the reason named. A supported request sends one bracketed paste followed by
 a separate submit key; the agent owns queueing while busy. Claude uses Enter and Codex uses Tab, each at idle and while
 working. The checked Claude 2.1.302 and Codex 0.163.0 queue it after the current turn; Claude's editor expands pasted
-tabs to spaces. Success means tmux confirmed the paste and submit, not that the agent started or finished the work.
-There is no idempotency key: a retry sends the message again. A failed delivery may have sent part or all of the input
-and is not proof that nothing arrived. Agent instructions explain these limits and treat cross-agent messages as
-untrusted input, with no secrets sent through this channel.
+tabs to spaces. Success means the agent's terminal took the paste and submit (tmux confirmed them, or a terminal host
+wrote them to the agent's terminal), not that the agent started or finished the work. There is no idempotency key: a
+retry sends the message again. A failed delivery may have sent part or all of the input and is not proof that nothing
+arrived. Agent instructions explain these limits and treat cross-agent messages as untrusted input, with no secrets sent
+through this channel.
 
 The verbs also CREATE, and this is where reaching the helm buys something no supervisor-local design could offer.
 `farhelm agent create` makes a session on an explicitly named host, and `farhelm agent clone` copies an explicitly named
@@ -3695,12 +3778,13 @@ the container and leaves images in the user's Podman storage alone.
 ### Local authority and trust between hosts
 
 The local security boundary is the Unix account on a particular host. Processes the user runs on the target host,
-including same-account processes that can reach Farhelm's private tmux server, are trusted by this threat model. Farhelm
-does not provide strong same-account isolation against deliberate interference with agents or that private session, and
-session credentials do not provide same-account containment. Running agents without permission checks in disposable
-remote environments is an intended use. Farhelm still keeps simple local guards against accidental interference where
-their identity is available, such as excluding a session's recorded agent pane from tab discovery and destructive tab
-cleanup. Containerized sessions have their own explicit isolation contract above.
+including same-account processes that can reach Farhelm's private tmux server or its terminal hosts (the processes that
+keep its new terminals), are trusted by this threat model. Farhelm does not provide strong same-account isolation
+against deliberate interference with agents, that private session or those terminal hosts, and session credentials do
+not provide same-account containment. Running agents without permission checks in disposable remote environments is an
+intended use. Farhelm still keeps simple local guards against accidental interference where their identity is available,
+such as excluding a session's recorded agent pane from tab discovery and destructive tab cleanup. Containerized sessions
+have their own explicit isolation contract above.
 
 Farhelm defends against what an attached host or an agent's output can do, and against mistakes a user plausibly makes
 in ordinary use of Farhelm or their machine. The test is whether a reasonable user would hit the trigger by accident.
@@ -3940,12 +4024,14 @@ secrets, or changing what Farhelm does on other hosts.
 
 Confirmed 2026-09-28: Farhelm's private tmux server is an implementation detail, not an interface, and the product
 should keep it out of the user's way as far as practical. Interacting with it directly is unsupported, whether the user
-does it by hand or a program running in a session does it (for example by pointing tmux at its socket). Farhelm keeps
-the accidental path out of reach: agents and terminal tabs run without the `TMUX` and `TMUX_PANE` variables tmux sets in
-its panes, so a plain `tmux new-window` or `tmux split-window` typed in a session behaves as it would over SSH, reaching
-the user's own tmux server or none, not the private one. A tab's shell starts without them, so a startup file that
-launches tmux when `TMUX` is unset does so in a tab as it would in an SSH login. Shells an agent starts for its own work
-also run without them, as they would if the agent ran in a terminal outside tmux. Windows, panes, processes and
+does it by hand or a program running in a session does it (for example by pointing tmux at its socket). The same holds
+for each terminal host, the process that keeps a new terminal (see [Terminal experience](#terminal-experience)), and its
+socket: talking to one, signalling it or removing its socket is outside every Farhelm guarantee in the same way. Farhelm
+keeps the accidental path out of reach: agents and terminal tabs run without the `TMUX` and `TMUX_PANE` variables tmux
+sets in its panes, so a plain `tmux new-window` or `tmux split-window` typed in a session behaves as it would over SSH,
+reaching the user's own tmux server or none, not the private one. A tab's shell starts without them, so a startup file
+that launches tmux when `TMUX` is unset does so in a tab as it would in an SSH login. Shells an agent starts for its own
+work also run without them, as they would if the agent ran in a terminal outside tmux. Windows, panes, processes and
 configuration changes made through the private server anyway are outside every Farhelm guarantee, including cleanup on
 Stop, Restart, Delete and tab close. Do not add code or complexity to detect, track, clean up after, or recover from
 them. Farhelm's own operations must still handle their own objects going missing without crashing, and the helm and GUI

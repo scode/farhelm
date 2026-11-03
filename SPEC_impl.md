@@ -12,7 +12,8 @@ of it in the same change.
 ## Language and runtime
 
 Rust throughout, async on tokio, one cargo workspace. The only sanctioned non-Rust runtime code is the xterm.js terminal
-island and the thin JS interop around it (see GUI), plus Playwright test code in TypeScript.
+island and the thin JS interop around it (see GUI), the grid client that draws terminals running in terminal hosts in
+the same island ("Terminal widget: xterm.js island", "The grid client"), plus Playwright test code in TypeScript.
 
 Motivation: single language across supervisor, helm, CLI, and UI maximizes shared types and lets one test suite exercise
 real components. tokio because the chosen web stack (axum, tungstenite) lives there; no exotic async needs exist that
@@ -153,7 +154,12 @@ framework for every externally supplied value.
 ## Workspace layout
 
 - `crates/farhelm` — the single multi-call binary (see CLI).
-- `crates/farhelm-supervisor` — session management, tmux driver, agent-kind integrations, SQLite state.
+- `crates/farhelm-supervisor` — session management, tmux driver, terminal hosts' client and runtimes, agent-kind
+  integrations, SQLite state.
+- `crates/terminal-host` — the terminal host, a self-contained process per terminal that depends on no other Farhelm
+  crate, with its own specification (see "Terminal host").
+- `crates/farhelm-terminal-emulator` — the supervisor's terminal emulator for terminals in terminal hosts, and their
+  snapshot format, over the patched crates in `vendor/` (see "Terminal host", "The supervisor's terminal emulator").
 - `crates/farhelm-helm` — the host registry (SPEC.md's term: the helm's record of registered hosts and their SSH
   destinations), SSH transport, aggregation, axum API, static UI serving.
 - `crates/farhelm-proto` — wire types and protocol version, shared by both ends and by tests; also the few HTTP tokens
@@ -1290,7 +1296,14 @@ they do not establish real Mac IME or desktop-shell behavior.
 
 ## Terminal widget: xterm.js island
 
-The terminal is xterm.js, vendored as a static asset (no CDN — the UI must be fully self-contained, consistent with
+This section covers the old terminals, the ones in the private tmux server ("Terminal substrate: private tmux server"),
+for as long as both kinds exist. A terminal in a terminal host ("Terminal host") reaches the same island as a grid
+stream, which the grid client draws instead of xterm.js ("The grid client", at the end of this section); the attach
+reply says which kind an attachment carries, so one page holds both. Much of the GUI section describes terminal behavior
+in xterm.js's terms (sizes, selection, links, input); the grid client reproduces that behavior for grid terminals, and
+its file headers say how and where it departs.
+
+The old terminal is xterm.js, vendored as a static asset (no CDN — the UI must be fully self-contained, consistent with
 SPEC.md's no-public-relay, no-third-party-services posture and the loopback deployment), mounted as a JS island inside
 the Dioxus tree. PTY bytes flow WebSocket → `term.write()` directly, bypassing Dioxus state entirely. Dioxus owns
 everything around the terminal (tabs, status, dialogs), not the terminal's content path.
@@ -1508,6 +1521,8 @@ Motivation: xterm.js is the only battle-tested embeddable terminal (VS Code) and
 SPEC.md requirement. Routing high-frequency PTY output through a reactive framework would be a performance disaster, so
 the bypass is load-bearing, not an optimization. A pure-Rust wasm terminal (alacritty_terminal grid + canvas renderer)
 was rejected: it is a project in itself and reintroduces the untestable-canvas problem inside the most important widget.
+The terminal-host design later put `alacritty_terminal` in the supervisor instead, which leaves the browser only a grid
+of styled text to draw as ordinary DOM ("The grid client"), so neither objection applies to it.
 
 The bypass alone is not sufficient (audited): `term.write()` is non-blocking with a hard ~50MB buffer that silently
 discards beyond the cap, and xterm.js parses at roughly 5–35 MB/s while a PTY can produce far faster. The terminal path
@@ -1688,6 +1703,37 @@ is two or more letters, which keeps version and directory text such as `v1.2/` o
 not judging scheme-less IP text. The warning shows the link's text with Unicode format characters (bidi controls,
 zero-width characters) as visible escapes, because the terminal stores them unapplied and HTML would apply them.
 
+### The grid client
+
+A terminal in a terminal host is interpreted by the supervisor's emulator ("The supervisor's terminal emulator"), so the
+browser gets the screen and scrollback as rows of styled runs (the grid stream of protocol 68, "Helm ↔ supervisor
+transport: system ssh + stdio protocol") and draws them; it is not a terminal emulator. It lives in
+`crates/farhelm-ui/assets/grid-*.js`: `grid-terminal.js` is the DOM half (rendering, the virtualized scrollback,
+selection, the pointer and keyboard), and `grid-model.js`, `grid-buffer.js`, `grid-style.js` and `grid-input.js` hold
+the decisions it acts on as pure functions, which `node --test` covers. `terminal.js` owns the connection for both
+kinds: every mount builds the xterm.js surface first, because the socket URL carries xterm.js's measured size before the
+stream's kind is known, asks for either kind (`grid=1`), and replaces that surface with the grid component when the
+helm's stream notice says `grid`, before any data has been written to it. The catch-up and its reveal, the heartbeat,
+detaches, banners, reconnect, resize, paste interception, the clipboard queue, links with their hover checks, file
+downloads and tunnels are shared with xterm.js terminals.
+
+The grid's fit and cell metrics are xterm.js 6.0's, step for step, so a pane gives the program the same rows and columns
+whichever component holds it (a grid that fitted differently would resize the program at once and, for a grid stream,
+make the supervisor resend the history); a browser spec holds the two to the same size across text sizes and pixel
+ratios. Rendering is one element per visible row with its runs as spans reused in place, painted at most once per
+animation frame however many messages arrive; the choice between boxing every non-ASCII cell and letting characters the
+font draws at the cell width flow inline came from a renderer benchmark against xterm.js, recorded in the file's header.
+Input goes up as small JSON messages (keys, text, pastes, mouse and focus events), never as encoded bytes: the
+supervisor encodes them from the terminal's modes (`crates/farhelm-supervisor/src/grid_input.rs`) and is held to the
+sequences the vendored xterm.js produces by golden tables generated from it, so a program reads the same keys and clicks
+in both kinds. The client sends no flow-control pause or resume: it applies every message as it arrives, applying a
+large history in slices between frames so that the screen stays usable, and the helm pauses a grid stream on its own
+queue instead.
+
+Not built for grid terminals, each a near-term entry in `TODO.md`: showing an input method's composition at the cursor
+(committed text is sent), dropping files (refused with a message to paste instead), and the drag-copy notice. An emoji
+widened by a variation selector is one column in the emulator where tmux gives it two, an open decision in `TODO.md`.
+
 ## Terminal host
 
 `crates/terminal-host/` is a tiny long-lived process that owns one pty and the program in it, journals the program's
@@ -1697,12 +1743,13 @@ other Farhelm crate, no Farhelm concepts in its code, `libc` its only runtime de
 every update: the protocol only grows, and every client release must keep working with every host ever shipped (its
 "Change policy"). It ships inside the `farhelm` binary as `farhelm internal terminal-host`, which takes no version lock
 (a host lives for weeks and must keep neither pruning nor uninstall waiting) and runs before anything starts a thread,
-since the host forks. A create starts its agent in a host, and a new tab opens in one, only under the supervisor's
-switch ("Creating agents in hosts" and "Tabs in hosts" below), which is off by default and which no shipped launch turns
-on yet. Each session row records its agent terminal's kind (the supervisor schema 32 column `terminal_kind`), which is
-`tmux` unless a create under that switch wrote `host`. Schema 33 changes nothing stored: it came with the flag that
-turns the switch on, so that every build at 32, which stores the kind without handling a host row everywhere, refuses a
-database such a supervisor has opened.
+since the host forks. A create starts its agent in a host, a new tab opens in one, and a Restart moves an agent out of
+tmux into one, only under the supervisor's switch ("Creating agents in hosts", "Tabs in hosts" and "Moving an old
+session into a host" below), which is off by default and which no shipped launch turns on yet; an agent already in a
+host restarts into a new host whatever the switch says. Each session row records its agent terminal's kind (the
+supervisor schema 32 column `terminal_kind`), which is `tmux` unless a create or a Restart under that switch wrote
+`host`. Schema 33 changes nothing stored: it came with the flag that turns the switch on, so that every build at 32,
+which stores the kind without handling a host row everywhere, refuses a database such a supervisor has opened.
 
 The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
 
@@ -1918,8 +1965,10 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   one row smaller and back, since Linux sends no `SIGWINCH` for a resize to the size in force (checked on Linux 6.8; the
   BSD tty code macOS uses compares the same way, read from its source, not tested). It asks the same after restoring a
   snapshot that left out the screens or was drawn with another character width table. A redraw cannot bring back the
-  scrollback in the gap, or a mode the lost output set until the program sets it again; a program that redraws on
-  `SIGWINCH` sets its modes again as it does.
+  scrollback in the gap, or a mode or other terminal setting (title, palette, character set, scroll region, cursor
+  style) the lost output set until the program sets it again; nothing makes a program do that on `SIGWINCH`, and many
+  set their modes only at startup, so the setting can stay wrong until the program restarts. Unverified either way: no
+  test covers what real programs resend on a resize.
 - **The terminal switch points** (`service/terminals.rs`'s `Terminal`, one variant per kind, matched exhaustively
   wherever behavior differs) answer for a session whose agent runs in a host from its runtime, never from tmux. Status
   reads the same three classes of evidence for both kinds: a running child is live, a processed exit record is an exit
@@ -2459,6 +2508,38 @@ that could start another host there is seen gone (the stack waits for its helm t
 supervisor is not gone within its bound or the command does not exit 0. The stack's directory is then left to the sweep;
 the desktop smoke's run directory stays for a person to retry.
 
+### The supervisor's terminal emulator
+
+For a terminal in a terminal host, the supervisor's emulator is the one place its output is interpreted: one
+`farhelm_terminal_emulator::Emulator` per terminal, held by that terminal's runtime (above).
+`crates/farhelm-terminal-emulator/` is `alacritty_terminal` 0.26.0 and `vte` 0.15.0, vendored with Farhelm's patches
+(`vendor/README.md`: the caps on hostile output, the history counters a grid stream numbers lines by, the parser's
+ground-state check a snapshot needs, and fixes), plus Farhelm's policy around them. It answers the program's terminal
+queries, tracks the modes that input encoding needs, gives status detection the screen text and title it would read from
+tmux (shaped like tmux's capture, so the status readers run unchanged on both kinds), serves the grid stream, and is
+snapshotted ("Terminal snapshots", below).
+
+Its query answers follow one rule, recorded with the table in the crate's `queries` module: answer what tmux 3.7c
+answers wherever that is true of this emulator, since programs were tested against those answers, and depart only where
+tmux's answer would claim something false. So device attributes say `CSI ? 1 ; 2 c` as tmux does (alacritty alone says a
+VT102); the secondary attributes are alacritty's own, never tmux's, since a program that believes it runs in tmux may
+wrap its output in tmux's passthrough envelope, which this emulator drops; XTVERSION names Farhelm and its version,
+because Claude Code asks nothing further, synchronized output included, without an answer; and color queries are
+answered from Farhelm's terminal theme (Ghostty's palette, as the browser's) or the colors the program set. Known
+differences, accepted: a few queries `vte` does not parse go unanswered, and a query inside an open synchronized update
+is answered when the update ends rather than at once. Keyboard input keeps today's legacy xterm encoding: the kitty
+keyboard protocol stays off (turning it on would change the Shift+Enter and Escape handling SPEC.md promises) and its
+query unanswered, and OSC 52 writes are honored while reads are never answered. The encoding itself is the supervisor's
+(`grid_input.rs`, "The grid client"). `vte` holds a synchronized update's bytes until the update ends, and its 150 ms
+safety deadline is not self-driving: the runtime wakes at the deadline on its own clock and draws the update, and also
+draws one left open when the child exits, when a replay ends and before a resize; `vte` itself ends one whose bytes
+reach its 2 MiB buffer. Each of those can draw a frame the program had not finished. The safety deadline, the buffer
+limit, a resize, the child's exit and the end of a replay are examples of the deliberate exceptions to frames never
+being drawn half done; a recovering replay also draws an open update where it crosses from output an earlier supervisor
+was sent to output none was, and where it crosses a gap, though it carries on to the same final state. The emulator's
+parity with tmux 3.7c (screen text, cursor, title and answers over generated and recorded output, `emulator_parity` in
+the supervisor) is tested against the pinned tmux, with the known differences pinned on both sides.
+
 ### Terminal snapshots
 
 The supervisor interprets a host terminal's output with its own emulator (`crates/farhelm-terminal-emulator/`,
@@ -2494,7 +2575,9 @@ trimmed. The mark survives later snapshots and restores, the blob carrying how m
 it ends, so that the viewer can say history was trimmed until the program clears its history or the history has turned
 over. Only if no history is left either does it drop the screens' contents (the supervisor then asks for a redraw).
 Ordinary terminals stay far below the limit: 12,000 lines of 200 columns encode to about 3.6 MiB. Restart seeds the new
-host the same way, with a snapshot of the old terminal's history above a blank screen in default modes.
+host the same way, with a snapshot of the old terminal's history above a blank screen in default modes, read from the
+old host's emulator, or for a session moving out of tmux from the tmux pane's history ("Moving an old session into a
+host").
 
 The memory budget for one supervisor-side terminal at Farhelm's full scrollback (12,000 lines, 200 columns) is 80 MiB
 for ordinary output (measured: 56 MiB, about 24 bytes a cell), and hostile output is bounded at about 190 MiB: the grid
@@ -2508,6 +2591,11 @@ least 12 terminals per GiB doing ordinary work and at least 5 per GiB if all of 
 journal cap and `MAX_SNAPSHOT`.
 
 ## Terminal substrate: private tmux server
+
+This section covers the old terminals for as long as both kinds exist. Terminals created with the supervisor's switch on
+run in terminal hosts instead ("Terminal host"), and a session moves its agent there one Restart at a time, its old tabs
+staying in tmux until they are closed. tmux stays required, installed and version-checked exactly as below for the whole
+transition, and this path changes only for what the switch needs and for bug fixes.
 
 Each supervisor runs a dedicated tmux server on a private socket (`~/.local/state/farhelm/tmux.sock`) with a locked-down
 generated config: status bar off, `history-limit` sized to SPEC.md's replay floor, `remain-on-exit on`. Every start,
@@ -2805,7 +2893,10 @@ restarts, scrollback retention, screen re-render on reattach — with a decade o
 by herdr. The rejected alternative (per-session Rust holder daemons owning PTYs plus our own terminal-grid engine for
 replay) buys independence from tmux at the cost of owning a terminal state machine's bugs; not a v1 trade. The
 supervisor's internal terminal interface stays narrow (create, attach-cutover, resize, input, kill) so a Rust holder
-could replace tmux behind it later without touching anything above.
+could replace tmux behind it later without touching anything above. That later trade is the terminal host design
+("Terminal host"): a process per terminal that holds the pty and parses nothing, and `alacritty_terminal` in the
+supervisor as the terminal state machine, whose bugs Farhelm now owns for new terminals. The seam it took is the
+supervisor's `Terminal` (`service/terminals.rs`), one variant per kind.
 
 Consequence to keep in mind: tmux sits in the escape-sequence path. Fidelity issues (new terminal features, passthrough
 sequences) get debugged at the tmux layer first; the generated config is the knob. Its truecolor capability and
@@ -3915,23 +4006,24 @@ refusal. No global geometry cache or new asset file is introduced.
   folder and scrubs the agent/private-tmux markers before execing the login shell. A failed tab entry reaches the
   existing dead-before-open refusal with its last output. This keeps tab startup inside containment and preserves a tab
   shell's own startup-file cd, while agent startup restores the session folder after those files have run.
-- Status heuristics: periodic sampling of each live agent pane's visible grid, read by one screen reader per agent kind
-  (`agent_kind::screen_reader`). Sampling must never sit on the attach/input path — SPEC.md forbids status from gating
-  interaction. The supervisor's own ticker takes the samples and stores one reading per successful capture; replies only
-  map the stored reading, and classification sits BELOW the recorded-error and dead-pane rules in the existing
-  precedence, so a reading only chooses among the live statuses of a pane tmux says is alive. The generic reader is
-  observed output alone, counted in a session's OWN samples rather than in elapsed time: three consecutive samples
-  showing an unchanged screen reads idle, anything else live reads running, and it never reads waiting (a blocked agent
-  and a finished one are equally quiet). Counting samples rather than seconds is load-bearing — the sampler works
-  through live panes on a budgeted round robin, so a session's real sampling period grows with the fleet, and any
-  wall-clock window would eventually report a continuously-working agent as idle because the HOST was busy. A new launch
-  reads running before its first comparison. A reloaded live pane instead reports provisional `unknown` until a changed
-  screen, a reading from recognized content, or three quiet comparisons provide fresh status evidence (a recognized idle
-  prompt therefore ends the gap on its first sample); a recognized waiting prompt is reported at once. Dead-pane and
-  recorded-error outcomes bypass that provisional state. The helm retains the prior status from its per-host cache for
-  an `unknown` reply, if it has one, and replaces the rest of the row as usual. Its identity-less in-memory list follows
-  the same rule within a connection. Disconnect clears those rows by the existing identity-less host rule, so there is
-  no previous status to retain after its supervisor restarts.
+- Status heuristics: periodic sampling of each live agent pane's visible grid (for an agent in a terminal host, its
+  emulator's screen, shaped like tmux's capture so that the same readers apply), read by one screen reader per agent
+  kind (`agent_kind::screen_reader`). Sampling must never sit on the attach/input path — SPEC.md forbids status from
+  gating interaction. The supervisor's own ticker takes the samples and stores one reading per successful capture;
+  replies only map the stored reading, and classification sits BELOW the recorded-error and dead-pane rules in the
+  existing precedence, so a reading only chooses among the live statuses of a terminal its tmux pane or terminal host
+  reports alive. The generic reader is observed output alone, counted in a session's OWN samples rather than in elapsed
+  time: three consecutive samples showing an unchanged screen reads idle, anything else live reads running, and it never
+  reads waiting (a blocked agent and a finished one are equally quiet). Counting samples rather than seconds is
+  load-bearing — the sampler works through live panes on a budgeted round robin, so a session's real sampling period
+  grows with the fleet, and any wall-clock window would eventually report a continuously-working agent as idle because
+  the HOST was busy. A new launch reads running before its first comparison. A reloaded live pane instead reports
+  provisional `unknown` until a changed screen, a reading from recognized content, or three quiet comparisons provide
+  fresh status evidence (a recognized idle prompt therefore ends the gap on its first sample); a recognized waiting
+  prompt is reported at once. Dead-pane and recorded-error outcomes bypass that provisional state. The helm retains the
+  prior status from its per-host cache for an `unknown` reply, if it has one, and replaces the rest of the row as usual.
+  Its identity-less in-memory list follows the same rule within a connection. Disconnect clears those rows by the
+  existing identity-less host rule, so there is no previous status to retain after its supervisor restarts.
 
   Claude Code and Codex have dedicated readers that answer from recognized content ("anchored" readings) rather than
   change counting, because both redraw parts of their screen while idle (Claude's `/clear` hint, Codex's recap block and
@@ -5605,9 +5697,11 @@ headlessly in on-demand CI and the release gate.
 `tracing` everywhere, with `tracing-subscriber` env-filter semantics. Processes log to stderr; where stderr goes is the
 starter's choice: the systemd journal for a setup-managed supervisor, the terminal for one started by hand, and for the
 desktop app's detached supervisor `supervisor.log` in its state directory (see "Side-by-side versions inside
-Farhelm.app"), because that supervisor outlives the app whose stderr it used to share. The intended mature shape uses
-spans carrying session and host ids, so SPEC.md's required diagnostic trails (creation, PTY lifecycle, attachment
-transfer, reconnection, resume) fall out of structured context rather than ad-hoc log lines.
+Farhelm.app"), because that supervisor outlives the app whose stderr it used to share. A terminal host has nowhere to
+log: once ready, its standard streams are on `/dev/null` (`crates/terminal-host/SPEC.md`, "Start and readiness"), so
+what happens to a host is logged by the supervisor that drives it. The intended mature shape uses spans carrying session
+and host ids, so SPEC.md's required diagnostic trails (creation, PTY lifecycle, attachment transfer, reconnection,
+resume) fall out of structured context rather than ad-hoc log lines.
 
 M1 emits structured lifecycle and failure events, attaching session or channel fields where that context exists. The
 host half of the span discipline above now exists: M6's connection manager runs every actor inside a span carrying the
@@ -5898,14 +5992,15 @@ since it is not the version that record would name. Recognizing the layout is by
 the shape, so elsewhere nothing changes.
 
 Inside that layout the supervisor hands sessions two different programs. Its own launch shim (`internal launch`, run in
-each session's tmux window) is its own versioned program, because the launch description it writes is read only by its
-own version. A terminal tab's helper (`internal tab-shell`) starts through the forwarder instead: tmux can start a tab's
-window after the supervisor that asked for it has stopped, and the forwarder claims the version it starts, which is this
-supervisor's own while it is there. Everything a session keeps beyond its supervisor's life names the forwarder instead:
-the hook command lines, the reporter variables, and the directory put first on the session's `PATH`. Desktop-managed
-supervisors before this layout ran from `Contents/MacOS/farhelm`, so sessions they started already hold that path, and
-putting the forwarder exactly there is what keeps them working without migration; it must never move. Outside the layout
-the supervisor uses its own program for all of these, as it always has.
+each session's agent terminal, a tmux window or a terminal host's child) is its own versioned program, because the
+launch description it writes is read only by its own version. A terminal tab's helper (`internal tab-shell`) starts
+through the forwarder instead: tmux, or a terminal host's first stage holding its spec, can start a tab's shell after
+the supervisor that asked for it has stopped, and the forwarder claims the version it starts, which is this supervisor's
+own while it is there. Everything a session keeps beyond its supervisor's life names the forwarder instead: the hook
+command lines, the reporter variables, and the directory put first on the session's `PATH`. Desktop-managed supervisors
+before this layout ran from `Contents/MacOS/farhelm`, so sessions they started already hold that path, and putting the
+forwarder exactly there is what keeps them working without migration; it must never move. Outside the layout the
+supervisor uses its own program for all of these, as it always has.
 
 A target release older than the first build with this installer (`HANDOFF_FLOOR` in `install.sh`, the lowest prerelease
 of the release that brought it, so its dev builds and release candidates are never handed off) cannot do the locked work
@@ -6003,7 +6098,12 @@ checks afterwards that the locked file is still the one at the path (same device
 the version's folder away while it holds the exclusive lock; a program that finds its version gone, or still exclusively
 held after a five-second wait, refuses with one line saying to run the command again (agent hooks refuse too, silently
 and with status 0, since their stderr is the agent's terminal). Where the filesystem cannot lock, programs run without
-one, as before. Programs outside the layout take no lock.
+one, as before. Programs outside the layout take no lock. One program in the layout takes none either: a terminal host
+(`internal terminal-host`, "Terminal host"), started from the supervisor's own versioned program, lives for weeks, so
+holding its version would keep pruning and uninstall waiting on every terminal ever opened. It clears
+`FARHELM_VERSION_LOCK_FD` and closes every descriptor it inherited, a forwarder's lock included, and it never runs its
+own program again; like a running agent, it needs nothing from its version once it has started. The program in it holds
+its version the way a tmux window's does (below).
 
 The forwarder's contract, which a later installer may only replace by rename and only with a script that forwards every
 older invocation the same way: it resolves its own real path (it is reached through `~/.local/bin/farhelm` from a
@@ -6077,30 +6177,30 @@ The record is written right after the spawn, so a crash in between leaves a supe
 reused while it answers, and not replaced on an update until it exits. A long-lived supervisor keeps its version's lock,
 so pruning keeps that version until the supervisor is replaced.
 
-A session's window runs the supervisor's own versioned `farhelm`, not the forwarder, so in this layout the supervisor
-starts it as `<farhelm> internal hold <spec> -- <shell argv>` (`crates/farhelm-supervisor/src/session_hold.rs`) to hold
-the version through the login shell's startup. The hold step takes the version lock, starts a keeper
-(`internal keep-version`) and waits up to ten seconds for it to report ready, writes `<id>.<generation>.held` beside the
-launch spec with its own pid, and replaces itself with the shell, which inherits neither the lock's descriptor nor its
-variable. The keeper adopts the hold step's lock through `FARHELM_VERSION_LOCK_FD`; it is detached by a double fork into
-a session of its own, with its streams on `/dev/null`, ignoring SIGINT, SIGQUIT, SIGTSTP and SIGHUP, and carries the
-session's `FARHELM_SESSION_ID` and `FARHELM_AGENT_ID` so stopping the session finds it. It watches the hold step's pid
-(kqueue `NOTE_EXIT` on macOS, registered before it reports ready) and exits when that process exits or when
-`<id>.<generation>.launched` names that pid, which the launch shim writes with its own pid once it holds its own lock.
-Hold step, shell and shim replace one another in place, so they share that pid. A keeper that cannot start fails the
-session's start, recorded in the launch's status file like any launch failure, and so does a hold step or shim that
-cannot hold its version. The marks follow the spec through the startup sweep, a retaken create and delete; the startup
-sweep's removal of an unknown or superseded launch's marks is a start-up cleanup the maintainer approved for this case
-(2026-10-24), as "Cleanup on quit" asks. On an orderly stop the supervisor waits up to three seconds for the windows it
-started to show a `held` mark naming their pane's pid, including windows still being created when the stop begins; every
-tmux query in that wait is cut off at the remaining budget, so a tmux server that does not answer cannot hold the stop.
-A window that has not got there by then, or whose keeper is killed before the shim holds its own lock, is unprotected
-until it does; if an install removes its version in that moment the session fails to start, visibly, and starting it
-again works. A shell whose startup files `exec` another shell never reaches the shim, and its keeper then holds the
-version until the window closes. A terminal tab needs no hold step: its window starts the tab helper through the
-forwarder, which claims the version before the helper runs (the tab's environment names this supervisor's socket, so it
-picks this supervisor's version while that is there), and the helper replaces itself with the tab's shell, which needs
-no version afterwards.
+A session's window, or a terminal host's child for an agent in a host, runs the supervisor's own versioned `farhelm`,
+not the forwarder, so in this layout the supervisor starts it as `<farhelm> internal hold <spec> -- <shell argv>`
+(`crates/farhelm-supervisor/src/session_hold.rs`) to hold the version through the login shell's startup. The hold step
+takes the version lock, starts a keeper (`internal keep-version`) and waits up to ten seconds for it to report ready,
+writes `<id>.<generation>.held` beside the launch spec with its own pid, and replaces itself with the shell, which
+inherits neither the lock's descriptor nor its variable. The keeper adopts the hold step's lock through
+`FARHELM_VERSION_LOCK_FD`; it is detached by a double fork into a session of its own, with its streams on `/dev/null`,
+ignoring SIGINT, SIGQUIT, SIGTSTP and SIGHUP, and carries the session's `FARHELM_SESSION_ID` and `FARHELM_AGENT_ID` so
+stopping the session finds it. It watches the hold step's pid (kqueue `NOTE_EXIT` on macOS, registered before it reports
+ready) and exits when that process exits or when `<id>.<generation>.launched` names that pid, which the launch shim
+writes with its own pid once it holds its own lock. Hold step, shell and shim replace one another in place, so they
+share that pid. A keeper that cannot start fails the session's start, recorded in the launch's status file like any
+launch failure, and so does a hold step or shim that cannot hold its version. The marks follow the spec through the
+startup sweep, a retaken create and delete; the startup sweep's removal of an unknown or superseded launch's marks is a
+start-up cleanup the maintainer approved for this case (2026-10-24), as "Cleanup on quit" asks. On an orderly stop the
+supervisor waits up to three seconds for the windows it started to show a `held` mark naming their pane's pid (for an
+agent in a host, its child's), including windows still being created when the stop begins; every tmux query in that wait
+is cut off at the remaining budget, so a tmux server that does not answer cannot hold the stop. A window that has not
+got there by then, or whose keeper is killed before the shim holds its own lock, is unprotected until it does; if an
+install removes its version in that moment the session fails to start, visibly, and starting it again works. A shell
+whose startup files `exec` another shell never reaches the shim, and its keeper then holds the version until the window
+closes. A terminal tab needs no hold step: its window starts the tab helper through the forwarder, which claims the
+version before the helper runs (the tab's environment names this supervisor's socket, so it picks this supervisor's
+version while that is there), and the helper replaces itself with the tab's shell, which needs no version afterwards.
 
 ### The desktop app's updater
 
@@ -6285,9 +6385,10 @@ Restart to update spawns a detached helper in its own process group: a short `/b
 about a minute, for the app's process to exit, then runs `/usr/bin/open` on the bundle, and gives up without opening
 anything if the app has not exited by then. The app then quits the way closing its window does, which leaves its
 supervisor running. The new main program finds the previous version's supervisor by its record, running another program
-file than its own, and replaces it in order (see "Side-by-side versions inside Farhelm.app"); sessions keep running. The
-real update handover is exercised by the release brick test. Opening the releases page uses the same external-link path
-as the Documentation item.
+file than its own, and replaces it in order (see "Side-by-side versions inside Farhelm.app"); sessions keep running.
+Terminals in terminal hosts keep running too: the old supervisor's orderly stop checkpoints them, and the new one adopts
+them from their hosts ("Terminal host", "Across supervisor restarts"). The real update handover is exercised by the
+release brick test. Opening the releases page uses the same external-link path as the Documentation item.
 
 What it trusts over TLS alone is the answer to "which release is the latest". A wrong answer cannot make it run anything
 unsigned, but it can withhold updates (by naming an old release), or, by naming one that fails verification, put up the
@@ -6642,6 +6743,14 @@ constraint (see the GUI section's motivation), not an afterthought:
   absent, and a developer enables it manually with `FARHELM_REAL_AGENT=1`.
 - Rust integration tests exercise supervisor+tmux directly (CI provides tmux) and the framing protocol with golden
   cases; farhelm-proto keeps wire compatibility testable.
+- **Terminal hosts are tested against real hosts on real ptys.** The host crate has a test bar of its own
+  (`crates/terminal-host/TESTING.md`: real-pty tests of the built binary, golden fixtures of every frame of every
+  protocol version, property tests, at least 95% line coverage and mutation testing; the suite also runs in the focused
+  macOS CI job), higher than the rest of the workspace's because a running host outlives every release that could fix
+  it. The supervisor's side starts real hosts from the built `farhelm`, never inside a test process, since a host forks;
+  the emulator is held to the pinned tmux 3.7c by its parity tests and to its snapshot round trip by property tests; and
+  the grid client has a static-page browser suite fed recorded grid streams beside the browser specs that run terminals
+  in hosts on a real stack. `.agents/validation.md` names the selections.
 - **`node --test` unit-tests the asset-JS layer's pure functions**, under `crates/farhelm-ui/js-tests/` (outside
   `assets/` for source/test separation — bundling itself is by explicit `asset!` registration, so placement alone
   neither includes nor excludes a file). It currently covers `term-bytes.js`'s byte-domain conversion for
@@ -6732,6 +6841,20 @@ an updater a release window only names its version. A check button's hover leads
 status, so a reinstall command still ends the text. An idle installed app also explains that the readout turns red once
 a newer version is installed and offers the restart menu then. The development-build predicate lives in `farhelm-proto`,
 shared by web wording and the helm's native release decisions, so their classification cannot drift.
+
+Terminal hosts add version surfaces that the protocol version above does not govern, because a running host outlives
+every release: the host's own protocol, which only grows and which every later supervisor must speak with every host
+ever shipped (`crates/terminal-host/SPEC.md`, "Change policy"); the client tag's encoding and every snapshot format,
+which every later supervisor reads for good, with golden fixtures per version ("Terminal host", "Terminal snapshots");
+and `farhelm internal stop-terminal-hosts`, whose command line and exit status 0 a newer helm relies on from an older
+installed `farhelm`. A supervisor that cannot read a host on one of these counts (an older supervisor after a downgrade
+meeting a newer host, tag or snapshot) leaves the host running and its terminal unavailable, never gone. A downgrade of
+the supervisor itself is fenced by its database instead: schema 32 stores each session's terminal kind, and schema 33
+came with the flag that turns hosts on, so every build that could misread a host row refuses the database (SPEC.md,
+"Upgrade compatibility and client scale"). The grid stream is not one of these surfaces: it is part of the
+helm↔supervisor protocol and changes with its ordinary bumps (protocol 68 added it), in the directions above. An older
+helm shows a supervisor at protocol 68 as `Too new` and must itself be upgraded, never the supervisor downgraded, and a
+helm at 68 shows an older supervisor as `Needs update`.
 
 ### Rootless Podman sessions
 
@@ -6824,8 +6947,9 @@ sessions keep running, and once Farhelm restarts on the new version, the session
 resumes reach the new binary with whatever the old one handed them. Nothing re-issues those values, and the protocol
 hello does not help, since no handshake stands between a session's command line and the program it ends up running.
 (State the supervisor keeps for itself, such as its database, its tmux window options and its scope unit names, follows
-its own migration and adoption rules instead.) So the following are a compatibility surface, held to the same care as a
-wire format:
+its own migration and adoption rules instead. A terminal host is the exception that outlives every binary: its protocol,
+its client tag and the snapshots it keeps are permanent surfaces with rules of their own, in "Terminal host" and
+"Version and skew".) So the following are a compatibility surface, held to the same care as a wire format:
 
 - The hook command lines and their flags: `farhelm internal hook --vendor <adapter>`, with or without `--announce`, as
   injected into Claude's `--settings`, Codex's `-c hooks.…` overrides and Muse's `-c hooks=…`, and as the user installs
