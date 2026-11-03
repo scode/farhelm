@@ -5,7 +5,7 @@
 
 import { type APIRequestContext, type Page } from "@playwright/test";
 import { expect, test } from "./helpers/evidence";
-import { attachSession, cleanupSession, waitForTermText } from "./helpers/term";
+import { attachSession, cleanupSession, onHostTerminals, sendTerminalInput, terminalKind, terminalSize, waitForTermText } from "./helpers/term";
 import { installTerminalSuiteHooks, reconnectTimingsFromNextLoad } from "./helpers/terminal-suite";
 import { waitForReplayReveal, waitForSessionRevealed } from "./helpers/terminal-readiness";
 
@@ -46,10 +46,7 @@ async function openUnicodeTerminal(page: Page, request: APIRequestContext): Prom
     await waitForTermText(page, "UNICODE-READY");
     await sendCommand(page, id, "ready");
     await waitForTermText(page, "UNICODE-LIVE");
-    const size = await page.evaluate(() => {
-      const term = (window as any).__farhelmIslands.terminal.term;
-      return { cols: term.cols as number, rows: term.rows as number };
-    });
+    const size = (await terminalSize(page))!;
     expect(size.cols, "the fixture needs room for the whole status line without wrapping").toBeGreaterThanOrEqual(40);
     expect(size.rows, "the emoji rows must all be visible for DOM assertions").toBeGreaterThanOrEqual(8);
     return id;
@@ -66,11 +63,7 @@ async function openUnicodeTerminal(page: Page, request: APIRequestContext): Prom
  */
 async function sendCommand(page: Page, id: string, command: string): Promise<void> {
   await waitForSessionRevealed(page, id);
-  await page.evaluate((command) => {
-    const ws = (window as any).__farhelmIslands.terminal.ws as WebSocket;
-    if (ws.readyState !== WebSocket.OPEN) throw new Error("the owned terminal socket closed before its request");
-    ws.send(new TextEncoder().encode(`${command}\n`));
-  }, command);
+  await sendTerminalInput(page, `${command}\n`);
 }
 
 /**
@@ -91,9 +84,21 @@ async function writeTerminal(page: Page, bytes: string): Promise<void> {
  * trailing blanks preserves interior spaces where cursor misalignment appears.
  * Replay can serialize blank padding as printable cells; normalize that padding
  * in both views instead of assuming the buffer API's trim flag removes it all.
+ * A grid terminal is read the same way: its model's screen rows and its
+ * drawn row elements, at the bottom when its view follows the output.
  */
 async function expectRows(page: Page, expected: string[]): Promise<void> {
   await expect.poll(() => page.evaluate((count) => {
+    const grid = (window as any).__farhelmIslands?.terminal?.grid;
+    if (grid) {
+      const snapshot = grid.snapshot();
+      const drawn = document.querySelectorAll("#terminal .grid-terminal-row");
+      return {
+        buffer: Array.from({ length: count }, (_, row) => (snapshot.lines[row] ?? "").trimEnd()),
+        rendered: Array.from({ length: count }, (_, row) => drawn[row]?.textContent?.trimEnd() ?? ""),
+        atTail: grid.viewport().following,
+      };
+    }
     const term = (window as any).__farhelmIslands?.terminal?.term;
     const buffer = term?.buffer.active;
     const rows = document.querySelector("#terminal .xterm-rows");
@@ -115,6 +120,12 @@ async function expectRows(page: Page, expected: string[]): Promise<void> {
  * printable cell catches tables that draw the glyph but still advance by one.
  */
 test("emoji and VS16 sequences occupy two cells before the following character", async ({ page, request }) => {
+  // Writes straight into xterm.js's parser and reads its buffer and DOM
+  // renderer. A grid terminal has no parser in the page: the supervisor's
+  // emulator owns cell widths (its own tests, and the tmux parity suite),
+  // and the grid's wide boxes and columns are pinned against recorded
+  // streams in e2e/grid-client/grid-terminal.spec.ts.
+  test.skip(onHostTerminals(), "direct writes into xterm.js's parser; the grid's wide cells are pinned in e2e/grid-client");
   const id = await openUnicodeTerminal(page, request);
   try {
     await writeTerminal(page, CLEAR + EMOJI.map((emoji) => `${emoji}X`).join("\r\n"));
@@ -145,6 +156,8 @@ test("emoji and VS16 sequences occupy two cells before the following character",
  * a full repaint that happens to repair an earlier overlap is insufficient.
  */
 test("cursor-addressed status redraws stay aligned as more output arrives", async ({ page, request }) => {
+  // As above: direct writes into xterm.js.
+  test.skip(onHostTerminals(), "direct writes into xterm.js's parser; the grid's wide cells are pinned in e2e/grid-client");
   const id = await openUnicodeTerminal(page, request);
   try {
     await writeTerminal(page, CLEAR + EMOJI.map((emoji) => `${emoji} 0`).join(" "));
@@ -167,6 +180,8 @@ test("cursor-addressed status redraws stay aligned as more output arrives", asyn
  * fallback font supplies the glyph, or comparing rendered pixels.
  */
 test("a coloured neighbouring cell starts after the emoji's full two-cell box", async ({ page, request }) => {
+  // As above: direct writes into xterm.js and its DOM renderer.
+  test.skip(onHostTerminals(), "direct writes into xterm.js's parser; the grid's wide cells are pinned in e2e/grid-client");
   const id = await openUnicodeTerminal(page, request);
   try {
     await writeTerminal(page, CLEAR + EMOJI.map((emoji) => `${emoji}\x1b[41mX\x1b[0m`).join("\r\n"));
@@ -226,21 +241,44 @@ test("tmux reconnect replay restores emoji rows and the cursor column", async ({
     }), { timeout: 20_000, message: "reconnect must replace the original terminal attachment" }).toBe(true);
     await waitForSessionRevealed(page, id);
     const replay = await waitForReplayReveal(page, "terminal");
+    const grid = (await terminalKind(page)) === "grid";
+    // Both kinds' catch-up ends at the replay's end marker. xterm.js's also
+    // reveals inside the write callback of the bytes before it; a grid
+    // replay is frames the component applies as they arrive, with no write
+    // callbacks to wait on.
     expect(replay.revealReason).toBe("marker");
-    expect(replay.revealedInWriteCallback).toBe(true);
+    if (!grid) expect(replay.revealedInWriteCallback).toBe(true);
     await expectRows(page, [REPLAY_ROW, `${CURSOR_PREFIX}⚠️`]);
     const cursor = await page.evaluate(() => {
-      const buffer = (window as any).__farhelmIslands.terminal.term.buffer.active;
+      const island = (window as any).__farhelmIslands.terminal;
+      if (island.grid) return island.grid.snapshot().cursor as { x: number; y: number };
+      const buffer = island.term.buffer.active;
       return { x: buffer.cursorX as number, y: buffer.cursorY as number };
     });
-    expect(cursor, "replayed VS16 emoji must leave the restored cursor two cells later").toEqual({
-      x: CURSOR_PREFIX.length + 2,
-      y: 1,
-    });
+    // A known difference, not a grid bug: the supervisor's emulator gives
+    // an emoji made wide by VS16 one column where tmux gives two (pinned in
+    // its tmux parity tests, emulator_parity/generated.rs; TODO.md, "Emoji
+    // made wide by a variation selector in grid terminals"). Until that is
+    // decided, a terminal host's cursor sits one cell earlier here, which
+    // this asserts so that deciding it shows up as a failure to update.
+    if (grid) {
+      test.info().annotations.push({ type: "known difference", description: "VS16 emoji width: one column in the emulator, two in tmux (TODO.md)" });
+      expect(cursor, "the emulator gives the VS16 emoji one column (the pinned difference)").toMatchObject({
+        x: CURSOR_PREFIX.length + 1,
+        y: 1,
+      });
+    } else {
+      expect(cursor, "replayed VS16 emoji must leave the restored cursor two cells later").toEqual({
+        x: CURSOR_PREFIX.length + 2,
+        y: 1,
+      });
+    }
     await sendCommand(page, id, "continue");
     await waitForTermText(page, "REPLAY-LIVE");
     await expectRows(page, [REPLAY_ROW, `${CURSOR_PREFIX}⚠️X`, "REPLAY-LIVE"]);
-    expect(await page.evaluate((column) => {
+    // The cell itself, from xterm.js's buffer; the grid's rows above already
+    // place X right after the emoji, its cells having no separate reader.
+    if (!grid) expect(await page.evaluate((column) => {
       const buffer = (window as any).__farhelmIslands.terminal.term.buffer.active;
       return buffer.getLine(buffer.baseY + 1).getCell(column).getChars();
     }, CURSOR_PREFIX.length + 2)).toBe("X");

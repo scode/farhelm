@@ -9,7 +9,7 @@ import {
   cleanupSession, createSession, FAKE_AGENT, patchPreferences,
   pinAutoSelect, resetPreferences,
 } from "./helpers/fleet";
-import { attachSession, waitForTermText } from "./helpers/term";
+import { attachSession, waitForTermText, terminalInput } from "./helpers/term";
 import { routeGate } from "./helpers/route-gate";
 
 /** Fix both the capture listener and terminal's idea of this client. */
@@ -64,7 +64,7 @@ test("Cmd-J exact name launches through the fresh quick-launch path", async ({ p
     await page.goto("/");
     await attachSession(page, source.id);
     await waitForTermText(page, "FAKE-AGENT READY");
-    const terminal = page.locator("#terminal .xterm-helper-textarea");
+    const terminal = terminalInput(page);
     await expect(terminal).toBeFocused();
     // The sequence pill is not a modal. Cmd-J must retire its queued
     // template and take the same list path as an idle page press.
@@ -186,7 +186,7 @@ test("Cmd-J has no-match and partial-template fallbacks", async ({ page, request
     await page.goto("/");
     await attachSession(page, source.id);
     await waitForTermText(page, "FAKE-AGENT READY");
-    const terminal = page.locator("#terminal .xterm-helper-textarea");
+    const terminal = terminalInput(page);
     let dialog = await openTemplateList(page);
     await dialog.getByRole("combobox").fill(`${name}-absent`);
     await expect(dialog.getByRole("option")).toHaveCount(0);

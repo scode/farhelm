@@ -10,6 +10,7 @@
 // The supervisor's recording and the helm's marks have their own Rust tests.
 import { setCompact } from "./helpers/list-header";
 import { expect, test } from "./helpers/evidence";
+import { terminalInput } from "./helpers/term";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { Locator, Page, Route } from "@playwright/test";
 import { cleanupSession, createSession, forceBuildSkew, openRowMenu, patchPreferences, pinAutoSelect, resetPreferences, stubFeed } from "./helpers/fleet";
@@ -556,7 +557,7 @@ test.describe("session notifications", () => {
     // so the Escape below depends on the list taking focus when it opens
     // rather than on the click having focused the bell (which not every
     // engine does for a pointer click).
-    const terminal = page.locator(".xterm-helper-textarea").first();
+    const terminal = terminalInput(page);
     await terminal.focus();
     await expect(terminal).toBeFocused();
     await bell.click();

@@ -2,6 +2,7 @@
 // client-side facts a test needs without manufacturing input, focus, or replay.
 
 import { expect, type Page } from "@playwright/test";
+import { activeHostPremiseWatch, oldTerminalProblem } from "./host-premise";
 import { recordPage } from "./timeline";
 
 /** One island's catch-up record, as terminal.js publishes it. */
@@ -56,8 +57,9 @@ export async function waitForReplayReveal(
 }
 
 /**
- * Wait until the island at `elementId` is MOUNTED — an xterm instance and a
- * socket exist for it.
+ * Wait until the island at `elementId` is MOUNTED — a terminal component
+ * (xterm.js, or the grid once a grid stream replaced it) and a socket exist
+ * for it.
  *
  * The registry's terminal, socket, and test record together are the mount
  * boundary. It does not require OPEN, replay reveal, or focus, which is why
@@ -70,7 +72,7 @@ export async function waitForIslandMounted(page: Page, elementId: string) {
       () =>
         page.evaluate((el) => {
           const island = (window as any).__farhelmIslands?.[el];
-          return !!(island?.term && island?.ws && island?.test);
+          return !!((island?.term || island?.grid) && island?.ws && island?.test);
         }, elementId),
       { timeout: 20_000, message: `waiting for the island at ${elementId} to mount` },
     )
@@ -160,17 +162,23 @@ async function observeSession(
       }
     }
 
-    // The public xterm textarea is the actual keyboard-input destination.
+    // The component's hidden text field is the actual keyboard-input
+    // destination: xterm.js's public textarea, or the grid's input field
+    // once a grid stream replaced xterm.js (terminal.js's `adoptGrid`).
     // Being somewhere inside a terminal container does not prove that keys
-    // reach xterm; another focusable descendant could own them instead.
+    // reach the terminal; another focusable descendant could own them
+    // instead.
+    const input = island?.grid
+      ? island.grid.element?.querySelector(".grid-terminal-input")
+      : island?.term?.textarea;
     return {
       pathname,
       pathnameMatches,
-      islandMounted: !!(island?.term && island?.ws && island?.test),
+      islandMounted: !!((island?.term || island?.grid) && island?.ws && island?.test),
       socketOpen: island?.ws?.readyState === WebSocket.OPEN,
       socketMatches,
       replayRevealed: !!island?.test?.replay?.revealed,
-      focused: document.activeElement === island?.term?.textarea,
+      focused: !!input && document.activeElement === input,
     };
   }, terminal);
 }
@@ -245,6 +253,27 @@ async function waitForSession(
     );
   }
   recordPage(page, "readiness-success", [["requested", terminal.id], ["kind", kind]]);
+  if (kind === "revealed" || kind === "ready") await expectHostTerminalKind(page, terminal);
+}
+
+/**
+ * On the browser suite's host-terminal run, a revealed or ready attachment
+ * that did not come back as a grid must belong to the stack's "remote"
+ * supervisor (host-premise.ts's `oldTerminalProblem`): an early, located
+ * failure for the premise that the automatic per-test check in evidence.ts
+ * enforces for every terminal socket opened in a browser context the test
+ * observes (the default one, `newObservedContext`, `observeContext`, or one
+ * registered with `watchHostPremise`), tabs and remounts included.
+ * The island is read first, so the ordinary case costs no request.
+ */
+async function expectHostTerminalKind(page: Page, terminal: SessionTerminal): Promise<void> {
+  const watch = activeHostPremiseWatch();
+  if (!watch) return;
+  const elementId = terminal.tabId === undefined ? "terminal" : `terminal-${terminal.tabId}`;
+  const grid = await page.evaluate((el) => !!(window as any).__farhelmIslands?.[el]?.grid, elementId);
+  if (grid) return;
+  const problem = await oldTerminalProblem(page.request, terminal, watch.options);
+  expect(problem, "the host-terminal run's premise").toBeNull();
 }
 
 /** Compare the fixed readiness snapshot without serializing browser-derived data for diagnostics. */

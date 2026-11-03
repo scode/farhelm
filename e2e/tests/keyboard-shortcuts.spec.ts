@@ -19,7 +19,7 @@ import {
 } from "./helpers/fleet";
 import { requireHelmBuild } from "./helpers/helm-build";
 import { routeGate } from "./helpers/route-gate";
-import { attachSession, waitForTermText } from "./helpers/term";
+import { attachSession, waitForTermText, terminalInput, programInput, type InputFrame, recordInput } from "./helpers/term";
 
 /** Classify both the listener and the overview before either mounts. */
 async function platform(page: Page, mac: boolean): Promise<void> {
@@ -78,17 +78,17 @@ for (const mac of [false, true]) {
   test(`the ${mac ? "Mac" : "non-Mac"} overview chord owns terminal input and labels`, async ({ page, request }, testInfo) => {
     await platform(page, mac);
     const session = await createSession(request, { title: `shortcuts-input-${Date.now()}` });
-    const binary: Buffer[] = [];
+    const binary: InputFrame[] = [];
     page.on("websocket", (socket) => {
       if (!new URL(socket.url()).pathname.endsWith("/term")) return;
-      socket.on("framesent", ({ payload }) => { if (Buffer.isBuffer(payload)) binary.push(payload); });
+      recordInput(socket, binary);
     });
     try {
       await pinAutoSelect(page, session.id);
       await page.goto("/");
       await attachSession(page, session.id);
       await waitForTermText(page, "FAKE-AGENT READY");
-      const terminal = page.locator("#terminal .xterm-helper-textarea");
+      const terminal = terminalInput(page);
       await expect(terminal).toBeFocused();
       const dialog = await openByChord(page, mac);
       await expect(dialog).toHaveAttribute("aria-modal", "true");
@@ -123,7 +123,7 @@ for (const mac of [false, true]) {
       await page.keyboard.type(probe);
       await page.keyboard.press("Enter");
       await waitForTermText(page, `echo:${probe}`);
-      expect(Buffer.concat(binary).toString(), "only the deliberate probe reaches the program").toBe(`${probe}\r`);
+      expect(programInput(binary), "only the deliberate probe reaches the program").toBe(`${probe}\r`);
 
       await page.locator(".new-session-button").click();
       const other = page.locator('.create-session-form[aria-modal="true"]');

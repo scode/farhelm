@@ -695,8 +695,10 @@ async function settled(page: Page): Promise<void> {
 /**
  * The page position in cell (`x`, visible row `y`), `fx` of the way across
  * it (the middle by default). A selection's ends move to the nearest cell
- * boundary, so a drag ending exactly mid-cell would leave the rounding to
- * sub-pixel layout; the drags below end clearly to one side.
+ * boundary, and exactly mid-cell to the left one, as in xterm.js; a drag
+ * ending exactly mid-cell would still leave the rounding to sub-pixel
+ * layout, so the drags below end clearly to one side, and the midpoint
+ * itself is tested where its position is a whole pixel.
  */
 async function cellAt(page: Page, x: number, y: number, fx = 0.5): Promise<{ x: number; y: number }> {
   const { width, height } = await cell(page);
@@ -801,6 +803,53 @@ test("the alternate screen has no history to scroll, and lost history is marked 
   await expect.poll(() => visibleRows(page)).toEqual(["screen 0", "screen 1", "screen 2"]);
   expect(await viewport(page)).toEqual({ top: 0, total: 3, rows: 3, following: true });
   await expect(page.locator(".grid-terminal-scrollbar")).toBeHidden();
+});
+
+/**
+ * A selection pressed exactly in the middle of a cell starts at that cell's
+ * left boundary, keeping its character, and a pixel further right starts
+ * after it.
+ *
+ * Why: that is xterm.js's rounding (its `getCoords` with `isSelection`, then
+ * one less: `ceil(x / width + 0.5) - 1`), and the grid once rounded the
+ * midpoint right instead (`Math.round`), so a live drag starting 4px into an
+ * 8px cell lost the first character it was aimed at. Spec: on a row
+ * `abcdefghij`, a drag from the exact midpoint of a cell `k` to the row's end
+ * copies the row from `k`'s character; from one pixel right of it, from the
+ * next character. The midpoint is chosen where it falls on a whole pixel, so
+ * the browser delivers it exactly.
+ */
+test("a selection pressed exactly mid-cell starts at that cell, as in xterm.js", async ({ page }) => {
+  await openGrid(page);
+  await feed(page, [
+    JSON.stringify({ t: "hello", cols: 10, rows: 3, history_cap: 100 }),
+    state({}),
+    JSON.stringify({ t: "rows", rows: [[0, textRow("abcdefghij")], [1, textRow("")], [2, textRow("$ ")]] }),
+    JSON.stringify({ t: "frame", rev: 1, cols: 10, rows: 3, cursor: { x: 2, y: 2, visible: true, shape: "block", blink: true } }),
+  ]);
+  await settled(page);
+  const { width, height } = await cell(page);
+  const screen = (await page.locator(".grid-terminal-screen").boundingBox())!;
+  // Premise: a cell whose midpoint is a whole pixel, short of the last cell
+  // so a pixel to its right is still inside the row.
+  const k = [...Array(8).keys()].find((index) => {
+    const x = screen.x + (index + 0.5) * width;
+    return Math.abs(x - Math.round(x)) < 1e-6;
+  });
+  expect(k, `a cell of width ${width} at ${screen.x} must have a whole-pixel midpoint`).not.toBeUndefined();
+  const mid = Math.round(screen.x + (k! + 0.5) * width);
+  const y = screen.y + 0.5 * height;
+  const end = await cellAt(page, 9, 0, 0.8);
+  for (const startX of [mid, mid + 1]) {
+    await page.mouse.move(startX, y);
+    await page.mouse.down();
+    await page.mouse.move(end.x, end.y, { steps: 4 });
+    await page.mouse.up();
+  }
+  await expect.poll(() => page.evaluate(() => (window as any).harness.copies.slice())).toEqual([
+    "abcdefghij".slice(k!),
+    "abcdefghij".slice(k! + 1),
+  ]);
 });
 
 test("a drag selects across history and screen, joins soft wraps, and copies every selection", async ({ page }) => {

@@ -18,7 +18,7 @@ import { resolveToken } from "./helpers/color";
 import { type Page, type APIRequestContext } from "@playwright/test";
 import fs from "node:fs";
 import { renameSession, stubFeed } from "./helpers/fleet";
-import { attachSession, cleanupSession, restartIdleAgent, termText, waitForTermText } from "./helpers/term";
+import { attachSession, cleanupSession, restartIdleAgent, termText, waitForTermText, onHostTerminals } from "./helpers/term";
 import { waitForSessionReady, waitForSessionRevealed } from "./helpers/terminal-readiness";
 import { routeGate } from "./helpers/route-gate";
 import {
@@ -671,6 +671,10 @@ test("stalling one tab's writes pauses only that tab; the agent and a sibling st
   page,
   request,
 }) => {
+  // xterm.js's write-callback flow control. A grid stream is paced by the
+  // helm and the supervisor instead (their own tests pin a paused flood
+  // losing nothing), and the grid has no writes to stall.
+  test.skip(onHostTerminals(), "xterm.js's write-callback flow control; grid streams are paced by the helm and supervisor");
   test.setTimeout(180_000);
   const title = `tab-isolation-${Date.now()}`;
   let id: string | undefined;
@@ -797,7 +801,8 @@ test("leaving a session with tabs tears down every island and reopening builds n
     const before = await page.evaluate(() => {
       const islands = (window as any).__farhelmIslands;
       (window as any).__sockets = Object.keys(islands).map((el) => islands[el].ws);
-      (window as any).__terms = Object.keys(islands).map((el) => islands[el].term);
+      // Each island's component, whichever kind: xterm.js or the grid.
+      (window as any).__terms = Object.keys(islands).map((el) => islands[el].term ?? islands[el].grid);
       return Object.keys(islands).sort();
     });
     expect(before).toEqual(
@@ -835,7 +840,7 @@ test("leaving a session with tabs tears down every island and reopening builds n
       await page.evaluate(() => {
         const islands = (window as any).__farhelmIslands;
         const old = (window as any).__terms;
-        return Object.keys(islands).every((el) => !old.includes(islands[el].term));
+        return Object.keys(islands).every((el) => !old.includes(islands[el].term ?? islands[el].grid));
       }),
     ).toBe(true);
   } finally {
@@ -1417,8 +1422,11 @@ test("an unselected terminal keeps real geometry while hidden", async ({
     const hidden = await page.evaluate((el) => {
       const node = document.getElementById(el)!;
       const box = node.getBoundingClientRect();
-      const term = (window as any).__farhelmIslands[el].term;
-      return { width: box.width, height: box.height, cols: term.cols, rows: term.rows };
+      const island = (window as any).__farhelmIslands[el];
+      // The page's own fit: xterm.js's, or the grid's `size()`, which a
+      // hidden pane that measured nothing would leave unchanged.
+      const size = island.grid ? island.grid.size() : island.term;
+      return { width: box.width, height: box.height, cols: size.cols, rows: size.rows };
     }, `terminal-${tabId}`);
     expect(hidden.width).toBeGreaterThan(0);
     expect(hidden.height).toBeGreaterThan(0);
@@ -1450,8 +1458,13 @@ async function terminalSizes(
     const out: Record<string, { font: number; cols: number; rows: number }> = {};
     const islands = (window as any).__farhelmIslands ?? {};
     for (const el of Object.keys(islands)) {
-      const term = islands[el].term;
-      out[el] = { font: term.options.fontSize, cols: term.cols, rows: term.rows };
+      const { term, grid } = islands[el];
+      // A grid's text size is its element's, and its size the page's own
+      // fit (`size()`), independent of what the supervisor sends back.
+      const fit = grid?.size();
+      out[el] = grid
+        ? { font: parseFloat(grid.element.style.fontSize), cols: fit.cols, rows: fit.rows }
+        : { font: term.options.fontSize, cols: term.cols, rows: term.rows };
     }
     return out;
   });
@@ -1552,6 +1565,20 @@ test("terminal text size steps every terminal, reaches the pty, and is remembere
       expect(after[el].rows, `${el} rows`).toBeLessThan(before[el].rows);
     }
 
+    // A grid draws the size the supervisor committed; wait until each one
+    // has taken its fit, as xterm.js's own size already is.
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const islands = (window as any).__farhelmIslands ?? {};
+          return Object.keys(islands).every((el) => {
+            const grid = islands[el].grid;
+            if (!grid) return true;
+            const fit = grid.size();
+            return grid.model.cols === fit.cols && grid.model.rows === fit.rows;
+          });
+        }), { timeout: 15_000, message: "every grid must take its fitted size" })
+      .toBe(true);
     // The programs see the new grids. The resize reaches the agent's pty
     // asynchronously after the last step, so one `size` query can be
     // answered with the previous step's grid; ask again until the reply
@@ -1684,7 +1711,10 @@ test("opening the close confirmation refits the terminals below it", async ({
     const session = await openSessionWithTabs(page, request, title, 1);
     id = session.id;
     const rows = () =>
-      page.evaluate(() => (window as any).__farhelmIslands["terminal"].term.rows);
+      page.evaluate(() => {
+        const island = (window as any).__farhelmIslands["terminal"];
+        return (island.grid ? island.grid.model.rows : island.term.rows) as number;
+      });
 
     const before = await rows();
     await page.locator(".tab-close").click();
@@ -1725,7 +1755,8 @@ test("a viewport resize reflows every island, hidden ones included", async ({
         const islands = (window as any).__farhelmIslands;
         const out: Record<string, string> = {};
         for (const el of Object.keys(islands).sort()) {
-          out[el] = `${islands[el].term.cols}x${islands[el].term.rows}`;
+          const size = islands[el].grid ? islands[el].grid.model : islands[el].term;
+          out[el] = `${size.cols}x${size.rows}`;
         }
         return out;
       });
@@ -2051,8 +2082,16 @@ test("a tab opened after closing another starts with a clean island", async ({
       .toBeGreaterThan(0);
     const below = await page.evaluate((el) => {
       const island = (window as any).__farhelmIslands[el];
-      const buf = island.term.buffer.active;
       const junk: string[] = [];
+      if (island.grid) {
+        const snapshot = island.grid.snapshot();
+        for (let row = snapshot.cursor.y + 1; row < snapshot.lines.length; row++) {
+          const line = snapshot.lines[row].trimEnd();
+          if (line) junk.push(`${row}: ${line}`);
+        }
+        return junk;
+      }
+      const buf = island.term.buffer.active;
       for (let row = buf.baseY + buf.cursorY + 1; row < buf.length; row++) {
         const line = buf.getLine(row)?.translateToString(true).trimEnd();
         if (line) junk.push(`${row}: ${line}`);

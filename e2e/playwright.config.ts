@@ -12,12 +12,13 @@
 // the desktop app embeds Gecko, so it would add runtime without
 // covering a real target.
 import { defineConfig, devices } from "@playwright/test";
-import { readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { STACK_INFO_ENV } from "./global-setup";
 import { STACK_PORT_ENV } from "./stack-port";
 import { currentStackSlot, harnessStackSlots, isWorkerProcess, STACK_COUNT } from "./stack-slots";
 import { AUTH_STATE_ENV, harnessAuthorizationHeaders } from "./tests/helpers/device-auth";
+import { HOST_TERMINAL_LEFT_OUT, HOST_TERMINAL_SPECS, SUITE_TERMINALS_ENV, SUITE_TERMINALS_METADATA } from "./host-terminal-specs";
 
 // One stack per worker slot (stack-slots.ts). Ports are chosen once per run
 // and pinned through the environment; see stack-port.ts for why a fixed port
@@ -46,7 +47,44 @@ function discoverSpecFiles(directory = testsDir): string[] {
     .sort();
 }
 
-const specFiles = discoverSpecFiles();
+/** An import of a terminal-family helper: what makes a spec a terminal spec for the host run's list. */
+const TERMINAL_HELPER_IMPORT = /from ["']\.\/helpers\/(term|terminal-readiness|terminal-suite|real-agent)["']/;
+
+// Which kind of terminal this run's stacks create (host-terminal-specs.ts;
+// tests/helpers/term.ts, "Two kinds of terminal"). Unset is the suite as it
+// always ran: every stack's supervisor keeps its own default. `host` starts
+// every stack's local supervisor with `--new-terminals host` and runs only the
+// spec files that host-terminal-specs.ts lists (it also says why the others
+// stay out); a test there that is about the old terminal alone skips itself.
+// Any other value is refused here rather than run as the default.
+const suiteTerminals = process.env[SUITE_TERMINALS_ENV] ?? "";
+if (suiteTerminals !== "" && suiteTerminals !== "host") {
+  throw new Error(`${SUITE_TERMINALS_ENV} must be unset or "host", got "${suiteTerminals}"`);
+}
+const onHostTerminals = suiteTerminals === "host";
+
+const discovered = discoverSpecFiles();
+if (onHostTerminals) {
+  // The host run's list must stay a complete account of the terminal specs:
+  // a listed or left-out file that does not exist (renamed, moved), a file
+  // in both, and a spec that uses the terminal helpers but is in neither
+  // would each change what the run covers without a word.
+  const leftOut = [...HOST_TERMINAL_LEFT_OUT.keys()];
+  const missing = [...HOST_TERMINAL_SPECS, ...leftOut].filter((spec) => !discovered.includes(spec));
+  const both = [...HOST_TERMINAL_SPECS].filter((spec) => HOST_TERMINAL_LEFT_OUT.has(spec));
+  const unclassified = discovered.filter((spec) =>
+    !HOST_TERMINAL_SPECS.has(spec) && !HOST_TERMINAL_LEFT_OUT.has(spec) &&
+    TERMINAL_HELPER_IMPORT.test(readFileSync(join(testsDir, spec), "utf8"))
+  );
+  if (missing.length || both.length || unclassified.length) {
+    throw new Error(
+      `host-terminal-specs.ts names spec files that do not exist (${missing.join(", ") || "none"}), ` +
+        `lists files in both sets (${both.join(", ") || "none"}), and leaves terminal specs in neither ` +
+        `(${unclassified.join(", ") || "none"})`,
+    );
+  }
+}
+const specFiles = discovered.filter((spec) => !onHostTerminals || HOST_TERMINAL_SPECS.has(spec));
 
 const engines = [
   { name: "chromium", use: { ...devices["Desktop Chrome"] } },
@@ -89,6 +127,7 @@ export default defineConfig({
   // Global setup runs in the runner, which has no slot of its own, so it is
   // told about every stack it has to authenticate here.
   metadata: {
+    [SUITE_TERMINALS_METADATA]: onHostTerminals ? "host" : "default",
     stackSlots: stackSlots.map(({ baseURL, stackInfoPath, authStatePath }) => ({
       baseURL,
       stackInfoPath,
@@ -140,12 +179,13 @@ export default defineConfig({
       [STACK_PORT_ENV]: String(stack.port),
       [STACK_INFO_ENV]: stack.stackInfoPath,
       [AUTH_STATE_ENV]: stack.authStatePath,
-      // Pinned empty ("pass nothing"): Playwright merges its own environment
-      // into this, and a FARHELM_E2E_NEW_TERMINALS exported for the
-      // host-terminal config (host-terminals/playwright.config.ts) must not
-      // turn terminal hosts on for every spec of this suite, which runs
-      // against the supervisor's default.
-      FARHELM_E2E_NEW_TERMINALS: "",
+      // Pinned ("pass nothing" by default): Playwright merges its own
+      // environment into this, and a FARHELM_E2E_NEW_TERMINALS exported for
+      // the host-terminal config (host-terminals/playwright.config.ts) must
+      // not turn terminal hosts on for every spec of this suite, which runs
+      // against the supervisor's default. Only this suite's own switch
+      // (`SUITE_TERMINALS_ENV`, above) turns them on.
+      FARHELM_E2E_NEW_TERMINALS: onHostTerminals ? "host" : "",
     },
     // The API correctly answers 401 before global setup has exchanged the
     // token. The public static bundle is therefore the readiness probe.

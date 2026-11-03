@@ -65,7 +65,29 @@
 import { expect, test } from "./helpers/evidence";
 import { type Page } from "@playwright/test";
 import { cleanupSession, createSession } from "./helpers/fleet";
-import { attachSession, termText, waitForTermText } from "./helpers/term";
+import { attachSession, onHostTerminals, termText, terminalScreen, terminalViewport, waitForTermText } from "./helpers/term";
+
+/**
+ * The agent terminal's local selection as text, run in the page: xterm.js's
+ * `getSelection()`, or the grid's `selectionText()`, both what a copy of the
+ * selection would put on the clipboard.
+ */
+function terminalSelectionInPage(): string {
+  const w = window as any;
+  return w.__farhelmTerm ? w.__farhelmTerm.getSelection() : w.__farhelmGrid.selectionText();
+}
+
+/**
+ * The agent terminal's mouse-reporting mode, run in the page: xterm.js's
+ * `modes.mouseTrackingMode`, or the grid model's `mouse` state (whose `off`
+ * is xterm.js's `none`). Only "is it on" matters to the callers.
+ */
+function mouseTrackingInPage(): string {
+  const w = window as any;
+  if (w.__farhelmTerm) return w.__farhelmTerm.modes.mouseTrackingMode;
+  const mouse = w.__farhelmGrid.model.state.mouse;
+  return mouse === "off" ? "none" : mouse;
+}
 
 /**
  * Build a session invocation that blocks on `read _gate` until this test
@@ -101,18 +123,11 @@ async function findViewportRow(
   page: Page,
   needle: string,
 ): Promise<{ rows: number; rowIndex: number }> {
-  const scan = (text: string) =>
-    page.evaluate((needleText) => {
-      const t = (window as any).__farhelmTerm;
-      const buf = t.buffer.active;
-      for (let i = 0; i < t.rows; i++) {
-        const line = buf.getLine(buf.viewportY + i);
-        if (line && line.translateToString(true).includes(needleText)) {
-          return { rows: t.rows, rowIndex: i };
-        }
-      }
-      return { rows: t.rows, rowIndex: -1 };
-    }, text);
+  // The rows on screen, whichever component draws them (`terminalViewport`).
+  const scan = async (text: string) => {
+    const view = (await terminalViewport(page))!;
+    return { rows: view.rows, rowIndex: view.lines.findIndex((line) => line.includes(text)) };
+  };
   let geometry = await scan(needle);
   const deadline = Date.now() + 10_000;
   while (geometry.rowIndex < 0 && Date.now() < deadline) {
@@ -164,7 +179,7 @@ async function dragRow(
   modifierKey?: "Shift",
 ): Promise<void> {
   const { rows, rowIndex } = await findViewportRow(page, needle);
-  const box = (await page.locator("#terminal .xterm-screen").boundingBox())!;
+  const box = (await terminalScreen(page).boundingBox())!;
   const cellHeight = box.height / rows;
   const y = box.y + (rowIndex + 0.5) * cellHeight;
   if (modifierKey) await page.keyboard.down(modifierKey);
@@ -346,7 +361,17 @@ test("an OSC 52 read query never receives real clipboard contents (F5)", async (
 }) => {
   const recordedText = await recordOutboundWebSocketText(page);
   const secret = `secret-e2e-${Date.now()}`;
-  const invocation = gatedShellInvocation(`printf "\\033]52;c;?\\007"`);
+  // In a terminal host the query is the supervisor emulator's, which never
+  // answers an OSC 52 read (its query-answer table,
+  // crates/farhelm-terminal-emulator/tests/queries.rs), so there is no
+  // report to wait for; a line printed after the query is what shows it was
+  // parsed. This page-side check sees only what the page sends.
+  const parsedMarker = `osc52-read-parsed-${Date.now()}`;
+  const invocation = gatedShellInvocation(
+    onHostTerminals()
+      ? `printf "\\033]52;c;?\\007"; printf "${parsedMarker}\\n"`
+      : `printf "\\033]52;c;?\\007"`,
+  );
   const session = await createSession(request, {
     title: `osc52-read-e2e-${Date.now()}`,
     cwd: "/tmp",
@@ -371,19 +396,27 @@ test("an OSC 52 read query never receives real clipboard contents (F5)", async (
     // is by design — so the report is sent as terminal INPUT
     // (`Terminal.input`, which rides the same `onData` -> WebSocket path
     // any keystroke does) almost immediately once xterm parses the query.
-    await expect
-      .poll(recordedText, {
-        timeout: 15_000,
-        message: "waiting for the addon's OSC 52 report of the (refused) query",
-      })
-      .toMatch(/\x1b\]52;c;[A-Za-z0-9+/=]*\x07/);
+    if (onHostTerminals()) {
+      await waitForTermText(page, parsedMarker, 15_000);
+      expect(
+        await recordedText(),
+        "the page sends no OSC 52 report for a grid terminal, not even an empty one",
+      ).not.toContain("]52;");
+    } else {
+      await expect
+        .poll(recordedText, {
+          timeout: 15_000,
+          message: "waiting for the addon's OSC 52 report of the (refused) query",
+        })
+        .toMatch(/\x1b\]52;c;[A-Za-z0-9+/=]*\x07/);
+      const report = (await recordedText()).match(/\x1b\]52;c;([A-Za-z0-9+/=]*)\x07/)!;
+      expect(
+        report[1],
+        "a refused read must report an EMPTY payload, not merely a harmless-looking one",
+      ).toBe("");
+    }
 
     const text = await recordedText();
-    const report = text.match(/\x1b\]52;c;([A-Za-z0-9+/=]*)\x07/)!;
-    expect(
-      report[1],
-      "a refused read must report an EMPTY payload, not merely a harmless-looking one",
-    ).toBe("");
     expect(
       text,
       "the secret must never reach the terminal's own input/output in any form",
@@ -476,7 +509,7 @@ test("a real drag-select copies the local selection to the system clipboard exac
     // "the drag selected nothing" or "the selection was never copied", and
     // only one of those is this fix's own bug.
     await expect
-      .poll(() => page.evaluate(() => !!(window as any).__farhelmTerm?.hasSelection()), {
+      .poll(() => page.evaluate(() => !!((window as any).__farhelmTerm ?? (window as any).__farhelmGrid)?.hasSelection()), {
         timeout: 5_000,
         message: "the drag must produce a local xterm selection before any copy can be asserted",
       })
@@ -486,7 +519,7 @@ test("a real drag-select copies the local selection to the system clipboard exac
     // second guess about what the row "should" contain (F11: `toBe`, not
     // `toContain`; the row carries trailing blank cells past the marker,
     // and this is the selection those cells are legitimately part of).
-    const selected = await page.evaluate(() => (window as any).__farhelmTerm.getSelection());
+    const selected = await page.evaluate(terminalSelectionInPage);
     expect(selected, "the captured selection must at least contain the marker it was aimed at").toContain(
       marker,
     );
@@ -502,11 +535,11 @@ test("a real drag-select copies the local selection to the system clipboard exac
     // just proved landed in the clipboard must still be exactly what it
     // was, on screen, after the copy resolved.
     expect(
-      await page.evaluate(() => (window as any).__farhelmTerm.hasSelection()),
+      await page.evaluate(() => ((window as any).__farhelmTerm ?? (window as any).__farhelmGrid).hasSelection()),
       "the selection must still be present after copying",
     ).toBe(true);
     expect(
-      await page.evaluate(() => (window as any).__farhelmTerm.getSelection()),
+      await page.evaluate(terminalSelectionInPage),
       "the selection's text must be unchanged by copying it",
     ).toBe(selected);
   } finally {
@@ -533,7 +566,7 @@ test("a drag released outside the terminal element still copies (F1)", async ({
 
     await dragFromRowToOutsideTerminal(page, marker);
     await expect
-      .poll(() => page.evaluate(() => !!(window as any).__farhelmTerm?.hasSelection()), {
+      .poll(() => page.evaluate(() => !!((window as any).__farhelmTerm ?? (window as any).__farhelmGrid)?.hasSelection()), {
         timeout: 5_000,
         message:
           "a drag released outside the terminal must still finalize a local xterm selection " +
@@ -541,7 +574,7 @@ test("a drag released outside the terminal element still copies (F1)", async ({
           "file's copy-on-select listener lives)",
       })
       .toBe(true);
-    const selected = await page.evaluate(() => (window as any).__farhelmTerm.getSelection());
+    const selected = await page.evaluate(terminalSelectionInPage);
     expect(selected).toContain(marker);
 
     await expect
@@ -575,7 +608,7 @@ test("reselecting identical text re-copies after an external clipboard change (F
     await waitForTermText(page, marker);
 
     await dragAcrossRowContaining(page, marker);
-    const selected = await page.evaluate(() => (window as any).__farhelmTerm.getSelection());
+    const selected = await page.evaluate(terminalSelectionInPage);
     await expect
       .poll(() => page.evaluate(() => navigator.clipboard.readText()), { timeout: 15_000 })
       .toBe(selected);
@@ -594,7 +627,7 @@ test("reselecting identical text re-copies after an external clipboard change (F
 
     // Reselect the EXACT same text. This must copy again.
     await dragAcrossRowContaining(page, marker);
-    const reselected = await page.evaluate(() => (window as any).__farhelmTerm.getSelection());
+    const reselected = await page.evaluate(terminalSelectionInPage);
     expect(reselected, "the same row must select the same text a second time").toBe(selected);
     await expect
       .poll(() => page.evaluate(() => navigator.clipboard.readText()), {
@@ -631,7 +664,7 @@ test("under mouse reporting: a plain drag copies nothing, Shift+drag copies exac
     // from a settle delay, so this leg cannot start before mouse reporting
     // is actually live.
     await expect
-      .poll(() => page.evaluate(() => (window as any).__farhelmTerm.modes.mouseTrackingMode), {
+      .poll(() => page.evaluate(mouseTrackingInPage), {
         timeout: 10_000,
         message: "waiting for DECSET 1000 to take effect",
       })
@@ -648,7 +681,7 @@ test("under mouse reporting: a plain drag copies nothing, Shift+drag copies exac
       .toBe(baseline);
     await dragAcrossRowContaining(page, marker);
     expect(
-      await page.evaluate(() => !!(window as any).__farhelmTerm?.hasSelection()),
+      await page.evaluate(() => !!((window as any).__farhelmTerm ?? (window as any).__farhelmGrid)?.hasSelection()),
       "a plain drag while mouse reporting is on must not make a local xterm selection",
     ).toBe(false);
     // No poll here on purpose, matching the no-clobber test's own
@@ -662,11 +695,11 @@ test("under mouse reporting: a plain drag copies nothing, Shift+drag copies exac
     // on, and it must copy exactly like any other local selection.
     await dragAcrossRowContaining(page, marker, "Shift");
     await expect
-      .poll(() => page.evaluate(() => !!(window as any).__farhelmTerm?.hasSelection()), {
+      .poll(() => page.evaluate(() => !!((window as any).__farhelmTerm ?? (window as any).__farhelmGrid)?.hasSelection()), {
         timeout: 5_000,
       })
       .toBe(true);
-    const selected = await page.evaluate(() => (window as any).__farhelmTerm.getSelection());
+    const selected = await page.evaluate(terminalSelectionInPage);
     expect(selected).toContain(marker);
     await expect
       .poll(() => page.evaluate(() => navigator.clipboard.readText()), { timeout: 15_000 })

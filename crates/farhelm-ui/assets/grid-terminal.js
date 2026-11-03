@@ -1052,7 +1052,13 @@
       if (index < shape.notice) index = shape.notice;
       const abs = absAt(Math.min(index, shape.total - 1), shape);
       const raw = x / cellWidth;
-      const col = Math.min(model.cols, Math.max(0, round ? Math.round(raw) : Math.floor(raw)));
+      // xterm.js's boundary is `ceil(raw + 0.5) - 1` (its `getCoords` with
+      // `isSelection`, then one less): nearest, but a press exactly
+      // mid-cell goes to the cell's left boundary, where `Math.round`
+      // would go right. With whole-pixel cells that is no corner case: a
+      // browser spec's drag starting 4px into an 8px cell lost the cell's
+      // character on the grid and kept it on xterm.js.
+      const col = Math.min(model.cols, Math.max(0, round ? Math.ceil(raw + 0.5) - 1 : Math.floor(raw)));
       return { abs, col: round ? col : Math.min(col, model.cols - 1) };
     }
 

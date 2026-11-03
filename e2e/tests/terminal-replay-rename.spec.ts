@@ -17,7 +17,7 @@ import { expect, newObservedContext, test } from "./helpers/evidence";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { type Page } from "@playwright/test";
 import { createSession, openRowMenu, SESSION_LISTING, stubFeed } from "./helpers/fleet";
-import { attachSession, cleanupSession, termText, waitForTermText } from "./helpers/term";
+import { attachSession, cleanupSession, termText, waitForTermText, terminalInput, programInput, onHostTerminals, type InputFrame, recordInput, terminalKind } from "./helpers/term";
 import {
   addTab,
   armTerminalFocusSpy,
@@ -474,25 +474,33 @@ test("reattach-lands-at-tail (agent terminal): hidden through catch-up, one writ
     // against the island's own bookkeeping.
     await expect(page.locator("#terminal")).toBeHidden();
     await expect(page.locator("#term-connecting")).toBeVisible();
-    const held = await replayRecord(page, "terminal");
-    expect(held.bufferedBytes, "the replay has arrived and is being held").toBeGreaterThan(0);
-    expect(held.writesWhileHidden, "nothing reaches xterm.js during the catch-up").toBe(0);
-    expect(
-      await termText(page),
-      "not one line of the replay may be painted before it is complete",
-    ).not.toContain("spam-line-");
+    // How xterm.js's catch-up holds the replay: buffered, unwritten. A grid
+    // applies the replay's frames as they arrive, to a terminal that stays
+    // hidden until the marker, so only the hiding holds for both.
+    const grid = (await terminalKind(page)) === "grid";
+    if (!grid) {
+      const held = await replayRecord(page, "terminal");
+      expect(held.bufferedBytes, "the replay has arrived and is being held").toBeGreaterThan(0);
+      expect(held.writesWhileHidden, "nothing reaches xterm.js during the catch-up").toBe(0);
+      expect(
+        await termText(page),
+        "not one line of the replay may be painted before it is complete",
+      ).not.toContain("spam-line-");
+    }
 
     await releaseCatchUp(page, "terminal");
     const replay = await waitForReplayReveal(page, "terminal");
     expect(replay.revealReason, "the marker is what ended the catch-up").toBe("marker");
-    expect(
-      replay.writesWhileHidden,
-      "the whole replay must reach xterm.js as one write, never chunk by chunk",
-    ).toBe(1);
-    expect(
-      replay.revealedInWriteCallback,
-      "the reveal must wait for xterm.js to have consumed the replay",
-    ).toBe(true);
+    if (!grid) {
+      expect(
+        replay.writesWhileHidden,
+        "the whole replay must reach xterm.js as one write, never chunk by chunk",
+      ).toBe(1);
+      expect(
+        replay.revealedInWriteCallback,
+        "the reveal must wait for xterm.js to have consumed the replay",
+      ).toBe(true);
+    }
     expect(
       replay.viewportAtTailOnReveal,
       "the first visible frame is at the tail",
@@ -596,19 +604,26 @@ test("reattach-lands-at-tail (tab): hidden through catch-up, one write, viewport
     await selectTerminal(page, tabId);
     await expect(page.locator(`[id="${element}"]`)).toBeHidden();
     await expect(page.locator(`[id="term-connecting-${tabId}"]`)).toBeVisible();
-    expect(
-      await islandText(page, element),
-      "a tab's replay is held back exactly like the agent terminal's",
-    ).not.toContain("TABSPAM-");
+    // xterm.js holds the replay unwritten; a grid applies it to the hidden
+    // terminal as it arrives (see the agent terminal's test above).
+    const grid = (await terminalKind(page, element)) === "grid";
+    if (!grid) {
+      expect(
+        await islandText(page, element),
+        "a tab's replay is held back exactly like the agent terminal's",
+      ).not.toContain("TABSPAM-");
+    }
 
     await releaseCatchUp(page, element);
     const replay = await waitForReplayReveal(page, element);
     expect(replay.revealReason).toBe("marker");
-    expect(
-      replay.writesWhileHidden,
-      "a tab's replay is batched exactly like the agent terminal's",
-    ).toBe(1);
-    expect(replay.revealedInWriteCallback).toBe(true);
+    if (!grid) {
+      expect(
+        replay.writesWhileHidden,
+        "a tab's replay is batched exactly like the agent terminal's",
+      ).toBe(1);
+      expect(replay.revealedInWriteCallback).toBe(true);
+    }
     expect(replay.viewportAtTailOnReveal).toBe(true);
 
     await waitForIslandText(page, element, "TABSPAM-200", 30_000);
@@ -650,6 +665,12 @@ test("replay-degrades-on-size: crossing the byte bound flushes once, keeps every
   page,
   request,
 }) => {
+  // xterm.js's catch-up: the replay's bytes buffered while hidden and
+  // handed over in one write, and its byte, frame, idle and ending bounds.
+  // A grid replay is frames the component applies as they arrive, with
+  // nothing to buffer; its reattach and recovery are pinned in
+  // e2e/grid-client/grid-attach.spec.ts.
+  test.skip(onHostTerminals(), "xterm.js's catch-up buffering; a grid replay applies frames as they arrive");
   test.setTimeout(120_000);
   const title = `replay-size-${Date.now()}`;
   let id: string | undefined;
@@ -729,6 +750,12 @@ test("replay-degrades-on-idle: a progressing replay keeps buffering; a quiet one
   page,
   request,
 }) => {
+  // xterm.js's catch-up: the replay's bytes buffered while hidden and
+  // handed over in one write, and its byte, frame, idle and ending bounds.
+  // A grid replay is frames the component applies as they arrive, with
+  // nothing to buffer; its reattach and recovery are pinned in
+  // e2e/grid-client/grid-attach.spec.ts.
+  test.skip(onHostTerminals(), "xterm.js's catch-up buffering; a grid replay applies frames as they arrive");
   test.setTimeout(120_000);
   const title = `replay-idle-${Date.now()}`;
   const idleMs = 1_500;
@@ -800,6 +827,12 @@ test("replay-degrades-on-detach: a takeover mid-catch-up shows what arrived, und
   page,
   request,
 }) => {
+  // xterm.js's catch-up: the replay's bytes buffered while hidden and
+  // handed over in one write, and its byte, frame, idle and ending bounds.
+  // A grid replay is frames the component applies as they arrive, with
+  // nothing to buffer; its reattach and recovery are pinned in
+  // e2e/grid-client/grid-attach.spec.ts.
+  test.skip(onHostTerminals(), "xterm.js's catch-up buffering; a grid replay applies frames as they arrive");
   test.setTimeout(120_000);
   const title = `replay-detach-${Date.now()}`;
   let id: string | undefined;
@@ -853,6 +886,12 @@ test("replay-degrades-on-close: a socket closing mid-catch-up flushes, reveals, 
   page,
   request,
 }) => {
+  // xterm.js's catch-up: the replay's bytes buffered while hidden and
+  // handed over in one write, and its byte, frame, idle and ending bounds.
+  // A grid replay is frames the component applies as they arrive, with
+  // nothing to buffer; its reattach and recovery are pinned in
+  // e2e/grid-client/grid-attach.spec.ts.
+  test.skip(onHostTerminals(), "xterm.js's catch-up buffering; a grid replay applies frames as they arrive");
   test.setTimeout(120_000);
   const title = `replay-close-${Date.now()}`;
   let id: string | undefined;
@@ -1314,6 +1353,12 @@ test("replay-degrades-on-chunks: crossing the frame bound flushes once, keeping 
   page,
   request,
 }) => {
+  // xterm.js's catch-up: the replay's bytes buffered while hidden and
+  // handed over in one write, and its byte, frame, idle and ending bounds.
+  // A grid replay is frames the component applies as they arrive, with
+  // nothing to buffer; its reattach and recovery are pinned in
+  // e2e/grid-client/grid-attach.spec.ts.
+  test.skip(onHostTerminals(), "xterm.js's catch-up buffering; a grid replay applies frames as they arrive");
   test.setTimeout(120_000);
   const title = `replay-chunks-${Date.now()}`;
   let id: string | undefined;
@@ -1384,6 +1429,12 @@ test("replay-idle-ignores-empty-frames: a stream of empty frames still counts as
   page,
   request,
 }) => {
+  // xterm.js's catch-up: the replay's bytes buffered while hidden and
+  // handed over in one write, and its byte, frame, idle and ending bounds.
+  // A grid replay is frames the component applies as they arrive, with
+  // nothing to buffer; its reattach and recovery are pinned in
+  // e2e/grid-client/grid-attach.spec.ts.
+  test.skip(onHostTerminals(), "xterm.js's catch-up buffering; a grid replay applies frames as they arrive");
   test.setTimeout(120_000);
   const title = `replay-empty-${Date.now()}`;
   const idleMs = 1_200;
@@ -1960,11 +2011,11 @@ test("reveal-does-not-steal-focus: a rename field being typed into keeps focus a
  * The final live echo in each caller also proves this observer saw the
  * attachment that would have received a stray Enter.
  */
-function observeQuestionInput(page: Page, id: string): Buffer[] {
-  const binary: Buffer[] = [];
+function observeQuestionInput(page: Page, id: string): InputFrame[] {
+  const binary: InputFrame[] = [];
   page.on("websocket", (socket) => {
     if (new URL(socket.url()).pathname !== `/api/sessions/${encodeURIComponent(id)}/term`) return;
-    socket.on("framesent", ({ payload }) => { if (Buffer.isBuffer(payload)) binary.push(payload); });
+    recordInput(socket, binary);
   });
   return binary;
 }
@@ -1974,7 +2025,7 @@ function observeQuestionInput(page: Page, id: string): Buffer[] {
  * and using Escape then restores the selected terminal, whose processed echo
  * settles the outgoing-frame observation without a time-only quiet window.
  */
-async function declineQuestionAndCheckInput(page: Page, action: "delete" | "replace", binary: Buffer[]) {
+async function declineQuestionAndCheckInput(page: Page, action: "delete" | "replace", binary: InputFrame[]) {
   const trigger = page.locator(`.header-${action}`);
   const question = page.locator(`.header-${action}-confirm`);
   await expect(question.locator(".btn-danger")).toBeFocused();
@@ -1987,12 +2038,12 @@ async function declineQuestionAndCheckInput(page: Page, action: "delete" | "repl
   await expect(question.locator(".btn-danger")).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(question).toHaveCount(0);
-  await expect(page.locator("#terminal .xterm-helper-textarea")).toBeFocused();
+  await expect(terminalInput(page)).toBeFocused();
   const marker = `question-escape-live-${Date.now()}`;
   await page.keyboard.type(marker);
   await page.keyboard.press("Enter");
   await waitForTermText(page, `echo:${marker}`);
-  expect(Buffer.concat(binary).toString(), "only input after Escape may reach the terminal").toBe(`${marker}\r`);
+  expect(programInput(binary), "only input after Escape may reach the terminal").toBe(`${marker}\r`);
 }
 
 for (const action of ["delete", "replace"] as const) {

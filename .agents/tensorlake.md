@@ -48,6 +48,12 @@ agent needs to run them, and to rebuild the sandbox template from scratch when t
    failure is settled. In landing notes and reports, list every shard's run ID, say the runs were on Tensorlake
    sandboxes at the maintainer's request, and note the Node version difference below.
 
+For the browser suite's host-terminal run (`.agents/validation.md`, the `FARHELM_E2E_SUITE_TERMINALS=host` entry), add
+`--suite-terminals host`: every shard's script then runs with that variable set and kept through the recorder's scrub,
+its `summary.txt` says so (a shard whose summary does not is failed, since it ran the ordinary suite), and with no
+projects named the run takes every project of the files `e2e/host-terminal-specs.ts` lists (a project outside them does
+not exist in that run).
+
 The shard runner uses the recorder's generic mode (`--kind development` without `--runner playwright`), because the
 Playwright mode accepts only spec files and grep selectors and always runs both engines; engine-specific shards need
 `--project`. Say so when reporting.

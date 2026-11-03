@@ -13,8 +13,10 @@
 #
 # Usage: run-shard.sh <label> <playwright project>... [-- <extra playwright arguments>]
 # Projects are named as in playwright.config.ts (e.g. webkit-settings); extra arguments such as
-# `-g <title> --repeat-each=3` narrow a rerun. Writes /home/tl-user/out/<label>/summary.txt and console.log; the
-# recorder's run directory under /tmp/farhelm-tmp/test-runs keeps the rest.
+# `-g <title> --repeat-each=3` narrow a rerun. FARHELM_E2E_SUITE_TERMINALS in this script's environment (`host`) is
+# kept for the run, which the recorder would otherwise scrub: it turns the stacks to terminal hosts
+# (e2e/host-terminal-specs.ts). Writes /home/tl-user/out/<label>/summary.txt and console.log; the recorder's run
+# directory under /tmp/farhelm-tmp/test-runs keeps the rest.
 set -u
 label=$1; shift
 W=/home/tl-user/farhelm
@@ -112,9 +114,14 @@ projects=()
 extra=()
 while [ $# -gt 0 ] && [ "$1" != "--" ]; do projects+=("--project=$1"); shift; done
 if [ "${1:-}" = "--" ]; then shift; extra=("$@"); fi
+keep=()
+if [ -n "${FARHELM_E2E_SUITE_TERMINALS:-}" ]; then
+  keep=(--keep-farhelm-env FARHELM_E2E_SUITE_TERMINALS)
+  echo "suite terminals: $FARHELM_E2E_SUITE_TERMINALS" >>"$OUT/summary.txt"
+fi
 cd "$W/e2e" || exit 1
-python3 ../scripts/record-test-run.py --kind development --tmux required \
-  --selection "sandbox shard $label: ${projects[*]} ${extra[*]}" \
+python3 ../scripts/record-test-run.py --kind development --tmux required "${keep[@]}" \
+  --selection "sandbox shard $label: ${FARHELM_E2E_SUITE_TERMINALS:+$FARHELM_E2E_SUITE_TERMINALS terminals: }${projects[*]} ${extra[*]}" \
   --concurrency '3 browser workers, one stack each; retries 0' \
   -- npx playwright test "${projects[@]}" "${extra[@]}" --retries=0 --reporter=line >"$OUT/console.log" 2>&1
 code=$?

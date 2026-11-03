@@ -10,9 +10,12 @@
  * Subcommands (all take `--scratch <dir>`, where packs, the ledger and results live, outside the checkout):
  *   make-template --name <sandbox>     bootstrap a fresh sandbox, prove it with a probe shard, snapshot it, print the ID
  *   run --template <snapshot> --prefix <name-prefix> --shards <n> --out <dir> [--grep <title>] [--repeat <n>]
- *       [project ...]                  shard the projects (default: all) over clones of the template, collect results;
+ *       [--suite-terminals host] [project ...]
+ *                                      shard the projects (default: all) over clones of the template, collect results;
  *                                      --grep and --repeat narrow a rerun and apply to every shard; --reuse-pack
- *                                      sends the previous run's pack (the same build) instead of packing again
+ *                                      sends the previous run's pack (the same build) instead of packing again;
+ *                                      --suite-terminals host runs every shard's stacks with terminal hosts
+ *                                      (e2e/host-terminal-specs.ts), so only that run's projects exist
  *   sweep [--keep <snapshot>]          terminate ledger sandboxes still alive, delete snapshots of ledger sandboxes
  *
  * The sandbox-side work is in `bootstrap.sh` and `run-shard.sh` beside this file. They are Bash because they run on the
@@ -24,6 +27,7 @@
 import $ from "jsr:@david/dax@0.50.1";
 import { parseArgs } from "jsr:@std/cli@1.0.32/parse-args";
 import { assertEquals } from "jsr:@std/assert@1.0.19";
+import { HOST_TERMINAL_SPECS } from "../../e2e/host-terminal-specs.ts";
 
 const HERE = import.meta.dirname!;
 // The checkout this script lives in; `--repo` overrides it for a copy run from elsewhere.
@@ -121,8 +125,10 @@ export function balance(projects: string[], n: number, lines: (spec: string) => 
   return shards.filter((s) => s.length);
 }
 
-function allProjects() {
+/** Every project of the suite, or of its host-terminal run (`hostTerminals`), which has only the listed specs'. */
+function allProjects(hostTerminals: boolean) {
   const specs = [...Deno.readDirSync(`${REPO}/e2e/tests`)].map((e) => e.name).filter((n) => n.endsWith(".spec.ts"))
+    .filter((n) => !hostTerminals || HOST_TERMINAL_SPECS.has(n))
     .map((n) => n.slice(0, -".spec.ts".length)).sort();
   return ["chromium", "webkit"].flatMap((e) => specs.map((s) => `${e}-${s}`));
 }
@@ -132,7 +138,8 @@ const specLines = (spec: string) => Deno.readTextFileSync(`${REPO}/e2e/tests/${s
 /** One shard on its own clone: run it in one attached exec (what an exec leaves running cannot be relied on
  * afterwards), bring back the summary and console output, and for a failed shard its retained run directories, then
  * terminate the clone.
- * `extra` holds Playwright arguments for every shard (a grep, a repeat count), passed after `--`. */
+ * `extra` holds Playwright arguments for every shard (a grep, a repeat count), passed after `--`; `env` holds
+ * `KEY=VALUE` settings for the shard script's environment (the suite's terminal kind), which it hands on to the run. */
 async function shard(
   scratch: string,
   pack: string,
@@ -141,13 +148,15 @@ async function shard(
   label: string,
   projects: string[],
   extra: string[],
+  env: string[],
   out: string,
 ) {
   await create(scratch, name, CLONE_DISK_MB, template);
   try {
     await provision(name, pack);
     const tail = extra.length ? ["--", ...extra] : [];
-    const r = await $`tl sbx exec -t 14400 ${name} bash ${HOME}/stage/run-shard.sh ${label} ${projects} ${tail}`
+    const envArgs = env.flatMap((e) => ["-e", e]);
+    const r = await $`tl sbx exec -t 14400 ${envArgs} ${name} bash ${HOME}/stage/run-shard.sh ${label} ${projects} ${tail}`
       .noThrow().captureCombined();
     await $`mkdir -p ${out}/${label}`;
     await Deno.writeTextFile(`${out}/${label}/exec.log`, r.combined.slice(-20000));
@@ -158,11 +167,24 @@ async function shard(
       await $`tl sbx exec ${name} tar -czf ${HOME}/out/${label}/runs.tar.gz -C /tmp/farhelm-tmp test-runs`.noThrow();
       await $`tl sbx cp ${name}:${HOME}/out/${label}/runs.tar.gz ${out}/${label}/runs.tar.gz`.noThrow().quiet();
     }
-    console.log(`${label} (${name}): exit ${r.code}, ${projects.length} projects`);
-    return r.code;
+    // A host-terminal shard whose script never saw the variable runs the ordinary suite and passes on tmux; its
+    // summary's `suite terminals:` line is the shard script's own word that it kept the variable for the run.
+    let code = r.code;
+    const kind = env.find((e) => e.startsWith("FARHELM_E2E_SUITE_TERMINALS="))?.split("=")[1];
+    if (kind && !summaryNamesSuiteTerminals(await Deno.readTextFile(`${out}/${label}/summary.txt`).catch(() => ""), kind)) {
+      console.log(`${label} (${name}): its summary does not say "suite terminals: ${kind}"; failing the shard`);
+      code = code || 1;
+    }
+    console.log(`${label} (${name}): exit ${code}, ${projects.length} projects`);
+    return code;
   } finally {
     await $`tl sbx terminate ${name}`.noThrow().quiet();
   }
+}
+
+/** Whether a shard's summary records that its run kept the suite's terminal kind (`run-shard.sh` writes the line). */
+export function summaryNamesSuiteTerminals(summary: string, kind: string): boolean {
+  return summary.split("\n").some((line) => line.trim() === `suite terminals: ${kind}`);
 }
 
 async function freeNames(prefix: string, n: number) {
@@ -175,16 +197,19 @@ async function freeNames(prefix: string, n: number) {
 // --- subcommands
 
 async function run(a: Record<string, string>, projects: string[]) {
+  // The main suite's terminal kind (e2e/host-terminal-specs.ts): only `host` is a choice; unset is the default.
+  if (a["suite-terminals"] && a["suite-terminals"] !== "host") throw new Error("--suite-terminals takes only host");
   // A rerun of failures must test the same build. Rust test builds relink `target/debug/farhelm` with test features, so
   // packing again while or after they run would send a different binary; --reuse-pack keeps the earlier pack.
   const pack_ = a["reuse-pack"] ? `${a.scratch}/pack` : await pack(a.scratch);
-  const shards = balance(projects.length ? projects : allProjects(), Number(a.shards), specLines);
+  const shards = balance(projects.length ? projects : allProjects(!!a["suite-terminals"]), Number(a.shards), specLines);
   const names = await freeNames(a.prefix, shards.length);
   const extra = [...(a.grep ? ["-g", a.grep] : []), ...(a.repeat ? [`--repeat-each=${a.repeat}`] : [])];
+  const env = a["suite-terminals"] ? [`FARHELM_E2E_SUITE_TERMINALS=${a["suite-terminals"]}`] : [];
   console.log(`${shards.length} shards`);
   try {
     const codes = await Promise.all(
-      shards.map((s, i) => shard(a.scratch, pack_, a.template, names[i], `shard${i + 1}`, s, extra, a.out)),
+      shards.map((s, i) => shard(a.scratch, pack_, a.template, names[i], `shard${i + 1}`, s, extra, env, a.out)),
     );
     console.log(codes.every((c) => c === 0) ? "ALL SHARDS PASSED" : "SOME SHARDS FAILED");
   } finally {
@@ -220,7 +245,7 @@ async function makeTemplate(a: Record<string, string>) {
 
 if (import.meta.main) {
   const args = parseArgs(Deno.args, {
-    string: ["scratch", "name", "template", "prefix", "shards", "out", "keep", "repo", "grep", "repeat"],
+    string: ["scratch", "name", "template", "prefix", "shards", "out", "keep", "repo", "grep", "repeat", "suite-terminals"],
     boolean: ["reuse-pack"],
   });
   const [cmd, ...rest] = args._.map(String);
@@ -250,4 +275,11 @@ Deno.test("snapshotRows reads snapshot and source sandbox IDs from the CLI's tab
     "│ suspend-x ┆ completed ┆ memory    ┆ CAS   ┆ sbx2       ┆ img   │",
   ].join("\n");
   assertEquals(snapshotRows(listing), [["snapA", "sbx1", "completed"], ["suspend-x", "sbx2", "completed"]]);
+});
+
+Deno.test("summaryNamesSuiteTerminals accepts only the shard script's exact line for the kind", () => {
+  const summary = "systemd --user: running\nself-ssh: ok\nsuite terminals: host\nexit: 0\n";
+  assertEquals(summaryNamesSuiteTerminals(summary, "host"), true);
+  assertEquals(summaryNamesSuiteTerminals("systemd --user: running\nexit: 0\n", "host"), false);
+  assertEquals(summaryNamesSuiteTerminals("suite terminals: tmux\n", "host"), false);
 });

@@ -9,7 +9,7 @@ import { type Page } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createSession, cleanupSession, listSessions } from './helpers/fleet';
-import { attachSession, waitForTermText } from './helpers/term';
+import { attachSession, onHostTerminals, terminalLinkPointer, terminalScreen, terminalViewport, waitForTermText } from './helpers/term';
 import { stackScratchDir } from './helpers/scratch';
 import { routeGate } from './helpers/route-gate';
 
@@ -20,24 +20,25 @@ import { routeGate } from './helpers/route-gate';
 async function hoverPath(page: Page, needle: string) {
   let cell: { x: number; y: number } | null = null;
   await expect.poll(async () => {
-    cell = await page.evaluate((needle) => {
-      const term = (window as any).__farhelmTerm;
-      const box = term.element.querySelector('.xterm-screen').getBoundingClientRect();
-      for (let i = 0; i < term.rows; i++) {
-        const text = term.buffer.active.getLine(term.buffer.active.viewportY + i)?.translateToString(true) || '';
-        const column = text.indexOf(needle);
-        if (column >= 0) return { x: box.x + (column + needle.length / 2) * box.width / term.cols, y: box.y + (i + 0.5) * box.height / term.rows };
+    const view = await terminalViewport(page);
+    const box = await terminalScreen(page).boundingBox();
+    cell = null;
+    if (!view || !box) return false;
+    for (let i = 0; i < view.rows; i++) {
+      const column = (view.lines[i] ?? '').indexOf(needle);
+      if (column >= 0) {
+        cell = { x: box.x + (column + needle.length / 2) * box.width / view.cols, y: box.y + (i + 0.5) * box.height / view.rows };
+        break;
       }
-      return null;
-    }, needle);
+    }
     return cell !== null;
   }, { timeout: 10000, message: `live output must contain ${needle}` }).toBe(true);
-  const box = (await page.locator('#terminal .xterm-screen').boundingBox())!;
+  const box = (await terminalScreen(page).boundingBox())!;
   // xterm retains the last buffer cell across mouseleave. Visit a known
   // blank in-grid cell before departing, so re-entry actually starts hover.
   await page.mouse.move(box.x + box.width - 2, cell!.y);
   await page.mouse.move(box.x + box.width - 2, box.y - 2);
-  await expect(page.locator('#terminal .xterm-screen')).not.toHaveClass(/xterm-cursor-pointer/);
+  await expect(terminalLinkPointer(page)).toHaveCount(0);
   await page.mouse.move(cell!.x, cell!.y);
   return cell!;
 }
@@ -100,6 +101,12 @@ for (const linkKind of ['plain', 'OSC']) {
      * Both link providers and both stat outcomes exercise the same contract.
      */
     test(`resting ${linkKind} ${targetKind} hover survives live redraws`, async ({ page, request }, testInfo) => {
+      // Counts xterm.js's own renders of the path row (`onRender`). The
+      // grid's counterpart, a redraw withdrawing a changed hover and keeping
+      // an unchanged one, is pinned in e2e/grid-client/grid-attach.spec.ts
+      // ("a redraw that changes the hovered path withdraws its click; the
+      // same text redrawn keeps it").
+      test.skip(onHostTerminals(), "counts xterm.js's renders; the grid's redraw handling is pinned in e2e/grid-client");
       const directory = stackScratchDir('file-redraw-');
       const basename = targetKind === 'folder' ? 'redraw.dir' : 'redraw.txt';
       const filename = path.join(directory, basename);
@@ -161,9 +168,9 @@ for (const linkKind of ['plain', 'OSC']) {
           pendingRequests: 1, answeredRequests: 1, readyEnd: { hides: 0, restarts: 0 },
         });
         await expect(tooltip).toContainText(result);
-        if (targetKind === 'file' || linkKind === 'OSC') await expect(page.locator('#terminal .xterm-screen')).toHaveClass(/xterm-cursor-pointer/);
-        else await expect(page.locator('#terminal .xterm-screen')).not.toHaveClass(/xterm-cursor-pointer/);
-        const screen = (await page.locator('#terminal .xterm-screen').boundingBox())!;
+        if (targetKind === 'file' || linkKind === 'OSC') await expect(terminalLinkPointer(page)).toHaveCount(1);
+        else await expect(terminalLinkPointer(page)).toHaveCount(0);
+        const screen = (await terminalScreen(page).boundingBox())!;
         await page.mouse.move(screen.x + screen.width - 2, screen.y - 2);
         await expect(tooltip).toBeHidden();
         await hoverPath(page, label);
@@ -342,7 +349,7 @@ for (const kind of ['local', 'ssh']) {
       await expect(tooltip).toBeVisible();
       await expect(tooltip).toContainText('Checking…');
       await expect(tooltip).toHaveClass(/terminal-file-checking/);
-      await expect(page.locator('#terminal .xterm-screen')).not.toHaveClass(/xterm-cursor-pointer/);
+      await expect(terminalLinkPointer(page)).toHaveCount(0);
       let downloadRequests = 0;
       page.on('request', req => { if (req.url().endsWith('/files/download')) downloadRequests++; });
       await page.mouse.click(point.x, point.y);
@@ -358,7 +365,7 @@ for (const kind of ['local', 'ssh']) {
       await expect(tooltip).toHaveAttribute('data-tier', 'small');
       await expect(tooltip).toHaveCSS('border-left-width', '3px');
       await expect(tooltip).not.toContainText('click to open');
-      await expect(page.locator('#terminal .xterm-screen')).toHaveClass(/xterm-cursor-pointer/);
+      await expect(terminalLinkPointer(page)).toHaveCount(1);
       const saved = page.waitForEvent('download');
       await page.mouse.click(point.x, point.y);
       const download = await saved;
@@ -368,7 +375,7 @@ for (const kind of ['local', 'ssh']) {
       const notice = page.locator('#terminal .terminal-file-message');
       await expect(notice).toContainText(`Downloaded ${basename}`);
       await expect(notice).toHaveClass(/showing/);
-      const terminalBox = (await page.locator('#terminal .xterm').boundingBox())!;
+      const terminalBox = (await page.locator('#terminal :is(.xterm, .grid-terminal)').boundingBox())!;
       const noticeBox = (await notice.boundingBox())!;
       expect(noticeBox.y - terminalBox.y).toBeCloseTo(4, 0);
       await expect(notice).toHaveCSS('opacity', '0', { timeout: 8000 });
@@ -427,7 +434,7 @@ test('file refusals, OSC file save and forbidden OSC schemes', async ({ page, re
     for (const [name, refusal] of [['missing.txt', 'Not found'], ['folder.dir', 'Folder: not downloadable'], ['private.txt', 'Not readable'], ['large.bin', '100 MB limit']]) {
       await hoverPath(page, name);
       await expect(page.locator('#terminal .terminal-file-target')).toContainText(refusal);
-      await expect(page.locator('#terminal .xterm-screen')).not.toHaveClass(/xterm-cursor-pointer/);
+      await expect(terminalLinkPointer(page)).toHaveCount(0);
     }
     await hoverPath(page, 'OSC-FILE');
     await expect(page.locator('#terminal .terminal-file-target')).toContainText('click to download');
@@ -458,7 +465,7 @@ test('file refusals, OSC file save and forbidden OSC schemes', async ({ page, re
     await expect(notice).toContainText('Download failed:');
     await expect(notice).toHaveClass(/showing/);
     // A blank terminal cell dismisses the failure without starting another save.
-    const screen = (await page.locator('#terminal .xterm-screen').boundingBox())!;
+    const screen = (await terminalScreen(page).boundingBox())!;
     await page.mouse.click(screen.x + screen.width - 2, screen.y + screen.height - 2);
     await expect(notice).toHaveText('');
     await expect(notice).not.toHaveClass(/showing/);
@@ -502,7 +509,7 @@ test('leaving cancels lookup and the next hover checks again', async ({ page, re
     await hoverPath(page, 'fresh.txt');
     await expect(page.locator('#terminal .terminal-file-target')).toContainText('Checking…');
     await expect.poll(() => arrived).toBe(true);
-    const box = (await page.locator('#terminal .xterm-screen').boundingBox())!;
+    const box = (await terminalScreen(page).boundingBox())!;
     await page.mouse.move(box.x + box.width - 2, box.y - 2);
     expect((await failed).failure()).not.toBeNull();
     gate.release();
@@ -512,7 +519,7 @@ test('leaving cancels lookup and the next hover checks again', async ({ page, re
     expect(fs.readFileSync(path.join(directory, 'fresh.txt'), 'utf8')).toBe('new file');
     await hoverPath(page, 'fresh.txt');
     await expect(page.locator('#terminal .terminal-file-target')).toContainText('8 B');
-    await expect(page.locator('#terminal .xterm-screen')).toHaveClass(/xterm-cursor-pointer/);
+    await expect(terminalLinkPointer(page)).toHaveCount(1);
   } catch (error) {
     bodyFailed = true;
     throw error;

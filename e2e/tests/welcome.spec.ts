@@ -5,12 +5,14 @@
  */
 import { Page } from "@playwright/test";
 import { expect, test } from "./helpers/evidence";
+import { terminalInput } from "./helpers/term";
 import { resolveToken } from "./helpers/color";
 import { patchPreferences, readPreferences, resetPreferences } from "./helpers/fleet";
 import { routeGate } from "./helpers/route-gate";
 import { DEVICE_SECRET_KEY } from "./helpers/device-auth";
 import { requireHelmBuild } from "./helpers/helm-build";
 import { waitForReplayReveal } from "./helpers/terminal-readiness";
+import { watchHostPremise } from "./helpers/host-premise";
 import { currentStackSlot } from "../stack-slots";
 
 const GET_STARTED_URL = "https://farhelm.io/docs/get-started/first-session/";
@@ -53,12 +55,14 @@ for (const dismissal of ["got it", "close", "Escape"] as const) {
     else if (dismissal === "close") await dialog.getByRole("button", { name: "Close welcome", exact: true }).click();
     else await dialog.getByRole("button", { name: "Got it", exact: true }).click();
     await expect(dialog).toHaveCount(0);
-    await expect(page.locator("#terminal .xterm-helper-textarea")).toBeFocused();
+    await expect(terminalInput(page)).toBeFocused();
     await expect.poll(async () => (await readPreferences(request)).welcome_seen).toBe(true);
     await page.reload();
     await expect(page.locator(".new-session-button")).toBeVisible();
     await expect(dialog).toHaveCount(0);
     const other = await browser.newContext({ storageState: currentStackSlot().authStatePath });
+    // Under the host-terminal run's premise watch like every other context.
+    watchHostPremise(other);
     try {
       const seed = await other.storageState();
       expect(seed.origins.flatMap(origin => origin.localStorage.map(item => item.name)),

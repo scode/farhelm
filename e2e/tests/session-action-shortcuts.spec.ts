@@ -5,7 +5,7 @@ import type { Page } from "@playwright/test";
 import { cleanupSession, createSession, listHosts, listSessions, patchPreferences, readPreferences } from "./helpers/fleet";
 import { routeGate } from "./helpers/route-gate";
 import { installTerminalSuiteHooks, LIVE_BADGE } from "./helpers/terminal-suite";
-import { attachSession, waitForTermText } from "./helpers/term";
+import { attachSession, waitForTermText, terminalInput, programInput, type InputFrame, recordInput } from "./helpers/term";
 
 installTerminalSuiteHooks();
 
@@ -18,7 +18,7 @@ async function openLiveSession(page: Page, id: string) {
   await attachSession(page, id);
   await waitForTermText(page, "FAKE-AGENT READY");
   await waitForTermText(page, "> ");
-  const terminal = page.locator("#terminal .xterm-helper-textarea");
+  const terminal = terminalInput(page);
   await expect(terminal).toBeFocused();
   const marker = `shortcut-live-${Date.now()}`;
   await page.keyboard.type(marker);
@@ -35,11 +35,11 @@ async function openLiveSession(page: Page, id: string) {
 test("browser Delete chord shares header confirmation and restores terminal focus without forwarding input", async ({ page, request }) => {
   const previous = await readPreferences(request);
   const session = await createSession(request, { title: `delete-shortcut-confirm-${Date.now()}` });
-  const binary: Buffer[] = [];
+  const binary: InputFrame[] = [];
   const deletes: string[] = [];
   page.on("websocket", (socket) => {
     if (new URL(socket.url()).pathname !== `/api/sessions/${encodeURIComponent(session.id)}/term`) return;
-    socket.on("framesent", ({ payload }) => { if (Buffer.isBuffer(payload)) binary.push(payload); });
+    recordInput(socket, binary);
   });
   page.on("request", (candidate) => {
     if (candidate.method() === "DELETE" && new URL(candidate.url()).pathname === `/api/sessions/${encodeURIComponent(session.id)}`) {
@@ -72,7 +72,7 @@ test("browser Delete chord shares header confirmation and restores terminal focu
     await page.keyboard.type(marker);
     await page.keyboard.press("Enter");
     await waitForTermText(page, `echo:${marker}`);
-    expect(Buffer.concat(binary).toString()).toBe(`${marker}\r`);
+    expect(programInput(binary)).toBe(`${marker}\r`);
     expect(deletes, "both unanswered questions must leave the session intact").toEqual([]);
     expect((await listSessions(request)).sessions.some((entry) => entry.id === session.id)).toBe(true);
   } finally {
@@ -214,11 +214,11 @@ test("browser Rename chord edits the filtered open session and returns live term
   const shown = title.replace("\u202E", "<U+202E>").replace("\u200B", "<U+200B>");
   const edited = `shortcut-renamed-${Date.now()}`;
   const session = await createSession(request, { title: initialTitle, host: local!.id });
-  const binary: Buffer[] = [];
+  const binary: InputFrame[] = [];
   const submittedTitles: string[] = [];
   page.on("websocket", (socket) => {
     if (new URL(socket.url()).pathname !== `/api/sessions/${encodeURIComponent(session.id)}/term`) return;
-    socket.on("framesent", ({ payload }) => { if (Buffer.isBuffer(payload)) binary.push(payload); });
+    recordInput(socket, binary);
   });
   const isRename = (url: URL) => url.pathname === `/api/sessions/${encodeURIComponent(session.id)}/rename`;
   page.on("request", (candidate) => {
@@ -268,7 +268,7 @@ test("browser Rename chord edits the filtered open session and returns live term
     await page.keyboard.type(echoed[0]);
     await page.keyboard.press("Enter");
     await waitForTermText(page, `echo:${echoed[0]}`);
-    expect(Buffer.concat(binary).toString()).toBe(`${echoed[0]}\r`);
+    expect(programInput(binary)).toBe(`${echoed[0]}\r`);
     expect(submittedTitles, "Escape must not save the title").toEqual([]);
 
     for (const nextTitle of [title, edited]) {
@@ -291,7 +291,7 @@ test("browser Rename chord edits the filtered open session and returns live term
       await page.keyboard.type(marker);
       await page.keyboard.press("Enter");
       await waitForTermText(page, `echo:${marker}`);
-      expect(Buffer.concat(binary).toString()).toBe(echoed.map((line) => `${line}\r`).join(""));
+      expect(programInput(binary)).toBe(echoed.map((line) => `${line}\r`).join(""));
       await expect(page.locator(`.session-row[data-session-id="${session.id}"]`)).toHaveCount(0);
     }
     expect(submittedTitles).toEqual([title, edited]);
@@ -304,7 +304,7 @@ test("browser Rename chord edits the filtered open session and returns live term
     await page.keyboard.press("Escape");
     await expect(dialog).toHaveCount(0);
     await expect(terminal).toBeFocused();
-    expect(Buffer.concat(binary).toString()).toBe(echoed.map((line) => `${line}\r`).join(""));
+    expect(programInput(binary)).toBe(echoed.map((line) => `${line}\r`).join(""));
 
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     const settings = page.getByRole("dialog", { name: "Settings", exact: true });

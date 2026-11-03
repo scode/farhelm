@@ -54,7 +54,7 @@ import { fulfillAsHelm, helmBuild, installTerminalSuiteHooks, LIVE_BADGE, LIVE_S
 const UNACCEPTED = { "x-farhelm-create-outcome": "definitely-unaccepted" };
 import { routeGate } from "./helpers/route-gate";
 import { selectSessionActionWith } from "./helpers/session-actions";
-import { answerYolo, attachSession, waitForTermText } from "./helpers/term";
+import { answerYolo, attachSession, waitForTermText, termText } from "./helpers/term";
 import { waitForSessionRevealed } from "./helpers/terminal-readiness";
 
 // Fabricated refusals need the live helm's stamp. The existing suite reset
@@ -604,7 +604,8 @@ test("replacing a live session creates a fresh row in its place, selected, with 
     // from the source's — only a marker that a fresh mount could not
     // possibly carry can.
     await page.evaluate(() => {
-      (window as any).__farhelmTerm.__testMarker = "pre-replace";
+      // The component, whichever kind: xterm.js or the grid.
+      ((window as any).__farhelmTerm ?? (window as any).__farhelmGrid).__testMarker = "pre-replace";
     });
 
     await openRowMenu(sourceRow);
@@ -667,7 +668,7 @@ test("replacing a live session creates a fresh row in its place, selected, with 
     await expect
       .poll(() =>
         page.evaluate(() => {
-          const term = (window as any).__farhelmTerm;
+          const term = (window as any).__farhelmTerm ?? (window as any).__farhelmGrid;
           const ws = (window as any).__farhelmWs;
           return (
             Boolean(term)
@@ -678,16 +679,7 @@ test("replacing a live session creates a fresh row in its place, selected, with 
       )
       .toBe(true);
     await waitForTermText(page, "FAKE-AGENT READY");
-    const buffer = await page.evaluate(() => {
-      const term = (window as any).__farhelmTerm;
-      if (!term) return "";
-      const buf = term.buffer.active;
-      const lines: string[] = [];
-      for (let i = 0; i < buf.length; i++) {
-        lines.push(buf.getLine(i)?.translateToString(true) ?? "");
-      }
-      return lines.join("\n");
-    });
+    const buffer = await termText(page);
     expect(buffer).not.toContain("PRE-REPLACE-MARKER");
   } finally {
     if (replacementId) await cleanupSession(request, replacementId);

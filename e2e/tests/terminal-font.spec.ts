@@ -57,7 +57,7 @@
 // not prove the empty-result branch was taken.
 import { expect, test } from "./helpers/evidence";
 import { type Page, type Route } from "@playwright/test";
-import { attachSession, waitForTermText } from "./helpers/term";
+import { attachSession, terminalFont, terminalInput, waitForTermText } from "./helpers/term";
 import { cleanupSession, createSession, pinAutoSelect } from "./helpers/fleet";
 import { waitForSessionReady } from "./helpers/terminal-readiness";
 
@@ -72,14 +72,14 @@ for (const [size, direction] of [[9, "smaller"], [28, "larger"]] as const) {
       await page.goto("/");
       await attachSession(page, session.id);
       await waitForTermText(page, "FONTREADY");
-      const terminal = page.locator("#terminal .xterm-helper-textarea");
+      const terminal = terminalInput(page);
       await expect(terminal).toBeFocused();
-      expect(await page.evaluate(() => (window as any).__farhelmTerm.options.fontSize)).toBe(size);
+      expect((await terminalFont(page))?.fontSize).toBe(size);
       const button = page.locator(`[data-text-size="${direction}"]`);
       await expect(button).toBeEnabled();
       await button.click();
       await expect(terminal).toBeFocused();
-      expect(await page.evaluate(() => (window as any).__farhelmTerm.options.fontSize)).toBe(size);
+      expect((await terminalFont(page))?.fontSize).toBe(size);
       await page.keyboard.type(marker);
       await page.keyboard.press("Enter");
       await waitForTermText(page, `received:${marker}`);
@@ -187,10 +187,10 @@ test("a rejected font download leaves the terminal unmounted and logs exactly on
       "the terminal must not be ready when the font failed",
     ).toBeUndefined();
     expect(
-      await page.evaluate(() => (window as any).__farhelmTerm),
+      await page.evaluate(() => (window as any).__farhelmTerm ?? (window as any).__farhelmGrid),
       "no terminal instance may exist",
     ).toBeUndefined();
-    await expect(page.locator("#terminal .xterm"), "no xterm element may exist").toHaveCount(0);
+    await expect(page.locator("#terminal :is(.xterm, .grid-terminal)"), "no terminal element may exist").toHaveCount(0);
   } finally {
     await cleanupSession(request, session.id);
   }
@@ -256,10 +256,10 @@ test("a held font request keeps the terminal unmounted past the old 3 s deadline
       "the terminal must not mount while the font request is held",
     ).toBeUndefined();
     expect(
-      await page.evaluate(() => (window as any).__farhelmTerm),
+      await page.evaluate(() => (window as any).__farhelmTerm ?? (window as any).__farhelmGrid),
       "no terminal instance may exist while the font request is held",
     ).toBeUndefined();
-    await expect(page.locator("#terminal .xterm"), "no xterm element may exist while the font request is held").toHaveCount(0);
+    await expect(page.locator("#terminal :is(.xterm, .grid-terminal)"), "no terminal element may exist while the font request is held").toHaveCount(0);
 
     // Only bold is pending now: its completion must open the same gate.
     // The family assertion belongs here rather than in a literal-only test.
@@ -268,7 +268,7 @@ test("a held font request keeps the terminal unmounted past the old 3 s deadline
     await waitForSessionReady(page, session.id);
     await waitForTermText(page, marker);
     expect(
-      await page.evaluate(() => (window as any).__farhelmTerm.options.fontFamily),
+      (await terminalFont(page))?.fontFamily,
       "the terminal must be constructed with JetBrains Mono",
     ).toMatch(/JetBrains Mono/);
   } finally {

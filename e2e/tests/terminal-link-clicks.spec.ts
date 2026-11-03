@@ -11,7 +11,7 @@ import { openSettings } from "./helpers/settings";
 import type { Page } from "@playwright/test";
 import path from "node:path";
 import { createSession, cleanupSession, patchPreferences, readPreferences, stubFeed } from "./helpers/fleet";
-import { attachSession, waitForTermText } from "./helpers/term";
+import { attachSession, waitForTermText, terminalInput } from "./helpers/term";
 import { addTab, selectTerminal, islandText, waitForIslandText, fulfillAsHelm, installTerminalSuiteHooks } from "./helpers/terminal-suite";
 
 const invocation = `"${path.resolve(__dirname, "../../target/debug/farhelm-fixtures")}" fake-agent --script mouse-modes`;
@@ -222,7 +222,7 @@ async function cue(page: Page, word: string, element = "terminal") {
   const nextLinks = word === "links"
     ? Math.max(0, ...Array.from((await islandText(page, element)).matchAll(/LINKS-READY:(\d+)/g), (match) => Number(match[1]))) + 1
     : null;
-  const input = page.locator(`#${element} .xterm-helper-textarea`);
+  const input = terminalInput(page, element);
   await input.focus();
   await expect(input).toBeFocused();
   await page.keyboard.type(word);
@@ -344,7 +344,7 @@ test("terminal link ownership opens once and preserves program clicks in all mou
     const tab = await addTab(page, 0);
     await selectTerminal(page, tab);
     const tabElement = `terminal-${tab}`;
-    const tabInput = page.locator(`#${tabElement} .xterm-helper-textarea`);
+    const tabInput = terminalInput(page, tabElement);
     await tabInput.focus();
     await expect(tabInput).toBeFocused();
     await page.keyboard.type(invocation);
@@ -1316,7 +1316,7 @@ test.describe("covered terminal disclosures", () => {
         const prompt = page.locator(".header-delete-confirm");
         const refusal = page.locator('#terminal .terminal-file-message[data-outcome="disclosure-refusal"]');
         if (first === "confirmation") {
-          await expect(page.locator("#terminal .xterm-helper-textarea")).toBeFocused();
+          await expect(terminalInput(page)).toBeFocused();
           await page.keyboard.press("Control+Shift+Backspace");
           await expect(prompt.locator(".header-delete-confirm-submit")).toBeFocused();
         }
@@ -1330,7 +1330,7 @@ test.describe("covered terminal disclosures", () => {
         expect(await opens()).toEqual([]);
         if (first === "refusal") {
           await expect(refusal).toHaveCSS("z-index", "51");
-          await expect(page.locator("#terminal .xterm-helper-textarea")).toBeFocused();
+          await expect(terminalInput(page)).toBeFocused();
           await page.keyboard.press("Control+Shift+Backspace");
           await expect(prompt.locator(".header-delete-confirm-submit")).toBeFocused();
         }

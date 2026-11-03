@@ -133,6 +133,46 @@ export const CLAUDE_CODE_MARKERS: AgentMarkers = {
  */
 async function bufferText(page: Page, mode: "full" | "viewport"): Promise<string> {
   return page.evaluate((mode) => {
+    const grid = (window as any).__farhelmGrid;
+    if (grid) {
+      // A terminal in a terminal host, drawn by the grid component: the
+      // same reconstruction over its model's rows, history then screen,
+      // whose `wrapped` flag marks a row that continues onto the next
+      // (where xterm.js flags the continuation row instead). The viewport
+      // is the component's view.
+      const model = grid.model;
+      const gridBuffer = (window as any).farhelmGridBuffer;
+      // History then screen, with no history on the alternate screen (as
+      // xterm.js's active alternate buffer has none); the view counts a
+      // notice line above the oldest history line when lost history is
+      // marked, which is not text and is left out here.
+      const historyShown = !model.state.altScreen;
+      const rows: { text: string; wrapped: boolean }[] = [];
+      if (historyShown) {
+        for (let i = 0; i < model.historyLength; i++) {
+          const row = model.historyLine(i);
+          rows.push({ text: gridBuffer.rowText(row, row.cols).replace(/ +$/, ""), wrapped: !!row.wrapped });
+        }
+      }
+      for (const row of model.screen) {
+        rows.push({ text: gridBuffer.rowText(row, model.cols).replace(/ +$/, ""), wrapped: !!row.wrapped });
+      }
+      const view = grid.viewport();
+      const notice = historyShown && model.state.historyTrimmed ? 1 : 0;
+      // The view's rows over `rows`: its top line less the notice, and, with
+      // the notice itself on screen, one row fewer.
+      const start = mode === "viewport" ? Math.max(0, view.top - notice) : 0;
+      const shown = mode === "viewport" ? view.rows - Math.max(0, notice - view.top) : rows.length;
+      const end = Math.min(rows.length, start + shown);
+      const gridLines: string[] = [];
+      let continues = false;
+      for (let i = start; i < end; i++) {
+        if (continues && gridLines.length > 0) gridLines[gridLines.length - 1] += rows[i].text;
+        else gridLines.push(rows[i].text);
+        continues = rows[i].wrapped;
+      }
+      return gridLines.join("\n");
+    }
     const term = (window as any).__farhelmTerm;
     if (!term) return "";
     const buf = term.buffer.active;

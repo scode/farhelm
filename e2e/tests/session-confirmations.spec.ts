@@ -11,7 +11,7 @@ import {
 import { fulfillAsHelm, installTerminalSuiteHooks } from "./helpers/terminal-suite";
 import { routeGate } from "./helpers/route-gate";
 import { drainedRoute } from "./helpers/drained-route";
-import { attachSession, waitForTermText } from "./helpers/term";
+import { attachSession, waitForTermText, terminalInput } from "./helpers/term";
 
 installTerminalSuiteHooks();
 
@@ -217,7 +217,7 @@ test("Escape cancels header restart replace and delete questions and restores te
     await waitForTermText(page, "FAKE-AGENT READY");
     await waitForTermText(page, "> ");
     await expect(page.locator(".session-details .status-badge")).toHaveClass(/\brunning\b/);
-    const terminal = page.locator("#terminal .xterm-helper-textarea");
+    const terminal = terminalInput(page);
     await expect(terminal).toBeFocused();
     await page.keyboard.type("header-escape-live");
     await page.keyboard.press("Enter");
