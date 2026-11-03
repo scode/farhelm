@@ -17,7 +17,11 @@
 //! its bytes are the protocol's. A socket that only refuses connections is
 //! judged stale (its host killed) after [`STALE_REFUSAL_WINDOW`] of nothing
 //! but refusals, never sooner: on macOS a live host whose listen backlog is
-//! full refuses too.
+//! full refuses too. And a socket is never judged gone, stale or missing,
+//! while a live process of this user still serves it by its command line
+//! (`... --socket <that path>`, the host's own): a stopped or wedged host
+//! whose backlog filled refuses for as long as it likes, and one whose
+//! socket file went missing cannot be reached at all.
 //!
 //! Anything short of that keeps the directory: a scan that could not read
 //! part of the tree, a host that did not answer, a socket that stayed.
@@ -61,9 +65,12 @@ pub const HOST_SOCKET_WALK_DEPTH: usize = 3;
 /// well, so the goal's "gone only after repeated attempts over a few
 /// seconds" applies. It must stay below [`HOST_STOP_DEADLINE`].
 ///
-/// A macOS host that stays stopped with a full backlog for this long is
-/// indistinguishable from a dead one, and is judged stale; nothing here
-/// fills a backlog, since every attempt that connects ends the attempt.
+/// Refusals alone cannot tell a dead host from a stopped one whose backlog
+/// is full: every connection that times out against a host that does not
+/// accept (this cleanup's own included) stays queued until the host accepts
+/// it, so a host stopped long enough fills its backlog. So a socket that
+/// refused for this long still counts as gone only when no process of this
+/// user serves it ([`serving_process`]).
 pub const STALE_REFUSAL_WINDOW: Duration = Duration::from_secs(3);
 
 /// Pause between connection attempts, and between looks at an ending
@@ -172,18 +179,19 @@ enum Connected {
 /// a cleanup), retrying until `deadline`. A missing file is gone at once;
 /// refusals are believed only once they have lasted
 /// [`STALE_REFUSAL_WINDOW`] without a break, and then the stale file is
-/// removed.
+/// removed. Either way, only once no process serves the socket.
 fn connect(socket: &Path, deadline: Instant) -> Connected {
     let mut refusing_since: Option<Instant> = None;
     loop {
         let last = match crate::connect_without_waiting(socket) {
             Ok(stream) => return Connected::Stream(stream),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Connected::Gone,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return confirm_gone(socket, false);
+            }
             Err(error) if error.kind() == io::ErrorKind::ConnectionRefused => {
                 let since = *refusing_since.get_or_insert_with(Instant::now);
                 if since.elapsed() >= STALE_REFUSAL_WINDOW {
-                    remove_stale_socket(socket);
-                    return Connected::Gone;
+                    return confirm_gone(socket, true);
                 }
                 error
             }
@@ -199,6 +207,112 @@ fn connect(socket: &Path, deadline: Instant) -> Connected {
         }
         // sleep-ok: interval between connection attempts to a host socket; bounded by the deadline above.
         std::thread::sleep(RETRY_INTERVAL);
+    }
+}
+
+/// Judge a socket that takes no connection gone, removing it first when it
+/// is a stale file, unless a process still serves it.
+fn confirm_gone(socket: &Path, stale: bool) -> Connected {
+    match serving_process(socket) {
+        Ok(None) => {
+            if stale {
+                remove_stale_socket(socket);
+            }
+            Connected::Gone
+        }
+        Ok(Some(pid)) => Connected::Unconfirmed(format!(
+            "it takes no connection, but process {pid} still serves it"
+        )),
+        Err(why) => Connected::Unconfirmed(format!(
+            "it takes no connection, and whether a process serves it is unknown: {why}"
+        )),
+    }
+}
+
+/// A live process of this user whose command line ends with
+/// `--socket <socket>`, as a host's does, if there is one.
+///
+/// Linux reads `/proc/<pid>/cmdline` of this user's processes (a zombie's
+/// is empty, so it never matches). macOS has no `/proc`, so it reads `ps`,
+/// whose command column joins the arguments with spaces; that is exact
+/// enough here, since test socket paths contain no spaces and a match only
+/// ever keeps a directory. Any failure to look is an error: the caller then
+/// keeps the directory.
+fn serving_process(socket: &Path) -> Result<Option<u32>, String> {
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::ffi::OsStrExt as _;
+        use std::os::unix::fs::MetadataExt as _;
+        // SAFETY: geteuid has no preconditions.
+        let me = unsafe { libc::geteuid() };
+        let entries = fs::read_dir("/proc").map_err(|error| format!("listing /proc: {error}"))?;
+        let wanted = socket.as_os_str().as_bytes();
+        for entry in entries.flatten() {
+            let Some(pid) = entry
+                .file_name()
+                .to_str()
+                .and_then(|name| name.parse::<u32>().ok())
+            else {
+                continue;
+            };
+            if !entry.metadata().is_ok_and(|meta| meta.uid() == me) {
+                continue;
+            }
+            let Ok(cmdline) = fs::read(entry.path().join("cmdline")) else {
+                continue;
+            };
+            let args: Vec<&[u8]> = cmdline
+                .strip_suffix(b"\0")
+                .unwrap_or(&cmdline)
+                .split(|&b| b == 0)
+                .collect();
+            if let [.., flag, path] = args.as_slice()
+                && *flag == b"--socket"
+                && *path == wanted
+            {
+                return Ok(Some(pid));
+            }
+        }
+        Ok(None)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        use crate::process::{CommandRunLimits, run_bounded};
+        // SAFETY: geteuid has no preconditions.
+        let me = unsafe { libc::geteuid() }.to_string();
+        let limits = CommandRunLimits::new(
+            Duration::from_secs(5),
+            Duration::from_millis(500),
+            8 * 1024 * 1024,
+            64 * 1024,
+            64 * 1024,
+        )
+        .map_err(|error| format!("{error:?}"))?;
+        let outcome = run_bounded(
+            std::process::Command::new("ps").args(["-A", "-ww", "-o", "pid=,uid=,command="]),
+            &limits,
+        )
+        .map_err(|error| format!("running ps: {error:?}"))?;
+        if !outcome.status.is_some_and(|status| status.success()) || !outcome.stdout.complete {
+            return Err("ps did not list the processes".into());
+        }
+        let suffix = format!(" --socket {}", socket.display());
+        for line in String::from_utf8_lossy(&outcome.stdout.prefix).lines() {
+            let mut fields = line.split_whitespace();
+            let (Some(pid), Some(uid)) = (fields.next(), fields.next()) else {
+                continue;
+            };
+            let command = fields.collect::<Vec<_>>().join(" ");
+            // A zombie's command is shown as `<defunct>`, so it never
+            // matches.
+            if uid == me
+                && command.ends_with(&suffix)
+                && let Ok(pid) = pid.parse()
+            {
+                return Ok(Some(pid));
+            }
+        }
+        Ok(None)
     }
 }
 

@@ -96,20 +96,31 @@ that its required systemd or SSH substrate ran.
   one test forks holds every descriptor of the test process until it execs, and on macOS, which cannot open a pty or
   socket close-on-exec in one call, it can keep another test's for good; that test then waits for an end of output or a
   close that never comes (`crates/terminal-host/TESTING.md`).
-- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'terminal host spawning and cleanup' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p farhelm-supervisor -p farhelm-teststate -p farhelm --lib --test terminal_host_spawn -E 'test(/^hosts::/) | binary(terminal_host_spawn)'`
+- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'terminal host spawning, client and cleanup' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p farhelm-supervisor -p farhelm-teststate -p farhelm --lib --test terminal_host_spawn --test terminal_host_client -E 'test(/^hosts::/) | binary(terminal_host_spawn) | binary(terminal_host_client)'`
   — the supervisor's side of terminal hosts and the harnesses' cleanup of them. The supervisor's `hosts::` unit tests
   cover the private socket directory, the socket path bound against macOS's 104-byte limit, the client tag's golden
   fixtures (`crates/farhelm-supervisor/tests/fixtures/host-tag/`, which must never change for a shipped version) and
   unreadable tags, and the spawn's start protocol against stand-in first stages (readiness from the exit status alone, a
-  relative state directory, and a start that does not finish ending whatever answers at its socket or naming it);
-  `farhelm-teststate`'s `hosts::` tests cover its blocking shutdown client against stand-in listeners (refusals believed
-  only over its stale window, an incomplete scan kept). `crates/farhelm/tests/terminal_host_spawn.rs` starts real hosts
-  from the built `farhelm` (never inside a test process, since a host forks): readiness and no zombie, a failed start
-  leaving nothing, no `FARHELM_*` marker or credential on the host while its child has them, and the test-state cleanup
-  for a normal run, a dead run, nested `remote/` state, and a stopped host that keeps its run (a sweep, a `TestDir` drop
-  and `close`) for a retry, plus, on Linux only, a stopped host with a full backlog. Under a minute, part of the
-  workspace nextest run; the focused macOS CI job runs it too, in the terminal host step. Portable to macOS except where
-  it reads `/proc`.
+  relative state directory, and a start that does not finish ending whatever answers at its socket or naming it), the
+  client's connection outcomes against stand-in listeners (a missing socket gone without retries, refusals gone only
+  after the refusal window, which any other answer restarts, busy retried and never gone, foreign versions, malformed
+  and silent answers unavailable), its input window, reply matching, one `Read` per connection, the write deadline of a
+  dropped half-written frame, events before an ending frame, the event queue's bound and what `shutdown` reports, and
+  the verified termination against stand-in processes (a stopped match ended by SIGTERM with SIGCONT, one that does not
+  act on SIGTERM killed, another socket or start identity never signalled, an exited process already gone, the serving
+  process found by its command line); `farhelm-teststate`'s `hosts::` tests cover its blocking shutdown client against
+  stand-in listeners (refusals believed only over its stale window, an incomplete scan kept).
+  `crates/farhelm/tests/terminal_host_spawn.rs` starts real hosts from the built `farhelm` (never inside a test process,
+  since a host forks): readiness and no zombie, a failed start leaving nothing, no `FARHELM_*` marker or credential on
+  the host while its child has them, and the test-state cleanup for a normal run, a dead run, nested `remote/` state,
+  and a stopped host that keeps its run (a sweep, a `TestDir` drop and `close`) for a retry, plus, on Linux only, a
+  stopped host with a full backlog. `crates/farhelm/tests/terminal_host_client.rs` drives the supervisor's client
+  against real hosts the same way: take-over and the peer process, a stopped host timing out and then ended by the
+  verified SIGTERM, a stopped host with a full backlog found by its process rather than judged gone, a killed host's
+  socket judged gone, a read decoding the snapshot record, a gap and the exit, resizes and snapshot replies, input
+  acknowledged in order, Shift+Enter in one read, no resend after a takeover mid-input, and `Shutdown`. Under a minute,
+  part of the workspace nextest run; the focused macOS CI job runs it too, in the terminal host step. Portable to macOS
+  except where it reads `/proc`.
 - Terminal host coverage, when the crate changes:
   `cargo +nightly llvm-cov -p terminal-host --branch --summary-only -- --test-threads=1`, with cargo-llvm-cov 0.9.1
   installed in your scratch directory (`cargo install --locked --root <scratch>/tools cargo-llvm-cov --version 0.9.1`,
@@ -291,8 +302,8 @@ that its required systemd or SSH substrate ran.
   uninstall stop's own tests are part of `uninstall::` above). After the uninstall acceptance, in a step of its own that
   runs whatever the steps before it did (so that a host failure cannot hide that gate), it runs the terminal host's
   whole test suite, `cargo nextest run -p terminal-host`, the host's entry test in the CLI,
-  `cargo nextest run -p farhelm --test terminal_host_entry`, and the supervisor's spawning and the test-state cleanup
-  (the `terminal host spawning and cleanup` selection above).
+  `cargo nextest run -p farhelm --test terminal_host_entry`, and the supervisor's spawning, its client and the
+  test-state cleanup (the `terminal host spawning, client and cleanup` selection above).
 - `scripts/test-provision-centos.sh` — the x86_64 Linux release gate boots a systemd CentOS Stream 9 container and makes
   the helm provision it over ssh, which is the only coverage of a helm installing onto a distribution other than its
   own. Needs docker and `musl-tools`: the payloads it pushes are the release's musl-static `farhelm` and static tmux,
