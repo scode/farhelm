@@ -67,6 +67,151 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   to a different target stays separate, so a disguised link still warns. Test with the repro bytes in the grid-client
   browser specs and the buffer's unit tests.
 
+- **A terminal whose terminal host becomes unavailable stays unavailable until the supervisor restarts.** When a running
+  supervisor loses the use of a terminal host, the terminal stays unavailable for the rest of that supervisor's life
+  even after the cause has passed: the session lists with an unknown status, its terminal does not attach ("the terminal
+  host is unavailable: ..."), and its verbs refuse (a prompt is refused, a guarded Delete cannot tell and refuses),
+  while the host and its program keep running untouched. Only the supervisor's next start adopts the host again. A
+  runtime becomes unavailable mid-life in `crates/farhelm-supervisor/src/hosts/terminal.rs` when its connection ends and
+  the reconnect fails (a timed-out, closed or refused connect, `Unavailability::Connect`), when the connection ends
+  `RECONNECT_LIMIT` (3) times within `RECONNECT_WINDOW` (60 s) (`Unstable`), when a checkpoint's encode task is lost
+  with the emulator (`EmulatorLost`), or when a request fails (`Request`, `ChildUnpinned`); `Unavailability::may_pass`
+  already marks these reasons as able to pass. Retrying while the supervisor runs (`Supervisor::start_readoption`,
+  `readopt_pass` and `retried_placeholder` in `crates/farhelm-supervisor/src/service/core/host_handover.rs`, module docs
+  "Adopting again") looks only at startup placeholders (`HostTerminal::unavailable`, `is_placeholder`) held as a
+  session's agent terminal. It never looks at a runtime that ran, and never at tabs: a tab whose host startup could not
+  use becomes a placeholder (`HostTab::placeholder`, `crates/farhelm-supervisor/src/service/core/host_tabs.rs`, "After a
+  restart") that lists the tab and refuses its verbs until the next start, and a tab runtime that becomes unavailable
+  later stays so as well. Leaving mid-life retry out was a deliberate narrowing during the terminal-host work (a scope
+  reassessment rated it acceptable but not needed), and SPEC_impl.md says so in "Across supervisor restarts" (the
+  **Re-adoption** paragraph) and in the host connection paragraph ("Unavailable ends a runtime, not a host's chances");
+  a fix updates both. Likely fix: let re-adoption also take agent runtimes that ended `Liveness::Unavailable` for a
+  reason that `may_pass`, and tab placeholders and tab runtimes the same way, woken by the liveness notifier (an
+  unavailable runtime is announced on it) as well as by `readoption_wake`. Keep what the placeholder retry guarantees:
+  the session's lifecycle claim taken without waiting, the entry (or tab cell) still holding that very handle for the
+  same generation, a scan of only the one socket the handle names so that no other runtime's host is taken over (exactly
+  one runtime per host, the runtime module's "One owner"), the `stopping` fence checked under the session map before the
+  swap, and the backoff (1 s doubling to a minute, never reset). Decide what `Unstable` should get: the reconnect limit
+  exists so that a runtime does not fight whoever keeps taking the host over, and retrying it on the backoff brings that
+  fight back, only slower. Reproduce with the in-process test host
+  (`crates/farhelm-supervisor/src/hosts/terminal/test_host.rs`): call `drop_connection` three times within a minute on a
+  session's host and check that the session stays unknown while the host still serves; `become_unreadable` will not do,
+  since an unsupported protocol version is a reason that does not pass and is rightly never retried. The existing test
+  that reads an unreadable host as unknown is in `crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs`.
+  Not checked when this was written: whether Stop and Restart also refuse for such a runtime (only a prompt and a
+  guarded Delete were confirmed).
+
+- **Typing into a grid terminal pauses while its checkpoint is encoded, longer than it needs to.** The supervisor
+  checkpoints a terminal in a terminal host (encodes its emulator as a snapshot and hands it to the host) after enough
+  output and at every orderly stop, and a Restart seeds the new host with the same encoder. While a checkpoint encodes,
+  the terminal's runtime does nothing else, so keystrokes, resizes and requests wait: at full scrollback about 0.3 s for
+  typical output, 1.6 to 1.9 s in true color, and over 10 s for a scrollback colored cell by cell like an image
+  (SPEC_impl.md, "Recovery and checkpoints", release build). Such an image-like scrollback receiving about 1 MiB/s
+  cannot be checkpointed as fast as it fills the host's journal, so it may gap while connected ("Some earlier output
+  could not be recovered"); SPEC_impl.md names a faster encoder as the remedy, and the stop's checkpoints (the entry
+  about the burst of checkpoints at an orderly stop) get cheaper with it. Part of the cost is the size-limit logic in
+  `crates/farhelm-terminal-emulator/src/snapshot/mod.rs` (`Emulator::snapshot_until`, `fit_titles`, `fit_history`). So
+  that the supervisor never holds a stream larger than the 16 MiB limit, it first paints the whole state in
+  `Mode::Measure` (counting bytes and dropping them, `snapshot/v1/paint.rs`) and then paints it again in `Mode::Keep`
+  with buffers reserved to the measured size, so every checkpoint that fits paints the terminal twice. One that does not
+  fit and has no title stack is measured in full by step 1 (`fit_titles`) and again, identically, by step 2's first
+  measurement (`fit_history` at the same `min_skip`, with all of zero titles left out), then measured once more after
+  dropping the oldest lines, and then kept: a scratch benchmark during the terminal-host work (200x60, 12,000 lines of
+  history, single runs on a loaded machine, about 30% noise) painted about 188 MiB to produce a 16 MiB blob, where an
+  unlimited encode of the same 78.7 MiB state took 9.7 s. A measurement also runs to the end after it has passed
+  `max_bytes`, and the painter allocates on every pen change (`pen_changes` and `pen_reset` build a `Vec<String>`,
+  joined through `format!`). Candidates, to be profiled first: reuse step 1's measurement in step 2 when the two would
+  be identical; keep what is painted while measuring as long as it stays under the limit, so that a snapshot that fits
+  is painted once; stop measuring past the limit where nothing needs the total (the excess decides how many titles or
+  lines to drop, so check what the ladder still reads); and drop the per-pen-change allocations. Constraints: the
+  encoder keeps writing exactly the bytes it writes now (SPEC_impl.md, "Terminal snapshots": a shipped format never
+  changes, checked byte for byte by `crates/farhelm-terminal-emulator/tests/snapshot_golden.rs` against
+  `tests/fixtures/snapshots/v1/`); the supervisor never holds a stream past the limit, nor a `Vec` that grew by doubling
+  past it (`Mode::Keep`'s docs); the encoder still looks at its `Cancel` between rows, which is what keeps an orderly
+  stop bounded; and the size ladder's guarantees in the module docs ("Size") hold. The repository has no encoder
+  benchmark; add one with the change so the speed-up is measured rather than assumed.
+
+- **An orderly supervisor stop encodes a checkpoint of every busy terminal at once.** At an orderly stop (an update, the
+  desktop app replacing its supervisor, a SIGTERM, SIGINT or SIGHUP), `Supervisor::stop_in_order` runs
+  `checkpoint_hosts_for_exit` (`crates/farhelm-supervisor/src/service/core/host_handover.rs`, module docs "Stopping")
+  beside the closing of tmux's output clients, both within 10 s (`HOST_CHECKPOINT_BUDGET`, equal to
+  `SHUTDOWN_OUTPUT_BUDGET`, in `crates/farhelm-supervisor/src/service/core.rs`). Every terminal host runtime with any
+  output since its last snapshot is asked for a checkpoint, however little that output is, and each checkpoint encodes
+  the whole terminal, not the new output: up to about 2 s of a core at full scrollback in true color, over 10 s for one
+  colored like an image (the entry about typing pausing during checkpoints). With many sessions that is a burst of
+  whole-terminal encodes, often while the machine is already busy with an update. #2897 bounded it: at most as many
+  encodes at once as `std::thread::available_parallelism` reports (a semaphore of that size), all under the one
+  deadline, and closing a runtime cancels its encode between rows (`HostTerminal::abort`,
+  `farhelm_terminal_emulator::Cancel`), so the stop and the process's exit stay within the budget. What is left: for up
+  to 10 s every core can be busy encoding; and a terminal whose checkpoint did not finish or never got a core keeps its
+  previous snapshot and all the output since, which the next supervisor replays (a slower recovery, the same terminal),
+  where which terminals get a core first follows the session map's order, not how much replay a checkpoint would save.
+  The largest lever needs the maintainer: skipping the stop checkpoint of a terminal whose output since its snapshot is
+  small (it replays in milliseconds) removes most of the burst, but the terminal-host work required a snapshot on every
+  orderly stop, and SPEC_impl.md ("Across supervisor restarts") states that every host with output since its snapshot is
+  checkpointed however little that output is. Changes that need no such decision: a faster encoder (the entry above),
+  checkpointing the terminals with the most output since their snapshot first, and fewer slots than cores so a stop does
+  not take the whole machine. Keep the stop bounded by its deadline, keep cancelling encodes as runtimes close (an
+  encode runs on tokio's blocking pool, which the exiting process waits for while it still holds the state directory's
+  claim), and keep the `stopping` fence that stops re-adoption, creates and Restarts from publishing a connected runtime
+  after the gather. No test measures the burst; to see it, stop a supervisor holding many full terminals (12,000 lines
+  of true-color history each) and watch CPU and the "left a terminal host its previous snapshot at exit" log lines.
+
+- **Without a tmux binary, listing sessions fails even when every session runs in a terminal host.** tmux is still a
+  hard requirement (the supervisor checks its tmux against `TMUX_FLOOR` in `crates/farhelm-supervisor/src/tmux.rs`), so
+  this matters once tmux becomes optional for hosts whose sessions all run in terminal hosts; until then it shows only
+  if the tmux binary disappears under a running supervisor. `TmuxDriver::pane_states` (`pane_states_checked` in
+  `crates/farhelm-supervisor/src/tmux.rs`) reads tmux saying there is no server or no panes as an empty answer
+  (`is_definitively_empty`), so a host whose private tmux server is not running lists fine, but a failure that carries
+  no tmux stderr, such as a missing binary failing to spawn, is always an error. The session listing
+  (`crates/farhelm-supervisor/src/service/listing.rs`, `needs_tmux`) asks tmux whenever any listed session has an agent
+  terminal of either kind, because a session moved into a terminal host can still have tmux tabs (windows of the tmux
+  session its row names, `tmux_tab_home` in `crates/farhelm-supervisor/src/service/terminals.rs`) and a client takes a
+  successful reply's tab list as the truth; so one failed query fails the whole listing. The same goes for a single
+  session's tabs (`Supervisor::session_tabs`, `session_tabs_including_dead` and the tab count in
+  `still_alive_for_delete`, all in `crates/farhelm-supervisor/src/service/core.rs`) and for the startup reload, which
+  calls `pane_states` with `?` (`reload_sessions_with_hosts`, same file). A missing binary does not prove there are no
+  tmux tabs (a server started before the binary was removed keeps running), so the fix is one of the two options the
+  review that found this named: do not ask tmux when the install provably has none, or add a "tabs unknown" answer to
+  the protocol that clients do not take as an empty tab strip. Either way, keep the rule that "we could not ask" is
+  never "there are none" (the comments in `listing.rs` and the `session_tabs` docs). Reproduce in a supervisor test by
+  building the tmux driver with `TmuxDriver::new_with_program` pointed at a path with no binary, creating only
+  terminal-host sessions, and listing.
+
+- **A moved session whose agent has no terminal hides its old tmux tabs.** A session that a Restart moved from tmux into
+  a terminal host keeps its tmux tabs (windows of the tmux session its row names) until they are closed (SPEC_impl.md,
+  "Moving an old session into a host"). While the session holds no agent terminal, those tabs are not listed at all: the
+  session list and the tab strip (`entry_info` in `crates/farhelm-supervisor/src/service/status.rs`,
+  `Supervisor::session_tabs` and `session_tabs_including_dead` in `crates/farhelm-supervisor/src/service/core.rs`) find
+  tmux tabs only through the agent terminal (`tmux_tab_home` in `crates/farhelm-supervisor/src/service/terminals.rs`),
+  and with none they list only the tabs in terminal hosts. The tab shells keep running, but the user cannot see, attach
+  to or close them, and the tab count `still_alive_for_delete` makes for a Delete guarded by "nothing alive" counts none
+  of them. Delete still ends them, since its teardown falls back to the session's tmux name for a session with no
+  terminal (`crates/farhelm-supervisor/src/service/teardown.rs`), and a later Restart that publishes a host lists them
+  again. A moved session ends up with no agent terminal when a replacement host cannot be confirmed ended during a
+  Restart (the session keeps its launching row with no terminal), when its host is gone at the supervisor's start, or
+  after a supervisor crash between the Restart's generation claim and the new host's launch record (the next start
+  leaves the row launching with no terminal, listed as unknown, and its next Restart starts an empty host). A crash
+  after the claim also leaves the old agent's window behind, whether or not the new host had started: the Restart
+  stopped the agent and kept its pane dead under `remain-on-exit`, nothing records that pane any more, and the dead
+  window stays in the session's tmux session, shown nowhere, until the session's Delete ends that tmux session
+  (SPEC_impl.md, "Moving an old session into a host", "A crash"; the code is
+  `crates/farhelm-supervisor/src/service/core/host_restart.rs`, "From a tmux pane"). After a crash before the new host's
+  launch record, the Restart that follows starts empty, so that dead window holds the only copy of the agent's history
+  from before the move. `a_move_interrupted_after_its_claim_restarts_empty_and_delete_ends_the_old_window` in
+  `crates/farhelm/tests/e2e/host_migrations.rs` pins exactly that behavior today and is where a reproduction with an
+  open tmux tab belongs. Likely fix: for a session with no terminal whose row is a host row, list the tab-marked windows
+  of `session_tmux_name(id)` with no agent pane to exclude (tabs come from tab markers, so the agent window is never
+  listed), as the review of the move suggested; and have a Restart of such a session find the dead window that carries
+  the session's agent marker, seed the new host from its history as the move does, and remove it once the new host is
+  published with that history (the move's own rule: a window that may hold the only copy is never removed without a
+  seed). Window markers are the one thing anything with access to the tmux server can write, so decide whether seeding
+  from a window found only by its marker is acceptable, or record the old pane durably before the claim. Keep the rule
+  that a failed tmux query fails the reply rather than reading as "no tabs" (`session_tabs` docs). Not checked when this
+  was written: that a host missing at the supervisor's start leaves the session with no agent terminal (taken from
+  SPEC_impl.md, not traced through `reload_sessions_with_hosts`), and that the Delete guard misses these tabs (read from
+  `still_alive_for_delete`'s `None => 0`, not tested).
+
 - **Assess the grid terminal's history memory.** Grid terminals (terminals in a terminal host) keep their scrollback in
   the page as one JavaScript object per run of styled text, plus a style object per distinct color pair, where xterm.js
   packs each cell into about 12 bytes. Measured in WebKit (the Mac desktop app's engine) at the 12,000-line scrollback
