@@ -11,7 +11,7 @@ import {
   stubFeed,
   type SessionRow,
 } from "./helpers/fleet";
-import { attachSession } from "./helpers/term";
+import { attachSession, terminalInput } from "./helpers/term";
 import { fulfillAsHelm, installTerminalSuiteHooks } from "./helpers/terminal-suite";
 import { routeGate } from "./helpers/route-gate";
 
@@ -670,7 +670,7 @@ test("approval remains answerable while the quick switcher is open", async ({ pa
   await openSelected(page);
   const trigger = page.locator(".quick-switcher-trigger");
   await expect(trigger).toHaveCount(1);
-  const terminal = page.locator("#terminal .xterm-helper-textarea");
+  const terminal = terminalInput(page);
   await terminal.focus();
   await expect(terminal).toBeFocused();
   const mac = await page.evaluate(() => navigator.platform.includes("Mac"));

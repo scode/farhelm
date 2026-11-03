@@ -76,7 +76,7 @@ import {
 import { waitForSessionReady, waitForSessionRevealed } from "./helpers/terminal-readiness";
 import { attachFocusTrace, installFocusTrace } from "./helpers/focus-trace";
 import { stackScratchDir } from "./helpers/scratch";
-import { attachSession, restartIdleAgent, waitForTermText, answerYolo } from "./helpers/term";
+import { attachSession, restartIdleAgent, waitForTermText, answerYolo, terminalScreen } from "./helpers/term";
 
 function row(page: Page, id: string) {
   return page.locator(`[data-session-id="${id}"]`);
@@ -4103,10 +4103,10 @@ test("a click outside an open row menu closes it and leaves focus where it lande
     await waitForHostsListSettled(page);
     const target = row(page, session.id);
     const toggle = target.locator(".session-row-menu");
-    const terminal = page.locator(".xterm-screen").first();
+    const terminal = terminalScreen(page);
     const terminalHasFocus = () =>
       page.evaluate(
-        () => document.activeElement?.classList.contains("xterm-helper-textarea") ?? false,
+        () => !!document.activeElement?.matches(".xterm-helper-textarea, .grid-terminal-input"),
       );
 
     // A click on the panel itself, away from any item, is inside.

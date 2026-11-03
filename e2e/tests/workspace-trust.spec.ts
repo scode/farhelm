@@ -3,7 +3,7 @@ import { expect, test } from "./helpers/evidence";
 import { openSettings, selectSettingsSection } from "./helpers/settings";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { agentLaunchRow, cleanupSession, createSession, resetPreferences } from "./helpers/fleet";
-import { attachSession } from "./helpers/term";
+import { attachSession, terminalInput } from "./helpers/term";
 import { waitForSessionReady } from "./helpers/terminal-readiness";
 import { requireHelmBuild } from "./helpers/helm-build";
 
@@ -248,7 +248,7 @@ for (const { harness, name } of AGENTS.filter((agent) => agent.harness !== "pi")
 
       failReads = false;
       await page.locator("#terminal").click();
-      const terminal = page.locator("#terminal .xterm-helper-textarea");
+      const terminal = terminalInput(page);
       await expect(terminal).toBeFocused();
       await nudge();
       await expect(page.locator(".build-skew")).toHaveCount(0);

@@ -11,7 +11,7 @@ import {
   resetPreferences, stubFeed,
 } from "./helpers/fleet";
 import { routeGate } from "./helpers/route-gate";
-import { attachSession, waitForTermText } from "./helpers/term";
+import { attachSession, waitForTermText, terminalInput } from "./helpers/term";
 import { fulfillAsHelm, installTerminalSuiteHooks } from "./helpers/terminal-suite";
 
 // Controlled approval replies carry the real helm's build stamp; the shared
@@ -67,7 +67,7 @@ for (const mode of ["sessions", "templates"] as const) {
       await page.goto("/");
       await attachSession(page, session.id);
       await waitForTermText(page, "FAKE-AGENT READY");
-      const terminal = page.locator("#terminal .xterm-helper-textarea");
+      const terminal = terminalInput(page);
       await terminal.focus();
       await expect(terminal).toBeFocused();
       await expect(page.locator(mode === "sessions" ? ".quick-switcher-trigger" : ".quick-switcher-template-trigger"))

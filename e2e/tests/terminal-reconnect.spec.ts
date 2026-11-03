@@ -33,7 +33,7 @@ import fs from "node:fs";
 import { drainedRoute } from "./helpers/drained-route";
 import { type Page, type APIRequestContext } from "@playwright/test";
 import { localHostId, stubFeed } from "./helpers/fleet";
-import { attachSession, cleanupSession, termText, waitForTermText } from "./helpers/term";
+import { attachSession, cleanupSession, termText, waitForTermText, terminalInput, onHostTerminals, terminalKind, terminalLinkPointer, terminalSize } from "./helpers/term";
 import {
   addTab,
   createTabSession,
@@ -350,11 +350,17 @@ test("socket-killed-reconnects-and-lands-at-tail", async ({ page, request }) => 
       replay.revealReason,
       "a reconnect is an ordinary reattach: it ends on the marker, not on a degradation",
     ).toBe("marker");
-    expect(
-      replay.writesWhileHidden,
-      "the whole replay reaches xterm.js as ONE write, exactly as a reopen does",
-    ).toBe(1);
-    expect(replay.revealedInWriteCallback).toBe(true);
+    // How xterm.js's catch-up hands over the replay: one write, revealed
+    // from its callback. A grid replay is frames the component applies as
+    // they arrive, with no writes to count; the rest of this test holds for
+    // both.
+    if ((await terminalKind(page)) !== "grid") {
+      expect(
+        replay.writesWhileHidden,
+        "the whole replay reaches xterm.js as ONE write, exactly as a reopen does",
+      ).toBe(1);
+      expect(replay.revealedInWriteCallback).toBe(true);
+    }
     expect(
       replay.viewportAtTailOnReveal,
       "the first frame the user sees after a reconnect is the tail",
@@ -698,9 +704,9 @@ test("takeover-during-backoff-does-not-steal-the-session", async ({
       await page.keyboard.type(`link ${text}`);
       await page.keyboard.press("Enter");
       await waitForTermText(page, `echo:link ${text}`);
-      await expect(page.locator("#terminal .xterm-rows > div").filter({ hasText: `echo:link ${text}` }).last()).toBeVisible();
+      await expect(page.locator("#terminal :is(.xterm-rows > div, .grid-terminal-row)").filter({ hasText: `echo:link ${text}` }).last()).toBeVisible();
     }
-    const snapshotCols = await page.evaluate(() => (window as any).__farhelmTerm.cols);
+    const snapshotCols = (await terminalSize(page))!.cols;
     // Withheld BEFORE the close, so there is no window at all in which the
     // ladder could reach the helm ahead of the winner below.
     await withholdTerminalSockets(page);
@@ -804,7 +810,7 @@ test("takeover-during-backoff-does-not-steal-the-session", async ({
         window.open = ((url: string) => { (window as any).__snapshotOpened.push(url); return null; }) as typeof window.open;
       });
       for (const text of [snapshotUrl, "snapshot.txt"]) {
-        const linkRow = page.locator("#terminal .xterm-rows > div").filter({ hasText: `echo:link ${text}` }).last();
+        const linkRow = page.locator("#terminal :is(.xterm-rows > div, .grid-terminal-row)").filter({ hasText: `echo:link ${text}` }).last();
         await expect(linkRow).toBeVisible();
         const linkBox = await linkRow.boundingBox();
         expect(linkBox, "the complete link must occupy a painted snapshot row").not.toBeNull();
@@ -815,7 +821,7 @@ test("takeover-during-backoff-does-not-steal-the-session", async ({
         await page.mouse.move(linkBox!.x - 1, y);
         await page.mouse.move(x, y);
         if (text === "snapshot.txt") await expect(page.locator("#terminal .terminal-file-target")).toContainText("click to download");
-        await expect(page.locator("#terminal .xterm-screen")).toHaveClass(/\bxterm-cursor-pointer\b/);
+        await expect(terminalLinkPointer(page)).toHaveCount(1);
         if (text === snapshotUrl) {
           // Restoring admission must not turn a selection drag into an open.
           await page.mouse.down();
@@ -844,7 +850,7 @@ test("takeover-during-backoff-does-not-steal-the-session", async ({
           navigator.clipboard.writeText = async (text) => { (window as any).__snapshotCopies.push(text); };
         });
       }
-      const row = page.locator("#terminal .xterm-rows > div").filter({ hasText: `echo:${marker}` }).last();
+      const row = page.locator("#terminal :is(.xterm-rows > div, .grid-terminal-row)").filter({ hasText: `echo:${marker}` }).last();
       await expect(row).toBeVisible();
       const box = await row.boundingBox();
       expect(box, "the held marker row must be painted before selecting it").not.toBeNull();
@@ -1898,7 +1904,7 @@ try {
   await waitForSessionRevealed(page, id);
   await waitForTermText(page, "FAKE-AGENT READY", 20_000);
   expect(
-    await page.evaluate(() => document.querySelectorAll("#terminal .xterm-rows").length),
+    await page.evaluate(() => document.querySelectorAll("#terminal :is(.xterm-rows, .grid-terminal-screen)").length),
     "exactly one terminal in the element: the reopened one",
   ).toBe(1);
 } finally {
@@ -2031,7 +2037,7 @@ try {
     .toBe(true);
   await waitForTermText(page, "FAKE-AGENT READY", 20_000);
   expect(
-    await page.evaluate(() => document.querySelectorAll("#terminal .xterm-rows").length),
+    await page.evaluate(() => document.querySelectorAll("#terminal :is(.xterm-rows, .grid-terminal-screen)").length),
     "exactly one terminal in the element: the buried screen was disposed",
   ).toBe(1);
 } finally {
@@ -2045,6 +2051,8 @@ try {
  * erase the successor retry or replace the outage card with a dead screen.
  */
 test("late-replay-flush-keeps-a-new-recovery-alive", async ({ page, request }) => {
+  // Holds xterm.js's write callback across a recovery; a grid has none.
+  test.skip(onHostTerminals(), "holds xterm.js's write callback; a grid has none");
   await reconnectTimingsFromNextLoad(page, { delaysMs: [50, 5_000], probeIntervalMs: 5_000 });
   let ownId: string | undefined;
   try {
@@ -2085,7 +2093,7 @@ test("late-replay-flush-keeps-a-new-recovery-alive", async ({ page, request }) =
     await waitForRemount(page, "terminal", 15_000);
     await waitForSessionRevealed(page, own.id);
     const marker = `after-flush-${Date.now()}`;
-    await expect(page.locator("#terminal .xterm-helper-textarea")).toBeFocused();
+    await expect(terminalInput(page)).toBeFocused();
     await page.keyboard.type(marker);
     await page.keyboard.press("Enter");
     await waitForTermText(page, `echo:${marker}`);

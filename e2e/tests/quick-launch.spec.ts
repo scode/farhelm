@@ -22,7 +22,7 @@ import {
   stubFeed,
   waitForFeedReadersSettled,
 } from "./helpers/fleet";
-import { attachSession, waitForTermText } from "./helpers/term";
+import { attachSession, waitForTermText, terminalInput, programInput, type InputFrame, recordInput } from "./helpers/term";
 import { waitForSessionReady, waitForSessionRevealed } from "./helpers/terminal-readiness";
 import { routeGate } from "./helpers/route-gate";
 import { requireHelmBuild } from "./helpers/helm-build";
@@ -225,7 +225,7 @@ test("launch sequence stacks a number template and bolt without showing New", as
   const gate = routeGate();
   const created: string[] = [];
   const bodies: any[] = [];
-  const binary: Buffer[] = [];
+  const binary: InputFrame[] = [];
   let bodyFailed = false;
   try {
     await commandTemplate(request, runnable);
@@ -235,9 +235,7 @@ test("launch sequence stacks a number template and bolt without showing New", as
     expect(saved.ok(), await saved.text()).toBe(true);
     page.on("websocket", (socket) => {
       if (new URL(socket.url()).pathname.endsWith("/term")) {
-        socket.on("framesent", ({ payload }) => {
-          if (Buffer.isBuffer(payload)) binary.push(payload);
-        });
+        recordInput(socket, binary);
       }
     });
     await patchPreferences(request, { template_shortcuts: { "1": partial }, quick_launch_template: runnable });
@@ -245,7 +243,7 @@ test("launch sequence stacks a number template and bolt without showing New", as
     await page.goto("/");
     await attachSession(page, source.id);
     await waitForTermText(page, "FAKE-AGENT READY");
-    await expect(page.locator("#terminal .xterm-helper-textarea")).toBeFocused();
+    await expect(terminalInput(page)).toBeFocused();
     binary.length = 0;
     await page.route("**/api/sessions", async (route) => {
       if (route.request().method() !== "POST") return route.continue();
@@ -282,18 +280,18 @@ test("launch sequence stacks a number template and bolt without showing New", as
     await expect(page.locator(".rename-dialog")).toHaveCount(0);
     await expect(indicator).toHaveCount(0);
     expect(bodies[0]).toMatchObject({ title: `${runnable}-session`, command: { command: FAKE_AGENT, yolo: false } });
-    expect(Buffer.concat(binary).toString(), "the sequence owns its complete input").toBe("");
+    expect(programInput(binary), "the sequence owns its complete input").toBe("");
     gate.release();
     await expect.poll(() => created.length).toBe(1);
     await expect(page.locator(`[data-session-id="${created[0]}"]`)).toHaveAttribute("data-session-selected", "true");
     await expect(form).toHaveCount(0);
     const field = await namingField(page, `${runnable}-session`);
     await agentStartedWhileNaming(page, created[0], field);
-    expect(Buffer.concat(binary).toString(), "composing and naming send no terminal input").toBe("");
+    expect(programInput(binary), "composing and naming send no terminal input").toBe("");
     await page.keyboard.press("Enter");
     const probe = `sequence-live-${Date.now()}`;
     await echoAfterNaming(page, created[0], probe);
-    expect(Buffer.concat(binary).toString()).toBe(`${probe}\r`);
+    expect(programInput(binary)).toBe(`${probe}\r`);
     expect(await page.evaluate(() => (window as unknown as { sequencePainted: boolean }).sequencePainted)).toBe(false);
     expect(bodies).toHaveLength(1);
   } catch (error) {
@@ -329,7 +327,7 @@ test("typed launch proceeds before the prefix catalog returns and owns terminal 
   const gate = routeGate();
   const created: string[] = [];
   const bodies: any[] = [];
-  const binary: Buffer[] = [];
+  const binary: InputFrame[] = [];
   let held = 0;
   let released = false;
   let bodyFailed = true;
@@ -351,14 +349,14 @@ test("typed launch proceeds before the prefix catalog returns and owns terminal 
     ]));
     page.on("websocket", (socket) => {
       if (new URL(socket.url()).pathname.endsWith("/term")) {
-        socket.on("framesent", ({ payload }) => { if (Buffer.isBuffer(payload)) binary.push(payload); });
+        recordInput(socket, binary);
       }
     });
     await pinAutoSelect(page, source.id);
     await page.goto("/");
     await attachSession(page, source.id);
     await waitForTermText(page, "> ");
-    await expect(page.locator("#terminal .xterm-helper-textarea")).toBeFocused();
+    await expect(terminalInput(page)).toBeFocused();
     binary.length = 0;
     await page.route("**/api/templates", async (route) => {
       if (route.request().method() === "GET" && held === 0) {
@@ -391,7 +389,7 @@ test("typed launch proceeds before the prefix catalog returns and owns terminal 
     await expect(page.locator(".create-session-form")).toHaveCount(0);
     const field = await namingField(page, `${stem}-composed`);
     await agentStartedWhileNaming(page, created[0], field);
-    expect(Buffer.concat(binary).toString(), "all typed sequence input stays away from both terminals").toBe("");
+    expect(programInput(binary), "all typed sequence input stays away from both terminals").toBe("");
     released = true;
     gate.release();
     await page.keyboard.press("Enter");
@@ -510,7 +508,7 @@ test("typed candidates stay bounded and pointer-transparent without moving the p
     await page.goto("/");
     await attachSession(page, source.id);
     await waitForTermText(page, "> ");
-    await expect(page.locator("#terminal .xterm-helper-textarea")).toBeFocused();
+    await expect(terminalInput(page)).toBeFocused();
     const indicator = page.locator(".launch-sequence-indicator");
     const pill = indicator.locator(".launch-sequence-pill");
     const candidates = indicator.locator(".launch-sequence-candidates");
@@ -528,8 +526,8 @@ test("typed candidates stay bounded and pointer-transparent without moving the p
         return !!main && main.x >= 0 && main.x + main.width <= width + 1;
       }, { message: "the main pane is exposed before candidate geometry is measured" }).toBe(true);
       await expect(page.locator(".terminal-panes")).toBeVisible();
-      await page.locator("#terminal .xterm-helper-textarea").focus();
-      await expect(page.locator("#terminal .xterm-helper-textarea")).toBeFocused();
+      await terminalInput(page).focus();
+      await expect(terminalInput(page)).toBeFocused();
       await page.keyboard.press("Control+Shift+KeyX");
       await expect(pill).toBeVisible();
       await expect(indicator).toHaveCSS("opacity", "1");
@@ -548,7 +546,7 @@ test("typed candidates stay bounded and pointer-transparent without moving the p
       await expect(indicator).toHaveCSS("pointer-events", "none");
       await expect(candidates).toHaveCSS("pointer-events", "none");
       expect(await indicator.locator("button, input, a, [tabindex]").count(), "hints contain no focusable controls").toBe(0);
-      await expect(page.locator("#terminal .xterm-helper-textarea")).toBeFocused();
+      await expect(terminalInput(page)).toBeFocused();
       await expect.poll(async () => {
         const current = await pill.boundingBox();
         const candidateBox = await candidates.boundingBox();
@@ -597,7 +595,7 @@ test("launch sequence cancellation leaves ordinary terminal input and modals in 
     await attachSession(page, source.id);
     await waitForTermText(page, "FAKE-AGENT READY");
     await waitForTermText(page, "> ");
-    await expect(page.locator("#terminal .xterm-helper-textarea")).toBeFocused();
+    await expect(terminalInput(page)).toBeFocused();
     const discarded = `discard-before-sequence-${Date.now()}`;
     await page.keyboard.type(discarded);
     await waitForTermText(page, discarded);
@@ -1218,8 +1216,8 @@ test("hidden preparation isolates keys and a queued Replace with requires Launch
     await expect(replaceWith).toHaveAttribute("aria-disabled", "false");
     const queuedReplaceWith = await replaceWith.elementHandle();
     if (!queuedReplaceWith) throw new Error("the pre-isolation Replace with element was not mounted");
-    await page.locator("#terminal .xterm-helper-textarea").focus();
-    await expect(page.locator("#terminal .xterm-helper-textarea")).toBeFocused();
+    await terminalInput(page).focus();
+    await expect(terminalInput(page)).toBeFocused();
     expect(await queuedReplaceWith.evaluate((node) => node.isConnected), "the callback origin survives restoring terminal focus").toBe(true);
     await chord(page);
     await expect.poll(() => catalogReads).toBeGreaterThan(0);
@@ -1624,7 +1622,7 @@ for (const [mac, numbered] of [[false, false], [true, false], [false, true], [tr
     const source = await createSession(request, { title: `quick-source-${Date.now()}` });
     const name = `quick-direct-${Date.now()}`;
     const created: string[] = [];
-    const binary: Buffer[] = [];
+    const binary: InputFrame[] = [];
     const gate = routeGate();
     const bodies: any[] = [];
     const renames: { path: string; body: unknown }[] = [];
@@ -1638,9 +1636,7 @@ for (const [mac, numbered] of [[false, false], [true, false], [false, true], [tr
       });
       page.on("websocket", (socket) => {
         if (new URL(socket.url()).pathname.endsWith("/term")) {
-          socket.on("framesent", ({ payload }) => {
-            if (Buffer.isBuffer(payload)) binary.push(payload);
-          });
+          recordInput(socket, binary);
         }
       });
       await page.route("**/api/sessions", async (route) => {
@@ -1656,7 +1652,7 @@ for (const [mac, numbered] of [[false, false], [true, false], [false, true], [tr
       await page.goto("/");
       await attachSession(page, source.id);
       await waitForTermText(page, "FAKE-AGENT READY");
-      await expect(page.locator("#terminal .xterm-helper-textarea")).toBeFocused();
+      await expect(terminalInput(page)).toBeFocused();
       // A later hidden snapshot would miss a launcher flashed before submit.
       // Retain one bounded observation bit across every actual DOM transition.
       await page.evaluate(() => {
@@ -1683,7 +1679,7 @@ for (const [mac, numbered] of [[false, false], [true, false], [false, true], [tr
         title: `${name}-session`,
         command: { command: FAKE_AGENT, yolo: false },
       });
-      expect(Buffer.concat(binary).toString(), "the captured chord and repeat reach no agent input frame").toBe("");
+      expect(programInput(binary), "the captured chord and repeat reach no agent input frame").toBe("");
       const response = page.waitForResponse((r) =>
         r.request().method() === "POST" && new URL(r.url()).pathname === "/api/sessions"
       );
@@ -1702,7 +1698,7 @@ for (const [mac, numbered] of [[false, false], [true, false], [false, true], [tr
         await page.keyboard.type(changed);
         await expect(field).toHaveValue(changed);
       }
-      expect(Buffer.concat(binary).toString(), "typing a name reaches no terminal input frame").toBe("");
+      expect(programInput(binary), "typing a name reaches no terminal input frame").toBe("");
       if (mac && numbered) await page.locator(".rename-dialog .rename-cancel").click();
       else await page.keyboard.press(mac ? "Escape" : "Enter");
       const probe = `quick-live-${Date.now()}`;
@@ -1715,7 +1711,7 @@ for (const [mac, numbered] of [[false, false], [true, false], [false, true], [tr
         ? [{ path: `/api/sessions/${encodeURIComponent(session.id)}/rename`, body: { title: changed } }]
         : []);
       expect(bodies).toHaveLength(1);
-      expect(Buffer.concat(binary).toString()).toBe(`${probe}\r`);
+      expect(programInput(binary)).toBe(`${probe}\r`);
       expect(await page.evaluate(() => (window as unknown as { quickLauncherPainted: boolean }).quickLauncherPainted))
         .toBe(false);
     } catch (error) {

@@ -1,7 +1,7 @@
 import { expect, test } from "./helpers/evidence";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { cleanupSession, createSession, patchPreferences, readPreferences, resetPreferences } from "./helpers/fleet";
-import { attachSession, waitForTermText } from "./helpers/term";
+import { attachSession, waitForTermText, terminalInput } from "./helpers/term";
 import { openSettings, selectSettingsSection } from "./helpers/settings";
 import { routeGate } from "./helpers/route-gate";
 import { drainedRoute } from "./helpers/drained-route";
@@ -54,7 +54,7 @@ test("Claude trust hint preserves the terminal and opens the opt-in caveats", as
     await installSeed(other);
     await page.goto("/");
     await attachSession(page, session.id);
-    const terminal = page.locator("#terminal .xterm-helper-textarea");
+    const terminal = terminalInput(page);
     await expect(terminal).toBeFocused();
     const panes = page.locator(".terminal-panes");
     const before = (await panes.boundingBox())!;

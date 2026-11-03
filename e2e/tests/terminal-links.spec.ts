@@ -43,7 +43,7 @@
 import { expect, test } from "./helpers/evidence";
 import { type Page } from "@playwright/test";
 import { cleanupSession, createSession } from "./helpers/fleet";
-import { attachSession, waitForTermText } from "./helpers/term";
+import { attachSession, waitForTermText, terminalInput, onHostTerminals, terminalKind, terminalLinkPointer, terminalScreen, terminalSize, terminalViewport } from "./helpers/term";
 import { replayRecord } from "./helpers/terminal-readiness";
 import fs from "node:fs";
 import path from "node:path";
@@ -74,7 +74,7 @@ for (const kind of ["web", "file"] as const) {
       await page.goto("/");
       await attachSession(page, session.id);
       await assertLinkWiring(page);
-      await expect(page.locator("#terminal .xterm-helper-textarea")).toBeFocused();
+      await expect(terminalInput(page)).toBeFocused();
       await page.keyboard.press("Enter");
       await waitForTermText(page, text);
       const head = await findViewportRow(page, text.slice(0, 20));
@@ -194,18 +194,9 @@ interface RowGeometry {
 
 /** One-shot scan for the first viewport row containing `needle`. */
 async function scanViewportRow(page: Page, needle: string): Promise<RowGeometry> {
-  return page.evaluate((needleText) => {
-    const t = (window as any).__farhelmTerm;
-    const buf = t.buffer.active;
-    for (let i = 0; i < t.rows; i++) {
-      const line = buf.getLine(buf.viewportY + i);
-      const text = line ? line.translateToString(true) : "";
-      if (text.includes(needleText)) {
-        return { rows: t.rows, cols: t.cols, rowIndex: i, rowText: text };
-      }
-    }
-    return { rows: t.rows, cols: t.cols, rowIndex: -1, rowText: "" };
-  }, needle);
+  const view = (await terminalViewport(page))!;
+  const rowIndex = view.lines.findIndex((text) => text.includes(needle));
+  return { rows: view.rows, cols: view.cols, rowIndex, rowText: rowIndex < 0 ? "" : view.lines[rowIndex] };
 }
 
 /**
@@ -251,7 +242,7 @@ async function linkCell(
   const geometry = await findViewportRow(page, rowNeedle);
   const col = geometry.rowText.indexOf(clickText);
   expect(col, `row containing ${rowNeedle} must contain ${clickText}`).toBeGreaterThanOrEqual(0);
-  const screen = page.locator("#terminal .xterm-screen");
+  const screen = terminalScreen(page);
   const box = (await screen.boundingBox())!;
   const cellWidth = box.width / geometry.cols;
   const cellHeight = box.height / geometry.rows;
@@ -285,7 +276,7 @@ async function hoverLink(
   clickText: string,
   attempts = 1,
 ): Promise<{ x: number; y: number }> {
-  const screen = page.locator("#terminal .xterm-screen");
+  const screen = terminalScreen(page);
   let lastError: unknown = null;
   for (let attempt = 0; attempt < attempts; attempt++) {
     const geometry = await findViewportRow(page, rowNeedle);
@@ -298,10 +289,10 @@ async function hoverLink(
     const y = box.y + (geometry.rowIndex + 0.5) * cellHeight;
     await page.mouse.move(box.x + box.width - cellWidth / 2, y);
     await page.mouse.move(box.x + box.width / 2, box.y - 1);
-    await expect(screen).not.toHaveClass(/\bxterm-cursor-pointer\b/);
+    await expect(terminalLinkPointer(page)).toHaveCount(0);
     await page.mouse.move(x, y);
     try {
-      await expect(screen).toHaveClass(/\bxterm-cursor-pointer\b/, { timeout: 2_000 });
+      await expect(terminalLinkPointer(page)).toHaveCount(1, { timeout: 2_000 });
       return { x, y };
     } catch (error) {
       lastError = error;
@@ -322,13 +313,13 @@ async function hoverLink(
  */
 async function hoverExpectNone(page: Page, rowNeedle: string, clickText: string): Promise<void> {
   const { x, y } = await linkCell(page, rowNeedle, clickText);
-  const screen = page.locator("#terminal .xterm-screen");
+  const screen = terminalScreen(page);
   const box = (await screen.boundingBox())!;
   await page.mouse.move(box.x + box.width / 2, box.y - 1);
-  await expect(screen).not.toHaveClass(/\bxterm-cursor-pointer\b/);
+  await expect(terminalLinkPointer(page)).toHaveCount(0);
   await page.mouse.move(x, y);
-  await page.evaluate(() => (window as any).__farhelmTerm.cols);
-  await expect(screen).not.toHaveClass(/\bxterm-cursor-pointer\b/);
+  await terminalSize(page);
+  await expect(terminalLinkPointer(page)).toHaveCount(0);
 }
 
 /** Hover a link (proving it resolves) and click it for real. */
@@ -358,7 +349,7 @@ async function dragRowSpan(
   endCol: number,
 ): Promise<void> {
   const geometry = await findViewportRow(page, rowNeedle);
-  const box = (await page.locator("#terminal .xterm-screen").boundingBox())!;
+  const box = (await terminalScreen(page).boundingBox())!;
   const cellWidth = box.width / geometry.cols;
   const cellHeight = box.height / geometry.rows;
   const y = box.y + (geometry.rowIndex + 0.5) * cellHeight;
@@ -373,7 +364,10 @@ async function dragRowSpan(
 
 /** The terminal's current local selection text (xterm's own API). */
 async function getSelection(page: Page): Promise<string> {
-  return page.evaluate(() => (window as any).__farhelmTerm.getSelection() as string);
+  return page.evaluate(() => {
+    const w = window as any;
+    return (w.__farhelmTerm ? w.__farhelmTerm.getSelection() : w.__farhelmGrid.selectionText()) as string;
+  });
 }
 
 test("clicking an OSC 8 hyperlink opens it in a new tab with no confirm dialog", async ({
@@ -562,27 +556,20 @@ test("a URL beginning above the viewport activates from its visible continuation
     // ones near it (fine steps move about a row, well under the
     // several-row target window, so the servo cannot straddle past it
     // forever).
-    const screen = page.locator("#terminal .xterm-screen");
+    const screen = terminalScreen(page);
     const box = (await screen.boundingBox())!;
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-    const locate = () =>
-      page.evaluate(({ headText, tailText }) => {
-        const t = (window as any).__farhelmTerm;
-        const buf = t.buffer.active;
-        let headRow = -1;
-        let tailRow = -1;
-        for (let i = 0; i < buf.length; i++) {
-          const text = buf.getLine(i)?.translateToString(true) ?? "";
-          if (headRow < 0 && text.includes(headText)) headRow = i;
-          if (text.includes(tailText)) tailRow = i;
-        }
-        const top = buf.viewportY;
-        return {
-          headAbove: headRow >= 0 && headRow < top,
-          tailVisible: tailRow >= top && tailRow < top + t.rows,
-          distance: tailRow - top,
-        };
-      }, { headText: head, tailText: tail });
+    const locate = async () => {
+      const view = (await terminalViewport(page))!;
+      const headRow = view.all.findIndex((text) => text.includes(head));
+      let tailRow = -1;
+      view.all.forEach((text, i) => { if (text.includes(tail)) tailRow = i; });
+      return {
+        headAbove: headRow >= 0 && headRow < view.top,
+        tailVisible: tailRow >= view.top && tailRow < view.top + view.rows,
+        distance: tailRow - view.top,
+      };
+    };
     let position = await locate();
     for (let notch = 0; notch < 120 && !(position.headAbove && position.tailVisible); notch++) {
       if (position.tailVisible) {
@@ -612,6 +599,14 @@ test("a wrapped URL still activates after a resize reflows it", async ({
   page,
   request,
 }) => {
+  // Not a grid gap but an emulator one, reported rather than worked around:
+  // narrowing a terminal in a terminal host reflows its screen as alacritty
+  // does, keeping the cursor's row and pushing the lines above it into
+  // history, where tmux keeps them on screen (seen here: the URL's head left
+  // the screen with twenty blank rows below the cursor). Resize reflow is
+  // among the emulator's pinned differences from tmux
+  // (crates/farhelm-supervisor/src/emulator_parity/generated.rs).
+  test.skip(onHostTerminals(), "the emulator's resize reflow pushes the URL's head into history where tmux keeps it on screen");
   const openedLinks = await recordWindowOpen(page);
   const dialogs = recordDialogs(page);
 
@@ -655,7 +650,7 @@ test("a wrapped URL still activates after a resize reflows it", async ({
     // clicking a URL that never reflowed.
     await page.setViewportSize({ width: 800, height: 600 });
     await expect
-      .poll(() => page.evaluate(() => (window as any).__farhelmTerm.cols as number), {
+      .poll(async () => (await terminalSize(page))!.cols, {
         timeout: 15_000,
         message: "waiting for xterm to refit after the viewport shrank",
       })
@@ -721,11 +716,16 @@ test("a replayed plain-text URL activates after a reload with no second gate", a
     // revealed). `writesWhileHidden`, not `bufferedBytes`: the latter is
     // current holdings, reset to zero at reveal by design.
     await waitForTermText(page, marker);
-    const replay = await replayRecord(page, "terminal");
-    expect(
-      replay.writesWhileHidden,
-      "the replay must have written the pane's bytes while hidden",
-    ).toBeGreaterThanOrEqual(1);
+    // xterm.js's catch-up counts its writes; a grid replay is frames the
+    // component applies as they arrive, so the marker back in the
+    // reattached terminal is the whole boundary there.
+    if ((await terminalKind(page)) !== "grid") {
+      const replay = await replayRecord(page, "terminal");
+      expect(
+        replay.writesWhileHidden,
+        "the replay must have written the pane's bytes while hidden",
+      ).toBeGreaterThanOrEqual(1);
+    }
 
     await clickLink(page, marker, url);
 
@@ -769,18 +769,8 @@ test("a URL scrolled out of view activates after scrolling back to it", async ({
     // The scrollback premise, as buffer facts: the marker's line sits
     // ABOVE the viewport (`viewportY`), genuinely out of view — not
     // merely off-screen by assumption.
-    const position = await page.evaluate((needle) => {
-      const t = (window as any).__farhelmTerm;
-      const buf = t.buffer.active;
-      let found = -1;
-      for (let i = 0; i < buf.length; i++) {
-        if (buf.getLine(i)?.translateToString(true).includes(needle)) {
-          found = i;
-          break;
-        }
-      }
-      return { found, viewportY: buf.viewportY };
-    }, marker);
+    const view = (await terminalViewport(page))!;
+    const position = { found: view.all.findIndex((text) => text.includes(marker)), viewportY: view.top };
     expect(position.found, "the marker line must exist in the buffer").toBeGreaterThanOrEqual(0);
     expect(
       position.found,
@@ -790,7 +780,7 @@ test("a URL scrolled out of view activates after scrolling back to it", async ({
     // A real wheel gesture back up, one notch at a time, until the
     // marker's row renders again — each scan is the barrier, so no
     // fixed sleep decides when the scroll "should" have landed.
-    const screen = page.locator("#terminal .xterm-screen");
+    const screen = terminalScreen(page);
     const box = (await screen.boundingBox())!;
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     let visible = await scanViewportRow(page, marker);
@@ -1075,6 +1065,12 @@ test("an OSC 8 link whose text matches its target, or is not a URL, hovers quiet
  */
 for (const layout of ["claude", "codex", "terminal", "wide-wrap", "split-host", "ambiguous", "repeated"] as const) {
   test(`OSC 8 tagged rows compare the complete ${layout} link`, async ({ page, request }) => {
+    // Writes straight into xterm.js and reads its cells' link tags. A grid
+    // terminal's links come from the supervisor, and judging a link's text
+    // across its rows is pinned against recorded streams in
+    // e2e/grid-client/grid-attach.spec.ts ("an OSC 8 link whose text is
+    // another address warns, judging the text across the link's rows").
+    test.skip(onHostTerminals(), "direct writes into xterm.js's cells; the grid's cross-row judgment is pinned in e2e/grid-client");
     let owned: string | undefined;
     try {
       const session = await createSession(request, {
@@ -1271,7 +1267,7 @@ test("forbidden and malformed schemes are neither decorated nor clickable", asyn
       // The click round-trip flushes any activation the click could have
       // caused before the empty-opens read — same synchronous-mouseup
       // reasoning as the drag tests.
-      await page.evaluate(() => (window as any).__farhelmTerm.cols);
+      await terminalSize(page);
       expect(await openedLinks(), `${cell.text} must not activate`).toEqual([]);
       expect(page.url(), `${cell.text} must not navigate`).toBe(pageUrl);
     }
@@ -1331,7 +1327,7 @@ test("an http substring inside a forbidden scheme opens only the http part", asy
     ] as const) {
       const { x, y } = await linkCell(page, needle, prefix);
       await page.mouse.click(x, y);
-      await page.evaluate(() => (window as any).__farhelmTerm.cols);
+      await terminalSize(page);
       expect(await openedLinks(), `${prefix} must not activate`).toEqual([]);
       expect(page.url(), `${prefix} must not navigate`).toBe(pageUrl);
     }

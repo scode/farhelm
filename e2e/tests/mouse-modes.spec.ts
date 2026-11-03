@@ -34,7 +34,7 @@ import { Page, APIRequestContext } from "@playwright/test";
 import path from "node:path";
 import fs from "node:fs";
 import { createSession, listSessions } from "./helpers/fleet";
-import { attachSession, cleanupSession, fillCreateForm, termText, waitForTermText } from "./helpers/term";
+import { attachSession, cleanupSession, fillCreateForm, termText, waitForTermText, terminalInput, terminalScreen, terminalSize, onHostTerminals } from "./helpers/term";
 import { addTab, selectTerminal } from "./helpers/terminal-suite";
 import { stackScratchDir } from "./helpers/scratch";
 import { waitForIslandMounted, waitForSessionMounted, waitForSessionRevealed } from "./helpers/terminal-readiness";
@@ -214,7 +214,7 @@ async function findSessionIdByTitle(
  * this test exists to prove (PLAN_M6_5.md item 2 review).
  */
 async function chooseClickColumn(page: Page): Promise<number> {
-  const cols = await page.evaluate(() => (window as any).__farhelmTerm.cols);
+  const cols = (await terminalSize(page))!.cols;
   expect(
     cols,
     "the terminal must be comfortably wider than 101 columns for this test's column choice to stay inside [96, 223]",
@@ -234,11 +234,8 @@ async function chooseClickColumn(page: Page): Promise<number> {
  * `waitForReportCount`'s exact targets rather than assuming a count of 1.
  */
 async function clickTerminalCell(page: Page, col: number, row: number) {
-  const box = (await page.locator("#terminal .xterm-screen").boundingBox())!;
-  const geometry = await page.evaluate(() => {
-    const t = (window as any).__farhelmTerm;
-    return { cols: t.cols, rows: t.rows };
-  });
+  const box = (await terminalScreen(page).boundingBox())!;
+  const geometry = (await terminalSize(page))!;
   const cellWidth = box.width / geometry.cols;
   const cellHeight = box.height / geometry.rows;
   await page.mouse.click(
@@ -532,6 +529,10 @@ test("drag-copy notice: shown only for a drag the program kept without copying",
   page,
   request,
 }) => {
+  // The drag-copy notice is not built for grid terminals (the
+  // maintainer's call: a near-term TODO entry, not part of the switch), so
+  // on terminal hosts there is nothing for this test to observe.
+  test.skip(onHostTerminals(), "the drag-copy notice is not built for terminals in terminal hosts");
   test.setTimeout(90_000);
   const ready = `DRAG-NOTICE-READY-${Date.now()}`;
   const session = await createSession(request, {
@@ -580,7 +581,7 @@ test("drag-copy notice: shown only for a drag the program kept without copying",
     expect(Math.abs(noticeBox.x + noticeBox.width / 2 - release.x)).toBeLessThan(2);
     expect(noticeBox.y).toBeCloseTo(Math.max(4, release.y - 6 - noticeBox.height), 0);
 
-    const textarea = page.locator("#terminal .xterm-helper-textarea");
+    const textarea = terminalInput(page);
     await expect(textarea).toBeFocused();
     // Observe xterm's real input doorway: a plain terminal press must emit
     // a mouse report, whereas × must not produce any input through it.
@@ -647,6 +648,10 @@ test("drag-copy notice: a Codex session gets Codex's own instruction", async ({
   page,
   request,
 }) => {
+  // The drag-copy notice is not built for grid terminals (the
+  // maintainer's call: a near-term TODO entry, not part of the switch), so
+  // on terminal hosts there is nothing for this test to observe.
+  test.skip(onHostTerminals(), "the drag-copy notice is not built for terminals in terminal hosts");
   test.setTimeout(90_000);
   const ready = `DRAG-NOTICE-CODEX-READY-${Date.now()}`;
   const dir = stackScratchDir("drag-notice-codex-");

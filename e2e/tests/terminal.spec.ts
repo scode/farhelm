@@ -57,7 +57,7 @@ import {
   agentLaunchRow,
   commandLaunchRow,
 } from "./helpers/fleet";
-import { attachSession, cleanupSession, fillCreateForm, termText, waitForTermText } from "./helpers/term";
+import { attachSession, cleanupSession, fillCreateForm, termText, terminalScreen, terminalSize, waitForTermText, onHostTerminals, terminalFit } from "./helpers/term";
 import { waitForIslandMounted, waitForSessionReady, waitForSessionRevealed } from "./helpers/terminal-readiness";
 import {
   FAKE_AGENT_INVOCATION,
@@ -97,7 +97,7 @@ test("renders the session and the agent's TUI output", async ({ page }) => {
   await waitForTermText(page, "fake-agent starting");
   // The visible viewport is real DOM text too — the DOM renderer is what
   // makes these tests semantic rather than pixel-diffing.
-  await expect(page.locator(".xterm-rows")).toContainText("FAKE-AGENT READY");
+  await expect(terminalScreen(page)).toContainText("FAKE-AGENT READY");
 });
 
 /**
@@ -111,15 +111,20 @@ test("matches Ghostty's terminal theme and surface", async ({ page }) => {
   await waitForTermText(page, "fake-agent starting");
   const colors = await page.evaluate(() => {
     const terminal = document.querySelector(".terminal");
-    const viewport = document.querySelector(".xterm-viewport");
-    const term = (window as any).__farhelmTerm;
+    // The component's own surface: xterm.js's viewport, or the grid's
+    // element, which paints the theme's background itself.
+    const viewport = document.querySelector(".xterm-viewport, .grid-terminal");
+    const w = window as any;
     return {
-      themeBackground: term.options.theme.background,
+      // The background the component draws with: xterm.js's theme option,
+      // or the default background the grid painted on its own element.
+      themeBackground: w.__farhelmTerm ? w.__farhelmTerm.options.theme.background : w.__farhelmGrid.element.style.backgroundColor,
+      grid: !w.__farhelmTerm,
       terminalBackground: getComputedStyle(terminal!).backgroundColor,
       viewportBackground: getComputedStyle(viewport!).backgroundColor,
     };
   });
-  expect(colors.themeBackground.toLowerCase()).toBe("#282c34");
+  expect(colors.themeBackground.toLowerCase()).toBe(colors.grid ? "rgb(40, 44, 52)" : "#282c34");
   expect(colors.viewportBackground, "the vendored #000 viewport rule must lose to the app override").toBe("rgb(40, 44, 52)");
   expect(colors.terminalBackground).toBe(colors.viewportBackground);
 });
@@ -143,9 +148,10 @@ test("host-colored terminal frame follows local appearance and Settings", async 
     await openTerminal(page);
     const panes = page.locator(".terminal-panes");
     // xterm also uses the class name `terminal`; the frame belongs to the
-    // outer island whose padding surrounds it.
+    // outer island whose padding surrounds it. The viewport is the
+    // component's own surface: xterm.js's viewport or the grid's element.
     const terminal = page.locator(".terminal-pane.selected > .terminal");
-    const viewport = terminal.locator(".xterm-viewport");
+    const viewport = terminal.locator(".xterm-viewport, .grid-terminal");
     const surface = await terminal.evaluate((element) => getComputedStyle(element).backgroundColor);
     const viewportSize = await viewport.evaluate((element) => ({ width: element.clientWidth, height: element.clientHeight }));
     await expect(panes).toHaveAttribute("data-colored-frame", "false");
@@ -165,7 +171,7 @@ test("host-colored terminal frame follows local appearance and Settings", async 
     const initialFrame = await terminal.evaluate((element) => getComputedStyle(element).boxShadow);
     expect(initialFrame).toContain(red);
     expect(initialFrame).toContain("4px");
-    await expect(terminal.locator(".xterm")).toHaveCSS("box-shadow", "none");
+    await expect(terminal.locator(".xterm, .grid-terminal")).toHaveCSS("box-shadow", "none");
     await expect(terminal).toHaveCSS("background-color", surface);
     await expect(viewport).toHaveCSS("background-color", surface);
     expect(await viewport.evaluate((element) => ({ width: element.clientWidth, height: element.clientHeight }))).toEqual(viewportSize);
@@ -455,7 +461,9 @@ test("switching sessions tears down the mounted terminal; reselecting mounts a f
   await waitForTermText(page, "echo:marker-before-back");
 
   await page.evaluate(() => {
-    (window as any).__farhelmTerm.__testMarker = "before-back";
+    // The agent terminal's component, whichever kind it is: xterm.js, or
+    // the grid that replaced it for a terminal in a terminal host.
+    ((window as any).__farhelmTerm ?? (window as any).__farhelmGrid).__testMarker = "before-back";
     // Stashed under different names so they survive terminal.js's own
     // deletes on unmount — the actual WebSocket object and test hook the
     // mount owned, kept around purely so the assertions below can check
@@ -479,8 +487,8 @@ test("switching sessions tears down the mounted terminal; reselecting mounts a f
         // teardown deletes the global, and `undefined !== marker` would
         // declare victory over a blank pane.
         () =>
-          Boolean((window as any).__farhelmTerm) &&
-          (window as any).__farhelmTerm.__testMarker !== "before-back",
+          Boolean((window as any).__farhelmTerm ?? (window as any).__farhelmGrid) &&
+          ((window as any).__farhelmTerm ?? (window as any).__farhelmGrid).__testMarker !== "before-back",
       ),
     )
     .toBe(true);
@@ -523,7 +531,7 @@ test("switching sessions tears down the mounted terminal; reselecting mounts a f
   await waitForTermText(page, "FAKE-AGENT READY");
 
   const isFreshInstance = await page.evaluate(
-    () => (window as any).__farhelmTerm.__testMarker !== "before-back",
+    () => ((window as any).__farhelmTerm ?? (window as any).__farhelmGrid).__testMarker !== "before-back",
   );
   expect(isFreshInstance).toBe(true);
 
@@ -967,6 +975,11 @@ test("DECRPM auto-replies to a mode query are dropped, not forwarded as pane inp
   page,
   request,
 }) => {
+  // About xterm.js's own query answers, which a grid terminal does not
+  // have: in a terminal host the supervisor's emulator answers a program's
+  // queries and the browser never does (the emulator's query-answer table
+  // and the host runtime's replay tests pin that).
+  test.skip(onHostTerminals(), "xterm.js's own query answers; a grid terminal sends none");
   // Patch only `send` on the WebSocket PROTOTYPE, before any navigation.
   // Replacing the `WebSocket` constructor outright (as the mount-rollback
   // test above does deliberately, to make it throw) would break RECEIVING
@@ -1099,6 +1112,8 @@ test("DECRQSS auto-replies to a status query are dropped, not forwarded as pane 
   page,
   request,
 }) => {
+  // As the DECRPM test above: xterm.js's own query answers.
+  test.skip(onHostTerminals(), "xterm.js's own query answers; a grid terminal sends none");
   await page.addInitScript(() => {
     const realSend = WebSocket.prototype.send;
     (window as any).__sentInput = [];
@@ -1252,6 +1267,12 @@ test("DECRQSS auto-replies to a status query are dropped, not forwarded as pane 
 test("input dismisses both the xterm and native selections", async ({
   page,
 }) => {
+  // About xterm.js's selection and the document selection its helper
+  // elements leave behind. The grid keeps its own selection, which input
+  // clears (e2e/grid-client/grid-terminal.spec.ts, "a mouse report brings
+  // a scrolled-back view to the bottom and clears the selection, as input
+  // does"), and leaves no document selection.
+  test.skip(onHostTerminals(), "xterm.js's selection and its helpers' document selection; the grid's is pinned in e2e/grid-client");
   await openTerminal(page);
   await page.locator("#terminal").click();
 
@@ -1376,25 +1397,15 @@ test("reload reattaches with replayed scrollback", async ({ page }) => {
 // result proves the WebSocket message reached tmux before later input.
 test("resize reaches the real terminal", async ({ page }) => {
   await openTerminal(page);
-  const before = await page.evaluate(() => {
-    const t = (window as any).__farhelmTerm;
-    return { cols: t.cols, rows: t.rows };
-  });
+  const before = await terminalFit(page);
   await page.setViewportSize({ width: 700, height: 500 });
   await expect
-    .poll(
-      () =>
-        page.evaluate(() => {
-          const t = (window as any).__farhelmTerm;
-          return { cols: t.cols, rows: t.rows };
-        }),
-      { message: "viewport change must reflow the terminal via fit()" },
-    )
+    .poll(() => terminalFit(page), { message: "viewport change must reflow the terminal via fit()" })
     .not.toEqual(before);
-  const geometry = await page.evaluate(() => {
-    const t = (window as any).__farhelmTerm;
-    return { cols: t.cols, rows: t.rows };
-  });
+  const geometry = (await terminalFit(page))!;
+  // A grid draws the size the supervisor committed; wait until that is the
+  // page's fit, as xterm.js's own size already is.
+  await expect.poll(() => terminalSize(page), { message: "the terminal must take the fitted size" }).toEqual(geometry);
   await page.locator("#terminal").click();
   await page.keyboard.type("size");
   await page.keyboard.press("Enter");

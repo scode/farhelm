@@ -104,6 +104,8 @@ Generic recorder wrapping is fine but not required for these; record each result
 - `cd e2e && npx playwright test --config host-terminals/playwright.config.ts` (the browser specs of terminals in
   terminal hosts, against one stack of their own whose supervisor runs with `--new-terminals host`; after the browser
   suite's builds, and neither the sweep nor CI runs them)
+- `node --test e2e/tests/helpers/program-input.test.ts` (the decoding the shortcut specs use to say what a program read
+  from a terminal's input frames; seconds)
 - `dist generate --check`
 - `python3 releasing/check-changelog.py format` and `python3 releasing/check-changelog.py --self-test`
 - `python3 releasing/finalize-release-notes.py --self-test`
@@ -181,6 +183,13 @@ Running it in the middle of the sweep competes with the sweep for the machine; p
 its timing-sensitive phases (the nextest and browser phases come first) or after it finishes, and do not count the
 sweep's own pre-fix result as evidence for the fix. A fix waiting for that required check is not ready to land; once the
 check passes, land it without waiting for unrelated work.
+
+The browser suite's host-terminal run (`.agents/validation.md`, the `FARHELM_E2E_SUITE_TERMINALS=host` entry) is not
+part of the sweep: the spec files `e2e/host-terminal-specs.ts` lists, on both engines, against stacks whose supervisors
+create terminals in terminal hosts. It is about the size of the browser suite, so run it like a runtime phase, after the
+sweep's timing-sensitive phases or once the sweep finishes, through the recorder with
+`--keep-farhelm-env FARHELM_E2E_SUITE_TERMINALS`, or on Tensorlake sandboxes
+(`sandbox-tests.ts run --suite-terminals host`) when the maintainer asked for them.
 
 ## 4. Release gate and CI in GitHub
 

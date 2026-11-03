@@ -12,12 +12,14 @@
 //   terminal kinds. This is also the end-to-end check that the kinds and the
 //   switch report reach the browser through the helm unchanged.
 // - Seeded listings. A stack whose supervisor creates new terminals needs
-//   the supervisor's `--new-terminals host` option, which the browser stack
-//   cannot pass yet, and an old session beside it needs that supervisor to
-//   have created one before the switch. So the band's cases, its dismissal
-//   and its return are driven through the real UI and the real stack, with
-//   only the session rows' terminal fields rewritten on the way to the page,
-//   the way claude-trust.spec.ts seeds its trust question.
+//   the supervisor's `--new-terminals host` option, which this suite's
+//   ordinary runs do not pass, and an old session beside it needs that
+//   supervisor to have created one before the switch. So the band's cases,
+//   its dismissal and its return are driven through the real UI and the
+//   real stack, with only the session rows' terminal fields rewritten on the
+//   way to the page, the way claude-trust.spec.ts seeds its trust question.
+//   On the suite's host-terminal run (host-terminal-specs.ts) the real
+//   terminals underneath are new ones; the seeded cases hold there too.
 //
 // A real-host leg (a stack whose supervisor creates new terminals) belongs
 // with the browser configuration that starts such a stack, not here.
@@ -25,7 +27,7 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "./helpers/evidence";
 import { cleanupSession, createSession, renameSession } from "./helpers/fleet";
-import { attachSession } from "./helpers/term";
+import { attachSession, onHostTerminals } from "./helpers/term";
 
 /** What a seeded row says about its terminals; `undefined` leaves the real
  * stack's value. */
@@ -108,6 +110,10 @@ const kinds = (page: Page) => page.locator(".session-details .session-details-te
  * the media harnesses' captures afterwards; any change there would show up
  * on every user's screen and in every published screenshot. */
 test("a supervisor still on old terminals shows no band and no terminal kinds", async ({ page, request }) => {
+  // About a stack whose supervisor keeps old terminals; on a host-terminal
+  // run every stack creates new ones, and host-terminals/migration.spec.ts
+  // checks that side (new kinds named, no band).
+  test.skip(onHostTerminals(), "needs a supervisor on old terminals; host-terminals/migration.spec.ts covers new ones");
   const session = await createSession(request, { title: `migration-off-${Date.now()}` });
   try {
     const tab = await openTab(request, session.id);

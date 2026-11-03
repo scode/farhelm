@@ -59,7 +59,7 @@ import path from "node:path";
 import fs from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import net from "node:net";
-import { cleanupSession, fillCreateForm, waitForTermText, answerYolo } from "./helpers/term";
+import { cleanupSession, fillCreateForm, waitForTermText, answerYolo, terminalInput } from "./helpers/term";
 import { waitForSessionRevealed } from "./helpers/terminal-readiness";
 import {
   cleanUpSessionsTitled,
@@ -3058,7 +3058,7 @@ test.describe("multi-host", () => {
       // Establish the keyboard owner before the outage. Only the recovery
       // handoff below must happen without a click.
       await page.locator("#terminal").click();
-      await expect(page.locator("#terminal .xterm-helper-textarea")).toBeFocused();
+      await expect(terminalInput(page)).toBeFocused();
       await page.evaluate(() => {
         (window as any).__beforeOutageWs = (window as any).__farhelmIslands.terminal.ws;
       });
@@ -3077,10 +3077,10 @@ test.describe("multi-host", () => {
       }), { timeout: 20_000, message: "replay must reveal before the stale detail read is released" }).toBe(true);
       await expect(card).toBeVisible();
       await expect(page.locator(".terminal-pane.selected")).toHaveJSProperty("inert", true);
-      await expect(page.locator("#terminal .xterm-helper-textarea")).not.toBeFocused();
+      await expect(terminalInput(page)).not.toBeFocused();
       reads.releaseAll();
       await expect(card).toHaveCount(0, { timeout: 10_000 });
-      await expect(page.locator("#terminal .xterm-helper-textarea")).toBeFocused();
+      await expect(terminalInput(page)).toBeFocused();
       const marker = `after-inert-${Date.now()}`;
       await page.keyboard.type(marker);
       await page.keyboard.press("Enter");

@@ -10,7 +10,7 @@ import path from "node:path";
 import { requireHelmBuild } from "./helm-build";
 import { createResumableSession } from "./fleet";
 import { stackScratchDir } from "./scratch";
-import { attachSession, waitForTermText } from "./term";
+import { attachSession, onHostTerminals, terminalKind, terminalText, waitForTermText, waitForTerminalText } from "./term";
 import { waitForSessionRevealed } from "./terminal-readiness";
 
 export {
@@ -328,6 +328,12 @@ export async function openTerminal(page: Page) {
   // The fake agent prints this banner once its raw-mode setup is ready; its
   // prompt is deliberately later output.
   await waitForTermText(page, "FAKE-AGENT READY");
+  // A host-terminal run's premise: the shared session really is a terminal
+  // in a terminal host, drawn as a grid. Without this, a stack that kept
+  // tmux would pass every product-level assertion of that run vacuously.
+  if (onHostTerminals()) {
+    expect(await terminalKind(page), "a host-terminal run's shared session must draw as a grid").toBe("grid");
+  }
 }
 
 /**
@@ -355,20 +361,12 @@ export async function cleanUpSessionsTitled(request: APIRequestContext, title: s
  *
  * Reads terminal.js's per-island registry rather than the legacy
  * `__farhelmTerm` singleton, which by design only ever points at the agent
- * terminal. Returns "" for an island that is not mounted, so callers can
+ * terminal, and reads whichever component the island holds (`terminalText`
+ * in term.ts). Returns "" for an island that is not mounted, so callers can
  * poll this while a mount is still in flight.
  */
 export async function islandText(page: Page, elementId: string): Promise<string> {
-  return page.evaluate((el) => {
-    const island = (window as any).__farhelmIslands?.[el];
-    if (!island) return "";
-    const buf = island.term.buffer.active;
-    const lines: string[] = [];
-    for (let i = 0; i < buf.length; i++) {
-      lines.push(buf.getLine(i)?.translateToString(true) ?? "");
-    }
-    return lines.join("\n");
-  }, elementId);
+  return terminalText(page, elementId);
 }
 
 /** `waitForTermText`, addressed at one island rather than the agent's. */
@@ -378,12 +376,7 @@ export async function waitForIslandText(
   needle: string,
   timeout = 15_000,
 ) {
-  await expect
-    .poll(() => islandText(page, elementId), {
-      timeout,
-      message: `waiting for ${needle} in ${elementId}`,
-    })
-    .toContain(needle);
+  await waitForTerminalText(page, elementId, needle, timeout);
 }
 
 /**

@@ -31,7 +31,7 @@
 // `FARHELM_REAL_AGENT=1 npx playwright test real-agent.spec.ts -g 'drives a real'` away
 // instead of a re-discovery.
 import { expect, test } from "./helpers/evidence";
-import { answerYolo } from "./helpers/term";
+import { answerYolo, terminalSize } from "./helpers/term";
 import { Page, APIRequestContext } from "@playwright/test";
 import path from "node:path";
 import fs from "node:fs";
@@ -388,7 +388,7 @@ test("termText reconstructs a reply marker that xterm wrapped across the screen 
     async () => {
       id = await createReadyFakeAgentSession(page, title);
 
-      const cols = await page.evaluate(() => (window as any).__farhelmTerm.cols as number);
+      const cols = (await terminalSize(page))!.cols;
       const marker = `wrap-marker-${Date.now()}`;
       const echoPrefixLen = "echo:".length;
       // Padding fills up to just short of the right edge, so the marker

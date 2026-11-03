@@ -107,7 +107,7 @@
 import { expect, test } from "./helpers/evidence";
 import { type Page } from "@playwright/test";
 import { cleanupSession, createSession } from "./helpers/fleet";
-import { attachSession, termText, waitForTermText } from "./helpers/term";
+import { attachSession, termText, waitForTermText, terminalKind } from "./helpers/term";
 
 /**
  * Every hex byte VALUE the raw dumper has printed so far, in order, read
@@ -350,10 +350,21 @@ test.describe("Shift+Enter's ESC CR reaches the pane as one write", () => {
       });
       await page.keyboard.press("Shift+Enter");
       const chordFrames = await page.evaluate(() => (window as any).__sentFrames);
-      expect(
-        chordFrames,
-        "the chord must leave the browser as exactly one two-byte frame",
-      ).toEqual(["1b0d"]);
+      if ((await terminalKind(page)) === "grid") {
+        // A grid terminal sends the key itself, one input message, and the
+        // supervisor encodes it as ESC CR in one write (grid-input.js and
+        // the supervisor's grid input encoder, whose golden table pins the
+        // bytes). One message, Enter with Shift held, is still the
+        // single-producer contract here.
+        expect(chordFrames, "the chord must leave the browser as exactly one input message").toHaveLength(1);
+        const message = JSON.parse(Buffer.from(chordFrames[0], "hex").toString());
+        expect(message, "the message is Enter with Shift alone").toMatchObject({ t: "key", key: "Enter", mods: 1 });
+      } else {
+        expect(
+          chordFrames,
+          "the chord must leave the browser as exactly one two-byte frame",
+        ).toEqual(["1b0d"]);
+      }
 
       await page.keyboard.press("z");
       await waitForTermText(page, "7a|");

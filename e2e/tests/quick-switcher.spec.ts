@@ -8,7 +8,7 @@ import {
   cleanupSession, createSession, listHosts, listSessions, localHostId,
   pinAutoSelect, resetPreferences, stubFeed, openRowMenu, patchPreferences,
 } from "./helpers/fleet";
-import { attachSession, waitForTermText } from "./helpers/term";
+import { attachSession, waitForTermText, terminalInput, AGENT_TERMINAL_INPUT, programInput, type InputFrame, recordInput } from "./helpers/term";
 import { waitForSessionReady } from "./helpers/terminal-readiness";
 import { routeGate } from "./helpers/route-gate";
 import { disposeRelease, expectConnectedRelease, observeModalRelease, type ModalReleaseObservation } from "./helpers/modal-release";
@@ -93,10 +93,10 @@ for (const mac of [false, true]) {
     await platform(page, mac);
     const first = await createSession(request, { title: `switch-origin-${Date.now()}` });
     const second = await createSession(request, { title: `switch-target-${Date.now()}` });
-    const binary: Buffer[] = [];
+    const binary: InputFrame[] = [];
     page.on("websocket", (socket) => {
       if (!new URL(socket.url()).pathname.endsWith("/term")) return;
-      socket.on("framesent", ({ payload }) => { if (Buffer.isBuffer(payload)) binary.push(payload); });
+      recordInput(socket, binary);
     });
     let releaseObservation: ModalReleaseObservation | undefined;
     let bodyFailed = true;
@@ -105,13 +105,13 @@ for (const mac of [false, true]) {
       await page.goto("/");
       await attachSession(page, first.id);
       await waitForTermText(page, "FAKE-AGENT READY");
-      const terminal = page.locator("#terminal .xterm-helper-textarea");
+      const terminal = terminalInput(page);
       await expect(terminal).toBeFocused();
       let dialog = await openSwitcher(page, mac);
       await dialog.getByRole("combobox").fill(first.title);
       await expect(dialog.locator(".quick-switcher-results").getByRole("option")).toHaveCount(1);
       if (!mac) {
-        releaseObservation = await observeModalRelease(dialog, "#terminal .xterm-helper-textarea", "#terminal .xterm-helper-textarea");
+        releaseObservation = await observeModalRelease(dialog, AGENT_TERMINAL_INPUT, AGENT_TERMINAL_INPUT);
       }
       await page.keyboard.press("Escape");
       await expect(dialog).toHaveCount(0);
@@ -128,10 +128,10 @@ for (const mac of [false, true]) {
       await page.keyboard.type(escaped);
       await page.keyboard.press("Enter");
       await waitForTermText(page, escaped);
-      expect(Buffer.concat(binary).toString()).toBe(`${escaped}\r`);
+      expect(programInput(binary)).toBe(`${escaped}\r`);
       if (!mac) {
         await page.keyboard.press("Control+k");
-        await expect.poll(() => Buffer.concat(binary).toString()).toContain("\x0b");
+        await expect.poll(() => programInput(binary)).toContain("\x0b");
         await expect(page.locator(".quick-switcher-dialog")).toHaveCount(0);
       }
 
@@ -152,7 +152,7 @@ for (const mac of [false, true]) {
       await dialog.getByRole("combobox").fill(second.title);
       await expect(dialog.locator(".quick-switcher-results").getByRole("option")).toHaveCount(1);
       if (!mac) {
-        releaseObservation = await observeModalRelease(dialog, ".host-rail-all", ".host-rail-all, #terminal .xterm-helper-textarea");
+        releaseObservation = await observeModalRelease(dialog, ".host-rail-all", `.host-rail-all, ${AGENT_TERMINAL_INPUT}`);
       }
       await page.keyboard.press("Enter");
       await expect(dialog).toHaveCount(0);
@@ -259,7 +259,7 @@ test("a busy pick leaves navigation and the host filter untouched", async ({ pag
     await expect.poll(() => requested).toBe(true);
     // Stop holds the row navigation lock, independently of New's global lock.
     await expect(row.locator(".session-row-open")).toBeDisabled();
-    const terminal = page.locator("#terminal .xterm-helper-textarea");
+    const terminal = terminalInput(page);
     await terminal.focus();
     await expect(terminal).toBeFocused();
     const dialog = await openSwitcher(page);

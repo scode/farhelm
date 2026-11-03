@@ -5,7 +5,7 @@ import { expect, test } from "./helpers/evidence";
 import { type Page } from "@playwright/test";
 import { cleanupSession, createSession, openRowMenu, showHostsPanel, showSessionsPanel } from "./helpers/fleet";
 import { FAKE_AGENT_INVOCATION } from "./helpers/terminal-suite";
-import { waitForTermText } from "./helpers/term";
+import { terminalFit, terminalInput, terminalScreen, terminalSize, waitForTermText } from "./helpers/term";
 import { waitForSessionRevealed } from "./helpers/terminal-readiness";
 
 /** Observe total rail-plus-content width; the border is deliberately extra. */
@@ -79,9 +79,9 @@ test("sidebar drag clamps, persists, resets and refits the program", async ({ pa
     await headingActionsFit(page);
     // The resize strip may use the terminal gutter, but its first content
     // column must still receive clicks for selection, links and mouse mode.
-    const screen = (await page.locator("#terminal .xterm-screen").boundingBox())!;
+    const screen = (await terminalScreen(page).boundingBox())!;
     expect(await page.evaluate(({ x, y }) => {
-      return !!document.elementFromPoint(x, y)?.closest(".xterm-screen");
+      return !!document.elementFromPoint(x, y)?.closest(".xterm-screen, .grid-terminal-screen");
     }, { x: screen.x + 0.5, y: screen.y + 20 })).toBe(true);
     await page.screenshot({ path: info.outputPath("sidebar-default.png") });
 
@@ -105,21 +105,21 @@ test("sidebar drag clamps, persists, resets and refits the program", async ({ pa
     await expect.poll(() => width(page)).toBe(656);
     await expect(handle).toBeFocused();
     await page.screenshot({ path: info.outputPath("sidebar-maximum.png") });
-    const before = await page.evaluate(() => (window as any).__farhelmTerm.cols);
+    const before = (await terminalSize(page))!.cols;
     await dragBy(page, -500);
     await expect.poll(() => width(page)).toBe(296);
     await headingActionsFit(page);
-    await expect.poll(() => page.evaluate(() => (window as any).__farhelmTerm.cols)).toBeGreaterThan(before);
+    await expect.poll(async () => (await terminalSize(page))!.cols).toBeGreaterThan(before);
     await page.screenshot({ path: info.outputPath("sidebar-minimum.png") });
 
     // Reveal and focus must finish before giving the separator the keyboard.
     // Otherwise an unrelated terminal handoff can make an arrow test flaky.
     await page.locator("#terminal").click();
-    await expect(page.locator("#terminal .xterm-helper-textarea")).toBeFocused();
-    const grid = await page.evaluate(() => {
-      const t = (window as any).__farhelmTerm;
-      return { rows: t.rows, cols: t.cols };
-    });
+    await expect(terminalInput(page)).toBeFocused();
+    // The page's own fit, which the program must report back (a grid also
+    // waits until the size the supervisor committed is that fit).
+    const grid = (await terminalFit(page))!;
+    await expect.poll(() => terminalSize(page)).toEqual(grid);
     await expect(async () => {
       await page.keyboard.type("size");
       await page.keyboard.press("Enter");

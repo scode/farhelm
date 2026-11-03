@@ -4,9 +4,12 @@
 
 import { expect, test } from "./helpers/evidence";
 import { type APIRequestContext, type Page } from "@playwright/test";
+import { createHash } from "node:crypto";
+import fs from "node:fs";
 import path from "node:path";
 import { DEVICE_SECRET_KEY, requireProductPageAuth } from "./helpers/device-auth";
-import { attachSession, cleanupSession, termText, waitForTermText } from "./helpers/term";
+import { attachSession, cleanupSession, onHostTerminals, termText, terminalKind, waitForTermText } from "./helpers/term";
+import { stackScratchDir } from "./helpers/scratch";
 import {
   installTerminalSuiteHooks,
   openTerminal,
@@ -668,6 +671,13 @@ test("the whole flood stream arrives exactly once and in order, with at least on
   page,
   request,
 }) => {
+  // xterm.js's watermark flow control (its write callbacks, `paused`)
+  // and a verifier over the byte stream. A grid stream carries the
+  // emulator's rows, not the program's bytes, and is paced by the helm and
+  // the supervisor; e2e/host-terminals/grid-flood.spec.ts checks a flood's
+  // scrollback there, and the Rust grid stream and helm relay tests check
+  // the pause.
+  test.skip(onHostTerminals(), "xterm.js's watermark flow control over a byte stream; e2e/host-terminals/grid-flood.spec.ts covers grid floods");
   test.setTimeout(150_000);
   const title = `flood-complete-${Date.now()}`;
   let id: string | undefined;
@@ -761,6 +771,10 @@ test("a client that stops draining is detached with the stall reason after the f
   page,
   request,
 }) => {
+  // Stalls xterm.js's writes to trip its own watermark; a grid has no
+  // writes to stall (the helm's stall detach for grid streams is pinned by
+  // its relay tests).
+  test.skip(onHostTerminals(), "stalls xterm.js's writes; the grid stall detach is pinned by the helm relay tests");
   // The nested waits below sum to a bit over STALL_DETACH_TIMEOUT (60s):
   // confirming the pause, the banner's own margin past 60s, and the
   // reattach/replay at the end. Set comfortably above that sum, plus room
@@ -973,6 +987,8 @@ test("reconnecting within the same page resets flow-control state; the new attac
   page,
   request,
 }) => {
+  // xterm.js's own flow-control state across a reconnect.
+  test.skip(onHostTerminals(), "xterm.js's client flow-control state; grid streams keep none in the page");
   // The producer's whole ~12 MiB now has to finish before the measurement
   // can even start: attachment one carries it as far as the pause, the
   // drain takes the entire rest, and only then comes the reattach. About
@@ -1133,6 +1149,11 @@ test("a terminal socket for an unknown session reports why", async ({
 test("an over-one-megabyte message does not drop the terminal socket", async ({
   page,
 }) => {
+  // A byte stream's input bound. A grid input message over 64 KiB ends the
+  // attachment by design (the grid format; the helm relay tests pin it), and
+  // the grid client never builds one; the grid's large paste has its own test
+  // below.
+  test.skip(onHostTerminals(), "a byte stream's input size; the grid's large paste is tested on its own below");
   const pasteOverOneMiB = 1024 * 1024 + 1;
   await openTerminal(page);
   // A fresh response proves the receiver is live before the large send;
@@ -1170,6 +1191,105 @@ test("an over-one-megabyte message does not drop the terminal socket", async ({
     const original = (window as any).__farhelmPasteSocket as WebSocket;
     return original === (window as any).__farhelmWs && original.readyState === WebSocket.OPEN;
   })).toBe(true);
+});
+
+/**
+ * The receiver for the grid's large-paste test: once it says it is ready, it
+ * reads exactly the number of bytes its argument names in raw mode, reports
+ * how many arrived and their SHA-256 on two short lines (so neither wraps in
+ * a terminal 80 columns wide), then echoes each line typed after it as
+ * `echo:<line>`. Owned by that test, so a lost, cut short or altered paste
+ * shows in its own report rather than in a shared agent's state.
+ */
+const PASTE_RECEIVER = `import hashlib, os, sys, termios, tty
+want = int(sys.argv[1])
+saved = termios.tcgetattr(0)
+tty.setraw(0)
+os.write(1, b"PASTE-RECEIVER-READY\\r\\n")
+data = bytearray()
+while len(data) < want:
+    chunk = os.read(0, want - len(data))
+    if not chunk:
+        break
+    data += chunk
+os.write(1, ("PASTE-GOT %d\\r\\nPASTE-SHA %s\\r\\n" % (len(data), hashlib.sha256(data).hexdigest())).encode())
+termios.tcsetattr(0, termios.TCSADRAIN, saved)
+for line in sys.stdin:
+    print("echo:" + line.rstrip("\\n"), flush=True)
+`;
+
+/**
+ * A paste of more than 1 MiB into a grid terminal arrives whole, byte for
+ * byte, and the attachment that carried it stays.
+ *
+ * Why: the user's half of the byte-stream test above. A grid terminal never
+ * sends one message that large (an input message over 64 KiB ends the
+ * attachment by design); its paste splits into messages within the bound,
+ * which the supervisor writes in order. A paste that lost, repeated or
+ * reordered a part, or that the attachment dropped, would still let a later
+ * line through, so the receiver's own count and digest are the oracle. The
+ * paste is a 23-letter cycle, which no part boundary (the grid splits a
+ * paste into 32 KiB parts) lines up with, so every part's text differs from
+ * its neighbours' and a reordered or repeated part changes the digest.
+ * Spec: in a session running `PASTE_RECEIVER`, a grid paste of 1 MiB + 1
+ * bytes of that cycle is reported as exactly that many bytes with the
+ * expected SHA-256, then a line typed after it is echoed, on the same, still
+ * open socket.
+ */
+test("a paste of more than one megabyte into a grid terminal arrives whole and keeps the socket", async ({
+  page,
+  request,
+}) => {
+  test.skip(!onHostTerminals(), "grid terminals only; old terminals have the byte-stream test above");
+  test.setTimeout(120_000);
+  const pasteOverOneMiB = 1024 * 1024 + 1;
+  const cycle = "abcdefghijklmnopqrstuvw";
+  const payload = cycle.repeat(Math.ceil(pasteOverOneMiB / cycle.length)).slice(0, pasteOverOneMiB);
+  const digest = createHash("sha256").update(payload, "utf8").digest("hex");
+  const dir = stackScratchDir("paste-receiver-");
+  const script = path.join(dir, "receiver.py");
+  fs.writeFileSync(script, PASTE_RECEIVER);
+  const created = await request.post("/api/sessions", {
+    data: {
+      cwd: "/tmp",
+      command: { command: `python3 ${script} ${pasteOverOneMiB}`, yolo: false },
+      title: `grid-big-paste-${Date.now()}`,
+    },
+  });
+  expect(created.status(), await created.text()).toBe(200);
+  const id: string = (await created.json()).id;
+  try {
+    await page.goto("/");
+    await attachSession(page, id);
+    await waitForTermText(page, "PASTE-RECEIVER-READY");
+    expect(await terminalKind(page), "premise: this session's terminal is a grid").toBe("grid");
+    await page.evaluate((text) => {
+      const w = window as any;
+      w.__farhelmPasteSocket = w.__farhelmWs;
+      if (!w.__farhelmGrid.paste(text)) throw new Error("the grid refused the paste");
+    }, payload);
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => {
+            const ws = (window as any).__farhelmWs as WebSocket;
+            return { state: ws.readyState, buffered: ws.bufferedAmount };
+          }),
+        { timeout: 30_000, message: "socket must stay open and drain" },
+      )
+      .toEqual({ state: WebSocket.OPEN, buffered: 0 });
+    await waitForTermText(page, `PASTE-GOT ${pasteOverOneMiB}\nPASTE-SHA ${digest}`, 60_000);
+    await page.keyboard.type("after-big-message");
+    await page.keyboard.press("Enter");
+    await waitForTermText(page, "echo:after-big-message");
+    expect(await page.evaluate(() => {
+      const original = (window as any).__farhelmPasteSocket as WebSocket;
+      return original === (window as any).__farhelmWs && original.readyState === WebSocket.OPEN;
+    }), "the paste must arrive on the same, still open attachment").toBe(true);
+  } finally {
+    await cleanupSession(request, id);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 // Regression test for the tmux paste-buffer input-mangling bug at the
