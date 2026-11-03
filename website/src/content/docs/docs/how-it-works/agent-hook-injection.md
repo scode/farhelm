@@ -87,7 +87,7 @@ reporter, and the Pi and OMP reporting subprocesses print nothing to your termin
 identity reporting outside a Farhelm session. A report never waits for Farhelm: the reporter saves it in Farhelm's state
 directory and is done in a moment, whether or not the host's supervisor is running. The supervisor picks saved reports
 up within about two seconds, or when it next starts, so a report the agent makes while the host's supervisor is not
-running (on your Mac, while Farhelm is closed) still decides what a restart resumes (see
+running (while it restarts for an update, say) still decides what a restart resumes (see
 [Your first session](/docs/get-started/first-session/#close-farhelm-and-come-back)). The one wait left is reading what
 the agent hands the reporter, which is allowed up to 30 seconds in case the agent never closes it. Pi and OMP keep their
 published 2-second child timers; a reporter that only saves a file finishes well inside them. Goose is different because

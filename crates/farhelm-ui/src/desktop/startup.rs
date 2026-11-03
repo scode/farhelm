@@ -139,7 +139,8 @@ impl Startup {
     }
 }
 
-/// Use the established fatal contract, including the managed child's stdin tether.
+/// Use the established fatal contract. A supervisor this launch started keeps
+/// running, as it does after any quit: it outlives the app by design.
 fn startup_timeout() -> ! {
     refuse_and_exit(&format!(
         "farhelm-desktop: native window startup did not finish within {} seconds",

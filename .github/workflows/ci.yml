@@ -89,6 +89,14 @@ jobs:
             --runner nextest --kind development --selection 'macOS version-lock process tests' --concurrency '4 nextest slots; retries 0' \
             --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" \
             -- cargo nextest run -p farhelm --test session_hold --test version_lock_forwarder
+          # The desktop app's record of its detached supervisor, and the stop
+          # that acts on it, rest on macOS's process identity and executable
+          # path reads (the `KERN_PROC_PID` sysctl and `proc_pidpath`), which
+          # differ from Linux's procfs.
+          python3 scripts/record-test-run.py \
+            --runner nextest --kind development --selection 'macOS managed supervisor record tests' --concurrency '4 nextest slots; retries 0' \
+            --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" \
+            -- cargo nextest run -p farhelm-supervisor --lib -E 'test(managed_supervisor::)'
           python3 scripts/record-test-run.py \
             --kind development --selection 'macOS installed uninstall acceptance' --concurrency 'one fixture at a time' \
             --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" \

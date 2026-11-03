@@ -37,7 +37,10 @@ use std::sync::{
 };
 use std::time::Duration;
 
-use farhelm_supervisor::service::{SHUTDOWN_OUTPUT_BUDGET, STATE_DIR_CLAIM_WAIT};
+use farhelm_supervisor::managed_supervisor::{
+    ManagedSupervisor, ORDERLY_STOP_GRACE, Observation, ProgramFile, StopOutcome,
+};
+use farhelm_supervisor::service::STATE_DIR_CLAIM_WAIT;
 
 #[cfg(debug_assertions)]
 mod appearance_smoke;
@@ -424,10 +427,6 @@ pub struct DesktopBootstrap {
     webview: WebviewBootstrap,
     /// The state root was resolved and made private during bootstrap.
     state_dir: PathBuf,
-    /// Present only when this process proved absence and started the local
-    /// supervisor. A discovered supervisor belongs to its existing owner and
-    /// must neither be tethered to nor stopped with the desktop app.
-    supervisor: Option<Child>,
     /// Owned as an option because `Drop` must move the handle out to join it.
     /// The monitor itself owns the helm handle and reports any unexpected
     /// completion before this orderly-shutdown join returns.
@@ -441,16 +440,19 @@ pub struct DesktopBootstrap {
 }
 
 impl DesktopBootstrap {
-    /// Discover or start the local supervisor and own one embedded helm.
+    /// Discover, start or replace the local supervisor and own one embedded
+    /// helm.
     ///
-    /// An answering supervisor is reused unchanged. Only confirmed absence
-    /// permits a bundled child, which this process then tethers and monitors
-    /// before authenticating native REST or exposing the component tree.
+    /// An answering supervisor is reused unchanged unless it is the one an
+    /// earlier launch of the app started (by its record) and runs another
+    /// program than this launch would start; see [`plan_local_supervisor`].
+    /// A supervisor this launch starts is detached and outlives the app; it
+    /// is monitored only until startup is done.
     pub fn start() -> anyhow::Result<Self> {
-        // Resolved here, unconditionally, because BOTH branches below need
-        // to know it: the `Absent` branch to run the preflight and choose
-        // what `FARHELM_TMUX` to hand its child, and neither branch needs
-        // to spawn or probe anything to compute it — `resolve_supervisor_tmux`
+        // Resolved here, unconditionally, because the plans that start a
+        // supervisor (a plain start, or replacing the app's own) run the
+        // preflight with it and hand its choice to the child as
+        // `FARHELM_TMUX`, and computing it needs no spawn or probe — `resolve_supervisor_tmux`
         // only stats candidate paths (`is_executable_file`), which is silent
         // on stderr regardless of the tracing filter `init_tracing` already
         // installed in `run`.
@@ -476,79 +478,113 @@ impl DesktopBootstrap {
         // this Finder-launched process never sees. Running the preflight
         // first would refuse startup over a dependency this process is not
         // about to need, for a supervisor it does not own and must not
-        // reconfigure. Only the `Absent` branch — the one case where THIS
-        // process is about to spawn and hand down its own tmux choice —
-        // runs the preflight, immediately before that spawn.
+        // reconfigure. Only the branches where THIS process is about to
+        // start a supervisor and hand down its own tmux choice (a plain
+        // start, or replacing its own outdated or wedged one) run the
+        // preflight, before anything is started or stopped.
         //
-        // Nothing between here and that preflight call reaches stderr,
-        // which is what keeps "the refusal is the ONLY thing printed" true
-        // on the missing/below-floor path even though the preflight itself
-        // no longer runs first: `ensure_private_dir` and `bundled_farhelm`
-        // do no logging at all, and `discover_local_supervisor`'s probe
-        // pipes its own probe child's stderr and drains it internally
-        // rather than inheriting this process's — verified by the exact
-        // stderr assertion in `scripts/desktop-smoke.sh`'s tmux-preflight
-        // legs, which is the oracle for this ordering claim.
-        let mut supervisor = match runtime.block_on(farhelm_helm::discover_local_supervisor(
-            &farhelm, &state_dir,
-        ))? {
-            farhelm_helm::LocalSupervisorDiscovery::Answering => None,
-            farhelm_helm::LocalSupervisorDiscovery::Absent => Some({
-                // Resolve a relative developer override before checking the
-                // session PATH folder: its working directory can supply a colon.
-                // Returning the refusal here gives startup's existing alert the
-                // same folder and reason as the child would report on stderr.
-                let absolute = std::path::absolute(&farhelm)
-                    .context("resolving the managed supervisor program path")?;
-                let session_program = farhelm_supervisor::app_bundle::versioned_program(&absolute)
-                    .map_or_else(|| absolute.clone(), |program| program.forwarder);
-                farhelm_supervisor::launch::validate_session_program_path(&session_program)?;
-                run_tmux_preflight_or_exit(
-                    supervisor_tmux.as_deref(),
-                    ambient_tmux.as_deref(),
-                    tmux_prefixes,
-                )?;
-                let mut command = Command::new(&farhelm);
-                command
-                    .args(["supervisor", "run", "--exit-on-stdin-close", "--state-dir"])
-                    .arg(&state_dir)
-                    // The supervisor inherits this process's PATH unchanged.
-                    // The bundle's own directory used to be prepended so a
-                    // bundled tmux would win; there is no bundled tmux any
-                    // more (SPEC_impl.md, "Terminal substrate: private tmux
-                    // server") — the `FARHELM_TMUX` below is what names the
-                    // substrate — and
-                    // the supervisor is launched by absolute path while the
-                    // launch shim prepends the directory the supervisor names\n\1// for the spawn CLI inside sessions, so nothing else needed it.
-                    //
-                    // Retaining the write end tethers only the child this app
-                    // owns, including GUI exits that skip Rust destructors.
-                    .stdin(Stdio::piped())
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::inherit())
-                    // The payload directory is this app's embedded helm's
-                    // setting alone. Inherited, it would reach the
-                    // supervisor's tmux server and every session shell in
-                    // it, so a `farhelm helm run` typed in a session would
-                    // silently push this launch's payloads, possibly long
-                    // after the app that set it has quit.
-                    .env_remove("FARHELM_HELM_PAYLOAD_DIR")
-                    // The reopen marker is for this one reopened app alone
-                    // (design, section 1: at most once). Inherited, it would
-                    // reach every session, where a Farhelm started from one
-                    // would take it as its own: refusing as "replaced by
-                    // another installation", or never reopening itself.
-                    .env_remove(bundle::REOPENED_ENV);
-                if let Some(tmux) = &supervisor_tmux {
-                    command.env(farhelm_supervisor::tmux::TMUX_PROGRAM_ENV, tmux);
-                }
-                command.spawn().with_context(|| {
-                    format!(
-                        "starting the managed supervisor child through the farhelm at {}",
-                        farhelm.display()
-                    )
-                })?
+        // Nothing between here and that preflight call reaches stderr on
+        // the paths the preflight legs exercise, which is what keeps "the
+        // refusal is the ONLY thing printed" true on the missing/below-floor
+        // path: `ensure_private_dir`, `bundled_farhelm` and `ProgramFile`
+        // do no logging, `own_supervisor` logs only for an unreadable record
+        // or process (the legs start from an empty state directory), and
+        // `discover_local_supervisor`'s probe pipes its own probe child's
+        // stderr and drains it internally rather than inheriting this
+        // process's — verified by the exact stderr assertion in
+        // `scripts/desktop-smoke.sh`'s tmux-preflight legs, which is the
+        // oracle for this ordering claim.
+        //
+        // The program this launch would start is read before anything is
+        // spawned from it: the record of a supervisor started from it must
+        // name the file it was started from, not one put at that path later
+        // (see `farhelm_supervisor::managed_supervisor`).
+        let absolute = std::path::absolute(&farhelm)
+            .context("resolving the managed supervisor program path")?;
+        let program = ProgramFile::read(&absolute).with_context(|| {
+            format!(
+                "reading the managed supervisor program {}",
+                absolute.display()
+            )
+        })?;
+        // The whole decision, and any stop or start, happens under the
+        // helm's lock (what an open app's embedded helm holds), taken before
+        // anything is read: an open app makes the launch refuse before it
+        // touches anything, and two launches cannot act on what they saw
+        // before the other changed it. Every writer and remover of the
+        // supervisor record holds this lock (uninstall takes it too), so
+        // what is read here stays true until it is released, just before
+        // this launch's own embedded helm takes the same lock below. A
+        // launch that slips in between makes a fresh decision of its own.
+        let app_lock = refuse_if_app_open(&state_dir, LAUNCH_LOCK_WAIT)?;
+        let own = own_supervisor(&state_dir);
+        let found = discovered(
+            runtime.block_on(farhelm_helm::discover_local_supervisor(
+                &farhelm, &state_dir,
+            )),
+            own.is_some(),
+        )?;
+        let spawn = SpawnInputs {
+            farhelm: &farhelm,
+            absolute: &absolute,
+            program: &program,
+            state_dir: &state_dir,
+            supervisor_tmux: supervisor_tmux.as_deref(),
+            ambient_tmux: ambient_tmux.as_deref(),
+            tmux_prefixes,
+        };
+        let plan = plan_local_supervisor(
+            own.map(|own| {
+                let current = own.started_from(&program);
+                (own, current)
             }),
+            found,
+        );
+        // The child is held only while startup runs, so a supervisor this
+        // launch started that exits early is reported. It runs detached and
+        // outlives the app: the handle is dropped without waiting for it, and
+        // nothing stops it when the app quits.
+        let mut supervisor = match plan {
+            SupervisorPlan::Reuse => None,
+            SupervisorPlan::Spawn => {
+                spawn.check_prerequisites()?;
+                let log = spawn.open_log()?;
+                Some(spawn.spawn(log)?)
+            }
+            SupervisorPlan::Replace { own, wait_first } => {
+                // Everything that could refuse comes first: a launch that
+                // would refuse anyway must not have stopped the supervisor
+                // that was serving the user. That includes a new program
+                // file that cannot run at all, which discovery cannot tell
+                // apart from a predecessor that does not answer, and a log
+                // that cannot be opened.
+                spawn.check_prerequisites()?;
+                spawn.check_program_runs()?;
+                let log = spawn.open_log()?;
+                let answered = wait_first
+                    && runtime.block_on(await_own_supervisor_answering(
+                        &own,
+                        MANAGED_SUPERVISOR_SERVING_WAIT,
+                        || async {
+                            Ok(
+                                farhelm_helm::discover_local_supervisor(&farhelm, &state_dir)
+                                    .await?
+                                    == farhelm_helm::LocalSupervisorDiscovery::Answering,
+                            )
+                        },
+                    )) == OwnSupervisorWait::Answered;
+                if answered {
+                    None
+                } else {
+                    // Under the lock no other launch can have started one
+                    // meanwhile. A supervisor started by hand in this window
+                    // races the new one for the state directory; if it wins,
+                    // this launch fails to start, and the next launch
+                    // reuses it.
+                    stop_own_supervisor(&own, &state_dir)?;
+                    Some(spawn.spawn(log)?)
+                }
+            }
         };
         ensure_managed_supervisor_running(&mut supervisor)?;
         if let Some(child) = &mut supervisor {
@@ -563,6 +599,7 @@ impl DesktopBootstrap {
                 },
             ))?;
         }
+        drop(app_lock);
 
         // The embedded helm is an internal implementation detail of this
         // process. Port 0 lets the kernel choose a fresh loopback port for
@@ -689,7 +726,6 @@ impl DesktopBootstrap {
         Ok(Self {
             webview,
             state_dir,
-            supervisor,
             helm_monitor: Some(helm_monitor),
             helm_shutdown: Some(shutdown_tx),
             expected_helm_shutdown,
@@ -731,14 +767,14 @@ impl Drop for ExpectHelmShutdownUnlessDisarmed {
     }
 }
 
+/// Stops the embedded helm. The supervisor is left running: it outlives the
+/// app by design, as it does on a normal quit (which skips this `Drop`
+/// altogether; tao's `run` ends in `process::exit`).
 impl Drop for DesktopBootstrap {
     fn drop(&mut self) {
         self.expected_helm_shutdown.store(true, Ordering::Release);
         if let Some(shutdown) = self.helm_shutdown.take() {
             let _ = shutdown.send(());
-        }
-        if let Some(supervisor) = &mut self.supervisor {
-            stop_managed_supervisor(supervisor, MANAGED_SUPERVISOR_STOP_GRACE);
         }
         if let Some(monitor) = self.helm_monitor.take() {
             let _ = monitor.join();
@@ -746,53 +782,479 @@ impl Drop for DesktopBootstrap {
     }
 }
 
-/// How long the app's own teardown lets its managed supervisor stop in order
-/// before killing it.
-///
-/// Longer than the supervisor's [`SHUTDOWN_OUTPUT_BUDGET`] for closing its
-/// terminal-output clients, so a supervisor doing exactly that is never cut
-/// off; only one still running well past the budget is treated as stuck.
-const MANAGED_SUPERVISOR_STOP_GRACE: Duration =
-    SHUTDOWN_OUTPUT_BUDGET.saturating_add(Duration::from_secs(5));
+/// What startup does about the local supervisor. `T` is the app's own
+/// supervisor from an earlier launch, carried into the one plan that acts on
+/// it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SupervisorPlan<T> {
+    /// Use the supervisor that answers, as it is.
+    Reuse,
+    /// Start one: none answers and none of the app's own is running.
+    Spawn,
+    /// Stop the app's own supervisor the orderly way, then start one.
+    /// `wait_first` when it runs the current program but does not answer:
+    /// it may still be starting, so startup first gives it a while to
+    /// answer and reuses it if it does.
+    Replace { own: T, wait_first: bool },
+}
 
-/// Stop the managed supervisor the way quitting the app does, and kill it
-/// only if it is stuck.
+/// Decide what startup does about the local supervisor.
 ///
-/// Closing the child's stdin is the stdin tether the supervisor runs under
-/// (`--exit-on-stdin-close`): it starts the same orderly shutdown a quit
-/// does, closing every terminal-output client before exiting. A SIGKILL
-/// skips that, and tmux can abort its whole private server, and every
-/// session in it, when an output client vanishes with output queued. So
-/// the kill comes only after `grace`, for a supervisor that did not finish
-/// on its own.
+/// A supervisor the app did not start (no matching record) is an ownership
+/// boundary: reused if it answers, never stopped, and only absence permits
+/// starting one. The app's own supervisor is replaced when it runs another
+/// program than this launch would start (an update, or a development build
+/// replacing the file), and when it does not answer at all (wedged, holding
+/// the state directory without serving), and reused otherwise. Comparing
+/// program files rather than versions matters: every untagged build reports
+/// the same version, so a version comparison would leave each development
+/// build after the first talking to the first one's supervisor.
 ///
-/// This is not what a normal quit runs. The event loop never returns
-/// (tao's `run` ends in `process::exit`, and AppKit's Cmd-Q terminates the
-/// process the same way), so [`DesktopBootstrap`]'s `Drop` is skipped and
-/// the tether closes when the process exits. `Drop`, and this, run only
-/// when a panic unwinds out of the event loop. Blocking the exiting app for
-/// up to `grace` there is the price of not destroying the user's sessions
-/// on the way out.
+/// A current-program supervisor that does not answer gets a wait first,
+/// whether nothing is listening or its hello fails: it may still be
+/// starting. Before it binds its socket it waits for the state directory or
+/// migrates its database after an update; after binding it runs startup
+/// sweeps (`Supervisor::serve`: the launch directory, the repository cache,
+/// attachment reconciliation) before it accepts, so a probe in that window
+/// connects but gets no hello. Only after the wait is it treated as wedged.
+/// The extra wait costs only a supervisor that really is wedged, which is
+/// rare; stopping a healthy slow one would interrupt its startup.
 ///
-/// Returns how the child ended, or `None` if even that could not be read.
-fn stop_managed_supervisor(child: &mut Child, grace: Duration) -> Option<std::process::ExitStatus> {
-    drop(child.stdin.take());
-    let deadline = std::time::Instant::now() + grace;
+/// The record never proves that the answering supervisor is the recorded
+/// process. When another program's supervisor of the app's own is stopped
+/// while a supervisor started by hand answers, this launch's new supervisor
+/// loses the state directory to it and this launch fails to start; the next
+/// launch finds no supervisor of its own and reuses the hand-started one.
+///
+/// `own` is the app's own supervisor (its record matched a live process; see
+/// [`own_supervisor`]) with whether it was started from the program file this
+/// launch would start (same resolved path, same device and inode). A failed
+/// discovery without one never reaches the planner ([`discovered`] refuses
+/// it); it is mapped to `Reuse`, the plan that touches nothing.
+fn plan_local_supervisor<T>(own: Option<(T, bool)>, found: Discovered) -> SupervisorPlan<T> {
+    match (own, found) {
+        (None, Discovered::Absent) => SupervisorPlan::Spawn,
+        (None, Discovered::Answering | Discovered::Failed) => SupervisorPlan::Reuse,
+        (Some((own, false)), _) => SupervisorPlan::Replace {
+            own,
+            wait_first: false,
+        },
+        (Some(_), Discovered::Answering) => SupervisorPlan::Reuse,
+        (Some((own, true)), Discovered::Absent | Discovered::Failed) => SupervisorPlan::Replace {
+            own,
+            wait_first: true,
+        },
+    }
+}
+
+/// How waiting for the app's own non-answering supervisor ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OwnSupervisorWait {
+    /// It answered: it was still starting, not wedged.
+    Answered,
+    /// It is gone, no longer the recorded process, or could not be read
+    /// (the stop that follows re-reads it and refuses if it still cannot).
+    Gone,
+    /// It neither answered nor went within the wait.
+    TimedOut,
+}
+
+/// Give the app's own supervisor that runs the current program but did not
+/// answer up to `wait` to start answering, before startup treats it as
+/// wedged.
+///
+/// A supervisor can be legitimately silent for a while: waiting for the
+/// state directory a just-quit predecessor held (`STATE_DIR_CLAIM_WAIT`),
+/// or a slow first start after an update (a database migration, starting
+/// tmux). Stopping it then, and killing it if it does not stop within the
+/// grace, could interrupt a migration, and a user who relaunches during
+/// that window would loop. `answers` is the probe (startup passes the same
+/// hello-based discovery); a probe error counts as not answering yet.
+async fn await_own_supervisor_answering<P, F>(
+    own: &ManagedSupervisor,
+    wait: Duration,
+    mut answers: P,
+) -> OwnSupervisorWait
+where
+    P: FnMut() -> F,
+    F: std::future::Future<Output = anyhow::Result<bool>>,
+{
+    let deadline = tokio::time::Instant::now() + wait;
     loop {
-        match child.try_wait() {
-            Ok(Some(status)) => return Some(status),
-            Ok(None) if std::time::Instant::now() < deadline => {
-                std::thread::sleep(Duration::from_millis(50));
+        if own.observe() != Ok(Observation::Matches) {
+            return OwnSupervisorWait::Gone;
+        }
+        // Each probe is bounded by what is left of the wait, so one slow
+        // probe cannot stretch it, and none starts once the wait is over.
+        let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if left.is_zero() {
+            return OwnSupervisorWait::TimedOut;
+        }
+        if matches!(tokio::time::timeout(left, answers()).await, Ok(Ok(true))) {
+            return OwnSupervisorWait::Answered;
+        }
+        tokio::time::sleep(Duration::from_millis(500).min(left)).await;
+    }
+}
+
+/// The launch lock: the helm's lock in `state_dir`, which every launch takes
+/// before it reads the supervisor record, so the whole decision is made on a
+/// snapshot no other launch or uninstall can change; or a refusal when an
+/// open app (its embedded helm) or another launch holds it.
+///
+/// The open-app refusal is the second reason it is taken this early: a
+/// second launch whose program differs (the Linux desktop app after a
+/// rebuild, or `open -n` on the Mac) would otherwise stop the supervisor
+/// serving the open app and only then refuse at the helm's own lock. The
+/// file is created if missing (0600, the helm's mode); it is released before
+/// this launch's own embedded helm takes it.
+///
+/// A brief holder (an offline `farhelm helm token show`, say) is waited out
+/// for up to `wait`; startup passes [`LAUNCH_LOCK_WAIT`].
+fn refuse_if_app_open(state_dir: &Path, wait: Duration) -> anyhow::Result<File> {
+    use std::os::unix::fs::OpenOptionsExt as _;
+    let path = state_dir.join(farhelm_helm::HELM_LOCK_FILE);
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .mode(0o600)
+        .open(&path)
+        .with_context(|| format!("opening {}", path.display()))?;
+    let deadline = std::time::Instant::now() + wait;
+    loop {
+        match file.try_lock() {
+            Ok(()) => return Ok(file),
+            Err(std::fs::TryLockError::WouldBlock) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(100));
             }
-            Ok(None) | Err(_) => break,
+            Err(std::fs::TryLockError::WouldBlock) => bail!(
+                "another process owns token control in {} (usually Farhelm already open); \
+                 nothing was changed",
+                state_dir.display()
+            ),
+            Err(std::fs::TryLockError::Error(error)) => {
+                return Err(error).with_context(|| format!("locking {}", path.display()));
+            }
         }
     }
-    tracing::warn!(
-        ?grace,
-        "the managed supervisor did not stop after its tether closed; killing it"
+}
+
+/// What discovery found, for [`plan_local_supervisor`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Discovered {
+    /// A supervisor completed the hello.
+    Answering,
+    /// Positively nothing listening.
+    Absent,
+    /// The discovery failed (the socket accepted but no hello came back
+    /// within the probe timeout, say): only possible to act on for the app's
+    /// own supervisor. Not proof of a wedge: a supervisor running its
+    /// post-bind startup sweeps looks the same.
+    Failed,
+}
+
+/// Classify a discovery result.
+///
+/// A discovery that failed outright (the socket accepted but the hello
+/// never came back within the probe timeout, say) is fatal when no
+/// supervisor of the app's own is running: the app cannot tell what holds
+/// the state directory and must not start a rival. When the app's own
+/// supervisor is running (`own`), the same failure means that supervisor is
+/// not serving: still starting, or wedged and holding its socket and state
+/// directory, which is the case the replacement exists for (the planner
+/// waits before treating it as wedged). A failure that comes from
+/// this launch's own program not running at all also lands here; the
+/// replacement path checks that the program runs before it stops anything.
+fn discovered(
+    discovery: anyhow::Result<farhelm_helm::LocalSupervisorDiscovery>,
+    own: bool,
+) -> anyhow::Result<Discovered> {
+    match discovery {
+        Ok(farhelm_helm::LocalSupervisorDiscovery::Answering) => Ok(Discovered::Answering),
+        Ok(farhelm_helm::LocalSupervisorDiscovery::Absent) => Ok(Discovered::Absent),
+        Err(error) if own => {
+            tracing::warn!(
+                error = format!("{error:#}"),
+                "the supervisor an earlier launch started does not answer"
+            );
+            Ok(Discovered::Failed)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// The record of the supervisor an earlier launch started in `state_dir`,
+/// when it still describes a live process exactly (pid, start identity and
+/// running program; see `ManagedSupervisor::observe`).
+///
+/// Anything less is "not ours": no record, a damaged one, a process that is
+/// gone or runs something else, or one that could not be read (logged).
+/// That is the safe direction, since a supervisor that is not ours is never
+/// stopped.
+fn own_supervisor(state_dir: &Path) -> Option<ManagedSupervisor> {
+    let record = match ManagedSupervisor::read(state_dir) {
+        Ok(record) => record?,
+        Err(error) => {
+            tracing::warn!(%error, "reading the desktop app's supervisor record");
+            return None;
+        }
+    };
+    match record.observe() {
+        Ok(Observation::Matches) => Some(record),
+        Ok(Observation::Gone | Observation::RunsSomethingElse) => None,
+        Err(error) => {
+            tracing::warn!(
+                pid = record.pid,
+                %error,
+                "could not check the supervisor an earlier launch started; leaving it alone"
+            );
+            None
+        }
+    }
+}
+
+/// Stop the app's own supervisor from an earlier launch, so this launch can
+/// start the current one.
+///
+/// The orderly stop first (SIGTERM, which closes its terminal-output
+/// clients in order), and a kill only after [`ORDERLY_STOP_GRACE`]: this is
+/// the app's own supervisor, and a wedged one would otherwise keep the
+/// state directory forever. Its record goes once it is confirmed gone. A
+/// stop that cannot be confirmed refuses startup, keeping the record.
+fn stop_own_supervisor(own: &ManagedSupervisor, state_dir: &Path) -> anyhow::Result<()> {
+    tracing::info!(
+        pid = own.pid,
+        program = %own.program.display(),
+        "replacing the supervisor an earlier launch started"
     );
-    let _ = child.kill();
-    child.wait().ok()
+    match own
+        .stop(ORDERLY_STOP_GRACE, true)
+        .map_err(|error| anyhow::anyhow!("stopping the previous local supervisor: {error}"))?
+    {
+        StopOutcome::AlreadyGone | StopOutcome::Stopped => {}
+        StopOutcome::Killed => tracing::warn!(
+            pid = own.pid,
+            "the previous local supervisor ignored the orderly stop and was killed"
+        ),
+        StopOutcome::StillRunning => bail!(
+            "the previous local supervisor (process {}) did not stop, even when killed",
+            own.pid
+        ),
+    }
+    if let Err(error) = ManagedSupervisor::remove(state_dir) {
+        tracing::warn!(%error, "removing the previous supervisor's record");
+    }
+    Ok(())
+}
+
+/// The supervisor's log file in its state directory: the supervisor writes
+/// its diagnostics there because it outlives the app whose stderr it used to
+/// share (and a long-lived process must not hold a stderr that can go away;
+/// a closed stderr once panicked one).
+const SUPERVISOR_LOG: &str = "supervisor.log";
+
+/// The previous log, kept once when the log is rotated.
+const SUPERVISOR_LOG_PREVIOUS: &str = "supervisor.log.1";
+
+/// The size at which a launch that starts a supervisor rotates its log
+/// first. The bound is per start: a supervisor that runs for weeks appends
+/// to one file for that long.
+const SUPERVISOR_LOG_ROTATE_AT: u64 = 16 * 1024 * 1024;
+
+/// Open the supervisor's log for appending (private, created if missing).
+fn open_supervisor_log(state_dir: &Path) -> io::Result<File> {
+    use std::os::unix::fs::OpenOptionsExt as _;
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .mode(0o600)
+        .open(state_dir.join(SUPERVISOR_LOG))
+}
+
+/// The log a supervisor about to start should write to: `kept` (an open
+/// append handle on `supervisor.log`) unless the log has reached
+/// [`SUPERVISOR_LOG_ROTATE_AT`], in which case it is moved aside as
+/// [`SUPERVISOR_LOG_PREVIOUS`] (replacing an older one) and a fresh one
+/// opened.
+///
+/// Best-effort by design: it runs after a predecessor may have been
+/// stopped, so a rotation that fails must not refuse the start; it is
+/// logged and `kept` is used. Called only when a supervisor is about to be
+/// started under the launch lock, so no supervisor the app knows of is
+/// writing the file.
+fn rotated_supervisor_log(state_dir: &Path, kept: File) -> File {
+    if kept
+        .metadata()
+        .map_or(true, |metadata| metadata.len() < SUPERVISOR_LOG_ROTATE_AT)
+    {
+        return kept;
+    }
+    let rotated = std::fs::rename(
+        state_dir.join(SUPERVISOR_LOG),
+        state_dir.join(SUPERVISOR_LOG_PREVIOUS),
+    )
+    .and_then(|()| open_supervisor_log(state_dir));
+    match rotated {
+        Ok(fresh) => fresh,
+        Err(error) => {
+            tracing::warn!(%error, "rotating the supervisor log; appending to it instead");
+            kept
+        }
+    }
+}
+
+/// What starting the managed supervisor needs, gathered once so both the
+/// plain start and the replacement use the same checks and command.
+struct SpawnInputs<'a> {
+    /// The program as the app names it (possibly a relative developer
+    /// override), used for the command itself.
+    farhelm: &'a Path,
+    /// `farhelm` resolved to an absolute path: what the session program
+    /// check and `program` are about, whatever spelling the command uses.
+    absolute: &'a Path,
+    /// `absolute`'s file, read before the spawn, for the record.
+    program: &'a ProgramFile,
+    state_dir: &'a Path,
+    supervisor_tmux: Option<&'a std::ffi::OsStr>,
+    ambient_tmux: Option<&'a std::ffi::OsStr>,
+    tmux_prefixes: &'a [&'a str],
+}
+
+impl SpawnInputs<'_> {
+    /// Refuse when the program this launch would start cannot run at all
+    /// (not executable, a missing loader, a damaged file): checked before a
+    /// replacement stops the supervisor that is running, since nothing else
+    /// would notice until after the stop. Runs `<program> --version`, bounded
+    /// in time.
+    fn check_program_runs(&self) -> anyhow::Result<()> {
+        let mut child = Command::new(self.farhelm)
+            .arg("--version")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .with_context(|| format!("running {}", self.farhelm.display()))?;
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            if let Some(status) = child.try_wait()? {
+                if status.success() {
+                    return Ok(());
+                }
+                bail!("{} --version failed with {status}", self.farhelm.display());
+            }
+            if std::time::Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                bail!(
+                    "{} --version did not finish within 10 seconds",
+                    self.farhelm.display()
+                );
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    /// Open the supervisor's log for appending. Called before anything is
+    /// stopped, so a log that cannot be opened refuses the launch while the
+    /// old supervisor still runs; rotation happens later, at the spawn, and
+    /// falls back to this handle.
+    fn open_log(&self) -> anyhow::Result<File> {
+        open_supervisor_log(self.state_dir)
+            .with_context(|| format!("opening the supervisor log in {}", self.state_dir.display()))
+    }
+
+    /// Refuse before anything is started or stopped when the supervisor
+    /// could not run: a session program path the shell cannot use, or no
+    /// usable tmux (the preflight exits the app with its own message).
+    fn check_prerequisites(&self) -> anyhow::Result<()> {
+        // Resolve a relative developer override before checking the
+        // session PATH folder: its working directory can supply a colon.
+        // Returning the refusal here gives startup's existing alert the
+        // same folder and reason as the child would report on stderr.
+        let session_program = farhelm_supervisor::app_bundle::versioned_program(self.absolute)
+            .map_or_else(|| self.absolute.to_path_buf(), |program| program.forwarder);
+        farhelm_supervisor::launch::validate_session_program_path(&session_program)?;
+        run_tmux_preflight_or_exit(self.supervisor_tmux, self.ambient_tmux, self.tmux_prefixes)?;
+        Ok(())
+    }
+
+    /// Start the supervisor detached, and record it as the app's own.
+    ///
+    /// Detached means its own session (`setsid`: no controlling terminal, so
+    /// a terminal's Ctrl-C or hangup aimed at a terminal-launched app never
+    /// reaches it), stdin and stdout on `/dev/null`, and stderr to its log
+    /// in the state directory. It is no longer tethered on stdin
+    /// (`--exit-on-stdin-close` stays a supervisor option for tests); it
+    /// keeps running after the app quits, as a Linux supervisor runs under
+    /// systemd.
+    ///
+    /// The record is written right after the spawn. A crash in between
+    /// leaves a supervisor without a record, which later launches treat as
+    /// not the app's own: reused while it answers, and not replaced on an
+    /// update until it exits. A record that cannot be written is logged and
+    /// has the same effect.
+    fn spawn(&self, log: File) -> anyhow::Result<Child> {
+        use std::os::unix::process::CommandExt as _;
+        let log = rotated_supervisor_log(self.state_dir, log);
+        let mut command = Command::new(self.farhelm);
+        command
+            .args(["supervisor", "run", "--state-dir"])
+            .arg(self.state_dir)
+            // The supervisor inherits this process's PATH unchanged. The
+            // bundle's own directory used to be prepended so a bundled tmux
+            // would win; there is no bundled tmux any more (SPEC_impl.md,
+            // "Terminal substrate: private tmux server") — the
+            // `FARHELM_TMUX` below is what names the substrate — and the
+            // supervisor is launched by absolute path while the launch shim
+            // prepends the directory the supervisor names for the spawn CLI
+            // inside sessions, so nothing else needed it.
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(log)
+            // The payload directory is this app's embedded helm's setting
+            // alone. Inherited, it would reach the supervisor's tmux server
+            // and every session shell in it, so a `farhelm helm run` typed
+            // in a session would silently push this launch's payloads,
+            // possibly long after the app that set it has quit.
+            .env_remove("FARHELM_HELM_PAYLOAD_DIR")
+            // The reopen marker is for this one reopened app alone (design,
+            // section 1: at most once). Inherited, it would reach every
+            // session, where a Farhelm started from one would take it as its
+            // own: refusing as "replaced by another installation", or never
+            // reopening itself.
+            .env_remove(bundle::REOPENED_ENV);
+        if let Some(tmux) = self.supervisor_tmux {
+            command.env(farhelm_supervisor::tmux::TMUX_PROGRAM_ENV, tmux);
+        }
+        // SAFETY: setsid is async-signal-safe and touches no memory; nothing
+        // else runs between fork and exec here.
+        unsafe {
+            command.pre_exec(|| {
+                if libc::setsid() == -1 {
+                    return Err(io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        let child = command.spawn().with_context(|| {
+            format!(
+                "starting the managed supervisor child through the farhelm at {}",
+                self.farhelm.display()
+            )
+        })?;
+        // A child already gone gets no record; startup's liveness check
+        // reports why it went.
+        if let Some(record) = ManagedSupervisor::for_process(child.id(), self.program)
+            && let Err(error) = record.write(self.state_dir)
+        {
+            tracing::warn!(
+                %error,
+                "recording the supervisor this launch started; later launches will treat it as not the app's own"
+            );
+        }
+        Ok(child)
+    }
 }
 
 /// Publish the embedded helm's address and native credential to the local
@@ -989,6 +1451,10 @@ fn ensure_managed_supervisor_running(supervisor: &mut Option<Child>) -> anyhow::
 const MANAGED_SUPERVISOR_SERVING_WAIT: Duration =
     STATE_DIR_CLAIM_WAIT.saturating_add(Duration::from_secs(15));
 
+/// How long a launch waits for the launch lock ([`refuse_if_app_open`]) before
+/// refusing: the same wait the helm itself gives a brief holder of that lock.
+const LAUNCH_LOCK_WAIT: Duration = farhelm_helm::HELM_LOCK_WAIT;
+
 /// Wait until the supervisor child this app spawned answers, failing early if
 /// the child exits.
 ///
@@ -1149,7 +1615,8 @@ fn local_supervisor_refusal(
              (helm.db) in {dir} no longer describe the same install, which happens when one of \
              them is restored from a backup or replaced without the other, or when \
              supervisor.db is deleted. Restarting this app alone will not change it. To fix \
-             it, quit Farhelm, make sure no supervisor is still running for {dir}, and restore \
+             it, quit Farhelm, stop the supervisor still running for {dir} (the app's own keeps \
+             running after a quit; its process number is in desktop-supervisor.json there), and restore \
              both databases from the same backup, together with their -wal and -shm files \
              if the backup includes them. Before restoring, delete any current \
              supervisor.db-wal, supervisor.db-shm, helm.db-wal or helm.db-shm that the backup \
@@ -1713,7 +2180,8 @@ mod tests {
         for expected in [
             "supervisor.db",
             "helm.db",
-            "no supervisor is still running",
+            "stop the supervisor still running",
+            "desktop-supervisor.json",
             "both databases from the same backup",
             "their -wal and -shm files",
             "if the backup includes them",
@@ -2132,52 +2600,333 @@ mod tests {
     }
 
     /// Spawn a stand-in for the managed supervisor: `script` under `sh`,
-    /// with a piped stdin like the real tether, and confirm it is running
-    /// before the test acts on it.
-    fn tethered_child(script: &str) -> Child {
+    /// and confirm it is running before the test acts on it.
+    fn stand_in_child(script: &str) -> Child {
         let mut child = Command::new("sh")
             .args(["-c", script])
-            .stdin(Stdio::piped())
+            .stdin(Stdio::null())
             .stdout(Stdio::null())
             .spawn()
             .expect("spawn the stand-in supervisor");
         assert!(
             child.try_wait().expect("poll the stand-in").is_none(),
-            "fixture: the stand-in must still be running before it is stopped"
+            "fixture: the stand-in must still be running before the test acts on it"
         );
         child
     }
 
-    /// The app's teardown must stop its supervisor through the tether, not
-    /// a SIGKILL, because a killed supervisor skips closing its output
-    /// clients in order and can take tmux, and every session, down with it.
-    /// Pinned: a child that exits when its stdin closes is left to exit by
-    /// itself, which shows as a normal zero exit rather than a signal.
-    #[farhelm_testtrace::test]
-    fn stopping_the_managed_supervisor_closes_its_tether_and_lets_it_exit() {
-        use std::os::unix::process::ExitStatusExt as _;
-        let mut child = tethered_child("cat >/dev/null");
-        let status = stop_managed_supervisor(&mut child, Duration::from_secs(60))
-            .expect("the stand-in's exit status");
-        assert_eq!(
-            status.signal(),
-            None,
-            "it must not have been killed: {status}"
-        );
-        assert!(status.success(), "{status}");
+    /// End a stand-in a test is done with.
+    fn end(mut child: Child) {
+        let _ = child.kill();
+        let _ = child.wait();
     }
 
-    /// A supervisor stuck past the grace still has to go, or a panicking app
-    /// would hang on its way out. Pinned: a child that ignores the closed
-    /// tether is killed once the grace runs out.
+    /// The replacement rule, case by case.
+    ///
+    /// Why: this decides whether startup stops a running supervisor, and so
+    /// whether the user's sessions lose their supervisor for a moment, or a
+    /// supervisor that is not the app's is ever touched. Spec: without the
+    /// app's own record, an answering supervisor is reused and absence
+    /// starts one (never a replacement); the app's own supervisor is
+    /// replaced when it runs another program, answering or not, and when it
+    /// does not answer at all, after a wait whether its hello fails or
+    /// nothing listens (it may still be starting, before or after binding
+    /// its socket); it is reused when it answers and runs the current
+    /// program. A failed discovery without a record of
+    /// the app's own never reaches the planner; it maps to the plan that
+    /// touches nothing.
     #[farhelm_testtrace::test]
-    fn stopping_a_stuck_managed_supervisor_kills_it_after_the_grace() {
-        use std::os::unix::process::ExitStatusExt as _;
-        const SIGKILL: i32 = 9;
-        let mut child = tethered_child("exec sleep 60");
-        let status = stop_managed_supervisor(&mut child, Duration::from_millis(100))
-            .expect("the stand-in's exit status");
-        assert_eq!(status.signal(), Some(SIGKILL), "{status}");
+    fn the_app_replaces_only_its_own_supervisor_and_only_when_it_must() {
+        use Discovered::{Absent, Answering, Failed};
+        use SupervisorPlan::{Replace, Reuse, Spawn};
+        let current = Some(((), true));
+        let other = Some(((), false));
+        let replace = |wait_first| Replace {
+            own: (),
+            wait_first,
+        };
+        for (own, found, expected) in [
+            (None, Answering, Reuse),
+            (None, Absent, Spawn),
+            (None, Failed, Reuse),
+            (current, Answering, Reuse),
+            (current, Absent, replace(true)),
+            (current, Failed, replace(true)),
+            (other, Answering, replace(false)),
+            (other, Absent, replace(false)),
+            (other, Failed, replace(false)),
+        ] {
+            assert_eq!(
+                plan_local_supervisor(own, found),
+                expected,
+                "own {own:?}, found {found:?}"
+            );
+        }
+    }
+
+    /// The record of a live `sleep` started as a stand-in for the app's own
+    /// supervisor, with the child to end afterwards.
+    fn own_stand_in() -> (Child, ManagedSupervisor) {
+        let program = ProgramFile::read(Path::new("/bin/sleep")).expect("fixture: /bin/sleep");
+        let child = Command::new(&program.path)
+            .arg("60")
+            .stdin(Stdio::null())
+            .spawn()
+            .expect("fixture: spawning the stand-in");
+        let record = ManagedSupervisor::for_process(child.id(), &program)
+            .expect("fixture: the stand-in is alive");
+        (child, record)
+    }
+
+    /// Waiting for the app's own silent supervisor ends as soon as it
+    /// answers, ends at once when it is gone, and otherwise ends at the
+    /// deadline.
+    ///
+    /// Why: a supervisor that is merely still starting (waiting for the
+    /// state directory, or migrating its database after an update) must not
+    /// be stopped and possibly killed; but a gone or truly wedged one must
+    /// not hold startup longer than the wait. Spec: a probe that answers on
+    /// its third try ends the wait as answered; a stand-in that has exited
+    /// ends it as gone without waiting; a probe that never answers (or
+    /// errors) ends it as timed out, after the wait; a probe slower than the
+    /// whole wait is cut off, so the wait ends near its deadline.
+    #[farhelm_testtrace::test]
+    fn waiting_for_the_apps_own_silent_supervisor_ends_on_answer_exit_or_deadline() {
+        let runtime = tokio::runtime::Runtime::new().expect("runtime");
+        let (child, own) = own_stand_in();
+        let probes = std::cell::Cell::new(0);
+        let outcome = runtime.block_on(await_own_supervisor_answering(
+            &own,
+            Duration::from_secs(60),
+            || {
+                probes.set(probes.get() + 1);
+                let answered = probes.get() >= 3;
+                async move { Ok(answered) }
+            },
+        ));
+        assert_eq!(outcome, OwnSupervisorWait::Answered);
+        assert_eq!(probes.get(), 3);
+
+        let started = std::time::Instant::now();
+        let outcome = runtime.block_on(await_own_supervisor_answering(
+            &own,
+            Duration::from_millis(300),
+            || async { Err(anyhow::anyhow!("hello timed out")) },
+        ));
+        assert_eq!(outcome, OwnSupervisorWait::TimedOut);
+        assert!(started.elapsed() >= Duration::from_millis(300));
+
+        // A probe that never finishes is cut off at the deadline rather than
+        // stretching the wait.
+        let started = std::time::Instant::now();
+        let outcome = runtime.block_on(await_own_supervisor_answering(
+            &own,
+            Duration::from_millis(300),
+            std::future::pending::<anyhow::Result<bool>>,
+        ));
+        assert_eq!(outcome, OwnSupervisorWait::TimedOut);
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "a slow probe stretched the wait to {:?}",
+            started.elapsed()
+        );
+
+        end(child);
+        let outcome = runtime.block_on(await_own_supervisor_answering(
+            &own,
+            Duration::from_secs(60),
+            || async { Ok(false) },
+        ));
+        assert_eq!(outcome, OwnSupervisorWait::Gone);
+    }
+
+    /// The launch lock refuses while an open app (or another launch) holds
+    /// it, waits out a brief holder, and is handed back when free.
+    ///
+    /// Why: every launch decides about its supervisor under this lock; a
+    /// launch beside an open app must refuse before it reads or stops
+    /// anything, and a CLI that holds the lock for a moment must not make a
+    /// launch refuse. Spec: with `helm-token.lock` held for longer than the
+    /// wait, `refuse_if_app_open` refuses naming token control and saying
+    /// nothing was changed; a holder that lets go partway through the wait
+    /// is waited out; without a holder it returns the held lock, which
+    /// blocks a third party until dropped.
+    #[farhelm_testtrace::test]
+    fn the_launch_lock_refuses_beside_an_open_app_and_waits_out_a_brief_holder() {
+        let state = tempfile::tempdir().expect("state");
+        let wait = Duration::from_millis(300);
+        let held = refuse_if_app_open(state.path(), wait).expect("a free lock is taken");
+        let error = refuse_if_app_open(state.path(), wait).expect_err("a held lock refuses");
+        let text = format!("{error:#}");
+        assert!(
+            text.contains("token control") && text.contains("nothing was changed"),
+            "{text}"
+        );
+        let (released_tx, released_rx) = mpsc::channel();
+        let holder = std::thread::spawn(move || {
+            // sleep-ok: the brief holder's hold is the behavior under test.
+            std::thread::sleep(Duration::from_millis(200));
+            drop(held);
+            released_tx.send(()).unwrap();
+        });
+        refuse_if_app_open(state.path(), Duration::from_secs(10))
+            .expect("a holder that lets go within the wait is waited out");
+        released_rx
+            .try_recv()
+            .expect("the lock was taken only after the holder let go");
+        holder.join().unwrap();
+    }
+
+    /// The replacement's check that its program runs at all.
+    ///
+    /// Why: a program file that cannot run looks to discovery like a
+    /// predecessor that does not answer, so without this check a launch
+    /// would stop a working supervisor and then fail to start one. Spec:
+    /// a program whose `--version` succeeds passes; one that exits non-zero
+    /// and one that is not executable refuse, naming the program.
+    #[farhelm_testtrace::test]
+    fn a_replacement_refuses_a_program_that_does_not_run() {
+        let dir = tempfile::tempdir().expect("dir");
+        let not_executable = dir.path().join("farhelm");
+        std::fs::write(&not_executable, b"#!/bin/sh\nexit 0\n").unwrap();
+        let state = dir.path().join("state");
+        let check = |farhelm: &Path| {
+            SpawnInputs {
+                farhelm,
+                absolute: farhelm,
+                program: &ProgramFile::read(Path::new("/bin/true")).expect("fixture: /bin/true"),
+                state_dir: &state,
+                supervisor_tmux: None,
+                ambient_tmux: None,
+                tmux_prefixes: &[],
+            }
+            .check_program_runs()
+        };
+        check(Path::new("/bin/true")).expect("a program that runs passes");
+        let error = check(Path::new("/bin/false")).expect_err("a failing program refuses");
+        assert!(format!("{error:#}").contains("/bin/false"), "{error:#}");
+        let error = check(&not_executable).expect_err("a non-executable file refuses");
+        assert!(
+            format!("{error:#}").contains(&not_executable.display().to_string()),
+            "{error:#}"
+        );
+    }
+
+    /// A discovery that fails outright means "not answering" only for the
+    /// app's own supervisor, and stays fatal otherwise.
+    ///
+    /// Why: the app's own supervisor can be wedged in a way that keeps its
+    /// socket accepting while the hello never comes back, and refusing to
+    /// start then would leave the user stuck with it until they found and
+    /// killed it by hand; but for a supervisor the app did not start, the
+    /// same failure says nothing about who holds the state directory, and
+    /// starting a rival there must not happen. Spec: an answer and an
+    /// absence pass through as they are; a failure becomes "not answering"
+    /// with a matching record of the app's own, and stays an error without.
+    #[farhelm_testtrace::test]
+    fn a_failed_discovery_counts_as_not_answering_only_for_the_apps_own_supervisor() {
+        use farhelm_helm::LocalSupervisorDiscovery::{Absent, Answering};
+        for own in [false, true] {
+            assert_eq!(
+                discovered(Ok(Answering), own).unwrap(),
+                Discovered::Answering
+            );
+            assert_eq!(discovered(Ok(Absent), own).unwrap(), Discovered::Absent);
+        }
+        assert_eq!(
+            discovered(Err(anyhow::anyhow!("hello timed out")), true).unwrap(),
+            Discovered::Failed
+        );
+        assert!(discovered(Err(anyhow::anyhow!("hello timed out")), false).is_err());
+    }
+
+    /// The supervisor's log is appended to across starts, and moved aside
+    /// once it reaches the rotation size.
+    ///
+    /// Why: the detached supervisor's diagnostics now live only in this
+    /// file, so a restart must not lose the previous run's lines, and a log
+    /// that grows across many starts must stay bounded. Spec: a small log is
+    /// appended to; a log at the rotation size becomes `supervisor.log.1`
+    /// (replacing an older one) and a fresh log starts; the log is private.
+    #[farhelm_testtrace::test]
+    fn the_supervisor_log_is_appended_to_and_rotated_at_its_size() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let state = tempfile::tempdir().expect("state");
+        let log = state.path().join(SUPERVISOR_LOG);
+        writeln!(open_supervisor_log(state.path()).unwrap(), "first run").unwrap();
+        writeln!(open_supervisor_log(state.path()).unwrap(), "second run").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&log).unwrap(),
+            "first run\nsecond run\n"
+        );
+        assert_eq!(
+            std::fs::metadata(&log).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        // Below the size, the kept handle is used as it is.
+        let kept = rotated_supervisor_log(state.path(), open_supervisor_log(state.path()).unwrap());
+        drop(kept);
+        assert!(!state.path().join(SUPERVISOR_LOG_PREVIOUS).exists());
+        // At the size, the log moves aside (replacing an older one) and a
+        // fresh one is used.
+        std::fs::write(state.path().join(SUPERVISOR_LOG_PREVIOUS), b"older").unwrap();
+        File::options()
+            .append(true)
+            .open(&log)
+            .unwrap()
+            .set_len(SUPERVISOR_LOG_ROTATE_AT)
+            .unwrap();
+        let mut fresh =
+            rotated_supervisor_log(state.path(), open_supervisor_log(state.path()).unwrap());
+        writeln!(fresh, "third run").unwrap();
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), "third run\n");
+        assert_eq!(
+            std::fs::metadata(state.path().join(SUPERVISOR_LOG_PREVIOUS))
+                .unwrap()
+                .len(),
+            SUPERVISOR_LOG_ROTATE_AT,
+            "the full log replaced the older one"
+        );
+    }
+
+    /// A rotation that fails falls back to the kept handle instead of
+    /// refusing the start.
+    ///
+    /// Why: rotation runs after a predecessor may already have been
+    /// stopped; refusing then would leave the user with no supervisor at
+    /// all. Spec: with the log at the rotation size and a directory where
+    /// the previous log would go, the kept handle is returned and still
+    /// appends to `supervisor.log`, which keeps its earlier content (it is
+    /// neither truncated nor replaced), and the directory is left alone.
+    #[farhelm_testtrace::test]
+    fn a_failed_rotation_appends_to_the_kept_log() {
+        let state = tempfile::tempdir().expect("state");
+        let log = state.path().join(SUPERVISOR_LOG);
+        std::fs::create_dir(state.path().join(SUPERVISOR_LOG_PREVIOUS)).unwrap();
+        std::fs::write(&log, b"x").unwrap();
+        File::options()
+            .append(true)
+            .open(&log)
+            .unwrap()
+            .set_len(SUPERVISOR_LOG_ROTATE_AT)
+            .unwrap();
+        let mut kept =
+            rotated_supervisor_log(state.path(), open_supervisor_log(state.path()).unwrap());
+        writeln!(kept, "still here").unwrap();
+        let tail = b"still here\n";
+        assert_eq!(
+            std::fs::metadata(&log).unwrap().len(),
+            SUPERVISOR_LOG_ROTATE_AT + tail.len() as u64,
+            "the kept log was appended to, not truncated or replaced"
+        );
+        use std::io::Seek as _;
+        let mut end = vec![0u8; tail.len()];
+        let mut file = File::open(&log).unwrap();
+        file.seek(std::io::SeekFrom::End(-(tail.len() as i64)))
+            .unwrap();
+        file.read_exact(&mut end).unwrap();
+        assert_eq!(end, tail);
+        assert!(state.path().join(SUPERVISOR_LOG_PREVIOUS).is_dir());
     }
 
     /// Startup must hand over to the embedded helm as soon as the child it
@@ -2186,7 +2935,7 @@ mod tests {
     /// answer and returns on the first answer, with the child still running.
     #[farhelm_testtrace::test]
     fn waiting_for_the_managed_supervisor_returns_once_it_answers() {
-        let mut child = tethered_child("cat >/dev/null");
+        let mut child = stand_in_child("exec sleep 60");
         let runtime = tokio::runtime::Runtime::new().expect("runtime");
         let probes = std::cell::Cell::new(0);
         runtime
@@ -2201,7 +2950,11 @@ mod tests {
             ))
             .expect("an answering supervisor ends the wait");
         assert_eq!(probes.get(), 3, "the wait ends on the first answer");
-        stop_managed_supervisor(&mut child, Duration::from_secs(60));
+        assert!(
+            child.try_wait().expect("poll the stand-in").is_none(),
+            "the child is still running"
+        );
+        end(child);
     }
 
     /// A child that dies while startup waits for it must be reported as the
@@ -2211,7 +2964,7 @@ mod tests {
     fn waiting_for_the_managed_supervisor_reports_its_exit() {
         let mut child = Command::new("sh")
             .args(["-c", "exit 3"])
-            .stdin(Stdio::piped())
+            .stdin(Stdio::null())
             .spawn()
             .expect("spawn the stand-in supervisor");
         let runtime = tokio::runtime::Runtime::new().expect("runtime");
@@ -2233,7 +2986,7 @@ mod tests {
     /// serving.
     #[farhelm_testtrace::test]
     fn waiting_for_the_managed_supervisor_gives_up_after_the_wait() {
-        let mut child = tethered_child("cat >/dev/null");
+        let mut child = stand_in_child("exec sleep 60");
         let runtime = tokio::runtime::Runtime::new().expect("runtime");
         let error = runtime
             .block_on(await_managed_supervisor_serving(
@@ -2246,7 +2999,7 @@ mod tests {
             format!("{error:#}").contains("did not start serving"),
             "{error:#}"
         );
-        stop_managed_supervisor(&mut child, Duration::from_secs(60));
+        end(child);
     }
 
     /// The startup guard marks the embedded helm's shutdown as expected when

@@ -225,8 +225,11 @@ together. Historical manifests with no declared P1 check report it as not planne
    guest SSH and compare observations with `--before` or `require_progress`. Require actual advancement before updating.
 4. Select the update path using the next section, perform the install, wait for the old app's readout to show **Restart
    to update**, and use that action. Do not manually launch the new binary to bypass a failed relaunch. Capture the app
-   log and readout. Record whether the trigger was automatic or manual for an in-app check; with automatic updates off,
-   explicitly ask the app to check.
+   log and readout, and the local supervisor's log, `~/.local/state/farhelm/supervisor.log` (and `supervisor.log.1` if
+   present): an app that starts its supervisor detached sends the supervisor's diagnostics there rather than to the
+   app's own stderr. With such an old app, quitting it to update leaves its supervisor running, and the candidate app
+   replaces it on its first launch; with an older app the supervisor stops when the app quits. Record whether the
+   trigger was automatic or manual for an in-app check; with automatic updates off, explicitly ask the app to check.
 5. Confirm the app opens at the candidate version, `farhelm --version` names it, and the local host is connected at the
    candidate supervisor version. The CLI follows the installed record, so it confirms installation, not the restart;
    require the app readout and supervisor version too. “Needs update” with a disabled local Update action is a failure
@@ -299,9 +302,10 @@ Required permission scopes and approvals (no credential contents):
 ## Evidence and report
 
 Collect one screenshot per GUI check, the first launch's app log and any relaunch logs the bring-up capture can actually
-retain, guest `farhelm --version` output, remote supervisor version and command continuity evidence, and diagnostics for
-failures. Copy them to private host storage before teardown. An unavailable relaunch log is a diagnostic coverage gap,
-not by itself a failed functional check. Screenshots and logs can reveal account names, credentials, conversations and
+retain, the local supervisor's `supervisor.log` from the state directory when the release writes one, guest
+`farhelm --version` output, remote supervisor version and command continuity evidence, and diagnostics for failures.
+Copy them to private host storage before teardown. An unavailable relaunch log is a diagnostic coverage gap, not by
+itself a failed functional check. Screenshots and logs can reveal account names, credentials, conversations and
 addresses; do not commit or publish raw evidence. Shared reports use portable evidence labels and redacted copies, not
 hostnames, usernames or private paths. `window-drag` instead keeps exactly the ten native images its contract names.
 

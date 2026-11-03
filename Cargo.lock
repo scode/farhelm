@@ -2028,6 +2028,7 @@ dependencies = [
  "gio",
  "gloo-timers",
  "gtk",
+ "libc",
  "mime_guess",
  "objc2",
  "objc2-app-kit",

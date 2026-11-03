@@ -294,8 +294,11 @@ fi
 
 # --- Run ------------------------------------------------------------------------
 #
-# In the foreground, so its log is this terminal and Ctrl-C quits it (taking the
-# supervisor it started with it). An ambient FARHELM_DESKTOP_FARHELM would point
+# In the foreground, so its log is this terminal and Ctrl-C quits it. The
+# supervisor it starts is detached and keeps running after that, logging to
+# `supervisor.log` in the state directory; the next build's first launch finds
+# it running another `farhelm` file (`install_atomically` gives every build a
+# new inode) and replaces it. An ambient FARHELM_DESKTOP_FARHELM would point
 # the app at some other `farhelm` than the one just built, so it is removed. The
 # state directory is passed explicitly every time, because the app's own
 # default is the installed app's state. `exec` keeps this shell's pid for the
