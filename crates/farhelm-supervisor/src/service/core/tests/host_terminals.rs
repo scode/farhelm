@@ -1021,12 +1021,22 @@ async fn terminal_less_tmux_s1(sup: &Arc<Supervisor>) {
     );
 }
 
-/// Whether the stand-in's child still runs (not a zombie, not gone).
+/// Whether process `pid` runs: it exists and is not a zombie. A stopped
+/// process runs, for this purpose. A stand-in host's child, killed, stays a
+/// zombie until the stand-in reaps it, which is why a zombie must not count.
+///
+/// It asks the sweep's own process reads (`crate::procs`) rather than
+/// reading `/proc/<pid>/stat`, because macOS has no `/proc` and these tests
+/// run there too. A failed read fails the test rather than reading as "not
+/// running", so that neither a premise nor an "it is gone" check passes on a
+/// process it could not see. The one exception is Linux's: a `/proc` entry
+/// hidden by `hidepid` (a pid reused by another user's process) reads as no
+/// process. A pid reused by another process of this user is not detected: it
+/// reads as the same process.
 fn runs(pid: u32) -> bool {
-    matches!(
-        crate::procs::read_process(pid),
-        Ok(Some((_, _, crate::procs::ProcessState::Running)))
-    )
+    let process = crate::procs::read_process(pid)
+        .unwrap_or_else(|error| panic!("fixture: reading process {pid}: {error}"));
+    matches!(process, Some((_, _, crate::procs::ProcessState::Running)))
 }
 
 /// An unconditional Delete of a session whose agent host cannot be read
@@ -3201,16 +3211,6 @@ async fn a_failed_host_restart_after_a_stop_began_restores_a_placeholder() {
     drop(checkpoint);
 }
 
-/// Whether process `pid` runs: it exists and is not a zombie (a stand-in
-/// host's child, killed, stays a zombie until the stand-in reaps it).
-fn program_runs(pid: u32) -> bool {
-    std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|stat| {
-        stat.rsplit_once(')')
-            .and_then(|(_, rest)| rest.split_whitespace().next())
-            .is_some_and(|state| state != "Z")
-    })
-}
-
 /// A host agent session with an earlier host start outstanding, as
 /// [`host_agent_with_an_earlier_start`] makes it.
 struct HostAgentWithEarlierStart {
@@ -3297,7 +3297,7 @@ async fn host_agent_with_an_earlier_start(
         installed
     };
     assert!(
-        program_runs(current_host.child_pid()) && program_runs(earlier_host.child_pid()),
+        runs(current_host.child_pid()) && runs(earlier_host.child_pid()),
         "premise: both programs run"
     );
     HostAgentWithEarlierStart {
@@ -3351,11 +3351,11 @@ async fn a_restart_without_consent_touches_no_program_of_a_working_host_agent() 
         .expect_err("a working agent is not restarted without consent");
     assert_eq!(error_kind(&refused), ErrorKind::Conflict, "{refused:#}");
     assert!(
-        program_runs(session.current_host.child_pid()),
+        runs(session.current_host.child_pid()),
         "the working agent's program still runs"
     );
     assert!(
-        program_runs(session.earlier_host.child_pid()),
+        runs(session.earlier_host.child_pid()),
         "the earlier start's program still runs"
     );
 }
@@ -3428,11 +3428,11 @@ async fn a_restart_asks_again_for_consent_after_settling_earlier_starts() {
     );
     assert_eq!(error_kind(&refused), ErrorKind::Conflict, "{refused:#}");
     assert!(
-        program_runs(session.current_host.child_pid()),
+        runs(session.current_host.child_pid()),
         "the working agent's program still runs"
     );
     assert!(
-        program_runs(session.earlier_host.child_pid()),
+        runs(session.earlier_host.child_pid()),
         "the earlier start's program still runs"
     );
 }
