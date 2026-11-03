@@ -46,6 +46,12 @@ pub(crate) use host_tabs::{
 mod host_restart;
 pub use host_restart::{HostRestartFault, HostRestartStage};
 
+/// The startup reclaim of orphaned terminal hosts: ending the hosts whose
+/// tags name sessions and tabs nothing in the state directory knows, and
+/// removing what gone hosts left (see its own docs).
+mod host_reclaim;
+pub use host_reclaim::ORPHAN_RECLAIM_BUDGET;
+
 /// The tracing target every event from this module and its `vendor` children
 /// uses: this module's own path.
 ///
@@ -439,6 +445,12 @@ pub struct SupervisorTimeouts {
     /// that bound with a host held on purpose instead of waiting out the
     /// production budget.
     pub delete_host_end: Duration,
+    /// See [`ORPHAN_RECLAIM_BUDGET`]: how long `serve`'s startup reclaim of
+    /// orphaned terminal hosts may take, discovery included, before what it
+    /// has not settled is left for the next start. Here so a test can reach
+    /// that bound with discovery held on purpose instead of waiting out the
+    /// production budget.
+    pub orphan_reclaim: Duration,
 }
 
 impl Default for SupervisorTimeouts {
@@ -457,6 +469,7 @@ impl Default for SupervisorTimeouts {
             agent_deliver: AGENT_DELIVER_TIMEOUT,
             agent_fence_retain: AGENT_FENCE_RETAIN_TIMEOUT,
             delete_host_end: super::session_hosts::DELETE_HOST_END_BUDGET,
+            orphan_reclaim: ORPHAN_RECLAIM_BUDGET,
         }
     }
 }
@@ -718,6 +731,20 @@ pub type DeletedSessionCleanupGate = SinkReservationGate;
 /// the settle's own timing is untouched.
 pub type TabSettleGate = SinkReservationGate;
 
+/// A hook awaited at the start of the startup reclaim's discovery
+/// (`host_reclaim`), inside its budget: a test holds it past the budget to
+/// show that a discovery that never finishes ends and removes nothing.
+/// Production installs none.
+pub type ReclaimDiscoveryGate = SinkReservationGate;
+
+/// A hook the startup reclaim's listing of the launch directory consults
+/// (`host_reclaim`): with `None` before it opens the directory, then with
+/// each entry's file name as it is read; `true` makes the listing fail
+/// there, as an I/O error would. A test fails it at the open, or partway
+/// through after some records were counted, to show that a listing that
+/// cannot be completed reclaims nothing. Production installs none.
+pub type ReclaimListingFault = Arc<dyn Fn(Option<&str>) -> bool + Send + Sync>;
+
 /// A hook awaited in Restart just after the session is taken off the session
 /// map for its relaunch, before the previous run's terminal is detached.
 ///
@@ -891,6 +918,10 @@ fault_hooks! {
     tab_host_end_fault: Arc<dyn Fn() -> Result<(), String> + Send + Sync>,
     /// See [`HostRestartFault`]. `None` in production.
     host_restart_fault: HostRestartFault,
+    /// See [`ReclaimDiscoveryGate`]. `None` in production.
+    reclaim_discovery_gate: ReclaimDiscoveryGate,
+    /// See [`ReclaimListingFault`]. `None` in production.
+    reclaim_listing_fault: ReclaimListingFault,
 }
 
 /// The injectable seams a `Supervisor` is built with. All default to
@@ -4741,7 +4772,10 @@ pub(crate) fn notification_cell()
 ///   adoptions that follow, twice: once for the agent hosts
 ///   (`host_handover::attribute_host_rows`) and once for the tab hosts
 ///   (`host_tabs::adopt_tab_hosts`), each learning the hosts to skip from
-///   `sessions` before taking it.
+///   `sessions` before taking it; and by `serve`'s startup reclaim
+///   (`host_reclaim`), around its scan for orphaned hosts and its removal
+///   of the sockets that scan found gone, after the same reading of
+///   `sessions` and before the reclaim ends any host.
 ///   Re-adoption does not take it: it contacts only the one socket a launch
 ///   recorded, which no spawn can be starting. Never held while a lifecycle
 ///   claim, `attachments`, or a tmux call is acquired.
@@ -4968,11 +5002,12 @@ pub struct Supervisor {
     /// signal leaves (`Self::end_launch_host`), whose re-verifying removal
     /// (`hosts::registry::GoneHost::remove_socket`) requires that nothing
     /// binds sockets in the directory meanwhile; and any scan of the socket
-    /// directory inside a running supervisor (today `serve`'s reload, which
-    /// runs before any connection is accepted): discovery takes over every
-    /// host it reaches, so it must skip every host this supervisor drives,
-    /// and a host between its spawn and its publication is on no map yet
-    /// while its socket already answers. Serializing the two, rather than
+    /// directory inside a running supervisor (today `serve`'s reload and its
+    /// startup reclaim of orphaned hosts, `host_reclaim`, both before any
+    /// connection is accepted): discovery takes over every host it reaches,
+    /// so it must skip every host this supervisor drives, and a host between
+    /// its spawn and its publication is on no map yet while its socket
+    /// already answers. Serializing the two, rather than
     /// reserving each spawn's socket name, is the simpler of the two ways
     /// the registry's docs allow. The constructor's reload scans without it,
     /// before the supervisor (and so any spawn) exists.
@@ -8215,6 +8250,17 @@ impl Supervisor {
             .store(may_record, std::sync::atomic::Ordering::SeqCst);
         // The freshly loaded map's own capture pass; see `capture_now`.
         self.capture_now().await;
+        // The startup reclaim of orphaned terminal hosts: after the reload
+        // above, whose reconciliation adopted every host a session accounts
+        // for; with the right to serve held (`begin_serving`, under the state
+        // directory's lock), so no other supervisor owns these hosts; and
+        // before the bind, so no create, tab operation or Delete can run
+        // beside it, and a client or harness that sees the socket sees a
+        // state directory already reclaimed (one that plants a host as soon
+        // as the socket appears would otherwise race it). Bounded by its
+        // budget; what it cannot settle is left for the next start.
+        self.reclaim_orphaned_hosts(self.timeouts.orphan_reclaim)
+            .await;
         // Holding the lock proves any existing socket file is a leftover
         // from a dead supervisor (the lock dies with its process), so
         // removing it is safe. Do this unconditionally: an existence check

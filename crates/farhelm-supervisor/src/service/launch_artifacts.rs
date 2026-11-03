@@ -741,9 +741,11 @@ impl LaunchArtifacts {
                 // how Delete finds every host of its session that no runtime
                 // holds (`service::session_hosts`). It goes with its
                 // session's Delete, or with a confirmed end of its host. A
-                // record of a session no longer on record stays until a
-                // startup reclaim (a later change) ends its host and then
-                // removes it. A terminal tab's host record
+                // record of a session no longer on record stays too: it
+                // keeps that session known to the startup reclaim
+                // (`service::core::host_reclaim`, which runs just before this
+                // startup sweep), which removes it once its host is gone and
+                // never ends a host it names. A terminal tab's host record
                 // (`<id>.tab-<tab id>.host`) is such a record too.
                 match owner {
                     // The parser yields a tab only for a `.host` record.

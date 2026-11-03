@@ -130,8 +130,9 @@
 //! orphan's) are left as they were: their
 //! connections close with the registry, except an earlier generation's
 //! agent host (below). A session's tab hosts are adopted beside this, from
-//! its tab records (`host_tabs`, "After a restart"); reclaiming orphans is
-//! a later change's.
+//! its tab records (`host_tabs`, "After a restart"); the hosts no session or
+//! tab accounts for are ended by `serve`'s startup reclaim once both have run
+//! (`host_reclaim`).
 //!
 //! The orderly stop's checkpoints and closes cover the sessions' tab hosts
 //! too: they outlive the supervisor the same way, and a runtime left open
@@ -1054,8 +1055,9 @@ pub(super) async fn end_superseded_hosts(
 /// agreement with the reload that just ran: a launch that was never given a
 /// host (unconfirmed, with no launch record) has none, and neither has one
 /// whose socket the reload found gone (`gone`; a stale socket file a killed
-/// host left stays on disk until the startup reclaim of a later change
-/// removes it, and must not keep the claim alive meanwhile). Otherwise a
+/// host left may still be on disk, where the startup reclaim, which runs
+/// before this check, could not remove it or ran out of time, and must not
+/// keep the claim alive). Otherwise a
 /// socket file still at the path the row names may be the host's, and a
 /// launch record that cannot be read may name one. Errs towards "may",
 /// which keeps a claim rather than reclaiming a checkout an agent may still

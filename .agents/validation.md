@@ -389,6 +389,35 @@ that its required systemd or SSH substrate ran.
   pinned tmux first on `PATH`. Linux only (the e2e suite), a minute or two; part of the workspace nextest run. Run it
   when tab opening, closing, the tab strip, the tab reap, the tab records, Delete's handling of tab runtimes, the
   reload's tab adoption or tmux's pane listing change.
+- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'reclaiming orphaned terminal hosts' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(known_session_ids_are_every_rows_and_every_reservations) | test(/^host_reclaim::/)'`
+  — the startup reclaim of orphaned terminal hosts (`crates/farhelm-supervisor/src/service/core/host_reclaim.rs`). The
+  store's unit test pins which sessions the database knows (every row's and every reservation's, a reservation whose row
+  was rolled back included, a session deleted with its reservations not). The e2e tests
+  (`crates/farhelm/tests/e2e/host_reclaim.rs`) run in-process supervisors with the switch on and real hosts started from
+  the built `farhelm`, and check the state once `serve` accepts: a session missing from the database whose launch
+  records remain keeping its agent and tab hosts running with their records, while its killed tab's record and socket
+  file go and another session's adopted runtime is never taken over; a database removed, then a new session made in its
+  replacement, then a restart, leaving the old hosts running while an unrecorded orphan nobody knows is ended at the
+  same start; unrecorded hosts tagged for sessions nobody knows (agent and tab) and an unrecorded tab of a known session
+  ended, the known session's agent program running on, and a killed host's socket file removed; with both sessions'
+  launch records removed so that the database alone knows them, a host whose session has only a pending reservation and
+  an unrecorded agent host of a session known only by its row (at a generation it never had) left running, as is a
+  SIGSTOPped host of an unknown session, while a readable orphan beside them is ended; hosts whose snapshot does not
+  restore and a host with a foreign raw tag left running beside an ordinary orphan that is ended; a `hosts` symlink
+  keeping a record and the stale socket file it names in another directory; a reclaim whose discovery is held past a
+  one-second budget (a fault seam and `SupervisorTimeouts::orphan_reclaim`) ending nothing, and the next start ending
+  the orphan; a missing and then an empty database reclaiming nothing; a launch directory whose listing fails at its
+  open, and one that fails partway after counting a record (a fault seam), reclaiming nothing, a session known only by
+  its records keeping every host, socket and record, until a whole listing ends the unrecorded orphan beside them; a
+  startup placeholder's socket never connected to by `serve` (a stand-in counting the connections it accepts); an
+  interrupted start of a session missing from the database settled (its first stage released by the settle's wait hook)
+  and the host it brings up left with its record, and one whose first stage never finishes fenced and its record
+  cleared; and, with a ten-minute ticker interval, an existing session's tab whose shell was killed while no supervisor
+  ran reaped, and a tab whose host was killed meanwhile leaving neither record nor socket file. The e2e harness's wait
+  for a served supervisor's socket allows the reclaim's whole budget on top of its own 20 seconds. Needs the pinned tmux
+  first on `PATH`. Linux only (the e2e suite), about a minute with four slots (stale sockets, a stopped host and a
+  fenced first stage wait out their deadlines); part of the workspace nextest run. Run it when the reclaim, discovery,
+  the launch records' settling, a host runtime's adoption, `serve`'s startup order or the store's reservations change.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'grid streams' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p farhelm-supervisor --lib -E 'test(/^grid_output::/) | test(/^service::grid_stream::/)'`
   — how a host terminal reaches a grid viewer: the encoding (`crates/farhelm-supervisor/src/grid_output.rs`: cells to
   runs with styles, redefined palette colors, wide and combining characters and links, a row with more links than a

@@ -83,7 +83,12 @@
 //! and that host is adopted rather than left running unseen. The settles
 //! run all at once, so a reload pays for the slowest (about twenty seconds
 //! for a first stage that never finishes), not for their sum. Tab records of sessions the
-//! store no longer holds are left for the startup reclaim of orphaned hosts.
+//! store no longer holds are left for the startup reclaim of orphaned hosts
+//! (`host_reclaim`), which `serve` runs once both reloads are done, and which
+//! leaves their hosts running (the records keep those sessions known) and
+//! removes a record once its host is gone; so is the record of a tab dropped
+//! here as gone, which that reclaim removes, with any socket file its killed
+//! host left, once its host is still gone.
 //! A placeholder tab is not retried while the supervisor runs; the next
 //! start tries it again.
 

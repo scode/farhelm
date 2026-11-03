@@ -120,6 +120,26 @@ The desktop event loop's `LoopDestroyed` hook closes native-download admission a
 directories before hard exit. Weak directory registrations preserve ordinary save cleanup; no transfer is awaited and
 completed files outside staging remain. Earlier-build, crash and force-quit leftovers are not reclaimed.
 
+Approved start-up sweep: terminal hosts. The maintainer approved one start-up cleanup for terminal hosts, recorded with
+the terminal-host design as the user's decision "Approve startup reclaim": "at startup the supervisor shuts down any
+live host whose tag names no known session or tab, and removes the sockets of hosts that are gone." Cleanup on quit
+cannot cover this case: a host outlives the supervisor that started it on purpose, so no quit is the moment it should
+end, and the tag a host carries already says which session and tab it is for, so telling an abandoned host from a live
+owner's needs no new machinery. What the supervisor does under it: a session is known when the session database has a
+row or a create reservation for it, or when the launch directory holds a host launch record named for it, and a tab is
+known when its session's runtime holds it or a tab record is named for it (reading "known" by the records too is a
+decision logged for this change, on 2026-11-02: records live beside the database, so a database that is removed,
+replaced or restored from an older copy costs no running terminal). A live host whose tag names no known session or tab
+is shut down, and its program gets the terminal's hangup; nothing else of it is looked for. A host this build cannot
+read is never shut down, and nothing at all is done while the database has no session and no reservation, or when the
+launch directory cannot be listed whole (a record not read would leave a known host looking like an orphan). Sockets
+nothing serves are removed, and so are the launch records of hosts confirmed gone that no session in the database holds:
+those of sessions known only by their records, and a known session's tab records whose host the restart found gone. A
+live host of a session known only by its records is left at every start, with a warning each time: the session has no
+row, so nothing in Farhelm lists or deletes it, and it runs until it is stopped by hand (SIGTERM to the process serving
+the socket the warning names), after which the next start clears its record. The rule is in "Terminal host", under the
+startup reclaim of orphaned hosts.
+
 ## Session IDs in logs
 
 Session IDs must not inject log lines or use invisible or direction-changing characters to disguise the ID shown in
@@ -2111,49 +2131,49 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   its shell runs and as "cannot tell" when it can no longer read its host, and it is ended by the same path; a tab's
   startup placeholder is settled from its record like the rest. The startup sweep of the launch directory keeps every
   host record, whoever owns it, so that a record goes only with its session's Delete or with a confirmed end of its
-  host; a record of a session no longer on record stays until the startup reclaim of orphaned hosts (a later change)
-  ends its host and then removes it. The record's first line names its format (`farhelm launch host 1`); a record Delete
-  cannot read or decode (a newer release's format, damage) makes it refuse and keep the session, since the host it names
-  may still run. Each record whose socket no runtime holds is settled as a retried create settles its own, all of them
-  at once: its recorded first stage is waited for and then ended with the verified signal, so a start a crashed
-  supervisor left half done cannot bind its socket after Delete looked, and a socket nothing serves is gone only once no
-  live process names it (a forked second stage still on its way to binding). Then what the socket holds decides.
-  Nothing: there is nothing to end, and a socket file a killed host left is removed, judged gone again first. A host
-  whose tag names the session: Delete's guard counts it (its program running is a live agent, of whatever launch
-  generation), its child is pinned over the connection as a sweep root, and it is ended over that same connection. A
-  host whose tag names anything else: Delete refuses and touches nothing. Something that does not answer usefully
-  (stopped, wedged, busy, another protocol, or a valid `Info` with a tag this build cannot read, which nothing but the
-  socket's name ties to the record) whose process is known (the connection's peer credentials, or the process naming the
-  socket): a guarded Delete refuses, since whether its program runs cannot be told, and an unconditional one ends that
-  process with the verified signal after the sweep, without connecting again; it gives the sweep no root, so its program
-  is reached by the marker sweep, the scope kill and its hangup. One whose process is not known: Delete refuses. The
-  sweep never roots at a host or at an exited child's pid; the agent's runtime gives its child as pinned at adoption,
-  checked against the process table whatever the host now says (a departure from "a root only while the host reports the
-  child alive": the pid and start identity together are the child, which an unreadable or stopped host does not change).
-  After the sweep, and before the attachment lock, every host is ended at once: the agent's through its runtime's
-  `Shutdown`, then, whenever that does not confirm the end (its 15-second bound ran out, the runtime had ended, or an
-  earlier Delete had stopped it), the verified signal to the process the runtime adopted, which the runtime keeps from
-  its adoption whatever happens to it since, and never whatever now serves the socket: a process renamed over the socket
-  is neither shut down nor signalled, and its socket file stays. A host the supervisor holds no adopted process for (a
-  failed create's start, a platform that named no peer) is shut down over a new connection only when its tag names the
-  session. The others are ended as above, and then the socket file a signal leaves is removed. Settling the records gets
-  60 seconds, and ending the hosts another 60 of its own, so that the sweep and the rest of the teardown between them
-  count against neither; a record not settled, or a host not confirmed ended, within its budget or at all, keeps the
-  session and its records for a retry, so Delete never reports a session gone while one of its hosts may still run. The
-  command-line read the verified signal makes runs off the async workers through the same gate as the process-table
-  walks: one that is stuck in the kernel fails the check within ten seconds, keeps one blocking thread until it returns,
-  and makes every later walk or check fail at once meanwhile rather than strand a thread each. Then the tmux teardown
-  runs and tolerates finding nothing. **The residual**: a host the session no longer records (a record deleted by hand)
-  is not found; a recorded host that answers nothing gets the verified signal but gives no sweep root; a read stuck in
-  the kernel holds one thread until it returns; and these keep a session undeletable until a person deals with them: a
-  record that cannot be read or decoded, a record whose socket serves another terminal's host, a recorded host whose
-  process is not known, whose command line the verified signal rejects (it does not end with `--socket` and that
-  socket's path), or that survives SIGKILL, and a recorded host whose child runs but cannot be read to pin it. A session
-  whose agent terminal is a startup placeholder (a host a restarted supervisor could not adopt, "Across supervisor
-  restarts" below) has no runtime: the launch record naming its socket is settled like any other. A placeholder no
-  record names is ended only when the host at its socket answers with a tag naming the session (then it is counted,
-  rooted and shut down like a recorded host of the session); anything else there keeps the session and is never
-  signalled, since nothing but the socket's name ties that process to the session.
+  host; a record of a session no longer on record stays too: it keeps that session known to the startup reclaim of
+  orphaned hosts (below), which removes it only once its host is gone. The record's first line names its format
+  (`farhelm launch host 1`); a record Delete cannot read or decode (a newer release's format, damage) makes it refuse
+  and keep the session, since the host it names may still run. Each record whose socket no runtime holds is settled as a
+  retried create settles its own, all of them at once: its recorded first stage is waited for and then ended with the
+  verified signal, so a start a crashed supervisor left half done cannot bind its socket after Delete looked, and a
+  socket nothing serves is gone only once no live process names it (a forked second stage still on its way to binding).
+  Then what the socket holds decides. Nothing: there is nothing to end, and a socket file a killed host left is removed,
+  judged gone again first. A host whose tag names the session: Delete's guard counts it (its program running is a live
+  agent, of whatever launch generation), its child is pinned over the connection as a sweep root, and it is ended over
+  that same connection. A host whose tag names anything else: Delete refuses and touches nothing. Something that does
+  not answer usefully (stopped, wedged, busy, another protocol, or a valid `Info` with a tag this build cannot read,
+  which nothing but the socket's name ties to the record) whose process is known (the connection's peer credentials, or
+  the process naming the socket): a guarded Delete refuses, since whether its program runs cannot be told, and an
+  unconditional one ends that process with the verified signal after the sweep, without connecting again; it gives the
+  sweep no root, so its program is reached by the marker sweep, the scope kill and its hangup. One whose process is not
+  known: Delete refuses. The sweep never roots at a host or at an exited child's pid; the agent's runtime gives its
+  child as pinned at adoption, checked against the process table whatever the host now says (a departure from "a root
+  only while the host reports the child alive": the pid and start identity together are the child, which an unreadable
+  or stopped host does not change). After the sweep, and before the attachment lock, every host is ended at once: the
+  agent's through its runtime's `Shutdown`, then, whenever that does not confirm the end (its 15-second bound ran out,
+  the runtime had ended, or an earlier Delete had stopped it), the verified signal to the process the runtime adopted,
+  which the runtime keeps from its adoption whatever happens to it since, and never whatever now serves the socket: a
+  process renamed over the socket is neither shut down nor signalled, and its socket file stays. A host the supervisor
+  holds no adopted process for (a failed create's start, a platform that named no peer) is shut down over a new
+  connection only when its tag names the session. The others are ended as above, and then the socket file a signal
+  leaves is removed. Settling the records gets 60 seconds, and ending the hosts another 60 of its own, so that the sweep
+  and the rest of the teardown between them count against neither; a record not settled, or a host not confirmed ended,
+  within its budget or at all, keeps the session and its records for a retry, so Delete never reports a session gone
+  while one of its hosts may still run. The command-line read the verified signal makes runs off the async workers
+  through the same gate as the process-table walks: one that is stuck in the kernel fails the check within ten seconds,
+  keeps one blocking thread until it returns, and makes every later walk or check fail at once meanwhile rather than
+  strand a thread each. Then the tmux teardown runs and tolerates finding nothing. **The residual**: a host the session
+  no longer records (a record deleted by hand) is not found; a recorded host that answers nothing gets the verified
+  signal but gives no sweep root; a read stuck in the kernel holds one thread until it returns; and these keep a session
+  undeletable until a person deals with them: a record that cannot be read or decoded, a record whose socket serves
+  another terminal's host, a recorded host whose process is not known, whose command line the verified signal rejects
+  (it does not end with `--socket` and that socket's path), or that survives SIGKILL, and a recorded host whose child
+  runs but cannot be read to pin it. A session whose agent terminal is a startup placeholder (a host a restarted
+  supervisor could not adopt, "Across supervisor restarts" below) has no runtime: the launch record naming its socket is
+  settled like any other. A placeholder no record names is ended only when the host at its socket answers with a tag
+  naming the session (then it is counted, rooted and shut down like a recorded host of the session); anything else there
+  keeps the session and is never signalled, since nothing but the socket's name ties that process to the session.
 - **Across supervisor restarts** (`service/core/host_handover.rs`) a host terminal keeps running, and its session keeps
   its state. An orderly stop asks every host terminal's runtime for a checkpoint under one ten-second deadline that runs
   beside the output clients' ten seconds, at most as many encodes at once as the machine has cores, and closes each
@@ -2212,22 +2232,72 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   verified signal's graces, a forked second stage's five-second wait); every record is settled at once, so a reload pays
   the slowest. `serve`'s second reload keeps the constructor's tab runtimes, and its scan for agent hosts skips their
   sockets. Tab placeholders are not retried while the supervisor runs; its next start tries them again. Tab records of
-  sessions the store no longer holds are left to the startup reclaim of orphaned hosts. The orderly stop checkpoints and
-  closes the tab runtimes with the agents'. The spare-checkout claims at startup read a host row's terminal, and for a
-  host row with no terminal, whether a socket file is still at the path the row (or its launch record) names and was not
-  found gone by the reload: a claim is released only then. **Re-adoption**: a running supervisor retries a host startup
-  could not adopt for a reason that can pass (no answer in time, busy, closed connections, a child that could not be
-  pinned, a socket directory that could not be scanned), one placeholder at a time: after a second, then doubling to a
-  minute, each next try scheduled before the try and never reset. A try takes the session's lifecycle claim without
-  waiting (a busy session is tried later), checks that the entry still holds that very placeholder for the same launch
-  generation and that no orderly stop has begun, looks only at the one socket the placeholder names (its tag must name
-  the session's launch, or, as at startup, an earlier one of its agent's), and swaps the outcome in under the session
-  map after checking again, keeping the entry's run and session cells; a launch or stop request is then confirmed as
-  reload would for a child the host reports alive. A runtime it made but does not install is stopped, leaving the host
-  as it was. An orderly stop sets a flag under the session map as it gathers the host terminals it closes, after which
-  no try installs a runtime. A placeholder whose reason will not pass on its own (another protocol version, snapshot
-  format or tag, a launch record that cannot be read) is not retried, and a runtime that becomes unavailable after it
-  ran stays so until the supervisor's next start, whose reload adopts the host afresh.
+  sessions the store no longer holds are left to the startup reclaim of orphaned hosts, and so is the record of a tab
+  dropped as gone. The orderly stop checkpoints and closes the tab runtimes with the agents'. The spare-checkout claims
+  at startup read a host row's terminal, and for a host row with no terminal, whether a socket file is still at the path
+  the row (or its launch record) names and was not found gone by the reload: a claim is released only then.
+  **Re-adoption**: a running supervisor retries a host startup could not adopt for a reason that can pass (no answer in
+  time, busy, closed connections, a child that could not be pinned, a socket directory that could not be scanned), one
+  placeholder at a time: after a second, then doubling to a minute, each next try scheduled before the try and never
+  reset. A try takes the session's lifecycle claim without waiting (a busy session is tried later), checks that the
+  entry still holds that very placeholder for the same launch generation and that no orderly stop has begun, looks only
+  at the one socket the placeholder names (its tag must name the session's launch, or, as at startup, an earlier one of
+  its agent's), and swaps the outcome in under the session map after checking again, keeping the entry's run and session
+  cells; a launch or stop request is then confirmed as reload would for a child the host reports alive. A runtime it
+  made but does not install is stopped, leaving the host as it was. An orderly stop sets a flag under the session map as
+  it gathers the host terminals it closes, after which no try installs a runtime. A placeholder whose reason will not
+  pass on its own (another protocol version, snapshot format or tag, a launch record that cannot be read) is not
+  retried, and a runtime that becomes unavailable after it ran stays so until the supervisor's next start, whose reload
+  adopts the host afresh.
+- **The startup reclaim of orphaned hosts** (`service/core/host_reclaim.rs`), the start-up cleanup the maintainer
+  approved ("Cleanup on quit"). Delete ends every host a session records before it removes the session's records and
+  row, every host start writes its record first, and a tab's close ends its host before it removes the record, so a live
+  host whose session nothing knows is a leftover made by hand; the likelier way a host's session goes missing is a
+  database that went backwards (removed, replaced, or restored from an older copy, as the desktop app's
+  identity-mismatch message tells people to do), and the rules are built so that this never costs a running terminal. A
+  session is known when the store has a row or a create reservation for it (in whatever state: a create claims its
+  reservation first, and a retry of it finds its host by the tag), or when the launch directory holds a host launch
+  record named for it (counted by name, so a record that cannot be read counts too). A tab is known when a runtime of
+  its session holds it or a tab record is named for it. An orphan is a host this build can read whose tag names no known
+  session, or a tab of a known session that is not known. Everything else is left: an agent host or a known tab's host
+  of a known session, whatever its launch generation and whether or not a runtime holds it (a superseded agent host of
+  an existing session is the reload's to end, "Restarting a host agent" above, before the reclaim runs); a live host of
+  a session only its records know, with a warning naming the session and the socket and saying the database was likely
+  restored, replaced or removed (the session has no row, so nothing in Farhelm lists or deletes it: it runs until it is
+  stopped by hand, with SIGTERM to the process serving that socket, the warning repeats at every start meanwhile, and
+  the start after it ends clears its record); a host that cannot be read (no answer, busy, another protocol version, no
+  `Info`, a tag this build cannot read, or a snapshot this build cannot restore), never signalled, its socket and record
+  kept, which the reclaim learns by adopting a host before it ends it, over the connection that read its tag and exactly
+  as a reload adopts a recovered host (which answers the queries its program asked while no supervisor was attached);
+  and whatever a terminal on the session map holds, runtime or startup placeholder, which is never contacted. Nothing at
+  all is reclaimed when the socket directory is in a shape the supervisor refuses (a symlink, another owner, a looser
+  mode: a host reached through it may be another installation's), when the store cannot be read, when it has no session
+  and no reservation (at every start while that holds, as after a database went missing), or when the launch directory
+  cannot be listed whole: a missing launch directory holds no records, but one that cannot be opened, or whose listing
+  stops partway, leaves records unseen whose sessions and tabs would then look unknown. Launch records of sessions known
+  only by their records are settled as a retried create settles its own (the recorded first stage waited for, then ended
+  with the verified signal; the socket looked at again while a forked second stage may still bind it), so a start a
+  crashed supervisor left half done cannot bring its host up after the reclaim looked; when nothing serves the socket
+  then, its file and the record are removed, and a host that answers is left. Only regular files are read as records.
+  The record of a known session's tab that the reload dropped as gone is settled the same way and removed, with any
+  socket file its killed host left, once nothing serves the socket; anything there then is left for the next start's
+  reload. Then a scan of the socket directory, skipping the sockets those records name and every socket the session map
+  holds, finds what no record names: a live orphan is ended, and every socket nothing serves is removed, judged gone
+  again first. Only the host of an orphan is ended, through the runtime its adoption made (`Shutdown`, else the verified
+  signal to the process the adoption pinned, never whatever serves the socket by then), and its socket file removed; its
+  program gets the terminal's hangup, and descendants that ignore it are not looked for, as with
+  `farhelm internal stop-terminal-hosts`. It runs once per start, in `serve` only (a supervisor that only constructs
+  never reclaims): once it holds the right to serve and the second reload has adopted every host the sessions account
+  for and settled the reservations, and before it binds its socket, so no create, tab operation or Delete runs beside it
+  and a client that sees the socket sees a state directory already reclaimed; the scan and its removals hold the socket
+  directory's spawn fence exclusively, as the reload's scan does. Everything runs within 60 seconds, discovery included:
+  discovery is a task of its own, and one that does not finish in time ends the reclaim before anything is ended or
+  removed. After discovery, records, the scan and the endings run at once; what is still running at the budget is
+  dropped, logged, and left for the next start, as is the work of any task that panics (discovery's included), so the
+  reclaim never keeps the supervisor from starting; nothing is retried while the supervisor runs. A first stage that
+  never finishes behind a wedged host can need more than the budget (its fence alone can take 40 seconds), so it may
+  take more than one start. The ordinary start reclaims nothing and costs a listing of the launch directory and a scan
+  that contacts no socket; each stale socket costs the refusal window twice (the scan's, then the removal's own check).
 - **Grid streams** (`service/grid_stream.rs`, the encoding in `grid_output.rs`): an attach to a host terminal from a
   client that can show grids is answered with stream kind `grid` and gets a sender task of its own in the forwarder's
   place, sharing the attachment machinery (takeover, detach, pause, the stall detach and its verdicts) with tmux

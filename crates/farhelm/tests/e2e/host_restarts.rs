@@ -58,14 +58,20 @@ impl Stack {
         &self,
         seams: SupervisorSeams,
     ) -> (Arc<Supervisor>, Arc<SupervisorClient>) {
-        let sup = Supervisor::new_with_seams(
-            self.state.path(),
-            farhelm_bin().into(),
-            suite_timeouts(),
-            seams,
-        )
-        .await
-        .expect("supervisor");
+        self.supervisor_with(seams, suite_timeouts()).await
+    }
+
+    /// [`Self::supervisor`] with `timeouts` instead of the suite's, for a
+    /// test that shortens a budget on purpose.
+    pub(crate) async fn supervisor_with(
+        &self,
+        seams: SupervisorSeams,
+        timeouts: SupervisorTimeouts,
+    ) -> (Arc<Supervisor>, Arc<SupervisorClient>) {
+        let sup =
+            Supervisor::new_with_seams(self.state.path(), farhelm_bin().into(), timeouts, seams)
+                .await
+                .expect("supervisor");
         assert!(
             sup.owns_state_dir(),
             "premise: the supervisor holds its state directory"
