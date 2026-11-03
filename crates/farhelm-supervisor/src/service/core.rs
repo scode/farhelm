@@ -2167,17 +2167,26 @@ const HOST_RESTART_UNAVAILABLE: &str = "this session's agent runs in a terminal 
 /// claim behind a program that does not read its terminal.
 const HOST_PROMPT_DELIVERY_TIMEOUT: Duration = crate::tmux::CONTROL_EXCHANGE_TIMEOUT;
 
-/// Type a prompt into a host terminal: the bracketed `paste`, in parts of at
-/// most `MAX_INPUT` bytes, then the harness's `submit` keys.
+/// Type a prompt into a host terminal: the bracketed `paste`, then the
+/// harness's `submit` keys.
 ///
-/// The parts go through one input sequence
-/// (`crate::hosts::HostTerminal::input_sequence`), so a part lost with a
-/// connection is never followed by a later one, and the submit is sent only
-/// once every part of the paste was written to the pty: a paste that did not
-/// arrive whole must not be submitted, which is the guarantee the tmux path
-/// gets from its confirmed input client. Anything short of that is an error
-/// saying delivery may be partial, as the tmux path says it; nothing is sent
-/// again, since some of it may have reached the program.
+/// Both go through one input sequence
+/// (`crate::hosts::HostTerminal::input_sequence`), the paste as one
+/// `send_paste`, which the runtime writes whole, with nothing between its
+/// pieces (another viewer's keys and the terminal's answers to the
+/// program's queries queue before or after it), and closes if a lost
+/// connection cuts it short. The submit is sent only once the whole paste
+/// was written to the pty: a paste that did not arrive whole must not be
+/// submitted, which is the guarantee the tmux path gets from its confirmed
+/// input client. Anything short of that is an error saying delivery may be
+/// partial, as the tmux path says it; nothing is sent again, since some of
+/// it may have reached the program.
+///
+/// Between the paste and the submit, other input can be written: an
+/// answer to a query the program asked meanwhile, or a viewer's keys,
+/// which then land in the prompt before it is submitted. Keeping them out
+/// would need the runtime to hold its answers across two sends, which was
+/// decided against.
 async fn deliver_prompt_to_host(
     host: &crate::hosts::HostTerminal,
     paste: &[u8],
@@ -2185,23 +2194,17 @@ async fn deliver_prompt_to_host(
 ) -> anyhow::Result<()> {
     let sequence = host.input_sequence();
     let deliver = async {
-        let mut receipts = Vec::new();
-        for part in paste.chunks(terminal_host::protocol::MAX_INPUT) {
-            receipts.push(
-                sequence
-                    .send(part)
-                    .await
-                    .context("delivering the prompt paste; delivery may be partial")?,
+        let fate = sequence
+            .send_paste(paste.to_vec(), true)
+            .await
+            .context("delivering the prompt paste; delivery may be partial")?
+            .fate()
+            .await;
+        if fate != crate::hosts::InputFate::Written {
+            anyhow::bail!(
+                "delivering the prompt paste; delivery may be partial (the terminal host's \
+                 input was {fate:?})"
             );
-        }
-        for receipt in receipts {
-            let fate = receipt.fate().await;
-            if fate != crate::hosts::InputFate::Written {
-                anyhow::bail!(
-                    "delivering the prompt paste; delivery may be partial (the terminal host's \
-                     input was {fate:?})"
-                );
-            }
         }
         let fate = sequence
             .send(submit)

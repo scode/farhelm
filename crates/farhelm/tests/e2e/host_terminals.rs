@@ -840,17 +840,20 @@ async fn delete_ends_the_adopted_host_and_never_one_that_replaced_it() {
     .await;
 }
 
-/// Attaching a host agent is refused, with the grid client's refusal for a
-/// client that cannot show grids.
+/// A host agent attaches only for a client that can show grids, and its
+/// grid stream shows the host child's output.
 ///
 /// Why: a host terminal has no byte stream; sending a bytes-only client
 /// anything would show it nothing it could draw, and the refusal is how a
-/// viewer learns why. Spec: a bytes-only attach is refused with the
-/// supervisor's permanent "needs a client that can show grid terminals"
-/// message, a grid-capable one with "cannot stream it as a grid yet"; the
-/// host's child runs on through both.
+/// viewer learns why. A client that can show grids gets the terminal from
+/// the supervisor's emulator, fed by a real host. Spec: a bytes-only attach
+/// is refused with the supervisor's permanent "needs a client that can show
+/// grid terminals" message; a grid attach is answered with stream kind
+/// `grid`, its first message is `hello`, a screen row it sends reads `host
+/// child ready`, and `ReplayComplete` arrives; the host's child runs on
+/// through both.
 #[farhelm_testtrace::test]
-async fn attaching_a_host_agent_is_refused() {
+async fn a_host_agent_attaches_only_as_a_grid() {
     let h = harness().await;
     let (session, work) = basic_session(&h).await;
     let installed = install_host(&h, &session.id, &tree_script(work.path())).await;
@@ -863,7 +866,7 @@ async fn attaching_a_host_agent_is_refused() {
         format!("{refused:#}").contains("needs a client that can show grid terminals"),
         "{refused:#}"
     );
-    let Err(refused) = h
+    let (_channel, mut stream) = h
         .client
         .attach_terminal(
             &session.id,
@@ -874,12 +877,40 @@ async fn attaching_a_host_agent_is_refused() {
             farhelm_helm::ViewerStreams::BytesOrGrid,
         )
         .await
-    else {
-        panic!("no grid stream yet");
-    };
+        .expect("a grid attach");
+    assert_eq!(stream.stream_kind(), farhelm_proto::StreamKind::Grid);
+    let mut first = None;
+    let mut ready_shown = false;
+    let mut replay_complete = false;
+    let waited = tokio::time::timeout(Duration::from_secs(WAIT_SECS), async {
+        while !(ready_shown && replay_complete) {
+            match stream.recv().await {
+                Some(TermEvent::Data(bytes)) => {
+                    let message =
+                        farhelm_proto::grid::GridOutput::decode(&bytes).expect("a grid message");
+                    first.get_or_insert_with(|| message.clone());
+                    if let farhelm_proto::grid::GridOutput::Rows { rows, .. } = &message {
+                        ready_shown |= rows.iter().any(|row| {
+                            let text: String =
+                                row.row.runs.iter().map(|run| run.text.as_str()).collect();
+                            text.contains("host child ready")
+                        });
+                    }
+                }
+                Some(TermEvent::ReplayComplete) => replay_complete = true,
+                Some(TermEvent::Detached(detach)) => panic!("detached: {detach:?}"),
+                None => panic!("the attachment ended"),
+            }
+        }
+    })
+    .await;
     assert!(
-        format!("{refused:#}").contains("cannot stream it as a grid yet"),
-        "{refused:#}"
+        waited.is_ok(),
+        "ready shown {ready_shown}, replay complete {replay_complete}"
+    );
+    assert!(
+        matches!(first, Some(farhelm_proto::grid::GridOutput::Hello { .. })),
+        "{first:?}"
     );
     assert!(!process_is_gone(child), "the agent runs on");
     end_host(&installed).await;

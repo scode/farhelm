@@ -1768,9 +1768,18 @@ pub(crate) struct ActiveAttach {
 /// the other side of the attachment (`connection::AttachOutput`); it is a
 /// separate type only because the forwarder task, not the attachment map,
 /// owns it.
+#[expect(
+    clippy::large_enum_variant,
+    reason = "one per attached terminal, held in the attachment map, never moved in a hot path"
+)]
 pub(crate) enum AttachBackend {
     /// An attachment to a tmux pane.
     Tmux(TmuxAttach),
+    /// An attachment to a terminal in a terminal host, streamed to a viewer
+    /// that can show grids: its input side (`super::grid_stream`). A host
+    /// terminal's death needs no latch: its sender follows the runtime's
+    /// liveness itself.
+    Host(super::grid_stream::HostAttach),
 }
 
 /// The tmux clients and latch behind one attachment to a tmux pane.
@@ -1815,13 +1824,26 @@ pub(crate) struct TmuxAttach {
 
 impl AttachBackend {
     /// Deliver one data frame of viewer input to the terminal, returning
-    /// only once its delivery is confirmed. An `Err` means this
-    /// attachment's input is broken, and the caller tears the attachment
-    /// down: accepting later frames after silently losing one can turn a
-    /// command into a different command.
-    pub(crate) async fn send_input(&mut self, bytes: &[u8]) -> anyhow::Result<()> {
+    /// only once its delivery is confirmed, and whether it submits a line
+    /// (`super::capture::submits_a_line`, for the hook warning's
+    /// first-input mark). An `Err` means this attachment's input is broken,
+    /// and the caller tears the attachment down: accepting later frames
+    /// after silently losing one can turn a command into a different
+    /// command.
+    ///
+    /// For a tmux pane the frame is the bytes to write, and delivery is
+    /// tmux having run the command. For a host terminal the frame is a grid
+    /// input message, and delivery is its bytes being queued for the
+    /// attachment's input pump, which never waits on the program
+    /// (`super::grid_stream`, "Input"); a later loss ends the attachment
+    /// from the pump's side.
+    pub(crate) async fn send_input(&mut self, bytes: &[u8]) -> anyhow::Result<bool> {
         match self {
-            AttachBackend::Tmux(tmux) => tmux.input.send(bytes).await,
+            AttachBackend::Tmux(tmux) => {
+                tmux.input.send(bytes).await?;
+                Ok(super::capture::submits_a_line(bytes))
+            }
+            AttachBackend::Host(host) => host.send_input(bytes),
         }
     }
 
@@ -1835,6 +1857,7 @@ impl AttachBackend {
     ) -> Option<watch::Sender<bool>> {
         match self {
             AttachBackend::Tmux(tmux) => tmux.pane_death.observed_in(states, probe_started),
+            AttachBackend::Host(_) => None,
         }
     }
 
@@ -1843,6 +1866,7 @@ impl AttachBackend {
     pub(crate) fn input_client_pid(&self) -> Option<u32> {
         match self {
             AttachBackend::Tmux(tmux) => tmux.input.pid(),
+            AttachBackend::Host(_) => None,
         }
     }
 }

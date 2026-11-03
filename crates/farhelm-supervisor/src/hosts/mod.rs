@@ -83,6 +83,6 @@ pub use tag::{HostRole, HostTag, TagError, UnreadableTag};
 pub use terminal::{
     AdoptError, Adoption, CheckpointOutcome, CheckpointPolicy, Clock, EmulatorRef, HostEvidence,
     HostStatus, HostTerminal, HostTerminalOptions, InputFate, InputReceipt, InputRefused,
-    InputSequence, Liveness, LivenessChange, LivenessNotifier, NotTaken, NoticeSubscription,
-    ProcessRoot, ResizeRefused, ShutdownReport, Unavailability,
+    InputSequence, Liveness, LivenessChange, LivenessNotifier, MAX_PASTE, NotTaken,
+    NoticeSubscription, ProcessRoot, ResizeRefused, ShutdownReport, Unavailability,
 };
