@@ -1558,18 +1558,35 @@ impl StateDirOwnership {
         }
     }
 
-    /// Whether something accepts connections on `state_dir`'s supervisor
+    /// Whether something serving answers on `state_dir`'s supervisor
     /// socket, for [`Self::claim_waiting_observed`].
     ///
-    /// Accepting is the whole answer: a supervisor that is shutting down has
-    /// already dropped its listener, so a refused or missing socket is the
-    /// only shape worth waiting for. The protocol hello that follows a
-    /// successful connect is there for the incumbent's sake, not this
-    /// caller's. A connection dropped before its hello is logged by the
-    /// serving supervisor as an error, and a duplicate start is an ordinary
-    /// event that should not leave one in a healthy supervisor's log. The
-    /// hello is bounded, and its outcome (including a protocol mismatch with
-    /// an older incumbent) does not change the answer.
+    /// A refused or missing socket is not an answer: a supervisor shutting
+    /// down in order has already dropped its listener. Neither is a
+    /// connection dropped before the hello completes
+    /// ([`Self::dropped_before_hello`]): that is a holder on its way out. An
+    /// exiting supervisor (killed or not) keeps the lock and its listener
+    /// until its last thread has finished, which on Linux can be a moment
+    /// after its main thread already reads as exited; the kernel queues
+    /// connections on that listener meanwhile and resets them when it
+    /// closes. The desktop app waits for the last thread, both when it stops
+    /// its own supervisor and when it finds that one already gone at launch
+    /// (`managed_supervisor`, "Gone"), so this is a second line of defence:
+    /// for a supervisor started by hand, for a launch that has no usable
+    /// record of the dying one, and for one still exiting after the app's
+    /// few seconds. Counting the bare connect as an answer made such a
+    /// successor give up the directory at once, start read-only and have
+    /// `serve` refuse it.
+    ///
+    /// Anything else counts as an answer: a completed hello, a hello an
+    /// older incumbent refused (a protocol mismatch is still an incumbent),
+    /// and a connection that is connected but not answered within the
+    /// bound (a serving supervisor that has not got round to it). So a dying
+    /// holder that stays silent past the bound still reads as serving; that
+    /// is not retried here, because the desktop app, the one thing that
+    /// kills a supervisor and starts another, already waits for the dying
+    /// one to finish. The hello also spares the incumbent a connection
+    /// dropped before it, which a serving supervisor logs as an error.
     async fn holder_answers(state_dir: &Path) -> bool {
         let Ok(stream) = UnixStream::connect(Supervisor::socket_path(state_dir)).await else {
             return false;
@@ -1577,12 +1594,27 @@ impl StateDirOwnership {
         let (read, write) = tokio::io::split(stream);
         let mut reader = farhelm_proto::io::FrameReader::new(read);
         let mut writer = farhelm_proto::io::FrameWriter::new(write);
-        let _ = tokio::time::timeout(
+        let outcome = tokio::time::timeout(
             Duration::from_secs(2),
             farhelm_proto::io::handshake(&mut reader, &mut writer, "supervisor-startup"),
         )
         .await;
-        true
+        !matches!(outcome, Ok(Err(error)) if Self::dropped_before_hello(&error))
+    }
+
+    /// Whether a failed hello failed because the peer's end went away (an
+    /// end of stream, a reset, an aborted or unconnected socket, a broken
+    /// pipe) rather than because the peer said something, such as a
+    /// protocol mismatch, which is an `Other` error and an answer.
+    fn dropped_before_hello(error: &std::io::Error) -> bool {
+        matches!(
+            error.kind(),
+            std::io::ErrorKind::UnexpectedEof
+                | std::io::ErrorKind::ConnectionReset
+                | std::io::ErrorKind::ConnectionAborted
+                | std::io::ErrorKind::NotConnected
+                | std::io::ErrorKind::BrokenPipe
+        )
     }
 
     /// Take the right to serve, or report that something already has it.
@@ -29504,9 +29536,9 @@ exit 0
     async fn a_waiting_claim_does_not_wait_for_a_holder_that_answers() {
         let dir = tempfile::tempdir().expect("state dir");
         let _incumbent = hold_state_dir_lock(dir.path());
-        // Bound but never accepted from: a pending connection in the
-        // backlog is what "answers" means here, exactly as for a serving
-        // supervisor that has not got round to accepting yet.
+        // Bound but never accepted from: a connection that stays pending
+        // past the hello's bound is what "answers" means here, exactly as
+        // for a serving supervisor that has not got round to accepting yet.
         std::fs::remove_file(Supervisor::socket_path(dir.path()))
             .expect("fixture: clearing the stale socket the holder helper leaves");
         let _listener = std::os::unix::net::UnixListener::bind(Supervisor::socket_path(dir.path()))
@@ -29518,6 +29550,212 @@ exit 0
             .await
             .expect("the claim must not fail");
         assert!(claim.is_none(), "the serving incumbent keeps the directory");
+    }
+
+    /// Bind a stand-in holder's listener at `state_dir`'s supervisor
+    /// socket, in place of the stale socket file [`hold_state_dir_lock`]
+    /// leaves, and serve every connection with `serve` on a task.
+    ///
+    /// The task counts the connections it accepted, so a test can show its
+    /// claim really reached this listener rather than a refused socket
+    /// (which a different branch of the claim handles). It ends with an
+    /// error rather than panicking when an accept fails, so that
+    /// [`end_stand_in_holder`] can report the failure instead of it being
+    /// lost in an aborted task.
+    fn stand_in_holder<F, Fut>(
+        state_dir: &Path,
+        serve: F,
+    ) -> (
+        Arc<std::sync::atomic::AtomicUsize>,
+        tokio::task::JoinHandle<std::io::Result<()>>,
+    )
+    where
+        F: Fn(tokio::net::UnixStream) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = ()> + Send + 'static,
+    {
+        std::fs::remove_file(Supervisor::socket_path(state_dir))
+            .expect("fixture: clearing the stale socket the holder helper leaves");
+        let listener = tokio::net::UnixListener::bind(Supervisor::socket_path(state_dir))
+            .expect("fixture: the stand-in holder's socket must bind");
+        let accepted = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counted = accepted.clone();
+        let task = tokio::spawn(async move {
+            loop {
+                let (stream, _) = listener.accept().await?;
+                counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                serve(stream).await;
+            }
+        });
+        (accepted, task)
+    }
+
+    /// Stop a [`stand_in_holder`] task, failing the test if it had already
+    /// ended (an accept error) or panicked rather than being cancelled here.
+    async fn end_stand_in_holder(task: tokio::task::JoinHandle<std::io::Result<()>>) {
+        task.abort();
+        match task.await {
+            Err(error) if error.is_cancelled() => {}
+            Err(error) => std::panic::resume_unwind(error.into_panic()),
+            Ok(ended) => panic!("fixture: the stand-in holder stopped accepting: {ended:?}"),
+        }
+    }
+
+    /// A successor waits for a dying predecessor that still holds the
+    /// directory, instead of giving up because its socket still takes
+    /// connections.
+    ///
+    /// Why: a killed supervisor keeps the lock and its listener until its
+    /// last thread has exited, a moment after its main thread reads as
+    /// exited on Linux; the kernel queues a successor's connection on that
+    /// listener and then resets it unanswered. The desktop app once started
+    /// the next supervisor in that window, and taking the bare connect for a
+    /// serving incumbent made it start read-only and `serve` refuse, so the
+    /// app never came up (the Linux desktop smoke's frozen-supervisor leg,
+    /// about two runs in eight). The app now waits for the last thread
+    /// (`managed_supervisor`); this pins the claim's own defence for any
+    /// other starter. Pinned: with the lock held and a listener that accepts
+    /// and drops every connection before the hello, the claim reaches that
+    /// listener (it counts at least one accept), enters its waiting branch
+    /// (where the predecessor lets go) and then owns the directory.
+    #[farhelm_testtrace::test]
+    async fn a_waiting_claim_waits_for_a_holder_whose_socket_drops_connections_unanswered() {
+        let dir = tempfile::tempdir().expect("state dir");
+        let predecessor = std::sync::Mutex::new(Some(hold_state_dir_lock(dir.path())));
+        let (accepted, holder) = stand_in_holder(dir.path(), |stream| async move {
+            drop(stream);
+        });
+        let busy = std::sync::atomic::AtomicUsize::new(0);
+        let (_, newly_acquired) =
+            StateDirOwnership::claim_waiting_observed(dir.path(), Duration::from_secs(60), || {
+                busy.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                predecessor.lock().unwrap().take();
+            })
+            .await
+            .expect("the claim must not fail")
+            .expect("the successor must own the directory once the predecessor released it");
+        end_stand_in_holder(holder).await;
+        assert!(
+            accepted.load(std::sync::atomic::Ordering::SeqCst) >= 1,
+            "premise: the claim's probe must have reached the dropping listener"
+        );
+        assert!(
+            busy.load(std::sync::atomic::Ordering::SeqCst) >= 1,
+            "the claim must have met the held lock and taken the waiting branch"
+        );
+        assert!(newly_acquired, "the successor took the OS lock itself");
+    }
+
+    /// A holder that completes the hello, or refuses it for a protocol
+    /// mismatch, is an incumbent, and the claim gives the directory up at
+    /// once.
+    ///
+    /// Why: the probe now tells apart the ways a hello can end, and only a
+    /// connection dropped before it means a holder on its way out. A
+    /// completed hello is what a healthy serving supervisor gives, and a
+    /// mismatch is what an older one gives; a change that counted only one
+    /// of them (say, only a completed hello) would make a second instance
+    /// beside an older incumbent wait out the whole claim wait and then fail
+    /// with a message about a supervisor still shutting down. Pinned for
+    /// both, against a stand-in that reads the probe's hello, sends one
+    /// with this build's protocol version or the next, and keeps the
+    /// connection open until the probe closes it: the listener was reached,
+    /// the claim is `None`, and the waiting branch (`on_busy`, which panics)
+    /// was never entered.
+    #[farhelm_testtrace::test]
+    async fn a_waiting_claim_does_not_wait_for_a_holder_that_says_hello() {
+        for protocol_version in [
+            farhelm_proto::PROTOCOL_VERSION,
+            farhelm_proto::PROTOCOL_VERSION + 1,
+        ] {
+            let dir = tempfile::tempdir().expect("state dir");
+            let _incumbent = hold_state_dir_lock(dir.path());
+            let (accepted, holder) = stand_in_holder(dir.path(), move |stream| async move {
+                let (read, write) = tokio::io::split(stream);
+                let mut reader = farhelm_proto::io::FrameReader::new(read);
+                let mut writer = farhelm_proto::io::FrameWriter::new(write);
+                reader
+                    .read_frame()
+                    .await
+                    .expect("fixture: reading the probe's hello")
+                    .expect("fixture: the probe sends its hello first");
+                writer
+                    .write_control(&ControlMsg::Hello {
+                        database_schema: None,
+                        protocol_version,
+                        build_version: "stand-in".into(),
+                        role: "supervisor".into(),
+                        host_identity: None,
+                        auth: None,
+                    })
+                    .await
+                    .expect("fixture: sending the stand-in's hello");
+                // Until the probe hangs up, so that closing first cannot
+                // turn the answer into a reset on the probe's side.
+                while let Ok(Some(_)) = reader.read_frame().await {}
+            });
+            let claim =
+                StateDirOwnership::claim_waiting_observed(dir.path(), Duration::from_secs(60), || {
+                    panic!("a holder that says hello (protocol {protocol_version}) must not be waited for")
+                })
+                .await
+                .expect("the claim must not fail");
+            end_stand_in_holder(holder).await;
+            assert_eq!(
+                accepted.load(std::sync::atomic::Ordering::SeqCst),
+                1,
+                "premise: the probe reached the stand-in once (protocol {protocol_version})"
+            );
+            assert!(
+                claim.is_none(),
+                "an incumbent speaking protocol {protocol_version} keeps the directory"
+            );
+        }
+    }
+
+    /// The probe's classification of a failed hello: only the ways a
+    /// peer's end goes away count as dropped, and a protocol mismatch or
+    /// any other refusal does not.
+    ///
+    /// Why: the claim waits for a dropping holder and gives up at once on an
+    /// answering one, so an error kind in the wrong class either delays a
+    /// second instance's refusal by the whole claim wait or brings back a
+    /// successor that starts read-only beside a dying predecessor. The kinds
+    /// are pinned by construction because the platforms do not all produce
+    /// each one on demand (Linux resets an unread close, macOS gives an end
+    /// of stream). The positive half only restates the list; the refusals
+    /// carry the value here, and the kind a real handshake gives for a
+    /// mismatch is pinned end to end by
+    /// `a_waiting_claim_does_not_wait_for_a_holder_that_says_hello`.
+    #[farhelm_testtrace::test]
+    fn a_hello_dropped_by_the_peer_is_told_apart_from_a_refusal() {
+        use std::io::{Error, ErrorKind};
+        for kind in [
+            ErrorKind::UnexpectedEof,
+            ErrorKind::ConnectionReset,
+            ErrorKind::ConnectionAborted,
+            ErrorKind::NotConnected,
+            ErrorKind::BrokenPipe,
+        ] {
+            assert!(
+                StateDirOwnership::dropped_before_hello(&Error::from(kind)),
+                "{kind:?} is a peer going away"
+            );
+        }
+        let skew = Error::other(farhelm_proto::io::VersionSkew {
+            peer_protocol: farhelm_proto::PROTOCOL_VERSION + 1,
+            peer_build: "stand-in".into(),
+            our_protocol: farhelm_proto::PROTOCOL_VERSION,
+            our_build: farhelm_proto::BUILD_VERSION.to_string(),
+            peer_database_schema: None,
+        });
+        assert!(
+            !StateDirOwnership::dropped_before_hello(&skew),
+            "a protocol mismatch is an answer"
+        );
+        assert!(
+            !StateDirOwnership::dropped_before_hello(&Error::from(ErrorKind::InvalidData)),
+            "a malformed hello is an answer"
+        );
     }
 
     /// The zero wait in-process harnesses get by default must stay a single

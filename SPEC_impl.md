@@ -5679,11 +5679,12 @@ and inode, which macOS does not expose cheaply), and the recorded program file (
 spelling nor another app put at the same place counts) is one of the version programs of the app being removed. The
 record is re-read first and must still equal the planned one, so a record replaced after confirmation is not followed to
 a process the user was not shown. The stop is SIGTERM with a grace longer than the supervisor's own output-client
-shutdown budget, never a kill; a supervisor still running after it, or a stop that cannot be confirmed because the
-process could not be read or signalled, refuses with nothing removed and keeps the record. The record of a supervisor
-confirmed gone is removed. Only then does uninstall take the supervisor locks; a holder at that point is reported as
-usually a supervisor uninstall did not stop, with an `lsof` command that shows which. A refusal after the stop says the
-supervisor was stopped and that opening Farhelm starts it again.
+shutdown budget, never a kill; a supervisor still running after it, one whose last threads are still exiting a few
+seconds after it ended, or a stop that cannot be confirmed because the process could not be read or signalled, refuses
+with nothing removed and keeps the record. The record of a supervisor confirmed gone is removed. Only then does
+uninstall take the supervisor locks; a holder at that point is reported as usually a supervisor uninstall did not stop,
+with an `lsof` command that shows which. A refusal after the stop says the supervisor was stopped and that opening
+Farhelm starts it again.
 
 Uninstall ends no terminal. The private tmux server and any terminal hosts (see "Terminal host") outlive the supervisor
 by design, including the supervisor uninstall stops on macOS, and keep running with their sessions; stopping sessions
@@ -6174,12 +6175,20 @@ answer, reuses it if it does, and only then treats it as wedged. Interrupting it
 those sweeps survive interruption (the repository-cache sweep renames before it removes); post-bind startup work that
 could not survive a kill would change that. Then the app stops the old one with SIGTERM, waits `ORDERLY_STOP_GRACE` (the
 output-client shutdown budget plus five seconds), kills it only after that, removes its record once it is confirmed
-gone, and starts the new one, with `STATE_DIR_CLAIM_WAIT` covering the handover. The log is rotated only then, when a
-supervisor is about to start, and a rotation that fails falls back to appending. A supervisor started by hand in that
-window races the new one for the state directory; if it wins, this launch fails to start, and the next launch reuses it.
-The record is written right after the spawn, so a crash in between leaves a supervisor the app treats as not its own:
-reused while it answers, and not replaced on an update until it exits. A long-lived supervisor keeps its version's lock,
-so pruning keeps that version until the supervisor is replaced.
+gone, and starts the new one, with `STATE_DIR_CLAIM_WAIT` covering the handover. Confirmed gone means that no thread of
+it can run any more, not that its main thread reads as exited: on Linux an exiting process's main thread can read as a
+zombie while its other threads are still exiting, after a kill or an orderly exit alike, and until the last of them has
+finished the process holds the state directory's lock and its socket (connections to which the kernel then resets
+unanswered); a successor started in that window came up read-only and never served. A stop that finds the process
+already gone, or that sees it go on its own, waits for that too, and a launch whose record names a process that reads as
+gone waits a few seconds for it to finish before it looks for a supervisor; a supervisor still exiting after a stop's
+few seconds refuses the launch. The new supervisor's claim also treats a connection dropped before the hello as a holder
+on its way out, not as one serving, for whatever else starts a supervisor without that wait. The log is rotated only
+then, when a supervisor is about to start, and a rotation that fails falls back to appending. A supervisor started by
+hand in that window races the new one for the state directory; if it wins, this launch fails to start, and the next
+launch reuses it. The record is written right after the spawn, so a crash in between leaves a supervisor the app treats
+as not its own: reused while it answers, and not replaced on an update until it exits. A long-lived supervisor keeps its
+version's lock, so pruning keeps that version until the supervisor is replaced.
 
 A session's window, or a terminal host's child for an agent in a host, runs the supervisor's own versioned `farhelm`,
 not the forwarder, so in this layout the supervisor starts it as `<farhelm> internal hold <spec> -- <shell argv>`

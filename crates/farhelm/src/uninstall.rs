@@ -584,7 +584,9 @@ fn app_supervisors(state_dirs: &[PathBuf], app: &app::AppPlan) -> Result<Vec<App
 /// Each one is re-read first: a record that changed since the plan (another
 /// supervisor started meanwhile) is not stopped, and its lock then refuses
 /// as for any supervisor the app did not start. A supervisor that does not
-/// exit within the grace refuses; uninstall never kills one, since a kill
+/// exit within the grace refuses, and so does one that ended but whose last
+/// threads are still exiting a few seconds later (it may still hold the
+/// version and state it used); uninstall never kills one, since a kill
 /// can take its tmux server and every session with it. A stop that could not
 /// be confirmed (the process could not be read or signalled) refuses too and
 /// keeps the record, which is what lets a later uninstall or app launch
@@ -619,6 +621,11 @@ fn stop_app_supervisors(planned: &[AppSupervisor], grace: std::time::Duration) -
                  nothing was removed; stop it yourself, then run uninstall again",
                 stop.record.pid,
                 grace.as_secs()
+            ),
+            StopOutcome::StillExiting => bail!(
+                "the desktop app's supervisor (process {}) had not finished exiting a few \
+                 seconds after it ended; nothing was removed; run uninstall again in a moment",
+                stop.record.pid
             ),
         }
         let _ = ManagedSupervisor::remove(&stop.state_dir);

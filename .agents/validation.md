@@ -74,7 +74,9 @@ that its required systemd or SSH substrate ran.
   — executes applicable unit and integration targets, including the support crates omitted from default-members. Nextest
   starts a process per test and bounds concurrency across binaries; the e2e group has four slots, supervisor tmux
   modules share two, the two-host fixture reserves two, and RSS reserves all four. The release gate retains its narrower
-  package/target selections; ordinary CI does not run this suite. Do not also run the old full libtest battery.
+  package/target selections; ordinary CI does not run this suite. Do not also run the old full libtest battery. On Linux
+  it needs Python 3 at `/usr/bin/python3`: besides the e2e stand-ins named below, the supervisor's
+  `managed_supervisor::` stop test runs a Python stand-in whose main thread exits before its other thread.
 - `python3 scripts/record-test-run.py --kind development --selection 'workspace doctests' --concurrency '4 doctest threads' --tmux required -- cargo test --locked --doc --workspace --exclude farhelm-desktop -- --show-output --test-threads=4`
   — preserves doctest coverage separately because nextest does not execute it.
 - `scripts/test-tmux-pinned-shutdown.sh` — the x86_64 Linux release gate builds the exact checksummed release named by
@@ -746,7 +748,9 @@ that its required systemd or SSH substrate ran.
   (`cargo nextest run -p farhelm-supervisor --lib -E 'test(/installation::|version_lock::|session_hold::/)'` and
   `cargo nextest run -p farhelm --test session_hold --test version_lock_forwarder`), each through the recorder with four
   slots and `--tmux none`. The focused macOS CI job (not the release gate) also runs the desktop app's supervisor record
-  and stop tests the same way: `cargo nextest run -p farhelm-supervisor --lib -E 'test(managed_supervisor::)'` (the
+  and stop tests the same way, with the stop's check that a process has finished exiting, which on macOS rests on the
+  zombie state alone:
+  `cargo nextest run -p farhelm-supervisor --lib -E 'test(/managed_supervisor::|procs::tests::finished_exiting/)'` (the
   uninstall stop's own tests are part of `uninstall::` above). After the uninstall acceptance, in a step of its own that
   runs whatever the steps before it did (so that a host failure cannot hide that gate), it runs the terminal host's
   whole test suite, `cargo nextest run -p terminal-host`, the host's entry test in the CLI,

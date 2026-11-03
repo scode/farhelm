@@ -487,8 +487,9 @@ impl DesktopBootstrap {
         // the paths the preflight legs exercise, which is what keeps "the
         // refusal is the ONLY thing printed" true on the missing/below-floor
         // path: `ensure_private_dir`, `bundled_farhelm` and `ProgramFile`
-        // do no logging, `own_supervisor` logs only for an unreadable record
-        // or process (the legs start from an empty state directory), and
+        // do no logging, `own_supervisor` logs only when a record exists
+        // (unreadable, or naming a process that is unreadable or still
+        // exiting; the legs start from an empty state directory), and
         // `discover_local_supervisor`'s probe pipes its own probe child's
         // stderr and drains it internally rather than inheriting this
         // process's — verified by the exact stderr assertion in
@@ -992,6 +993,14 @@ fn discovered(
 /// gone or runs something else, or one that could not be read (logged).
 /// That is the safe direction, since a supervisor that is not ours is never
 /// stopped.
+///
+/// A recorded supervisor that reads as gone is first given a few seconds to
+/// finish exiting (`ManagedSupervisor::wait_exited`). One that died on its
+/// own just before this launch can still hold the state directory's lock
+/// and its socket while its last threads exit, and discovery would then
+/// reach a dying listener and refuse the launch for a supervisor it cannot
+/// identify. One still exiting after the wait is logged and treated as
+/// gone, leaving discovery and the new supervisor's claim to deal with it.
 fn own_supervisor(state_dir: &Path) -> Option<ManagedSupervisor> {
     let record = match ManagedSupervisor::read(state_dir) {
         Ok(record) => record?,
@@ -1002,7 +1011,23 @@ fn own_supervisor(state_dir: &Path) -> Option<ManagedSupervisor> {
     };
     match record.observe() {
         Ok(Observation::Matches) => Some(record),
-        Ok(Observation::Gone | Observation::RunsSomethingElse) => None,
+        Ok(Observation::Gone) => {
+            match record.wait_exited() {
+                Ok(true) => {}
+                Ok(false) => tracing::warn!(
+                    pid = record.pid,
+                    "the supervisor an earlier launch started is still exiting"
+                ),
+                Err(error) => tracing::warn!(
+                    pid = record.pid,
+                    %error,
+                    "could not check whether the supervisor an earlier launch started has \
+                     finished exiting"
+                ),
+            }
+            None
+        }
+        Ok(Observation::RunsSomethingElse) => None,
         Err(error) => {
             tracing::warn!(
                 pid = record.pid,
@@ -1020,8 +1045,13 @@ fn own_supervisor(state_dir: &Path) -> Option<ManagedSupervisor> {
 /// The orderly stop first (SIGTERM, which closes its terminal-output
 /// clients in order), and a kill only after [`ORDERLY_STOP_GRACE`]: this is
 /// the app's own supervisor, and a wedged one would otherwise keep the
-/// state directory forever. Its record goes once it is confirmed gone. A
-/// stop that cannot be confirmed refuses startup, keeping the record.
+/// state directory forever. Its record goes once it is confirmed gone,
+/// which the stop reports only when no thread of it can run any more: an
+/// exiting supervisor holds the state directory's lock and its socket until
+/// its last thread has finished, and the supervisor this launch starts next
+/// needs both. A stop that cannot be confirmed refuses startup, keeping the
+/// record, and so does one whose supervisor is still exiting after the
+/// stop's few seconds.
 fn stop_own_supervisor(own: &ManagedSupervisor, state_dir: &Path) -> anyhow::Result<()> {
     tracing::info!(
         pid = own.pid,
@@ -1039,6 +1069,11 @@ fn stop_own_supervisor(own: &ManagedSupervisor, state_dir: &Path) -> anyhow::Res
         ),
         StopOutcome::StillRunning => bail!(
             "the previous local supervisor (process {}) did not stop, even when killed",
+            own.pid
+        ),
+        StopOutcome::StillExiting => bail!(
+            "the previous local supervisor (process {}) had not finished exiting a few \
+             seconds after it ended; open Farhelm again in a moment",
             own.pid
         ),
     }

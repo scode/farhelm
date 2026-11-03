@@ -191,6 +191,35 @@ pub(crate) fn read_process(pid: u32) -> Result<Option<(u32, u64, ProcessState)>,
     imp::read_process(pid)
 }
 
+/// Whether the process `pid` started at `start` has finished exiting: no
+/// thread of it can still run, so everything it held (descriptors, the
+/// locks and listening sockets behind them) has been let go.
+///
+/// [`read_process`] alone cannot say this on Linux. It reads the thread
+/// group leader, which can show as a zombie as soon as the main thread has
+/// exited, while the process's other threads are still on their way out
+/// and the descriptor table they share stays open until the last of them
+/// has closed it. Any exit can pass through that state, a kill or an
+/// orderly one; a supervisor in it still holds its state directory's lock
+/// and its socket, and a successor started then finds both taken. So on
+/// Linux this also requires the process's thread count to be down to the
+/// zombie leader alone. On macOS the kernel closes a process's descriptors
+/// before it marks the process a zombie (XNU's `proc_exit` in
+/// `bsd/kern/kern_exit.c`, read from source, not observed), so a zombie
+/// there has already let go of everything and this adds nothing to
+/// [`read_process`].
+///
+/// "Finished" is about the process's own threads only: a child it forked
+/// and that has not exec'd yet can still hold copies of its descriptors
+/// for a moment, and a finished process can still be an unreaped zombie.
+///
+/// A process that is gone, or whose pid now names another process (another
+/// start identity), has finished exiting. A process that could not be read
+/// is an error, never "finished", for the reason [`read_process`] gives.
+pub(crate) fn finished_exiting(pid: u32, start: u64) -> Result<bool, String> {
+    imp::finished_exiting(pid, start)
+}
+
 /// One process's exec-time environment as the kernel's own
 /// NUL-delimited `KEY=VALUE\0KEY=VALUE\0...` block, or `None` when it
 /// cannot be read.
@@ -864,13 +893,7 @@ mod imp {
     /// the only way a numeric pid recorded minutes, seconds, or even
     /// microseconds ago can still be trusted.
     fn parse_stat(bytes: &[u8]) -> Result<(u32, u64, char), String> {
-        let Some(after_comm) = bytes.iter().rposition(|&b| b == b')') else {
-            return Err(format!(
-                "stat content has no ')' delimiting comm: {bytes:?}"
-            ));
-        };
-        let rest = std::str::from_utf8(&bytes[after_comm + 1..])
-            .map_err(|e| format!("stat fields after comm are not valid UTF-8: {e}"))?;
+        let rest = fields_after_comm(bytes)?;
         let state = stat_field(rest, 0)
             .ok_or("stat content is missing the state field")?
             .chars()
@@ -885,6 +908,27 @@ mod imp {
             .parse::<u64>()
             .map_err(|e| format!("stat starttime field is unparseable: {e}"))?;
         Ok((ppid, starttime, state))
+    }
+
+    /// Everything after the LAST `)` of a `/proc/<pid>/stat` line, decoded:
+    /// the fixed-format fields [`parse_stat`] explains the boundary of.
+    fn fields_after_comm(bytes: &[u8]) -> Result<&str, String> {
+        let Some(after_comm) = bytes.iter().rposition(|&b| b == b')') else {
+            return Err(format!(
+                "stat content has no ')' delimiting comm: {bytes:?}"
+            ));
+        };
+        std::str::from_utf8(&bytes[after_comm + 1..])
+            .map_err(|e| format!("stat fields after comm are not valid UTF-8: {e}"))
+    }
+
+    /// A `/proc/<pid>/stat` line's `num_threads` (field 20 overall, the
+    /// 18th token after `comm`), for [`finished_exiting`].
+    fn parse_num_threads(bytes: &[u8]) -> Result<u64, String> {
+        stat_field(fields_after_comm(bytes)?, 17)
+            .ok_or("stat content is missing the num_threads field")?
+            .parse::<u64>()
+            .map_err(|e| format!("stat num_threads field is unparseable: {e}"))
     }
 
     /// This process's own effective uid, for [`is_own_pid_dir`].
@@ -997,6 +1041,39 @@ mod imp {
         }))
     }
 
+    /// See [`super::finished_exiting`].
+    ///
+    /// One read of `/proc/<pid>/stat` answers it: the start identity, the
+    /// state and the thread count (`num_threads`, the kernel's count of the
+    /// group's threads) come from one consistent view. A thread leaves that
+    /// count only when it is released, after it has closed its share of the
+    /// descriptor table, while the leader stays counted until it is reaped,
+    /// so a zombie leader with a count of one (or a leader being reaped,
+    /// which reads as 0) is a process whose every thread has finished. Walking `/proc/<pid>/task` instead is not a
+    /// snapshot: the kernel lists threads by position and resumes a listing
+    /// that spans several reads at the position it had reached, so threads
+    /// released meanwhile shift the rest and a live one can be skipped,
+    /// which is exactly the moment this is asked about.
+    ///
+    /// A pid that is gone, or that now names another process (another start
+    /// identity, or another user's process hidden as [`read_process`]
+    /// describes), has finished exiting as far as the recorded one goes.
+    pub(super) fn finished_exiting(pid: u32, start: u64) -> Result<bool, String> {
+        let bytes = match std::fs::read(format!("/proc/{pid}/stat")) {
+            Ok(bytes) => bytes,
+            Err(e) if is_gone_errno(&e) => return Ok(true),
+            Err(_) if !is_own_pid_dir(pid) => return Ok(true),
+            Err(e) => return Err(format!("reading /proc/{pid}/stat: {e}")),
+        };
+        let (_, found, state) = parse_stat(&bytes)?;
+        if found != start {
+            return Ok(true);
+        }
+        // At most one, not exactly one: a leader caught while it is being
+        // reaped reads as dead with a count of 0, and has long finished.
+        Ok(matches!(state, 'Z' | 'X') && parse_num_threads(&bytes)? <= 1)
+    }
+
     /// See [`super::read_environ`]. `/proc/<pid>/environ` is already
     /// exactly the NUL-delimited block the contract describes, so there is
     /// nothing to parse: every failure (gone, foreign uid, non-dumpable)
@@ -1090,6 +1167,21 @@ mod imp {
             assert_eq!(ppid, 456, "ppid must be read from AFTER the true delimiter");
             assert_eq!(starttime, 789, "starttime is the 20th field after comm");
             assert_eq!(state, 'S', "state is the first field after comm");
+        }
+
+        /// `num_threads` is read from the same boundary as the other fields,
+        /// at its own position (field 20 overall), not from a neighbour.
+        ///
+        /// Why: `finished_exiting` decides from it whether a zombie leader
+        /// still has threads holding its descriptors, and its neighbours
+        /// (`nice` and `itrealvalue`) are usually 0, so an off-by-one read
+        /// would make every exiting process look finished.
+        #[farhelm_testtrace::test]
+        fn parse_num_threads_reads_field_twenty_after_a_tricky_comm() {
+            let line: &[u8] =
+                b"123 (1 (weird) name)) Z 456 1 1 0 -1 0 0 0 0 0 0 0 0 0 20 0 7 0 789";
+            assert_eq!(parse_num_threads(line), Ok(7));
+            assert!(parse_num_threads(b"123 (short) Z 456").is_err());
         }
 
         /// `comm` is whatever bytes the process named itself with — it can be
@@ -1460,6 +1552,15 @@ mod imp {
             stats.insert(pid as u32, (ppid, starttime_key(&row.kp_proc.p_starttime)));
         }
         Ok((stats, Vec::new()))
+    }
+
+    /// See [`super::finished_exiting`]: on macOS a zombie has already
+    /// closed its descriptors, so the process row alone answers.
+    pub(super) fn finished_exiting(pid: u32, start: u64) -> Result<bool, String> {
+        Ok(!matches!(
+            read_process(pid)?,
+            Some((_, found, ProcessState::Running)) if found == start
+        ))
     }
 
     /// See [`super::read_process`]. One `KERN_PROC_PID` sysctl.
@@ -1992,6 +2093,60 @@ mod tests {
                 .expect("a table containing the caller passes");
         assert_eq!(passed, table);
         assert_eq!(soft, vec!["pid 99: unreadable".to_string()]);
+    }
+
+    /// `finished_exiting` tells a running process from one whose every
+    /// thread has finished, on Linux and on macOS.
+    ///
+    /// Why: the desktop app waits on it before it starts a supervisor that
+    /// needs the state directory a dying one held (`managed_supervisor`),
+    /// and the two platforms answer it differently: a thread count on Linux,
+    /// the zombie state on macOS, which rests on XNU closing a process's
+    /// descriptors before it marks it a zombie. Pinned: this running test
+    /// process is not finished; this process's pid with another start
+    /// identity is, since that names a process that is no longer there; and
+    /// a child that has exited but was not reaped yet is finished (so the
+    /// wait never depends on whoever reaps it).
+    #[farhelm_testtrace::test]
+    fn finished_exiting_tells_a_running_process_from_an_exited_one() {
+        let me = std::process::id();
+        let (_, my_start, _) = read_process(me)
+            .expect("reading this process must not error")
+            .expect("this process exists");
+        assert_eq!(
+            finished_exiting(me, my_start),
+            Ok(false),
+            "a running process (this one) has not finished exiting"
+        );
+        assert_eq!(
+            finished_exiting(me, my_start.wrapping_add(1)),
+            Ok(true),
+            "another start identity is a process that is no longer there"
+        );
+
+        let mut child = std::process::Command::new("/usr/bin/true")
+            .spawn()
+            .expect("fixture: spawning /usr/bin/true");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let child_start = loop {
+            match read_process(child.id()).expect("reading the child must not error") {
+                Some((_, start, ProcessState::Zombie)) => break start,
+                Some(_) => {}
+                None => panic!("fixture: the unreaped child vanished"),
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "fixture: the child never exited"
+            );
+            // sleep-ok: polling interval for the child's exit.
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        assert_eq!(
+            finished_exiting(child.id(), child_start),
+            Ok(true),
+            "an exited child that was not reaped yet has finished exiting"
+        );
+        child.wait().expect("reaping the child");
     }
 
     /// This process must be able to find ITSELF in the table, with its own
