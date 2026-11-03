@@ -1698,9 +1698,11 @@ every update: the protocol only grows, and every client release must keep workin
 "Change policy"). It ships inside the `farhelm` binary as `farhelm internal terminal-host`, which takes no version lock
 (a host lives for weeks and must keep neither pruning nor uninstall waiting) and runs before anything starts a thread,
 since the host forks. A create starts its agent in a host, and a new tab opens in one, only under the supervisor's
-internal switch ("Creating agents in hosts" and "Tabs in hosts" below), which no shipped supervisor turns on yet. Each
-session row records its agent terminal's kind (the supervisor schema 32 column `terminal_kind`), which is `tmux` unless
-a create under that switch wrote `host`.
+switch ("Creating agents in hosts" and "Tabs in hosts" below), which is off by default and which no shipped launch turns
+on yet. Each session row records its agent terminal's kind (the supervisor schema 32 column `terminal_kind`), which is
+`tmux` unless a create under that switch wrote `host`. Schema 33 changes nothing stored: it came with the flag that
+turns the switch on, so that every build at 32, which stores the kind without handling a host row everywhere, refuses a
+database such a supervisor has opened.
 
 The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
 
@@ -1945,23 +1947,35 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   wait compares the "held" mark with the child's pid. An attach is refused for a client that cannot show grids,
   permanently, with `InvalidRequest`; one that can gets a grid stream (below). A host agent's session has no tmux
   session of its own; tmux tabs of such a session are looked for in the tmux session its row names, which is always
-  `fh-` and its id. Only a create or a tab open under the internal switch (below) makes a host terminal, which a
-  restarted supervisor finds again ("Across supervisor restarts" below); a Restart replaces a host agent's host with a
-  new one ("Restarting a host agent" below), and leaves the session's tab hosts as they are.
-- **Creating agents in hosts** (`service/core/host_launch.rs`) is behind an internal switch,
-  `SupervisorSeams::new_terminals` (`Tmux` by default, or `Host`), which only the in-process test harnesses set:
-  `farhelm supervisor run` cannot turn it on, and no test sets it through its own environment. Only a new create and a
-  new tab ("Tabs in hosts" below) consult it: a relaunch keeps its row's kind, so Restart of a tmux session stays in
-  tmux under either setting until Restart can move a session into a host, and Restart of a host agent starts a new host
-  under either setting. A create decides the kind once and commits it with the launching row, before anything starts, so
-  a crash between the start and its confirmation leaves a row that says where to look; a retried create launches in the
-  kind its row records, whatever the switch says by then, since the evidence that allowed the retry was gathered for
-  that kind. A host launch shares everything with a pane's up to the command (the spec, the hooks, the login shell, and
-  the shim's command line with its `systemd-run --user --scope` wrapper exactly where a pane has it), and the host's
-  child runs that command: the agent keeps its launch scope, and the host gets no scope of its own, living in the
-  supervisor's control group as the tmux server does. The child's environment is what tmux 3.7c gives a pane's command
-  when the supervisor creates a session: the supervisor's own environment, then the launch environment, then
-  `TERM=xterm-256color`, `TERM_PROGRAM=tmux`, `TERM_PROGRAM_VERSION` (the private server's version) and
+  `fh-` and its id. Only a create or a tab open under the switch (below) makes a host terminal, which a restarted
+  supervisor finds again ("Across supervisor restarts" below); a Restart replaces a host agent's host with a new one
+  ("Restarting a host agent" below), and leaves the session's tab hosts as they are.
+- **Turning terminal hosts on.** The switch is `SupervisorSeams::new_terminals` (`Tmux` by default, or `Host`), the one
+  value a running supervisor reads it from (`Supervisor::new_terminals` for code outside the constructor). A real
+  supervisor process takes it from `farhelm supervisor run --new-terminals <tmux|host>`, a hidden flag that defaults to
+  `tmux`; the in-process test harnesses set the field directly. It is a harness seam, built like `--boot-id-file`: never
+  read from the environment (tests never change their own process's environment, and a systemd unit or an agent's shell
+  could inherit a variable by accident) and never a user setting, since which kind new terminals are is the release's
+  decision. No shipped launch passes the flag (`farhelm helm setup`'s units, the desktop app and a hand-started
+  supervisor all get `tmux`); the process-level tests (`crates/farhelm/tests/e2e/host_processes.rs`) and the browser
+  suite's host-terminal specs (`e2e/host-terminals/`, whose config starts `e2e/start-stack.sh` with
+  `FARHELM_E2E_NEW_TERMINALS=host`) pass `host`. When terminal hosts become the default, only the flag's default
+  changes, and the harnesses that keep testing tmux pass `--new-terminals tmux`. The value is fixed for the supervisor's
+  lifetime: it decides only what later creates and tab opens start in and never moves a running terminal, and a
+  supervisor restarted with the other value still finds and keeps every terminal it had, of either kind. The flag came
+  with schema 33 (above).
+- **Creating agents in hosts** (`service/core/host_launch.rs`) is behind that switch, off by default. Only a new create
+  and a new tab ("Tabs in hosts" below) consult it: a relaunch keeps its row's kind, so Restart of a tmux session stays
+  in tmux under either setting until Restart can move a session into a host, and Restart of a host agent starts a new
+  host under either setting. A create decides the kind once and commits it with the launching row, before anything
+  starts, so a crash between the start and its confirmation leaves a row that says where to look; a retried create
+  launches in the kind its row records, whatever the switch says by then, since the evidence that allowed the retry was
+  gathered for that kind. A host launch shares everything with a pane's up to the command (the spec, the hooks, the
+  login shell, and the shim's command line with its `systemd-run --user --scope` wrapper exactly where a pane has it),
+  and the host's child runs that command: the agent keeps its launch scope, and the host gets no scope of its own,
+  living in the supervisor's control group as the tmux server does. The child's environment is what tmux 3.7c gives a
+  pane's command when the supervisor creates a session: the supervisor's own environment, then the launch environment,
+  then `TERM=xterm-256color`, `TERM_PROGRAM=tmux`, `TERM_PROGRAM_VERSION` (the private server's version) and
   `COLORTERM=truecolor`, the supervisor's `PATH` (else the launch environment's, else `/usr/bin:/bin`), `SHELL` (the
   user's login shell) and `PWD`, without `TMUX_PANE` and systemd's `LISTEN_*`. `TERM_PROGRAM` names tmux although none
   is involved, so that agents read exactly what they read in a pane; tmux's passthrough envelope, which a program that
@@ -2005,48 +2019,48 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   Delete's settling of its session's launch records takes no part in it: the session's lifecycle claim keeps that
   session's own creates out. A session kept as a launching record with its host unconfirmed ended has that host ended by
   its Delete, which finds it by the launch record.
-- **Tabs in hosts** (`service/core/host_tabs.rs`): under the same internal switch every new tab is a terminal host of
-  its own, whatever its session's agent runs in, so a tmux agent's session holds its old tmux tabs and new host tabs
-  side by side (a mixed session), and a host agent's only host tabs; a tab never changes kind. The tab-open gate asks
-  the agent's terminal by its kind: a tmux agent's tmux session must exist, as before, and a host agent's host must
-  still run (with its program or its final screen); one that has ended is the restart gap, and one that cannot be read
-  refuses. A host agent's session has a tmux session only while it has old tmux tabs, and losing the last of them (tmux
-  ends a session with its last window) touches neither its agent nor its host tabs. The tab host's child is today's tab
-  chain (the forwarder, then `internal tab-shell`, in the tab's own scope when there is a user manager), with the
-  environment a pane's command gets plus the tab's markers and credential, which reach only the child; it starts at the
-  size of the agent's terminal (its tmux window, or its host's emulator; 80x24 when neither can be read). Its tag names
-  the session, the tab, whether it runs in its own scope, and its creation time, which is never at or below the newest
-  of the session's tabs, so a clock stepped backwards cannot reorder them. Like an agent's start, a tab host's writes a
-  launch record before its first stage is given the spec (`<state>/launch/<id>.tab-<tab id>.host`, the same format),
-  under the same `host_scan` fence until the tab is published; the record is removed only once its host is confirmed
-  ended. It is not a registry of tabs (a tab's kind is still known from where it was found): it is how Delete finds a
-  tab host no runtime holds, and how a restarted supervisor knows which socket to ask, cross-checked against the host's
-  tag. The session's tab runtimes live in its session cells, which a Restart shares, so tabs keep running across Restart
-  and Stop as tmux tabs do. The open waits up to 250 ms for the shell to die, from the runtime's view of the child
-  rather than a poll of tmux, and a shell dead by then refuses the open with the emulator's screen as its last words
-  once the host's exit record has been processed (two seconds at most); the `host_scan` fence is let go as soon as the
-  shell is seen not alive, so that wait holds up no other host's spawn or socket removal. Any failure after the host
-  started ends the host (its `Shutdown`, else the verified signal), sweeps the tab's scope and marker (rooted at the
-  child only when a runtime pinned it, so a failure before the runtime adopted the host sweeps with no root, never one
-  read from an unverified pid) and removes its record, so a failed open leaves nothing; a host that cannot be confirmed
-  ended keeps its record, which its session's Delete finds it by, and whatever could not be confirmed cleaned up is in
-  the refusal. The tab strip and every tab lookup merge the two kinds: tmux tabs first, in window order, then host tabs
-  by their tags' creation times; a host tab whose shell exited, or whose host ended under it, is hidden at once, as a
-  dead window is. Closing a host tab: the session's cell holds only hosts whose tag names one of its tabs (the open
-  wrote it, a reload checked it), and the agent's own runtime is refused; the reap's "only if dead" is the runtime's
-  processed exit record, checked again under the session's lifecycle claim; the scope is the tag's; the sweep roots at
-  the child only while it runs; then the attached viewer is told the tab closed (before the host ends, since a grid
-  stream would otherwise report its terminal ended first), the host is ended as above (for a runtime that judged its
-  host gone from its socket alone, the process it adopted is confirmed gone first, by the verified signal), a
-  marker-only sweep catches what outlived the hangup, and the record goes once the end is confirmed. A close that cannot
-  confirm the end keeps the tab and its record and marks it, and since its stopped runtime announces nothing, the reap
-  closes it again until one does: a second after the failure, then doubling to at most a minute between tries, so an end
-  that keeps failing holds the session's lifecycle claim and a reap slot only that often. A host tab that cannot be read
-  refuses to close; its session's Delete ends it. The automatic reap is driven by the host's exit event: the runtime
-  announces its processed exit record on the supervisor's liveness notifier, which wakes the ticker's reap pass at once,
-  with no poll; the tick runs it too, for a close a busy session put off. A takeover displaces the previous client's
-  attachments to every terminal of the session, tmux and host alike, and a grid attach to a host tab goes through the
-  grid stream as an agent's does.
+- **Tabs in hosts** (`service/core/host_tabs.rs`): under the same switch every new tab is a terminal host of its own,
+  whatever its session's agent runs in, so a tmux agent's session holds its old tmux tabs and new host tabs side by side
+  (a mixed session), and a host agent's only host tabs; a tab never changes kind. The tab-open gate asks the agent's
+  terminal by its kind: a tmux agent's tmux session must exist, as before, and a host agent's host must still run (with
+  its program or its final screen); one that has ended is the restart gap, and one that cannot be read refuses. A host
+  agent's session has a tmux session only while it has old tmux tabs, and losing the last of them (tmux ends a session
+  with its last window) touches neither its agent nor its host tabs. The tab host's child is today's tab chain (the
+  forwarder, then `internal tab-shell`, in the tab's own scope when there is a user manager), with the environment a
+  pane's command gets plus the tab's markers and credential, which reach only the child; it starts at the size of the
+  agent's terminal (its tmux window, or its host's emulator; 80x24 when neither can be read). Its tag names the session,
+  the tab, whether it runs in its own scope, and its creation time, which is never at or below the newest of the
+  session's tabs, so a clock stepped backwards cannot reorder them. Like an agent's start, a tab host's writes a launch
+  record before its first stage is given the spec (`<state>/launch/<id>.tab-<tab id>.host`, the same format), under the
+  same `host_scan` fence until the tab is published; the record is removed only once its host is confirmed ended. It is
+  not a registry of tabs (a tab's kind is still known from where it was found): it is how Delete finds a tab host no
+  runtime holds, and how a restarted supervisor knows which socket to ask, cross-checked against the host's tag. The
+  session's tab runtimes live in its session cells, which a Restart shares, so tabs keep running across Restart and Stop
+  as tmux tabs do. The open waits up to 250 ms for the shell to die, from the runtime's view of the child rather than a
+  poll of tmux, and a shell dead by then refuses the open with the emulator's screen as its last words once the host's
+  exit record has been processed (two seconds at most); the `host_scan` fence is let go as soon as the shell is seen not
+  alive, so that wait holds up no other host's spawn or socket removal. Any failure after the host started ends the host
+  (its `Shutdown`, else the verified signal), sweeps the tab's scope and marker (rooted at the child only when a runtime
+  pinned it, so a failure before the runtime adopted the host sweeps with no root, never one read from an unverified
+  pid) and removes its record, so a failed open leaves nothing; a host that cannot be confirmed ended keeps its record,
+  which its session's Delete finds it by, and whatever could not be confirmed cleaned up is in the refusal. The tab
+  strip and every tab lookup merge the two kinds: tmux tabs first, in window order, then host tabs by their tags'
+  creation times; a host tab whose shell exited, or whose host ended under it, is hidden at once, as a dead window is.
+  Closing a host tab: the session's cell holds only hosts whose tag names one of its tabs (the open wrote it, a reload
+  checked it), and the agent's own runtime is refused; the reap's "only if dead" is the runtime's processed exit record,
+  checked again under the session's lifecycle claim; the scope is the tag's; the sweep roots at the child only while it
+  runs; then the attached viewer is told the tab closed (before the host ends, since a grid stream would otherwise
+  report its terminal ended first), the host is ended as above (for a runtime that judged its host gone from its socket
+  alone, the process it adopted is confirmed gone first, by the verified signal), a marker-only sweep catches what
+  outlived the hangup, and the record goes once the end is confirmed. A close that cannot confirm the end keeps the tab
+  and its record and marks it, and since its stopped runtime announces nothing, the reap closes it again until one does:
+  a second after the failure, then doubling to at most a minute between tries, so an end that keeps failing holds the
+  session's lifecycle claim and a reap slot only that often. A host tab that cannot be read refuses to close; its
+  session's Delete ends it. The automatic reap is driven by the host's exit event: the runtime announces its processed
+  exit record on the supervisor's liveness notifier, which wakes the ticker's reap pass at once, with no poll; the tick
+  runs it too, for a close a busy session put off. A takeover displaces the previous client's attachments to every
+  terminal of the session, tmux and host alike, and a grid attach to a host tab goes through the grid stream as an
+  agent's does.
 - **Restarting a host agent** (`service/core/host_restart.rs`): a host runs one child for its whole life, so a Restart
   of an agent in a host (or of a host row whose session holds no terminal) never reuses the host. Under the session's
   lifecycle claim, once the consent a working agent needs has been checked (so a refusal touches nothing) and before
@@ -5216,10 +5230,12 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   the pane. Existing rows become `tmux`. Older supervisors refuse this upgraded database on downgrade, which is why the
   kind got a schema bump instead of riding on an existing column: a supervisor from before terminal hosts would
   otherwise take a host's socket name for a tmux pane, find no such pane, and record a live session as exited (SPEC.md,
-  "Upgrade compatibility and client scale"). Schema 32 alone does not fence every such build: builds at 32 that cannot
-  create host terminals in production decode the kind but do not act on it, so the change that first lets a supervisor
-  create host terminals in production must bump the schema again, to 33, so that every one of them refuses a database
-  that may hold host rows.
+  "Upgrade compatibility and client scale"). Schema 32 alone did not fence every such build: builds at 32 decode the
+  kind but do not act on it everywhere, so the change that let a supervisor be started with host terminals on bumped the
+  schema again, to 33, so that every one of them refuses a database that may hold host rows.
+- Schema 33 changes no table or row. It came with `farhelm supervisor run --new-terminals`, so that every build at 32
+  (which stores the kind but does not handle a host row everywhere) refuses a database that a supervisor able to create
+  host terminals has opened.
 - Session notifications (SPEC.md, Status) are recorded by the supervisor, which holds the specifics their wording
   depends on (which agent, which reporter, why a hook was not added), in a `session_notifications` table of its own
   database: a per-session sequence number that only grows, a kind naming the problem, the launch generation it belongs

@@ -4153,7 +4153,11 @@ That refusal is the point: such a supervisor would treat a session whose agent's
 ended, record it as exited, and leave the process keeping that terminal running with nothing to end it. An older helm
 from v0.31.0 on refuses to Update a host already on this change, naming the host's newer schema, rather than install a
 supervisor that would refuse it. Going back otherwise needs a copy of the state directory taken before the upgrade,
-restored together with the older version, losing whatever changed after the copy.
+restored together with the older version, losing whatever changed after the copy. A second supervisor database upgrade,
+which changes nothing stored, comes with the first build that can be started with the outside-tmux terminal turned on.
+Builds between the two record each session's terminal kind but do not yet handle an outside-tmux terminal everywhere, so
+they would misread such a session the same way; the second upgrade makes them refuse the database in the same manner,
+with the same consequences.
 
 Until upgrade epochs exist (TODO.md), no change may break the upgrade path of the desktop app, the helm, or the
 supervisor. An installation of any stable release from v0.23.0 on, the first one the in-app updater and get.farhelm.io

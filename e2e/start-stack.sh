@@ -112,6 +112,27 @@ if [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
   exit 1
 fi
 
+# Which kind of terminal the LOCAL supervisor creates new terminals in, passed
+# on as `farhelm supervisor run --new-terminals` (the supervisor's hidden
+# harness seam; SPEC_impl.md, "Terminal host"). Unset passes nothing, so the
+# supervisor keeps its own default: the main browser suite never sets it, and
+# every spec there runs against exactly the supervisor it always has. The
+# host-terminal config (host-terminals/playwright.config.ts) sets `host`, which
+# makes the startup session below, and every session its specs create there,
+# a terminal in a terminal host. Only the local supervisor takes it: nothing
+# creates sessions on the "remote" one, and terminal-multihost.spec.ts
+# restarts that one with arguments of its own. A value the flag would refuse
+# is refused here, before anything starts.
+new_terminals_args=()
+case "${FARHELM_E2E_NEW_TERMINALS:-}" in
+  '') ;;
+  tmux | host) new_terminals_args=(--new-terminals "$FARHELM_E2E_NEW_TERMINALS") ;;
+  *)
+    echo "FARHELM_E2E_NEW_TERMINALS must be tmux or host, got '$FARHELM_E2E_NEW_TERMINALS'" >&2
+    exit 1
+    ;;
+esac
+
 # Reap runs that died without their trap (a SIGKILL, a crashed shell).
 # The sweep lives in the farhelm-teststate crate so there is exactly one
 # implementation of the guards (prefix family only, symlinks excluded,
@@ -472,7 +493,7 @@ stack_mark "watcher $watcher_pid watching spawner $spawner_pid; state $state"
 
 HOME="$structured_home" SHELL="$bash_shell" GIT_CONFIG_GLOBAL="$checkout_git_config" \
   GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_COUNT=0 GIT_ALLOW_PROTOCOL=file GIT_TERMINAL_PROMPT=0 \
-  "$bin" supervisor run --state-dir "$state" >"$state/supervisor.log" 2>&1 9>&- &
+  "$bin" supervisor run --state-dir "$state" "${new_terminals_args[@]}" >"$state/supervisor.log" 2>&1 9>&- &
 sup_pid=$!
 
 # A SECOND supervisor, on its own state directory inside this run's

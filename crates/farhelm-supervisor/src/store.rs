@@ -88,7 +88,7 @@ use subtle::ConstantTimeEq;
 /// database has ever had, and the template every later one follows.
 /// Public because the supervisor's hello reports it and the helm's Update
 /// refuses a host whose reported schema is above this build's.
-pub const SCHEMA_VERSION: i64 = 32;
+pub const SCHEMA_VERSION: i64 = 33;
 
 /// Random payload size behind one URL-safe session bearer.
 const SESSION_TOKEN_BYTES: usize = 32;
@@ -1094,11 +1094,13 @@ pub type BootTxFault = Arc<dyn Fn() -> anyhow::Result<()> + Send + Sync>;
 /// refuse the database (it refuses any newer schema) rather than take a
 /// host's socket name for a tmux pane, find no such pane, and record a live
 /// session as exited. That bump alone is not the whole fence: builds at
-/// schema 32 that cannot create host terminals in production decode the
-/// kind but do not act on it, and would misread a host row the same way.
-/// So the change that first lets a supervisor create host terminals in
-/// production must bump the schema again, to 33, making every one of those
-/// builds refuse a database that may hold host rows.
+/// schema 32 decode the kind but do not act on it everywhere (they were
+/// built while the host arms were still being added, and none of them can
+/// be started with host terminals on), and would misread a host row the
+/// same way. So the change that lets `farhelm supervisor run` turn host
+/// terminals on (`--new-terminals host`) bumped the schema again, to 33,
+/// with nothing else in the step: every build at 32 refuses a database a
+/// supervisor that may have created host rows has opened.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TerminalKind {
     /// A pane in the supervisor's private tmux server. Every row written
@@ -1566,9 +1568,11 @@ pub(crate) struct StoredSessionNotification {
 /// - 32: `sessions.terminal_kind`, whether the row's agent terminal is a tmux
 ///   pane or a terminal host ([`TerminalKind`]). Existing rows become `tmux`.
 ///   An older supervisor refuses this database instead of misreading host
-///   rows; the change that first creates host terminals in production must
-///   bump to 33, because builds at 32 before it do not act on the kind
-///   (see [`TerminalKind`]).
+///   rows.
+/// - 33: no change to any table. A marker that the database belongs to a
+///   build whose `farhelm supervisor run` can create host terminals: builds
+///   at 32 hold the column but do not handle host rows everywhere, and this
+///   bump makes them refuse such a database (see [`TerminalKind`]).
 ///
 /// `may_migrate` is the caller's assertion that it holds this state
 /// directory's exclusivity (see `service::StateDirOwnership`). Upgrading a
@@ -1688,7 +1692,7 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
              CREATE TRIGGER session_notifications_follow_sessions
                  AFTER DELETE ON sessions
                  BEGIN DELETE FROM session_notifications WHERE session_id = OLD.id; END;
-             PRAGMA user_version = 32;
+             PRAGMA user_version = 33;
              COMMIT;",
         )
         .context("creating schema")?;
@@ -2379,6 +2383,22 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
         )
         .context("migrating schema from version 31 to 32")?;
         version = 32;
+    }
+    if version == 32 {
+        // Nothing to change: every table is as 32 left it. The bump itself
+        // is the step, because what it fences out is a build, not a shape.
+        // Builds at 32 store the terminal kind but cannot all act on a host
+        // row, and from this version on a supervisor can be started with
+        // host terminals on (`--new-terminals host`), so a database this
+        // build has opened may hold host rows. Those builds refuse anything
+        // above 32, which is exactly the downgrade this must stop.
+        conn.execute_batch(
+            "BEGIN;
+             PRAGMA user_version = 33;
+             COMMIT;",
+        )
+        .context("migrating schema from version 32 to 33")?;
+        version = 33;
     }
     if version == SCHEMA_VERSION {
         return Ok(());
@@ -7694,9 +7714,10 @@ mod tests {
     /// live agent in the wrong place.
     ///
     /// Specified: a schema-31 database holding a confirmed running session
-    /// and a not-yet-confirmed launching one migrates to version 32 with both
-    /// rows kept field for field and marked [`TerminalKind::Tmux`], and a
-    /// second open of the migrated database reads the same rows.
+    /// and a not-yet-confirmed launching one migrates through version 32 to
+    /// [`SCHEMA_VERSION`] with both rows kept field for field and marked
+    /// [`TerminalKind::Tmux`], and a second open of the migrated database
+    /// reads the same rows.
     #[farhelm_testtrace::test]
     async fn terminal_kind_migration_marks_existing_sessions_tmux() {
         let (dir, store) = fresh_store().await;
@@ -7748,7 +7769,76 @@ mod tests {
             let version: i64 = conn
                 .query_row("PRAGMA user_version", [], |r| r.get(0))
                 .unwrap();
-            assert_eq!(version, 32);
+            assert_eq!(version, SCHEMA_VERSION);
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // Schema 33: the marker that host terminals can be turned on
+    // -----------------------------------------------------------------
+
+    /// Schema 33 changes no table: it only makes every build at 32 refuse a
+    /// database that a supervisor able to create host terminals has opened.
+    /// A marker step that touched rows or tables, or skipped the version,
+    /// would be a migration nobody reviewed as one, or would leave a database
+    /// that a build at 32 still opens and misreads.
+    ///
+    /// Specified: a schema-32 database holding a running tmux session and a
+    /// running host session (its socket name in `pane`) opens at version 33
+    /// with both rows kept field for field and every table's and index's
+    /// definition unchanged, and a second open reads the same; a process
+    /// that does not hold the state directory's claim refuses to take a
+    /// schema-32 database to 33, as for any other step.
+    #[farhelm_testtrace::test]
+    async fn the_schema_33_marker_changes_no_table_and_keeps_every_row() {
+        let (dir, store) = fresh_store().await;
+        let path = dir.path().join("supervisor.db");
+        insert_running(&store, "tmux-running").await;
+        let mut host = launching_row("host-running");
+        host.terminal_kind = TerminalKind::Host;
+        host.pane = "abcd2345".to_string();
+        host.outcome = LastOutcome::Running;
+        store.insert_session(host, None).await.unwrap();
+        let mut before = store.load_all().await.unwrap();
+        before.sort_by(|a, b| a.id.cmp(&b.id));
+        drop(store);
+        let definitions = |conn: &Connection| -> Vec<(String, String, Option<String>)> {
+            conn.prepare("SELECT type, name, sql FROM sqlite_schema ORDER BY type, name")
+                .unwrap()
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap()
+        };
+        let definitions_at_32 = {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch("PRAGMA user_version = 32;").unwrap();
+            definitions(&conn)
+        };
+
+        let err = SessionStore::open(&path, false)
+            .await
+            .expect_err("a process without the claim must not migrate");
+        assert!(
+            format!("{err:#}").contains("schema version 32"),
+            "the refusal names the version it found: {err:#}"
+        );
+
+        for _ in 0..2 {
+            let reopened = SessionStore::open(&path, true).await.unwrap();
+            let mut after = reopened.load_all().await.unwrap();
+            after.sort_by(|a, b| a.id.cmp(&b.id));
+            assert_eq!(after, before, "the marker changes no session's fields");
+            let conn = reopened.conn.lock();
+            assert_eq!(
+                definitions(&conn),
+                definitions_at_32,
+                "the marker changes no table, index or trigger"
+            );
+            let version: i64 = conn
+                .query_row("PRAGMA user_version", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(version, 33);
         }
     }
 
@@ -7799,9 +7889,10 @@ mod tests {
 
     /// A host row must come back as a host row, with its socket name in
     /// `pane`, through every read path and across a restart that is aborted.
-    /// Only a create under the internal switch writes `host`, and its own
-    /// tests read the row back through the service; this round trip pins
-    /// the store's half of that on its own.
+    /// Only a create under the switch (the hidden harness flag
+    /// `--new-terminals host`, which no shipped launch passes) writes
+    /// `host`, and its own tests read the row back through the service; this
+    /// round trip pins the store's half of that on its own.
     ///
     /// Specified: a [`TerminalKind::Host`] row inserted with a socket name
     /// for `pane` reads back unchanged through `session` and `load_all`; a
@@ -10031,9 +10122,10 @@ mod tests {
     /// off-by-one there would let exactly the adjacent version through.
     ///
     /// Earlier builds carry the same fall-through, which is what the
-    /// terminal-host downgrade fence (schema 32, [`TerminalKind`]) relies
-    /// on: a supervisor from before terminal hosts refuses the database
-    /// rather than reading host rows as tmux rows.
+    /// terminal-host downgrade fences (schemas 32 and 33, [`TerminalKind`])
+    /// rely on: a supervisor from before terminal hosts, or from before they
+    /// could be turned on, refuses the database rather than reading host
+    /// rows as tmux rows.
     #[farhelm_testtrace::test]
     async fn open_refuses_an_unrecognized_schema_version() {
         for version in [SCHEMA_VERSION + 1, 99] {

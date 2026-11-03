@@ -140,6 +140,12 @@ export default defineConfig({
       [STACK_PORT_ENV]: String(stack.port),
       [STACK_INFO_ENV]: stack.stackInfoPath,
       [AUTH_STATE_ENV]: stack.authStatePath,
+      // Pinned empty ("pass nothing"): Playwright merges its own environment
+      // into this, and a FARHELM_E2E_NEW_TERMINALS exported for the
+      // host-terminal config (host-terminals/playwright.config.ts) must not
+      // turn terminal hosts on for every spec of this suite, which runs
+      // against the supervisor's default.
+      FARHELM_E2E_NEW_TERMINALS: "",
     },
     // The API correctly answers 401 before global setup has exchanged the
     // token. The public static bundle is therefore the readiness probe.

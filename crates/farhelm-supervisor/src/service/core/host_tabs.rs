@@ -2,11 +2,11 @@
 //! the tab strip and lookup, closing one, the automatic reap of one whose
 //! shell exited, and finding them again after a supervisor restart.
 //!
-//! Under the supervisor's internal switch (`SupervisorSeams::new_terminals`
-//! set to `Host`) every new tab is a host of its own, whatever its session's
-//! agent runs in: a tmux agent's session then holds its old tmux tabs and new
-//! host tabs side by side (a mixed session), and a host agent's session holds
-//! only host tabs. A tab never changes kind while it lives.
+//! Under the supervisor's switch (`SupervisorSeams::new_terminals` set to
+//! `Host`, by `--new-terminals host` or a test harness) every new tab is a
+//! host of its own, whatever its session's agent runs in: a tmux agent's
+//! session then holds its old tmux tabs and new host tabs side by side (a
+//! mixed session), and a host agent's session holds only host tabs. A tab never changes kind while it lives.
 //!
 //! ## What a host tab is
 //!

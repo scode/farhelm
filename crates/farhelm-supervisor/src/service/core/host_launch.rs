@@ -1,5 +1,6 @@
-//! Starting a create's agent in a terminal host, behind the internal switch
-//! [`super::SupervisorSeams::new_terminals`].
+//! Starting a create's agent in a terminal host, behind the switch
+//! [`super::SupervisorSeams::new_terminals`] (off by default; `farhelm
+//! supervisor run --new-terminals host` or a test harness turns it on).
 //!
 //! A host launch is the tmux launch with a different terminal around the
 //! same command. Everything up to the command is shared
