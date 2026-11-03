@@ -175,12 +175,19 @@ function state(change: Record<string, unknown>): string {
   return JSON.stringify({ ...STATE, ...change });
 }
 
-/**
- * Whether this browser is a Mac by xterm.js's exact platform list, the
- * `mac` flag every key message carries (the format's `key` bullet).
- */
+/** Whether this browser is a Mac by xterm.js's exact platform list. */
 async function viewerIsMac(page: Page): Promise<boolean> {
   return page.evaluate(() => ["Macintosh", "MacIntel", "MacPPC", "Mac68K"].includes(navigator.platform));
+}
+
+/**
+ * What this browser's key messages carry of the `mac` flag (the format's
+ * `key` bullet): `mac: true` on a Mac, and nothing elsewhere, since an
+ * absent `mac` means false and that is how `farhelm-proto` encodes it (its
+ * golden fixture `key.json`).
+ */
+async function macField(page: Page): Promise<{ mac?: true }> {
+  return (await viewerIsMac(page)) ? { mac: true } : {};
 }
 
 test("a recorded attach draws its text, wide boxes, styles and cursor in their cells", async ({ page }) => {
@@ -239,12 +246,25 @@ test("non-ASCII cells keep their columns: only covered box drawing, blocks and b
   // shape narrower together), and a cell whose text is only a bidi
   // control. Every later column must land exactly where it belongs; a
   // renderer that let everything flow fails both halves.
+  //
+  // The measurement alone cannot be what keeps characters outside the
+  // flowing families boxed: a character can measure exactly one cell wide
+  // alone and still shape against its neighbors in a span, which is why
+  // flow is limited to box drawing, blocks and braille at all. So an
+  // accented Latin letter, mapped to the bundled face at its own size so
+  // that it measures exactly the cell width, must still be a box: that
+  // assertion fails if the range limit in `flows` is removed, where the
+  // Arabic cells need not: nothing makes their fallback glyph measure
+  // exactly a cell wide alone, so the measurement may box them by itself.
   await openGrid(page);
   await page.addStyleTag({
-    content: '@font-face { font-family: "JetBrains Mono"; src: url("/assets/JetBrainsMonoNerdFont-Regular.woff2") format("woff2"); unicode-range: U+2591; size-adjust: 150%; }',
+    content: [
+      '@font-face { font-family: "JetBrains Mono"; src: url("/assets/JetBrainsMonoNerdFont-Regular.woff2") format("woff2"); unicode-range: U+2591; size-adjust: 150%; }',
+      '@font-face { font-family: "JetBrains Mono"; src: url("/assets/JetBrainsMonoNerdFont-Regular.woff2") format("woff2"); unicode-range: U+00E9; }',
+    ].join("\n"),
   });
   const premise = await page.evaluate(async () => {
-    await document.fonts.load('14px "JetBrains Mono"', "\u2591");
+    await document.fonts.load('14px "JetBrains Mono"', "\u2591\u00e9");
     const probe = document.createElement("span");
     probe.style.cssText = 'font: 14px "JetBrains Mono"; white-space: pre; position: absolute;';
     document.body.appendChild(probe);
@@ -252,11 +272,16 @@ test("non-ASCII cells keep their columns: only covered box drawing, blocks and b
     const w = probe.getBoundingClientRect().width;
     probe.textContent = "\u2591";
     const shade = probe.getBoundingClientRect().width;
+    probe.textContent = "\u00e9";
+    const acute = probe.getBoundingClientRect().width;
     probe.remove();
-    return { w, shade };
+    return { w, shade, acute };
   });
-  // The fixture premise: the mapped block element is wider than a cell.
+  // The fixture premises: the mapped block element is wider than a cell,
+  // and the accented letter is exactly a cell wide (within the tolerance
+  // `flows` itself allows), so only the range limit can box it.
   expect(premise.shade).toBeGreaterThan(premise.w * 1.2);
+  expect(Math.abs(premise.acute - premise.w)).toBeLessThan(0.01);
   const plain = [0, -1, -1];
   await feed(page, [
     JSON.stringify({ t: "hello", cols: 40, rows: 2, history_cap: 0 }),
@@ -274,6 +299,8 @@ test("non-ASCII cells keep their columns: only covered box drawing, blocks and b
             [6, 2, "cd", plain],
             [8, 1, "\u200e", plain],
             [9, 2, "ef", plain],
+            [11, 1, "\u00e9", plain],
+            [12, 2, "gh", plain],
           ],
         }],
         [1, { w: false, r: [[0, 1, "\u06fb", plain], [1, 1, "\u06fb", plain], [2, 1, "X", plain]] }],
@@ -321,10 +348,16 @@ test("non-ASCII cells keep their columns: only covered box drawing, blocks and b
   const empty = first.spans.find((span) => span.text === "")!;
   expect(empty.box).toBe(true);
   expect(empty.left).toBeCloseTo(8 * width, 0);
+  // The accented letter measures exactly a cell wide and is still a box of
+  // its own: outside the flowing families, the measurement never decides.
+  const acute = first.spans.find((span) => span.text === "\u00e9");
+  expect(acute, "the accented letter is a span of its own, not flowing with its neighbors").toBeDefined();
+  expect(acute!.box).toBe(true);
+  expect(acute!.left).toBeCloseTo(11 * width, 0);
   // Arabic cells are boxes.
   expect(second.spans.filter((span) => span.text === "\u06fb").every((span) => span.box)).toBe(true);
   // Every ASCII letter in its column.
-  const columns = { a: 3, b: 4, c: 6, d: 7, e: 9, f: 10 };
+  const columns = { a: 3, b: 4, c: 6, d: 7, e: 9, f: 10, g: 12, h: 13 };
   for (const [letter, column] of Object.entries(columns)) {
     expect(Math.abs(first.letters[letter] - column * width), `${letter} at column ${column}`).toBeLessThan(1);
   }
@@ -412,7 +445,7 @@ test("markup-looking, bidi-overriding and right-to-left text is drawn as literal
 });
 
 test("typing sends the same key and text messages today's terminal would", async ({ page }) => {
-  const mac = await viewerIsMac(page);
+  const mac = await macField(page);
   // Keys xterm.js encodes at keydown go as `key` messages for the
   // supervisor to encode; keys whose character comes from text input
   // (capitals, space) go as `text`. Shift+Enter is a key with the Shift bit.
@@ -426,12 +459,12 @@ test("typing sends the same key and text messages today's terminal would", async
   await page.keyboard.press("Control+c");
   await page.keyboard.press("ArrowUp");
   await expect.poll(() => sent(page)).toEqual([
-    { t: "key", key: "a", code: "KeyA", kc: 65, mods: 0, mac },
+    { t: "key", key: "a", code: "KeyA", kc: 65, mods: 0, ...mac },
     { t: "text", data: "A" },
     { t: "text", data: " " },
-    { t: "key", key: "Enter", code: "Enter", kc: 13, mods: 1, mac },
-    { t: "key", key: "c", code: "KeyC", kc: 67, mods: 4, mac },
-    { t: "key", key: "ArrowUp", code: "ArrowUp", kc: 38, mods: 0, mac },
+    { t: "key", key: "Enter", code: "Enter", kc: 13, mods: 1, ...mac },
+    { t: "key", key: "c", code: "KeyC", kc: 67, mods: 4, ...mac },
+    { t: "key", key: "ArrowUp", code: "ArrowUp", kc: 38, mods: 0, ...mac },
   ]);
 });
 
@@ -672,7 +705,7 @@ async function cellAt(page: Page, x: number, y: number, fx = 0.5): Promise<{ x: 
 }
 
 test("the wheel scrolls back through history, which stays put while output arrives, and typing returns to the bottom", async ({ page }) => {
-  const mac = await viewerIsMac(page);
+  const mac = await macField(page);
   // Scrollback is the client's own view over the history it holds. A
   // scrolled-back view is anchored to its lines, as xterm.js's viewport
   // is, so new output does not drag it along; any input sent to the
@@ -714,7 +747,7 @@ test("the wheel scrolls back through history, which stays put while output arriv
   await page.evaluate(() => (window as any).harness.grid.focus());
   await expect(page.locator(".grid-terminal-input")).toBeFocused();
   await page.keyboard.press("a");
-  await expect.poll(() => sent(page)).toEqual([{ t: "key", key: "a", code: "KeyA", kc: 65, mods: 0, mac }]);
+  await expect.poll(() => sent(page)).toEqual([{ t: "key", key: "a", code: "KeyA", kc: 65, mods: 0, ...mac }]);
   await expect.poll(() => visibleRows(page)).toEqual(["screen 1", "screen 2", "screen 3", "screen 4"]);
   expect((await viewport(page)).following).toBe(true);
 });
@@ -1123,12 +1156,12 @@ test("a quick Alt-click (Option on a Mac) moves the program's cursor with arrow 
     JSON.stringify({ t: "rows", rows: [[2, textRow("$ ls")]] }),
     JSON.stringify({ t: "frame", rev: 1, cols: 20, rows: 3, cursor: { x: 2, y: 2, visible: true, shape: "block", blink: true } }),
   ]);
-  const mac = await viewerIsMac(page);
+  const mac = await macField(page);
   const at = await cellAt(page, 7, 2);
   await page.keyboard.down("Alt");
   await page.mouse.click(at.x, at.y);
   await page.keyboard.up("Alt");
-  const arrow = { t: "key", key: "ArrowRight", code: "ArrowRight", kc: 39, mods: 0, mac };
+  const arrow = { t: "key", key: "ArrowRight", code: "ArrowRight", kc: 39, mods: 0, ...mac };
   await expect.poll(() => sent(page)).toEqual([arrow, arrow, arrow, arrow, arrow]);
 });
 

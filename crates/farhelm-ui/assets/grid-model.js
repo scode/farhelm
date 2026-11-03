@@ -231,8 +231,11 @@
       if (!Array.isArray(run) || (run.length !== 4 && run.length !== 5)) fail("bad run");
       const [col, width, text, style] = run;
       if (!isInt(col, end, maxCols - 1)) fail("run column out of order or past the row");
-      if (!isInt(width, 1, maxCols - col)) fail("run width past the row");
+      if (!Number.isInteger(width) || width < 1) fail("bad run width");
+      if (width > maxCols - col) fail("run width past the row");
       if (typeof text !== "string" || utf8Length(text) > MAX_TEXT_BYTES_PER_CELL * width) fail("bad run text");
+      // Never empty: blank cells are the columns no run covers.
+      if (text === "") fail("empty run text");
       if (PRINTABLE_ASCII.test(text)) {
         if (text.length !== width) fail("an ASCII run's width is not its length");
       } else if (width > 2) {
@@ -275,9 +278,20 @@
     return new Array(rows).fill(BLANK_ROW);
   }
 
-  function decodeCursor(raw) {
+  /**
+   * Validate a frame's cursor against the frame's own size. The format puts
+   * the cursor on the screen (`x < cols`, `y < rows`), and `farhelm-proto`
+   * refuses one past either edge (its golden fixtures
+   * `frame-cursor-past-cols` and `frame-cursor-past-rows`), so this does
+   * too rather than clamp. A real supervisor never sends one: the emulator
+   * keeps a pending wrap as a flag, not as a column past the last, and the
+   * sender clamps the cursor onto the screen besides. So a cursor off the
+   * screen means a broken peer, and the two decoders must agree on what the
+   * stream allows.
+   */
+  function decodeCursor(raw, cols, rows) {
     if (!isPlainObject(raw)) fail("bad cursor");
-    if (!isInt(raw.x, 0, MAX_DIMENSION) || !isInt(raw.y, 0, MAX_DIMENSION - 1)) fail("bad cursor position");
+    if (!isInt(raw.x, 0, cols - 1) || !isInt(raw.y, 0, rows - 1)) fail("cursor off the screen");
     if (typeof raw.visible !== "boolean" || typeof raw.blink !== "boolean") fail("bad cursor flags");
     if (!CURSOR_SHAPES.has(raw.shape)) fail("bad cursor shape");
     return { x: raw.x, y: raw.y, visible: raw.visible, shape: raw.shape, blink: raw.blink };
@@ -511,13 +525,17 @@
     }
 
     applyFrame(message) {
-      if (!Number.isSafeInteger(message.rev) || message.rev <= this.rev) fail("frame revision did not increase");
+      // The format bounds `rev` at 2^53 - 1: past `Number.MAX_SAFE_INTEGER`
+      // a revision can round onto its neighbor, so the increase check below
+      // would no longer be exact.
+      if (!Number.isSafeInteger(message.rev) || message.rev < 0) fail("bad frame revision");
+      if (message.rev <= this.rev) fail("frame revision did not increase");
       if (!isInt(message.cols, 1, MAX_DIMENSION) || !isInt(message.rows, 1, MAX_DIMENSION)) fail("bad frame size");
       const cols = message.cols;
       const rows = message.rows;
       const shift = message.shift === undefined ? 0 : message.shift;
       if (!isInt(shift, 0, rows)) fail("bad frame shift");
-      const cursor = decodeCursor(message.cursor);
+      const cursor = decodeCursor(message.cursor, cols, rows);
       // Every buffered row must fit the committing frame; checked before
       // the screen is touched.
       for (const [y, row] of this.pending) {
@@ -545,14 +563,7 @@
       }
       this.pending.clear();
       this.updateOpen = false;
-      // Clamped rather than refused: a cursor one past the last column is
-      // a pending-wrap state some emulators report, and drawing it at the
-      // edge is harmless.
-      this.cursor = {
-        ...cursor,
-        x: Math.min(cursor.x, cols - 1),
-        y: Math.min(cursor.y, rows - 1),
-      };
+      this.cursor = cursor;
       this.rev = message.rev;
       damage.cursor = true;
     }
