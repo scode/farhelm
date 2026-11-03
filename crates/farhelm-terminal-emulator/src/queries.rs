@@ -138,7 +138,9 @@
 //!   alone, unlike 1049, which saves and restores the cursor. Mixing these
 //!   with 1049 (entering with one and leaving with the other) can leave the
 //!   cursor elsewhere than tmux would, since alacritty keeps a cursor per
-//!   screen where tmux keeps one.
+//!   screen where tmux keeps one. `vendor/README.md` ("Not a patch: modes
+//!   47 and 1047 built on alacritty's screen switch") records the upstream
+//!   behavior this works around, for an upstream issue.
 //! - A full reset (RIS, `ESC c`) that clears a title reports the change
 //!   (`Notice::Title`), which alacritty does silently. tmux keeps the title
 //!   across RIS; this emulator clears it, as alacritty does.

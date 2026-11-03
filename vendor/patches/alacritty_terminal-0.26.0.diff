@@ -445,7 +445,7 @@ index 484eabe..bcc1ff0 100644
              Arc::make_mut(extra).hyperlink = hyperlink;
          }
 diff --git a/alacritty_terminal/src/term/mod.rs b/alacritty_terminal/src/term/mod.rs
-index 8eb6797..a26597d 100644
+index 8eb6797..1c61130 100644
 --- a/alacritty_terminal/src/term/mod.rs
 +++ b/alacritty_terminal/src/term/mod.rs
 @@ -1,3 +1,15 @@
@@ -556,14 +556,15 @@ index 8eb6797..a26597d 100644
          }
      }
  
-@@ -953,6 +1027,67 @@ impl<T> Term<T> {
+@@ -953,6 +1027,73 @@ impl<T> Term<T> {
          &self.colors
      }
  
 +    // Farhelm patch: snapshot support. Access to the state an embedder needs to
 +    // rebuild an equivalent `Term` from escape sequences. All are read-only
-+    // except `inactive_grid_mut`, which a restore uses to write what no escape
-+    // sequence can set; none changes behavior.
++    // except `inactive_grid_mut`, which a restore uses to write what its escape
++    // sequences cannot produce on the screen that is not showing; none changes
++    // behavior.
 +
 +    /// The grid that is not showing: the primary screen (with its scrollback)
 +    /// while the alternate screen is active, otherwise the alternate screen.
@@ -573,9 +574,14 @@ index 8eb6797..a26597d 100644
 +
 +    /// Mutable access to the inactive grid.
 +    ///
-+    /// Escape sequences cannot set the primary screen's saved cursor while the
-+    /// alternate screen is active, because entering the alternate screen
-+    /// overwrites it; a restore fixes it up through this.
++    /// Rebuilding a `Term` from escape sequences cannot produce every state of
++    /// the screen that is not showing. While the alternate screen is active,
++    /// entering it overwrote the primary screen's saved cursor, and a
++    /// restoring stream cannot paint every cell and cursor state there (a
++    /// pending wrap away from the last column, say). A restore writes such
++    /// cells, the cursor and the saved cursor through this. An embedder can
++    /// also use it to switch screens without losing the primary screen's
++    /// saved cursor, which `swap_alt` overwrites.
 +    pub fn inactive_grid_mut(&mut self) -> &mut Grid<Cell> {
 +        &mut self.inactive_grid
 +    }
@@ -624,7 +630,7 @@ index 8eb6797..a26597d 100644
      /// Insert a linebreak at the current cursor position.
      #[inline]
      fn wrapline(&mut self)
-@@ -998,7 +1133,9 @@ impl<T> Term<T> {
+@@ -998,7 +1139,9 @@ impl<T> Term<T> {
              if wide && point.column < self.last_column() {
                  self.grid[point.line][point.column + 1].flags.remove(Flags::WIDE_CHAR_SPACER);
              } else if point.column > 0 {
@@ -635,7 +641,7 @@ index 8eb6797..a26597d 100644
              }
  
              // Remove leading spacers.
-@@ -1017,6 +1154,36 @@ impl<T> Term<T> {
+@@ -1017,6 +1160,36 @@ impl<T> Term<T> {
          cursor_cell.extra = extra;
      }
  
@@ -672,7 +678,7 @@ index 8eb6797..a26597d 100644
      #[inline]
      fn damage_cursor(&mut self) {
          // The normal cursor coordinates are always in viewport.
-@@ -1080,7 +1247,17 @@ impl<T: EventListener> Handler for Term<T> {
+@@ -1080,7 +1253,17 @@ impl<T: EventListener> Handler for Term<T> {
                  column.0 = column.saturating_sub(1);
              }
  
@@ -691,7 +697,7 @@ index 8eb6797..a26597d 100644
              return;
          }
  
-@@ -1112,8 +1289,12 @@ impl<T: EventListener> Handler for Term<T> {
+@@ -1112,8 +1295,12 @@ impl<T: EventListener> Handler for Term<T> {
                      self.grid.cursor.template.flags.remove(Flags::LEADING_WIDE_CHAR_SPACER);
                      self.wrapline();
                  } else {
@@ -706,7 +712,7 @@ index 8eb6797..a26597d 100644
                      return;
                  }
              }
-@@ -1130,9 +1311,13 @@ impl<T: EventListener> Handler for Term<T> {
+@@ -1130,9 +1317,13 @@ impl<T: EventListener> Handler for Term<T> {
              self.grid.cursor.template.flags.remove(Flags::WIDE_CHAR_SPACER);
          }
  
@@ -721,7 +727,7 @@ index 8eb6797..a26597d 100644
              self.grid.cursor.input_needs_wrap = true;
          }
      }
-@@ -1180,7 +1365,9 @@ impl<T: EventListener> Handler for Term<T> {
+@@ -1180,7 +1371,9 @@ impl<T: EventListener> Handler for Term<T> {
      #[inline]
      fn goto_col(&mut self, col: usize) {
          trace!("Going to column: {col}");
@@ -732,7 +738,7 @@ index 8eb6797..a26597d 100644
      }
  
      #[inline]
-@@ -1215,18 +1402,18 @@ impl<T: EventListener> Handler for Term<T> {
+@@ -1215,18 +1408,18 @@ impl<T: EventListener> Handler for Term<T> {
      fn move_up(&mut self, lines: usize) {
          trace!("Moving up: {lines}");
  
@@ -755,7 +761,7 @@ index 8eb6797..a26597d 100644
      }
  
      #[inline]
-@@ -1349,16 +1536,16 @@ impl<T: EventListener> Handler for Term<T> {
+@@ -1349,16 +1542,16 @@ impl<T: EventListener> Handler for Term<T> {
      fn move_down_and_cr(&mut self, lines: usize) {
          trace!("Moving down and cr: {lines}");
  
@@ -776,7 +782,7 @@ index 8eb6797..a26597d 100644
      }
  
      /// Insert tab at cursor position.
-@@ -1757,8 +1944,10 @@ impl<T: EventListener> Handler for Term<T> {
+@@ -1757,8 +1950,10 @@ impl<T: EventListener> Handler for Term<T> {
              ansi::ClearMode::Above => {
                  let cursor = self.grid.cursor.point;
  
@@ -789,7 +795,7 @@ index 8eb6797..a26597d 100644
                      // Fully clear all lines before the current line.
                      self.grid.reset_region(..cursor.line);
                  }
-@@ -1774,7 +1963,15 @@ impl<T: EventListener> Handler for Term<T> {
+@@ -1774,7 +1969,15 @@ impl<T: EventListener> Handler for Term<T> {
              },
              ansi::ClearMode::Below => {
                  let cursor = self.grid.cursor.point;
@@ -806,7 +812,7 @@ index 8eb6797..a26597d 100644
                      *cell = bg.into();
                  }
  
-@@ -1873,7 +2070,26 @@ impl<T: EventListener> Handler for Term<T> {
+@@ -1873,7 +2076,26 @@ impl<T: EventListener> Handler for Term<T> {
      #[inline]
      fn set_hyperlink(&mut self, hyperlink: Option<Hyperlink>) {
          trace!("Setting hyperlink: {hyperlink:?}");
@@ -834,7 +840,7 @@ index 8eb6797..a26597d 100644
      }
  
      /// Set a terminal attribute.
-@@ -1881,15 +2097,19 @@ impl<T: EventListener> Handler for Term<T> {
+@@ -1881,15 +2103,19 @@ impl<T: EventListener> Handler for Term<T> {
      fn terminal_attribute(&mut self, attr: Attr) {
          trace!("Setting attribute: {attr:?}");
          let cursor = &mut self.grid.cursor;
@@ -856,7 +862,7 @@ index 8eb6797..a26597d 100644
              },
              Attr::Reverse => cursor.template.flags.insert(Flags::INVERSE),
              Attr::CancelReverse => cursor.template.flags.remove(Flags::INVERSE),
-@@ -1968,15 +2188,13 @@ impl<T: EventListener> Handler for Term<T> {
+@@ -1968,15 +2194,13 @@ impl<T: EventListener> Handler for Term<T> {
              },
              NamedPrivateMode::ReportFocusInOut => self.mode.insert(TermMode::FOCUS_IN_OUT),
              NamedPrivateMode::BracketedPaste => self.mode.insert(TermMode::BRACKETED_PASTE),
@@ -879,7 +885,7 @@ index 8eb6797..a26597d 100644
              NamedPrivateMode::AlternateScroll => self.mode.insert(TermMode::ALTERNATE_SCROLL),
              NamedPrivateMode::LineWrap => self.mode.insert(TermMode::LINE_WRAP),
              NamedPrivateMode::Origin => {
-@@ -2031,7 +2249,12 @@ impl<T: EventListener> Handler for Term<T> {
+@@ -2031,7 +2255,12 @@ impl<T: EventListener> Handler for Term<T> {
              NamedPrivateMode::Utf8Mouse => self.mode.remove(TermMode::UTF8_MOUSE),
              NamedPrivateMode::AlternateScroll => self.mode.remove(TermMode::ALTERNATE_SCROLL),
              NamedPrivateMode::LineWrap => self.mode.remove(TermMode::LINE_WRAP),
@@ -893,7 +899,7 @@ index 8eb6797..a26597d 100644
              NamedPrivateMode::ColumnMode => self.deccolm(),
              NamedPrivateMode::BlinkingCursor => {
                  let style = self.cursor_style.get_or_insert(self.config.default_cursor_style);
-@@ -2221,6 +2444,20 @@ impl<T: EventListener> Handler for Term<T> {
+@@ -2221,6 +2450,20 @@ impl<T: EventListener> Handler for Term<T> {
      fn set_title(&mut self, title: Option<String>) {
          trace!("Setting title to '{title:?}'");
  
@@ -914,7 +920,7 @@ index 8eb6797..a26597d 100644
          self.title.clone_from(&title);
  
          let title_event = match title {
-@@ -3299,4 +3536,629 @@ mod tests {
+@@ -3299,4 +3542,629 @@ mod tests {
          assert_eq!(version_number("1.2.3-dev"), 1_02_03);
          assert_eq!(version_number("999.99.99"), 9_99_99_99);
      }

@@ -1029,8 +1029,9 @@ impl<T> Term<T> {
 
     // Farhelm patch: snapshot support. Access to the state an embedder needs to
     // rebuild an equivalent `Term` from escape sequences. All are read-only
-    // except `inactive_grid_mut`, which a restore uses to write what no escape
-    // sequence can set; none changes behavior.
+    // except `inactive_grid_mut`, which a restore uses to write what its escape
+    // sequences cannot produce on the screen that is not showing; none changes
+    // behavior.
 
     /// The grid that is not showing: the primary screen (with its scrollback)
     /// while the alternate screen is active, otherwise the alternate screen.
@@ -1040,9 +1041,14 @@ impl<T> Term<T> {
 
     /// Mutable access to the inactive grid.
     ///
-    /// Escape sequences cannot set the primary screen's saved cursor while the
-    /// alternate screen is active, because entering the alternate screen
-    /// overwrites it; a restore fixes it up through this.
+    /// Rebuilding a `Term` from escape sequences cannot produce every state of
+    /// the screen that is not showing. While the alternate screen is active,
+    /// entering it overwrote the primary screen's saved cursor, and a
+    /// restoring stream cannot paint every cell and cursor state there (a
+    /// pending wrap away from the last column, say). A restore writes such
+    /// cells, the cursor and the saved cursor through this. An embedder can
+    /// also use it to switch screens without losing the primary screen's
+    /// saved cursor, which `swap_alt` overwrites.
     pub fn inactive_grid_mut(&mut self) -> &mut Grid<Cell> {
         &mut self.inactive_grid
     }
