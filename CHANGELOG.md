@@ -2,6 +2,30 @@
 
 Notable user-facing changes in each stable release of Farhelm. Release candidates and dev builds are not listed; their changes appear under the stable release that follows them. Entries are written for someone running Farhelm, not for someone reading its source, so internal mechanics are left out unless they change what you have to do. cargo-dist copies each release's section into its GitHub release; `releasing/AGENTS.md` describes the format and how a section is written.
 
+## v0.34.0 - 2026-11-03
+
+**DRAFT release notes - not yet finalized**
+
+### 💥 Breaking
+
+- This release *requires* you to update your remote hosts. (#2882)
+
+### 🔄 Changed
+
+- New sessions and terminal tabs no longer run inside tmux. Each new terminal runs in a small Farhelm process of its own on its host, so a tmux upgrade or crash no longer takes every session on the host down at once. tmux is still required. [Move sessions to new terminals](https://farhelm.io/docs/using/new-terminals/) explains what changes and how to move the sessions you already have. (#2875, #2917)
+- Sessions that were already running keep working in tmux, with a note at the top saying that a future release will stop supporting it. Restarting, replacing or cloning a session moves its agent to a new terminal, but its old shell tabs move only when you close them and open new ones. (#2907, #2908, #2917, #2922, #2927)
+- Dropping a file onto a new terminal is refused with a message saying to paste it instead. (#2899, #2917)
+- In a new terminal, text you compose with an input method, as for Chinese, Japanese or Korean, does not show at the cursor until you commit it. (#2899, #2917)
+- A new terminal does not show the hint about holding Shift (Option on a Mac) when a drag over a program that uses the mouse selects nothing; holding the key still works. (#2899, #2917)
+- In a new terminal, an emoji with a variation selector, as in ❤️, takes one column where tmux gave it two, which can leave the rest of that line one column off. (#2880, #2917)
+- Quitting the desktop app no longer stops its supervisor, the background part of Farhelm that runs your sessions; opening the app reconnects to it, and on a Mac `farhelm uninstall` stops it. The supervisor's log is now `supervisor.log` in Farhelm's state directory instead of the app's log. (#2870, #2873, #2916)
+
+### 🩹 Misc fixes
+
+*Fixes that would normally be summed up as a single "various bug fixes" line. In the interest of transparency, the complete list is included.*
+
+- The helm no longer starts another connection attempt to a host while it is shutting down or removing that host. (#2929)
+
 ## v0.33.0 - 2026-10-30
 
 ### 💥 Breaking
