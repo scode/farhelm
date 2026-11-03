@@ -1039,6 +1039,12 @@ struct ActorHandle {
     /// several wakes arriving together collapse into one extra pass.
     refresh: watch::Sender<u64>,
     task: tokio::task::JoinHandle<()>,
+    /// Cancel the actor as soon as its registry handle is removed. The
+    /// supervising task also owns a guard, but aborting that task only
+    /// drops its guard when the runtime next polls it. Without this guard,
+    /// a retired connection can wake its actor first and let it dial again
+    /// during shutdown or removal, before supervision propagates cancellation.
+    _abort_actor: AbortOnDrop,
     /// Released once this handle is INSTALLED in the actor map; the actor
     /// does nothing until then (see [`ConnectionManager::spawn_actor`]).
     ///
@@ -1811,7 +1817,8 @@ impl ConnectionManager {
         let events = Arc::clone(&self.events);
         // Capture the guard before spawn: cancellation can drop this future
         // before its first poll, and a bare JoinHandle would detach the actor.
-        let abort_actor = AbortOnDrop(actor_task.abort_handle());
+        let actor_abort = actor_task.abort_handle();
+        let abort_actor = AbortOnDrop(actor_abort.clone());
         let task = tokio::spawn(async move {
             let _abort_actor = abort_actor;
             let reason = match actor_task.await {
@@ -1864,6 +1871,7 @@ impl ConnectionManager {
             nudge: nudge_tx,
             refresh: refresh_tx,
             task,
+            _abort_actor: AbortOnDrop(actor_abort),
             start: Some(gate_tx),
             cache_lock,
             seed_epoch,
@@ -11469,6 +11477,55 @@ mod tests {
             "the host must come back once it is released, so the sampling covers the return \
              transition too"
         );
+    }
+
+    /// Removing a host handle cancels its actor without waiting for its
+    /// supervising task to propagate cancellation.
+    ///
+    /// Shutdown retires the published client after draining the handles.
+    /// If only supervision requests cancellation, closing that client can
+    /// wake another dial first. Keep supervision alive independently here:
+    /// its completion then proves that removing the handle itself ended
+    /// the actor, rather than a favorable order of task cancellation.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn dropping_a_host_handle_cancels_its_actor_without_cancelling_supervision() {
+        let fixture = fixture(Cadence::default(), |store, transport| async move {
+            let host = store
+                .add_ssh_host("removing.example", None, None)
+                .await
+                .unwrap();
+            transport.set_script(host, Script::default());
+        })
+        .await;
+        let host = fixture.store.list_hosts().await.unwrap()[1].id;
+        fixture
+            .manager
+            .wait_for_state(host, HostState::is_connected)
+            .await
+            .expect("fixture premise: actor is connected");
+        let mut handle = fixture
+            .manager
+            .actors
+            .lock()
+            .unwrap()
+            .actors
+            .remove(&host)
+            .unwrap();
+        // A JoinHandle detaches on drop. Retain the real supervision here
+        // and give the registry handle an already-completing stand-in, so
+        // neither dropping nor aborting that handle can cancel supervision.
+        let supervision = std::mem::replace(&mut handle.task, tokio::spawn(async {}));
+        let _cleanup = AbortOnDrop(supervision.abort_handle());
+        assert!(
+            !supervision.is_finished(),
+            "fixture premise: supervision is live"
+        );
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(10), supervision)
+            .await
+            .expect("the handle must cancel its actor while supervision stays live")
+            .expect("supervision must finish normally after actor cancellation");
+        fixture.transport.wait_for_closures(host, 1).await;
     }
 
     /// A shutdown must be TERMINAL against a reconciliation that is already
