@@ -11,6 +11,7 @@ members = [
   "crates/farhelm-testtrace",
   "crates/farhelm-testtrace-macros",
   "crates/farhelm-ui",
+  "crates/terminal-host",
 ]
 # Application and ordinary library members, excluding `farhelm-desktop`, so that a bare `cargo
 # build`/`test`/`clippy --all-targets` — the workspace checks the
@@ -37,6 +38,7 @@ default-members = [
   "crates/farhelm-fixtures",
   "crates/farhelm-teststate",
   "crates/farhelm-ui",
+  "crates/terminal-host",
 ]
 
 # Shared package metadata. One version number across the workspace is a
