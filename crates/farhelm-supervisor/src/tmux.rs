@@ -2522,7 +2522,7 @@ impl TmuxDriver {
     /// excludes the versions that needed it: a config line tmux cannot
     /// place is a config line that silently does nothing, and that is not
     /// a failure mode worth re-earning on the next floor change.
-    fn config_body() -> String {
+    pub(crate) fn config_body() -> String {
         format!(
             "set -s exit-empty off\n\
              set -s escape-time 0\n\

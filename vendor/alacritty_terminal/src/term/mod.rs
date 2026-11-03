@@ -1,7 +1,11 @@
 // Modified for Farhelm: adds snapshot accessors to `Term`, caps hyperlink and
 // title lengths, reuses the active hyperlink when an identical one is sent
-// again, and drops a wide character a one-column grid cannot hold. See
-// vendor/README.md in the Farhelm repository.
+// again, drops a wide character a one-column grid cannot hold, raises the
+// pending-wrap flag only while autowrap is on, makes `CSI 1 J` on the second
+// line clear the first and `CSI J` with a wrap pending keep the last column,
+// stops relative vertical cursor moves at the scroll margins, keeps CHA on the
+// cursor's line in origin mode, and homes the cursor when origin mode is
+// reset. See vendor/README.md in the Farhelm repository.
 
 //! Exports the `Term` type which is a high-level API for the Grid.
 
@@ -1100,6 +1104,36 @@ impl<T> Term<T> {
         cursor_cell.extra = extra;
     }
 
+    /// Farhelm patch: move the cursor `delta` lines down (up when negative)
+    /// and to `column`, as CUU, CUD, CNL and CPL do (and CHA, with no lines
+    /// to move). Callers clamp `delta` to the screen's height, so the sum
+    /// with the cursor's line cannot overflow.
+    ///
+    /// The move stops at the scroll region's margin in the direction of travel
+    /// when the cursor starts inside the region (or beyond the far margin,
+    /// for a cursor above the top or below the bottom), and at the screen's
+    /// edge otherwise, as xterm (`CursorUp`, `CursorDown`) and tmux
+    /// (`screen_write_cursorup`, `screen_write_cursordown`) do. Upstream
+    /// went through `goto`, which ignores the margins outside origin mode and
+    /// in origin mode offsets the already absolute line a second time.
+    fn vertical_move(&mut self, delta: i32, column: Column) {
+        let cursor = self.grid.cursor.point.line;
+        let (top, bottom) = (self.scroll_region.start, self.scroll_region.end - 1);
+        let line = if delta < 0 {
+            let limit = if cursor >= top { top } else { Line(0) };
+            cmp::max(cursor + delta, limit)
+        } else {
+            let limit = if cursor <= bottom { bottom } else { self.bottommost_line() };
+            cmp::min(cursor + delta, limit)
+        };
+
+        self.damage_cursor();
+        self.grid.cursor.point.line = line;
+        self.grid.cursor.point.column = cmp::min(column, self.last_column());
+        self.damage_cursor();
+        self.grid.cursor.input_needs_wrap = false;
+    }
+
     #[inline]
     fn damage_cursor(&mut self) {
         // The normal cursor coordinates are always in viewport.
@@ -1203,8 +1237,12 @@ impl<T: EventListener> Handler for Term<T> {
                     self.grid.cursor.template.flags.remove(Flags::LEADING_WIDE_CHAR_SPACER);
                     self.wrapline();
                 } else {
-                    // Prevent out of bounds crash when linewrapping is disabled.
-                    self.grid.cursor.input_needs_wrap = true;
+                    // Farhelm patch: with autowrap off the character is
+                    // dropped and the cursor stays; returning is what keeps
+                    // its spacer from going past the row. Upstream also
+                    // raised the wrap flag here, but nothing wraps with
+                    // autowrap off; a flag already raised while autowrap was
+                    // on stays raised.
                     return;
                 }
             }
@@ -1221,9 +1259,13 @@ impl<T: EventListener> Handler for Term<T> {
             self.grid.cursor.template.flags.remove(Flags::WIDE_CHAR_SPACER);
         }
 
+        // Farhelm patch: the flag means the next character wraps first, which
+        // happens only while autowrap is on. With it off the cursor stays on
+        // the last column, as in tmux, so erasing to the right and cursor
+        // reports see it there. Upstream raised the flag either way.
         if self.grid.cursor.point.column + 1 < columns {
             self.grid.cursor.point.column += 1;
-        } else {
+        } else if self.mode.contains(TermMode::LINE_WRAP) {
             self.grid.cursor.input_needs_wrap = true;
         }
     }
@@ -1271,7 +1313,9 @@ impl<T: EventListener> Handler for Term<T> {
     #[inline]
     fn goto_col(&mut self, col: usize) {
         trace!("Going to column: {col}");
-        self.goto(self.grid.cursor.point.line.0, col)
+        // Farhelm patch: see `vertical_move`; `goto` would add origin mode's
+        // offset to the cursor's already absolute line.
+        self.vertical_move(0, Column(col));
     }
 
     #[inline]
@@ -1306,18 +1350,18 @@ impl<T: EventListener> Handler for Term<T> {
     fn move_up(&mut self, lines: usize) {
         trace!("Moving up: {lines}");
 
-        let line = self.grid.cursor.point.line - lines;
+        // Farhelm patch: see `vertical_move`.
         let column = self.grid.cursor.point.column;
-        self.goto(line.0, column.0)
+        self.vertical_move(-(lines.min(self.screen_lines()) as i32), column);
     }
 
     #[inline]
     fn move_down(&mut self, lines: usize) {
         trace!("Moving down: {lines}");
 
-        let line = self.grid.cursor.point.line + lines;
+        // Farhelm patch: see `vertical_move`.
         let column = self.grid.cursor.point.column;
-        self.goto(line.0, column.0)
+        self.vertical_move(lines.min(self.screen_lines()) as i32, column);
     }
 
     #[inline]
@@ -1440,16 +1484,16 @@ impl<T: EventListener> Handler for Term<T> {
     fn move_down_and_cr(&mut self, lines: usize) {
         trace!("Moving down and cr: {lines}");
 
-        let line = self.grid.cursor.point.line + lines;
-        self.goto(line.0, 0)
+        // Farhelm patch: see `vertical_move`.
+        self.vertical_move(lines.min(self.screen_lines()) as i32, Column(0));
     }
 
     #[inline]
     fn move_up_and_cr(&mut self, lines: usize) {
         trace!("Moving up and cr: {lines}");
 
-        let line = self.grid.cursor.point.line - lines;
-        self.goto(line.0, 0)
+        // Farhelm patch: see `vertical_move`.
+        self.vertical_move(-(lines.min(self.screen_lines()) as i32), Column(0));
     }
 
     /// Insert tab at cursor position.
@@ -1848,8 +1892,10 @@ impl<T: EventListener> Handler for Term<T> {
             ansi::ClearMode::Above => {
                 let cursor = self.grid.cursor.point;
 
-                // If clearing more than one line.
-                if cursor.line > 1 {
+                // If clearing more than one line. Farhelm patch: upstream
+                // compares with 1, which leaves the first line alone when the
+                // cursor is on the second.
+                if cursor.line > 0 {
                     // Fully clear all lines before the current line.
                     self.grid.reset_region(..cursor.line);
                 }
@@ -1865,7 +1911,15 @@ impl<T: EventListener> Handler for Term<T> {
             },
             ansi::ClearMode::Below => {
                 let cursor = self.grid.cursor.point;
-                for cell in &mut self.grid[cursor.line][cursor.column..] {
+                // Farhelm patch: with a wrap pending the cursor is past the
+                // last column, which stays, as erasing the line to the right
+                // already does here, and as tmux and xterm.js do.
+                let first = if self.grid.cursor.input_needs_wrap {
+                    cmp::min(cursor.column + 1, Column(self.columns()))
+                } else {
+                    cursor.column
+                };
+                for cell in &mut self.grid[cursor.line][first..] {
                     *cell = bg.into();
                 }
 
@@ -2138,7 +2192,12 @@ impl<T: EventListener> Handler for Term<T> {
             NamedPrivateMode::Utf8Mouse => self.mode.remove(TermMode::UTF8_MOUSE),
             NamedPrivateMode::AlternateScroll => self.mode.remove(TermMode::ALTERNATE_SCROLL),
             NamedPrivateMode::LineWrap => self.mode.remove(TermMode::LINE_WRAP),
-            NamedPrivateMode::Origin => self.mode.remove(TermMode::ORIGIN),
+            // Farhelm patch: resetting origin mode homes the cursor, as
+            // setting it does (and as tmux and xterm.js do).
+            NamedPrivateMode::Origin => {
+                self.mode.remove(TermMode::ORIGIN);
+                self.goto(0, 0);
+            },
             NamedPrivateMode::ColumnMode => self.deccolm(),
             NamedPrivateMode::BlinkingCursor => {
                 let style = self.cursor_style.get_or_insert(self.config.default_cursor_style);
@@ -3481,6 +3540,193 @@ mod tests {
         finished
             .recv_timeout(std::time::Duration::from_secs(10))
             .expect("resizing to one column panicked or ran past 10 s (the reflow fix)");
+    }
+
+    /// Spec: `CSI 1 J` (erase above) with the cursor on the second line
+    /// erases the whole first line and the second up to the cursor, as it does
+    /// from any later line.
+    ///
+    /// Why: upstream skipped the first line in exactly this case, leaving
+    /// text on screen that xterm (`ClearAbove`), tmux
+    /// (`screen_write_clearstartofscreen`) and xterm.js erase; Farhelm reads
+    /// agents' screens from this grid.
+    #[test]
+    fn erase_above_from_the_second_line_clears_the_first() {
+        let term = fed_term(4, 3, 0, b"abcd\r\nefgh\r\nijkl\x1b[2;2H\x1b[1J");
+        let row = |line: i32| -> String {
+            term.grid()[Line(line)][..].iter().map(|cell| cell.c).collect()
+        };
+        assert_eq!(row(0), "    ");
+        assert_eq!(row(1), "  gh");
+        assert_eq!(row(2), "ijkl");
+    }
+
+    /// Spec: `CSI J` (erase below) with a wrap pending leaves the last column
+    /// of the cursor's line and erases every line below; without one it
+    /// erases from the cursor's column. A wrap is pending only when the last
+    /// column was written with autowrap on, whatever autowrap is when the
+    /// erase comes.
+    ///
+    /// Why: the cursor is logically past the last column then, as erasing the
+    /// line to the right already assumed; upstream erased the last character
+    /// a program had just written, which tmux
+    /// (`screen_write_clearendofscreen`, which keeps it when `cx == sx`) and
+    /// xterm.js keep. tmux's cursor is past the column only if the character
+    /// was written with autowrap on (`screen_write_cell`), and changing
+    /// autowrap later does not move it. xterm erases it in every case
+    /// (`ClearRight` from `cur_col`), as it does for `CSI K`.
+    #[test]
+    fn erase_below_with_a_wrap_pending_keeps_the_last_column() {
+        // (output, the first row after it)
+        let cases: [(&[u8], &str); 6] = [
+            (b"\x1b[2;1Hzzzz\x1b[1;1Habcd\x1b[J", "abcd"),
+            (b"abcd\x1b[1;4H\x1b[J", "abc "),
+            // Written with autowrap off: the cursor is on the last column.
+            (b"\x1b[?7labcd\x1b[J\x1b[?7h", "abc "),
+            // Written with autowrap off, then autowrap on: still on it.
+            (b"\x1b[?7labcd\x1b[?7h\x1b[J", "abc "),
+            // Written with autowrap on, then autowrap off: still past it.
+            (b"abcd\x1b[?7l\x1b[J\x1b[?7h", "abcd"),
+            // A wide character dropped there moves nothing: still past it.
+            (b"abcd\x1b[?7l\xe4\xb8\x80\x1b[?7h\x1b[J", "abcd"),
+        ];
+        for (bytes, first) in cases {
+            let term = fed_term(4, 2, 0, bytes);
+            let row: String = term.grid()[Line(0)][..].iter().map(|cell| cell.c).collect();
+            assert_eq!(row, first, "{:?}", String::from_utf8_lossy(bytes));
+        }
+        let term = fed_term(4, 2, 0, b"\x1b[2;1Hzzzz\x1b[1;1Habcd\x1b[J");
+        let second: String = term.grid()[Line(1)][..].iter().map(|cell| cell.c).collect();
+        assert_eq!(second, "    ");
+    }
+
+    /// Spec: with autowrap off, writing the last column raises no wrap flag:
+    /// the cursor stays on that column, `CSI K` erases it, the next
+    /// character overwrites it (at the bottom right too, without scrolling)
+    /// even if autowrap is on by then, a tab leaves the cursor there, and a
+    /// resize keeps the cursor on it. A wide character that does not fit
+    /// before the last column with autowrap off is dropped without raising
+    /// the flag, and leaves a flag raised earlier with autowrap on. With
+    /// autowrap on, the flag is raised as upstream raises it.
+    ///
+    /// Why: the crate documents the flag as "the next call to input will
+    /// need to first handle wrapping", which never happens with autowrap off;
+    /// upstream raised it anyway, so every reader of the flag took a cursor
+    /// on the last column for one past it. tmux keeps the cursor on the last
+    /// column when it is written with autowrap off (`screen_write_cell`),
+    /// erases it there (`screen_write_clearendofline` skips only when
+    /// `cx > sx - 1`), writes the next character in place (it wraps only
+    /// for `cx > sx - width`), and changing autowrap later does not move the
+    /// cursor (`input.c`, the DECAWM cases only flip the mode). Farhelm
+    /// reads agents' screens from this grid.
+    #[test]
+    fn writing_the_last_column_with_autowrap_off_raises_no_wrap() {
+        let rows = |term: &Term<VoidListener>| -> Vec<String> {
+            (0..term.screen_lines() as i32)
+                .map(|line| term.grid()[Line(line)][..].iter().map(|cell| cell.c).collect())
+                .collect()
+        };
+        let cursor = |term: &Term<VoidListener>| {
+            let cursor = &term.grid().cursor;
+            (cursor.point.line.0, cursor.point.column.0, cursor.input_needs_wrap)
+        };
+        // (output on a 4x2 screen, the rows after it, line, column, pending)
+        let cases: [(&[u8], [&str; 2], (i32, usize, bool)); 11] = [
+            (b"abcd\x1b[K", ["abcd", "    "], (0, 3, true)),
+            (b"\x1b[?7labcd\x1b[K\x1b[?7h", ["abc ", "    "], (0, 3, false)),
+            (b"\x1b[?7labcd\x1b[?7h\x1b[K", ["abc ", "    "], (0, 3, false)),
+            (b"abcd\x1b[?7l\x1b[K\x1b[?7h", ["abcd", "    "], (0, 3, true)),
+            (b"abcd\x1b[?7l\xe4\xb8\x80\x1b[K\x1b[?7h", ["abcd", "    "], (0, 3, true)),
+            // A wide character dropped with autowrap off and nothing pending
+            // raises no flag either (upstream raised it here).
+            (b"\x1b[?7labc\xe4\xb8\x80\x1b[?7hx", ["abcx", "    "], (0, 3, true)),
+            (b"\x1b[?7labcd\xe4\xb8\x80\x1b[K\x1b[?7h", ["abc ", "    "], (0, 3, false)),
+            (b"\x1b[?7labcd\x1b[?7hx", ["abcx", "    "], (0, 3, true)),
+            (b"\x1b[2;1Hwxyz\x1b[1;1H\x1b[?7l\x1b[2;4Hq\x1b[?7hr", ["    ", "wxyr"], (1, 3, true)),
+            (b"abcdx", ["abcd", "x   "], (1, 1, false)),
+            (b"\x1b[?7labcd\x1b[?7h\tx", ["abcx", "    "], (0, 3, true)),
+        ];
+        for (bytes, expected, at) in cases {
+            let term = fed_term(4, 2, 0, bytes);
+            assert_eq!(rows(&term), expected, "{:?}", String::from_utf8_lossy(bytes));
+            assert_eq!(cursor(&term), at, "{:?}", String::from_utf8_lossy(bytes));
+        }
+
+        // A resize keeps a cursor left on the last column there.
+        let mut term = fed_term(4, 2, 0, b"\x1b[?7labcd\x1b[?7h");
+        term.resize(TermSize::new(6, 2));
+        assert_eq!(cursor(&term), (0, 3, false));
+    }
+
+    /// Spec: CUU, CUD, CNL and CPL stop at the scroll region's margin in the
+    /// direction of travel when the cursor starts inside the region or beyond
+    /// that margin's far side, and at the screen's edge otherwise; in origin
+    /// mode they move relative to where the cursor is; a count far past the
+    /// screen's height stops at the edge.
+    ///
+    /// Why: that is what xterm (`CursorUp`, `CursorDown`) and tmux
+    /// (`screen_write_cursorup`, `screen_write_cursordown`) do, so programs
+    /// that move relative to the cursor inside a scroll region draw in the
+    /// right place; upstream ignored the margins, and in origin mode added the
+    /// region's offset to an absolute line (vendor/README.md).
+    #[test]
+    fn relative_vertical_moves_stop_at_the_scroll_margins() {
+        // (output on a 4x6 screen with lines 2 to 4 as the region, cursor
+        // line and column after it, counted from 0)
+        let cases: [(&[u8], i32, usize); 8] = [
+            (b"\x1b[3;2H\x1b[9A", 1, 1),
+            (b"\x1b[3;2H\x1b[9B", 3, 1),
+            (b"\x1b[1;2H\x1b[9B", 3, 1),
+            (b"\x1b[6;2H\x1b[9A", 1, 1),
+            (b"\x1b[1;2H\x1b[9A", 0, 1),
+            (b"\x1b[6;2H\x1b[9B", 5, 1),
+            (b"\x1b[3;2H\x1b[9E", 3, 0),
+            (b"\x1b[3;2H\x1b[9F", 1, 0),
+        ];
+        for (moves, line, column) in cases {
+            let mut bytes = b"\x1b[2;4r".to_vec();
+            bytes.extend_from_slice(moves);
+            let term = fed_term(4, 6, 0, &bytes);
+            let point = term.grid().cursor.point;
+            assert_eq!((point.line, point.column), (Line(line), Column(column)), "{moves:?}");
+        }
+        let term = fed_term(4, 6, 0, b"\x1b[2;4r\x1b[?6h\x1b[1B");
+        assert_eq!(term.grid().cursor.point.line, Line(2));
+
+        // Through the handler directly, a count far past the screen's height
+        // stops at the edge rather than overflowing the line.
+        let mut term = fed_term(4, 6, 0, b"\x1b[6;1H");
+        Handler::move_down(&mut term, usize::MAX);
+        assert_eq!(term.grid().cursor.point.line, Line(5));
+        Handler::move_up(&mut term, usize::MAX);
+        assert_eq!(term.grid().cursor.point.line, Line(0));
+    }
+
+    /// Spec: CHA (`CSI Ps G`) in origin mode moves the cursor along its own
+    /// line.
+    ///
+    /// Why: upstream's `goto_col` passed the cursor's absolute line to
+    /// `goto`, which in origin mode adds the region's offset again, so CHA
+    /// moved the cursor down; xterm (`CASE_HPA` with `CursorRow`) and tmux
+    /// (`INPUT_CSI_HPA`, which leaves the line alone) keep it on its line.
+    #[test]
+    fn cha_in_origin_mode_keeps_the_line() {
+        let term = fed_term(4, 6, 0, b"\x1b[2;4r\x1b[?6h\x1b[2;1H\x1b[3G");
+        let point = term.grid().cursor.point;
+        assert_eq!((point.line, point.column), (Line(2), Column(2)));
+    }
+
+    /// Spec: resetting origin mode (`CSI ? 6 l`) homes the cursor to the
+    /// screen's top left.
+    ///
+    /// Why: setting it homes the cursor and resetting it did not; xterm
+    /// (`srm_DECOM` in `dpmodes`) and tmux (`input_csi_dispatch_rm_private`,
+    /// mode 6) home it both ways.
+    #[test]
+    fn resetting_origin_mode_homes_the_cursor() {
+        let term = fed_term(4, 6, 0, b"\x1b[2;4r\x1b[?6h\x1b[2;2H\x1b[?6l");
+        let point = term.grid().cursor.point;
+        assert_eq!((point.line, point.column), (Line(0), Column(0)));
     }
 
     /// Spec: a cell keeps the first `MAX_ZEROWIDTH_CHARS` zero-width

@@ -27,6 +27,17 @@ const EXPECTED_STATES: &[&str] = &["working", "waiting", "idle", "unknown"];
 /// Harnesses represented by real or explicitly derived screen fixtures.
 const HARNESSES: &[&str] = &["claude", "codex", "muse"];
 
+/// The agent kind for a harness as fixture directories (and the emulator
+/// parity tests' recordings) name it, one of [`HARNESSES`].
+pub(crate) fn agent_kind(harness: &str) -> AgentKind {
+    match harness {
+        "claude" => AgentKind::Claude,
+        "codex" => AgentKind::Codex,
+        "muse" => AgentKind::Muse,
+        other => panic!("no agent kind for harness {other:?}"),
+    }
+}
+
 /// One captured screen with the state the capture tool drove the agent into.
 #[derive(Debug)]
 pub(crate) struct ScreenFixture {
@@ -266,12 +277,7 @@ fn screen_fixtures_email_detector_matches_addresses_only() {
 fn screen_fixtures_read_as_the_state_they_were_captured_in() {
     let mut failures = Vec::new();
     for fixture in load_fixtures().into_iter().filter(has_activity_contract) {
-        let kind = match fixture.harness.as_str() {
-            "claude" => AgentKind::Claude,
-            "codex" => AgentKind::Codex,
-            "muse" => AgentKind::Muse,
-            other => panic!("no agent kind for harness {other}"),
-        };
+        let kind = agent_kind(&fixture.harness);
         let expected = match fixture.expected.as_str() {
             "working" => ScreenState::Working,
             "waiting" => ScreenState::Waiting,
