@@ -46,6 +46,10 @@ class FakeSource:
         """The capability is explicitly supplied by this fixture, not a historical claim."""
         return tag in self.supported
 
+    def ships_terminal_host(self, tag):
+        """No fictional tag carries the terminal host crate, so the cross-check gives no answer."""
+        return False
+
 
 class PlanningTests(unittest.TestCase):
     """Pin candidate selection and the full supported-old-version coverage."""
@@ -762,16 +766,95 @@ image evidence so cleanup cannot silently skip its new obligation.
         image = self.evidence_file('agent.png', PNG)
         command = self.evidence_file('agent.txt', b'synthetic agent response receipt')
         with self.run.locked():
-            for check in ('local-supervisor-agent', 'remote-supervisor-agent'):
+            for check in ('local-supervisor-agent', 'local-old-session', 'remote-supervisor-agent', 'remote-old-session'):
                 with self.assertRaisesRegex(Refused, 'command/identity evidence'):
                     self.run.record('p0-updater-upgrade', check, 'pass', [image], 'GUI alone is not execution evidence.')
                 self.run.record('p0-updater-upgrade', check, 'pass', [image, command], 'Synthetic evidence format only.')
+                report = self.run.report()['p0']
                 if check == 'local-supervisor-agent':
-                    report = self.run.report()['p0']
+                    # The local question also covers the old local session.
+                    self.assertEqual(report['checks']['local-supervisor-agent'], 'could not run')
+                if check == 'local-old-session':
                     self.assertEqual(report['checks']['local-supervisor-agent'], 'pass')
                     self.assertEqual(report['checks']['remote-supervisor-agent'], 'could not run')
                     self.assertEqual(report['verdict'], 'could not run')
             self.assertEqual(self.run.report()['p0']['verdict'], 'pass')
+            self.run.cleanup('p0-updater-upgrade')
+
+    def test_old_sessions_follow_each_hosts_agent_check_and_fold_into_its_question(self):
+        """The terminal transition is part of P0 without changing its five questions.
+
+Each old-session check must follow its host's new-session check, which tells it
+whether the candidate creates terminal hosts; the remote one must also follow
+the remote Update. A failed old session fails its host's supervisor question.
+A manifest written before these checks still answers all five questions.
+"""
+        self.assertEqual(list(checks('p0-updater-upgrade')),
+                         ['artifact-verification', 'old-fixture', 'update-discovery', 'update-relaunch',
+                          'local-supervisor-agent', 'local-old-session', 'remote-supervisor-agent',
+                          'remote-old-session', 'p1-feedback-send'])
+        for check in ('local-old-session', 'remote-old-session'):
+            self.assertEqual(checks('p0-updater-upgrade')[check],
+                             {'gui': True, 'command': True, 'continuity': False, 'priority': 'P0'})
+            self.assertNotIn(check, checks('p0-installer-upgrade'))
+            self.assertNotIn(check, checks('upgrade-v0.24.0'))
+        self.enable_p0(p0_only=True)
+        self.complete_p0('p0-fresh')
+        self.complete_p0('p0-installer-upgrade')
+        self.complete_p0('p0-updater-upgrade', through='local-supervisor-agent')
+        image = self.evidence_file('old-session.png', PNG)
+        with self.run.locked():
+            self.run.record('p0-updater-upgrade', 'local-old-session', 'fail', [image],
+                            'Synthetic failed old-session observation.')
+            report = self.run.report()['p0']
+            self.assertEqual(report['checks']['local-supervisor-agent'], 'fail')
+            self.assertEqual(report['verdict'], 'fail')
+            with self.assertRaisesRegex(Refused, 'stop after the first'):
+                self.run.record('p0-updater-upgrade', 'remote-supervisor-agent', 'pass', [image, image],
+                                'Must not continue.')
+            self.run.cleanup('p0-updater-upgrade', discard_failed=True)
+
+    def test_run_planned_before_old_sessions_keeps_its_answers_but_cannot_start_that_pair(self):
+        """An in-flight run must not acquire the new obligations mid-run, nor lose what it already retained.
+
+Preparing its updater pair is refused before any clone, with a message naming
+the cause. A pair that was already prepared and recorded under the earlier
+coordinator still answers all five questions without the keys it never declared.
+"""
+        self.enable_p0(p0_only=True)
+        self.complete_p0('p0-fresh')
+        self.complete_p0('p0-installer-upgrade')
+        with self.run.locked():
+            required = self.run.selected('p0-updater-upgrade')['required']
+            removed = {check: required.pop(check) for check in ('local-old-session', 'remote-old-session')}
+            self.run.save()
+        calls = len(self.model.calls)
+        with self.run.locked(), self.assertRaisesRegex(Refused, 'planned before P0 carried old sessions'):
+            self.run.prepare('p0-updater-upgrade', [])
+        self.assertEqual(len(self.model.calls), calls)
+        with self.run.locked():
+            self.run.selected('p0-updater-upgrade')['required'].update(removed)
+            self.run.save()
+        self.prepare('p0-updater-upgrade')
+        with self.run.locked():
+            for check in removed:
+                self.run.selected('p0-updater-upgrade')['required'].pop(check)
+            self.run.save()
+        image = self.evidence_file('legacy.png', PNG)
+        command = self.evidence_file('legacy.txt', b'synthetic legacy evidence')
+        receipt = self.evidence_file('legacy.json', json.dumps({
+            'version': self.run.data['plan']['candidate'], 'previous_trust_ring': 'v0.24.0',
+            'sha256sums_sha256': 'fixture-checksum', 'signature': 'verified',
+            'trusted_comment': 'verified', 'installer_checksum': 'verified'}).encode())
+        with self.run.locked():
+            self.run.select_update('p0-updater-upgrade', 'v0.24.0')
+            for check, spec in self.run.selected('p0-updater-upgrade')['required'].items():
+                if spec.get('priority') == 'P0':
+                    refs = [receipt] if check == 'artifact-verification' else [image, command]
+                    self.run.record('p0-updater-upgrade', check, 'pass', refs, 'Synthetic legacy observation.')
+            report = self.run.report()['p0']
+            self.assertEqual(report['verdict'], 'pass')
+            self.assertEqual(set(report['checks'].values()), {'pass'})
             self.run.cleanup('p0-updater-upgrade')
 
     def test_mid_session_stop_and_stale_evidence_refuse_new_bonus_work(self):
@@ -808,7 +891,7 @@ The two preceding pairs have already passed their evidence and cleanup gates.
         self.enable_p0(p0_only=p0_only, p1_only=p1_only)
         self.complete_p0('p0-fresh')
         self.complete_p0('p0-installer-upgrade')
-        children = self.complete_p0('p0-updater-upgrade', through='remote-supervisor-agent')
+        children = self.complete_p0('p0-updater-upgrade', through='remote-old-session')
         self.assertTrue(all(child.poll() is None for child in children))
         with self.run.locked():
             self.assertEqual(self.run.report()['p0']['verdict'], 'pass')
@@ -883,15 +966,15 @@ lift that protection either: the scope fences future work, not evidence.
         self.enable_p0()
         self.complete_p0('p0-fresh')
         self.complete_p0('p0-installer-upgrade')
-        self.complete_p0('p0-updater-upgrade', through='local-supervisor-agent')
+        self.complete_p0('p0-updater-upgrade', through='remote-supervisor-agent')
         image = self.evidence_file('p1.png', PNG)
         with self.run.locked():
             self.assertEqual(self.run.report()['p0']['verdict'], 'could not run')
             for status in ('pass', 'fail', 'could-not-run'):
                 with self.subTest(status=status), self.assertRaisesRegex(Refused, 'complete all P0'):
                     self.run.record('p0-updater-upgrade', 'p1-feedback-send', status, [image], 'Out of order.')
-            command = self.evidence_file('remote-agent.txt', b'synthetic remote agent receipt')
-            self.run.record('p0-updater-upgrade', 'remote-supervisor-agent', 'pass', [image, command],
+            command = self.evidence_file('remote-old-session.txt', b'synthetic remote old-session receipt')
+            self.run.record('p0-updater-upgrade', 'remote-old-session', 'pass', [image, command],
                             'Synthetic evidence; all P0 checks now recorded.')
             self.assertEqual(self.run.report()['p0']['verdict'], 'pass')
             # A previously accepted earlier fixture is still a prerequisite:

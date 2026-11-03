@@ -259,6 +259,49 @@ neither the update endpoint nor the native capture is a live product oracle.
             self.assertEqual(self.run.report()['requested_verdict'], 'pass')
             self.run.cleanup('p0-updater-upgrade')
 
+    def test_updater_pair_schedules_each_old_session_after_its_hosts_agent_check(self):
+        """The dispatched guest turns, not only the declared manifest, carry the terminal transition in order.
+
+Each old-session turn must follow its host's new-session turn, whose receipt
+says whether the candidate creates terminal hosts, and the remote one must
+follow the remote Update. Every turn carries the previous-source cross-check;
+these fictional tags have no terminal host crate, so it gives no answer.
+"""
+        self.finish_preceding_pairs()
+        self.seen.clear()
+        self.drive_pair('p0-updater-upgrade')
+        self.assertEqual([value['check_id'] for value in self.seen],
+                         ['native-preflight', 'artifact-verification', 'old-fixture', 'update-discovery',
+                          'update-relaunch', 'local-supervisor-agent', 'local-old-session',
+                          'remote-supervisor-agent', 'remote-old-session'])
+        self.assertTrue(all(value['context']['previous_can_create_hosts'] is None for value in self.seen))
+        remote = next(value for value in self.seen if value['check_id'] == 'remote-old-session')
+        self.assertIn('remote_host_survival', remote['instructions'])
+        budgets = {value['check_id']: value['timeout_seconds'] for value in self.seen}
+        self.assertEqual((budgets['old-fixture'], budgets['local-old-session'], budgets['update-relaunch']),
+                         (2400, 1800, 1200))
+        with self.run.locked():
+            self.assertEqual(self.run.report()['p0']['verdict'], 'pass')
+
+    def test_updater_pair_planned_before_old_sessions_dispatches_nothing(self):
+        """A pair prepared under the earlier contract cannot be tested under the new one, half old and half new.
+
+The refusal names its cause and comes before credentials or any guest turn.
+"""
+        self.finish_preceding_pairs()
+        self.fixture.prepare('p0-updater-upgrade')
+        with self.run.locked():
+            for check in ('local-old-session', 'remote-old-session'):
+                self.run.selected('p0-updater-upgrade')['required'].pop(check)
+            self.run.save()
+        self.seen.clear()
+        self.run.tester = self.execute_fixture
+        with self.assertRaisesRegex(Refused, 'planned before P0 carried old sessions'):
+            self.run.test('p0-updater-upgrade', source=self.source)
+        self.assertEqual(self.seen, [])
+        with self.run.locked():
+            self.assertNotIn('credentials_injected', self.run.selected('p0-updater-upgrade'))
+
     def test_full_and_p1_setup_refuse_without_send_consent_before_mutation(self):
         """Known missing send authority must not first pause an otherwise completed P0 run."""
         self.prepare()
@@ -314,7 +357,7 @@ neither the update endpoint nor the native capture is a live product oracle.
         def removed_consent(controller, envelope, files):
             """Withdraw only fictional send consent as the modeled last P0 task completes."""
             self.seen.append(envelope)
-            if envelope['check_id'] == 'remote-supervisor-agent':
+            if envelope['check_id'] == 'remote-old-session':
                 path = self.fixture.root / 'consent.json'
                 value = json.loads(path.read_text())
                 value.pop('feedback_send_approved')
@@ -339,7 +382,7 @@ neither the update endpoint nor the native capture is a live product oracle.
         def narrowed(controller, envelope, files):
             """Persist the user's scope change while the modeled last P0 task is outside the workflow lock."""
             self.seen.append(envelope)
-            if envelope['check_id'] == 'remote-supervisor-agent':
+            if envelope['check_id'] == 'remote-old-session':
                 with self.run.locked():
                     self.run.limit_to_p0()
             return self.archive(controller, envelope)
@@ -360,7 +403,7 @@ neither the update endpoint nor the native capture is a live product oracle.
         def changed_prior(controller, envelope, files):
             """Damage independently retained earlier evidence as the final P0 task completes."""
             self.seen.append(envelope)
-            if envelope['check_id'] == 'remote-supervisor-agent':
+            if envelope['check_id'] == 'remote-old-session':
                 (self.run.directory / archive).write_bytes(b'changed earlier archive')
             return self.archive(controller, envelope)
         with self.assertRaisesRegex(Refused, 'valid evidence before P1 dispatch'):

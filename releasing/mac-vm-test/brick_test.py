@@ -34,6 +34,7 @@ from verify_release import require_comment
 from guest_tester import native_events, native_image_digests, request as tester_request, RESULT_STATES
 from guest_workflow import (copy_credentials, execute as execute_guest, cancel as cancel_guest, require_setup,
                             source_url, task_for, Unavailable, CheckStopped, CleanupPending)
+from checkpoint_contract import turn_timeout
 
 
 REPO = Path(__file__).resolve().parents[2]
@@ -90,6 +91,29 @@ require the recipe's actual startup-log and GUI observations.
         version(tag)
         return 'FARHELM_DESKTOP_UPDATE_LATEST' in self.git(
             'show', tag + ':crates/farhelm-ui/src/desktop/updater.rs')
+
+    def ships_terminal_host(self, tag):
+        """Report whether a tag's source contains the terminal host crate at all.
+
+Containing it does not mean that release created terminal hosts (its switch
+may be off); lacking it means it cannot have. `ls-tree` prints nothing for an
+absent path, so absence is an answer rather than a lookup failure.
+"""
+        version(tag)
+        return bool(self.git('ls-tree', '--name-only', tag, '--', 'crates/terminal-host/Cargo.toml').strip())
+
+
+def previous_can_create_hosts(source, previous, candidate):
+    """Cross-check the old session's observed terminal kind against the previous tag's source.
+
+False only when the candidate's source has the terminal host crate and the
+previous tag's lacks it: that previous release cannot have put the old session
+in a terminal host. True means it could have; None means this source layout
+gives no answer (the crate moved since), so the check does not apply.
+"""
+    if not source.ships_terminal_host(candidate):
+        return None
+    return source.ships_terminal_host(previous)
 
 
 def download(url):
@@ -185,14 +209,21 @@ Continuity checkpoints require independent before/after receipts as well.
         return {'commands': {'gui': False, 'continuity': False}}
     if pass_id.startswith('p0-'):
         # Separate upgrade fixtures keep installer success from standing in for
-        # discovery by the old updater. P0 deliberately has no resume/settings
-        # or continuity workload prerequisites; those remain bonus coverage.
+        # discovery by the old updater. P0 deliberately has no template,
+        # settings or continuity workload prerequisites; those remain bonus
+        # coverage. Its one exception, at the maintainer's request, is the old
+        # agent session per host that carries the move from tmux to terminal
+        # hosts: each old-session check follows its host's new-session check,
+        # whose still-running session shows whether this candidate creates
+        # terminal hosts, and the remote one follows the remote Update that
+        # switches that host over.
         items = ({'artifact-verification': False, 'fixture-clean': False,
                   'install': False, 'app-start': True} if pass_id == 'p0-fresh' else
                  {'artifact-verification': False, 'old-fixture': True,
                   **({'update-discovery': True} if pass_id == 'p0-updater-upgrade' else {}),
                   'update-relaunch': True,
-                  **({'local-supervisor-agent': True, 'remote-supervisor-agent': True}
+                  **({'local-supervisor-agent': True, 'local-old-session': True,
+                      'remote-supervisor-agent': True, 'remote-old-session': True}
                      if pass_id == 'p0-updater-upgrade' else {})})
         required = {key: {'gui': gui, 'command': gui, 'continuity': False, 'priority': 'P0'}
                     for key, gui in items.items()}
@@ -487,6 +518,7 @@ P0 scheduling and scope are checked before budget probes or clone mutations.
             raise Refused('guest-native product fixtures require the normal Mac desktop start')
         if self.data['plan'] and self.data['plan'].get('p0_sequence'):
             self.require_priority(pass_id)
+            self.require_current_contract(pass_id)
         if entry['phase'] != 'pending':
             raise Refused('pass already attempted; inspect its state instead of replaying preparation')
         if any(v['phase'] in ('preparing', 'ready', 'failed') for v in self.data['passes'].values()):
@@ -710,11 +742,14 @@ failures retain their artifacts and stop the sequence without automatic retry.
             if entry.get('automation_failure'):
                 raise Refused('failed automation is retained; fix the fixture and use a new run')
             self.require_priority(pass_id)
+            self.require_current_contract(pass_id)
             # Resolve read-only source inputs before claiming the test. Once the
             # claim is saved, every mutation failure must leave a terminal state.
             context = {'candidate': self.data['plan']['candidate'], 'previous': entry['previous'],
                        'previous_commit': source.commit(entry['previous']), 'source_url': source_url(source),
-                       'pass_id': pass_id}
+                       'pass_id': pass_id,
+                       'previous_can_create_hosts': previous_can_create_hosts(
+                           source, entry['previous'], self.data['plan']['candidate'])}
             c = self.pair(pass_id)
             entry['tester'] = {'phase': 'running', 'check_id': check_id}
             self.save()
@@ -778,7 +813,7 @@ failures retain their artifacts and stop the sequence without automatic retry.
                         raise Unavailable('this old updater/candidate combination cannot demonstrate discovery')
                     context['latest_at_selection'] = entry.get('latest_at_selection')
                     context['prior_results'] = entry['results']
-                    task = task_for(self, pass_id, check_id, context, timeout)
+                    task = task_for(self, pass_id, check_id, context, turn_timeout(check_id, pass_id, timeout))
                     entry['tester'].update(check_id=check_id, attempt=task['attempt'])
                     entry['tester']['guest_directory'] = context['pass_directory'] + '/' + task['attempt']
                     entry['tester']['termination_observed'] = False
@@ -1002,6 +1037,19 @@ Ignoring P1 here never changes its separate or full-run verdict.
                     if entry['required'][key].get('priority', entry.get('priority')) != 'P1'):
                 raise Refused('stop after the first failed or unavailable check; preserve this run')
 
+    def require_current_contract(self, pass_id):
+        """Refuse to start or test an updater pair planned before P0 carried old sessions.
+
+Its manifest lacks the old-session checks, while this coordinator's old fixture
+and agent checks now assume them; continuing would hold an in-flight run to
+obligations it never planned, or half of them. Its retained observations keep
+their verdicts; a new run gets the current contract.
+"""
+        entry = self.selected(pass_id)
+        if pass_id == 'p0-updater-upgrade' and 'local-old-session' not in entry['required']:
+            raise Refused('this run was planned before P0 carried old sessions across the upgrade; '
+                          'start a new run with init for this pair')
+
     def require_priority(self, pass_id):
         """Fence bonus work and later P0 fixtures before any guest is cloned.
 
@@ -1125,17 +1173,23 @@ of its fixture's full verdict but excluded from P0's projections.
             if p0_ids:
                 # Publish the user's five questions, including separate local
                 # and remote agent results, without weakening prerequisite or
-                # retained-evidence validation of the complete P0 verdict.
+                # retained-evidence validation of the complete P0 verdict. Each
+                # host's old-session check answers part of that host's
+                # supervisor-upgrade question: did its sessions survive it.
+                # Manifests from before those checks keep their declared set.
                 questions = [('fresh-install-start', 'p0-fresh', None),
                              ('installer-upgrade', 'p0-installer-upgrade', None),
                              ('click-to-upgrade', 'p0-updater-upgrade',
                               ['artifact-verification', 'old-fixture', 'update-discovery', 'update-relaunch']),
-                             ('local-supervisor-agent', 'p0-updater-upgrade', ['local-supervisor-agent']),
-                             ('remote-supervisor-agent', 'p0-updater-upgrade', ['remote-supervisor-agent'])]
+                             ('local-supervisor-agent', 'p0-updater-upgrade',
+                              ['local-supervisor-agent', 'local-old-session']),
+                             ('remote-supervisor-agent', 'p0-updater-upgrade',
+                              ['remote-supervisor-agent', 'remote-old-session'])]
                 output['p0']['checks'] = {}
                 for label, pass_id, keys in questions:
                     entry = priority_entry(self.selected(pass_id), 'P0')
                     if keys is not None:
+                        keys = [key for key in keys if key in entry['required']]
                         entry = dict(entry, required={key: entry['required'][key] for key in keys},
                                      results={key: entry['results'][key] for key in keys if key in entry['results']})
                     output['p0']['checks'][label] = self.verdict(entry)
