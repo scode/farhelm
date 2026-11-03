@@ -35,13 +35,14 @@ triage, fixes, or execution of triage outcomes.
    complete commit list, its assigned scope, and the instructions in `review_feedback_queue/.agents/recording.md`,
    "Running an agent review that feeds this queue".
 3. Run the groups under `persistent-review`, including concurrent launches, immediate findings logs, delivery audits,
-   same-session continuation and later-turn synthesis. Keep the skill's manifests, logs and completion evidence in the
-   session's agent scratch space. Reviewers still return the queue's required findings and candidate fields in their
-   final replies; the persistent logs supplement those replies. Reconcile the logs, including withdrawn findings, with
-   the replies so candidates cannot disappear before the queue's independent-review checks. Apply the usual coverage,
-   deduplication, filtering, and independent-review requirements before recording findings. Record retained findings in
-   feedback files and `INDEX.md`, preserving their reviewed commits and provenance. A trailing review is an automated
-   review of committed code for the purposes of `FILTER.md`.
+   same-session continuation and later-turn synthesis. Monitor them as described under "Monitoring reviewers" below.
+   Keep the skill's manifests, logs and completion evidence in the session's agent scratch space. Reviewers still return
+   the queue's required findings and candidate fields in their final replies; the persistent logs supplement those
+   replies. Reconcile the logs, including withdrawn findings, with the replies so candidates cannot disappear before the
+   queue's independent-review checks. Apply the usual coverage, deduplication, filtering, and independent-review
+   requirements before recording findings. Record retained findings in feedback files and `INDEX.md`, preserving their
+   reviewed commits and provenance. A trailing review is an automated review of committed code for the purposes of
+   `FILTER.md`.
 4. Only after every group meets `persistent-review`'s completion requirements, every commit in the range has been
    reviewed, every finding and proposed drop has been handled, and all retained findings have been recorded, update
    `TRAILING_REVIEW.md` to `review-tip` in the same change as the queue updates. Findings need not be fixed for the
@@ -65,6 +66,27 @@ summary. Preserve material uncertainty in each TLDR so a conditional lead does n
 Put the review-result draft PR's diff link immediately after the grouped summary. If no draft PR was created, put that
 fact and the reason there instead; do not imply that an interrupted review completed or create a PR when there were no
 new commits to review. The closing status banner below, when required, comes after the link or explanation.
+
+## Monitoring reviewers
+
+Monitor every running reviewer for stalled progress and blocked turns, including cybersecurity refusals. Start with job
+state and exit status, file timestamps and growth, compact delivery audits, findings counts and short progress notes.
+Silence alone does not establish a stall. Use the persistent-review and shellout skills' monitoring and continuation
+rules; inspect findings and final replies when they need a decision.
+
+Keep whole transcripts and routine activity out of the orchestrator's context. Delivery audits use the evidence helper,
+not manual transcript reading. When metadata cannot explain a suspected stall, use a separate diagnostic agent with only
+the job handle and artifact paths. Have it inspect execution metadata and narrowly relevant errors or refusal text, then
+return the failure category, last observed progress and next permitted step. It must not read implementation payloads,
+reproduce a bug, perform the review, or return source or transcript dumps. This diagnosis earns no review coverage.
+Targeted transcript inspection still needs the permission required by `persistent-review`.
+
+If a reviewer encounters a cybersecurity block, continue its original identity only with permitted defensive work.
+Narrow the instructions as needed: source inspection and documented contracts, with no bug reproduction, exploit or
+payload construction, runtime or network experiments, process operations, or live-install actions. Do not use a helper,
+another identity, concealed summaries or repeated requests to bypass a safety control. A narrower continuation does not
+establish coverage of work it omits. If the reviewer still cannot complete its assigned scope, preserve its findings and
+evidence, report the exact gap, and leave the checkpoint unchanged under the completion rule above.
 
 ## Closing status banner
 
