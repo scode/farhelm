@@ -314,6 +314,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Better feedback when launching sessions.** When a remote host is slow, a launch can feel hung: it is not clear
   whether the session is succeeding, failing, still in flight, or stuck. Make the launch's state and progress visible so
   a slow host reads as in flight rather than dead.
+- **Don't let git auto-gc run while a session is spawning.** On 2026-11-02, git auto-triggered gc on the farhelm repo
+  itself when spawning a session — the user was actively waiting, which is exactly when auto-triggering is supposed to
+  be deferred. Investigate what ran gc during the spawn (likely a jj/git operation in the colocated checkout) and move
+  it to a moment when the user is not waiting.
 
 ## Doc todo
 
