@@ -321,6 +321,39 @@ that its required systemd or SSH substrate ran.
   `/usr/bin/python3` (the unusable host's stand-in). Linux only (the e2e suite), about three minutes; part of the
   workspace nextest run. Run it when Restart's host path, the host spawn, the runtime's seed, reload's host attribution
   or the superseded rule changes.
+- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'moving old sessions into terminal hosts' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(a_relaunch_into_a_host_writes_the_kind_and_an_abort_restores_tmux) | test(/^tmux::tests::pane_history_/) | test(/^host_migrations::/)'`
+  — a Restart that moves a tmux session's agent into a terminal host under the internal switch
+  (`crates/farhelm-supervisor/src/service/core/host_restart.rs`, "From a tmux pane"). The unit tests pin the store's
+  relaunch writing the new launch's kind with its generation and an abort restoring the tmux kind with the pane, and,
+  against a private tmux server, the history capture the seed is made from: the rows above the screen alone (never the
+  visible screen), styled, wrapped rows joined, at the pane's size; an empty history giving none, a capture over its
+  byte bound keeping the newest whole lines and saying it was cut, and a pane named under another session told apart
+  from a failed read and a capture out of time; a pane resized between its two reads read again at its new size, and one
+  resized on every read failing after three; only the newest rows asked for taken, starting from the default rendition
+  (a style set before them written again); a 5,000-column pane's history of short lines taken only as far as a seed's
+  restore budget at that width; and a capture seeded and restored as the move does it, keeping line drawing across a
+  line end, a wide character wrapped at the last column, a hyperlink on its first row only, and only the history part of
+  a row that wraps into the screen. The e2e tests (`crates/farhelm/tests/e2e/host_migrations.rs`) run in-process
+  supervisors on one state directory, the first with the switch off making the old session in the real private tmux
+  server and the next with it on, starting hosts from the built `farhelm` (an agent with distinct start and resume
+  commands that records each launch and the conversation it resumed): the move seeding the new host with the tmux pane's
+  history and nothing of its last screen, resuming the recorded conversation exactly once, the row becoming a running
+  host row, the old agent window removed while a tmux tab stays alive, listed first and typed into through a client's
+  attachment, a new tab opening as a host, and a takeover displacing a client's host agent, tmux tab and host tab
+  attachments together; a Restart with the switch off staying in tmux; a refused new host leaving the tmux session as it
+  was (row, pane, window and history), retried successfully; a history read that fails refusing the move with the tmux
+  session kept and listed as stopped, and the next supervisor moving it; a capture out of time tried again for fewer
+  rows, refused after a second timeout with the way out named, and moving the session when the retry finishes; a pane
+  resized past what a seed can hold moved without a seed and its old window kept; the old window's removal failing with
+  the move still succeeding; crashes right after the generation claim (no terminal, a later Restart starting empty, the
+  dead old window left to Delete), after the new host started and before the old window's removal (the new host adopted
+  and confirmed at the next start); a move whose row is deleted mid-launch ending its new host; an orderly stop during
+  the seed (held at a gate) refusing the move at once with the tmux row unchanged; a moved agent outliving its tmux
+  session when the last tmux tab closes (observed once the session's output client is reaped), through an observation
+  pass, a supervisor restart, Stop and Restart; and Clone and Replace of an old session, created from its own launch,
+  making host sessions. Needs the pinned tmux first on `PATH`. Linux only (the e2e suite), a few minutes; part of the
+  workspace nextest run. Run it when Restart's target choice, the tmux history capture, the store's relaunch kind or the
+  restart's host path changes.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'host terminals across supervisor restarts' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(/a_prompt_waits_for_a_recovered_host_terminal_to_catch_up|spare_claims_read_a_host_rows_own_host|a_stop_request_survives_a_restart|an_unreadable_launch_record_leaves_its_session_unavailable|an_orderly_stop_ends_its_encodes_before_its_runtime_drops|a_readoption_that_loses_its_fence|readoption_backs_off_without_spinning|a_scan_restricted_to_some_names|delete_settles_the_record_of_a_startup_placeholders_socket/) | test(/^host_restarts::/)'`
   — a restarted supervisor keeping its host terminals (`crates/farhelm-supervisor/src/service/core/host_handover.rs`):
   the orderly stop's checkpoints, reload finding each host row's host again, and re-adoption of hosts that were
@@ -501,9 +534,11 @@ that its required systemd or SSH substrate ran.
   trimmed; mutated and crafted blobs never panicking; extras shared by content through a restore, within the extra
   storage limit; the size ladder (titles before history); the trimmed mark across restores; an encode's cancel (nothing
   once it fires, the same bytes until then); the character width table's fingerprint; the Restart seeds, and a seed's
-  encode stopping at whichever look its cancel fires on. About a minute. Part of the workspace nextest run. Run it when
-  the crate or anything under `vendor/` changes. Ignored tests, run by hand in release: the snapshot spike's full
-  round-trip configuration
+  encode stopping at whichever look its cancel fires on, and a seed from a tmux pane's capture cut short marked trimmed,
+  its styles carried across line ends without a background filling the next row, its line drawing restored, its history
+  bounded by its restore budget (none at 10,000 by 400), and the history lines a seed holds reported. About a minute.
+  Part of the workspace nextest run. Run it when the crate or anything under `vendor/` changes. Ignored tests, run by
+  hand in release: the snapshot spike's full round-trip configuration
   (`cargo nextest run -p farhelm-terminal-emulator --release --run-ignored only -E 'test(/^full_size_round_trip_seed_/)'`,
   a few minutes), the review's 300,000 short scripts (`-E 'test(short_scripts_round_trip_at_review_size)'`) and 230,000
   hostile blobs (`-E 'test(hostile_blobs_never_panic_at_review_size)'`), the full round trip over private recordings of

@@ -92,6 +92,8 @@ mod tcp_relays;
 #[cfg(target_os = "linux")]
 mod host_creates;
 #[cfg(target_os = "linux")]
+mod host_migrations;
+#[cfg(target_os = "linux")]
 mod host_processes;
 #[cfg(target_os = "linux")]
 mod host_reclaim;

@@ -811,17 +811,33 @@ pub struct PriorRun {
     /// Finality proof for the prior external run, restored only when the
     /// failed restart provably started nothing outside the database.
     pub launch_boot_ended: bool,
+    /// The kind of terminal the previous run's `pane` names
+    /// ([`StoredSession::terminal_kind`]). Restored with the pane: a Restart
+    /// that moves an old tmux session into a terminal host writes the host
+    /// kind as it opens the generation, and a definitive failure of that
+    /// move must leave the row naming its tmux pane as a tmux row again.
+    pub terminal_kind: TerminalKind,
 }
 
 /// The columns [`SessionStore::begin_relaunch`] reads before deciding
 /// whether it may open a new generation: the outcome quartet, the pane,
 /// the current generation, the captured conversation, the current launch's
-/// scope selection, ownership provenance and boot-finality proof — in that order.
+/// scope selection, ownership provenance, boot-finality proof and terminal
+/// kind — in that order.
 ///
 /// Named only because the tuple is wide enough that clippy (rightly) asks
 /// for it; it has exactly one producer and one consumer, both inside that
 /// function's transaction.
-type RelaunchBasisColumns = (OutcomeColumns, String, i64, Option<String>, i64, i64, i64);
+type RelaunchBasisColumns = (
+    OutcomeColumns,
+    String,
+    i64,
+    Option<String>,
+    i64,
+    i64,
+    i64,
+    String,
+);
 
 /// The columns [`SessionStore::restart_pending_launch`] reads inside its
 /// transaction: the outcome state, the pane, `created_at`, the title, the
@@ -1275,15 +1291,15 @@ pub struct StoredSession {
     /// Whether the agent terminal this row describes is a tmux pane or a
     /// terminal host. Rows from before schema 32 are [`TerminalKind::Tmux`].
     ///
-    /// Written when the row is inserted, never at confirm, so a crash before
-    /// the launch is confirmed is reconciled against the right kind. A
-    /// relaunch keeps it today, which holds only until Restart can move an
-    /// old tmux session into a terminal host (step 7 of the terminal-host
-    /// goal). From then the relaunch must write the new launch's kind when it
-    /// opens the generation, save the prior kind with the rest of
-    /// [`PriorRun`], and [`SessionStore::abort_relaunch`] must restore it
-    /// together with the pane, so a restored pane is read the way it was
-    /// written.
+    /// Written with the launching row of the launch that starts the
+    /// terminal, never at confirm, so a crash before the launch is confirmed
+    /// is reconciled against the right kind: when the row is inserted for a
+    /// create, and when a relaunch opens its generation
+    /// ([`SessionStore::begin_relaunch_named`]), which is where a Restart
+    /// moves an old tmux session into a terminal host. The relaunch saves
+    /// the prior kind with the rest of [`PriorRun`], and
+    /// [`SessionStore::abort_relaunch`] restores it together with the pane,
+    /// so a restored pane is read the way it was written.
     pub terminal_kind: TerminalKind,
     /// The last transition the supervisor witnessed for this session.
     pub outcome: LastOutcome,
@@ -4187,13 +4203,12 @@ impl SessionStore {
     ///   alone;
     /// - the exit code and the error detail go for the same reason;
     /// - the pane is emptied, because the relaunch has not confirmed one
-    ///   yet. `terminal_kind` is KEPT for now, so the pane an abort restores
-    ///   is read as it was written. That holds only while every relaunch
-    ///   stays in the same kind of terminal: once Restart can move an old
-    ///   tmux session into a terminal host (step 7 of the terminal-host
-    ///   goal), this call must write the new kind, [`PriorRun`] must carry
-    ///   the old one, and the abort must restore it with the pane
-    ///   ([`StoredSession::terminal_kind`]).
+    ///   yet. `terminal_kind` is KEPT: this spelling relaunches in the kind
+    ///   the row already records. [`Self::begin_relaunch_named`] can write
+    ///   another, for a Restart that moves an old tmux session into a
+    ///   terminal host; the prior kind is returned in [`PriorRun`] either
+    ///   way, and an abort restores it with the pane, so the pane it puts
+    ///   back is read as it was written ([`StoredSession::terminal_kind`]).
     /// - boot-finality proof clears because a new shim can write. A definitive
     ///   abort restores that proof with the prior external run's facts.
     /// - Codex's process pin clears: it authorizes one launch's reports, not
@@ -4223,7 +4238,7 @@ impl SessionStore {
         basis: OfferBasis,
         scope_available: bool,
     ) -> anyhow::Result<RelaunchDecision> {
-        self.begin_relaunch_named(id, basis, scope_available, false)
+        self.begin_relaunch_named(id, basis, scope_available, false, None)
             .await
     }
 
@@ -4232,14 +4247,26 @@ impl SessionStore {
     /// Named Goose starts cannot report a replacement. Clear inside this same
     /// transaction so reload cannot advertise the prior conversation, and keep
     /// its old columns only for the existing definitive-abort restoration.
+    ///
+    /// `kind`, when given, is the kind of terminal the new launch starts in,
+    /// written in the same transaction as the generation (`None` keeps the
+    /// row's). A Restart that moves an old tmux session into a terminal host
+    /// passes [`TerminalKind::Host`] here rather than at its confirmation, for
+    /// the reason a create writes its kind with its launching row: from the
+    /// moment the generation is open a host may start for it, and a
+    /// supervisor that dies before the confirmation must look for that
+    /// launch where it ran, by its host's tag, not for a tmux pane. The
+    /// previous kind rides in [`PriorRun`] for an abort to restore.
     pub async fn begin_relaunch_named(
         &self,
         id: &str,
         basis: OfferBasis,
         scope_available: bool,
         clear_capture: bool,
+        kind: Option<TerminalKind>,
     ) -> anyhow::Result<RelaunchDecision> {
         let id = id.to_string();
+        let kind = kind.map(TerminalKind::column);
         self.conn
             .call(
                 "relaunch generation task panicked",
@@ -4251,7 +4278,7 @@ impl SessionStore {
                         .query_row(
                             "SELECT outcome_state, exit_code, annotation, error_detail, pane, \
                      generation, captured_conversation, launch_scoped, \
-                     capture_ownership_version, launch_boot_ended \
+                     capture_ownership_version, launch_boot_ended, terminal_kind \
                      FROM sessions WHERE id = ?1",
                             rusqlite::params![id],
                             |r| {
@@ -4263,6 +4290,7 @@ impl SessionStore {
                                     r.get(7)?,
                                     r.get(8)?,
                                     r.get(9)?,
+                                    r.get(10)?,
                                 ))
                             },
                         )
@@ -4276,6 +4304,7 @@ impl SessionStore {
                         scoped,
                         capture_ownership_version,
                         launch_boot_ended,
+                        prior_kind,
                     )) = current
                     else {
                         return Ok(RelaunchDecision::Gone);
@@ -4300,6 +4329,8 @@ impl SessionStore {
                         pane,
                         scoped: scoped != 0,
                         launch_boot_ended: launch_boot_ended != 0,
+                        terminal_kind: TerminalKind::from_column(&prior_kind)
+                            .with_context(|| format!("session {id}"))?,
                     };
                     let generation = generation + 1;
                     let (state, exit_code, annotation, error_detail) =
@@ -4314,7 +4345,7 @@ impl SessionStore {
                         "UPDATE sessions SET outcome_state = ?2, exit_code = ?3, annotation = ?4, \
                  error_detail = ?5, pane = '', generation = ?6, launch_scoped = ?7, \
                  omp_reporter_asset = NULL, omp_launch_program = NULL, launch_hooked = 0, launch_boot_ended = 0, \
-                 codex_report_pin = NULL \
+                 codex_report_pin = NULL, terminal_kind = COALESCE(?8, terminal_kind) \
                  WHERE id = ?1",
                         rusqlite::params![
                             id,
@@ -4324,6 +4355,7 @@ impl SessionStore {
                             error_detail,
                             generation,
                             i64::from(scope_available),
+                            kind,
                         ],
                     )
                     .context("opening a new launch generation for a restart")?;
@@ -4366,8 +4398,9 @@ impl SessionStore {
     /// restores the capture columns it withdrew, alongside the prior outcome.
     /// The Codex reporting-process pin, OMP reporter asset and launch program stay cleared: they
     /// authorize one launch, not the conversation, so a later launch must
-    /// establish its own pair. The outcome, pane, and scope selection describe
-    /// the prior run; they and its boot-finality proof are restored together.
+    /// establish its own pair. The outcome, pane, terminal kind and scope
+    /// selection describe the prior run; they and its boot-finality proof are
+    /// restored together.
     ///
     /// The generation itself is deliberately NOT rolled back — it is monotonic,
     /// and a reused number is exactly what would let a stale sentinel or a
@@ -4390,6 +4423,7 @@ impl SessionStore {
             error_detail.map(str::to_string),
         );
         let pane = prior.pane.clone();
+        let kind = prior.terminal_kind.column();
         let scoped = i64::from(prior.scoped);
         let launch_boot_ended = i64::from(prior.launch_boot_ended);
         let cleared_capture = prior.cleared_capture.clone();
@@ -4403,7 +4437,8 @@ impl SessionStore {
                      error_detail = ?5, pane = ?6, launch_scoped = ?8, launch_boot_ended = ?9, \
                      captured_conversation = CASE WHEN ?10 THEN ?11 ELSE captured_conversation END, \
                      conversation_source = CASE WHEN ?10 THEN ?12 ELSE conversation_source END, \
-                     capture_ownership_version = CASE WHEN ?10 THEN ?13 ELSE capture_ownership_version END \
+                     capture_ownership_version = CASE WHEN ?10 THEN ?13 ELSE capture_ownership_version END, \
+                     terminal_kind = ?14 \
                      WHERE id = ?1 AND generation = ?7",
                     rusqlite::params![
                         id,
@@ -4419,6 +4454,7 @@ impl SessionStore {
                         cleared_capture.as_ref().and_then(|capture| capture.0.as_deref()),
                         cleared_capture.as_ref().and_then(|capture| capture.1.as_deref()),
                         cleared_capture.as_ref().map_or(0, |capture| capture.2),
+                        kind,
                     ],
                 )
                 .context("restoring the outcome a failed restart replaced")?;
@@ -7955,6 +7991,81 @@ mod tests {
         let restored = store.session("host-row").await.unwrap().unwrap();
         assert_eq!(restored.pane, "abcd2345");
         assert_eq!(restored.terminal_kind, TerminalKind::Host);
+    }
+
+    /// A relaunch that moves a tmux row into a terminal host writes the host
+    /// kind with its generation, and an abort puts the tmux kind back with
+    /// the tmux pane.
+    ///
+    /// Why: a Restart of an old tmux session under the terminal-host switch
+    /// starts its new launch in a host, and from the generation claim on a
+    /// supervisor that dies must look for that launch by its host's tag, so
+    /// the kind cannot wait for the confirmation; but a move that fails
+    /// definitively restores the tmux pane, which a host row would read as a
+    /// socket name. Specified: a running tmux row with pane `%7`, relaunched
+    /// with `Some(Host)`, reads as a host row with an empty pane at the next
+    /// generation, and its claim's prior run says tmux; aborting restores
+    /// `%7` under the tmux kind. A relaunch with `None` keeps the kind.
+    #[farhelm_testtrace::test]
+    async fn a_relaunch_into_a_host_writes_the_kind_and_an_abort_restores_tmux() {
+        let (_dir, store) = fresh_store().await;
+        let mut row = launching_row("moving");
+        row.pane = "%7".to_string();
+        row.outcome = LastOutcome::Running;
+        store.insert_session(row, None).await.unwrap();
+        let basis = || OfferBasis {
+            captured_conversation: None,
+            capture_ownership_version: 0,
+        };
+
+        let RelaunchDecision::Claimed(claim) = store
+            .begin_relaunch_named("moving", basis(), false, false, Some(TerminalKind::Host))
+            .await
+            .unwrap()
+        else {
+            panic!("the relaunch must be claimed");
+        };
+        assert_eq!(claim.prior.terminal_kind, TerminalKind::Tmux);
+        assert_eq!(claim.prior.pane, "%7");
+        let moving = store.session("moving").await.unwrap().unwrap();
+        assert_eq!(
+            (
+                moving.terminal_kind,
+                moving.pane.as_str(),
+                moving.generation
+            ),
+            (TerminalKind::Host, "", claim.generation)
+        );
+
+        assert!(
+            store
+                .abort_relaunch("moving", claim.generation, &claim.prior)
+                .await
+                .unwrap()
+        );
+        let restored = store.session("moving").await.unwrap().unwrap();
+        assert_eq!(
+            (restored.terminal_kind, restored.pane.as_str()),
+            (TerminalKind::Tmux, "%7")
+        );
+
+        let RelaunchDecision::Claimed(_) = store
+            .begin_relaunch_named("moving", basis(), false, false, None)
+            .await
+            .unwrap()
+        else {
+            panic!("the relaunch must be claimed");
+        };
+        assert_eq!(
+            store
+                .session("moving")
+                .await
+                .unwrap()
+                .unwrap()
+                .terminal_kind,
+            TerminalKind::Tmux,
+            "no kind keeps the row's"
+        );
     }
 
     /// The `CHECK` keeps the kind to the two values this build can act on,
@@ -14384,6 +14495,7 @@ mod tests {
                     },
                     false,
                     true,
+                    None,
                 )
                 .await
                 .unwrap(),

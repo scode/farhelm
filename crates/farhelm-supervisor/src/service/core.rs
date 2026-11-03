@@ -44,7 +44,7 @@ pub(crate) use host_tabs::{
 /// Restarting a host agent into a new terminal host that keeps the old
 /// one's history (see its own docs).
 mod host_restart;
-pub use host_restart::{HostRestartFault, HostRestartStage};
+pub use host_restart::{HostRestartFault, HostRestartStage, TmuxSeedFault};
 
 /// The startup reclaim of orphaned terminal hosts: ending the hosts whose
 /// tags name sessions and tabs nothing in the state directory knows, and
@@ -922,6 +922,18 @@ fault_hooks! {
     reclaim_discovery_gate: ReclaimDiscoveryGate,
     /// See [`ReclaimListingFault`]. `None` in production.
     reclaim_listing_fault: ReclaimListingFault,
+    /// Awaited by a Restart that moves a tmux session into a terminal host,
+    /// before it reads the tmux pane's history for the new host's seed
+    /// (`host_restart`, "From a tmux pane"), so a test can begin an orderly
+    /// stop while the seed is being made and show that the stop refuses the
+    /// Restart rather than wait for it. `None` in production.
+    tmux_seed_gate: SinkReservationGate,
+    /// Called by a Restart that moves a tmux session into a terminal host
+    /// in place of each attempt to read the tmux pane's history; an error is
+    /// handled as that failure of the read would be (`host_restart`,
+    /// "tmux_restart_seed"), and `Ok` lets the real read run. `None` in
+    /// production.
+    tmux_seed_fault: Arc<dyn Fn() -> Result<(), host_restart::TmuxSeedFault> + Send + Sync>,
 }
 
 /// The injectable seams a `Supervisor` is built with. All default to
@@ -1117,9 +1129,10 @@ pub struct SupervisorSeams {
     /// takes (and [`Supervisor::new`], which delegates to it), sets
     /// [`STATE_DIR_CLAIM_WAIT`].
     pub state_dir_claim_wait: Duration,
-    /// Which kind of terminal a create starts its agent in, and a new tab
-    /// opens in: a pane in the private tmux server, or a terminal host of
-    /// its own ([`NewTerminals`]).
+    /// Which kind of terminal a create starts its agent in, a new tab opens
+    /// in, and a Restart of a tmux session moves its agent into: a pane in
+    /// the private tmux server, or a terminal host of its own
+    /// ([`NewTerminals`]).
     ///
     /// The switch terminal hosts land behind, off ([`NewTerminals::Tmux`])
     /// by default. This field is the one place a running supervisor keeps
@@ -1154,16 +1167,17 @@ pub struct SupervisorSeams {
 /// media harnesses that keep using tmux, and "new terminals: tmux" reads as
 /// what it does then too.
 ///
-/// A new create and a new tab consult it; a retried create launches in the
-/// kind its launching row already records, and so does a Restart, whatever
-/// this says then. A terminal never changes kind while it lives, and nothing
-/// here moves one: a Restart of a tmux session stays in tmux under either
-/// setting until Restart learns to move a session into a host (the plan's
-/// D-23), and a Restart of a host agent starts a new host (`host_restart`).
-/// Under `Host` every new tab is a host, beside a tmux agent too (a mixed
-/// session, whose old tmux tabs stay where they are); under `Tmux` a host
-/// agent's session cannot get a tab, since it has no tmux session to open
-/// one in.
+/// A new create, a new tab and a Restart consult it; a retried create
+/// launches in the kind its launching row already records, whatever this
+/// says then. A terminal never changes kind while it lives: a Restart starts
+/// a new one. Under `Host` a Restart of a tmux session starts its new launch
+/// in a host, which is how an old session moves to a new terminal
+/// (`host_restart`, "From a tmux pane"), and under `Tmux` it stays in tmux
+/// exactly as before; a Restart of a host agent starts a new host under
+/// either. Under `Host` every new tab is a host, beside a tmux agent too (a
+/// mixed session, whose old tmux tabs stay where they are); under `Tmux` a
+/// host agent's session cannot get a tab, since it has no tmux session to
+/// open one in.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum NewTerminals {
     /// A pane in the supervisor's private tmux server, as every terminal was
@@ -4200,9 +4214,15 @@ struct RelaunchPlan {
     argv: Vec<String>,
     launch_cwd: String,
     terminal_survives: bool,
+    /// Whether the new launch starts in a terminal host: always for a host
+    /// row, and for a tmux row when the internal switch is on, which moves
+    /// the session to a new terminal (`host_restart`, "From a tmux pane").
+    /// The generation claim writes the matching kind into the row.
+    into_host: bool,
     restart_with: Option<RestartWithBundle>,
-    /// A host agent's history seed for its new host, read before the
-    /// generation was claimed; `None` for tmux and a terminal-less host row.
+    /// The new host's history seed, read from the old host or the old tmux
+    /// pane before the generation was claimed; `None` for a launch that
+    /// stays in tmux, and for a restart with no old terminal to read.
     seed: Option<host_restart::RestartSeed>,
 }
 
@@ -5044,6 +5064,14 @@ pub struct Supervisor {
     /// and the re-adoption task returns. So every runtime in the map when
     /// the stop gathers is one the stop closes, and none is added after.
     pub(crate) stopping: std::sync::atomic::AtomicBool,
+    /// Woken (`notify_waiters`) right after [`Self::stopping`] is set, for
+    /// work that must give up as an orderly stop begins rather than poll the
+    /// flag: a Restart's seed from a tmux pane, which runs on the blocking
+    /// pool with no runtime of its own for the stop to cancel
+    /// (`host_restart`, "From a tmux pane"). A waiter enables its
+    /// `notified()` before it reads the flag, so a stop between the two is
+    /// never missed.
+    pub(crate) stop_began: tokio::sync::Notify,
     /// Launches in the versioned layout between starting their tmux window
     /// and being added to [`Self::pending_holds`] (or failing). The shutdown
     /// wait keeps going while any are in flight, so a window created just as
@@ -6442,6 +6470,7 @@ impl Supervisor {
             gone_hosts,
             readoption_wake: Arc::new(tokio::sync::Notify::new()),
             stopping: std::sync::atomic::AtomicBool::new(false),
+            stop_began: tokio::sync::Notify::new(),
             starting_launches: Default::default(),
             launches_closed: Default::default(),
             session_farhelm_exe,
@@ -12861,8 +12890,7 @@ impl Supervisor {
         // running in such a host is rooted into the stop (or the leftover
         // reap) below, before the new launch (`host_restart`,
         // "settle_outstanding_launches"). Refused when one cannot be settled,
-        // with nothing stopped. Only a host agent's launches start hosts, so
-        // a tmux session has none to settle.
+        // with nothing stopped.
         let host_agent = match &entry.terminal {
             Some(Terminal::Host(_)) => true,
             Some(Terminal::Tmux(_)) => false,
@@ -12872,7 +12900,14 @@ impl Supervisor {
                 .await?
                 .is_some_and(|row| row.terminal_kind == TerminalKind::Host),
         };
-        let outstanding = if host_agent {
+        // Where the new launch goes: a host agent stays in hosts, and with
+        // the switch on a tmux session moves into one (`host_restart`, "From
+        // a tmux pane"; `Self::new_terminals` is the one reading of the
+        // switch). A tmux session that moves is settled too: a host
+        // start an earlier move left (one that failed definitively keeps
+        // the row tmux) would otherwise go unseen.
+        let into_host = host_agent || self.new_terminals() == NewTerminals::Host;
+        let outstanding = if into_host {
             self.settle_outstanding_launches(session_id, entry.terminal.as_ref())
                 .await?
         } else {
@@ -12948,12 +12983,18 @@ impl Supervisor {
             .context("reaping the prior run's leftover descendants before relaunching")?;
         }
 
-        // A host agent's new host starts from the old one's history, read
-        // here, before the generation is claimed, so that a crash or an
-        // orderly stop while it is read leaves the session as it was
-        // (`host_restart`, "restart_seed").
+        // A new host starts from the old terminal's history, read here,
+        // after the stop and before the generation is claimed, so that a
+        // crash or an orderly stop while it is read leaves the session as it
+        // was (`host_restart`, "restart_seed" and "tmux_restart_seed"). A
+        // tmux pane is read only while it is still this session's (the
+        // probe above owned it), dead or alive: a pane gone, or another
+        // session's now, has nothing of this session to keep.
         let seed = match entry.terminal.as_ref() {
             Some(Terminal::Host(old)) => Some(self.restart_seed(session_id, old).await?),
+            Some(Terminal::Tmux(old)) if into_host && pane_state.is_some() => {
+                Some(self.tmux_restart_seed(session_id, old).await?)
+            }
             Some(Terminal::Tmux(_)) | None => None,
         };
 
@@ -13025,6 +13066,7 @@ impl Supervisor {
                     argv,
                     launch_cwd,
                     terminal_survives,
+                    into_host,
                     restart_with,
                     seed,
                 },
@@ -13088,6 +13130,7 @@ impl Supervisor {
             argv,
             launch_cwd,
             terminal_survives,
+            into_host,
             restart_with,
             seed,
         } = plan;
@@ -13109,6 +13152,17 @@ impl Supervisor {
                 // previous run's answer is simply the wrong one.
                 self.scope_selected(&id).await,
                 clear_capture,
+                // A host launch's kind goes into the row with its generation,
+                // as a create's goes in with its launching row: from here on
+                // a host may start for it, and a supervisor that dies before
+                // the confirmation must look for it by its host's tag. For a
+                // tmux session that moves this is where the row becomes a
+                // host row; a definitive failure's abort makes it tmux again.
+                Some(if into_host {
+                    TerminalKind::Host
+                } else {
+                    TerminalKind::Tmux
+                }),
             )
             .await
             .context("opening a new launch generation for this restart")?;
@@ -13223,6 +13277,7 @@ impl Supervisor {
                     argv,
                     launch_cwd,
                     terminal_survives,
+                    into_host,
                     seed,
                 )
                 .await
@@ -13410,10 +13465,13 @@ impl Supervisor {
                 // terminals it closes (`Self::publishable`, as for a
                 // successful relaunch): the runtime was off the map while the
                 // stop gathered, so nothing else would close it.
+                // A launch that went to a host never ran in the old pane, so
+                // an ambiguous one leaves no terminal to name even when that
+                // pane survives (a tmux session that was moving into a host).
                 let terminal = if still_exists {
                     self.publishable(republished_terminal(
                         definitive,
-                        terminal_survives,
+                        terminal_survives && !into_host,
                         entry.terminal.clone(),
                     ))
                 } else {
@@ -13464,9 +13522,11 @@ impl Supervisor {
     /// The launch itself, once the generation is claimed and the session is
     /// off the map: publish this launch's spec, hand it to tmux (into the
     /// surviving pane, or a fresh session), confirm it durably, and
-    /// republish the entry. A host agent (a host terminal, or a host row with
-    /// none) goes to a new terminal host instead
-    /// ([`Supervisor::relaunch_into_host`]).
+    /// republish the entry. With `into_host` (a host agent, or a tmux
+    /// session the internal switch moves to a new terminal) it goes to a new
+    /// terminal host instead ([`Supervisor::relaunch_into_host`]), replacing
+    /// the old host, or the old tmux agent window when `terminal_survives`
+    /// says its pane is still this session's.
     ///
     /// `launch` and `snapshot` describe the selected execution, including
     /// Restart with's replacement before it is durably published. Reading
@@ -13501,6 +13561,7 @@ impl Supervisor {
         argv: Vec<String>,
         launch_cwd: String,
         terminal_survives: bool,
+        into_host: bool,
         seed: Option<host_restart::RestartSeed>,
     ) -> Result<SessionInfo, RelaunchFailure> {
         let id = entry.info.id.clone();
@@ -13518,26 +13579,49 @@ impl Supervisor {
         })?;
         // Every target below is tmux's: the surviving pane, a replacement
         // window beside the session's tabs, or a fresh tmux session. A host
-        // agent restarts into a new host instead (its host runs one child),
-        // and a relaunch keeps the row's kind, so a host row goes there
-        // whether or not its session still holds the old host's runtime.
+        // launch goes to a new host instead (a host runs one child): a host
+        // agent's, whether or not its session still holds the old host's
+        // runtime, and, with the switch on, a tmux session's, whose old tabs
+        // stay in its tmux session while only the agent window goes. An
+        // existing tmux session must not pull such a launch into a window
+        // beside its tabs (the inventory's old-to-new rows). This is the one
+        // route into a host. The old agent window goes once the new launch
+        // is published only when the new host starts with its history: a
+        // seed read without history (the pane not this session's any more,
+        // or too large to seed) leaves the window, which may hold the only
+        // copy, for the session's Delete.
+        if into_host {
+            let replacing = match terminal {
+                Some(Terminal::Host(old)) => host_restart::Replacing::Host(old),
+                Some(Terminal::Tmux(old))
+                    if terminal_survives
+                        && seed
+                            .as_ref()
+                            .is_some_and(host_restart::RestartSeed::holds_history) =>
+                {
+                    host_restart::Replacing::TmuxWindow(old)
+                }
+                Some(Terminal::Tmux(_)) | None => host_restart::Replacing::Nothing,
+            };
+            return self
+                .relaunch_into_host(
+                    entry, replacing, launch, snapshot, generation, scope, argv, launch_cwd, tabs,
+                    seed,
+                )
+                .await;
+        }
+        // A host agent always sets `into_host` (`restart_session_named`,
+        // under the same claim), so a host terminal here is a bug; refused
+        // definitively, since nothing was started, rather than relaunched in
+        // tmux, which would leave a host row naming a tmux pane.
         let terminal = match terminal {
             Some(Terminal::Tmux(terminal)) => Some(terminal),
-            Some(Terminal::Host(old)) => {
-                return self
-                    .relaunch_into_host(
-                        entry,
-                        Some(old),
-                        launch,
-                        snapshot,
-                        generation,
-                        scope,
-                        argv,
-                        launch_cwd,
-                        tabs,
-                        seed,
-                    )
-                    .await;
+            Some(Terminal::Host(_)) => {
+                return Err(RelaunchFailure::definitive(anyhow::anyhow!(
+                    "session {} has its agent in a terminal host, but its relaunch was not \
+                     routed to one; nothing was relaunched",
+                    truncate_for_error(&id)
+                )));
             }
             None => None,
         };
@@ -13549,20 +13633,10 @@ impl Supervisor {
             // (create reservations reconcile against exactly this string)
             // and a relaunch is the same session, not a new one.
             //
-            // A host row with no terminal (its host was found gone, or a
-            // create was kept as a launching record) restarts in a new,
-            // empty host: relaunching it in tmux would leave a host row
-            // whose `pane` holds a tmux pane id, which every later reader
-            // would look for as a host's socket.
+            // The row is a tmux row: the claim wrote `tmux` for a launch
+            // that is not `into_host`, and a host row with no terminal is
+            // `into_host` (`restart_session_named`).
             None => match self.store.session(&id).await {
-                Ok(Some(row)) if row.terminal_kind == TerminalKind::Host => {
-                    return self
-                        .relaunch_into_host(
-                            entry, None, launch, snapshot, generation, scope, argv, launch_cwd,
-                            tabs, None,
-                        )
-                        .await;
-                }
                 Ok(Some(row)) => row.tmux_name,
                 Ok(None) => {
                     return Err(RelaunchFailure::definitive(anyhow::anyhow!(
@@ -40412,6 +40486,7 @@ exit 0
                     argv: vec!["sh".into(), "-c".into(), "exit 0".into()],
                     launch_cwd: "/tmp".into(),
                     terminal_survives: false,
+                    into_host: false,
                     restart_with: None,
                     seed: None,
                 },
