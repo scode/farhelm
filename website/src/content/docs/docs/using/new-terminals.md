@@ -3,25 +3,13 @@ title: Move sessions to new terminals
 description: Why Farhelm's terminals no longer run in tmux, what that means for sessions you already have, and how to move them.
 sidebar:
   order: 11
-# A draft until the release that turns new terminals on, which describes the world after it: production builds leave
-# drafts out. That release:
-# - removes `draft: true`;
-# - adds a link here from "Session details and actions" in work-in-a-session.mdx (the bar under the terminal now names
-#   terminal kinds);
-# - corrects the published pages that say every session runs in tmux: get-started/install.md, "If the installer asks
-#   for tmux" ("Farhelm runs every session inside tmux"), and agents/agent-wrappers.md ("tmux starts the pane's login
-#   shell");
-# - checks this page against what shipped: the known gaps against TODO.md's near-term entries, the tmux paragraph
-#   against what the installer and host setup do then, and the remark on remote hosts with an older supervisor against
-#   how those hosts are handled.
-draft: true
 ---
 
 Farhelm has changed how it runs your sessions' terminals. Until now, every session's terminal, and every shell tab
 beside it, ran inside tmux on its host. New terminals run without tmux: each one runs in a small Farhelm process of its
 own on the host, which keeps it going while the host's [supervisor](/docs/how-it-works/the-pieces/) restarts or updates.
-A host makes new terminals once its supervisor is a version that does; a remote host still on an older one keeps making
-old terminals until you [update it](/docs/using/manage-hosts/#update-a-host).
+A remote host makes new terminals once you [update it](/docs/using/manage-hosts/#update-a-host); until then Farhelm
+shows it as needing an update.
 
 Sessions you already have keep their old terminals and keep working as they always have. Nothing is moved for you,
 because moving a session's agent means starting it again. You move each session when it suits you.

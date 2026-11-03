@@ -484,7 +484,7 @@ impl CheckoutStack {
         let markers = farhelm_teststate::tempdir().expect("checkout markers");
         let inherited_git_environment = std::env::vars_os()
             .filter_map(|(key, _)| key.to_string_lossy().starts_with("GIT_").then_some(key));
-        let supervisor = supervisor_process_with_env_removed(
+        let supervisor = supervisor_process_tmux_with_env_removed(
             [
                 ("HOME", home.into_os_string()),
                 ("SHELL", fake.bash_shell()),

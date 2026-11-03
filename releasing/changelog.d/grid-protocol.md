@@ -9,5 +9,4 @@ update** until that host is updated.
 
 For the curator: this is the helm-supervisor protocol bump (67 to 68) for the coming terminals that do not run in tmux
 (grid streams). Releases that share a protocol version keep working together, so later releases on 68 need no such
-caveat. Nothing else changes for users yet; the change that turns those terminals on amends this fragment with what
-users see.
+caveat. What users see of those terminals is `terminal-hosts-on.md`'s entry, which repeats this caveat; keep it once.

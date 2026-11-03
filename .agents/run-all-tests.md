@@ -158,9 +158,11 @@ The workspace nextest selection includes Linux `containerized_sessions` coverage
 and report its explicit SKIPPED output as missing coverage, not a runtime pass.
 
 The opt-in `DESKTOP_SMOKE_APPEARANCE=1 scripts/desktop-smoke.sh` checks four native fresh/stored dark/light cases:
-startup palette, ordinary Settings choices, private-profile persistence, fonts and same-attachment terminal input. It
-retains JSON and one final client image per case. Normal appshots supply visual review; DOM observations do not prove
-transient paint correctness. This is not an extra default battery. See `.agents/validation.md` for coverage.
+startup palette, ordinary Settings choices, private-profile persistence, fonts and same-attachment terminal input. Its
+terminal checks read xterm.js, so on the grid terminals of the terminal-host sessions the app now creates they are
+skipped (recorded in the evidence) and the rest of the leg runs; TODO.md has the migration. It retains JSON and one
+final client image per case. Normal appshots supply visual review; DOM observations do not prove transient paint
+correctness. This is not an extra default battery. See `.agents/validation.md` for coverage.
 
 The separate `DESKTOP_SMOKE_APPEARANCE=no-initialize scripts/desktop-smoke.sh` leg exercises one fixed
 missing-initialize fault through the same builds and owned display. It observes the hidden native creation deadline,

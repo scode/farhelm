@@ -179,12 +179,13 @@ export default defineConfig({
       [STACK_PORT_ENV]: String(stack.port),
       [STACK_INFO_ENV]: stack.stackInfoPath,
       [AUTH_STATE_ENV]: stack.authStatePath,
-      // Pinned ("pass nothing" by default): Playwright merges its own
-      // environment into this, and a FARHELM_E2E_NEW_TERMINALS exported for
-      // the host-terminal config (host-terminals/playwright.config.ts) must
-      // not turn terminal hosts on for every spec of this suite, which runs
-      // against the supervisor's default. Only this suite's own switch
-      // (`SUITE_TERMINALS_ENV`, above) turns them on.
+      // Pinned: Playwright merges its own environment into this, and a
+      // FARHELM_E2E_NEW_TERMINALS exported for the host-terminal config
+      // (host-terminals/playwright.config.ts) must not decide this suite's
+      // terminals. Only this suite's own switch (`SUITE_TERMINALS_ENV`,
+      // above) turns terminal hosts on; otherwise it is empty, which
+      // start-stack.sh reads as `tmux`, since this suite's specs were written
+      // against tmux terminals although a bare supervisor now creates hosts.
       FARHELM_E2E_NEW_TERMINALS: onHostTerminals ? "host" : "",
     },
     // The API correctly answers 401 before global setup has exchanged the

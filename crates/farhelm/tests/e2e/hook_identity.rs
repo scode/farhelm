@@ -2226,7 +2226,7 @@ async fn claude_hook_command_carries_announce(supervisor: &SupervisorProcess) ->
 #[farhelm_testtrace::test]
 async fn farhelm_agent_instructions_off_suppresses_announce_through_the_real_cli() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
-    let supervisor = supervisor_process_with_env([
+    let supervisor = supervisor_process_tmux_with_env([
         (
             "FARHELM_AGENT_INSTRUCTIONS",
             std::ffi::OsString::from("off"),
@@ -2262,7 +2262,7 @@ async fn farhelm_agent_instructions_non_utf8_falls_back_to_default_through_the_r
 
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let malformed = std::ffi::OsString::from_vec(vec![0xff, 0xfe]);
-    let supervisor = supervisor_process_with_env([
+    let supervisor = supervisor_process_tmux_with_env([
         ("FARHELM_AGENT_INSTRUCTIONS", malformed),
         // See the sibling test above: pinned so a suite run under
         // `FARHELM_AGENT_HOOKS=none` cannot fail this assertion for a

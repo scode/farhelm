@@ -11081,12 +11081,75 @@ mod tests {
         unit_path: PathBuf,
         state_dir: PathBuf,
         cleaned: bool,
+        /// Set when ending the fixture's terminal hosts could not be
+        /// confirmed, so that a [`FixtureRoot`] sharing it keeps the state
+        /// (the hosts' sockets and the supervisor's log) instead of deleting
+        /// the only evidence of a host that may still run.
+        keep_root: Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    /// A fixture's temporary root that is kept, and named on stderr, rather
+    /// than removed when its [`UnitGuard`] could not confirm that the
+    /// terminal hosts it held have ended. Removed on drop otherwise, as the
+    /// plain temporary directory it wraps would be.
+    struct FixtureRoot {
+        dir: Option<tempfile::TempDir>,
+        keep: Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl FixtureRoot {
+        fn new() -> Self {
+            Self {
+                dir: Some(tempfile::tempdir().expect("isolated provisioning root")),
+                keep: Arc::default(),
+            }
+        }
+
+        fn path(&self) -> &Path {
+            self.dir.as_ref().expect("held until drop").path()
+        }
+
+        /// The flag a [`UnitGuard`] sets to keep this root.
+        fn keep_flag(&self) -> Arc<std::sync::atomic::AtomicBool> {
+            self.keep.clone()
+        }
+    }
+
+    impl Drop for FixtureRoot {
+        fn drop(&mut self) {
+            if self.keep.load(std::sync::atomic::Ordering::SeqCst)
+                && let Some(dir) = self.dir.take()
+            {
+                eprintln!(
+                    "provisioning fixture root kept for diagnosis, since ending its terminal hosts was not \
+                     confirmed: {}",
+                    dir.keep().display()
+                );
+            }
+        }
     }
 
     impl UnitGuard {
         /// Finish teardown only after every fixture-owned resource is proven
         /// absent; callers must surface failure instead of trusting Drop.
         fn cleanup(&mut self) -> anyhow::Result<()> {
+            // The provisioned supervisor runs the bare `supervisor run`, so its
+            // sessions run in terminal hosts, which live in the unit's control
+            // group and outlive its main process (`KillMode=process`):
+            // stopping the unit alone leaves them running. End everything in
+            // the group first; a unit that is not loaded has nothing to end.
+            let _ = std::process::Command::new("systemctl")
+                .args([
+                    "--user",
+                    "kill",
+                    "--kill-whom=all",
+                    "--signal=SIGTERM",
+                    "--",
+                    &self.unit,
+                ])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
             let disable = std::process::Command::new("systemctl")
                 .args(["--user", "--runtime", "disable", "--now", "--", &self.unit])
                 .output()
@@ -11156,9 +11219,86 @@ mod tests {
                     tmux_alive.success()
                 );
             }
+            // Whatever the unit's control group no longer reaches: a unit
+            // the uninstall already removed and forgot leaves no group to
+            // signal, and a host whose stop failed would outlive it.
+            let ended = end_fixture_hosts(&self.state_dir)
+                .and_then(|()| wait_no_listening_host_sockets(&self.state_dir));
+            if let Err(error) = ended {
+                self.keep_root
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+                return Err(error).context("nonce teardown verification failed");
+            }
             self.cleaned = true;
             Ok(())
         }
+    }
+
+    /// End every terminal host still listening under `state_dir`'s
+    /// `hosts/`, without relying on the provisioned unit still existing, and
+    /// report every host whose end could not be confirmed.
+    ///
+    /// The unit-wide kill reaches hosts only while systemd still knows the
+    /// unit; once an uninstall has removed and forgotten it, a host its stop
+    /// missed keeps running with nothing left to end it, and this fixture's
+    /// state is a plain temporary directory no harness sweep looks at. So:
+    /// first the supervisor's own stop of a state directory's hosts (the
+    /// command an uninstall runs), which needs their socket files; then, for
+    /// every listener the kernel still lists under that path (its file may be
+    /// gone), the process found by its command line naming that socket
+    /// (within the bounded search the supervisor itself uses), ended by the
+    /// verified signal, which re-checks the process's identity and command
+    /// line before each signal. Every remaining host is tried before the
+    /// failures are reported together. Runs on a thread of its own with a
+    /// runtime of its own, since its callers include `Drop` and code already
+    /// inside a test's runtime; that runtime is shut down without waiting for
+    /// a process-table walk the search gave up on, as `farhelm`'s own command
+    /// does, so a stuck walk costs a thread, never the teardown.
+    fn end_fixture_hosts(state_dir: &Path) -> anyhow::Result<()> {
+        use farhelm_supervisor::hosts::process::{
+            PROCESS_SEARCH_DEADLINE, find_socket_process, terminate_verified,
+        };
+        let state_dir = state_dir.to_path_buf();
+        std::thread::spawn(move || -> anyhow::Result<()> {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .context("a runtime for ending the fixture's hosts")?;
+            let failures = runtime.block_on(async {
+                let _ = farhelm_supervisor::hosts::stop::stop_terminal_hosts(&state_dir).await;
+                let sockets = match listening_host_sockets(&state_dir) {
+                    Ok(sockets) => sockets,
+                    Err(error) => return vec![format!("{error:#}")],
+                };
+                let mut failures = Vec::new();
+                for socket in sockets {
+                    match find_socket_process(&socket, PROCESS_SEARCH_DEADLINE).await {
+                        Ok(Some(host)) => {
+                            if let Err(error) = terminate_verified(&host, &socket).await {
+                                failures.push(format!("{}: {error}", socket.display()));
+                            }
+                        }
+                        Ok(None) => failures.push(format!(
+                            "{}: still listening, and no process names it",
+                            socket.display()
+                        )),
+                        Err(why) => failures.push(format!("{}: {why}", socket.display())),
+                    }
+                }
+                failures
+            });
+            runtime.shutdown_background();
+            if failures.is_empty() {
+                Ok(())
+            } else {
+                bail!(
+                    "ending the fixture's terminal hosts was not confirmed: {}",
+                    failures.join("; ")
+                )
+            }
+        })
+        .join()
+        .map_err(|_| anyhow::anyhow!("the thread ending the fixture's hosts panicked"))?
     }
 
     /// Exercise an error return while the checked teardown guard is live.
@@ -11172,6 +11312,20 @@ mod tests {
             if self.cleaned {
                 return;
             }
+            // As in `cleanup`: the unit's terminal hosts first, which a stop
+            // of its main process leaves running.
+            let _ = std::process::Command::new("systemctl")
+                .args([
+                    "--user",
+                    "kill",
+                    "--kill-whom=all",
+                    "--signal=SIGTERM",
+                    "--",
+                    &self.unit,
+                ])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
             let _ = std::process::Command::new("systemctl")
                 .args(["--user", "--runtime", "disable", "--now", "--", &self.unit])
                 .stdout(Stdio::null())
@@ -11190,8 +11344,18 @@ mod tests {
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .status();
+            // Hosts the unit no longer reaches, then what still listens, said
+            // out loud: Drop cannot fail the test, and the fixture's root goes
+            // right after it, so a surviving host would otherwise go unseen.
+            let ended = end_fixture_hosts(&self.state_dir);
+            let still = listening_host_sockets(&self.state_dir);
+            if ended.is_err() || !still.as_ref().is_ok_and(Vec::is_empty) {
+                self.keep_root
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+            }
             eprintln!(
-                "provisioning test teardown fell back to Drop for nonce unit {}; explicit cleanup did not complete",
+                "provisioning test teardown fell back to Drop for nonce unit {}; explicit cleanup did not \
+                 complete; ending its terminal hosts: {ended:?}; still listening: {still:?}",
                 self.unit
             );
         }
@@ -11637,13 +11801,25 @@ mod tests {
         }
     }
 
-    /// Prove both halves of session survival: tmux still reports a live
-    /// process, and the post-restart supervisor can drive its terminal.
+    /// Prove both halves of session survival: the supervisor still reports a
+    /// live process, and the post-restart supervisor can drive its terminal.
     ///
     /// A reloaded supervisor deliberately reports `Unknown` until its ticker
     /// has sampled the pane. Wait for that readiness boundary rather than
     /// treating the provisional status as evidence that the session died.
-    async fn assert_session_operable(client: &crate::client::SupervisorClient, session_id: &str) {
+    ///
+    /// The terminal is driven the way the browser drives it, as a viewer that
+    /// can draw grids, and must answer with `expected`: a provisioned
+    /// supervisor runs the bare `farhelm supervisor run`, so its sessions run
+    /// in terminal hosts and stream as grids, where a tmux terminal would
+    /// stream bytes. Requiring the kind keeps these cases from quietly going
+    /// back to testing tmux if the provisioned launch ever did. The typed line
+    /// must then show its output either way.
+    async fn assert_session_operable(
+        client: &crate::client::SupervisorClient,
+        session_id: &str,
+        expected: farhelm_proto::StreamKind,
+    ) {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
         let session = loop {
             let listing = client.list_sessions().await.expect("list live session");
@@ -11652,7 +11828,7 @@ mod tests {
                 .iter()
                 .find(|session| session.id == session_id)
                 .cloned()
-                .expect("the tmux-held session must remain listed");
+                .expect("the retained session must remain listed");
             if session.status.is_live()
                 || !matches!(session.status, farhelm_proto::SessionStatus::Unknown)
                 || tokio::time::Instant::now() >= deadline
@@ -11669,9 +11845,22 @@ mod tests {
         );
 
         let (channel, mut terminal) = client
-            .attach(session_id, 80, 24)
+            .attach_terminal(
+                session_id,
+                80,
+                24,
+                farhelm_proto::TerminalSelector::default(),
+                "",
+                crate::client::ViewerStreams::BytesOrGrid,
+            )
             .await
             .expect("attach to the retained session");
+        assert_eq!(
+            terminal.stream_kind(),
+            expected,
+            "the retained session's terminal streams as the kind its supervisor creates"
+        );
+        let grid = expected == farhelm_proto::StreamKind::Grid;
         tokio::time::timeout(Duration::from_secs(10), async {
             loop {
                 match terminal.recv().await {
@@ -11689,16 +11878,58 @@ mod tests {
 
         let token = format!("farhelmoperable{}", uuid::Uuid::new_v4().simple());
         let marker = token.to_ascii_uppercase();
-        client
-            .send_input(
-                channel,
-                format!("printf '%s\\n' '{token}' | tr '[:lower:]' '[:upper:]'\n").into_bytes(),
-            )
-            .await;
+        let command = format!("printf '%s\\n' '{token}' | tr '[:lower:]' '[:upper:]'");
+        if grid {
+            // The browser's grid client sends typed characters as `text` and
+            // Enter as a `key`, and the supervisor encodes them for the
+            // program from the terminal's modes.
+            use farhelm_proto::grid::GridInput;
+            let enter = GridInput::Key {
+                key: "Enter".into(),
+                code: "Enter".into(),
+                kc: 13,
+                mods: 0,
+                mac: false,
+            };
+            for message in [GridInput::Text { data: command }, enter] {
+                client
+                    .send_grid_input(channel, message.encode().expect("a grid input message"))
+                    .await
+                    .expect("the retained terminal takes grid input");
+            }
+        } else {
+            client
+                .send_input(channel, format!("{command}\n").into_bytes())
+                .await;
+        }
         tokio::time::timeout(Duration::from_secs(10), async {
             let mut output = Vec::new();
             loop {
                 match terminal.recv().await {
+                    // A grid stream carries the screen's rows, not the
+                    // program's bytes: the marker is looked for in the text
+                    // of the rows each message draws or adds to history.
+                    Some(crate::client::TermEvent::Data(bytes)) if grid => {
+                        use farhelm_proto::grid::{GridOutput, Row};
+                        let text = |row: &Row| {
+                            row.runs
+                                .iter()
+                                .map(|run| run.text.as_str())
+                                .collect::<String>()
+                        };
+                        let shown = match GridOutput::decode(&bytes).expect("a grid message") {
+                            GridOutput::Rows { rows, .. } => {
+                                rows.iter().any(|row| text(&row.row).contains(&marker))
+                            }
+                            GridOutput::History { rows, .. } => {
+                                rows.iter().any(|row| text(row).contains(&marker))
+                            }
+                            _ => false,
+                        };
+                        if shown {
+                            break;
+                        }
+                    }
                     Some(crate::client::TermEvent::Data(bytes)) => {
                         output.extend(bytes);
                         if String::from_utf8_lossy(&output).contains(&marker) {
@@ -11716,6 +11947,106 @@ mod tests {
         .await
         .expect("retained terminal did not echo post-restart input");
         client.detach(channel).await;
+    }
+
+    /// Every socket path in the kernel's table of unix sockets
+    /// (`/proc/net/unix`, Linux only, as this suite is) that a live process
+    /// listens on and that lies under `state_dir`'s `hosts/`, in the spelling
+    /// given or its canonical form.
+    ///
+    /// Read by path prefix rather than from the directory's entries: an
+    /// uninstall unlinks the socket files and the directory after its stop
+    /// reports success, and a listener whose file is gone is still in the
+    /// table, so walking the directory would report a surviving host as
+    /// absent. Passive on purpose, too: connecting to a host would make it
+    /// serve this test instead of its supervisor. A table that cannot be read
+    /// is an error, never "none".
+    fn listening_host_sockets(state_dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
+        // The listen flag (`__SO_ACCEPTCON`) in the table's flags column.
+        const LISTENING: u32 = 0x0001_0000;
+        let mut prefixes = vec![state_dir.join("hosts")];
+        if let Ok(real) = std::fs::canonicalize(state_dir) {
+            prefixes.push(real.join("hosts"));
+        }
+        let table = std::fs::read_to_string("/proc/net/unix").context("reading /proc/net/unix")?;
+        let mut found = Vec::new();
+        for line in table.lines().skip(1) {
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            let (Some(flags), Some(path)) = (fields.get(3), fields.get(7)) else {
+                continue;
+            };
+            let flags = u32::from_str_radix(flags, 16)
+                .with_context(|| format!("an unreadable flags column in /proc/net/unix: {line}"))?;
+            let path = PathBuf::from(path);
+            if flags & LISTENING != 0 && prefixes.iter().any(|prefix| path.starts_with(prefix)) {
+                found.push(path);
+            }
+        }
+        Ok(found)
+    }
+
+    /// Whether a live process listens on `socket`, by the same table.
+    fn socket_listens(socket: &Path) -> bool {
+        let state_dir = socket
+            .parent()
+            .and_then(Path::parent)
+            .expect("a host socket lives in <state>/hosts/");
+        let real = std::fs::canonicalize(socket).ok();
+        listening_host_sockets(state_dir)
+            .expect("reading the kernel's socket table")
+            .iter()
+            .any(|listening| listening == socket || Some(listening) == real.as_ref())
+    }
+
+    /// Wait, within a bound, until no process listens on a terminal-host
+    /// socket under `state_dir`, failing with what still listens.
+    ///
+    /// Synchronous because the teardown guard's checks are; a bounded poll
+    /// of the kernel's table is the only observable of a host's listener
+    /// ending.
+    fn wait_no_listening_host_sockets(state_dir: &Path) -> anyhow::Result<()> {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            let listening = listening_host_sockets(state_dir)?;
+            if listening.is_empty() {
+                return Ok(());
+            }
+            if std::time::Instant::now() >= deadline {
+                bail!(
+                    "terminal hosts still listen under {}: {listening:?}",
+                    state_dir.display()
+                );
+            }
+            // sleep-ok: bounded polling of the kernel's socket table for the hosts' listeners to end
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    /// The ended or running session `session_id`'s host socket on this
+    /// machine, read from the supervisor's own database: the row must be a
+    /// host row, and its `pane` names the socket in `<state>/hosts/`.
+    fn host_socket_of(state_dir: &Path, session_id: &str) -> PathBuf {
+        let db = rusqlite::Connection::open_with_flags(
+            state_dir.join("supervisor.db"),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .expect("open the supervisor's database read-only");
+        let (kind, pane): (String, String) = db
+            .query_row(
+                "SELECT terminal_kind, pane FROM sessions WHERE id = ?1",
+                [session_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("the session's row");
+        assert_eq!(
+            kind, "host",
+            "the session {session_id} is not a terminal-host row"
+        );
+        assert!(
+            !pane.is_empty(),
+            "the host row of {session_id} names no socket"
+        );
+        state_dir.join("hosts").join(pane)
     }
 
     /// Prove server absence through tmux's exact socket diagnostic before
@@ -11789,6 +12120,7 @@ mod tests {
             unit_path: unit_path.clone(),
             state_dir: root.path().to_path_buf(),
             cleaned: false,
+            keep_root: Arc::default(),
         };
         let start = tokio::process::Command::new("systemctl")
             .args(["--user", "--runtime", "enable", "--now", "--"])
@@ -11994,7 +12326,7 @@ mod tests {
             );
             return;
         };
-        let root = tempfile::tempdir().expect("isolated provisioning root");
+        let root = FixtureRoot::new();
         let lib_dir = root.path().join("lib");
         let supervisor_state = root.path().join("supervisor-state");
         let probe_state = root.path().join("probe-state-never-created");
@@ -12021,6 +12353,7 @@ mod tests {
             unit_path: unit_path.clone(),
             state_dir: supervisor_state.clone(),
             cleaned: false,
+            keep_root: root.keep_flag(),
         });
         let store = HelmStore::open(&helm_state.join("helm.db")).await.unwrap();
         let manager = ConnectionManager::start(
@@ -12342,19 +12675,40 @@ mod tests {
         // is outstanding. Nothing after this point asks the manager to
         // reconfigure or re-dial the row.
         let client = wait_real_client(&manager, accepted.host_id).await;
-        assert_session_operable(&client, &session.id).await;
+        // A provisioned supervisor runs the bare `farhelm supervisor run`,
+        // whose default is terminal hosts: the session is a host terminal, and
+        // the supervisor says it creates them (what the migration band reads).
+        let listed = client.list_sessions().await.expect("list the session");
+        let listed = listed
+            .sessions
+            .iter()
+            .find(|row| row.id == session.id)
+            .expect("the session is listed");
+        assert_eq!(
+            listed.agent_terminal,
+            Some(farhelm_proto::TerminalKind::Host),
+            "the provisioned supervisor created the session in a terminal host: {listed:?}"
+        );
+        assert!(
+            listed.supervisor_creates_host_terminals,
+            "the provisioned supervisor reports that it creates terminal hosts: {listed:?}"
+        );
+        assert_session_operable(&client, &session.id, farhelm_proto::StreamKind::Grid).await;
         client.delete_session(&session.id).await.unwrap();
 
         // UNINSTALL leg, for the ssh shapes only: the helm's own machine has
         // no panel uninstall (it is `farhelm uninstall`'s). The panel's
         // removal runs for real over ssh.
         if use_ssh {
-            // An ENDED session keeps its dead pane, and with it the private
-            // tmux server, alive. Uninstall accepts ended sessions, and its
-            // stop must end that server as well. Removing the unit and
-            // reloading restores control-group termination; the ended pane
-            // distinguishes that mechanism from a server exiting when its
-            // last pane disappears.
+            // An ENDED session keeps its terminal alive: a terminal host
+            // keeps its process and final screen after its program exits (a
+            // provisioned supervisor creates new terminals in hosts), as a
+            // tmux terminal's dead pane keeps the private tmux server.
+            // Uninstall accepts ended sessions, and its stop must end that
+            // process as well. Removing the unit and reloading restores
+            // control-group termination; the ended terminal distinguishes
+            // that mechanism from a process exiting when its last terminal
+            // disappears.
             let ended = client
                 .create_session_with_key(
                     &cwd,
@@ -12385,20 +12739,26 @@ mod tests {
                 "the `true` session never reported having ended"
             );
             let tmux_socket = supervisor_state.join("tmux.sock");
-            let tmux_alive = || {
-                std::process::Command::new("tmux")
-                    .arg("-S")
-                    .arg(&tmux_socket)
-                    .arg("has-session")
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .status()
-                    .is_ok_and(|status| status.success())
-            };
-            if !remote {
+            let listing = client.list_sessions().await.unwrap();
+            let ended_row = listing
+                .sessions
+                .iter()
+                .find(|session| session.id == ended.id)
+                .expect("the ended session is listed");
+            assert_eq!(
+                ended_row.agent_terminal,
+                Some(farhelm_proto::TerminalKind::Host),
+                "fixture premise: the ended session's terminal is a host, kept with its final \
+                 screen: {ended_row:?}"
+            );
+            // Its own socket, captured now: the uninstall removes the file and
+            // the directory, and the check afterwards must not depend on them.
+            let ended_socket = (!remote).then(|| host_socket_of(&supervisor_state, &ended.id));
+            if let Some(socket) = &ended_socket {
                 assert!(
-                    tmux_alive(),
-                    "fixture premise: the ended session keeps the private tmux server alive"
+                    socket_listens(socket),
+                    "fixture premise: the ended session's host still listens on {}",
+                    socket.display()
                 );
             }
 
@@ -12506,6 +12866,14 @@ mod tests {
             );
             if !remote {
                 wait_private_tmux_gone(&payloads.tmux, &tmux_socket).await;
+                wait_no_listening_host_sockets(&supervisor_state)
+                    .expect("the uninstall's stop ended every terminal host");
+                let socket = ended_socket.as_ref().expect("captured on this machine");
+                assert!(
+                    !socket_listens(socket),
+                    "the ended session's host still listens on {} after the uninstall",
+                    socket.display()
+                );
             }
         }
 
@@ -12540,8 +12908,9 @@ mod tests {
         );
     }
 
-    /// Real SSH UPDATE preserves a tmux-held session; UNINSTALL then ends
-    /// the private server while retaining the host's data.
+    /// Real SSH UPDATE preserves a session in a terminal host; UNINSTALL then
+    /// ends its terminal hosts and the private server while retaining the
+    /// host's data.
     ///
     /// Destination-agnostic on purpose. By default it dials `localhost` into
     /// fixture-owned paths, which is what a laptop and the Ubuntu CI runner
@@ -12558,7 +12927,7 @@ mod tests {
     }
 
     /// The local path performs no SSH, and the explicit UPDATE replaces the
-    /// payload, restarts only the supervisor, and preserves its tmux session.
+    /// payload, restarts only the supervisor, and preserves its session's terminal host.
     ///
     /// Both of this case's runs are UPDATEs now: the hosts panel's local
     /// row stopped offering to install a supervisor (D1), so UPDATE is the
@@ -12601,6 +12970,7 @@ mod tests {
             unit_path: unit_path.clone(),
             state_dir: root.path().to_path_buf(),
             cleaned: false,
+            keep_root: Arc::default(),
         };
         assert!(
             activated.status.success(),

@@ -398,8 +398,9 @@ cargo-zigbuild --version >/dev/null 2>&1 \
   || need "cargo-zigbuild" "cargo install --locked cargo-zigbuild"
 command -v zig >/dev/null 2>&1 || need "zig" "brew install zig"
 
-# Not a build tool: the app's local supervisor runs sessions in tmux, and the
-# app refuses to start without one. Checked here so that a build is not
+# Not a build tool: the app refuses to start without tmux, which its local
+# supervisor still requires for the sessions it started in tmux before new
+# terminals moved to terminal hosts. Checked here so that a build is not
 # wasted on a machine that cannot run it. The directories are the ones the
 # app itself searches besides PATH (`MACOS_TMUX_PREFIXES`), since an app
 # started from Finder has no shell PATH.

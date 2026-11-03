@@ -333,7 +333,7 @@ async fn prove_prompt(agent: LaunchHarness, expect: Expect) {
     // The fixture files must outlive the processes and their failure diagnostics.
     let work = farhelm_teststate::tempdir().expect("prompt recorder workdir");
     std::fs::write(work.path().join("recorder.py"), RECORDER).expect("write the raw recorder");
-    let supervisor = supervisor_process().await;
+    let supervisor = supervisor_process_tmux().await;
     let helm = helm_process(supervisor.state.path(), None).await;
     let secret = device_secret(supervisor.state.path(), &helm.base).await;
     let client = client_with_secret(&secret);

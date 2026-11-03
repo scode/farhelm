@@ -1,7 +1,8 @@
 //! Grid streams: how a terminal that runs in a terminal host reaches its
 //! viewer, as a grid of styled runs rather than raw terminal bytes.
 //!
-//! NOTE: nothing sends these messages until terminal hosts are switched on.
+//! Every new terminal runs in a terminal host and reaches its viewers this
+//! way; old tmux terminals keep their byte streams until they are gone.
 //! This module is the contract the supervisor's sender, its input encoder,
 //! the helm's relay and the browser's grid client are built against.
 //!

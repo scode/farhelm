@@ -150,17 +150,18 @@ session.
 
 ## What happens on stop
 
-There are fewer processes involved than the launch chain suggests. tmux starts the pane's login shell, the shell `exec`s
-Farhelm's launch shim, and the shim `exec`s your command. For a custom command or wrapper prefix, Bash interprets the
-text and can replace itself with a simple command; compound commands can keep Bash running above the wrapper and agent.
-A wrapper that `exec`s the agent replaces itself in that chain. Where farhelm's own probe finds a WORKING systemd user
-manager — it creates a throwaway scope, looks it up, kills it, and confirms it went away, rather than trusting a
-`systemd-run` on `PATH` — the launch also runs inside a per-launch cgroup scope, which is containment rather than a
-level of the tree (`systemd-run --scope` execs in place too). Each launch records what it selected, so a session can
-outlive the manager that scoped it.
+There are fewer processes involved than the launch chain suggests. Farhelm starts a login shell in the session's
+terminal (tmux starts it instead for a session from before [new terminals](/docs/using/new-terminals/)), the shell
+`exec`s Farhelm's launch shim, and the shim `exec`s your command. For a custom command or wrapper prefix, Bash
+interprets the text and can replace itself with a simple command; compound commands can keep Bash running above the
+wrapper and agent. A wrapper that `exec`s the agent replaces itself in that chain. Where farhelm's own probe finds a
+WORKING systemd user manager — it creates a throwaway scope, looks it up, kills it, and confirms it went away, rather
+than trusting a `systemd-run` on `PATH` — the launch also runs inside a per-launch cgroup scope, which is containment
+rather than a level of the tree (`systemd-run --scope` execs in place too). Each launch records what it selected, so a
+session can outlive the manager that scoped it.
 
 Stopping a session and restarting it reap the agent's tree and leave the session's terminal tabs running; deleting it
-takes the tabs too. What a stop claims is the pane process's descendants plus every process carrying the session's
+takes the tabs too. What a stop claims is the descendants of that login shell plus every process carrying the session's
 `FARHELM_AGENT_ID` — the value is the session's own id, set on every agent launch, so the marker says "an agent of this
 session" rather than "this generation of it" — and, for sessions launched by builds predating that marker, anything
 wearing the session marker with no other claim on it. All of those additionally require the session's

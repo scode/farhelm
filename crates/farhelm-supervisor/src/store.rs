@@ -7925,9 +7925,9 @@ mod tests {
 
     /// A host row must come back as a host row, with its socket name in
     /// `pane`, through every read path and across a restart that is aborted.
-    /// Only a create under the switch (the hidden harness flag
-    /// `--new-terminals host`, which no shipped launch passes) writes
-    /// `host`, and its own tests read the row back through the service; this
+    /// Only a create under the switch (`farhelm supervisor run`'s default,
+    /// or an in-process harness that turns it on) writes `host`, and its
+    /// own tests read the row back through the service; this
     /// round trip pins the store's half of that on its own.
     ///
     /// Specified: a [`TerminalKind::Host`] row inserted with a socket name

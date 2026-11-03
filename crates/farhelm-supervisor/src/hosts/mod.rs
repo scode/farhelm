@@ -37,9 +37,10 @@
 //! The service's terminal switch points handle a session whose terminal is
 //! a [`terminal::HostTerminal`] (`service::terminals::Terminal::Host`). A
 //! create starts its agent in a host, and a new tab opens in one, only under
-//! the supervisor's switch (`service::SupervisorSeams::new_terminals`), off
-//! by default and turned on only by `farhelm supervisor run`'s hidden
-//! `--new-terminals host` or by a test harness. A restarted supervisor finds
+//! the supervisor's switch (`service::SupervisorSeams::new_terminals`), on
+//! in every supervisor `farhelm supervisor run` starts unless its hidden
+//! `--new-terminals tmux` asks for the old kind, and off in the in-process
+//! test harnesses unless a test turns it on. A restarted supervisor finds
 //! the hosts of its host rows again with [`registry`] and adopts them
 //! ([`terminal::HostTerminal::adopt_found`]), in
 //! `service::core::host_handover`, and its sessions' tab hosts in

@@ -139,7 +139,8 @@ async fn two_real_hosts_serve_one_merged_list_and_both_are_operable() {
         );
         return;
     }
-    // Two supervisors, two tmux servers, one helm: two slots, taken
+    // Two supervisors (each with the terminal hosts of its sessions and an
+    // idle private tmux server), one helm: two slots, taken
     // together so this test never holds one while waiting for the other.
     let _slots = SLOTS
         .acquire_many(2)

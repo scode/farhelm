@@ -5,24 +5,29 @@
 //
 // Two kinds of evidence, kept apart on purpose:
 //
-// - The real stack's own replies. Its supervisors run with their internal
-//   switch off, as every shipped supervisor does until the switch-on
-//   release and as the media harnesses' stacks keep running after it, so
-//   their sessions must look exactly as they always have: no band, no
-//   terminal kinds. This is also the end-to-end check that the kinds and the
-//   switch report reach the browser through the helm unchanged.
-// - Seeded listings. A stack whose supervisor creates new terminals needs
-//   the supervisor's `--new-terminals host` option, which this suite's
-//   ordinary runs do not pass, and an old session beside it needs that
-//   supervisor to have created one before the switch. So the band's cases,
-//   its dismissal and its return are driven through the real UI and the
-//   real stack, with only the session rows' terminal fields rewritten on the
-//   way to the page, the way claude-trust.spec.ts seeds its trust question.
-//   On the suite's host-terminal run (host-terminal-specs.ts) the real
-//   terminals underneath are new ones; the seeded cases hold there too.
+// - The real stack's own replies. This suite's ordinary runs start their
+//   supervisors with `--new-terminals tmux` (start-stack.sh does unless its
+//   config asks for hosts), which keeps the switch off, as the media
+//   harnesses' stacks run too, so their sessions must look exactly as they
+//   always have: no band, no terminal kinds. This is also the end-to-end
+//   check that the kinds and the switch report reach the browser through
+//   the helm unchanged.
+// - Seeded listings. The band needs an old session on a supervisor that
+//   creates new terminals, which only a supervisor restarted from tmux to
+//   hosts has, and no browser stack restarts its local supervisor. So the
+//   band's cases, its dismissal and its return are driven through the real
+//   UI and the real stack, with only the session rows' terminal fields
+//   rewritten on the way to the page, the way claude-trust.spec.ts seeds its
+//   trust question. That a real supervisor reports exactly those fields for
+//   such a session is checked by the process test
+//   `host_processes::an_old_session_after_the_switch_to_hosts_is_reported_as_one_to_move`
+//   (crates/farhelm/tests/e2e/host_processes.rs). On the suite's
+//   host-terminal run (host-terminal-specs.ts) the real terminals underneath
+//   are new ones; the seeded cases hold there too.
 //
-// A real-host leg (a stack whose supervisor creates new terminals) belongs
-// with the browser configuration that starts such a stack, not here.
+// The real-host leg for sessions already on new terminals is
+// e2e/host-terminals/migration.spec.ts, under the config that starts such a
+// stack.
 
 import type { Page } from "@playwright/test";
 import { expect, test } from "./helpers/evidence";
@@ -106,9 +111,9 @@ const kinds = (page: Page) => page.locator(".session-details .session-details-te
 
 /** A supervisor that does not create new terminals reports its terminals as
  * old and the switch as off, and its sessions show neither the band nor the
- * terminal kinds. Why: that is every shipped supervisor until switch-on, and
- * the media harnesses' captures afterwards; any change there would show up
- * on every user's screen and in every published screenshot. */
+ * terminal kinds. Why: that is what the media harnesses' captures run on,
+ * and what every shipped supervisor showed before terminal hosts; any change
+ * there would show up in every published screenshot. */
 test("a supervisor still on old terminals shows no band and no terminal kinds", async ({ page, request }) => {
   // About a stack whose supervisor keeps old terminals; on a host-terminal
   // run every stack creates new ones, and host-terminals/migration.spec.ts

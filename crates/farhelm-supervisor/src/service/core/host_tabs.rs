@@ -3,7 +3,8 @@
 //! shell exited, and finding them again after a supervisor restart.
 //!
 //! Under the supervisor's switch (`SupervisorSeams::new_terminals` set to
-//! `Host`, by `--new-terminals host` or a test harness) every new tab is a
+//! `Host`, as `farhelm supervisor run` does by default, or by a test
+//! harness) every new tab is a
 //! host of its own, whatever its session's agent runs in: a tmux agent's
 //! session then holds its old tmux tabs and new host tabs side by side (a
 //! mixed session), and a host agent's session holds only host tabs. A tab never changes kind while it lives.

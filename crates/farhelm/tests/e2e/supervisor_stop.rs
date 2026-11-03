@@ -144,9 +144,14 @@ async fn stop_attached_supervisor(stop: Stop) {
     let no_output_log = state.path().join("no-output.log");
     let wrapper = no_output_recording_tmux(state.path(), &no_output_log);
     let mut command = tokio::process::Command::new(farhelm_bin());
+    // `--new-terminals tmux`: what this checks is the orderly stop's
+    // teardown of tmux's output-bearing control clients, which only a tmux
+    // terminal has; on the default the session would run in a terminal host
+    // and the recorded `no-output` acknowledgements would never come.
     command
         .args(["supervisor", "run", "--state-dir"])
         .arg(state.path())
+        .args(["--new-terminals", "tmux"])
         .arg("--tmux")
         .arg(&wrapper);
     if matches!(stop, Stop::TetherClosed) {

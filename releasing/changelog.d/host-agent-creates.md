@@ -2,6 +2,5 @@
 kind: none
 ---
 
-Nothing user-facing yet: the supervisor can now start a new session's agent in a terminal host instead of tmux, behind
-a hidden harness flag that no shipped launch passes. Every session still starts in tmux until a later change turns
-new terminals on; that change carries the real entry.
+No entry of its own: the supervisor can start a new session's agent in a terminal host instead of tmux, which every
+shipped supervisor does since `terminal-hosts-on.md`'s change; that fragment carries the entry for the move out of tmux.
