@@ -901,7 +901,7 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   worker archive can omit the screenshots, traces and timelines Playwright writes outside its archived directory.
 
 - [`worker-template-acceptance-ignores-prerequisite-failures.md`](worker-template-acceptance-ignores-prerequisite-failures.md)
-  — Automated template acceptance can welcome a worker despite failed manager or SSH prerequisites.
+  — Automated template acceptance can welcome a worker despite failed SSH readiness; manager readiness now gates it.
 
 - [`worker-checkpoint-polling-has-no-failure-exit.md`](worker-checkpoint-polling-has-no-failure-exit.md) — Worker
   checkpoint polling can wait indefinitely for completion; the exact service transition needed for the suspected
@@ -1049,8 +1049,8 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`selected-expanded-host-hover-white-on-white.md`](selected-expanded-host-hover-white-on-white.md) — In Light
   appearance, hovering the selected expanded host can make its name and destination unreadable.
 
-- [`signal-test-child-lacks-unwind-cleanup.md`](signal-test-child-lacks-unwind-cleanup.md) — A failed signal-log
-  regression can leave its owned sleeper running; the runner's leak report does not prove the child was cleaned up.
+- [`signal-test-child-lacks-unwind-cleanup.md`](signal-test-child-lacks-unwind-cleanup.md) — Failed signal-log,
+  supervisor and terminal-host fixtures can leave owned processes running before cleanup ownership is armed.
 
 - [`replacement-cleanup-missing-pane-root-source-gap.md`](replacement-cleanup-missing-pane-root-source-gap.md) — Failed
   replacement cleanup without a pane root has a conditional orphaning concern, but a supported uncovered producer
@@ -1133,3 +1133,38 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`manual-unroute-leaves-listing-callback-running.md`](manual-unroute-leaves-listing-callback-running.md) — A test can
   remove a route without draining its active listing callback, letting that callback outlive assertions and fixture
   deletion.
+
+- [`legacy-quickstart-stops-surviving-supervisor.md`](legacy-quickstart-stops-surviving-supervisor.md) — The parked
+  quickstart contradicts itself about whether the supervisor survives quitting the Mac app.
+
+- [`inherited-lock-test-self-dup.md`](inherited-lock-test-self-dup.md) — A terminal-host regression can pass without
+  inheriting its intended version lock if the opened file already has descriptor 8; that allocation was not observed.
+
+- [`desktop-owner-record-lacks-boot-domain.md`](desktop-owner-record-lacks-boot-domain.md) — A Linux desktop development
+  build can recognize another boot's coincident process identity as its own and stop it during replacement. A qualifying
+  user-work-loss route remains unestablished; this is not a macOS claim.
+
+- [`literal-deleted-suffix-breaks-desktop-owner.md`](literal-deleted-suffix-breaks-desktop-owner.md) — A development
+  executable literally ending in ` (deleted)` can lose ownership recognition and leave an older answering build reused.
+
+- [`desktop-smoke-supervisor-precedes-cleanup-record.md`](desktop-smoke-supervisor-precedes-cleanup-record.md) —
+  Interruption before desktop-test ownership publication can leave a detached supervisor outside cleanup; timing and
+  survivor duration are unmeasured, and an older browser-helper discard's broader intent is ambiguous.
+
+- [`failed-client-close-test-lacks-writer-premise.md`](failed-client-close-test-lacks-writer-premise.md) — The
+  failed-client close regression can pass before its continuously sending peer runs, missing the intended receive bound.
+
+- [`stalled-input-test-accepts-discarded-bytes.md`](stalled-input-test-accepts-discarded-bytes.md) — The stalled-input
+  regression accepts discarded typing rather than proving that controls remain responsive beside pending input.
+
+- [`preclient-output-test-connects-during-wait.md`](preclient-output-test-connects-during-wait.md) — The pre-client
+  output regression connects during its premise wait, so it can pass without output preceding the first negotiated
+  client.
+
+- [`late-output-test-does-not-distinguish-flush-order.md`](late-output-test-does-not-distinguish-flush-order.md) — The
+  overdue-frame regression cannot distinguish flushing before new output from flushing afterward; production order is
+  currently correct.
+
+- [`reflow-property-timeout-retains-workers.md`](reflow-property-timeout-retains-workers.md) — If an allocating
+  regression returns, property-test shrinking can retain timed-out workers and start more; no current emulator defect or
+  measured memory exhaustion is claimed.
