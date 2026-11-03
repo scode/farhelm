@@ -55,6 +55,19 @@ fn shell(script: &str) -> ChildSpec {
     }
 }
 
+/// A shell pipeline stage that prints the bytes on its stdin as bare
+/// lowercase hex pairs, with no separator and no line end (`ESC [ c` is
+/// `1b5b63`), so that a test can find what a child read on its screen.
+///
+/// The spacing is removed rather than matched because `od` spaces its
+/// columns differently per platform: GNU `od -An -tx1` writes ` 1b 5b 63`,
+/// macOS's writes a wide indent and two spaces between bytes. Deleting every
+/// blank leaves the same text on both. It loses nothing: `-tx1` writes every
+/// byte as exactly two hex digits, so the digits alone still split into
+/// bytes unambiguously, and `-v` makes `od` write every row, where it would
+/// otherwise replace a row repeating the one before with a lone `*`.
+const HEX_DUMP: &str = "od -An -v -tx1 | tr -d '[:space:]'";
+
 fn agent_tag() -> HostTag {
     HostTag {
         session_id: "0f8e2b9c-4c1d-4e7a-9a53-7d2f61c0b8e4".into(),
@@ -206,14 +219,17 @@ async fn a_fresh_hosts_output_title_and_child_reach_the_runtime() {
 /// Why: agents probe their terminal at startup and some wait for the
 /// answer; a terminal host answers nothing itself, so the runtime's answer
 /// is the only one the program gets. Spec: a child in raw mode that sends
-/// DA1 and prints the next seven bytes it reads, in hex, shows
-/// `1b 5b 3f 31 3b 32 63` (`ESC [ ? 1 ; 2 c`, the answer the emulator gives
+/// DA1 and prints the next seven bytes it reads, in hex ([`HEX_DUMP`]),
+/// shows `1b5b3f313b3263` (`ESC [ ? 1 ; 2 c`, the answer the emulator gives
 /// as today's terminal does).
 #[farhelm_testtrace::test]
 async fn a_device_attributes_query_is_answered_end_to_end() {
-    let host = Host::start(shell(
-        "stty raw -echo; printf '\\033[c'; od -An -tx1 -N7; exec /bin/sleep 600",
-    ))
+    // `dd` reads the seven bytes, rather than `od -N7`, only so that this
+    // test shares `HEX_DUMP` (which takes no byte count) with the replay test.
+    let host = Host::start(shell(&format!(
+        "stty raw -echo; printf '\\033[c'; dd bs=1 count=7 2>/dev/null | {HEX_DUMP}; \
+         exec /bin/sleep 600"
+    )))
     .await;
     let terminal = host
         .adopt(Adoption::Fresh, HostTerminalOptions::default())
@@ -221,7 +237,7 @@ async fn a_device_attributes_query_is_answered_end_to_end() {
     wait_until(
         &terminal,
         "the answer read back",
-        screen_has("1b 5b 3f 31 3b 32 63"),
+        screen_has("1b5b3f313b3263"),
     )
     .await;
 }
@@ -637,10 +653,11 @@ const FLOOD: &str = "i=0; while [ $i -lt 3000 ]; do \
 /// and reports that it asked; the first runtime shows everything before
 /// that, and an `Info`-only connection (no `Read`) shows all 21 bytes of
 /// the query, clipboard write and bell journaled past `delivered_end`
-/// before the recovery adopts the host. The recovered runtime makes the child print `1b 5b 30 6e`, the
-/// status answer; once released, the child writes `four` to the clipboard
-/// and rings, and a notice subscription taken on the recovered runtime
-/// receives that clipboard write first, and nothing else.
+/// before the recovery adopts the host. The recovered runtime makes the
+/// child print `1b5b306e` (in [`HEX_DUMP`]'s form), the status answer;
+/// once released, the child writes `four` to the clipboard and rings, and
+/// a notice subscription taken on the recovered runtime receives that
+/// clipboard write first, and nothing else.
 #[farhelm_testtrace::test]
 async fn the_replay_answers_only_what_no_supervisor_saw() {
     let fifos = tempfile::tempdir().unwrap();
@@ -651,13 +668,13 @@ async fn the_replay_answers_only_what_no_supervisor_saw() {
     let host = Host::start(shell(&format!(
         "stty raw -echo; \
          printf '\\033[c\\033]52;c;b25l\\007\\007'; \
-         a=$(dd bs=1 count=7 2>/dev/null | od -An -tx1); printf 'one:%s\\r\\n' \"$a\"; \
+         a=$(dd bs=1 count=7 2>/dev/null | {HEX_DUMP}); printf 'one:%s\\r\\n' \"$a\"; \
          read go < '{first}'; \
          printf '\\033[c\\033]52;c;dHdv\\007\\007'; \
-         b=$(dd bs=1 count=7 2>/dev/null | od -An -tx1); printf 'two:%s\\r\\nend-two' \"$b\"; \
+         b=$(dd bs=1 count=7 2>/dev/null | {HEX_DUMP}); printf 'two:%s\\r\\nend-two' \"$b\"; \
          read go < '{second}'; \
          printf '\\033[5n\\033]52;c;dGhyZWU=\\007\\007'; echo asked > '{asked}'; \
-         c=$(dd bs=1 count=4 2>/dev/null | od -An -tx1); printf 'three:%s\\r\\n' \"$c\"; \
+         c=$(dd bs=1 count=4 2>/dev/null | {HEX_DUMP}); printf 'three:%s\\r\\n' \"$c\"; \
          read go < '{third}'; \
          printf '\\033]52;c;Zm91cg==\\007\\007'; \
          exec /bin/sleep 600",
@@ -671,7 +688,7 @@ async fn the_replay_answers_only_what_no_supervisor_saw() {
         .adopt(Adoption::Fresh, HostTerminalOptions::default())
         .await;
     let child = terminal.status().child_pid;
-    wait_until(&terminal, "the first answer", screen_has("one: 1b 5b 3f")).await;
+    wait_until(&terminal, "the first answer", screen_has("one:1b5b3f")).await;
     let deadline = tokio::time::Instant::now() + WAIT;
     let checkpoint = terminal.checkpoint_now(deadline).await;
     assert!(
@@ -712,7 +729,7 @@ async fn the_replay_answers_only_what_no_supervisor_saw() {
     let mut notices = recovered.subscribe_notices();
     wait_until(&recovered, "the third answer", screen_has("three:")).await;
     assert!(
-        recovered.screen_tail(4096).contains("three: 1b 5b 30 6e"),
+        recovered.screen_tail(4096).contains("three:1b5b306e"),
         "{:?}",
         recovered.screen_tail(4096)
     );
