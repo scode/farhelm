@@ -1,10 +1,14 @@
 #!/bin/bash
-# Run one shard of Farhelm's browser suite on a bootstrapped Tensorlake sandbox, inside one attached exec (a sandbox
-# freezes everything between execs, so the services this needs live only as long as this script).
+# Run one shard of Farhelm's browser suite on a bootstrapped Tensorlake sandbox, inside one attached exec. Whatever an
+# exec leaves running cannot be relied on afterwards (the sandbox freezes it when it idles), so the tests and the
+# services they need start here, in the exec that runs them.
 #
-# The image boots no systemd, but the supervisor puts sessions in transient systemd user scopes. sd_booted() only checks
-# for /run/systemd/system, so this creates it, gives tl-user a delegated cgroup v2 subtree, and starts a session bus and
-# `systemd --user` there (probed: transient scopes then start normally). It also starts sshd so the harness's second,
+# The supervisor puts sessions in transient systemd user scopes, so this needs a systemd user manager, and how it gets
+# one depends on what PID 1 is. A sandbox created from the stock image boots Tensorlake's own init, which starts no
+# systemd at all; that is the template sandbox during make-template's probe. bootstrap.sh's packages pull in
+# systemd-sysv, which installs /sbin/init, and clones of a template boot that, so on them PID 1 is a real systemd with
+# logind. Both cases are handled below, and a shard whose user manager is not up fails before any test runs. The script
+# also makes sure an SSH server answers on localhost (on a clone, ssh.socket already does) so the harness's second,
 # ssh-to-localhost host is reachable, as on a developer machine with passwordless self-ssh.
 #
 # Usage: run-shard.sh <label> <playwright project>... [-- <extra playwright arguments>]
@@ -17,41 +21,89 @@ W=/home/tl-user/farhelm
 OUT=/home/tl-user/out/$label
 mkdir -p "$OUT"
 uid=$(id -u)
-# --- leftovers from an earlier exec on this sandbox
-# Processes die when an exec ends but their files stay: a stale bus socket refuses connections, and a cgroup that still
-# has the old manager's child groups cannot take this shell (cgroup v2 forbids processes in a non-leaf group with
-# controllers enabled). Remove both, children first.
-pkill -u "$(id -u)" -x systemd 2>/dev/null; pkill -u "$(id -u)" -x dbus-daemon 2>/dev/null
-rm -f "/run/user/$(id -u)/bus"
-if test -d "/sys/fs/cgroup/user.slice"; then
-  find /sys/fs/cgroup/user.slice -depth -mindepth 1 -type d -exec sudo -n rmdir {} + 2>/dev/null
-fi
-# --- systemd user manager
-sudo -n mkdir -p /run/systemd/system
 export XDG_RUNTIME_DIR=/run/user/$uid
-sudo -n install -d -m 700 -o "$uid" -g "$uid" "$XDG_RUNTIME_DIR"
-cg=/sys/fs/cgroup/user.slice/user-$uid.slice/user@$uid.service
-sudo -n mkdir -p "$cg"
-for f in /sys/fs/cgroup/cgroup.subtree_control /sys/fs/cgroup/user.slice/cgroup.subtree_control \
-         /sys/fs/cgroup/user.slice/user-$uid.slice/cgroup.subtree_control; do
-  echo "+cpu +memory +pids" | sudo -n tee "$f" >/dev/null 2>&1
-done
-sudo -n chown -R "$uid:$uid" "$cg"
-echo $$ | sudo -n tee "$cg/cgroup.procs" >/dev/null
-test -S "$XDG_RUNTIME_DIR/bus" || dbus-daemon --session --address="unix:path=$XDG_RUNTIME_DIR/bus" --fork --nopidfile
 export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
-if ! systemctl --user is-system-running >/dev/null 2>&1; then
-  /usr/lib/systemd/systemd --user >"$XDG_RUNTIME_DIR/systemd-user.log" 2>&1 &
+# Set when the user manager cannot be had; the shard then stops before running anything.
+setup_error=
+pid1=$(cat /proc/1/comm 2>/dev/null)
+# PID 1's name decides, with systemd's private socket as a fallback for a /proc that hides PID 1. Do not test for
+# /run/systemd/system (what sd_booted() checks) instead: the Tensorlake-init path below creates that directory itself,
+# and it is still there for every later exec on that sandbox.
+if [ "$pid1" = systemd ] || [ -S /run/systemd/private ]; then
+  # --- systemd user manager, PID 1 is systemd: let logind own it
+  # Lingering makes logind start user@<uid>.service and keep it running with no login session open. bootstrap.sh
+  # already marks tl-user as lingering, so logind normally starts the manager at boot; enabling it here is the backstop,
+  # and its failure is fatal. Without lingering, every ssh-to-localhost login (the self-ssh check below, the harness's
+  # second host) starts a user manager that logind stops ten seconds after that session ends (UserStopDelaySec),
+  # killing every session scope in it mid-spec. The hand-built manager below is worse here: the self-ssh login makes
+  # logind start the real user@<uid>.service in the cgroup that path takes over, and stopping it SIGKILLs this shell and
+  # the whole test run. The exec's own cgroup lies outside systemd's tree, but `systemd-run --user --scope` still works
+  # from it, because the user manager asks PID 1 to move processes it cannot move itself. Nothing from the
+  # Tensorlake-init path below may run here: its pkill and rmdir sweep would hit the lingering manager and systemd's own
+  # cgroups.
+  for _ in $(seq 1 40); do
+    systemctl is-active --quiet systemd-logind && break
+    sleep 0.5
+  done
+  if sudo -n loginctl enable-linger "$uid"; then
+    linger=ok
+  else
+    linger=FAILED
+    setup_error="loginctl enable-linger failed"
+  fi
+else
+  linger="n/a (no systemd as PID 1)"
+  # --- leftovers from an earlier exec on this sandbox
+  # An earlier exec's processes may or may not still run (an sshd it started can outlive it), and its files stay: a
+  # stale bus socket refuses connections, and a cgroup that still has the old manager's child groups cannot take this
+  # shell (cgroup v2 forbids processes in a non-leaf group with controllers enabled). Remove both, children first.
+  pkill -u "$(id -u)" -x systemd 2>/dev/null; pkill -u "$(id -u)" -x dbus-daemon 2>/dev/null
+  rm -f "/run/user/$(id -u)/bus"
+  if test -d "/sys/fs/cgroup/user.slice"; then
+    find /sys/fs/cgroup/user.slice -depth -mindepth 1 -type d -exec sudo -n rmdir {} + 2>/dev/null
+  fi
+  # --- systemd user manager, PID 1 is Tensorlake's init: build one by hand
+  # sd_booted() only checks for /run/systemd/system, so create it, give tl-user a delegated cgroup v2 subtree, and start
+  # a session bus and `systemd --user` there (probed: transient scopes then start normally).
+  sudo -n mkdir -p /run/systemd/system
+  sudo -n install -d -m 700 -o "$uid" -g "$uid" "$XDG_RUNTIME_DIR"
+  cg=/sys/fs/cgroup/user.slice/user-$uid.slice/user@$uid.service
+  sudo -n mkdir -p "$cg"
+  for f in /sys/fs/cgroup/cgroup.subtree_control /sys/fs/cgroup/user.slice/cgroup.subtree_control \
+           /sys/fs/cgroup/user.slice/user-$uid.slice/cgroup.subtree_control; do
+    echo "+cpu +memory +pids" | sudo -n tee "$f" >/dev/null 2>&1
+  done
+  sudo -n chown -R "$uid:$uid" "$cg"
+  echo $$ | sudo -n tee "$cg/cgroup.procs" >/dev/null
+  test -S "$XDG_RUNTIME_DIR/bus" || dbus-daemon --session --address="unix:path=$XDG_RUNTIME_DIR/bus" --fork --nopidfile
+  if ! systemctl --user is-system-running >/dev/null 2>&1; then
+    /usr/lib/systemd/systemd --user >"$XDG_RUNTIME_DIR/systemd-user.log" 2>&1 &
+  fi
 fi
-for _ in $(seq 1 20); do
+# Up to 20 s, as long as the logind wait above: on a busy, freshly booted clone the manager may only start now.
+for _ in $(seq 1 40); do
   state=$(systemctl --user is-system-running 2>&1)
   case "$state" in running|degraded) break ;; esac
   sleep 0.5
 done
-echo "systemd --user: $state" >"$OUT/summary.txt"
+case "$state" in running|degraded) ;; *) setup_error=${setup_error:-"the systemd user manager is not running"} ;; esac
+{
+  echo "pid 1: ${pid1:-unreadable}"
+  echo "linger: $linger"
+  echo "systemd --user: $state"
+} >"$OUT/summary.txt"
+# Without a user manager the supervisor silently falls back to running sessions unscoped, and the specs can still pass
+# on that fallback, which is not the substrate this run claims to test (.agents/validation.md). Stop loudly instead.
+if [ -n "$setup_error" ]; then
+  echo "setup failed: $setup_error; no tests were run" >>"$OUT/summary.txt"
+  cat "$OUT/summary.txt"
+  exit 1
+fi
 # --- self-ssh
+# Under a booted systemd, ssh.socket already holds port 22 and no sshd shows until the first connection, so start sshd
+# only when neither answers.
 sudo -n mkdir -p /run/sshd
-pgrep -x sshd >/dev/null || sudo -n /usr/sbin/sshd
+systemctl is-active --quiet ssh.socket 2>/dev/null || pgrep -x sshd >/dev/null || sudo -n /usr/sbin/sshd
 ssh-keyscan -H localhost 127.0.0.1 >>/home/tl-user/.ssh/known_hosts 2>/dev/null
 ssh -o BatchMode=yes localhost true && echo "self-ssh: ok" >>"$OUT/summary.txt" || echo "self-ssh: FAILED" >>"$OUT/summary.txt"
 # --- the shard

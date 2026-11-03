@@ -1,22 +1,30 @@
 #!/bin/bash
 # Bootstrap a Tensorlake sandbox (Ubuntu 24.04, Tensorlake's own init as PID 1, user tl-user) into a Farhelm browser-test
-# worker, once, before it is checkpointed as a template. Installs the base packages, systemd and D-Bus (started per test
-# exec by run-shard.sh, since nothing here boots them), an SSH server for the harness's ssh-to-localhost second host,
-# unpacks the pushed source and binaries into /home/tl-user/farhelm, installs the e2e node modules and Playwright's
-# Chromium and WebKit with their system dependencies, and gives tl-user passwordless self-ssh. Expects
-# /home/tl-user/stage/src.tar.gz and bin.tar.gz. Each step stops the script on failure.
+# worker, once, before it is checkpointed as a template. Installs the base packages, systemd and D-Bus, an SSH server for
+# the harness's ssh-to-localhost second host, unpacks the pushed source and binaries into /home/tl-user/farhelm, installs
+# the e2e node modules and Playwright's Chromium and WebKit with their system dependencies, and gives tl-user
+# passwordless self-ssh. Nothing boots systemd on this sandbox itself, but the packages bring in systemd-sysv's
+# /sbin/init, and clones of the template boot it, so on a clone PID 1 is systemd with logind; run-shard.sh handles both.
+# Expects /home/tl-user/stage/src.tar.gz and bin.tar.gz. Each step stops the script on failure.
 set -u
 W=/home/tl-user/farhelm
 S=/home/tl-user/stage
 step() { echo "== $(date -u +%H:%M:%S) $1"; }
 step apt
-# Package scripts (libc6 among them) call systemctl when /run/systemd/system exists, and nothing answers here; the
-# marker is created only by run-shard.sh for a test run, so make sure it is absent while installing.
-sudo -n rm -rf /run/systemd/system
+# Package scripts (libc6 among them) call systemctl when /run/systemd/system exists. Without systemd as PID 1 nothing
+# answers, and the marker is there only because run-shard.sh created it for a test run, so make sure it is absent while
+# installing. Under a booted systemd the directory is systemd's own and the calls reach it: leave it alone.
+if [ "$(cat /proc/1/comm 2>/dev/null)" != systemd ] && ! [ -S /run/systemd/private ]; then
+  sudo -n rm -rf /run/systemd/system
+fi
 sudo -n env DEBIAN_FRONTEND=noninteractive dpkg --configure -a >/dev/null 2>&1
 sudo -n apt-get update -qq || exit 1
 sudo -n env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq build-essential ca-certificates curl git rsync \
   systemd dbus dbus-user-session openssh-server python3 >/dev/null || exit 1
+# Mark tl-user as lingering (what `loginctl enable-linger` records; no logind runs here to ask). On a clone, logind then
+# starts tl-user's user manager at boot and keeps it with no login session open, which run-shard.sh relies on.
+sudo -n install -d -m 755 /var/lib/systemd/linger || exit 1
+sudo -n touch /var/lib/systemd/linger/tl-user || exit 1
 step unpack
 mkdir -p "$W" || exit 1
 tar -xzf "$S/src.tar.gz" -C "$W" || exit 1
