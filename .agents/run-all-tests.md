@@ -138,7 +138,7 @@ sweep's workspace nextest runs the same tests on the same pinned tmux), the macO
 rehearsal's macOS leg runs it in step 4), and the emulator parity's `#[ignore]`d replay of recorded agent sessions
 (`emulator_parity::recordings`), which needs private recordings kept outside the repository; `.agents/validation.md`
 gives its manual command. The focused macOS CI job's terminal host step (the host crate, its entry test in the CLI, and
-the supervisor's spawning, its client, the test-state cleanup and the stop command) runs only with
+the supervisor's spawning, its client, discovery, the test-state cleanup and the stop command) runs only with
 `gh workflow run ci.yml --ref <branch> -f suite=uninstall-macos`; its Linux side is part of the sweep's workspace
 nextest.
 

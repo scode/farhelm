@@ -29,7 +29,12 @@
 //!   the result is unavailable and names it. That process is a candidate,
 //!   not proven to be the host: it is signalled only once its command line
 //!   names the socket exactly. Rows of the process table the search cannot
-//!   read are passed over, as are command lines it cannot read. A caller that meets an unavailable
+//!   read are passed over, as are command lines it cannot read. That search
+//!   is bounded ([`super::process::PROCESS_SEARCH_DEADLINE`]) and runs one
+//!   at a time in the process ([`super::process::find_socket_process`]), and
+//!   one that fails, runs out of time or is refused behind a stuck one is
+//!   never read as "no process", so it too keeps the socket from being judged
+//!   gone. A caller that meets an unavailable
 //!   host should end it with that peer rather than keep reconnecting: each
 //!   attempt adds to the backlog.
 //! - **Always take over** (the plan's D-11). Every `Hello` sets `take_over`:
@@ -129,7 +134,7 @@ use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::UnixStream;
 use tokio::time::Instant;
 
-use super::process::{HostProcess, peer_process, socket_process};
+use super::process::{HostProcess, PROCESS_SEARCH_DEADLINE, find_socket_process, peer_process};
 
 // ---- Limits and deadlines ------------------------------------------------------
 
@@ -1196,19 +1201,18 @@ fn with_peer(error: ConnectError, found: Option<HostProcess>) -> ConnectError {
 /// process (see the module docs, "Never gone while a host process serves
 /// the socket").
 ///
-/// A search that cannot run turns gone into unavailable, since gone is the
-/// one outcome that lets a caller forget a host; a peer-less outcome stays
-/// as it was.
+/// A search that cannot run, or does not finish within
+/// [`PROCESS_SEARCH_DEADLINE`], turns gone into unavailable, since gone is
+/// the one outcome that lets a caller forget a host; a peer-less outcome
+/// stays as it was.
 async fn confirm_with_process(socket: &Path, error: ConnectError) -> ConnectError {
     if peer_of(&error).is_some() {
         return error;
     }
-    let path = socket.to_path_buf();
-    // The search reads every process's command line: off the runtime's
-    // threads.
-    let found = tokio::task::spawn_blocking(move || socket_process(&path))
-        .await
-        .unwrap_or_else(|join| Err(format!("searching the process table: {join}")));
+    // Bounded: a walk that hangs on a stuck process must not hold a connect
+    // (or a discovery scan waiting on it) forever. Running out of time is an
+    // error, which never makes a socket gone.
+    let found = find_socket_process(socket, PROCESS_SEARCH_DEADLINE).await;
     match (error, found) {
         (ConnectError::Gone(_), Ok(Some(host))) => ConnectError::Unavailable {
             reason: Unavailable::NotAccepting,
