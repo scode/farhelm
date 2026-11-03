@@ -4,8 +4,8 @@ Reviewed commit: d6645f771bee8ed03a66486ef8755834937d759d
 
 ## TLDR
 
-A failed signal-log regression can leave its owned sleeper running; the runner's leak report does not prove the child
-was cleaned up.
+A failed signal-log, supervisor or terminal-host fixture can leave its owned processes running. The runner's leak report
+does not prove those processes were cleaned up.
 
 ## Details
 
@@ -46,3 +46,45 @@ after spawn addresses this failure path.
 Provenance: trailing-review run `1e4abedb-1946-4bfb-93a4-fd2f4e241acd`; `g179/f1`, `a018/g179-f1`. These are original
 reviewer identities for this concern, not additional bugs. Full revisions, withdrawals and independent verdicts remain
 in the private review evidence. No fix or triage decision was executed.
+
+## Additional fixture ownership gaps through a98147fb
+
+Reviewed commit for this additional scope: `a98147fb2eaaefb448473107529ada69114d7b03`. These are source-confirmed
+conditional test-ownership gaps, all `other`; no production shutdown defect, runtime occurrence, guaranteed survivor
+duration under the outer recorder or loss of user-owned work is claimed. The original signal-test assessment above
+retains its historical revision and evidence.
+
+The supervisor ownership work in `4a37e4ea9fe39becefb30e855a41b49cd654316f` adds these direct-child cases:
+
+- `crates/farhelm-supervisor/src/managed_supervisor.rs:357–394,487–514` holds a plain `Child` across fallible identity,
+  readiness and assertion work. A reaper-thread handoff supplies no unconditional kill-and-reap owner for failure.
+- `crates/farhelm/src/uninstall.rs:1254–1276` starts a stand-in before fallible identity, readiness and durable-record
+  work. Its cleanup owner exists only after successful construction; `Drop` at `1297–1306` cannot cover a constructor
+  failure. The stand-in can retain the supervisor lock as well as its process.
+- `managed_supervisor.rs:556–566` at `05ce9d59f38bfcaf5cdc40162c26695c37d7e44b` enables the replacement test on macOS
+  with a plain child across copy, rename and observation. The Linux ordering predates that platform change.
+
+The terminal-host fixtures introduced in `d5a7f8de5ea949628ce146dcd7944852baa40db1` need distinct ownership remedies:
+
+- `crates/terminal-host/src/host.rs:2326` evaluates `idle_child()` before `stepped_on` constructs `Stepped`.
+  `idle_child` at `2167–2175` starts `/bin/sleep 1000` with null stdio; `stepped_on` at `1862–1879` can panic on
+  listener setup before its destructor is armed. Closing this fixture's regular-file master does not hang up the
+  sleeper. Arm a direct-child kill-and-reap owner at acquisition and transfer it after setup.
+- `crates/terminal-host/src/spawn.rs:978–1039` starts a HUP-resistant shell and background job before fallible readiness
+  observations and pipe setup. This case needs process-group cleanup and direct-child reaping, with ownership
+  transferred or disarmed when `report_ready` calls `Host::abandon`. An always-active raw-PID guard after abandonment
+  could act on a reused identity.
+- `crates/terminal-host/tests/host_lifecycle.rs:700–709` starts a HUP-resistant child, then performs fallible protocol
+  observations before creating `KillOnDrop`. The common fixture owner at `tests/common/mod.rs:217–252` ends the host,
+  not this deliberately surviving child. The child belongs to the terminal host; the test cannot reap it as its own
+  `std::process::Child`. Acquire effective cleanup ownership before observations without changing the required
+  production behavior that normal `Shutdown` leaves this child alive.
+
+These locations extend the existing failure-before-cleanup finding rather than establish acceptance of it. Searches of
+the specifications, Planned work, unlanded plans, known bugs, queue, ledger and filters found no exact coverage. The
+same-run PID-reuse exception concerns a different mechanism. Pending browser/indirect-child publication discards do not
+explicitly cover these directly acquired fixture resources.
+
+Provenance: trailing-review run `4b58b499-b330-4a1c-841a-38eda725531a`; `g020/f2`, `g021/f1`, `g032/f1`, `g035/f1`,
+`g038/f2`, with independent corroboration of the lifecycle instance by `g036/f2`. All used Codex gpt-6.1-sol, high
+reasoning. Their original event histories and the different cleanup ownership boundaries remain in private evidence.
