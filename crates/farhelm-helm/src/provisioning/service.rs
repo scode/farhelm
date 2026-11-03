@@ -2495,11 +2495,20 @@ impl ProvisioningService {
             }
             ProvisioningAction::StopSupervisor {
                 unit,
+                farhelm_program,
+                state_dir,
                 tmux_program,
                 tmux_socket,
             } => {
                 self.backend
-                    .stop(&plan.target, unit, tmux_program, tmux_socket)
+                    .stop(
+                        &plan.target,
+                        unit,
+                        farhelm_program,
+                        state_dir,
+                        tmux_program,
+                        tmux_socket,
+                    )
                     .await
             }
             ProvisioningAction::RemoveDirectory { path } => {
