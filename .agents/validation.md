@@ -154,31 +154,56 @@ that its required systemd or SSH substrate ran.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'host terminal runtime' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test terminal_host_runtime -E 'test(/^hosts::terminal::/) | binary(terminal_host_runtime)'`
   — the supervisor's runtime for a terminal in a terminal host (`crates/farhelm-supervisor/src/hosts/terminal.rs`). The
   `hosts::terminal::` unit tests (also part of the `hosts::` selection above) drive it against stand-in hosts in the
-  test process: a recovered adoption answering only what follows the journal it adopted, splitting a read that straddles
-  the two, a fresh one answering everything, and a "fresh" one whose host already sent output treating that output as
-  replay; a replay ending inside an open synchronized update answering nothing of it; a snapshot record restored once
-  (before adoption returns, so a seeded host is caught up only with its seed) and not again on a resumed stream, and one
-  that does not restore making the host unavailable; a gap keeping the emulator; a synchronized update drawn at its
-  deadline on a manual clock; the child's exit ending its root for good and reaching the notifier, and an exit known
-  from `Info` (at adoption or on a reconnect) withdrawing the root at once but announced only with its record; the
-  adapters to the supervisor's pane types for every liveness, with a child pinned to a reused pid no root; input fates
-  (written, discarded, unknown when the connection ends and not resent on the next one); callers held while the window
-  is full, a cancelled waiting send sending nothing; nothing written after input lost with a connection, a send still
-  waiting for room in the queue included, nor any later part of a paste sent through one input sequence; a lost
-  connection freeing no room in the input queue while busy callers wait; input cut off while written unknown and not
-  resent, the epoch moving once for the loss (Linux); a reconnect answered by another process than the adopted host
-  unavailable as replaced, naming the adopted one; answers to a query flood bounded by the window and the held-answer
-  cap; a dropped connection resumed from the processed position, a resize lost with one sent again and one already in
-  force not, and resizes taking effect at the host's record; the reconnect limit; a shutdown whose process stays
-  reported unconfirmed, and one on a connection that ended unnoticed sent again on a new connection (Linux). The
-  stand-in answers the adoption's first `Info` after `Read` ahead of the stream's first records, as a real host may.
-  `crates/farhelm/tests/terminal_host_runtime.rs` runs it against real hosts started from the built `farhelm` (never
-  inside a test process, since a host forks): output, title and the pinned child; a DA1 query answered end to end; input
-  reaching the child and its exit recorded; an update left open drawn once a manual clock passes its deadline; a host
-  seeded with a snapshot, and one seeded with several hundred KiB of history and a silent child caught up with the seed
-  on screen when adoption returns (a seed that is not a snapshot failing the adoption); a recovered runtime rebuilding
-  the screen; a resize; and a shutdown confirmed by the host's process. Seconds, part of the workspace nextest run; the
-  focused macOS CI job runs it too, in the terminal host step.
+  test process: the replay policy (a recovered adoption answering the queries no supervisor saw and only those,
+  splitting a read across output an earlier supervisor was sent, output written while none was attached, and live
+  output), a fresh adoption answering everything, and a "fresh" one whose host already sent output treating that output
+  as seen; a replay ending inside an open synchronized update answering nothing of it when an earlier supervisor saw it,
+  and once when none did, drawn without waiting for its deadline; effects following the bytes (a resize at
+  `delivered_end` drawing a seen update answers nothing, an update straddling `delivered_end` answers its seen part
+  never); the goal's three replay cases with a notice subscription (a query, a clipboard write and a bell in the
+  snapshot, sent to an earlier supervisor, and written while none was attached: only the unseen query answered, only
+  live notices reported); notices fanned out to every subscription, one that falls behind losing the oldest; checkpoints
+  taken once due at a read's clean end, at its split candidate, after a synchronized update's deadline draws it when
+  output already made one due, and at once after a long sequence ends, never by time alone on a manual clock, a rejected
+  one retried only after as much output again, and an orderly checkpoint taken where the terminal is clean, reported
+  current with nothing new, kept as not clean mid-sequence, refused while replaying, reporting a rejection, and timed
+  out, with the deadline kept on a current-thread runtime while the encode is held (an orderly one, and an automatic one
+  started from a read), the status and views answering meanwhile and a read of the whole emulator waiting for it to come
+  back (a non-waiting read reading nothing, then again once the status changes); checkpoints due by four times the
+  latest snapshot's size within their floor and ceiling, and taken where a replay ends, never at a read's split
+  candidate before the threshold; an encoder panic handing the emulator back and reported to an orderly stop as a failed
+  encode, a lost encode task ending the runtime as `EmulatorLost` and releasing a waiting read with an error, and a
+  shutdown during an encode answering the waiting read first; notices queued for no one when nobody subscribes, and
+  every subscription ending with the runtime; a gap keeping the emulator, marking the history trimmed (readable with the
+  emulator) and asking for a redraw with a resize one row smaller and one back, and a recovery across a gap asking for
+  it only once caught up; a snapshot record restored once (before adoption returns, so a seeded host is caught up only
+  with its seed) and not again on a resumed stream, and one that does not restore making the host unavailable; a
+  synchronized update drawn at its deadline on a manual clock; the child's exit ending its root for good and reaching
+  the notifier, and an exit known from `Info` (at adoption or on a reconnect) withdrawing the root at once but announced
+  only with its record; the adapters to the supervisor's pane types for every liveness, with a child pinned to a reused
+  pid no root; input fates (written, discarded, unknown when the connection ends and not resent on the next one);
+  callers held while the window is full, a cancelled waiting send sending nothing; nothing written after input lost with
+  a connection, a send still waiting for room in the queue included, nor any later part of a paste sent through one
+  input sequence; a lost connection freeing no room in the input queue while busy callers wait; input cut off while
+  written unknown and not resent, the epoch moving once for the loss (Linux); a reconnect answered by another process
+  than the adopted host unavailable as replaced, naming the adopted one; answers to a query flood bounded by the window
+  and the held-answer cap; a dropped connection resumed from the processed position, a resize lost with one sent again
+  and one already in force not, and resizes taking effect at the host's record; the reconnect limit; a shutdown whose
+  process stays reported unconfirmed, and one on a connection that ended unnoticed sent again on a new connection
+  (Linux). The stand-in answers the adoption's first `Info` after `Read` ahead of the stream's first records, as a real
+  host may. `crates/farhelm/tests/terminal_host_runtime.rs` runs it against real hosts started from the built `farhelm`
+  (never inside a test process, since a host forks): output, title and the pinned child; a DA1 query answered end to
+  end; input reaching the child and its exit recorded; an update left open drawn once a manual clock passes its
+  deadline; a host seeded with a snapshot, and one seeded with several hundred KiB of history and a silent child caught
+  up with the seed on screen when adoption returns (a seed that is not a snapshot failing the adoption); a recovered
+  runtime rebuilding the screen; the replay policy across a crash (a raw-mode child reading each answer in turn: a query
+  in the snapshot and one sent to the crashed supervisor not answered again, one asked while none was attached answered,
+  its premise shown by an `Info`-only connection, and only the clipboard write and bell after the recovery reported);
+  output overflowing the smallest journal while no supervisor is attached, with a shell that sets a mode in the lost
+  output, marked trimmed and redrawn on `SIGWINCH` with the mode back; a sequence left open then silence refused an
+  orderly checkpoint and ending in a gap; a sequence longer than the cap written while away ending in a gap; the FIFO
+  helpers giving up within their bound when nobody is at the other end; a resize; and a shutdown confirmed by the host's
+  process. Seconds, part of the workspace nextest run; the focused macOS CI job runs it too, in the terminal host step.
 - Terminal host coverage, when the crate changes:
   `cargo +nightly llvm-cov -p terminal-host --branch --summary-only -- --test-threads=1`, with cargo-llvm-cov 0.9.1
   installed in your scratch directory (`cargo install --locked --root <scratch>/tools cargo-llvm-cov --version 0.9.1`,

@@ -18,7 +18,8 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::Poll;
 use terminal_host::protocol::{
-    ClientMessage, HostMessage, INPUT_COST, MAX_FRAME, decode_client, encode_host, split_frame,
+    ClientMessage, HostMessage, INPUT_COST, MAX_FRAME, SnapshotRejection, decode_client,
+    encode_host, split_frame,
 };
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::{UnixListener, UnixStream};
@@ -310,29 +311,35 @@ fn seed_record(text: &[u8]) -> HostMessage {
 
 // ---- Adoption and replay ---------------------------------------------------------
 
-/// A recovered adoption feeds what the host journaled before it without
-/// answering it, and answers what follows, splitting a read that straddles
-/// the two.
+/// A recovered adoption answers the queries no supervisor saw and only
+/// those: not those in output an earlier supervisor was sent, and those in
+/// live output as ever, splitting a read across the three.
 ///
-/// Why: an earlier supervisor received the journaled output and answered its
-/// queries; answering them again would type the answers into the program
-/// (a shell shows them as garbage at its prompt). Spec: with `Info` saying 4
-/// bytes were journaled, one `Output` at 0 holding DA1, `x` and DA1 again
-/// (7 bytes) draws `x` and draws one answer, to the second DA1 only; a
-/// status request that follows is answered next, with nothing between; the
-/// runtime reads from (0, 0) and is caught up once past the 4 bytes.
+/// Why: this is the replay policy (D-7). An earlier supervisor answered the
+/// queries in output it was sent; answering them again would type the
+/// answers into the program (a shell shows them as garbage at its prompt).
+/// A query written while no supervisor was attached was never answered,
+/// and the program may still be waiting for it. Spec: with `Info` saying 8
+/// bytes were journaled and 4 of them sent to a client (`delivered_end`),
+/// one `Output` at 0 holds DA1 and `x` (seen), a status request (unseen,
+/// to the journal's end) and DA1 again (live); the program gets the status
+/// answer and then the DA1 answer, in one `Input`, and nothing for the
+/// first DA1; `x` is drawn, and the runtime, reading from (0, 0), is caught
+/// up once past the 8 bytes.
 #[farhelm_testtrace::test]
-async fn a_recovered_adoption_answers_only_what_follows_it() {
+async fn a_recovered_adoption_answers_only_what_no_supervisor_saw() {
     let stand_in = StandIn::new();
+    let journaled = Info {
+        delivered_end: 4,
+        ..info(8)
+    };
     let (terminal, mut server, from) =
-        adopt(&stand_in, Adoption::Recovered, &info(4), options()).await;
+        adopt(&stand_in, Adoption::Recovered, &journaled, options()).await;
     assert_eq!(from, Position::default());
-    assert!(!terminal.status().caught_up, "premise: 4 bytes to replay");
+    assert!(!terminal.status().caught_up, "premise: 8 bytes to replay");
 
-    server.output(0, b"\x1b[cx\x1b[c").await;
-    assert_eq!(server.input().await, DA1_ANSWER);
-    server.output(7, b"\x1b[5n").await;
-    assert_eq!(server.input().await, STATUS_ANSWER);
+    server.output(0, b"\x1b[cx\x1b[5n\x1b[c").await;
+    assert_eq!(server.input().await, [STATUS_ANSWER, DA1_ANSWER].concat());
     wait_until(&terminal, "the replay", screen_has("x")).await;
     assert!(terminal.status().caught_up);
 }
@@ -378,23 +385,247 @@ async fn a_fresh_adoption_replays_what_a_client_was_sent() {
 }
 
 /// A replay that ends inside an open synchronized update draws it with
-/// replay's effects, so the live output that ends it answers nothing from
-/// before the adoption.
+/// the effects of the replay's last part, so the live output that ends it
+/// answers nothing from before the adoption a second time.
 ///
 /// Why: vte holds an update's bytes and interprets them when it ends, with
 /// the effects of whichever feed ends it; an update opened in the replayed
 /// output and ended by the first live feed would answer its replayed
 /// queries live. Spec: with 11 bytes journaled (an update start and DA1),
-/// then live output ending the update and asking for status, the first
-/// answer the program gets is the status answer.
+/// all sent to an earlier supervisor, then live output ending the update
+/// and asking for status, the first answer the program gets is the status
+/// answer.
 #[farhelm_testtrace::test]
 async fn a_replay_ending_inside_an_update_answers_nothing_of_it() {
     let stand_in = StandIn::new();
-    let (_terminal, mut server, _) =
-        adopt(&stand_in, Adoption::Recovered, &info(11), options()).await;
+    let seen = Info {
+        delivered_end: 11,
+        ..info(11)
+    };
+    let (_terminal, mut server, _) = adopt(&stand_in, Adoption::Recovered, &seen, options()).await;
     server.output(0, b"\x1b[?2026h\x1b[c").await;
     server.output(11, b"\x1b[?2026l\x1b[5n").await;
     assert_eq!(server.input().await, STATUS_ANSWER);
+}
+
+/// A replay that ends inside an open synchronized update no supervisor saw
+/// draws it when the replay ends, answering its query once, and shows its
+/// frame without waiting for its deadline.
+///
+/// Why: a query a program asked while no supervisor was attached is
+/// answered once, whether or not it sits in an update the program left
+/// open; and a frame left open when the replay ends is drawn then, since
+/// the replay is all the output there is (a pending update flushed during
+/// recovery). Spec: with 17 bytes journaled and none sent (an update start,
+/// DA1 and `hidden`), the program gets the DA1 answer, `hidden` is on the
+/// screen once caught up with the runtime's manual clock never advanced,
+/// and live output at 17 ending the update and asking for status gets the
+/// status answer next, and no second DA1 answer, with the end marker
+/// interpreted (no `2026l` on the screen).
+#[farhelm_testtrace::test]
+async fn a_replay_ending_inside_an_unseen_update_answers_it_once() {
+    let clock = ManualClock::new();
+    let options = HostTerminalOptions {
+        clock: Clock::Manual(clock),
+        ..options()
+    };
+    let stand_in = StandIn::new();
+    let journaled = b"\x1b[?2026h\x1b[chidden";
+    let end = journaled.len() as u64;
+    assert_eq!(end, 17);
+    let (terminal, mut server, _) =
+        adopt(&stand_in, Adoption::Recovered, &info(end), options).await;
+    server.output(0, journaled).await;
+    assert_eq!(server.input().await, DA1_ANSWER);
+    wait_until(&terminal, "the replay", |terminal| {
+        terminal.status().caught_up
+    })
+    .await;
+    assert!(terminal.screen_tail(4096).contains("hidden"));
+    server.output(end, b"\x1b[?2026l\x1b[5n").await;
+    assert_eq!(server.input().await, STATUS_ANSWER);
+    let screen = terminal.screen_tail(4096);
+    assert!(
+        screen.contains("hidden") && !screen.contains("2026"),
+        "{screen:?}"
+    );
+}
+
+/// A resize at `delivered_end` that draws an update an earlier supervisor
+/// was sent answers nothing from it.
+///
+/// Why: a resize draws an open update with the effects the runtime gives
+/// it; the update's bytes are seen output, whose queries the earlier
+/// supervisor answered, so a resize processed where the unseen part
+/// begins must still draw them as seen (effects follow the bytes). Spec:
+/// with 11 bytes journaled and sent (an update start and DA1) and a resize
+/// at 11 journaled after them, a live status request at 11 gets the status
+/// answer as the first input, and no DA1 answer.
+#[farhelm_testtrace::test]
+async fn a_resize_at_delivered_end_answers_nothing_seen() {
+    let journaled = Info {
+        delivered_end: 11,
+        resizes: 1,
+        ..info(11)
+    };
+    let stand_in = StandIn::new();
+    let (_terminal, mut server, _) =
+        adopt(&stand_in, Adoption::Recovered, &journaled, options()).await;
+    server.output(0, b"\x1b[?2026h\x1b[c").await;
+    server
+        .send(&HostMessage::Resized {
+            offset: 11,
+            index: 0,
+            size: Size { cols: 90, rows: 20 },
+        })
+        .await;
+    server.output(11, b"\x1b[5n").await;
+    assert_eq!(server.input().await, STATUS_ANSWER);
+}
+
+/// An update that straddles `delivered_end` answers what it held of the
+/// seen output never, and what it held of the unseen output once.
+///
+/// Why: the update's seen part was sent to an earlier supervisor, which
+/// answered it; drawing the whole update with the effects of its unseen end
+/// would answer those queries a second time. Spec: with 23 bytes
+/// journaled, 11 of them sent (an update start and DA1) and the rest not
+/// (a status request and the update's end), the program gets the status
+/// answer, and then, for a live status request at 23, the status answer
+/// again, with no DA1 answer anywhere.
+#[farhelm_testtrace::test]
+async fn an_update_straddling_delivered_end_answers_its_seen_part_never() {
+    let journaled = Info {
+        delivered_end: 11,
+        ..info(23)
+    };
+    let stand_in = StandIn::new();
+    let (_terminal, mut server, _) =
+        adopt(&stand_in, Adoption::Recovered, &journaled, options()).await;
+    server
+        .output(0, b"\x1b[?2026h\x1b[c\x1b[5n\x1b[?2026l")
+        .await;
+    assert_eq!(server.input().await, STATUS_ANSWER);
+    server.output(23, b"\x1b[5n").await;
+    assert_eq!(server.input().await, STATUS_ANSWER);
+}
+
+/// A recovery answers and reports only what no supervisor saw: a query, a
+/// clipboard write (OSC 52) and a bell in the snapshot, in output an
+/// earlier supervisor was sent after it, and in output written while none
+/// was attached, then live ones.
+///
+/// Why: this is the goal's replay test (D-7). An answer delivered twice
+/// reaches the program as typed garbage, and a bell or clipboard write
+/// delivered again, maybe minutes later, surprises the user; a query no
+/// supervisor saw must still be answered. Spec: with a notice sink, a
+/// snapshot record of a terminal that was sent a query, a clipboard write
+/// and a bell, then those three again as seen output (delivered up to its
+/// end), then a status request, a clipboard write and a bell as unseen
+/// output, then a clipboard write of `live` and a bell as live output: the
+/// program gets the status answer only, and the sink receives the live
+/// clipboard write and bell only, in that order.
+#[farhelm_testtrace::test]
+async fn a_recovery_answers_and_reports_only_what_no_supervisor_saw() {
+    const SEEN: &[u8] = b"\x1b[c\x1b]52;c;c2Vlbg==\x07\x07";
+    const UNSEEN: &[u8] = b"\x1b[5n\x1b]52;c;dW5zZWVu\x07\x07";
+    const LIVE: &[u8] = b"\x1b]52;c;bGl2ZQ==\x07\x07";
+    let snapshot = match seed_record(b"\x1b[c\x1b]52;c;c25hcA==\x07\x07") {
+        HostMessage::SnapshotRecord { blob, .. } => HostMessage::SnapshotRecord {
+            position: Position {
+                offset: 100,
+                resizes: 0,
+            },
+            blob,
+        },
+        other => unreachable!("{other:?}"),
+    };
+    let seen_end = 100 + SEEN.len() as u64;
+    let end = seen_end + UNSEEN.len() as u64;
+    let journaled = Info {
+        snapshot: Position {
+            offset: 100,
+            resizes: 0,
+        },
+        tail_start: 100,
+        delivered_end: seen_end,
+        ..info(end)
+    };
+    let stand_in = StandIn::new();
+    let (terminal, mut server, _) = adopt_with(
+        &stand_in,
+        Adoption::Recovered,
+        &journaled,
+        options(),
+        &[snapshot],
+    )
+    .await;
+    let terminal = terminal.expect("the adoption succeeds");
+    let mut notices = terminal.subscribe_notices();
+    server.output(100, SEEN).await;
+    server.output(seen_end, UNSEEN).await;
+    server.output(end, LIVE).await;
+    assert_eq!(server.input().await, STATUS_ANSWER);
+    let first = within("the first notice", notices.recv()).await;
+    assert_eq!(
+        first,
+        Some(Notice::Clipboard {
+            target: farhelm_terminal_emulator::ClipboardTarget::Clipboard,
+            text: "live".into()
+        })
+    );
+    assert_eq!(
+        within("the second notice", notices.recv()).await,
+        Some(Notice::Bell)
+    );
+    server.output(end + LIVE.len() as u64, b"\x1b[5n").await;
+    assert_eq!(server.input().await, STATUS_ANSWER);
+    assert_eq!(notices.try_recv(), None, "a notice from replayed output");
+}
+
+/// Every notice subscription gets every live notice from when it was
+/// taken, and one that falls behind loses the oldest rather than holding
+/// the terminal up.
+///
+/// Why: each viewer attachment shows clipboard writes to its own user, so
+/// one viewer taking a notice must not take it from another; and a viewer
+/// that stalls must not stall the terminal or grow without bound. Spec:
+/// with two subscriptions taken before it, one read holding ten clipboard
+/// writes (`n0` to `n9`) gives each subscription `n2` to `n9` (the last
+/// [`NOTICE_BACKLOG`]), in order, and then nothing; a subscription taken
+/// after the read gets nothing of it.
+#[farhelm_testtrace::test]
+async fn notices_fan_out_and_a_lagging_subscription_loses_the_oldest() {
+    const TEXTS: [&str; 10] = [
+        "bjA=", "bjE=", "bjI=", "bjM=", "bjQ=", "bjU=", "bjY=", "bjc=", "bjg=", "bjk=",
+    ];
+    assert_eq!(NOTICE_BACKLOG, 8, "the spec counts on a backlog of 8");
+    let stand_in = StandIn::new();
+    let (terminal, mut server, _) = adopt(&stand_in, Adoption::Fresh, &info(0), options()).await;
+    let mut first = terminal.subscribe_notices();
+    let mut second = terminal.subscribe_notices();
+    let mut output = Vec::new();
+    for text in TEXTS {
+        output.extend_from_slice(format!("\x1b]52;c;{text}\x07").as_bytes());
+    }
+    let end = output.len() as u64;
+    server.output(0, &output).await;
+    wait_until(&terminal, "the clipboard writes", |terminal| {
+        terminal.status().position.offset == end
+    })
+    .await;
+    let mut late = terminal.subscribe_notices();
+    for subscription in [&mut first, &mut second] {
+        let texts: Vec<String> = std::iter::from_fn(|| subscription.try_recv())
+            .map(|notice| match notice {
+                Notice::Clipboard { text, .. } => text,
+                other => panic!("expected a clipboard write, got {other:?}"),
+            })
+            .collect();
+        let expected: Vec<String> = (2..10).map(|n| format!("n{n}")).collect();
+        assert_eq!(texts, expected);
+    }
+    assert_eq!(late.try_recv(), None);
 }
 
 /// An initial snapshot record is restored before adoption returns, and a
@@ -408,7 +639,9 @@ async fn a_replay_ending_inside_an_update_answers_nothing_of_it() {
 /// `seeded` is on the screen when adoption returns; ` live` then shows
 /// `seeded live`; on the connection after a dropped one, which reads from
 /// (5, 0), the record again and then `!` at 5 show `seeded live!` at (6, 0)
-/// (restoring again would show `seeded!`).
+/// (restoring again would show `seeded!`). The emulator counts one rebuild
+/// throughout, the restore at adoption, which is what tells a viewer's
+/// grid stream to send its history again.
 #[farhelm_testtrace::test]
 async fn a_snapshot_record_is_restored_once() {
     let record = seed_record(b"seeded");
@@ -424,6 +657,7 @@ async fn a_snapshot_record_is_restored_once() {
     .await;
     let terminal = terminal.expect("the adoption succeeds");
     assert!(terminal.screen_tail(4096).contains("seeded"));
+    assert_eq!(terminal.try_read(|emulator| emulator.rebuilds()), Some(1));
     server.output(0, b" live").await;
     wait_until(
         &terminal,
@@ -458,6 +692,11 @@ async fn a_snapshot_record_is_restored_once() {
             offset: 6,
             resizes: 0
         }
+    );
+    assert_eq!(
+        terminal.try_read(|emulator| emulator.rebuilds()),
+        Some(1),
+        "a record not restored again is no rebuild"
     );
 }
 
@@ -539,14 +778,636 @@ async fn a_snapshot_that_does_not_restore_makes_the_host_unavailable() {
     assert_eq!(terminal.evidence(), HostEvidence::Unattributed);
 }
 
-/// A gap in the journal keeps the emulator and continues after it.
+// ---- Checkpoints -----------------------------------------------------------------
+
+/// Options with checkpoints due after exactly `after_bytes` of output,
+/// whatever the snapshots' sizes, on `clock`.
+fn checkpointing(after_bytes: u64, clock: &ManualClock) -> HostTerminalOptions {
+    HostTerminalOptions {
+        clock: Clock::Manual(clock.clone()),
+        checkpoints: CheckpointPolicy {
+            min_bytes: after_bytes,
+            max_bytes: after_bytes,
+        },
+        ..options()
+    }
+}
+
+/// The next `Snapshot` the client sends, answered as `accept` says.
+async fn snapshot_request(server: &mut Server, accept: bool) -> (Position, Vec<u8>) {
+    let (position, blob) = loop {
+        match server.next().await {
+            ClientMessage::Snapshot { position, blob } => break (position, blob),
+            ClientMessage::Input(_) => {}
+            other => panic!("expected Snapshot, got {other:?}"),
+        }
+    };
+    let reply = if accept {
+        HostMessage::SnapshotAccepted(position)
+    } else {
+        HostMessage::SnapshotRejected {
+            position,
+            reason: SnapshotRejection::OutsideRetained,
+        }
+    };
+    server.send(&reply).await;
+    (position, blob)
+}
+
+/// Whether the terminal's emulator is away being encoded (module docs,
+/// "Checkpoints"): the premise of the tests that check what answers
+/// meanwhile, which would pass vacuously if the encode had not started or
+/// had already finished.
+fn emulator_away(terminal: &HostTerminal) -> bool {
+    matches!(
+        terminal
+            .inner
+            .emulator
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .slot,
+        Slot::Encoding(_)
+    )
+}
+
+/// The screen text of a snapshot blob.
+fn restored_screen(blob: &[u8]) -> String {
+    Emulator::restore(blob, 100)
+        .expect("a blob the runtime made restores")
+        .emulator
+        .screen_text()
+}
+
+/// Once enough output has passed, the runtime snapshots the emulator at
+/// the end of a clean read and hands the snapshot to the host; a rejected
+/// one leaves the previous, and the next is due only after as much output
+/// again.
 ///
-/// Why: a gap means the bytes in it were never interpreted, not that the
-/// terminal is broken; resetting a healthy screen would lose everything on
-/// it. Spec: `abc`, a gap from 3 to 10, and `def` at 10 show `abcdef` at
-/// (13, 0).
+/// Why: checkpoints are what let the host drop raw output, keep its tail
+/// short, and leave its cap for a supervisor's absence; a snapshot taken
+/// anywhere but a clean boundary could not be continued from, and one
+/// retried at every read after a rejection would cost a whole snapshot per
+/// read. Spec: with checkpoints due after 10 bytes, `hello world!` (12
+/// bytes, clean at its end) brings a `Snapshot` at (12, 0) whose blob
+/// shows `hello world!`; rejected, the status names no checkpoint, and
+/// `x` and a status request (5 bytes, so 5 since the attempt) bring none
+/// (the stand-in's next frame is the status answer); `0123456789` and
+/// another status request then bring one at (27, 0), at the split
+/// candidate before the request, and accepted, the status names it.
 #[farhelm_testtrace::test]
-async fn a_gap_keeps_the_emulator() {
+async fn checkpoints_are_taken_at_clean_reads_once_due() {
+    let clock = ManualClock::new();
+    let stand_in = StandIn::new();
+    let (terminal, mut server, _) = adopt(
+        &stand_in,
+        Adoption::Fresh,
+        &info(0),
+        checkpointing(10, &clock),
+    )
+    .await;
+    server.output(0, b"hello world!").await;
+    let (position, blob) = snapshot_request(&mut server, false).await;
+    assert_eq!(
+        position,
+        Position {
+            offset: 12,
+            resizes: 0
+        }
+    );
+    assert!(restored_screen(&blob).contains("hello world!"));
+    assert_eq!(terminal.status().checkpoint, None);
+
+    server.output(12, b"x\x1b[5n").await;
+    assert_eq!(
+        server.next().await,
+        ClientMessage::Input(STATUS_ANSWER.to_vec())
+    );
+    server.output(17, b"0123456789\x1b[5n").await;
+    let (position, _) = snapshot_request(&mut server, true).await;
+    assert_eq!(
+        position,
+        Position {
+            offset: 27,
+            resizes: 0
+        }
+    );
+    wait_until(&terminal, "the checkpoint", |terminal| {
+        terminal.status().checkpoint == Some(position)
+    })
+    .await;
+}
+
+/// A read whose split candidate comes before enough output is not
+/// snapshotted there, but at its end, once the threshold is passed.
+///
+/// Why: checkpoints are due only after enough output (the plan's D-8,
+/// revised); checking the threshold at the read's end alone would encode
+/// up to a whole read early. Spec: with checkpoints due after 10 bytes,
+/// `abc`, a status request and `0123456789` (17 bytes, split candidate at
+/// 3, before the request) bring a `Snapshot` at (17, 0), not at (3, 0).
+#[farhelm_testtrace::test]
+async fn a_split_before_the_threshold_waits_for_the_read_end() {
+    let clock = ManualClock::new();
+    let stand_in = StandIn::new();
+    let (_terminal, mut server, _) = adopt(
+        &stand_in,
+        Adoption::Fresh,
+        &info(0),
+        checkpointing(10, &clock),
+    )
+    .await;
+    server.output(0, b"abc\x1b[5n0123456789").await;
+    let (position, _) = snapshot_request(&mut server, true).await;
+    assert_eq!(
+        position,
+        Position {
+            offset: 17,
+            resizes: 0
+        }
+    );
+}
+
+/// A read that ends inside an open synchronized update is snapshotted at
+/// its split candidate, where the emulator is clean, not at its end.
+///
+/// Why: agents draw in synchronized updates, so their reads seldom end
+/// clean; the split candidate (just before the update's start) is where a
+/// checkpoint can still be taken, and a snapshot of an open update could
+/// not be continued from. Spec: with checkpoints due after 1 byte, `text`
+/// followed by an update start and `partial` brings a `Snapshot` at
+/// (4, 0) whose blob shows `text` and not `partial`.
+#[farhelm_testtrace::test]
+async fn a_checkpoint_is_taken_at_the_split_candidate() {
+    let clock = ManualClock::new();
+    let stand_in = StandIn::new();
+    let (_terminal, mut server, _) = adopt(
+        &stand_in,
+        Adoption::Fresh,
+        &info(0),
+        checkpointing(1, &clock),
+    )
+    .await;
+    server.output(0, b"text\x1b[?2026hpartial").await;
+    let (position, blob) = snapshot_request(&mut server, true).await;
+    assert_eq!(
+        position,
+        Position {
+            offset: 4,
+            resizes: 0
+        }
+    );
+    let screen = restored_screen(&blob);
+    assert!(
+        screen.contains("text") && !screen.contains("partial"),
+        "{screen:?}"
+    );
+}
+
+/// No checkpoint is taken inside a sequence, however long, and one is
+/// taken at the first clean boundary after it ends.
+///
+/// Why: a snapshot inside a sequence could not be continued from (a fresh
+/// parser would misread the rest), so a sequence longer than the host's
+/// cap leaves the host's tail growing until it ends; the first clean point
+/// after it is where the tail must be cut back, or a later recovery would
+/// find a gap for no reason. Spec: with checkpoints due after 1 byte, a
+/// read holding a title's start and 5,000 bytes of it, then a read holding
+/// the title's end, `done` and a status request, bring one snapshot, the
+/// first: at the position after `done`, before the request (5,009 bytes
+/// in), showing `done`.
+#[farhelm_testtrace::test]
+async fn a_checkpoint_follows_a_long_sequence_at_once() {
+    let clock = ManualClock::new();
+    let stand_in = StandIn::new();
+    let (_terminal, mut server, _) = adopt(
+        &stand_in,
+        Adoption::Fresh,
+        &info(0),
+        checkpointing(1, &clock),
+    )
+    .await;
+    let mut title = b"\x1b]2;".to_vec();
+    title.extend(vec![b'x'; 5000]);
+    server.output(0, &title).await;
+    server.output(5004, b"\x07done\x1b[5n").await;
+    let (position, blob) = snapshot_request(&mut server, true).await;
+    assert_eq!(
+        position,
+        Position {
+            offset: 5009,
+            resizes: 0
+        }
+    );
+    assert!(restored_screen(&blob).contains("done"));
+}
+
+/// A checkpoint the replayed output made due is taken where the replay
+/// finishes, whether output or a resize ends it.
+///
+/// Why: a recovery may replay most of the host's cap; with no read after
+/// it (a program that went quiet while no supervisor was attached), the
+/// checkpoint is due nowhere else, and the host's tail would stay near its
+/// cap until the program writes again. Spec: with checkpoints due after
+/// 10 bytes, a recovered adoption whose 15 journaled bytes end the replay
+/// sends a `Snapshot` at (15, 0), not at the split candidate of the live
+/// read that follows (`x` and a status request, which would put it at 16);
+/// one whose replay ends with a resize after its 15 bytes sends one at
+/// (15, 1).
+#[farhelm_testtrace::test]
+async fn a_replay_ending_with_a_due_checkpoint_takes_it() {
+    let clock = ManualClock::new();
+    let stand_in = StandIn::new();
+    let (_terminal, mut server, _) = adopt(
+        &stand_in,
+        Adoption::Recovered,
+        &info(15),
+        checkpointing(10, &clock),
+    )
+    .await;
+    server.output(0, b"fifteen bytes..").await;
+    server.output(15, b"x\x1b[5n").await;
+    let (position, _) = snapshot_request(&mut server, true).await;
+    assert_eq!(
+        position,
+        Position {
+            offset: 15,
+            resizes: 0
+        }
+    );
+
+    let resized = Info {
+        resizes: 1,
+        ..info(15)
+    };
+    let stand_in = StandIn::new();
+    let (_terminal, mut server, _) = adopt(
+        &stand_in,
+        Adoption::Recovered,
+        &resized,
+        checkpointing(10, &clock),
+    )
+    .await;
+    server.output(0, b"fifteen bytes..").await;
+    server
+        .send(&HostMessage::Resized {
+            offset: 15,
+            index: 0,
+            size: Size { cols: 90, rows: 20 },
+        })
+        .await;
+    let (position, _) = snapshot_request(&mut server, true).await;
+    assert_eq!(
+        position,
+        Position {
+            offset: 15,
+            resizes: 1
+        }
+    );
+}
+
+/// Time alone never makes a checkpoint due: a terminal that writes a
+/// little and goes quiet keeps its tail.
+///
+/// Why: a time trigger re-encodes the whole scrollback of every terminal
+/// that changed at all (a spinner, a clock) once per period, which made it
+/// the largest steady cost of checkpoints, to spare a recovery a tail that
+/// replays in milliseconds; checkpoints are due by output alone (the
+/// plan's D-8, revised). Spec: with checkpoints due after 1 KiB, `quiet`
+/// and a status request bring the answer and no snapshot; with the
+/// runtime's clock then advanced by a day, two more status requests each
+/// bring their answer as the next frame, never a snapshot.
+#[farhelm_testtrace::test]
+async fn time_alone_never_makes_a_checkpoint_due() {
+    let clock = ManualClock::new();
+    let stand_in = StandIn::new();
+    let (_terminal, mut server, _) = adopt(
+        &stand_in,
+        Adoption::Fresh,
+        &info(0),
+        checkpointing(1024, &clock),
+    )
+    .await;
+    server.output(0, b"quiet\x1b[5n").await;
+    assert_eq!(
+        server.next().await,
+        ClientMessage::Input(STATUS_ANSWER.to_vec())
+    );
+    clock.advance(Duration::from_secs(24 * 3600));
+    // Two requests: a timer the clock woke could lose the race with the
+    // first, never with the second.
+    for offset in [9, 13] {
+        server.output(offset, b"\x1b[5n").await;
+        assert_eq!(
+            server.next().await,
+            ClientMessage::Input(STATUS_ANSWER.to_vec())
+        );
+    }
+}
+
+/// A checkpoint for an orderly stop is taken where the terminal is when it
+/// is clean there, and otherwise leaves the host its previous snapshot.
+///
+/// Why: an orderly stop (an update, the app replacing its supervisor) must
+/// leave the shortest replay it can, but must never wait for a clean
+/// boundary, which a program stopped mid-sequence may never reach. Spec:
+/// after `ready`, `checkpoint_now` sends a `Snapshot` at (5, 0) and,
+/// accepted, reports it; asked again with nothing new, it reports the
+/// checkpoint current without sending anything; after an unfinished
+/// sequence (`ESC [`), it reports `NotClean` without sending a snapshot
+/// (the next frame is the answer to a status request); and with a deadline
+/// the stand-in does not answer by, it reports `TimedOut`.
+#[farhelm_testtrace::test]
+async fn checkpoint_now_takes_a_clean_snapshot_or_keeps_the_previous() {
+    let clock = ManualClock::new();
+    let stand_in = StandIn::new();
+    let (terminal, mut server, _) = adopt(
+        &stand_in,
+        Adoption::Fresh,
+        &info(0),
+        checkpointing(1 << 30, &clock),
+    )
+    .await;
+    server.output(0, b"ready").await;
+    wait_until(&terminal, "the output", screen_has("ready")).await;
+    let deadline = || tokio::time::Instant::now() + WAIT;
+    let (outcome, (position, _)) = tokio::join!(
+        terminal.checkpoint_now(deadline()),
+        snapshot_request(&mut server, true)
+    );
+    assert_eq!(
+        position,
+        Position {
+            offset: 5,
+            resizes: 0
+        }
+    );
+    assert_eq!(outcome, Ok(CheckpointOutcome::Accepted(position)));
+    assert_eq!(
+        terminal.checkpoint_now(deadline()).await,
+        Ok(CheckpointOutcome::Current(position))
+    );
+
+    server.output(5, b"\x1b[").await;
+    wait_until(&terminal, "the open sequence", |terminal| {
+        terminal.status().position.offset == 7
+    })
+    .await;
+    assert_eq!(
+        terminal.checkpoint_now(deadline()).await,
+        Ok(CheckpointOutcome::Kept(NotTaken::NotClean))
+    );
+    server.output(7, b"m\x1b[5n").await;
+    assert_eq!(
+        server.next().await,
+        ClientMessage::Input(STATUS_ANSWER.to_vec())
+    );
+
+    let soon = tokio::time::Instant::now() + Duration::from_millis(200);
+    let outcome = terminal.checkpoint_now(soon).await;
+    assert_eq!(outcome, Ok(CheckpointOutcome::Kept(NotTaken::TimedOut)));
+    assert!(matches!(
+        server.next().await,
+        ClientMessage::Snapshot { .. }
+    ));
+}
+
+/// A checkpoint already due by output is taken as soon as a synchronized
+/// update's deadline draws the update, between reads.
+///
+/// Why: output that came in reads with no clean point (an update the
+/// program left open) still fills the host's journal; once the update is
+/// drawn, the checkpoint that output made due must follow, or the host's
+/// tail grows until the program writes again, which a stalled program may
+/// never do. Spec: with checkpoints due after 10 bytes, an update start and 20
+/// letters (28 bytes, never clean) bring no snapshot; advancing the
+/// runtime's clock by 150 ms draws the update, and a `Snapshot` at (28, 0)
+/// follows at once.
+#[farhelm_testtrace::test]
+async fn a_checkpoint_due_by_output_follows_as_soon_as_the_terminal_is_clean() {
+    let clock = ManualClock::new();
+    let stand_in = StandIn::new();
+    let (terminal, mut server, _) = adopt(
+        &stand_in,
+        Adoption::Fresh,
+        &info(0),
+        checkpointing(10, &clock),
+    )
+    .await;
+    server.output(0, b"\x1b[?2026habcdefghijklmnopqrst").await;
+    wait_until(&terminal, "the update's bytes", |terminal| {
+        terminal.status().position.offset == 28
+    })
+    .await;
+    clock.advance(Duration::from_millis(150));
+    let (position, _) = snapshot_request(&mut server, true).await;
+    assert_eq!(
+        position,
+        Position {
+            offset: 28,
+            resizes: 0
+        }
+    );
+}
+
+/// An orderly checkpoint keeps its deadline while the snapshot's encode
+/// runs long, even on a current-thread runtime, and the views do not wait
+/// for the encode; the encode, once done, goes to the host as an ordinary
+/// checkpoint.
+///
+/// Why: encoding a full terminal takes seconds; run on an async worker it
+/// would stall the stop that asked for it within a budget, and every view
+/// read on the way (status sampling, titles) would wait for it too; a
+/// `read` of the whole emulator cannot be answered until it is back, and
+/// must neither block the runtime nor miss its return. Spec: on this
+/// test's current-thread runtime, with every encode held (holding the
+/// emulator) by a closed gate, `checkpoint_now` with a 300 ms deadline
+/// reports `TimedOut` within 2 s; the emulator is then away; the screen
+/// tail and the title come back at once (within 1 s) with `ready` and the
+/// title; a `read` is pending; once the gate opens, the
+/// `read` answers with `ready` and a `Snapshot` at (11, 0), the end of the
+/// title and `ready`, reaches the stand-in.
+#[farhelm_testtrace::test]
+async fn an_orderly_checkpoint_keeps_its_deadline_while_the_encode_runs() {
+    let clock = ManualClock::new();
+    let gate = EncodeGate::closed();
+    let options = HostTerminalOptions {
+        encode_gate: Some(gate.clone()),
+        ..checkpointing(1 << 30, &clock)
+    };
+    let stand_in = StandIn::new();
+    let (terminal, mut server, _) = adopt(&stand_in, Adoption::Fresh, &info(0), options).await;
+    server.output(0, b"\x1b]2;t\x07ready").await;
+    wait_until(&terminal, "the output", screen_has("ready")).await;
+
+    let asked = std::time::Instant::now();
+    let outcome = terminal
+        .checkpoint_now(tokio::time::Instant::now() + Duration::from_millis(300))
+        .await;
+    assert_eq!(outcome, Ok(CheckpointOutcome::Kept(NotTaken::TimedOut)));
+    assert!(
+        asked.elapsed() < Duration::from_secs(2),
+        "{:?}",
+        asked.elapsed()
+    );
+
+    assert!(emulator_away(&terminal), "the encode holds the emulator");
+    let read = std::time::Instant::now();
+    assert!(terminal.screen_tail(4096).contains("ready"));
+    assert_eq!(terminal.title(), "t");
+    assert!(
+        read.elapsed() < Duration::from_secs(1),
+        "{:?}",
+        read.elapsed()
+    );
+
+    let reading = terminal.read(|emulator| emulator.screen_text());
+    tokio::pin!(reading);
+    assert!(
+        pending_once(&mut reading).await,
+        "a read answered while the emulator was away"
+    );
+
+    gate.open();
+    let (screen, (position, _)) = tokio::join!(
+        within("the read once the emulator is back", reading),
+        snapshot_request(&mut server, true)
+    );
+    let screen = screen.expect("the emulator came back");
+    assert!(screen.contains("ready"), "{screen:?}");
+    assert_eq!(
+        position,
+        Position {
+            offset: 11,
+            resizes: 0
+        }
+    );
+}
+
+/// An automatic checkpoint's encode, started from a read, leaves the status
+/// and the views answering, and an orderly checkpoint asked meanwhile keeps
+/// its deadline, on a current-thread runtime.
+///
+/// Why: publishing a read's status after the encode started once waited
+/// for the encode's hold on the emulator, which on a current-thread runtime
+/// stalled everything for the whole encode, an orderly stop's deadline
+/// included; that path is taken by every automatic checkpoint, not by the
+/// orderly one. Spec: with checkpoints due after 10 bytes and every encode
+/// held by a closed gate, `hello world!` (12 bytes) sends the emulator away
+/// for an encode; the status then reports position (12, 0) and the screen
+/// tail shows `hello world!`, at once (within 1 s), and `try_read` gives
+/// nothing; `checkpoint_now` with a 300 ms deadline reports `TimedOut`
+/// within 2 s; once the gate opens, a status change shows `try_read`
+/// reading again, and a `Snapshot` at (12, 0) reaches the stand-in.
+#[farhelm_testtrace::test]
+async fn an_automatic_checkpoint_leaves_the_views_and_deadlines_answering() {
+    let clock = ManualClock::new();
+    let gate = EncodeGate::closed();
+    let options = HostTerminalOptions {
+        encode_gate: Some(gate.clone()),
+        ..checkpointing(10, &clock)
+    };
+    let stand_in = StandIn::new();
+    let (terminal, mut server, _) = adopt(&stand_in, Adoption::Fresh, &info(0), options).await;
+    server.output(0, b"hello world!").await;
+    wait_until(&terminal, "the encode to take the emulator", emulator_away).await;
+
+    let read = std::time::Instant::now();
+    assert_eq!(
+        terminal.status().position,
+        Position {
+            offset: 12,
+            resizes: 0
+        }
+    );
+    assert!(terminal.screen_tail(4096).contains("hello world!"));
+    assert!(
+        read.elapsed() < Duration::from_secs(1),
+        "{:?}",
+        read.elapsed()
+    );
+    assert_eq!(terminal.try_read(|_| ()), None, "try_read while away");
+
+    let asked = std::time::Instant::now();
+    let outcome = terminal
+        .checkpoint_now(tokio::time::Instant::now() + Duration::from_millis(300))
+        .await;
+    assert_eq!(outcome, Ok(CheckpointOutcome::Kept(NotTaken::TimedOut)));
+    assert!(
+        asked.elapsed() < Duration::from_secs(2),
+        "{:?}",
+        asked.elapsed()
+    );
+
+    gate.open();
+    wait_until(&terminal, "the emulator to come back", |terminal| {
+        terminal.try_read(|_| ()).is_some()
+    })
+    .await;
+    let (position, _) = snapshot_request(&mut server, true).await;
+    assert_eq!(
+        position,
+        Position {
+            offset: 12,
+            resizes: 0
+        }
+    );
+}
+
+/// An orderly checkpoint is refused while the runtime still replays, and
+/// reports the host's rejection.
+///
+/// Why: a snapshot during the replay would capture a state the host's
+/// journal is still ahead of, and a caller deciding whether a stop may
+/// proceed must learn that the host did not take a snapshot. Spec: a
+/// recovered adoption with 5 bytes journaled and none fed reports
+/// `Replaying`; once fed, with the stand-in rejecting the snapshot as
+/// outside its retained output, it reports `Rejected(OutsideRetained)`.
+#[farhelm_testtrace::test]
+async fn an_orderly_checkpoint_reports_replay_and_rejection() {
+    let stand_in = StandIn::new();
+    let (terminal, mut server, _) =
+        adopt(&stand_in, Adoption::Recovered, &info(5), options()).await;
+    let deadline = || tokio::time::Instant::now() + WAIT;
+    assert_eq!(
+        terminal.checkpoint_now(deadline()).await,
+        Ok(CheckpointOutcome::Kept(NotTaken::Replaying))
+    );
+    server.output(0, b"hello").await;
+    wait_until(&terminal, "the replay", |terminal| {
+        terminal.status().caught_up
+    })
+    .await;
+    let (outcome, _) = tokio::join!(
+        terminal.checkpoint_now(deadline()),
+        snapshot_request(&mut server, false)
+    );
+    assert_eq!(
+        outcome,
+        Ok(CheckpointOutcome::Kept(NotTaken::Rejected(
+            SnapshotRejection::OutsideRetained
+        )))
+    );
+}
+
+// ---- Gaps ------------------------------------------------------------------------
+
+/// A gap keeps the emulator, marks the history trimmed, and asks the
+/// program to redraw with a resize one row smaller and one back.
+///
+/// Why: the bytes in a gap were never interpreted, so the screen and modes
+/// may be stale until the program draws again; a resize is the one thing
+/// that makes every program redraw, and a resize to the size in force
+/// sends no `SIGWINCH` (checked on Linux 6.8: none for the same size, one
+/// for a different size and one for the change back; macOS was not
+/// checked, though the BSD tty code it derives from compares sizes the
+/// same way), so it takes two. Spec: `abc`, a gap from 3 to 10
+/// at 80x24, and `def` at 10 show `abcdef` at (13, 0) with the history
+/// marked trimmed, in the status and as read with the emulator, which was
+/// not rebuilt (a viewer reading the emulator learns of the gap too, and
+/// keeps its history); the stand-in receives a resize to 80x23 and then one to
+/// 80x24.
+#[farhelm_testtrace::test]
+async fn a_gap_keeps_the_emulator_and_asks_for_a_redraw() {
     let stand_in = StandIn::new();
     let (terminal, mut server, _) = adopt(&stand_in, Adoption::Fresh, &info(0), options()).await;
     server.output(0, b"abc").await;
@@ -566,6 +1427,113 @@ async fn a_gap_keeps_the_emulator() {
             offset: 13,
             resizes: 0
         }
+    );
+    assert!(terminal.status().history_trimmed);
+    assert_eq!(
+        terminal.try_read(|emulator| (emulator.history_trimmed(), emulator.rebuilds())),
+        Some((true, 0)),
+        "the gap's mark is read with the emulator, which was not rebuilt"
+    );
+    assert_eq!(
+        server.next().await,
+        ClientMessage::Resize(Size { cols: 80, rows: 23 })
+    );
+    assert_eq!(
+        server.next().await,
+        ClientMessage::Resize(Size { cols: 80, rows: 24 })
+    );
+}
+
+/// A recovery across a gap rebuilds from the snapshot and the retained
+/// tail, and asks for the redraw only once the replay is over.
+///
+/// Why: this is the recovery after output overflowed the host's journal
+/// while no supervisor was attached: what the snapshot held and what the
+/// host kept after the gap are all there is, and a redraw requested in the
+/// middle of the replay would be answered before the program's later
+/// output was even fed. Spec: a host holding a snapshot of `seeded ` at
+/// (7, 0), a gap from 7 to 50, `tail` at 50 and a resize to 100x30 at 54
+/// (54 bytes and one resize journaled) shows `seeded tail` with the history
+/// marked trimmed, caught up, and receives the two redraw resizes at the
+/// size the replay ended at, 100x29 and 100x30, which a redraw asked for
+/// before the replay's end would not have (80x23 and 80x24).
+#[farhelm_testtrace::test]
+async fn a_recovery_across_a_gap_rebuilds_and_then_asks_for_a_redraw() {
+    let snapshot = match seed_record(b"seeded ") {
+        HostMessage::SnapshotRecord { blob, .. } => HostMessage::SnapshotRecord {
+            position: Position {
+                offset: 7,
+                resizes: 0,
+            },
+            blob,
+        },
+        other => unreachable!("{other:?}"),
+    };
+    let journaled = Info {
+        snapshot: Position {
+            offset: 7,
+            resizes: 0,
+        },
+        tail_start: 50,
+        gap: true,
+        resizes: 1,
+        ..info(54)
+    };
+    let stand_in = StandIn::new();
+    let (terminal, mut server, _) = adopt_with(
+        &stand_in,
+        Adoption::Recovered,
+        &journaled,
+        options(),
+        &[snapshot],
+    )
+    .await;
+    let terminal = terminal.expect("the adoption succeeds");
+    assert_eq!(
+        terminal.status().checkpoint,
+        Some(Position {
+            offset: 7,
+            resizes: 0
+        })
+    );
+    server
+        .send(&HostMessage::Gap {
+            from: 7,
+            to: 50,
+            resizes: 0,
+            size: Size { cols: 80, rows: 24 },
+        })
+        .await;
+    server.output(50, b"tail").await;
+    server
+        .send(&HostMessage::Resized {
+            offset: 54,
+            index: 0,
+            size: Size {
+                cols: 100,
+                rows: 30,
+            },
+        })
+        .await;
+    wait_until(&terminal, "the recovery", |terminal| {
+        terminal.status().caught_up
+    })
+    .await;
+    assert!(terminal.screen_tail(4096).contains("seeded tail"));
+    assert!(terminal.status().history_trimmed);
+    assert_eq!(
+        server.next().await,
+        ClientMessage::Resize(Size {
+            cols: 100,
+            rows: 29
+        })
+    );
+    assert_eq!(
+        server.next().await,
+        ClientMessage::Resize(Size {
+            cols: 100,
+            rows: 30
+        })
     );
 }
 
@@ -842,6 +1810,8 @@ fn the_adapters_map_each_liveness_like_a_pane() {
         position: Position::default(),
         revision: 0,
         caught_up: true,
+        checkpoint: None,
+        history_trimmed: false,
     };
     let anchor = Some(PaneAnchor {
         pid: own.pid,
@@ -1609,4 +2579,192 @@ async fn a_shutdown_whose_process_stays_is_unconfirmed() {
             ..
         }
     ));
+}
+
+/// An encoder that panics hands the emulator back: an orderly stop hears
+/// that the encode failed, and the terminal carries on.
+///
+/// Why: an encode runs the emulator through code a malformed state could
+/// make panic; losing a healthy terminal to it would be worse than missing
+/// one checkpoint, and an orderly stop told "not clean" would be told
+/// something false about the terminal. Spec: with every encoder panicking,
+/// after `ready`, `checkpoint_now` reports `EncodeFailed`; the emulator is
+/// home (`try_read` shows `ready`), and a status request after it is still
+/// answered.
+#[farhelm_testtrace::test]
+async fn an_encoder_panic_keeps_the_emulator_and_is_reported() {
+    let clock = ManualClock::new();
+    let gate = EncodeGate::closed();
+    gate.fail_with(EncodeFault::EncoderPanics);
+    gate.open();
+    let options = HostTerminalOptions {
+        encode_gate: Some(gate),
+        ..checkpointing(1 << 30, &clock)
+    };
+    let stand_in = StandIn::new();
+    let (terminal, mut server, _) = adopt(&stand_in, Adoption::Fresh, &info(0), options).await;
+    server.output(0, b"ready").await;
+    wait_until(&terminal, "the output", screen_has("ready")).await;
+    assert_eq!(
+        terminal
+            .checkpoint_now(tokio::time::Instant::now() + WAIT)
+            .await,
+        Ok(CheckpointOutcome::Kept(NotTaken::EncodeFailed))
+    );
+    assert!(
+        terminal
+            .try_read(|emulator| emulator.screen_text())
+            .is_some_and(|screen| screen.contains("ready"))
+    );
+    server.output(5, b"\x1b[5n").await;
+    assert_eq!(
+        server.next().await,
+        ClientMessage::Input(STATUS_ANSWER.to_vec())
+    );
+}
+
+/// An encode whose task is lost takes the emulator with it: the runtime
+/// ends, unavailable, and a `read` waiting for the emulator is released
+/// with an error.
+///
+/// Why: with the emulator gone, every later feed would have nothing to
+/// feed; carrying on would crash the task or guess at the terminal's state,
+/// and a reader waiting for the emulator's return would wait forever.
+/// Spec: with checkpoints due after 10 bytes and the encode's task failing
+/// outside the encoder once the gate opens, `hello world!` sends the
+/// emulator away; a `read` is pending; once the gate opens, the read fails
+/// with `EmulatorLost`, the terminal becomes unavailable as
+/// `EmulatorLost`, the screen tail still shows `hello world!` and
+/// `try_read` reads nothing.
+#[farhelm_testtrace::test]
+async fn a_lost_encode_ends_the_runtime_and_releases_readers() {
+    let clock = ManualClock::new();
+    let gate = EncodeGate::closed();
+    gate.fail_with(EncodeFault::TaskLost);
+    let options = HostTerminalOptions {
+        encode_gate: Some(gate.clone()),
+        ..checkpointing(10, &clock)
+    };
+    let stand_in = StandIn::new();
+    let (terminal, mut server, _) = adopt(&stand_in, Adoption::Fresh, &info(0), options).await;
+    server.output(0, b"hello world!").await;
+    wait_until(&terminal, "the encode to take the emulator", emulator_away).await;
+    let reading = terminal.read(|emulator| emulator.screen_text());
+    tokio::pin!(reading);
+    assert!(
+        pending_once(&mut reading).await,
+        "a read answered while away"
+    );
+
+    gate.open();
+    assert_eq!(
+        within("the read to be released", reading).await,
+        Err(EmulatorLost)
+    );
+    wait_until(&terminal, "the runtime to end", |terminal| {
+        matches!(
+            terminal.liveness(),
+            Liveness::Unavailable {
+                reason: Unavailability::EmulatorLost,
+                ..
+            }
+        )
+    })
+    .await;
+    assert!(terminal.screen_tail(4096).contains("hello world!"));
+    assert_eq!(terminal.try_read(|_| ()), None);
+    drop(server);
+}
+
+/// A shutdown asked for while an encode holds the emulator and a `read`
+/// waits for it brings the emulator home first: the read is answered and
+/// the shutdown goes ahead.
+///
+/// Why: a runtime that ended with its emulator away would leave every
+/// waiting reader (a Restart taking its seed, a viewer) waiting for a
+/// return that never comes. Spec: with checkpoints due after 10 bytes and
+/// every encode held by a closed gate, `hello world!` sends the emulator
+/// away; a `read` is pending; a shutdown is asked for; once the gate opens,
+/// the stand-in gets the checkpoint (accepted) and then `Shutdown`
+/// (answered with `Goodbye`), the read answers with `hello world!`, and the
+/// shutdown reports the goodbye.
+#[farhelm_testtrace::test]
+async fn a_shutdown_during_an_encode_answers_the_waiting_read() {
+    let clock = ManualClock::new();
+    let gate = EncodeGate::closed();
+    let mut options = HostTerminalOptions {
+        encode_gate: Some(gate.clone()),
+        ..checkpointing(10, &clock)
+    };
+    options.deadlines.shutdown = Duration::from_millis(300);
+    let stand_in = StandIn::new();
+    let (terminal, mut server, _) = adopt(&stand_in, Adoption::Fresh, &info(0), options).await;
+    server.output(0, b"hello world!").await;
+    wait_until(&terminal, "the encode to take the emulator", emulator_away).await;
+    let reading = terminal.read(|emulator| emulator.screen_text());
+    tokio::pin!(reading);
+    assert!(
+        pending_once(&mut reading).await,
+        "a read answered while away"
+    );
+
+    let shutdown = async { within("the shutdown", terminal.shutdown()).await };
+    let host = async {
+        gate.open();
+        snapshot_request(&mut server, true).await;
+        assert_eq!(server.next().await, ClientMessage::Shutdown);
+        server.send(&HostMessage::Goodbye).await;
+    };
+    let (report, screen, ()) = tokio::join!(
+        shutdown,
+        within("the read once the emulator is back", reading),
+        host
+    );
+    assert!(
+        screen
+            .expect("the emulator came back")
+            .contains("hello world!")
+    );
+    assert!(report.expect("the runtime shuts down").goodbye);
+}
+
+/// Notices are queued only for subscriptions open when they were sent, and
+/// a subscription ends with the runtime, even one taken after it ended.
+///
+/// Why: a clipboard write can carry megabytes; kept for nobody, the last
+/// few would stay in the supervisor for the terminal's whole life. And a
+/// viewer must learn that no more notices will come rather than wait for
+/// them. Spec: with no subscription, a clipboard write leaves nothing
+/// queued; a subscription taken before the runtime's shutdown, and one
+/// taken after, both read `None`.
+#[farhelm_testtrace::test]
+async fn notices_are_kept_for_nobody_and_end_with_the_runtime() {
+    let mut options = options();
+    options.deadlines.shutdown = Duration::from_millis(300);
+    let stand_in = StandIn::new();
+    let (terminal, mut server, _) = adopt(&stand_in, Adoption::Fresh, &info(0), options).await;
+    let write = b"\x1b]52;c;bjA=\x07";
+    server.output(0, write).await;
+    wait_until(&terminal, "the clipboard write", |terminal| {
+        terminal.status().position.offset == write.len() as u64
+    })
+    .await;
+    let queued = terminal
+        .inner
+        .notices
+        .upgrade()
+        .expect("the runtime runs")
+        .len();
+    assert_eq!(queued, 0, "a notice kept for nobody");
+
+    let mut before = terminal.subscribe_notices();
+    let host = async {
+        assert_eq!(server.next().await, ClientMessage::Shutdown);
+        server.send(&HostMessage::Goodbye).await;
+    };
+    let (report, ()) = tokio::join!(within("the shutdown", terminal.shutdown()), host);
+    assert!(report.expect("the runtime shuts down").goodbye);
+    assert_eq!(within("the end of the notices", before.recv()).await, None);
+    let mut after = terminal.subscribe_notices();
+    assert_eq!(within("an ended subscription", after.recv()).await, None);
 }

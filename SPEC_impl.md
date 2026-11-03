@@ -1806,26 +1806,76 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   its 150 ms deadline passes on the runtime's own clock, which tests advance by hand. For a host the supervisor has just
   spawned, everything is live, so the program's first queries are answered even when it asked before the supervisor
   connected; output the host's `delivered_end` says some client was already sent is replay all the same. For a host that
-  ran before, what was journaled before adoption is fed without answers, bells or clipboard writes for now: never
-  answering twice matters more than answering a query asked while no supervisor was attached, until the replay policy
-  splits that output at the host's `delivered_end`. Answers waiting for room in the input window are capped at 64 KiB
-  and dropped past it, since a program that floods queries without reading its terminal would otherwise grow the
-  supervisor without bound. Input is sent whole and in order and never resent; input in flight when a connection ends is
-  reported as unknown, and caller input asked for before that loss is reported not sent rather than written after the
-  hole. Each input carries an epoch, which a connection that lost caller input moves on once: a one-off input takes the
-  epoch of its call, and the parts of a paste sent through one input sequence share the sequence's, so no part asked for
-  after a loss is written even when the sender never waited for a receipt. A connection that a different process than
-  the adopted host answers is never named as the host's: the terminal becomes unavailable as replaced, naming the
-  adopted process. A connection that ends while the host answers is resumed from the position processed, so nothing is
-  fed twice, and the latest size asked for is sent again if the host reports another; after three reconnects within a
-  minute the terminal is made unavailable rather than fight whoever keeps taking the host over. Unavailable ends a
-  runtime, not a host's chances: for a reason that can pass (a timed-out connect, a host briefly stopped, a connection
-  that kept ending), the runtimes' owner adopts the host again later. The child's pid is a kill root only while the host
-  reports the child alive and the process under that pid still has the start identity pinned at adoption (between two
-  `Info` replies that both say it runs; a pid is not reused before the host reaps it), re-read each time a root is asked
-  for. A terminal counts as exited only once the stream's exit record is processed, which the host sends after the
-  child's drained output, so whatever acts on the exit reads the final screen; every exit, end or loss of a host
-  terminal is also sent to one shared notifier, so one task can wait on every exit.
+  ran before, what was journaled before adoption is replay, under the replay policy below. Answers waiting for room in
+  the input window are capped at 64 KiB and dropped past it, since a program that floods queries without reading its
+  terminal would otherwise grow the supervisor without bound. Input is sent whole and in order and never resent; input
+  in flight when a connection ends is reported as unknown, and caller input asked for before that loss is reported not
+  sent rather than written after the hole. Each input carries an epoch, which a connection that lost caller input moves
+  on once: a one-off input takes the epoch of its call, and the parts of a paste sent through one input sequence share
+  the sequence's, so no part asked for after a loss is written even when the sender never waited for a receipt. A
+  connection that a different process than the adopted host answers is never named as the host's: the terminal becomes
+  unavailable as replaced, naming the adopted process. A connection that ends while the host answers is resumed from the
+  position processed, so nothing is fed twice, and the latest size asked for is sent again if the host reports another;
+  after three reconnects within a minute the terminal is made unavailable rather than fight whoever keeps taking the
+  host over. Unavailable ends a runtime, not a host's chances: for a reason that can pass (a timed-out connect, a host
+  briefly stopped, a connection that kept ending), the runtimes' owner adopts the host again later. The child's pid is a
+  kill root only while the host reports the child alive and the process under that pid still has the start identity
+  pinned at adoption (between two `Info` replies that both say it runs; a pid is not reused before the host reaps it),
+  re-read each time a root is asked for. A terminal counts as exited only once the stream's exit record is processed,
+  which the host sends after the child's drained output, so whatever acts on the exit reads the final screen; every
+  exit, end or loss of a host terminal is also sent to one shared notifier, so one task can wait on every exit.
+- **Recovery and checkpoints** (`hosts/terminal.rs`, `hosts/terminal/checkpoint.rs`). The **replay policy** decides what
+  replayed output may do, by the host's `delivered_end` (the end of the output it wrote whole to some client). Output in
+  the stored snapshot is never replayed: a restore has no side effects. Output below `delivered_end` was sent to an
+  earlier supervisor, so it is fed with no side effects at all. Output from there to where the journal ended at adoption
+  was written while no supervisor was attached: its queries are answered, since the program may still be waiting for
+  them, and its bells and clipboard writes are dropped, since acting on them minutes later would surprise the user.
+  Effects follow the bytes, not the moment they are interpreted: a synchronized update holds its bytes until something
+  ends it, and the emulator gives what it then interprets the effects of that moment, so where the replay crosses
+  `delivered_end` it draws any update still open with seen effects, and it ends by drawing any update still open with
+  unseen ones. No query is answered twice. **The delivery ambiguity accepted** (a decision, not an oversight; only an
+  acknowledgement in the host's protocol, which only grows, could remove it): output written whole to a supervisor
+  counts as seen even if that supervisor never interpreted it, so a query in it goes unanswered and the program waits
+  out its own timeout; and an answer a supervisor had worked out but not written is lost the same way. That holds for a
+  crash, and for an orderly stop too, for the output in flight between the host and the stopping supervisor when it lets
+  the connection go. Bells, clipboard writes and title changes reach notice subscribers only from live output, so the
+  user never sees one twice; each viewer attachment subscribes on its own, every subscription gets every notice, and one
+  that falls behind by more than a short backlog loses the oldest (logged) rather than holding the terminal up. Every
+  replacement of the emulator (a restored snapshot) goes through one place and is counted under the emulator's lock,
+  beside the gap's history-trimmed mark, so that a viewer's grid stream reading the emulator can tell that its history
+  must be sent again. **Checkpoints** keep the host's tail short: once the output since the previous attempt reaches
+  four times the latest snapshot's size (at least 1 MiB, at most a quarter of the host's journal cap), the runtime
+  snapshots its emulator at the next clean boundary (after a read's split candidate, at a read's end, after a
+  synchronized update's deadline draws it, or where the replay finishes) and hands the snapshot to the host, which then
+  drops the output before it; a rejected snapshot leaves the previous one. Nothing makes a checkpoint due by time: a
+  quiet terminal's short tail replays in milliseconds, so it costs nothing. The host's `Info` does not report its cap,
+  so a runtime assumes the default unless its creator passes the policy for another. Encoding a snapshot at full
+  scrollback takes long (in a release build about 0.3 s for typical output, 1.6 to 1.9 s for 12,000 lines of 200 columns
+  in true color, and over 10 s for a scrollback colored like an image), and so does restoring one (0.25 to 0.46 s), so
+  both run on tokio's blocking pool, never on an async worker. For an encode the emulator moves out to the blocking task
+  and back, and what status sampling reads (screen text, title, modes, size, whether history was trimmed) comes from a
+  view left in its place, without waiting; a reader of the whole emulator waits for it to come back, without blocking.
+  The runtime waits for an encode before it does anything else, so input, resizes and requests wait as long. Letting
+  input through meanwhile was decided against: the host stops acting on a client's requests while more than 256 KiB of
+  its output waits unread, so during a flood, where an encode hurts, a Ctrl-C would not take effect sooner; reading the
+  connection while the emulator is away would overflow the client's bounded event queue, or need a backlog of megabytes
+  that still runs out; and typed input's echo cannot be drawn until the emulator is back. An encode task lost with the
+  emulator (not an encoder panic, which hands it back) ends the runtime, unavailable. At about 100 KiB/s of output, a
+  full terminal in true color spends about 2% of a core on checkpoints (typical output about a fifth of that). The
+  exposure accepted: a scrollback colored like an image receiving about 1 MiB/s cannot be checkpointed as fast as it
+  fills the journal, and may gap while connected; the remedy is a faster encoder. An orderly stop asks for a checkpoint
+  within a deadline that bounds the encode and the host's answer: taken where the terminal is if it is clean there, else
+  none, so that the host keeps its last accepted snapshot and the tail after it, which a recovery replays; an encode the
+  deadline cuts short is finished and sent as an ordinary checkpoint. A host's **journal cap** is 32 MiB by default:
+  checkpoints keep the tail below a quarter of it, which leaves about four minutes of an agent's heaviest redraw
+  traffic, and hours of a shell's, for a supervisor's absence before the oldest of that output is trimmed into a
+  **gap**. A gap never resets a healthy emulator: the runtime carries on after it, marks the history trimmed for the
+  viewer (for as long as that runtime runs: a snapshot cannot carry the mark), and, once any replay is over, asks the
+  program to redraw by resizing the terminal one row smaller and back, since Linux sends no `SIGWINCH` for a resize to
+  the size in force (checked on Linux 6.8; the BSD tty code macOS uses compares the same way, read from its source, not
+  tested). It asks the same after restoring a snapshot that left out the screens or was drawn with another character
+  width table. A redraw cannot bring back the scrollback in the gap, or a mode the lost output set until the program
+  sets it again; a program that redraws on `SIGWINCH` sets its modes again as it does.
 
 Test harnesses end the hosts they leave behind: `farhelm-teststate` ends every host whose socket is in a `hosts`
 directory within an owned run directory (its dead-run sweep, and every `TestDir` drop) through a small blocking client

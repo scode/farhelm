@@ -77,6 +77,21 @@ const STDERR_CAP: usize = 4 * 1024;
 /// one. With 40 random bits per name, a second draw is already a curiosity.
 const NAME_ATTEMPTS: usize = 8;
 
+/// The journal cap a terminal's host gets unless its creator says otherwise
+/// (the plan's D-8): 32 MiB of output since the latest snapshot, per host.
+///
+/// The cap is what output written while no supervisor reads it may reach
+/// before the oldest of it is trimmed into a gap. A connected supervisor
+/// checkpoints at most a quarter of the way to it (`terminal::CheckpointPolicy`),
+/// so at least three quarters of it are left for a supervisor's absence:
+/// about four minutes of an agent's heaviest redraw traffic (about
+/// 100 KB/s), and hours of a shell's. It is memory in the host process only while that
+/// much output waits there, and is never written to disk.
+pub const DEFAULT_JOURNAL_CAP: u64 = 32 * 1024 * 1024;
+
+const _: () = assert!(DEFAULT_JOURNAL_CAP >= terminal_host::protocol::MIN_JOURNAL_CAP);
+const _: () = assert!(DEFAULT_JOURNAL_CAP <= terminal_host::protocol::MAX_JOURNAL_CAP);
+
 /// Everything about the program a host runs. It reaches the host on stdin
 /// (the host crate's `Spawn`, minus the tag, which [`spawn_host`] adds).
 ///
@@ -94,7 +109,8 @@ pub struct ChildSpec {
     /// The terminal's initial size.
     pub size: Size,
     /// The host's journal budget, in bytes (see
-    /// `crates/terminal-host/SPEC.md`, "Journal").
+    /// `crates/terminal-host/SPEC.md`, "Journal"); [`DEFAULT_JOURNAL_CAP`]
+    /// unless there is a reason for another.
     pub journal_cap: u64,
     /// A snapshot of the client's own making, for a host that continues a
     /// terminal another host ran before.

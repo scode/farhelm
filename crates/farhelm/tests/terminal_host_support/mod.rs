@@ -1,12 +1,20 @@
 //! Fixtures shared by the tests that start real terminal hosts from the
-//! built `farhelm`: the program, a child that just sleeps, a bounded poll,
+//! built `farhelm`: the program, a child that just sleeps, bounded polls,
 //! and a host started with a raw child spec.
 //!
-//! Only `terminal_host_registry.rs` uses this so far. The older
+//! `terminal_host_registry.rs` uses most of it, and
+//! `terminal_host_runtime.rs` its async poll. Each test binary compiles
+//! this module whole and uses its own part, hence the allowance for what
+//! one of them leaves unused. The older
 //! terminal-host test binaries (`terminal_host_spawn.rs`,
 //! `terminal_host_client.rs`, `terminal_host_entry.rs`) still carry their
 //! own copies of these helpers; they move here when those files are next
 //! changed, rather than in a change that other work in flight also edits.
+
+#![allow(
+    dead_code,
+    reason = "each test binary that includes this module uses only its own part of it"
+)]
 
 use farhelm_supervisor::hosts::ChildSpec;
 use std::path::{Path, PathBuf};
@@ -52,6 +60,26 @@ pub fn eventually(mut condition: impl FnMut() -> bool) -> bool {
         }
         // sleep-ok: polling interval for a process or file the test owns.
         std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// Whether `condition` holds within [`WAIT`], asking every 20 ms without
+/// blocking the runtime: for a condition that must itself be awaited,
+/// such as a request to a host. A condition that hangs is the caller's to
+/// bound.
+pub async fn poll_until<F: std::future::Future<Output = bool>>(
+    mut condition: impl FnMut() -> F,
+) -> bool {
+    let deadline = tokio::time::Instant::now() + WAIT;
+    loop {
+        if condition().await {
+            return true;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return false;
+        }
+        // sleep-ok: polling interval for state the test cannot be told about.
+        tokio::time::sleep(Duration::from_millis(20)).await;
     }
 }
 
