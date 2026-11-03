@@ -11,8 +11,9 @@ own on the host, which keeps it going while the host's [supervisor](/docs/how-it
 A remote host makes new terminals once you [update it](/docs/using/manage-hosts/#update-a-host); until then Farhelm
 shows it as needing an update.
 
-Sessions you already have keep their old terminals and keep working as they always have. Nothing is moved for you,
-because moving a session's agent means starting it again. You move each session when it suits you.
+Sessions you already have keep their old terminals and keep working as they always have for now, but a future Farhelm
+release will stop supporting old terminals. Nothing is moved for you, because moving a session's agent means starting it
+again. You move each session when it suits you.
 
 ## Why terminals are leaving tmux
 
@@ -33,8 +34,11 @@ tmux version a host has.
 When a session on a host that makes new terminals still has an old terminal, an amber note appears at the top of the
 session:
 
-- If the agent's terminal is old, it suggests restarting the session when convenient. For a session that cannot be
-  restarted, it suggests cloning or replacing it instead.
+- It says that old terminals are fine for now, but that a future Farhelm release will stop supporting them.
+- If the agent's terminal is old, it asks you to restart, replace or delete the session when convenient. For a session
+  that cannot be restarted, it asks you to replace or delete it instead, and says why it cannot be restarted: either
+  Farhelm does not know the agent's conversation yet (most agents report it after your first prompt), or the session has
+  no way to resume one.
 - If the agent already runs in a new terminal but some shell tabs are old, it names those tabs and suggests closing them
   and opening new ones.
 
@@ -63,8 +67,8 @@ and new terminals side by side meanwhile.
 
 ## What is the same, and what is not yet
 
-Old terminals keep working exactly as before, so there is no hurry. You use both kinds the same way: type to the agent,
-scroll back, select and copy, paste text, screenshots and files, and open links.
+Old terminals keep working exactly as before for now. You use both kinds the same way: type to the agent, scroll back,
+select and copy, paste text, screenshots and files, and open links.
 
 A few things do not work in a new terminal yet:
 

@@ -3346,6 +3346,8 @@ a:any-link,
 }
 .migration-band-copy { flex: 1 1 320px; min-width: 0; }
 .migration-band-copy strong { color: var(--warn-bright); }
+/* The band's aside (why Restart is missing), a paragraph of its own under the request. */
+.migration-band-note { margin-top: 6px; }
 .migration-band-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
 .migration-band-link { color: var(--warn-bright); font-weight: 600; white-space: nowrap; }
 .migration-band-dismiss { padding: 2px 8px; }

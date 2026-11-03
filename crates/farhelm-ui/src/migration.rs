@@ -44,8 +44,8 @@ pub(crate) const DOCS_URL: &str = "https://farhelm.io/docs/using/new-terminals/"
 pub(crate) enum MigrationCase {
     /// The agent's terminal is old. `restart_available` is whether this
     /// session can be restarted at all (SPEC.md, "Lifecycle operations"):
-    /// when it cannot, the band offers only Clone and Replace, which start a
-    /// fresh conversation.
+    /// when it cannot, the band asks only for Replace or Delete, and says
+    /// why Restart is missing.
     OldAgent { restart_available: bool },
     /// The agent's terminal is new, and these tabs (by their labels, in the
     /// tab strip's order) are old. Restarting the agent would not move them;
@@ -105,59 +105,89 @@ impl MigrationCase {
     }
 }
 
-/// The band's words for one case: a bold first sentence that says what is
-/// true of this session, then what to do about it, and when.
+/// The band's words for one case, in reading order: the `lead` every message
+/// shares (what is changing in Farhelm), the bold `headline` that says what
+/// is true of this session, the `body` that says what to do about it and
+/// when, and an optional `note`, shown as its own paragraph, for an aside
+/// the action does not depend on.
+///
+/// The headline is bold where it stands rather than first, because the lead
+/// is the same for every session and the headline is the part that differs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BandText {
+    pub(crate) lead: &'static str,
     pub(crate) headline: String,
     pub(crate) body: String,
+    pub(crate) note: Option<String>,
 }
 
 /// Word the band for `case`.
 ///
-/// Every message says "when convenient": nothing is broken, an old terminal
-/// keeps working, and moving costs the user a restart or a fresh
-/// conversation, so the band must not read as an error or a deadline. It
-/// promises nothing about when old terminals stop working.
+/// Every message says old terminals are fine for now and that a future
+/// release will stop supporting them, and asks the user to move "when
+/// convenient": nothing is broken, and moving costs the user a restart or a
+/// fresh conversation, so the band must not read as an error or name a
+/// deadline. It announces the end of support without a date (wording chosen
+/// by the maintainer, 2026-11-03).
 pub(crate) fn band_text(case: &MigrationCase) -> BandText {
-    const NEW_TERMINALS: &str = "Farhelm now runs new terminals without tmux.";
+    const LEAD: &str = "Farhelm is moving to a new way of running terminals (no longer using \
+                        tmux or xterm.js internally).";
+    const FOR_NOW: &str = "This is okay for now, but a future Farhelm release will stop \
+                           supporting old terminals.";
     match case {
         MigrationCase::OldAgent {
             restart_available: true,
         } => BandText {
+            lead: LEAD,
             headline: "This session still runs in an old terminal.".into(),
             body: format!(
-                "{NEW_TERMINALS} Old terminals keep working, but when convenient, restart this \
-                 session to move it to a new one; Restart keeps its conversation. Clone and \
-                 Replace start in a new terminal too."
+                "{FOR_NOW} Please restart (the conversation will resume), replace or delete \
+                 this session when convenient."
             ),
+            note: None,
         },
+        // Restart is unavailable either for a while (the agent has not
+        // reported its conversation yet; the band switches to the message
+        // above once it does) or for good (no resume command, or a container).
+        // The note covers both without guessing which, since the Restart
+        // button's tooltip already names the exact reason.
         MigrationCase::OldAgent {
             restart_available: false,
         } => BandText {
+            lead: LEAD,
             headline: "This session still runs in an old terminal.".into(),
-            body: format!(
-                "{NEW_TERMINALS} Old terminals keep working, but this session can't be \
-                 restarted, so to move it to a new one, clone or replace it when convenient. \
-                 Either one starts a fresh conversation unless you pick a conversation to \
-                 continue."
+            body: format!("{FOR_NOW} Please replace or delete this session when convenient."),
+            note: Some(
+                "(This session cannot be restarted, either because Farhelm does not yet know \
+                 the agent's conversation, which most agents report after your first prompt, \
+                 or because this session has no way to resume one.)"
+                    .into(),
             ),
         },
         MigrationCase::OldTabs { labels } => {
-            let (headline, them) = match labels.as_slice() {
-                [only] => (format!("{only} is still an old terminal."), "it"),
+            let (headline, them, new_tabs) = match labels.as_slice() {
+                [only] => (
+                    format!("{only} is still an old terminal."),
+                    "it",
+                    "a new tab",
+                ),
                 _ => (
                     format!("{} are still old terminals.", join_labels(labels)),
                     "them",
+                    "new tabs",
                 ),
             };
             BandText {
+                lead: LEAD,
                 headline,
+                // The tabs hint stays because this message usually appears
+                // right after the user restarted the agent and expected
+                // the tabs to move with it.
                 body: format!(
-                    "{NEW_TERMINALS} The agent already runs in a new one, but restarting it does \
-                     not move this session's tabs. When convenient, close {them} and open a new \
-                     tab."
+                    "{FOR_NOW} Restarting the session does not move tabs, so when convenient, \
+                     close {them} and open {new_tabs}."
                 ),
+                note: None,
             }
         }
     }
@@ -297,8 +327,12 @@ pub(crate) fn MigrationBand(
     rsx! {
         div { class: "migration-band", role: "status", aria_live: "polite", "data-migration": message,
             div { class: "migration-band-copy",
-                strong { "{text.headline} " }
-                "{text.body}"
+                "{text.lead} "
+                strong { "{text.headline}" }
+                " {text.body}"
+                if let Some(note) = &text.note {
+                    div { class: "migration-band-note", "{note}" }
+                }
             }
             div { class: "migration-band-actions",
                 a { class: "migration-band-link", href: DOCS_URL, target: "_blank", rel: "noopener",
@@ -375,12 +409,14 @@ mod tests {
     }
 
     /// Spec (goal s7, first case): an old agent terminal gets the band that
-    /// says to restart when convenient, and names Restart only while the
-    /// session can be restarted; otherwise it offers Clone and Replace and
-    /// says they start a fresh conversation by default. Matters because the
-    /// band must never point at an action the header greys out.
+    /// says a future release will stop supporting old terminals and asks
+    /// for a restart, replace or delete when convenient. It names Restart
+    /// only while the session can be restarted; otherwise it asks for
+    /// Replace or Delete and adds a note saying why Restart is missing.
+    /// Matters because the band must never point at an action the header
+    /// greys out.
     #[farhelm_testtrace::test]
-    fn an_old_agent_is_told_to_restart_or_else_to_clone_or_replace() {
+    fn an_old_agent_is_told_to_restart_or_else_to_replace_or_delete() {
         let old = session("s");
         let case =
             migration_case(&old, &strip(Vec::new()), true).expect("an old agent gets the band");
@@ -391,20 +427,33 @@ mod tests {
             }
         );
         let text = band_text(&case);
-        assert!(text.headline.contains("old terminal"), "{text:?}");
-        assert!(text.body.contains("restart this session"), "{text:?}");
-        assert!(text.body.contains("when convenient"), "{text:?}");
+        assert!(text.lead.contains("no longer using tmux"), "{text:?}");
+        assert_eq!(text.headline, "This session still runs in an old terminal.");
+        assert!(
+            text.body
+                .contains("a future Farhelm release will stop supporting old terminals"),
+            "{text:?}"
+        );
+        assert!(
+            text.body
+                .contains("Please restart (the conversation will resume), replace or delete"),
+            "{text:?}"
+        );
+        assert!(text.body.ends_with("when convenient."), "{text:?}");
+        assert_eq!(text.note, None);
 
         let case =
             migration_case(&old, &strip(Vec::new()), false).expect("still banded without Restart");
         let text = band_text(&case);
-        assert!(!text.body.contains("restart this session"), "{text:?}");
-        assert!(text.body.contains("clone or replace it"), "{text:?}");
+        assert!(!text.body.contains("restart"), "{text:?}");
         assert!(
-            text.body.contains("fresh conversation unless you pick"),
+            text.body
+                .ends_with("Please replace or delete this session when convenient."),
             "{text:?}"
         );
-        assert!(text.body.contains("when convenient"), "{text:?}");
+        let note = text.note.as_deref().expect("says why Restart is missing");
+        assert!(note.contains("cannot be restarted"), "{text:?}");
+        assert!(note.contains("after your first prompt"), "{text:?}");
     }
 
     /// Spec (goal s7, second case): a new agent with old tabs gets the band
@@ -435,13 +484,15 @@ mod tests {
             "Terminal 1 and Terminal 3 are still old terminals."
         );
         assert!(
-            text.body.contains("restarting it does not move"),
+            text.body
+                .contains("Restarting the session does not move tabs"),
             "{text:?}"
         );
         assert!(
-            text.body.ends_with("close them and open a new tab."),
+            text.body.ends_with("close them and open new tabs."),
             "{text:?}"
         );
+        assert_eq!(text.note, None);
 
         tabs.truncate(1);
         let text =

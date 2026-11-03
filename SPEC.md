@@ -2223,17 +2223,19 @@ whatever the agent renders is what you see. There is no composer, no message abs
   terminals once its supervisor is a version that has them; from then on, everything started there gets one (a new
   session, Restart, Clone, Replace, a new tab), and existing terminals stay as they are until the user moves them. While
   the session's host creates new terminals, a session that still has an old terminal shows a loud band at the top of the
-  session view, below the top row, linking to the docs page that explains the move. When the agent's terminal is old, it
-  asks the user to restart the session when convenient, or, when Restart is unavailable for the session, to clone or
-  replace it, which starts a fresh conversation unless the user picks one to continue. When the agent's terminal is new
-  but some tabs are old, it names those tabs as the tab strip labels them and asks the user to close them and open new
-  ones when convenient, since restarting the agent does not move tabs. Its × hides that message until the session is
-  next opened, never on a timer (a different message the session comes to need meanwhile still shows), and the dismissal
-  is that view's alone: nothing is stored or shared. No band shows for a session shown from a disconnected host's last
-  known state, or whose agent has no terminal. The bottom bar names the session's terminal kinds (old, new, or both,
-  with each terminal listed in its tooltip and accessible text) while its host creates new terminals or any of its
-  terminals is new; a host that only creates old terminals shows neither the band nor the kinds, so its sessions look as
-  they always have.
+  session view, below the top row, linking to the docs page that explains the move. Every message says that old
+  terminals are fine for now but that a future release will stop supporting them, without naming a date. When the
+  agent's terminal is old, it asks the user to restart (keeping the conversation), replace or delete the session when
+  convenient, or, when Restart is unavailable for the session, to replace or delete it, with a note that the session
+  cannot be restarted because Farhelm does not yet know the agent's conversation or because the session has no way to
+  resume one. When the agent's terminal is new but some tabs are old, it names those tabs as the tab strip labels them
+  and asks the user to close them and open new ones when convenient, since restarting the agent does not move tabs. Its
+  × hides that message until the session is next opened, never on a timer (a different message the session comes to need
+  meanwhile still shows), and the dismissal is that view's alone: nothing is stored or shared. No band shows for a
+  session shown from a disconnected host's last known state, or whose agent has no terminal. The bottom bar names the
+  session's terminal kinds (old, new, or both, with each terminal listed in its tooltip and accessible text) while its
+  host creates new terminals or any of its terminals is new; a host that only creates old terminals shows neither the
+  band nor the kinds, so its sessions look as they always have.
 - One attached client per session, enforced by the supervisor: attaching from a second client visibly detaches the
   first, which keeps a non-live snapshot and an explicit take-control action. No shared-input mirroring in v1.
 - A viewer that is slow is served slowly, down to a floor below which it is detached as stalled. No viewer can stop a
