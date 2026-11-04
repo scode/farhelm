@@ -487,6 +487,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Deflake
 
+- **Visit-history deletion fixture stops in error instead of exited.**
+  `visit history chooses and remembers the next session after row deletion` in `e2e/tests/sidebar.spec.ts` failed its
+  stopped-session premise in Chromium sweep run `ceac5813-b025-478a-9019-a370b5fc97e5`: expected `exited`, observed
+  `error` for five seconds. All three isolated classification reruns passed (`46ef9fa7-7605-4b68-9a5f-77a4e60d1e6c`,
+  `7a1c431b-99c8-4581-b46b-b126c58b3407`, `63f93b25-ad0e-4db1-99a5-6b9367db2d30`). Cause unknown (FLAKES.md,
+  2026-11-04).
+
 - **Checkout folder save cleanup times out on WebKit.**
   `an untouched checkout folder save writes nothing and edited paths are trimmed` in `e2e/tests/settings.spec.ts` passed
   its body assertions but timed out draining submitted saves in host-terminal run

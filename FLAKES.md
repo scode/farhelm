@@ -57,6 +57,31 @@ paragraphs. Classes are `readiness`, `replay-live`, `fixture-premise`, `peer-lif
 Confidence is `established`, `hypothesis`, or `unknown`; `Cause:` is the last line. These fields apply only to new
 entries. Missing historical fields are missing evidence, not an implicit cause classification.
 
+## 2026-11-04 — visit-history deletion fixture reports error after Stop (e2e/tests/sidebar.spec.ts)
+
+`visit history chooses and remembers the next session after row deletion` failed in Chromium during sweep browser run
+`ceac5813-b025-478a-9019-a370b5fc97e5`, before exercising selection after deletion. The fixture stopped its first
+session and expected `exited`, but observed `error` through the five-second polling deadline. All three isolated
+classification reruns passed: `46ef9fa7-7605-4b68-9a5f-77a4e60d1e6c`, `7a1c431b-99c8-4581-b46b-b126c58b3407`, and
+`63f93b25-ad0e-4db1-99a5-6b9367db2d30`. Cause unknown. Open and excluded from future sweeps; no fix attempted.
+
+```text
+Expected: "exited"
+Received: "error"
+Timeout 5000ms exceeded while waiting on the predicate
+```
+
+Evidence: clean commit `bcd9df417a0e660d6f2d917247a87b715018dc01`, shared x86_64 Linux; full ordinary browser suite,
+both engines, three workers with one stack each and zero retries. This was its only failed case; 2,907 passed and 18
+skipped. Concurrent load, memory pressure and the full failing duration were not measured. Recorded tmux 3.7c SHA256
+`384c071bf93d416a8f1d884ceb13df0cebabfabe885a3f1408f6144f17fda723`; locale C.UTF-8; recorder-owned child variables
+`FARHELM_TEST_TRACE_DIR` and `FARHELM_PLAYWRIGHT_POLICY_FILE`, with ambient Farhelm variables scrubbed. The evidence,
+including the failure trace, is retained in the UUID run directory and expires with temporary-file cleanup.
+
+Class: fixture-premise
+
+Cause: unknown
+
 ## 2026-11-04 — checkout folder save cleanup stalls on WebKit (e2e/tests/settings.spec.ts)
 
 `an untouched checkout folder save writes nothing and edited paths are trimmed` completed its save and readback
