@@ -401,11 +401,14 @@ rendered as YOLO for compatibility with older snapshots. The full invocation rem
 The working directory is tilde-folded against the `/home/<user>` and `/Users/<user>` shapes, since no home directory is
 on the wire to fold against properly. The full invocation stays on the agent mark; the untouched directory and other row
 facts ride in a hidden summary card source beside the row. The open button names that source with `data-tooltip-card`;
-the shared tooltip clones its DOM children on hover or keyboard focus. The source is a sibling, not a row descendant, so
-row-scoped controls and locators cannot match a second, hidden copy. Rust renders the host's own mark, status classes
-and isolated peer text. The card gives the full title, host, managed checkout, directory and timestamps without changing
-the open button's accessible name; marks keep their nearer hover targets and the complete ended-status detail stays on
-the row. The source and cloned tooltip remain outside the accessibility tree.
+the shared tooltip clones its DOM children on hover or keyboard focus. Its `data-tooltip-anchor="session-card"` opt-in
+places the card six pixels past the enclosing `.app-sidebar`, level with the row and clamped vertically to the window.
+The pure `placeSessionCard` falls back to `placeTooltip` when there is no room to the right; nearer marks retain
+ordinary placement. The source is a sibling, not a row descendant, so row-scoped controls and locators cannot match a
+second, hidden copy. Rust renders the host's own mark, status classes and isolated peer text. The card gives the full
+title, host, managed checkout, directory and timestamps without changing the open button's accessible name; marks keep
+their nearer hover targets and the complete ended-status detail stays on the row. The source and cloned tooltip remain
+outside the accessibility tree.
 
 Agent identity colors are independent of the permission mark: `app.css` binds `.harness-glyph[data-glyph]` to per-theme
 `--harness-*` tokens for Claude, Muse, Cursor, Pi, OMP, Grok and OpenCode. Codex, Goose and Terminal inherit the agent

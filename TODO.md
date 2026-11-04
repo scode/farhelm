@@ -347,9 +347,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   of the memory claim.
 - **Built-in questions tool.** A built-in questions tool in the style of the interactive artifacts: how an agent asks
   the user a structured question (multiple choice, say), presented like those artifacts rather than as plain text.
-- **Move the session hover pop-up to the right of the session list.** Hovering a session in the session list shows a
-  pop-up that covers nearby sessions; position it beside the list so it does not hide them. Plan:
-  `plans/queue/session-summary-beside-list.md`.
 - **Jittery/jiggling characters when switching between sessions.** Switching between sessions makes characters jitter or
   jiggle: something is being re-drawn or laid out for no reason. Find what triggers the needless re-draw/re-layout on
   session switch.

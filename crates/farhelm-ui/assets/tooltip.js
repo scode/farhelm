@@ -90,10 +90,14 @@
 // `data-tooltip-anchor="panel"`. The item still owns the help and dismissal;
 // only placement clears the other choices. The existing short-window clamp
 // still applies when neither side of the whole panel has enough room.
+// Session summary cards opt into `data-tooltip-anchor="session-card"`: six
+// pixels past the enclosing sidebar, level with their row and shifted up to
+// fit the window. They fall back to ordinary placement when there is no room
+// to the right, rather than covering the list by shifting left.
 //
 // ## Testability
 //
-// The pure decisions (`placeTooltip`, `instantFollowOn`, `scrollMovesTarget`)
+// The pure decisions (`placeTooltip`, `placeSessionCard`, `instantFollowOn`, `scrollMovesTarget`)
 // are exported under CommonJS as well as installed on `window`, the same
 // dual install term-bytes.js uses. The unit harness also exercises menu hover's
 // synchronous focus provenance and rest timers. The browser suite
@@ -144,6 +148,19 @@
     const preferred = side === "above" ? aboveTop : belowTop;
     const top = Math.max(EDGE, Math.min(preferred, viewport.height - EDGE - size.height));
     return { left, top, side };
+  }
+
+  /**
+   * Keep a session summary clear of the list while there is room beside it.
+   * Coordinates are in viewport CSS pixels, including the sidebar's right
+   * edge. A cramped window preserves the ordinary tooltip rule exactly;
+   * pushing the card left would hide the neighbouring rows again.
+   */
+  function placeSessionCard(target, sidebarRight, size, viewport) {
+    const left = Math.max(EDGE, sidebarRight + GAP_ABOVE);
+    if (left + size.width > viewport.width - EDGE) return placeTooltip(target, size, viewport);
+    const top = Math.max(EDGE, Math.min(target.top, viewport.height - EDGE - size.height));
+    return { left, top, side: "right" };
   }
 
   /**
@@ -318,12 +335,18 @@
       box.style.top = "0px";
       const size = box.getBoundingClientRect();
       const rect = tooltipAnchor(target).getBoundingClientRect();
-      placedAt = { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
-      const place = placeTooltip(
-        rect,
-        { width: size.width, height: size.height },
-        { width: win.innerWidth, height: win.innerHeight },
-      );
+      placedAt = {
+        left: rect.left, top: rect.top, width: rect.width, height: rect.height,
+        viewportWidth: win.innerWidth, viewportHeight: win.innerHeight,
+      };
+      const viewport = { width: win.innerWidth, height: win.innerHeight };
+      // Only the row's card opts in. A nearer mark still owns ordinary
+      // text help, even though it lives inside that same sidebar row.
+      const sidebar = content.kind === "card" && target.getAttribute("data-tooltip-anchor") === "session-card"
+        ? target.closest(".app-sidebar") : null;
+      const place = sidebar
+        ? placeSessionCard(rect, sidebar.getBoundingClientRect().right, size, viewport)
+        : placeTooltip(rect, size, viewport);
       box.style.left = `${place.left}px`;
       box.style.top = `${place.top}px`;
       box.dataset.side = place.side;
@@ -364,7 +387,11 @@
       const rect = tooltipAnchor(target).getBoundingClientRect();
       const moved = rect.left !== placedAt.left || rect.top !== placedAt.top
         || rect.width !== placedAt.width || rect.height !== placedAt.height;
-      if (moved || content.signature !== placedContent) position(content);
+      // A fixed-width sidebar row need not move when the window narrows.
+      // Its card must still switch between beside and ordinary placement.
+      const cardWindowChanged = content.kind === "card" && target.getAttribute("data-tooltip-anchor") === "session-card"
+        && (win.innerWidth !== placedAt.viewportWidth || win.innerHeight !== placedAt.viewportHeight);
+      if (moved || cardWindowChanged || content.signature !== placedContent) position(content);
     }
 
     function schedule(next, focus) {
@@ -525,7 +552,7 @@
     });
   }
 
-  const api = { placeTooltip, instantFollowOn, scrollMovesTarget, install };
+  const api = { placeTooltip, placeSessionCard, instantFollowOn, scrollMovesTarget, install };
   if (typeof window !== "undefined") {
     window.farhelmTooltip = api;
     install(window);
