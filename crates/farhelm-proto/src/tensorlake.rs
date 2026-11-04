@@ -12,6 +12,10 @@
 //! command that registers it. An API key cannot register ssh keys, so Farhelm
 //! cannot do that step itself, and cannot check that it was done.
 
+/// Recipes: the named descriptions Farhelm creates sandboxes from (see the
+/// module's own docs).
+pub mod recipes;
+
 use serde::{Deserialize, Serialize};
 
 /// The non-secret snapshot returned after loading or saving the settings.

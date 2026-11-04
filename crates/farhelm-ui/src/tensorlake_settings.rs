@@ -17,6 +17,10 @@
 //!
 //! Requests survive the dialog closing, but component state is touched only
 //! while mounted, as in the other explicit-save fields.
+//!
+//! The recipe list sits between the ssh key and the switch. It is its own
+//! component (`crate::tensorlake::recipes::RecipeList`) with its own reads
+//! and saves; this section only places it.
 
 use crate::{
     ApiBase,
@@ -266,8 +270,9 @@ pub(crate) fn TensorlakeSettings() -> Element {
                 "Farhelm cannot check that the key is registered, because an API key cannot list SSH keys. An unregistered key shows up as an error the first time Farhelm sets up a sandbox."
             }
         }
-        // Follow-up PRs add the recipe list and the list of sandboxes not on
-        // this helm here, between the account and the creation choice.
+        // Recipes sit between the account and the creation choice. A
+        // follow-up PR adds the list of sandboxes not on this helm after them.
+        crate::tensorlake::recipes::RecipeList {}
         section { class: "host-settings-section tensorlake-settings", aria_label: "Creating sandboxes",
             h4 { class: "host-settings-section-title", "Creating sandboxes" }
             div { class: "setting-group",

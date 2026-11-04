@@ -334,7 +334,7 @@ pub struct FolderHistoryEntry {
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 70;
+const SCHEMA_VERSION: i64 = 71;
 
 /// Shared visits are bounded independently of fleet size. Stale references
 /// remain ordinary history entries until later visits push them out.
@@ -409,6 +409,28 @@ const LAUNCH_TEMPLATES_SCHEMA: &str = "CREATE TABLE launch_templates (
                  name        TEXT NOT NULL PRIMARY KEY,
                  fields_json TEXT NOT NULL,
                  updated_at  INTEGER NOT NULL
+             ) STRICT;";
+
+/// The helm's Tensorlake recipes (schema 71): one row per immutably named
+/// recipe. Shared by the fresh schema and the 69→70 step so both produce the
+/// same DDL; the SQL that reads and writes it lives in
+/// `crate::tensorlake::recipes`.
+///
+/// `spec_json` is the user's recipe, endpoint tokens included (unencrypted,
+/// like the ntfy token; never returned over HTTP). `state_json` is the helm's
+/// own snapshot-build bookkeeping, which the build feature fills in; nothing
+/// writes it before then, so it stays `{}`. They are separate columns because
+/// they have separate writers: a user's save replaces only the spec and a
+/// build only the state, so a recipe edit racing a build can never drop a
+/// recorded snapshot or builder ID, each of which is the only record of a
+/// billed Tensorlake resource. The name CHECK mirrors
+/// `farhelm_proto::tensorlake::recipes::RECIPE_NAME_CAP`.
+const TENSORLAKE_RECIPES_SCHEMA: &str = "CREATE TABLE tensorlake_recipes (
+                 name       TEXT NOT NULL PRIMARY KEY CHECK (length(name) BETWEEN 1 AND 32),
+                 spec_json  TEXT NOT NULL,
+                 state_json TEXT NOT NULL DEFAULT '{}',
+                 created_at INTEGER NOT NULL,
+                 updated_at INTEGER NOT NULL
              ) STRICT;";
 
 /// Historical schema 17 DDL, retained for databases entering the migration
@@ -2216,6 +2238,7 @@ pub struct HelmStore {
 ///   mistake the upgrade's build for their original installation.
 /// - 70: a dedicated Tensorlake account singleton with no API key and sandbox
 ///   creation asking first; like ntfy's row, its key is never part of a read.
+/// - 71: `tensorlake_recipes`, created empty.
 fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -2524,10 +2547,11 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
               {REGISTRY_NAMESPACE_SCHEMA}
               {announcement_schema}
               {TENSORLAKE_ACCOUNT_SCHEMA}
+              {TENSORLAKE_RECIPES_SCHEMA}
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 70;",
+              PRAGMA user_version = 71;",
             announcement_schema = crate::announcements::SCHEMA,
         ))
         .context("creating schema")?;
@@ -4099,6 +4123,25 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
         tx.execute_batch("PRAGMA user_version = 70;")
             .context("migrating helm.db to schema version 70")?;
         version = 70;
+    }
+    if version == 70 {
+        // Rewound migration fixtures can already contain the current table.
+        // Genuine schema-70 databases gain an empty recipe catalog.
+        let present: bool = tx
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE name = 'tensorlake_recipes'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .context("checking for the Tensorlake recipes table")?
+            > 0;
+        if !present {
+            tx.execute_batch(TENSORLAKE_RECIPES_SCHEMA)
+                .context("creating the Tensorlake recipes table")?;
+        }
+        tx.execute_batch("PRAGMA user_version = 71;")
+            .context("migrating helm.db to schema version 71")?;
+        version = 71;
     }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
@@ -13932,6 +13975,37 @@ mod tests {
         };
         store.put_launch_template(template.clone()).await.unwrap();
         assert_eq!(store.launch_templates().await.unwrap(), vec![template]);
+    }
+
+    /// Spec: schema 71 adds the empty Tensorlake recipes table to a schema-70
+    /// database, which then stores and lists recipes like a fresh one.
+    ///
+    /// Why: an upgraded helm must offer recipes with no step of its own; the
+    /// fresh-versus-migrated schema test pins the DDL, and this pins that the
+    /// table is usable after the step.
+    #[farhelm_testtrace::test]
+    async fn migrating_from_v70_adds_the_tensorlake_recipes_table() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("helm.db");
+        drop(
+            HelmStore::open(&db_path)
+                .await
+                .expect("create current schema"),
+        );
+        {
+            let conn = Connection::open(&db_path).expect("reopen raw");
+            conn.execute_batch(
+                "DROP TABLE tensorlake_recipes;
+                 PRAGMA user_version = 70;",
+            )
+            .expect("rewind to schema 70");
+        }
+        let store = HelmStore::open(&db_path).await.expect("migrate and open");
+        assert!(store.tensorlake_recipes().await.unwrap().is_empty());
+        crate::tensorlake::recipes::tests_support::create(&store, "rust-dev").await;
+        let listed = store.tensorlake_recipes().await.unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].0, "rust-dev");
     }
 
     /// Spec: schema 42 drops `agent_create_bindings`, rows and all, from a

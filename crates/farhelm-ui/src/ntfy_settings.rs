@@ -31,7 +31,9 @@ fn save_request(draft: Settings, token: String, clear: bool) -> SaveSettings {
 /// Match the helm's URL-origin comparison for the pre-save explanation, including
 /// default-port normalization. Invalid drafts cannot be saved and have no new
 /// origin to compare; the helm remains authoritative for stale forms and writes.
-fn server_origin_changed(saved: &str, draft: &str) -> bool {
+/// The recipe editor's endpoint token fields share it: the helm applies the
+/// same origin rule to recipe endpoint tokens.
+pub(crate) fn server_origin_changed(saved: &str, draft: &str) -> bool {
     let parsed = |value: &str| {
         url::Url::parse(value)
             .ok()

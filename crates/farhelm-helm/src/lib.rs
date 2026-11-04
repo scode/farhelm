@@ -148,7 +148,8 @@ mod ntfy;
 
 /// `/api/tensorlake` and the Tensorlake API client: the account side of
 /// Tensorlake sandbox hosts (the API key, Farhelm's own ssh key for
-/// sandboxes, and the helm tag their names carry).
+/// sandboxes, and the helm tag their names carry), plus the recipes under
+/// `/api/tensorlake/recipes`.
 mod tensorlake;
 
 /// The changed-only fleet invalidation feed shared by the manager and REST edge.
@@ -870,6 +871,24 @@ fn api_router(state: Arc<AppState>) -> Router {
         .route(
             "/api/tensorlake/ssh-key",
             axum::routing::post(tensorlake::create_ssh_key),
+        )
+        // Tensorlake recipes. The write bodies can carry endpoint tokens and
+        // up to 500 package names, hence the explicit limit.
+        .route(
+            "/api/tensorlake/recipes",
+            get(tensorlake::recipes::list_recipes)
+                .post(tensorlake::recipes::create_recipe)
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    tensorlake::recipes::BODY_LIMIT,
+                )),
+        )
+        .route(
+            "/api/tensorlake/recipes/{name}",
+            axum::routing::put(tensorlake::recipes::update_recipe)
+                .delete(tensorlake::recipes::delete_recipe)
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    tensorlake::recipes::BODY_LIMIT,
+                )),
         )
         // API paths are reserved before the public SPA fallback is installed.
         // Without this catch-all, an extensionless GET typo receives

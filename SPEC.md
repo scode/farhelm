@@ -283,6 +283,27 @@ control characters or invisible formatting characters. Saving such a value is re
 GUI, the CLI or an agent alike, because the template editor's single-line fields can neither show nor keep them. A
 template saved before this rule still launches, but saving any change to it is refused until those fields are fixed.
 
+Tensorlake recipes belong to the helm too: one catalog of named descriptions of the Tensorlake sandboxes Farhelm creates
+as hosts, kept in Settings → **Tensorlake**. A recipe has a size (CPUs, memory in GB and disk in GB, whole numbers), a
+software source, optional Claude Code and Codex API endpoints, and outbound tunnels. The source either installs Ubuntu
+packages (Farhelm builds a snapshot from Tensorlake's Ubuntu image with those packages, Claude Code and Codex) or reuses
+an existing Tensorlake image name or snapshot ID as is, which must have systemd installed, enabled and running as the
+init system at startup. Each endpoint is a base URL plus an optional token (Claude Code's auth token, Codex's bearer
+token); a tunnel makes a sandbox loopback port reach a host and port as seen from the helm's machine. A recipe's name is
+lowercase letters, digits and hyphens, starts with a letter, does not end with a hyphen, is at most 32 characters, and
+never changes: hosts refer to their recipe by name, and renaming means creating a new recipe. Creating a recipe under a
+name that exists is refused rather than overwriting it, and deleting a recipe a host uses is refused. Endpoint tokens
+are stored unencrypted in the helm's state, like the ntfy token, and are never returned: the editor shows whether one is
+saved, keeps it when the field is left blank and the endpoint's server is unchanged, and clears it on request or when
+the server changes, saying so before saving. Edits to size and packages affect only hosts created afterwards (packages
+after the next snapshot build); tunnels are read when a host connects. The list shows each recipe's name, size, package
+count or reused image or snapshot, and tunnel count. Snapshot builds, and with them build status and **Rebuild
+snapshot**, come with the build feature; until then a package recipe's status reads that its snapshot is not built yet.
+The editor replaces the list in place; leaving it with unsaved changes, whether by its own Back or Cancel or by closing
+Settings with Escape or a close control, asks whether to save, discard or keep editing, and saving or discarding then
+completes the close. Delete asks for confirmation. A list refresh that fails keeps the rows shown, says they may be out
+of date, and offers **Retry loading**.
+
 Cursor is an agent type launched as `cursor-agent`, and YOLO adds `--force`; Farhelm launches Cursor by that name, never
 as the generic `agent`, which other tools also use. Its model is optional, with `auto`, `composer-2.5` and literal
 custom IDs supported. The non-YOLO choice is labelled "Agent's own setting": Farhelm found no flag that wins over
@@ -1717,31 +1738,33 @@ user's Tensorlake account, `tl sbx ssh keys add --name farhelm-<tag> '<public ke
 command carries the public key's text, so it works on any machine where Tensorlake's `tl` CLI is signed in. The section
 says that Farhelm cannot check the registration, because an API key cannot list SSH keys. `<tag>` is the helm tag: four
 lowercase letters or digits derived from the helm's registry, stable for the life of its state, which the names of the
-sandboxes this helm creates also carry. The off-by-default **Create Tensorlake sandboxes without asking** switch saves
-only when the helm acknowledges it and shows only the stored choice; `Set up new hosts without asking` never covers
-creating a sandbox. The section also notes that on Tensorlake's Usage Credits plan Tensorlake suspends a sandbox after
-24 hours without a connection from Farhelm. The **Terminal** section chooses whether web links open in Farhelm without
-passing the click on (the default), open in Farhelm and also pass the click on, or only pass the click on. The latter
-two choices explain the risk of a second browser tab and that a program without mouse reporting cannot act on a click.
-This choice covers every client of the helm and takes effect in every mounted terminal of the current client
-immediately; other open clients pick it up when they reload, like the host choices. In the desktop app, the **Terminal**
-section also has tunnel consent and a free-form, comma-separated **File types to open with Cmd-click** field (Ctrl-click
-outside macOS). It defaults to `md, txt, json`; saving an empty list disables opening while downloads still save. This
-field requires an explicit, acknowledged save, but its value lives in the shared preference row. The dialog shows one
-prominent warning beside the field for each listed type outside `md`, `txt`, `json` and `log`; HTML-like types have a
-browser-specific warning, and all other unrecognized types have a generic warning. The warnings follow the draft as
-typed, including when another entry is malformed. A refused save leaves the draft and current helm policy unchanged and
-shows the reason inline. Under **Notifications**, sounds has three device switches (see Status), and **ntfy alerts** has
-an off-by-default switch, server URL (default `https://ntfy.sh`), topic, optional access token, and priority (Min, Low,
-Default, High, Urgent; default Default). These are explicitly saved helm configuration, shared by every client, outside
-the preference row. Save refusals appear inline. The stored token is never returned: the form shows whether one exists
-and allows replacing or clearing it. Changing to another server clears a saved token unless a new one is entered, and
-the form says so before saving. **Send test** uses the saved configuration, even while disabled, and reports success or
-failure inline. The **Checkouts** section holds the explicitly saved all-hosts checkout folder and, below it, a
-monospace multi-line post-clone command field and the default-on **Keep a checkout ready for faster launches** switch
-(see [Managed checkouts](#managed-checkouts)). The switch's help explains one extra checkout's disk space per repository
-and host, promptless login-shell preparation, earlier file times and Git hooks/filters, and discard on the next create
-or after 30 days unused; it links the full earlier-clone caveats. The folder's help explains expansion on each host,
+sandboxes this helm creates also carry. Below the account, the section lists the helm's Tensorlake recipes with **New
+recipe** and an editor per recipe (see [Topology](#topology)). The off-by-default **Create Tensorlake sandboxes without
+asking** switch saves only when the helm acknowledges it and shows only the stored choice;
+`Set up new hosts without asking` never covers creating a sandbox. The section also notes that on Tensorlake's Usage
+Credits plan Tensorlake suspends a sandbox after 24 hours without a connection from Farhelm. The **Terminal** section
+chooses whether web links open in Farhelm without passing the click on (the default), open in Farhelm and also pass the
+click on, or only pass the click on. The latter two choices explain the risk of a second browser tab and that a program
+without mouse reporting cannot act on a click. This choice covers every client of the helm and takes effect in every
+mounted terminal of the current client immediately; other open clients pick it up when they reload, like the host
+choices. In the desktop app, the **Terminal** section also has tunnel consent and a free-form, comma-separated **File
+types to open with Cmd-click** field (Ctrl-click outside macOS). It defaults to `md, txt, json`; saving an empty list
+disables opening while downloads still save. This field requires an explicit, acknowledged save, but its value lives in
+the shared preference row. The dialog shows one prominent warning beside the field for each listed type outside `md`,
+`txt`, `json` and `log`; HTML-like types have a browser-specific warning, and all other unrecognized types have a
+generic warning. The warnings follow the draft as typed, including when another entry is malformed. A refused save
+leaves the draft and current helm policy unchanged and shows the reason inline. Under **Notifications**, sounds has
+three device switches (see Status), and **ntfy alerts** has an off-by-default switch, server URL (default
+`https://ntfy.sh`), topic, optional access token, and priority (Min, Low, Default, High, Urgent; default Default). These
+are explicitly saved helm configuration, shared by every client, outside the preference row. Save refusals appear
+inline. The stored token is never returned: the form shows whether one exists and allows replacing or clearing it.
+Changing to another server clears a saved token unless a new one is entered, and the form says so before saving. **Send
+test** uses the saved configuration, even while disabled, and reports success or failure inline. The **Checkouts**
+section holds the explicitly saved all-hosts checkout folder and, below it, a monospace multi-line post-clone command
+field and the default-on **Keep a checkout ready for faster launches** switch (see
+[Managed checkouts](#managed-checkouts)). The switch's help explains one extra checkout's disk space per repository and
+host, promptless login-shell preparation, earlier file times and Git hooks/filters, and discard on the next create or
+after 30 days unused; it links the full earlier-clone caveats. The folder's help explains expansion on each host,
 first-use folder creation, and that command-line host overrides keep their folder. The command's help explains that it
 runs in each new checkout on its host, after cloning and before the agent starts, that changes affect future checkouts
 only, and that command-line host overrides keep their command. The installed desktop app's dialog also has an **App**

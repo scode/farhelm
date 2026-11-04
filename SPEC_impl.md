@@ -5725,6 +5725,31 @@ startup in non-test builds, must name a directory that canonicalizes inside the 
 sandboxes, failures to inject per operation) and read `events.jsonl`, one line per call recording only whether the key
 matched. Operations the specs do not exercise yet answer 501.
 
+## Tensorlake recipes
+
+Protected `/api/tensorlake/recipes` routes store recipes in the schema-71 `tensorlake_recipes` table, one row per name,
+with the user's definition in `spec_json` and the helm's snapshot-build bookkeeping in `state_json`. The two are
+separate columns because they have separate writers: a save replaces only `spec_json`, and the build feature will write
+only `state_json`, so a recipe edit racing a build cannot drop a recorded snapshot or builder ID, each of which is the
+only record of a billed Tensorlake resource. Until builds exist nothing writes `state_json`, and it stays `{}`. This is
+why recipes are not launch templates' last-write-wins "PUT creates or replaces": `POST` creates and answers 409 for an
+existing name, `PUT /{name}` updates and answers 404 for a missing one, and no route renames. `DELETE /{name}` checks
+host use inside its own transaction; until Tensorlake hosts exist that check always finds none.
+
+The wire types and validation live in `farhelm_proto::tensorlake::recipes`, shared with the UI, which runs the same
+checks before sending. The name grammar is narrower than a template's because the name is embedded verbatim in the
+snapshot builder's sandbox name (`farhelm-build-<helm tag>-<recipe>`), so it must already be a valid part of a
+Tensorlake name, and mapping it without sanitizing keeps two recipes from sharing a builder. Package words must start
+with a lowercase letter or digit: the build shell-quotes them, but apt-get still reads a quoted `-o...` word as an
+option. Tunnel hosts are DNS names, IPv4 literals or bracketed IPv6 literals, the shape an ssh `-R` forward carries
+without quoting. Endpoint base URLs are http(s) without credentials, query or fragment, and tokens are at most 4096
+visible ASCII bytes. Token preservation is the ntfy rule, resolved against the stored row inside the update's immediate
+transaction: an omitted token survives only for the same origin, an empty one clears, any other replaces, and removing
+an endpoint drops its token. A request body that does not decode is refused with a fixed message, because serde's
+diagnostic can quote submitted text, and stored rows that do not decode fail the listing without quoting their content.
+Successful writes bump the invalidation feed, and the Settings list re-reads on each notice. Write bodies are capped at
+64 KiB.
+
 ## Feedback forwarding
 
 SPEC.md's Feedback section is implemented as one protected UI route on the helm, `POST /api/feedback`, behind the same

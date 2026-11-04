@@ -185,6 +185,8 @@ mod sounds;
 mod ssh_help;
 mod status;
 mod tabs;
+/// Settings → Tensorlake: the recipe list and editor (see the module's own docs).
+mod tensorlake;
 mod tensorlake_settings;
 #[cfg(native_desktop)]
 mod tunnels;

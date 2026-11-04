@@ -299,6 +299,16 @@ pub(crate) fn SettingsDialog(
     // affects presentation only: neither back nor selection unmounts a panel.
     let mut sections_open = use_signal(|| false);
     let has_updater = updater.is_some();
+    // Escape and both close controls go through this, so an open recipe
+    // editor with unsaved changes can ask first. When it holds the close, its
+    // question is in the Tensorlake panel, so that panel is shown.
+    let close_guard = crate::tensorlake::recipe_editor::DialogCloseGuard::provide();
+    let mut request_close = move || {
+        if close_guard.request(on_close) {
+            selected.set("tensorlake");
+            sections_open.set(false);
+        }
+    };
 
     rsx! {
         div { class: "host-settings-backdrop", role: "presentation",
@@ -327,7 +337,7 @@ pub(crate) fn SettingsDialog(
                 },
                 on_escape: move |event: KeyboardEvent| {
                     if !event.is_composing() {
-                        on_close.call(());
+                        request_close();
                     }
                 },
                 HostDialogHeader {
@@ -338,7 +348,7 @@ pub(crate) fn SettingsDialog(
                     summary: "For every host on this helm, and for this device",
                     dismiss_label: "Close settings",
                     dismiss_tooltip: "Close settings; unsaved fields are discarded",
-                    on_dismiss: move |_| on_close.call(()),
+                    on_dismiss: move |_| request_close(),
                 }
                 div { class: if sections_open() { "dialog-body host-settings-body app-settings-sections-open" } else { "dialog-body host-settings-body" },
                     nav {
@@ -779,7 +789,7 @@ pub(crate) fn SettingsDialog(
                             r#type: "button",
                             class: "btn btn-neutral app-settings-close",
                             "data-tooltip": "Close settings; unsaved fields are discarded",
-                            onclick: move |_| on_close.call(()),
+                            onclick: move |_| request_close(),
                             "Close"
                         }
                     }
