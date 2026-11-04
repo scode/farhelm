@@ -351,10 +351,13 @@ pub(super) struct HostOption {
     ///
     /// Every host is offered as a create target regardless of phase (see
     /// `ListView`), so the label is what keeps that from being a trap: a
-    /// user picking a host the helm will refuse can see why before they
-    /// submit. Selectors retain the stable wire token elsewhere, while this
+    /// user picking an unavailable host can see why before they submit.
+    /// Suspended hosts are the explicit exception: launch resumes them first.
+    /// Selectors retain the stable wire token elsewhere, while this
     /// visible label and the refusal use the humanized phase phrase.
     pub(super) phase: Option<String>,
+    /// An explicitly resumable destination, unlike an unavailable SSH host.
+    pub(super) suspended: bool,
     /// This host's current incarnation (`hosts::host_incarnation`) — what an
     /// idempotency key is bound to, so that an id pointed at a different
     /// machine since the key was minted is a different intent.
@@ -394,11 +397,20 @@ impl HostOption {
     /// directional override could make one host's row read as another's, and
     /// the choice made there is which machine a command runs on.
     pub(super) fn label(&self) -> String {
-        let name = gui_host_name(&self.name, self.local);
+        let name = self.display_name();
         match &self.phase {
             Some(phase) => format!("{name} ({phase})"),
             None => name,
         }
+    }
+
+    /// The host's name without its phase, for text that outlives the moment
+    /// it was captured. A launch on a suspended host captures the name before
+    /// resuming it, so the selector's "(Suspended)" would still be in the
+    /// pending-launch status and its deadline explanation after the resume
+    /// succeeded.
+    pub(super) fn display_name(&self) -> String {
+        gui_host_name(&self.name, self.local)
     }
 }
 
@@ -647,6 +659,7 @@ pub(super) fn host_options(hosts: &[Host]) -> Vec<HostOption> {
             // one is an informed choice rather than a surprise refusal.
             phase: (!is_connected(&host.state))
                 .then(|| phase_display_label(&host.state).to_string()),
+            suspended: matches!(host.state, crate::HostPhase::Suspended { .. }),
             incarnation: host_incarnation(host),
             connection: host.incarnation,
             identity: host
@@ -788,6 +801,7 @@ pub(super) mod tests {
             icon: Default::default(),
             color: Default::default(),
             phase: None,
+            suspended: false,
             incarnation: format!("incarnation-{id}"),
             connection: 1,
             identity: Some(format!("install-{id}")),

@@ -2795,10 +2795,10 @@ impl ConnectionManager {
     /// Reconnect `host` now with a fresh active-retry window: drop whatever
     /// connection it has, reload its row, and dial through the full ladder.
     ///
-    /// The narrow sibling of [`Self::retry_now`] for the one caller with
-    /// positive evidence the host is coming back: provisioning's
-    /// `AttachSupervisor`, which runs seconds after starting or restarting
-    /// the supervisor's own unit. A plain retry's single probe races that
+    /// The narrow sibling of [`Self::retry_now`] for callers with positive
+    /// evidence the host is coming back: provisioning's `AttachSupervisor`
+    /// after starting the supervisor's unit, and an explicit sandbox Resume.
+    /// A plain retry's single probe races that
     /// start latency and, on losing, resets the re-probe clock while
     /// buying only one dial — the next attempt lands a full
     /// [`Cadence::reprobe`] out, past the attach step's own deadline. The
@@ -4134,11 +4134,12 @@ impl HostActor {
         // agent on this host has to the helm, and it carries the host's own
         // id because the helm cannot otherwise tell which fleet member an
         // upcall came from (see `crate::agent_requests`).
-        let hello = SupervisorClient::start_for_host(
+        let hello = SupervisorClient::start_for_host_with_heartbeat(
             reader,
             writer,
             Arc::clone(&self.agent_requests),
             self.id,
+            row.kind == HostKind::Tensorlake,
         );
         tokio::pin!(hello);
         let ssh = progress.ssh.clone();
@@ -6462,6 +6463,7 @@ mod tests {
                 closures: watch::Sender::new(Vec::new()),
                 id: 1,
                 browser_requests: watch::Sender::new(Vec::new()),
+                heartbeats: watch::Sender::new(Vec::new()),
             },
             kill_rx,
         ));
@@ -6504,6 +6506,7 @@ mod tests {
                 requests: Arc::new(Mutex::new(Vec::new())),
                 closures: watch::Sender::new(Vec::new()),
                 id: 1,
+                heartbeats: watch::Sender::new(Vec::new()),
                 browser_requests: watch::Sender::new(Vec::new()),
             },
             kill_rx,
@@ -6610,6 +6613,9 @@ mod tests {
         /// supervisor a hostile host could run, asking for another refresh
         /// the moment each one is answered.
         hint_after_list: bool,
+        /// Model an opted-in proxy's deadline. A cache-stall test must fail
+        /// by losing its peer if the actual client writer stops heartbeats.
+        stdin_idle_limit: Option<Duration>,
     }
 
     impl Default for Script {
@@ -6632,6 +6638,7 @@ mod tests {
                 list_gate: None,
                 hint_after_hello: false,
                 hint_after_list: false,
+                stdin_idle_limit: None,
             }
         }
     }
@@ -6699,6 +6706,8 @@ mod tests {
         /// Every host whose shared connections were released, in order
         /// ([`HostTransport::release_shared_connections`]).
         releases: watch::Sender<Vec<HostId>>,
+        /// Heartbeats received by the peer, independent of session refreshes.
+        heartbeats: watch::Sender<Vec<(HostId, tokio::time::Instant)>>,
     }
 
     impl ScriptedTransport {
@@ -6714,6 +6723,7 @@ mod tests {
                 kill,
                 closures: watch::Sender::new(Vec::new()),
                 releases: watch::Sender::new(Vec::new()),
+                heartbeats: watch::Sender::new(Vec::new()),
             })
         }
 
@@ -6844,6 +6854,7 @@ mod tests {
                     requests: Arc::clone(&self.requests),
                     closures: self.closures.clone(),
                     browser_requests: self.browser_requests.clone(),
+                    heartbeats: self.heartbeats.clone(),
                     id,
                 };
                 tokio::spawn(run_peer(theirs, script, peer, kill));
@@ -6891,6 +6902,7 @@ mod tests {
         requests: Arc<Mutex<Vec<(HostId, std::time::Instant)>>>,
         closures: watch::Sender<Vec<HostId>>,
         browser_requests: watch::Sender<Vec<(HostId, bool)>>,
+        heartbeats: watch::Sender<Vec<(HostId, tokio::time::Instant)>>,
         id: HostId,
     }
 
@@ -6972,9 +6984,24 @@ mod tests {
                     }
                     continue;
                 }
-                frame = reader.read_frame() => frame,
+                frame = async {
+                    match hello.stdin_idle_limit {
+                        Some(limit) => tokio::time::timeout(limit, reader.read_frame()).await
+                            .unwrap_or_else(|_| Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "fixture stdin expired"))),
+                        None => reader.read_frame().await,
+                    }
+                } => frame,
             };
             let Ok(Some(frame)) = frame else { return };
+            if frame.kind == farhelm_proto::FrameKind::Data {
+                // Match the real supervisor: no attachment can own zero,
+                // and empty data there needs neither parsing nor a reply.
+                if frame.channel == 0 && frame.body.is_empty() {
+                    peer.heartbeats
+                        .send_modify(|log| log.push((id, tokio::time::Instant::now())));
+                }
+                continue;
+            }
             let Ok(msg) = parse_control(&frame) else {
                 return;
             };
@@ -12480,6 +12507,7 @@ mod tests {
                 requests: Arc::new(Mutex::new(Vec::new())),
                 closures: watch::Sender::new(Vec::new()),
                 id: 1,
+                heartbeats: watch::Sender::new(Vec::new()),
                 browser_requests: watch::Sender::new(Vec::new()),
             },
             kill_rx,
@@ -12530,6 +12558,7 @@ mod tests {
                     requests: Arc::new(Mutex::new(Vec::new())),
                     closures: watch::Sender::new(Vec::new()),
                     id: 1,
+                    heartbeats: watch::Sender::new(Vec::new()),
                     browser_requests: watch::Sender::new(Vec::new()),
                 },
                 kill_rx,
@@ -12818,6 +12847,88 @@ mod tests {
         assert_eq!(sandboxes.checks().len(), 1);
         assert_eq!(fixture.transport.attempts(host).len(), 1);
         assert_eq!(fixture.transport.releases(host), 0);
+    }
+
+    /// A blocked cache completion can exceed the proxy's idle budget even
+    /// after ListSessions succeeds. The real writer must keep an opted-in
+    /// Tensorlake peer alive without another refresh, and keep its token.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn tensorlake_heartbeats_survive_cache_work_beyond_the_proxy_budget() {
+        use crate::tensorlake::api::SandboxStatus;
+        let sandboxes = ScriptedSandboxes::new(sandbox_status(SandboxStatus::Running));
+        let (fixture, host) = sandbox_fixture(
+            sandboxes,
+            Script {
+                stdin_idle_limit: Some(Duration::from_secs(120)),
+                ..Script::default()
+            },
+        )
+        .await;
+        fixture
+            .manager
+            .wait_for_state(host, HostState::is_connected)
+            .await
+            .unwrap();
+        let token = fixture.manager.status(host).unwrap().incarnation;
+        let cache = fixture.manager.host_write_lock(host).await.unwrap();
+        let before = fixture.transport.requests(host).len();
+        // sleep-ok: let the next refresh reach the held cache-completion boundary.
+        tokio::time::sleep(REFRESH_INTERVAL * 2).await;
+        let blocked = fixture.transport.requests(host).len();
+        assert_eq!(
+            blocked,
+            before + 1,
+            "premise: one refresh reached the cache lock"
+        );
+        let mut beats = fixture.transport.heartbeats.subscribe();
+        let mut observed = 0;
+        for _ in 0..5 {
+            tokio::time::timeout(Duration::from_secs(35), async {
+                beats
+                    .wait_for(|log| log.iter().filter(|(id, _)| *id == host).count() > observed)
+                    .await
+                    .unwrap();
+            })
+            .await
+            .expect("independent heartbeat reached the opted-in peer");
+            observed = beats.borrow().iter().filter(|(id, _)| *id == host).count();
+        }
+        let times: Vec<_> = beats
+            .borrow()
+            .iter()
+            .filter(|(id, _)| *id == host)
+            .map(|(_, at)| *at)
+            .collect();
+        assert!(times.last().unwrap().duration_since(times[0]) >= Duration::from_secs(120));
+        assert!(
+            times
+                .windows(2)
+                .all(|pair| pair[1] - pair[0] == Duration::from_secs(30))
+        );
+        assert_eq!(
+            fixture.transport.requests(host).len(),
+            blocked,
+            "cache work still blocks polling"
+        );
+        let current = fixture.manager.status(host).unwrap();
+        assert!(current.state.is_connected());
+        assert!(
+            tokio::time::timeout(Duration::ZERO, current.client.unwrap().closed())
+                .await
+                .is_err()
+        );
+        assert_eq!(current.incarnation, token);
+        assert_eq!(fixture.transport.attempts(host).len(), 1);
+        assert!(
+            fixture
+                .transport
+                .closures
+                .borrow()
+                .iter()
+                .all(|id| *id != host)
+        );
+        drop(cache);
+        fixture.manager.shutdown();
     }
 
     /// Why: an API outage or a cleared key must not take running Tensorlake

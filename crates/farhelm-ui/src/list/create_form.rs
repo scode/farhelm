@@ -3732,12 +3732,14 @@ pub(super) fn CreateSessionForm(
     // The host selector still shows unavailable destinations so a user can
     // see what changed, but an agent choice must not make Launch look ready
     // when the helm already knows that destination cannot accept it.
+    let selected_host_suspended =
+        selected.is_some_and(|id| hosts.iter().any(|host| host.id == id && host.suspended));
     let selected_host_available = restart_host_confirmed
         && selected.is_some_and(|id| {
             hosts
                 .iter()
                 .find(|host| host.id == id)
-                .is_some_and(|host| host.phase.is_none())
+                .is_some_and(|host| host.phase.is_none() || host.suspended)
         });
     // A stored structured snapshot is provenance, rather than a promise that
     // a later release still supports every combination it named. Keep its
@@ -3890,7 +3892,9 @@ pub(super) fn CreateSessionForm(
     };
     let fresh_destination_ready = matches!(destination_draft(), DestinationDraft::Existing { .. })
         || retry_binding.is_some()
-        || current_preview.is_some();
+        || current_preview.is_some()
+        || (selected_host_suspended
+            && matches!(destination_draft(), DestinationDraft::Github { .. }));
     let command_requires_text = retry_binding.is_none();
     let launch_prerequisites = LaunchPrerequisites {
         busy,
@@ -5126,9 +5130,27 @@ pub(super) fn CreateSessionForm(
                 hosts
                     .iter()
                     .find(|host| host.id == id)
-                    .is_some_and(|host| host.phase.is_none())
+                    .is_some_and(|host| host.phase.is_none() || host.suspended)
             }) {
                 drop(op_guard);
+                return;
+            }
+            if selected_now
+                .is_some_and(|id| hosts.iter().any(|host| host.id == id && host.suspended))
+                && matches!(
+                    draft.snapshot().destination(),
+                    DestinationDraft::Github { .. }
+                )
+            {
+                let host = selected_now.expect("the suspended host was found");
+                let base = base.clone();
+                spawn(async move {
+                    error.set(match api::resume_host_connected(&base, host).await {
+                        Ok(_) => Some("The host resumed. Review the refreshed checkout preview, then launch again".into()),
+                        Err(reason) => Some(reason),
+                    });
+                    drop(op_guard);
+                });
                 return;
             }
             // "Replace with" keeps the source's own host (SPEC.md's
@@ -5525,12 +5547,13 @@ pub(super) fn CreateSessionForm(
             // a vanished row, or one that has
             // never connected — means no claim (see `connection_claim`).
             let expected_incarnation = connection_claim(&hosts, binding.host);
-            // The name the YOLO confirmation shows for this create's
-            // host, from the same snapshot, should the helm ask.
+            // The name the YOLO confirmation and the pending-launch status
+            // show for this create's host, from the same snapshot. Phase-free:
+            // a suspended host is resumed before the create is sent.
             let yolo_host_name = hosts
                 .iter()
                 .find(|host| host.id == binding.host)
-                .map(HostOption::label)
+                .map(HostOption::display_name)
                 .unwrap_or_else(|| "This host".to_string());
             // An admitted attempt is progress, not a refusal. Do not show
             // the busy prerequisite merely because its request is running.
@@ -5564,6 +5587,38 @@ pub(super) fn CreateSessionForm(
                 // anybody is waiting on, and spinning would be worse
                 // than saying so.
                 let mut binding = binding;
+                // Suspension deliberately invalidates the connection token.
+                // Resume first, then bind both minting and the create to the
+                // new connection, preserving the selected installation.
+                let (hosts, expected_incarnation, created_host_identity) = if hosts
+                    .iter()
+                    .any(|host| host.id == binding.host && host.suspended)
+                {
+                    // Both failures below happen before any create is sent, so
+                    // the launch is Refused, never Unknown: whatever the
+                    // resume did, no session can have started from it.
+                    let fresh = match api::resume_host_connected(&base, binding.host).await {
+                        Ok(hosts) => super::shared::host_options(&hosts),
+                        Err(reason) => {
+                            launch_attempted.set(LaunchAttempt::Refused);
+                            error.set(Some(reason));
+                            drop(op_guard);
+                            return;
+                        }
+                    };
+                    let current = fresh.iter().find(|host| host.id == binding.host);
+                    if current.map(|host| &host.incarnation) != Some(&binding.incarnation) {
+                        launch_attempted.set(LaunchAttempt::Refused);
+                        error.set(Some("The host installation changed while resuming; review the target and launch again".into()));
+                        drop(op_guard);
+                        return;
+                    }
+                    let connection = connection_claim(&fresh, binding.host);
+                    let identity = current.map(|host| host.identity.clone());
+                    (fresh, connection, identity)
+                } else {
+                    (hosts, expected_incarnation, created_host_identity)
+                };
                 let mut attempts = 0;
                 let (key, bound) = loop {
                     let held = intent_key.peek().clone();

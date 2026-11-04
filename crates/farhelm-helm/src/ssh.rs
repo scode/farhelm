@@ -453,6 +453,23 @@ pub(crate) fn ssh_stdio_args(
         args.push("--state-dir".to_string());
         args.push(shell_quote(remote_state));
     }
+    if matches!(access, SshAccess::Tensorlake(_)) {
+        // Probe the executable itself before passing a new option: an older
+        // helper must reach the normal hello/version-skew path, not fail in
+        // clap before it can report its protocol. Help never opens a socket;
+        // its output is captured so stdout remains a pure protocol stream.
+        let command_start = args
+            .iter()
+            .position(|arg| arg == "--")
+            .expect("ssh terminator")
+            + 2;
+        let command = args[command_start..].join(" ");
+        let probe = format!("{} internal stdio --help", shell_quote(remote_farhelm));
+        args.truncate(command_start);
+        args.push(format!(
+            "case \"$({probe} 2>/dev/null)\" in *--stdin-idle-limit-secs*) exec {command} --stdin-idle-limit-secs 120 ;; *) exec {command} ;; esac"
+        ));
+    }
     Ok(args)
 }
 
@@ -1081,6 +1098,61 @@ mod tests {
         let dashdash = args.iter().position(|a| a == "--").expect("-- separator");
         let remote = args[dashdash + 2..].join(" ");
         shell_words::split(&remote).expect("remote command must be shell-parseable")
+    }
+
+    /// A new helm must never pass an unknown flag to an old helper: that
+    /// would hide its normal absence/version-skew evidence behind clap's
+    /// usage error. Execute the reconstructed remote shell command against
+    /// both helper generations, with hostile paths, and preserve exit 75.
+    #[farhelm_testtrace::test]
+    fn tensorlake_stdio_negotiates_the_idle_option_without_polluting_stdout() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().unwrap();
+        let program = dir.path().join("helper's $program");
+        let access =
+            super::SshAccess::resolve(super::SshAccessKind::Tensorlake, dir.path()).unwrap();
+        for supported in [false, true] {
+            let help = if supported {
+                "--stdin-idle-limit-secs <SECONDS>"
+            } else {
+                "legacy stdio help"
+            };
+            let reject = if supported {
+                ""
+            } else {
+                "for arg; do test \"$arg\" != --stdin-idle-limit-secs || exit 2; done"
+            };
+            std::fs::write(&program, format!(
+                "#!/bin/sh\nif test \"$3\" = --help; then printf '%s\\n' '{help}'; exit 0; fi\n{reject}\nprintf '<%s>\\n' \"$@\"\nexit 75\n"
+            )).unwrap();
+            std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+            let args = super::ssh_stdio_args(
+                "fixture",
+                dir.path(),
+                &access,
+                program.to_str().unwrap(),
+                Some("/state's $literal"),
+            )
+            .unwrap();
+            let start = args.iter().position(|arg| arg == "--").unwrap() + 2;
+            let output = std::process::Command::new("/bin/sh")
+                .arg("-c")
+                .arg(args[start..].join(" "))
+                .output()
+                .unwrap();
+            assert_eq!(output.status.code(), Some(75), "{output:?}");
+            let expected = if supported {
+                "<internal>\n<stdio>\n<--state-dir>\n</state's $literal>\n<--stdin-idle-limit-secs>\n<120>\n"
+            } else {
+                "<internal>\n<stdio>\n<--state-dir>\n</state's $literal>\n"
+            };
+            assert_eq!(
+                output.stdout,
+                expected.as_bytes(),
+                "help must not reach protocol stdout"
+            );
+            assert!(output.stderr.is_empty());
+        }
     }
 
     /// The argv-injection regression: OpenSSH parses options up to the

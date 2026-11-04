@@ -963,6 +963,14 @@ fn api_router(state: Arc<AppState>) -> Router {
             "/api/hosts/{id}/retry",
             axum::routing::post(hosts::retry_host),
         )
+        .route(
+            "/api/hosts/{id}/suspend",
+            axum::routing::post(tensorlake::lifecycle::suspend),
+        )
+        .route(
+            "/api/hosts/{id}/resume",
+            axum::routing::post(tensorlake::lifecycle::resume),
+        )
         // ADD consumes its plan before its owned service operation; UPDATE's
         // bodyless planner first reads/refuses a host outside ownership. Keep
         // those admission boundaries and the service's distinct panic mapping.

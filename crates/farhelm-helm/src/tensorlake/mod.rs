@@ -26,29 +26,17 @@
 //!   the builder.
 //!
 //! Host creation is an outer provisioning plan in [`crate::provisioning`].
-//! Suspend/resume verbs and recipe tunnels build on this service in
-//! follow-up changes.
+//! [`lifecycle`] owns explicit Suspend/Resume; recipe tunnels build on this
+//! service separately.
 
-// The client carries the calls the follow-up PRs need (suspend and resume),
-// which nothing calls yet. The unit tests exercise every call, so the lint
-// fires only outside them; the expectation is meant to fail, and come off,
-// once the last call is used. On `e2e` it fires through the helper only those
-// unused calls reach (the fake's `unimplemented`).
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "calls typed now for the follow-up Tensorlake PRs")
-)]
 pub(crate) mod api;
 pub(crate) mod build;
 mod build_script;
 pub(crate) mod config;
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "calls typed now for the follow-up Tensorlake PRs")
-)]
 pub(crate) mod e2e;
 pub(crate) mod hosts;
 mod http;
+pub(crate) mod lifecycle;
 pub(crate) mod recipes;
 pub(crate) mod shell;
 pub(crate) mod ssh;

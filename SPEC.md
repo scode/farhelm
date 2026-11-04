@@ -273,6 +273,21 @@ the sandbox runs again; it never resumes a sandbox on its own. A sandbox Tensorl
 unreachable with the advice to delete it. When Tensorlake cannot answer at all (no key, an outage), Farhelm dials anyway
 rather than cutting off a sandbox that may be running.
 
+The hosts panel offers **Suspend** for Tensorlake hosts in every non-suspended state, including when the supervisor is
+unreachable, and **Resume** in both the menu and the suspended row. Suspend asks first when an agent on that host is
+working, its status is unknown or stale, or activity cannot be checked completely. Immediate Suspend requires a
+connected host after the activity read and a complete listing with conclusive non-working statuses. An offline or
+unknown host asks even when its cached listing is empty. Suspension preserves running processes and sessions. A session
+on a suspended host says **&lt;host&gt; is suspended; this session continues when it resumes** and offers **Resume
+host**. Launching on a suspended host resumes it first and waits for a fresh connection. For a fresh GitHub checkout,
+Resume refreshes the checkout preview; the user reviews it and launches again, since the preview from the old connection
+cannot authorize work on the new one. Farhelm does not suspend automatically.
+
+Tensorlake supervisor connections opt into a two-minute input-silence limit when the remote helper supports it. The helm
+sends a lightweight heartbeat every 30 seconds independently of session refreshes or storage work. If the helm vanishes
+while the gateway keeps its connection open, the remote helper exits so that its leaked SSH session cannot keep the
+sandbox running indefinitely. Ordinary SSH hosts and connections from older helms have no such deadline.
+
 **Add host** offers **SSH** and **Tensorlake sandbox**. A sandbox needs a Name and a saved recipe; **New recipe…** opens
 the full recipe editor inside the dialog and saves it under its name. Without an API key, the form points to Settings →
 Tensorlake. Continue shows the sandbox name, size and setup steps, says it bills while running, links to Tensorlake

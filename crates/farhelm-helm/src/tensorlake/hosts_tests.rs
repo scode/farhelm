@@ -8,6 +8,7 @@
 
 use super::test_support::plant;
 use super::*;
+use crate::manager::HostState;
 use crate::store::{HelmStore, HostStoreError};
 use crate::tensorlake::api::{
     CreateSandbox, CreatedSandbox, CreatedSnapshot, SandboxInfo, SandboxPage, SnapshotInfo,
@@ -37,6 +38,8 @@ struct FakeState {
     /// When set, terminate announces itself and waits for the test before
     /// doing anything, so a test can look at the helm mid-removal.
     terminate_gate: Option<Arc<Gate>>,
+    /// Hold Suspend at its API boundary to inspect routing and admission.
+    suspend_gate: Option<Arc<Gate>>,
 }
 
 /// A pause point inside a fake call: the call notifies `entered`, then waits
@@ -51,6 +54,23 @@ struct Gate {
 /// make. Sandboxes are found by id or name, as the real API finds them.
 #[derive(Clone, Default)]
 struct FakeApi(Arc<Mutex<FakeState>>);
+
+/// Lifecycle tests need the actor to observe the same sandbox the REST
+/// service mutates. A separate offline status source would dial blindly
+/// after a successful Suspend and hide the persistent-state contract.
+#[async_trait::async_trait]
+impl SandboxStatusSource for FakeApi {
+    async fn check(&self, sandbox: &str) -> SandboxCheck {
+        match self.get_sandbox(&ApiKey::new(KEY.into()), sandbox).await {
+            Ok(info) => SandboxCheck::Status {
+                status: info.status,
+                error_details: info.error_details,
+            },
+            Err(TensorlakeError::NotFound { .. }) => SandboxCheck::Missing,
+            Err(error) => SandboxCheck::Unavailable(error.to_string()),
+        }
+    }
+}
 
 impl FakeApi {
     fn with_sandbox(self, id: &str, name: &str, status: SandboxStatus) -> Self {
@@ -158,12 +178,35 @@ impl TensorlakeApi for FakeApi {
         unimplemented!("removal never creates")
     }
 
-    async fn suspend_sandbox(&self, _: &ApiKey, _: &str) -> Result<(), TensorlakeError> {
-        unimplemented!("removal never suspends")
+    async fn suspend_sandbox(&self, key: &ApiKey, sandbox: &str) -> Result<(), TensorlakeError> {
+        let gate = self.0.lock().unwrap().suspend_gate.clone();
+        if let Some(gate) = gate {
+            gate.entered.notify_one();
+            gate.release.notified().await;
+        }
+        self.enter("suspend", sandbox, key)?;
+        self.0
+            .lock()
+            .unwrap()
+            .sandboxes
+            .iter_mut()
+            .find(|(id, name, _)| id == sandbox || name == sandbox)
+            .ok_or_else(not_found)?
+            .2 = SandboxStatus::Suspended;
+        Ok(())
     }
 
-    async fn resume_sandbox(&self, _: &ApiKey, _: &str) -> Result<(), TensorlakeError> {
-        unimplemented!("removal never resumes")
+    async fn resume_sandbox(&self, key: &ApiKey, sandbox: &str) -> Result<(), TensorlakeError> {
+        self.enter("resume", sandbox, key)?;
+        self.0
+            .lock()
+            .unwrap()
+            .sandboxes
+            .iter_mut()
+            .find(|(id, name, _)| id == sandbox || name == sandbox)
+            .ok_or_else(not_found)?
+            .2 = SandboxStatus::Running;
+        Ok(())
     }
 
     async fn terminate_sandbox(&self, key: &ApiKey, sandbox: &str) -> Result<(), TensorlakeError> {
@@ -1120,11 +1163,22 @@ async fn a_recipe_in_use_cannot_be_deleted() {
 async fn helm_with_sandbox_host(
     api: &FakeApi,
 ) -> (crate::rest_harness::Harness, crate::store::HostId) {
-    let harness = crate::rest_harness::FleetBuilder::new()
+    sandbox_helm(api, false).await
+}
+
+/// Preserve removal tests' API-call isolation while lifecycle tests opt into
+/// the actor's status seam. Both use the same registration and saved key.
+async fn sandbox_helm(
+    api: &FakeApi,
+    actor_checks_status: bool,
+) -> (crate::rest_harness::Harness, HostId) {
+    let mut builder = crate::rest_harness::FleetBuilder::new()
         .await
-        .tensorlake_api(Arc::new(api.clone()))
-        .start()
-        .await;
+        .tensorlake_api(Arc::new(api.clone()));
+    if actor_checks_status {
+        builder = builder.sandboxes(Arc::new(api.clone()));
+    }
+    let harness = builder.start().await;
     harness
         .store
         .save_tensorlake_config(SaveSettings {
@@ -1172,6 +1226,281 @@ async fn delete_host(
         .await
         .unwrap();
     (status, String::from_utf8(bytes.to_vec()).unwrap())
+}
+
+/// Exercise the protected lifecycle routes rather than bypassing admission,
+/// task ownership or the provisioning lock in a service-only test.
+async fn lifecycle_host(
+    harness: &crate::rest_harness::Harness,
+    host: HostId,
+    verb: &str,
+) -> (axum::http::StatusCode, String) {
+    use tower::ServiceExt as _;
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri(format!("/api/hosts/{host}/{verb}"))
+        .header("host", "127.0.0.1:7433")
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = harness.router().oneshot(request).await.unwrap();
+    let status = response.status();
+    let bytes = axum::body::to_bytes(response.into_body(), 4096)
+        .await
+        .unwrap();
+    (status, String::from_utf8(bytes.to_vec()).unwrap())
+}
+
+/// Suspend must withdraw routing without losing the registered machine. Resume
+/// must preserve the host/session identity while earning a fresh connection.
+/// Repeating either verb is safe and does not issue a second vendor mutation.
+#[farhelm_testtrace::test]
+async fn lifecycle_suspend_resume_preserves_the_host_and_is_idempotent() {
+    let api = FakeApi::default().with_sandbox(
+        "sbx-1",
+        "farhelm-host-k7q2-gpu-dev-m3x9",
+        SandboxStatus::Running,
+    );
+    let (harness, host) = sandbox_helm(&api, true).await;
+    harness.await_state(host, HostState::is_connected).await;
+    let before = harness.state.manager.status(host).unwrap().incarnation;
+    // A prior Farhelm suspension may have been resumed through Tensorlake's
+    // own controls. A new Suspend must replace that stale wording timestamp.
+    harness
+        .store
+        .set_tensorlake_suspended_at(host, Some(1))
+        .await
+        .unwrap();
+    let mut suspended_at = None;
+    for _ in 0..2 {
+        let (status, body) = lifecycle_host(&harness, host, "suspend").await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+        let at = row(&harness.store, host)
+            .await
+            .tensorlake
+            .unwrap()
+            .suspended_at
+            .unwrap();
+        assert!(at > 1, "a fresh suspension replaces stale metadata");
+        if let Some(previous) = suspended_at {
+            assert_eq!(at, previous, "repeated Suspend keeps its original time");
+        }
+        suspended_at = Some(at);
+    }
+    harness
+        .await_state(host, |state| matches!(state, HostState::Suspended { .. }))
+        .await;
+    let suspended = harness.state.manager.status(host).unwrap();
+    assert!(matches!(suspended.state, HostState::Suspended { .. }));
+    assert!(suspended.client.is_none());
+    assert!(
+        row(&harness.store, host)
+            .await
+            .tensorlake
+            .unwrap()
+            .suspended_at
+            .is_some()
+    );
+    assert_eq!(
+        api.calls()
+            .iter()
+            .filter(|call| call.starts_with("suspend "))
+            .count(),
+        1
+    );
+    let mut resumed_incarnation = None;
+    for _ in 0..2 {
+        let (status, body) = lifecycle_host(&harness, host, "resume").await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+        harness.await_state(host, HostState::is_connected).await;
+        let current = harness.state.manager.status(host).unwrap().incarnation;
+        if let Some(previous) = resumed_incarnation {
+            assert_eq!(
+                current, previous,
+                "repeated Resume must not detach connected viewers"
+            );
+        }
+        resumed_incarnation = Some(current);
+    }
+    harness.await_state(host, HostState::is_connected).await;
+    assert_ne!(
+        harness.state.manager.status(host).unwrap().incarnation,
+        before
+    );
+    assert!(
+        row(&harness.store, host)
+            .await
+            .tensorlake
+            .unwrap()
+            .suspended_at
+            .is_none()
+    );
+    assert_eq!(
+        api.calls()
+            .iter()
+            .filter(|call| call.starts_with("resume "))
+            .count(),
+        1
+    );
+}
+
+/// External suspension can precede the actor's detection. A real Resume
+/// must invalidate that old Connected token; only a repeated Resume once
+/// running and recovered may preserve a connected viewer's token.
+#[farhelm_testtrace::test]
+async fn lifecycle_resume_replaces_a_pre_suspension_connected_actor() {
+    let api = FakeApi::default().with_sandbox(
+        "sbx-1",
+        "farhelm-host-k7q2-gpu-dev-m3x9",
+        SandboxStatus::Running,
+    );
+    let (harness, host) = sandbox_helm(&api, true).await;
+    harness.await_state(host, HostState::is_connected).await;
+    let before = harness.state.manager.status(host).unwrap().incarnation;
+    api.0.lock().unwrap().sandboxes[0].2 = SandboxStatus::Suspended;
+    assert!(
+        harness
+            .state
+            .manager
+            .status(host)
+            .unwrap()
+            .state
+            .is_connected(),
+        "premise: the actor has not detected the external suspension"
+    );
+    let (status, body) = lifecycle_host(&harness, host, "resume").await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+    assert!(
+        !harness
+            .state
+            .manager
+            .status(host)
+            .unwrap()
+            .state
+            .is_connected()
+            || harness.state.manager.status(host).unwrap().incarnation != before,
+        "the pre-suspension connection must be withdrawn before success"
+    );
+    harness.await_state(host, HostState::is_connected).await;
+    let recovered = harness.state.manager.status(host).unwrap().incarnation;
+    assert_ne!(recovered, before);
+    let (status, body) = lifecycle_host(&harness, host, "resume").await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+    assert_eq!(
+        harness.state.manager.status(host).unwrap().incarnation,
+        recovered
+    );
+    assert_eq!(
+        api.calls()
+            .iter()
+            .filter(|call| call.starts_with("resume "))
+            .count(),
+        1
+    );
+}
+
+/// A failed suspend may not strand a hold, and a busy lifecycle request may
+/// not race removal or an update. Neither refusal forgets the registered host.
+#[farhelm_testtrace::test]
+async fn lifecycle_refusal_releases_the_hold_and_busy_hosts_do_not_mutate() {
+    let api = FakeApi::default()
+        .with_sandbox(
+            "sbx-1",
+            "farhelm-host-k7q2-gpu-dev-m3x9",
+            SandboxStatus::Running,
+        )
+        .failing(
+            "suspend",
+            TensorlakeError::Transport("injected failure".into()),
+        );
+    let (harness, host) = sandbox_helm(&api, true).await;
+    harness.await_state(host, HostState::is_connected).await;
+    let (status, body) = lifecycle_host(&harness, host, "suspend").await;
+    assert_eq!(
+        status,
+        axum::http::StatusCode::SERVICE_UNAVAILABLE,
+        "{body}"
+    );
+    harness.await_state(host, HostState::is_connected).await;
+    let lock = harness.state.manager.try_host_provision_lock(host).unwrap();
+    let calls = api.calls().len();
+    let (status, body) = lifecycle_host(&harness, host, "suspend").await;
+    assert_eq!(status, axum::http::StatusCode::CONFLICT, "{body}");
+    assert_eq!(api.calls().len(), calls);
+    drop(lock);
+    let local = harness
+        .store
+        .list_hosts()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|row| row.kind.is_reserved_local())
+        .unwrap()
+        .id;
+    let (status, body) = lifecycle_host(&harness, local, "resume").await;
+    assert_eq!(status, axum::http::StatusCode::CONFLICT, "{body}");
+}
+
+/// Resume is an explicit recovery action even when a transport bug retired
+/// the actor. Releasing a hold alone cannot wake a dead task; the fresh retry
+/// must revive it before the host can carry sessions again.
+#[farhelm_testtrace::test]
+async fn lifecycle_resume_revives_a_retired_actor() {
+    let api = FakeApi::default().with_sandbox(
+        "sbx-1",
+        "farhelm-host-k7q2-gpu-dev-m3x9",
+        SandboxStatus::Running,
+    );
+    let (harness, host) = sandbox_helm(&api, true).await;
+    harness.await_state(host, HostState::is_connected).await;
+    harness
+        .fleet
+        .edit(host, |script| script.panic_on_dial = true);
+    harness.fleet.kill_connection(host);
+    harness
+        .await_state(host, |state| matches!(state, HostState::Retired { .. }))
+        .await;
+    api.0.lock().unwrap().sandboxes[0].2 = SandboxStatus::Suspended;
+    harness
+        .fleet
+        .edit(host, |script| script.panic_on_dial = false);
+    let (status, body) = lifecycle_host(&harness, host, "resume").await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+    harness.await_state(host, HostState::is_connected).await;
+}
+
+/// A concurrent Retry cannot reopen a held transport, and Remove cannot
+/// terminate a sandbox while Suspend owns its operation lock. Observe both
+/// while the vendor call is deliberately unsettled, before releasing it.
+#[farhelm_testtrace::test]
+async fn lifecycle_suspend_holds_routing_and_excludes_removal() {
+    let api = FakeApi::default().with_sandbox(
+        "sbx-1",
+        "farhelm-host-k7q2-gpu-dev-m3x9",
+        SandboxStatus::Running,
+    );
+    let gate = Arc::new(Gate::default());
+    api.0.lock().unwrap().suspend_gate = Some(gate.clone());
+    let (harness, host) = sandbox_helm(&api, true).await;
+    harness.await_state(host, HostState::is_connected).await;
+    let harness = Arc::new(harness);
+    let suspended = tokio::spawn({
+        let harness = harness.clone();
+        async move { lifecycle_host(&harness, host, "suspend").await }
+    });
+    tokio::time::timeout(Duration::from_secs(10), gate.entered.notified())
+        .await
+        .unwrap();
+    let held = harness.state.manager.status(host).unwrap();
+    assert!(held.client.is_none());
+    assert!(matches!(held.state, HostState::Suspended { .. }));
+    let dials = harness.fleet.dials(host);
+    harness.state.manager.retry_now(host).await.unwrap();
+    let (status, body) = delete_host(&harness, host).await;
+    assert_eq!(status, axum::http::StatusCode::CONFLICT, "{body}");
+    assert_eq!(harness.fleet.dials(host), dials);
+    gate.release.notify_one();
+    let (status, body) = suspended.await.unwrap();
+    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
 }
 
 /// Why: `DELETE /api/hosts/{id}` is the GUI's removal, and for a Tensorlake
