@@ -20922,3 +20922,490 @@
   this ledger, the queue removal or a changelog fragment); over it, block and bring it back. Remove the feedback file
   and its index entry.
 - Execution: `pending`.
+
+## retained-delete-approval-can-kill-new-tab.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main 1ec66971 (not run; delegated checker, re-read by the triage session).
+  Delete's live-work guard reads each tab's liveness twice: first it refuses only for a tab that is unreadable at that
+  moment (`hosts.untold()`, `service/session_hosts.rs` around 587-607), then after a tmux round trip it counts only tabs
+  that are readable and alive (`live_tabs()`, around 639-668). A tab whose terminal goes from running to unreadable
+  between the two reads is missed by both, so a Delete whose prompt said nothing was alive passes, and teardown still
+  roots and ends that tab's pinned child. The window is milliseconds and needs a tab connection failure, so it is very
+  rare; the route is in shipped code and also affects guarded CLI and agent Deletes. SPEC.md "Lifecycle operations"
+  (Confirmed 2026-10-01): "a Delete or Replace whose prompt said nothing was alive ... is refused if the agent or any
+  terminal tab is running". The 2026-10-10 coinciding-faults paragraph does not apply (one fault plus timing). Bucket
+  highest kept: the action ends work beyond what the confirmation said.
+- Decision: recorded as `fix code` without asking, under the 2026-10-19 clearly-settled rule (triage.md, "Preparing each
+  item"), on the SPEC.md sentence quoted above and the guard's own rule that an unreadable tab means "cannot tell",
+  which refuses. The user can revise it.
+- Completion criteria: Delete's guard decides from one reading of each tab's liveness (or rechecks "cannot tell" after
+  counting), so a tab that is unreadable at any point while the guard runs makes a nothing-alive Delete refuse. A unit
+  test flips a tab from running to unreadable between the two reads and expects refusal. Size gate: about 100 lines of
+  diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over it, block and
+  bring it back. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## container-policy-missing-from-approvals.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main 1ec66971 (not run; delegated checker, re-read by the triage session).
+  The template approval card (`template_rows`, `crates/farhelm-ui/src/approvals.rs` around 1288-1368) shows every
+  template field except its container setting (image, proxy port, GitHub token file), so an approved template write can
+  set, change or remove container isolation without the card saying so. The shipped `farhelm` command never sends that
+  field, so the harmful route (silently turning isolation off) needs a hand-built protocol request; through shipped
+  tools the card is only incomplete. SPEC.md "Agent requests across hosts": "For a template write it shows the whole
+  resulting template". The launch card's omission is not covered by that sentence and is not part of this outcome.
+  Bucket: the established part is an incomplete card (other); the isolation change would be highest once a shipped
+  control can set the field (TODO near-term "Containerized sessions: `farhelm spawn` and CLI flags").
+- Decision: recorded as `fix code` without asking, under the 2026-10-19 clearly-settled rule (triage.md, "Preparing each
+  item"), on the SPEC.md sentence quoted above. The user can revise it.
+- Completion criteria: the template approval card shows the resulting template's container setting (image, proxy port
+  and token file) whenever the resulting template has one, and says "none" when the write removes it, modelled on the
+  wrapper-prefix rows, with a card test. Size gate: about 100 lines of diff (code, tests and docs, not counting this
+  ledger, the queue removal or a changelog fragment); over it, block and bring it back. Remove the feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## container-stop-approval-omits-tab-work.md
+
+- Outcome: `other`.
+- Assessment: confirmed by code reading on main 1ec66971 (not run; delegated checker). An agent's Stop request for
+  another session shows a card that says "stop a session's agent" with only the session's title, id and host. For a
+  containerized target the supervisor stops the whole container, ending every terminal tab and its work. The route is
+  shipped end to end (`farhelm agent stop`). SPEC.md says a containerized Stop takes the tabs but does not require the
+  card to say so. The session menu's Stop description ("Ends the agent and its processes") has the same gap. Bucket
+  highest held: a destructive confirmation that understates what it ends.
+- Decision: on the 2026-11-04 highest-bucket triage page (Q1, all eight containerized-session items) the user wrote:
+  "move all of these into a near term podman rigor todo iteam so they go out of the quee, they just become todos in the
+  podman project". (The picker read "Leave for later"; the comment names the outcome.)
+- Completion criteria: add one Near term TODO.md entry, "Podman rigor" or similar, holding the containerized-session
+  findings from this Q1 group, each with enough of its assessment to act on later (this item: the Stop card, and the
+  session menu's Stop text, should say a containerized Stop ends the whole container, tabs included). No code or spec
+  change. Remove the feedback file and its index entry. The eight Q1 items share that one entry and one change.
+- Execution: `pending`.
+
+## wrapper-guide-stop-promises-tab-preservation.md
+
+- Outcome: `other`.
+- Assessment: confirmed on main 1ec66971 (delegated checker). The agent-wrappers docs page's "What happens on stop"
+  section says without qualification that Stop leaves the session's terminal tabs running. For containerized sessions
+  Stop ends the whole container, tabs included (SPEC.md "Lifecycle operations" and the containerized-sessions page say
+  so correctly). A two-line docs fix. Bucket: high on substance; the wrong sentence sits in a wrapper-author section.
+- Decision: as for `container-stop-approval-omits-tab-work.md` (2026-11-04 page, Q1): moved into the near-term Podman
+  rigor TODO entry.
+- Completion criteria: the shared Podman rigor TODO entry lists this item (the wrapper guide's Stop sentence needs the
+  container exception). No docs change now. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## detached-container-client-hides-live-agent-and-tab-work.md
+
+- Outcome: `other`.
+- Assessment: partly correct on main 1ec66971 (delegated checker; not run). Farhelm does not turn off Podman's default
+  detach keys (Ctrl-P then Ctrl-Q) for the agent's or tabs' `podman exec` connections. Typed in a tab, they close the
+  tab and its shell is hung up; typed in the agent terminal, the agent shows as exited while it keeps running in the
+  container, and a later Delete kills it, possibly without asking. SPEC.md "Containerized sessions" accepts Delete
+  removing work that detached inside the container; showing a live agent as exited is not covered. Unverified: that
+  Podman 4.9 accepts an empty `--detach-keys`. Bucket: high on substance.
+- Decision: as for `container-stop-approval-omits-tab-work.md` (2026-11-04 page, Q1): moved into the near-term Podman
+  rigor TODO entry.
+- Completion criteria: the shared Podman rigor TODO entry lists this item (turn off Podman's detach keys for the agent
+  and tab connections). Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## checkout-token-path-rereads-host-files.md
+
+- Outcome: `other`.
+- Assessment: confirmed on main 1ec66971 (delegated checker; not run). The optional GitHub token file is re-read on the
+  host at every agent start and tab open with a plain read that follows symlinks and has no location or file-type check;
+  the configured path need only be absolute. If the user places it inside the session's checkout, the agent can replace
+  it with a link to any readable host file, which the next tab open delivers into the container as `GH_TOKEN`. The
+  premise is an unusual user choice. Bucket highest held on substance (a host secret crossing the container's
+  host-filesystem boundary).
+- Decision: as for `container-stop-approval-omits-tab-work.md` (2026-11-04 page, Q1): moved into the near-term Podman
+  rigor TODO entry.
+- Completion criteria: the shared Podman rigor TODO entry lists this item (refuse a token path inside the checkout and
+  read the file without following links, regular files only). Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## container-inherits-host-proxy-credentials.md
+
+- Outcome: `other`.
+- Assessment: confirmed on main 1ec66971 (delegated checker; Podman 4.9.3's `--http-proxy` default true read from its
+  help, not run). Container creation does not pass `--http-proxy=false`, so proxy variables from the user's login shell,
+  credentials included, become part of the container's environment and reach the agent and tabs. SPEC.md's list of what
+  the container receives omits them, and a code comment and SPEC_impl.md say only TERM, COLORTERM and the token are
+  forwarded. The credential grants network access, which the spec leaves unisolated; `containers.conf` can turn it off.
+- Decision: as for `container-stop-approval-omits-tab-work.md` (2026-11-04 page, Q1): moved into the near-term Podman
+  rigor TODO entry.
+- Completion criteria: the shared Podman rigor TODO entry lists this item (decide whether containers inherit host proxy
+  settings; either way, make the spec's list of what the container receives and the code comment accurate). Remove the
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## retained-container-startup-reaches-replacement-checkout.md
+
+- Outcome: `other`.
+- Assessment: partly correct on main 1ec66971 (delegated checker). Opening a tab in a stopped containerized session
+  restarts its container on whatever folder is now at the checkout path and runs the container's shell startup files,
+  which an earlier agent could have edited. The route needs the user to re-clone the checkout by hand at the same path
+  while keeping the old session. SPEC.md "Terminal-tab working directory" accepts a tab following its path to a
+  different directory as "not a correctness or security finding", without naming containers. Bucket: other on substance.
+- Decision: as for `container-stop-approval-omits-tab-work.md` (2026-11-04 page, Q1): moved into the near-term Podman
+  rigor TODO entry.
+- Completion criteria: the shared Podman rigor TODO entry lists this item (decide whether the tab-path acceptance covers
+  containerized tabs, and say so). Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## pending-create-retry-deletes-initialized-container-files.md
+
+- Outcome: `other`.
+- Assessment: partly correct on main 1ec66971 (delegated checker; not run). A create whose launch spec fails to write
+  removes the container named after the session before rolling back, so a retry after a crash and reboot can remove a
+  container an earlier attempt initialized, losing the agent's in-container files (not the checkout). Recovery's launch
+  evidence does not consult the container. Needs three or four rare conditions; "no recovery before reboot" is not
+  shown. SPEC_impl.md prescribes removal before discarding the row; the 2026-10-10 coinciding-faults acceptance names
+  processes, not files. Bucket: high on substance.
+- Decision: as for `container-stop-approval-omits-tab-work.md` (2026-11-04 page, Q1): moved into the near-term Podman
+  rigor TODO entry.
+- Completion criteria: the shared Podman rigor TODO entry lists this item (decide whether an existing container counts
+  as launch evidence on a retried create, or accept the loss in the spec). Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## checkpoint-image-inspection-restores-unowned-workload.md
+
+- Outcome: `other`.
+- Assessment: premise unverified on main 1ec66971 (delegated checker). Account inspection runs the chosen image without
+  checking whether it is a Podman checkpoint image. That `podman run` restores a checkpoint image is not shown, and
+  restore is root-only while the spec requires rootless Podman and a supervisor that never runs as root. Bucket: other
+  (route not established in supported use).
+- Decision: as for `container-stop-approval-omits-tab-work.md` (2026-11-04 page, Q1): moved into the near-term Podman
+  rigor TODO entry.
+- Completion criteria: the shared Podman rigor TODO entry lists this item (optionally refuse checkpoint images and a
+  root supervisor). Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## colliding-start-cleanup-ends-winning-terminal.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed as a source route on main 1ec66971 (delegated checker; not run). A new terminal's random 40-bit
+  socket name is checked for absence but not reserved; when a start does not finish (its first stage is killed, or the
+  start deadline passes), cleanup connects to that socket and sends Shutdown to whatever answers, without checking the
+  peer's launch tag. If another start for a different session or tab drew the same name and won, cleanup ends that
+  terminal and its program gets a hangup. Needs about a 1-in-10^12 collision between overlapping starts plus an
+  interruption within milliseconds. SPEC.md's 2026-10-10 coinciding-faults paragraph may cover it but names no
+  random-identifier collision.
+- Decision: on the 2026-11-04 highest-bucket triage page (Q2, the five astronomically-unlikely items) the user wrote:
+  "all of the ones with a very straight forward fix (including that terminal host what-conts-towards-size things) - just
+  go ahead and fix them. for each in the list that isn't a straightorward fix, add them to the FILTER.md as a specific
+  case we have accepted." Triage judged this one straightforward.
+- Completion criteria: cleanup of an unfinished start shuts down the host at that socket only when its launch tag is the
+  one this start wrote; anything else (a foreign or unreadable tag) is left alone and reported as possibly remaining. A
+  test covers a foreign host answering at the socket. If execution finds it is not straightforward (over about 100 lines
+  of diff, not counting this ledger, the queue removal or a changelog fragment, or it needs a design choice), do not fix
+  it: instead add a FILTER.md entry accepting this specific case, as the decision says. Remove the feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## async-process-verification-leaves-stale-signal-authority.md
+
+- Outcome: `other`.
+- Assessment: confirmed as a source route on main 1ec66971 (delegated checker; not run). When force-stopping a terminal
+  host that did not end through its protocol, Farhelm verifies the process identity on a blocking thread, then awaits
+  that result and sends a bare signal by number with no fresh check. If the host exits and its number is reused inside
+  that handoff (microseconds in practice), the signal can hit an unrelated process. SPEC_impl.md's short PID-reuse
+  acceptance excludes "asynchronous work" in so many words. Not a straightforward fix: moving the signal into the
+  blocking closure can send a signal after the caller gave up, unless guarded, and pidfd is Linux-only.
+- Decision: on the 2026-11-04 page (Q2) the user said each item in the group without a straightforward fix goes into
+  FILTER.md "as a specific case we have accepted" (full quote under `colliding-start-cleanup-ends-winning-terminal.md`).
+  Triage judged this one not straightforward, for the reason above.
+- Completion criteria: add a FILTER.md filter for this specific case: a process number reused inside Farhelm's internal
+  handoff between verifying a terminal host's identity and signalling it, during forced termination. Say it was accepted
+  by the maintainer on 2026-11-04. No code or spec change. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## registry-test-basename-lookup-can-kill-foreign-host.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed on main 1ec66971 (delegated checker), test code only. The terminal-host registry test finds its
+  host by the socket's file name in any directory and SIGKILLs the first match, so with about a 1-in-10^10 chance per
+  run it can kill a real Farhelm terminal on the same machine.
+- Decision: on the 2026-11-04 page (Q2) the user said to fix the items with a very straightforward fix (full quote under
+  `colliding-start-cleanup-ends-winning-terminal.md`). This one is a few lines.
+- Completion criteria: the test identifies its host by the exact socket path (or the peer process of a connection to its
+  own socket) before signalling. If execution finds it is not straightforward, add a FILTER.md entry accepting this
+  specific case instead. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## displaced-input-pump-can-submit-replacement-typing.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed as an ordering gap on main 1ec66971 (delegated checker; not run). On takeover, the old
+  attachment's input task is told to cancel but not awaited, so input it was handing on at that instant could reach the
+  terminal after the new window's first keys. That needs the OS to stall the supervisor mid-send; in a shell, a
+  half-typed command could run. SPEC.md "One GUI at a time" asks for easy fixes to such races.
+- Decision: on the 2026-11-04 page (Q2) the user said to fix the items with a very straightforward fix (full quote under
+  `colliding-start-cleanup-ends-winning-terminal.md`). Triage judged this one straightforward.
+- Completion criteria: takeover, replace and detach wait for the old input task to stop before the replacement is
+  installed or detach returns. A test holds the old task mid-send and checks ordering. If execution finds it is not
+  straightforward (over about 100 lines of diff, not counting this ledger, the queue removal or a changelog fragment, or
+  it needs a design choice), add a FILTER.md entry accepting this specific case instead. Remove the feedback file and
+  its index entry.
+- Execution: `pending`.
+
+## resize-journal-exhaustion-does-not-trigger-checkpoint.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed on main 1ec66971 (delegated checker; not run). A new terminal's recovery buffer charges 64 bytes
+  per applied size change against its 32 MiB cap, but neither the checkpoint trigger nor an orderly stop's skip-the-save
+  rule counts size changes. On a nearly silent terminal, about 524,288 distinct resizes can push out output no snapshot
+  holds; the next supervisor (after a crash or an ordinary update, which skipped the save) rebuilds that terminal
+  without it. This contradicts SPEC.md "no viewer can cause a new terminal's gap" and SPEC_impl.md's "keeps its previous
+  snapshot and all the output after it". Only Farhelm's copy of the scrollback is lost.
+- Decision: on the 2026-11-04 page (Q2) the user named this one for fixing: "including that terminal host
+  what-conts-towards-size things" (full quote under `colliding-start-cleanup-ends-winning-terminal.md`).
+- Completion criteria: size changes count toward a checkpoint becoming due and toward an orderly stop's decision to save
+  (at the host's own per-resize cost), or the skip checks that the host still holds all output since the snapshot.
+  SPEC_impl.md's "The skip counts only processed output bytes, not resizes" changes to match, and the "a resize alone is
+  not due" test changes with it. If execution finds it is not straightforward (over about 100 lines of diff, not
+  counting this ledger, the queue removal or a changelog fragment, or it needs a design choice), add a FILTER.md entry
+  accepting this specific case instead and correct the spec sentences. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## normal-durability-restores-revoked-grants.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by code reading on main 1ec66971 (delegated checker; not run). Turning off a host's "run farhelm
+  commands without asking", YOLO-without-asking, link or local-network link permission, or the tunnel consent is an
+  ordinary WAL/NORMAL commit, so an OS crash or power loss on the helm machine shortly after can bring it back on. Only
+  web-token rotation is written fully durably in the helm store. SPEC_impl.md accepts losing the last commits but
+  singles out credential revocation as something a power loss must not undo.
+- Decision: on the 2026-11-04 page (Q3) the user agreed with the recommendation ("Protect trust, not recent history":
+  revocations of trust written fully durably) "so long as individual transactions being written fully durably is simple
+  in sqlite and doesn't require some massive redesign or introducing separate databases or anything non-trivial". Triage
+  checked: the existing per-transaction helper (`with_full_sync`, `farhelm-supervisor/src/db.rs`) switches one
+  connection to FULL around one write and is already used for token rotation and host identity.
+- Completion criteria: the turn-off direction of those permission writes, and withdrawing tunnel consent, run through
+  the existing full-durability helper, with tests that check the sync setting during each write (as the token-rotation
+  test does). SPEC_impl.md names trust revocations among the fully durable writes. Gate: if it needs anything beyond
+  wrapping those writes in the existing helper (a redesign, a separate database, or over about 100 lines of diff not
+  counting this ledger, the queue removal or a changelog fragment), block and bring it back. Remove the feedback file
+  and its index entry.
+- Execution: `pending`.
+
+## power-loss-removes-valid-resume-binding.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed as a mechanism on main 1ec66971 (delegated checker; not run). Accepting a conversation report is
+  an ordinary WAL/NORMAL commit and the report file is deleted at once, so a power loss within seconds of a new
+  conversation (new session, `/clear`) can make Restart unable to resume or resume the previous conversation. The
+  conversation still exists in the agent's own history.
+- Decision: on the 2026-11-04 page (Q3) the user agreed with the recommendation: accept losing a conversation learned in
+  the last moments before a power loss.
+- Completion criteria: SPEC.md "Durability and resume" says a conversation Farhelm learned in the last moments before an
+  OS crash or power loss may be forgotten, like other recent state, so Restart may not resume it or may resume the
+  previous one. No code change. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## failed-restart-restoration-loses-valid-resume.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed as a mechanism on main 1ec66971 (delegated checker; not run). "Restart with" (Goose, hooks off,
+  or a Pi/OMP reporter that cannot be prepared) clears the old conversation and restores it on a definitive pre-spawn
+  failure; if that restoring write also fails (a full disk, say), the old Resume offer is lost. SPEC_impl.md describes
+  this outcome; SPEC.md "Healthy local filesystems" does not say whether a full disk counts.
+- Decision: on the 2026-11-04 page (Q3) the user agreed with the recommendation: a full disk counts as an unhealthy
+  filesystem, and its outcomes are accepted.
+- Completion criteria: SPEC.md "Healthy local filesystems" says a full disk is covered, including losing durable state
+  such as a Resume offer when a write fails. No code change. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## rolled-back-host-number-transfers-retained-approval.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed as a mechanism on main 1ec66971 (delegated checker; not run). Agent retry keys hash the asking
+  host's numeric registry row, not its random entry ID. If the helm forgets a newly added host (power loss in the lost
+  tail, or restoring an older helm database), the next host gets the same number, and a colluding hostile host could
+  finish the first host's approved, unstarted launch. SPEC.md: the replay completes "only for the session, on the host,
+  that asked". The 2026-10-18 `pending-approval-can-cross-host-entries.md` decision chose random entry IDs over
+  sequential numbers.
+- Decision: on the 2026-11-04 page (Q3) the user agreed with the recommendation: retry keys use the host entry's random
+  ID.
+- Completion criteria: the asker-scoped retry key includes the asking host entry's random ID (instead of or with its
+  number), with a test that the same number under two entry IDs gives different keys. Size gate: about 100 lines of diff
+  (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over it, block and bring
+  it back. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## critical-mac-commits-omit-media-flush.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed as a gap on main 1ec66971 (delegated checker, re-checked by the triage session; no power-cut
+  experiment). The full-durability helper (`with_full_sync`, `farhelm-supervisor/src/db.rs`) raises only SQLite's
+  `synchronous` setting. Nothing sets `PRAGMA fullfsync` or `checkpoint_fullfsync`, which SQLite leaves off by default,
+  and the bundled build does not change those defaults. So on macOS the host-identity creation and web-token rotation
+  end in a plain `fsync`, which Apple documents as not forcing data through the drive's own cache. The installer already
+  uses `F_FULLFSYNC` for this reason (`farhelm-supervisor/src/installation/mod.rs`). Exposure needs a real power cut on
+  a Mac without a battery within seconds of one of those two writes.
+- Decision: on the 2026-11-04 highest-bucket triage page (Q3b) the user picked "Accept it; say so", with the motivation:
+  "this is borderline if it's really worth it to begin with, and vast majority of people are on macbooks with batteries
+  etc."
+- Completion criteria: SPEC_impl.md, where it lists the fully durable writes (supervisor "Runtime state" and the helm
+  store's paragraph), says that on macOS they are durable only up to the drive's cache (no `F_FULLFSYNC`), and why: a
+  borderline benefit, since most Macs running Farhelm have batteries. No code change. Remove the feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## plain-url-hover-omits-neighbor-dependencies.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed on main 1ec66971 (delegated checker; not run). For a printed (plain) web address in a new
+  terminal, the hover keeps only the rows the match was found on. A program that edits the neighbouring wrapped row can
+  extend the shown address (`bank.co` to `bank.com`) while the existing hover, and so the click, keeps opening the old,
+  shorter prefix, indefinitely and after repaint. SPEC.md "Terminal experience": for plain URLs what is shown is what
+  opens. The 2026-10-10 sub-second allowance does not cover a lasting mismatch.
+- Decision: on the 2026-11-04 page (Q4, printed links) the user picked "Best effort, but no lasting mismatch": a racing
+  program is best effort, but a click must not keep opening an address the screen no longer shows.
+- Completion criteria: a plain-URL hover records every row its match depended on (the wrapped neighbours its window
+  read), or revalidates the match before opening, so an edit to any of them drops or refreshes the hover. A regression
+  test edits only the neighbouring row. Size gate: about 100 lines of diff (code, tests and docs, not counting this
+  ledger, the queue removal or a changelog fragment); over it, block and bring it back. Remove the feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## plain-url-click-can-bind-before-text-paints.md
+
+- Outcome: `other`.
+- Assessment: confirmed in Farhelm's code on main 1ec66971 (delegated checker; the reviewer's Chromium event-queue
+  premise was not re-checked). A press can pick up a printed address the program just wrote but the screen has not yet
+  drawn, about one frame early. A hostile program gains at most a frame over the bug-free trick of swapping the text as
+  the pointer arrives.
+- Decision: on the 2026-11-04 page (Q4) the user picked "Best effort, but no lasting mismatch", whose outcome for this
+  item is coverage by SPEC.md "One GUI at a time" (Confirmed 2026-10-10: "an action a user takes inside a sub-second
+  window before the screen updates ... may be carried out as delivered"), as read in the 2026-10-26 ruling that named
+  guards hold and otherwise the target follows the click. The plain-URL sentence is not a named guard.
+- Completion criteria: no code or spec change. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## stationary-hover-omits-canonical-ancestor-dependencies.md
+
+- Outcome: `fix spec`.
+- Assessment: partly correct on main 1ec66971 (delegated checker; not run). A redraw of a row above a program's
+  hyperlink can change which text a fresh hover would compare, so a fresh hover would show the mismatch warning while
+  the resting hover does not. The resting hover still names the real destination, and the pointed-at text matches it.
+  SPEC.md calls the warning "an aid, not a guarantee". Bucket: other on substance.
+- Decision: on the 2026-11-04 page (Q4) the user picked "Best effort, but no lasting mismatch", whose outcome for this
+  item is that the mismatch warning is judged when the hover starts.
+- Completion criteria: SPEC.md (the hyperlink mismatch warning in "Terminal experience") or SPEC_impl.md says the
+  warning is judged when the hover starts and need not follow later redraws of other rows while the pointer rests; the
+  destination display stays authoritative. No code change. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## hidden-live-tmux-tabs-escape-delete-consent.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed as a source route on main 1ec66971 (delegated checker; not run), with a shipped producer the
+  file underplays. After upgrading from 0.33 or earlier, Restart moves the agent into a new terminal while the session's
+  old tmux tabs stay. If the agent's terminal is later lost and the supervisor reloads, the session has no agent
+  terminal, and both the tab listing and Delete's live-work count find old tmux tabs only through it, so they show and
+  count none; teardown still ends them. A Delete whose prompt said nothing was alive then kills them. SPEC.md "Lifecycle
+  operations" (Confirmed 2026-10-01) requires such a Delete to be refused while any tab runs.
+- Decision: on the 2026-11-04 page (Q5) the user picked "Fix both".
+- Completion criteria: with no agent terminal, the tab listing and Delete's guard find the session's tmux tabs by its
+  durable tmux session name, as teardown already does, so they are shown and counted. A test covers a session with old
+  tmux tabs and no agent terminal. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger,
+  the queue removal or a changelog fragment); over it, block and bring it back. Remove the feedback file and its index
+  entry.
+- Execution: `pending`.
+
+## failed-tab-recovery-loses-delete-child-root.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed as a source route on main 1ec66971 (delegated checker; not run), including the agent variant.
+  When an automatic reconnect of an unreadable tab or agent terminal fails, the replacement placeholder drops the pinned
+  identity of the program running in it. An unconditional Delete (the user confirmed a running agent, or an unguarded
+  CLI delete; a guarded Delete refuses on an unreadable tab) then has no root for that program, so on a host without a
+  usable systemd user manager (macOS) a foreground program that ignores hangups survives Delete. Nothing is lost; a
+  stray process stays. SPEC.md "Lifecycle operations": "A server that stays in the foreground under the agent remains in
+  the terminal's process tree and is still reaped." Bucket: high on substance.
+- Decision: on the 2026-11-04 page (Q5) the user picked "Fix both".
+- Completion criteria: the pinned program identity (process number and start time) survives a failed reconnect for both
+  tabs and the agent, and Delete roots its sweep at it, validated against the process table as it already does for a
+  live terminal. A unit test covers a failed retry followed by Delete. Size gate: about 100 lines of diff (code, tests
+  and docs, not counting this ledger, the queue removal or a changelog fragment); over it, block and bring it back.
+  Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## selector-policy-drops-ordinary-formatting-input.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed on main 1ec66971 (delegated checker; not run). Since v0.35.0 (#2971) new terminals drop
+  invisible formatting characters before storing them: zero-width space, directional marks and embeddings, line and
+  paragraph separators, word joiner, BOM, two Hangul fillers. They vanish from scrollback, saved state and copies; the
+  program, its input and its files are untouched. The patch says this matches Ghostty (not checked). The vs16 landing
+  report flags it; the changelog does not. Bucket: other on substance.
+- Decision: on the 2026-11-04 page (Q6, terminal text) the user picked "Keep visible letters; accept dropping invisible
+  formatting".
+- Completion criteria: SPEC_impl.md (the emulator selector rules) and the user docs page on new terminals state that new
+  terminals drop these invisible formatting characters, so copied text and history lack them. No code change. Remove the
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## emoji-continuation-drops-standalone-kirat-characters.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed and broader than the file says, on main 1ec66971 (delegated checker; not run). New terminals
+  send Kirat Rai vowel signs (classed as Hangul V) to the jamo-attachment path, which keeps them only after Hangul or
+  Prepend characters, so most vowel signs in ordinary Kirat Rai words vanish from screen and copies, as does one after
+  an ASCII letter or at column 0. Before v0.35.0 they printed in their own cell. Bucket: other on substance.
+- Decision: on the 2026-11-04 page (Q6) the user picked "Keep visible letters; accept dropping invisible formatting".
+- Completion criteria: a V/T character that cannot attach prints as an ordinary character at its own width, as before
+  #2971, while a following selector still finds the emoji base; update the three tests that pin the drop, and the
+  vendored patch file. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
+  removal or a changelog fragment); over it, block and bring it back. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## gap-recovery-stale-input-modes-submit-pasted-command.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed as a mechanism on main 1ec66971 (delegated checker; not run). After a gap in a new terminal's
+  recovered output, the emulator keeps its earlier modes; if the lost output had turned on bracketed paste in Bash, a
+  multi-line paste goes out unbracketed and each line runs as it arrives, until the shell next accepts a line. SPEC.md
+  "Terminal experience" (the gap bullet) already accepts that pastes "can reach the program encoded for the wrong mode"
+  but does not name this consequence. Bucket: high on substance.
+- Decision: on the 2026-11-04 page (Q7) the user picked "Accepted; name it".
+- Completion criteria: the gap bullet in SPEC.md "Terminal experience" adds that a multi-line paste into a shell may
+  then run line by line instead of arriving as one block. No code change. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## attachment-debug-trace-emits-remote-controls.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed on main 1ec66971 (delegated checker; not run). The helm's off-by-default terminal-attachment
+  debug trace logs the tab name a supervisor reported as a raw field, so a compromised host can put terminal control
+  bytes into the operator's log display when that trace is on. The October fixes of 18 remote-error-text items set the
+  precedent; SPEC_impl.md says "Peer-supplied error text is normalized the same way wherever it is logged", which does
+  not cover identifiers.
+- Decision: on the 2026-11-04 page (Q9) the user picked "All peer-supplied text, not just errors".
+- Completion criteria: SPEC_impl.md's sentence widens from peer-supplied error text to all peer-supplied text the helm
+  logs or retains. The trace escapes the tab name, keeping the plain `terminal=agent` text the desktop smoke script
+  matches. A unit test covers a tab name with control bytes. Size gate: about 100 lines of diff (code, tests and docs,
+  not counting this ledger, the queue removal or a changelog fragment); over it, block and bring it back. Remove the
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## stored-wrapper-breaks-new-prompt-literalness.md
+
+- Outcome: `discard`.
+- Assessment: confirmed as a mechanism on main 1ec66971 (delegated checker, plus a harmless `printf`-only check by the
+  triage session of how Bash parses such a joined line). At launch the stored wrapper words are joined raw and followed
+  by the single-quoted agent words, prompt included, and run by Bash. Today's GUI editor and CLI `--wrapper` refuse
+  unbalanced quoting and keep each word's spelling, so newly saved wrappers stay balanced. Wrappers saved by 0.30-0.32
+  stored de-quoted words and can hold a lone quote mark. With such a wrapper, a prompt without quote marks makes Bash
+  refuse the line (nothing runs); a prompt containing an apostrophe rebalances it, and the part of the prompt before the
+  apostrophe is parsed as shell. A hand-built protocol request could also store such a wrapper, but whoever can write a
+  template's wrapper can already put any shell there, shown on the approval card.
+- Decision: on the 2026-11-04 highest-bucket triage page (Q8) the user picked "Discard: only old templates", having said
+  "I don't care about pre-change templates".
+- Completion criteria: remove the feedback file and its index entry. No code or spec change.
+- Execution: `pending`.
