@@ -178,40 +178,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   building the tmux driver with `TmuxDriver::new_with_program` pointed at a path with no binary, creating only
   terminal-host sessions, and listing.
 
-- **A moved session whose agent has no terminal hides its old tmux tabs.** A session that a Restart moved from tmux into
-  a terminal host keeps its tmux tabs (windows of the tmux session its row names) until they are closed (SPEC_impl.md,
-  "Moving an old session into a host"). While the session holds no agent terminal, those tabs are not listed at all: the
-  session list and the tab strip (`entry_info` in `crates/farhelm-supervisor/src/service/status.rs`,
-  `Supervisor::session_tabs` and `session_tabs_including_dead` in `crates/farhelm-supervisor/src/service/core.rs`) find
-  tmux tabs only through the agent terminal (`tmux_tab_home` in `crates/farhelm-supervisor/src/service/terminals.rs`),
-  and with none they list only the tabs in terminal hosts. The tab shells keep running, but the user cannot see, attach
-  to or close them, and the tab count `still_alive_for_delete` makes for a Delete guarded by "nothing alive" counts none
-  of them. Delete still ends them, since its teardown falls back to the session's tmux name for a session with no
-  terminal (`crates/farhelm-supervisor/src/service/teardown.rs`), and a later Restart that publishes a host lists them
-  again. A moved session ends up with no agent terminal when a replacement host cannot be confirmed ended during a
-  Restart (the session keeps its launching row with no terminal), when its host is gone at the supervisor's start, or
-  after a supervisor crash between the Restart's generation claim and the new host's launch record (the next start
-  leaves the row launching with no terminal, listed as unknown, and its next Restart starts an empty host). A crash
-  after the claim also leaves the old agent's window behind, whether or not the new host had started: the Restart
-  stopped the agent and kept its pane dead under `remain-on-exit`, nothing records that pane any more, and the dead
-  window stays in the session's tmux session, shown nowhere, until the session's Delete ends that tmux session
-  (SPEC_impl.md, "Moving an old session into a host", "A crash"; the code is
-  `crates/farhelm-supervisor/src/service/core/host_restart.rs`, "From a tmux pane"). After a crash before the new host's
-  launch record, the Restart that follows starts empty, so that dead window holds the only copy of the agent's history
-  from before the move. `a_move_interrupted_after_its_claim_restarts_empty_and_delete_ends_the_old_window` in
-  `crates/farhelm/tests/e2e/host_migrations.rs` pins exactly that behavior today and is where a reproduction with an
-  open tmux tab belongs. Likely fix: for a session with no terminal whose row is a host row, list the tab-marked windows
-  of `session_tmux_name(id)` with no agent pane to exclude (tabs come from tab markers, so the agent window is never
-  listed), as the review of the move suggested; and have a Restart of such a session find the dead window that carries
-  the session's agent marker, seed the new host from its history as the move does, and remove it once the new host is
-  published with that history (the move's own rule: a window that may hold the only copy is never removed without a
-  seed). Window markers are the one thing anything with access to the tmux server can write, so decide whether seeding
-  from a window found only by its marker is acceptable, or record the old pane durably before the claim. Keep the rule
-  that a failed tmux query fails the reply rather than reading as "no tabs" (`session_tabs` docs). Not checked when this
-  was written: that a host missing at the supervisor's start leaves the session with no agent terminal (taken from
-  SPEC_impl.md, not traced through `reload_sessions_with_hosts`), and that the Delete guard misses these tabs (read from
-  `still_alive_for_delete`'s `None => 0`, not tested).
-
 - **Assess the grid terminal's history memory.** Grid terminals (terminals in a terminal host) keep their scrollback in
   the page as one JavaScript object per run of styled text, plus a style object per distinct color pair, where xterm.js
   packs each cell into about 12 bytes. Measured in WebKit (the Mac desktop app's engine) at the 12,000-line scrollback
@@ -219,23 +185,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   color in every cell 364 MiB (xterm.js 408), a different true color in every cell 737 MiB (xterm.js 502). Not a
   blocker; assess whether a more compact history representation (decoded on demand for the rows on screen and for
   selection and link lookups) is worth it. Method and harness: the grid client's WebKit memory benchmark.
-
-- **Detect and upgrade an outdated tmux on a host.** tmux is meant to be an implementation detail, so it is a bug that
-  Farhelm does not notice when the tmux server running a host's sessions is out of date: older than the tmux Farhelm
-  would now use there, or a version with known security problems. Detect that, warn the user (more insistently when a
-  security issue is known), and offer to upgrade. Upgrading means replacing the running tmux server, which ends every
-  session on that host much like a reboot does, so it has to be the user's choice and say so plainly. The same applies
-  when a host's tmux binary was upgraded underneath a server still running the old one (a Linuxbrew `brew upgrade`, or a
-  Farhelm update that changes the bundled tmux).
-
-- **Tie a late conversation report to its session on tmux 3.8.** tmux 3.8 no longer reports a pane's process id once the
-  pane is dead, and the supervisor accepts a hook report only when that id appears among the reporter's parents
-  (SPEC_impl.md, the five-step admission). So with tmux 3.8, a conversation report still waiting to be applied when its
-  agent exits is refused, and a later Restart can resume the conversation the agent had before it switched (a `/clear`
-  right before exiting, say). Every Mac on a current Homebrew runs 3.8. Left open by the tactical fix for Restart, Stop
-  and Delete failing on exited sessions under tmux 3.8 (2026-10-30). The review of that fix raised one option: anchor to
-  the pane pid the session-hold marks record, but any process running as the same user can write those files, which
-  makes them a weaker trust root than tmux, so that is a design decision.
 
 - **Emoji made wide by a variation selector in grid terminals.** In tmux, an emoji followed by the emoji variation
   selector (U+FE0F, as in "❤️") takes two columns; the emulator behind terminals in a terminal host gives it one, as
@@ -315,17 +264,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   does not stop them. Tags have no protection at all (the repository has no rulesets), though the release procedure says
   a tag is never deleted or reused. Work out what GitHub rulesets, bypass lists or a separate agent identity can enforce
   without blocking the PR flow.
-
-- **Consider an upstream xterm.js API for links spanning agent-drawn rows.** Farhelm's `linkHoverText` in
-  `crates/farhelm-ui/assets/terminal-links.js` reads the undocumented `extended.urlId` from the cell returned by
-  `getCell`, joining consecutive hyperlink rows for the hover mismatch warning (SPEC_impl.md's paragraph beginning "An
-  OSC 8 link's hover compares"). A public API would retire this private read and its browser pinning test. Consider
-  extending the OSC 8 provider's `_getRangeWithLineWrap` in the 6.1.0 betas: it currently joins only while `isWrapped`
-  holds and the urlId matches, but agent TUIs produce consecutive same-tag rows without that flag. Claude closes the
-  link at the edge and reopens the same id and URI after indentation; Codex holds an id-less link open across a cursor
-  move past indentation, sometimes before the edge. Alternatively expose a cell's link id or a link's full extent
-  through the public buffer API. Nothing has been filed upstream; filing is the maintainer's call. Farhelm vendors
-  xterm.js unmodified, so an upstream fix arrives only with a stable release.
 
 - **Re-assess letting agents prompt running sessions.** `farhelm agent prompt` (an agent sending a message into another
   session's running Claude or Codex agent) landed and was turned off before any release: the helm refuses every such
