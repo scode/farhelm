@@ -1164,6 +1164,12 @@ pub struct SupervisorSeams {
     /// nothing in production can start hosts from another program.
     #[cfg(any(test, feature = "test-seams"))]
     pub host_program: Option<PathBuf>,
+    /// Counts completed background re-adoption passes for tests that must
+    /// establish the task is waiting before making a live host unavailable.
+    /// Without that premise, the constructor's first pass can recover the
+    /// host and hide a missing liveness wake. Never set in production.
+    #[cfg(test)]
+    pub readoption_passes: Option<Arc<std::sync::atomic::AtomicUsize>>,
 }
 
 /// Which kind of terminal a supervisor creates new agent terminals in (the
@@ -1279,6 +1285,8 @@ impl Default for SupervisorSeams {
             new_terminals: NewTerminals::Tmux,
             #[cfg(any(test, feature = "test-seams"))]
             host_program: None,
+            #[cfg(test)]
+            readoption_passes: None,
         }
     }
 }
@@ -5045,7 +5053,8 @@ pub struct Supervisor {
     /// The ticker takes the receiving end ([`Self::host_liveness_receiver`])
     /// and runs its reap pass on each change, which is what records a host
     /// agent's exit and reaps an exited tab between ticks, as tmux's
-    /// `pane-died` hook does for panes.
+    /// `pane-died` hook does for panes. A passing unavailability change
+    /// also wakes re-adoption: its task remains the only retry owner.
     pub(crate) host_liveness: crate::hosts::LivenessNotifier,
     /// The receiving end of [`Self::host_liveness`], until the ticker takes
     /// it (`ticker::start_ticker`). A ticker started without it (a second
@@ -5097,7 +5106,10 @@ pub struct Supervisor {
     /// first reload without asking again.
     pub(crate) gone_hosts: GoneHosts,
     /// Wakes the re-adoption task early: after `serve`'s reload, which may
-    /// have left placeholders, and when an orderly stop begins.
+    /// have left placeholders, when the ticker sees a passing
+    /// unavailability change, and when an orderly stop begins. `Notify`
+    /// keeps a permit when the task is between waits, so these wakes do
+    /// not need another consumer on the liveness channel.
     pub(crate) readoption_wake: Arc<tokio::sync::Notify>,
     /// Set once an orderly stop has begun gathering the host terminals it
     /// checkpoints and closes (`Self::checkpoint_hosts_for_exit`), under

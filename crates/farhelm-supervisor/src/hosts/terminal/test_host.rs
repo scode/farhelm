@@ -92,6 +92,9 @@ pub(crate) struct TestHost {
     unreadable: Arc<AtomicBool>,
     /// How many connections the host has accepted.
     accepted: Arc<AtomicUsize>,
+    /// A reversible handshake gate: unlike a foreign protocol, silence is
+    /// a temporary failure that re-adoption must recover from.
+    answering: watch::Sender<bool>,
     task: tokio::task::JoinHandle<()>,
     /// The socket's own directory, for a host started outside any state
     /// directory; `None` for one placed where the test asked.
@@ -176,6 +179,13 @@ impl TestHost {
     /// a caller did, or did not, connect to it.
     pub(crate) fn connections(&self) -> usize {
         self.accepted.load(Ordering::SeqCst)
+    }
+
+    /// Withhold or resume `Welcome` on new connections, keeping the host
+    /// and its child alive. An established connection is left alone until
+    /// the test drops it, so the test can name the mid-life failure boundary.
+    pub(crate) fn set_answering(&self, answering: bool) {
+        self.answering.send_replace(answering);
     }
 
     /// Stream the output the host journaled before its adoption
@@ -417,6 +427,7 @@ fn start_with(
     let (held_tx, held) = watch::channel(0);
     let unreadable = Arc::new(AtomicBool::new(unreadable));
     let accepted = Arc::new(AtomicUsize::new(0));
+    let (answering, answers) = watch::channel(true);
     let journal = Journal {
         child_pid,
         tag,
@@ -436,6 +447,7 @@ fn start_with(
         },
         journal,
         Arc::clone(&accepted),
+        answers,
     ));
     TestHost {
         socket: socket.to_path_buf(),
@@ -447,6 +459,7 @@ fn start_with(
         commands,
         unreadable,
         accepted,
+        answering,
         task,
         _dir: None,
     }
@@ -461,6 +474,7 @@ async fn serve(
     records: Records,
     mut journal: Journal,
     accepted: Arc<AtomicUsize>,
+    mut answering: watch::Receiver<bool>,
 ) {
     loop {
         let Ok((stream, _)) = listener.accept().await else {
@@ -471,9 +485,16 @@ async fn serve(
             refuse(stream).await;
             continue;
         }
-        if serve_one(stream, &mut journal, &mut commands, &received, &records)
-            .await
-            .is_err()
+        if serve_one(
+            stream,
+            &mut journal,
+            &mut commands,
+            &received,
+            &records,
+            &mut answering,
+        )
+        .await
+        .is_err()
         {
             return;
         }
@@ -558,6 +579,7 @@ async fn serve_one(
     commands: &mut mpsc::UnboundedReceiver<Command>,
     received: &Mutex<Vec<u8>>,
     records: &Records,
+    answering: &mut watch::Receiver<bool>,
 ) -> Result<(), ()> {
     journal.written = 0;
     let mut buf = Vec::new();
@@ -567,7 +589,15 @@ async fn serve_one(
             let message = decode_client(frame, 1).expect("a well-formed message");
             buf.drain(..consumed);
             let reply = match message {
-                ClientMessage::Hello { .. } => Some(HostMessage::Welcome { version: 1 }),
+                ClientMessage::Hello { .. } => {
+                    // A connected socket with no Welcome exercises the
+                    // client's connect deadline, rather than Gone or a
+                    // permanent unsupported-version refusal.
+                    while !*answering.borrow_and_update() {
+                        answering.changed().await.map_err(|_| ())?;
+                    }
+                    Some(HostMessage::Welcome { version: 1 })
+                }
                 ClientMessage::Info => Some(HostMessage::InfoReply(journal.info())),
                 ClientMessage::Input(data) => match &mut journal.held {
                     Some(held) if journal.pass == 0 => {

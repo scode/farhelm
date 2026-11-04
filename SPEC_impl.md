@@ -1906,13 +1906,13 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   position processed, so nothing is fed twice, and the latest size asked for is sent again if the host reports another;
   after three reconnects within a minute the terminal is made unavailable rather than fight whoever keeps taking the
   host over. Unavailable ends a runtime, not a host's chances: for a reason that can pass (a timed-out connect, a host
-  briefly stopped, a connection that kept ending), the host is adopted again at the supervisor's next start, and a host
-  startup itself could not adopt is also retried while it runs ("Across supervisor restarts", re-adoption). The child's
-  pid is a kill root only while the host reports the child alive and the process under that pid still has the start
-  identity pinned at adoption (between two `Info` replies that both say it runs; a pid is not reused before the host
-  reaps it), re-read each time a root is asked for. A terminal counts as exited only once the stream's exit record is
-  processed, which the host sends after the child's drained output, so whatever acts on the exit reads the final screen;
-  every exit, end or loss of a host terminal is also sent to one shared notifier, so one task can wait on every exit.
+  briefly stopped, a connection that kept ending), an agent's host is retried while the supervisor runs, as is one
+  startup could not adopt ("Across supervisor restarts", re-adoption). The child's pid is a kill root only while the
+  host reports the child alive and the process under that pid still has the start identity pinned at adoption (between
+  two `Info` replies that both say it runs; a pid is not reused before the host reaps it), re-read each time a root is
+  asked for. A terminal counts as exited only once the stream's exit record is processed, which the host sends after the
+  child's drained output, so whatever acts on the exit reads the final screen; every exit, end or loss of a host
+  terminal is also sent to one shared notifier, so one task can wait on every exit.
 - **Recovery and checkpoints** (`hosts/terminal.rs`, `hosts/terminal/checkpoint.rs`). The **replay policy** decides what
   replayed output may do, by the host's `delivered_end` (the end of the output it wrote whole to some client). Output in
   the stored snapshot is never replayed: a restore has no side effects. Output below `delivered_end` was sent to an
@@ -2392,19 +2392,24 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   dropped as gone. The orderly stop checkpoints and closes the tab runtimes with the agents'. The spare-checkout claims
   at startup read a host row's terminal, and for a host row with no terminal, whether a socket file is still at the path
   the row (or its launch record) names and was not found gone by the reload: a claim is released only then.
-  **Re-adoption**: a running supervisor retries a host startup could not adopt for a reason that can pass (no answer in
-  time, busy, closed connections, a child that could not be pinned, a socket directory that could not be scanned), one
-  placeholder at a time: after a second, then doubling to a minute, each next try scheduled before the try and never
-  reset. A try takes the session's lifecycle claim without waiting (a busy session is tried later), checks that the
-  entry still holds that very placeholder for the same launch generation and that no orderly stop has begun, looks only
-  at the one socket the placeholder names (its tag must name the session's launch, or, as at startup, an earlier one of
-  its agent's), and swaps the outcome in under the session map after checking again, keeping the entry's run and session
-  cells; a launch or stop request is then confirmed as reload would for a child the host reports alive. A runtime it
-  made but does not install is stopped, leaving the host as it was. An orderly stop sets a flag under the session map as
-  it gathers the host terminals it closes, after which no try installs a runtime. A placeholder whose reason will not
-  pass on its own (another protocol version, snapshot format or tag, a launch record that cannot be read) is not
-  retried, and a runtime that becomes unavailable after it ran stays so until the supervisor's next start, whose reload
-  adopts the host afresh.
+  **Re-adoption**: a running supervisor retries an agent host that startup could not adopt, or whose runtime became
+  unavailable later, for a reason that can pass (no answer in time, busy, closed connections, a child that could not be
+  pinned, a socket directory that could not be scanned, an encode task lost with its emulator). Retries start after a
+  second and double to a minute, each next try scheduled before the try. The attempt count is kept for that session and
+  launch even after success. Every episode of a connection that kept ending waits at least the runtime's full minute
+  reconnect window before its first try, so re-adoption does not resume a takeover fight at once. Healthy launches keep
+  their counts but contribute no wake time. The ticker forwards a passing unavailability notice to the retry task,
+  without waiting for its ordinary tick. A try takes the session's lifecycle claim without waiting (a busy session is
+  tried later), checks that the entry still holds that very handle for the same launch generation and that no orderly
+  stop has begun, looks only at the one socket the handle names (its tag must name the session's launch, or, as at
+  startup, an earlier one of its agent's), and swaps the outcome in under the session map after checking again, keeping
+  the entry's run and session cells; a launch or stop request is then confirmed as reload would for a child the host
+  reports alive. A runtime it made but does not install is stopped, leaving the host as it was. An orderly stop sets a
+  flag under the session map as it gathers the host terminals it closes, after which no try installs a runtime. A handle
+  whose reason will not pass on its own (another protocol version, snapshot format or tag, a launch record that cannot
+  be read) is not retried. A failed try leaves a placeholder with its new reason, so a refusal that will not pass stops
+  the retries. An unconditional Delete that aborts an unavailable runtime without finishing may leave it eligible for
+  re-adoption; Delete's retry then acts through the replacement runtime.
 - **The startup reclaim of orphaned hosts** (`service/core/host_reclaim.rs`), the start-up cleanup the maintainer
   approved ("Cleanup on quit"). Delete ends every host a session records before it removes the session's records and
   row, every host start writes its record first, and a tab's close ends its host before it removes the record, so a live
@@ -2480,21 +2485,20 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   leaving the reset to the live path's settle rule, and is followed at once by a live cycle, since its later reads take
   history only. The program's exit is `state`'s, over the final screen; a host that is gone ends the attachment as a
   dead pane's, and an unavailable one as a failed stream. An attach to a host that cannot be read is refused as
-  `Unavailable` before anything is taken over, with a message that says what can help: a startup placeholder whose
-  reason may pass becomes attachable once re-adoption replaces it with a runtime (it never has an attachment, so the
-  viewer attaches again then), while a runtime that ran and became unavailable, or a placeholder whose reason will not
-  pass, stays refused until the supervisor restarts. Clipboard writes reach the viewer from the attachment's notice
-  subscription; while the viewer is behind only the latest is kept. Viewer input is decoded and encoded where the
-  connection reads it, with the modes and size the status carries, never waiting there, and handed to the attachment's
-  own input pump, which writes it through one input sequence per attachment. A paste is collected in the attachment and
-  handed on only with its last part, as one paste the runtime writes whole; one whose last part never arrives is dropped
-  whole. What an attachment holds (a paste being collected, input waiting for the pump, a paste not yet written) is
-  bounded at 8 MiB. A malformed message, an interrupted paste, input past the bound, or input whose fate is unknown or
-  not sent ends the attachment as an input failure, which the sender notices wherever it waits, a pause included. Since
-  another producer's input lost with a connection moves the terminal's input epoch too, an attachment's next input after
-  any such loss fails it, and the viewer attaches again. An attachment that ends drops the input its pump had not handed
-  to the runtime and stops the pump at once; what the pump handed over is written before anything a replacement
-  attachment sends.
+  `Unavailable` before anything is taken over, with a message that says what can help: an agent handle whose reason may
+  pass becomes attachable once re-adoption replaces it with a runtime (the viewer attaches again then), while a reason
+  that will not pass stays refused until the supervisor restarts. Clipboard writes reach the viewer from the
+  attachment's notice subscription; while the viewer is behind only the latest is kept. Viewer input is decoded and
+  encoded where the connection reads it, with the modes and size the status carries, never waiting there, and handed to
+  the attachment's own input pump, which writes it through one input sequence per attachment. A paste is collected in
+  the attachment and handed on only with its last part, as one paste the runtime writes whole; one whose last part never
+  arrives is dropped whole. What an attachment holds (a paste being collected, input waiting for the pump, a paste not
+  yet written) is bounded at 8 MiB. A malformed message, an interrupted paste, input past the bound, or input whose fate
+  is unknown or not sent ends the attachment as an input failure, which the sender notices wherever it waits, a pause
+  included. Since another producer's input lost with a connection moves the terminal's input epoch too, an attachment's
+  next input after any such loss fails it, and the viewer attaches again. An attachment that ends drops the input its
+  pump had not handed to the runtime and stops the pump at once; what the pump handed over is written before anything a
+  replacement attachment sends.
 - **Terminal kinds on replies** (the migration band and the session details' kinds, SPEC.md "Terminal experience").
   `SessionInfo` carries `agent_terminal` (`tmux` or `host`), taken in `status::entry_info` from the `Terminal` variant
   the entry holds, not from the row's stored `terminal_kind`, so a session with no terminal reports none and is never
