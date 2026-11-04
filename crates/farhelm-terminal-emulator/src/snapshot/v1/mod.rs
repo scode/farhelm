@@ -107,7 +107,7 @@ use alacritty_terminal::grid::{Cursor, Dimensions, Grid};
 use alacritty_terminal::index::{Column, Line};
 use alacritty_terminal::term::cell::Cell;
 
-pub(super) use paint::{Content, Mode, sgr_setting};
+pub(super) use paint::{Content, sgr_setting};
 use wire::{Extras, Reader, Writer, malformed};
 
 use super::{
@@ -175,43 +175,30 @@ struct Fixups {
     preceding_char: Option<Option<char>>,
 }
 
-/// How a blob came out of [`encode`] or [`encode_history`].
+/// Exact costs of a complete paint, with its blob retained whenever `len`
+/// fits the supplied budget. Cancellation invalidates the other fields.
 pub(super) struct Encoded {
-    /// The blob; empty when measuring.
+    /// The blob; empty when it exceeded the budget or was cancelled.
     pub(super) blob: Vec<u8>,
     /// The blob's length, kept or not.
     pub(super) len: usize,
     /// See `paint::Painted::history_costs`.
     pub(super) history_costs: Vec<usize>,
-    /// The stream's and the cell fixups' encoded lengths, for keeping what
-    /// was measured ([`Encoded::keep`]).
-    stream_len: usize,
-    cell_fixup_bytes: usize,
     /// The encode was cancelled part way: the rest describes nothing.
     pub(super) cancelled: bool,
-}
-
-impl Encoded {
-    /// The mode that keeps what this measured, its buffers reserved to the
-    /// sizes measured.
-    pub(super) fn keep(&self) -> Mode {
-        Mode::Keep {
-            stream: self.stream_len,
-            cell_fixups: self.cell_fixup_bytes,
-        }
-    }
 }
 
 /// Encode `emulator`'s whole state, with `content` deciding how much of the
 /// grids and `skip_titles` how many of the oldest title stack entries to
 /// leave out. `trimmed_for` is recorded as is (0: not trimmed). The emulator
-/// must be at a clean boundary.
+/// must be at a clean boundary. A fitting blob is retained during this paint;
+/// an oversized result contains only exact costs for the size ladder.
 pub(super) fn encode(
     emulator: &Emulator,
     content: Content,
     skip_titles: usize,
     trimmed_for: u32,
-    mode: Mode,
+    max_bytes: usize,
     cancel: &Cancel,
 ) -> Encoded {
     let painted = paint::paint(
@@ -219,7 +206,7 @@ pub(super) fn encode(
         emulator.parser.preceding_char(),
         content,
         skip_titles,
-        mode,
+        max_bytes,
         cancel,
     );
     let mut flags = 0;
@@ -236,50 +223,63 @@ pub(super) fn encode(
             0
         }
     };
-    container(&emulator.term, flags, history, trimmed_for, painted, mode)
+    container(
+        &emulator.term,
+        flags,
+        history,
+        trimmed_for,
+        painted,
+        max_bytes,
+    )
 }
 
 /// Encode only `emulator`'s primary history, without its `skip` oldest
 /// lines, above a blank screen with everything else as in a fresh terminal.
-/// Any parser state works: the stream starts from a fresh parser.
+/// Any parser state works: the stream starts from a fresh parser. As in
+/// [`encode`], bytes survive only when the whole blob fits `max_bytes`.
 pub(super) fn encode_history(
     emulator: &Emulator,
     skip: usize,
     trimmed_for: u32,
-    mode: Mode,
+    max_bytes: usize,
     cancel: &Cancel,
 ) -> Encoded {
-    let painted = paint::paint_history(&emulator.term, skip, mode, cancel);
+    let painted = paint::paint_history(&emulator.term, skip, max_bytes, cancel);
     let flags = if trimmed_for > 0 {
         FLAG_HISTORY_TRIMMED
     } else {
         0
     };
     let history = emulator.primary_grid().history_size().saturating_sub(skip);
-    container(&emulator.term, flags, history, trimmed_for, painted, mode)
+    container(
+        &emulator.term,
+        flags,
+        history,
+        trimmed_for,
+        painted,
+        max_bytes,
+    )
 }
 
-/// Lay out a painted state as a version 1 blob, or when it was only
-/// measured, work out the blob's length.
+/// Finish sizing with cursor and REP fixups, retaining a blob only if it fits.
+/// The painter reserves their minimum overhead; their exact final cost can
+/// still turn a retained paint into a measurement here.
 fn container(
     term: &Term<Listener>,
     flags: u8,
     history: usize,
     trimmed_for: u32,
     painted: paint::Painted,
-    mode: Mode,
+    max_bytes: usize,
 ) -> Encoded {
     if painted.cancelled {
         return Encoded {
             blob: Vec::new(),
             len: 0,
             history_costs: Vec::new(),
-            stream_len: 0,
-            cell_fixup_bytes: 0,
             cancelled: true,
         };
     }
-    let measured = mode == Mode::Measure;
     let fixups = painted.fixups;
     let mut cursors = Writer::default();
     for fixup in &fixups.cursors {
@@ -298,20 +298,20 @@ fn container(
         + 4
         + cursors.buf.len()
         + rep_len;
-    if measured {
+    if !painted.kept || len > max_bytes {
         return Encoded {
             blob: Vec::new(),
             len,
             history_costs: painted.history_costs,
-            stream_len: painted.stream_len,
-            cell_fixup_bytes: painted.cell_fixup_bytes,
             cancelled: false,
         };
     }
 
-    // Filled to exactly its length, so the buffer never grows: with the
-    // stream and the fixups it is copied from, a snapshot holds about twice
-    // the blob while it is taken, and no more.
+    // Compact each source once, after painting is complete. Their written
+    // bytes share one budget; unused reservations must not accompany the
+    // final blob, which is allocated only after these compactions finish.
+    let stream = painted.stream.into_boxed_slice();
+    let cells = fixups.cells.buf.into_boxed_slice();
     let mut w = Writer::default();
     w.buf.reserve_exact(len);
     w.buf.extend_from_slice(&MAGIC);
@@ -329,11 +329,11 @@ fn container(
     w.u8(update);
     w.u64(widths.fingerprint);
     w.len(painted.stream_len);
-    w.buf.extend_from_slice(&painted.stream);
-    drop(painted.stream);
+    w.buf.extend_from_slice(&stream);
+    drop(stream);
     w.len(painted.cell_fixup_count);
-    w.buf.extend_from_slice(&fixups.cells.buf);
-    drop(fixups.cells);
+    w.buf.extend_from_slice(&cells);
+    drop(cells);
     w.len(fixups.cursors.len());
     w.buf.extend_from_slice(&cursors.buf);
     match fixups.preceding_char {
@@ -349,8 +349,6 @@ fn container(
         blob: w.buf,
         len,
         history_costs: painted.history_costs,
-        stream_len: painted.stream_len,
-        cell_fixup_bytes: painted.cell_fixup_bytes,
         cancelled: false,
     }
 }
@@ -522,6 +520,55 @@ fn select(term: &mut Term<Listener>, grid: GridSel) -> &mut Grid<Cell> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The painter allows the smallest suffix while retaining bulk bytes.
+    /// Cursor records and a four-byte REP character can exceed that allowance
+    /// only at assembly; neither may produce an oversized retained blob.
+    #[test]
+    fn final_fixup_overhead_can_discard_a_retained_paint() {
+        let emulator = Emulator::new(
+            Size {
+                columns: 2,
+                lines: 1,
+            },
+            1,
+        );
+        for cursor_fixup in [false, true] {
+            let painted = || {
+                let mut fixups = Fixups::default();
+                if cursor_fixup {
+                    fixups.cursors.push(CursorFixup {
+                        grid: GridSel::Active,
+                        saved: false,
+                        cursor: emulator.term.grid().cursor.clone(),
+                    });
+                } else {
+                    fixups.preceding_char = Some(Some('x'));
+                }
+                paint::Painted {
+                    stream: Vec::new(),
+                    fixups,
+                    kept: true,
+                    stream_len: 0,
+                    cell_fixup_bytes: 0,
+                    cell_fixup_count: 0,
+                    history_costs: Vec::new(),
+                    cancelled: false,
+                }
+            };
+            let full = container(&emulator.term, 0, 0, 0, painted(), usize::MAX);
+            assert!(
+                full.len > HEADER_BYTES + 9,
+                "premise: final fixups add overhead"
+            );
+            assert_eq!(full.blob.len(), full.len);
+            let measured = container(&emulator.term, 0, 0, 0, painted(), full.len - 1);
+            assert_eq!(measured.len, full.len);
+            assert!(measured.blob.is_empty());
+            let exact = container(&emulator.term, 0, 0, 0, painted(), full.len);
+            assert_eq!(exact.blob, full.blob);
+        }
+    }
 
     /// The streams the encoder writes where painting costs the most work per
     /// byte stay within half of version 1's work limit: every history row

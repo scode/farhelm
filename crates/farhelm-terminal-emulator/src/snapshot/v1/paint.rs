@@ -55,7 +55,7 @@ use alacritty_terminal::vte::ansi::{
 use unicode_width::UnicodeWidthChar;
 
 use super::wire;
-use super::{CELL_FIXUP_HEADER_BYTES, CursorFixup, Fixups, GridSel, grid_number};
+use super::{CELL_FIXUP_HEADER_BYTES, CursorFixup, Fixups, GridSel, HEADER_BYTES, grid_number};
 use crate::effects::Listener;
 use crate::snapshot::Cancel;
 
@@ -63,6 +63,11 @@ use crate::snapshot::Cancel;
 /// an atomic load and a clock read, and a row of a wide terminal takes
 /// microseconds, so a cancelled encode stops within about a millisecond.
 const ROWS_PER_CANCEL_CHECK: usize = 64;
+
+/// Reserve lazily up to the normal host's snapshot limit, without committing
+/// unwritten bytes. Larger caller budgets still grow from actual output;
+/// `snapshot(usize::MAX)` must not try to allocate that budget up front.
+const EAGER_BUFFER_BYTES: usize = 16 * 1024 * 1024;
 
 /// The cell flags SGR sets on the cursor's template, and so on a printed cell.
 const SGR_FLAGS: Flags = Flags::BOLD
@@ -106,41 +111,19 @@ pub(crate) enum Content {
     Nothing,
 }
 
-/// Whether painting keeps what it paints, or only measures it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Mode {
-    /// Keep the stream and the fixups, in buffers reserved for `stream` and
-    /// `cell_fixups` bytes up front: a measurement says exactly how much a
-    /// painting takes, so that its buffers never grow past it (a `Vec` that
-    /// grows doubles, and could hold twice the blob for a moment).
-    Keep { stream: usize, cell_fixups: usize },
-    /// Count their encoded bytes and drop them as painting goes, so that
-    /// finding how much history fits the size limit never holds a stream
-    /// larger than the limit: a hostile state can paint to hundreds of
-    /// megabytes.
-    Measure,
-}
-
-impl Mode {
-    /// Keep, without a measurement to reserve by.
-    pub(crate) const KEEP: Mode = Mode::Keep {
-        stream: 0,
-        cell_fixups: 0,
-    };
-
-    fn keeps(self) -> bool {
-        matches!(self, Mode::Keep { .. })
-    }
-}
-
-/// The stream and fixups of one emulator state, or with [`Mode::Measure`]
-/// only their sizes (the stream and cell fixups empty). Cell fixups are kept
-/// encoded, as the blob holds them: a hostile state has hundreds of
-/// thousands, and as records in memory they would take about twice their
-/// encoded size beside the blob.
+/// One painted state, retaining its bytes only while its smallest possible
+/// container fits the budget. After crossing it, both large buffers are
+/// empty but their exact lengths and history costs still describe the whole
+/// paint. Cursor and REP metadata survive so the container can finish sizing.
+/// Cell fixups are kept encoded, as the blob holds them: a hostile state has
+/// hundreds of thousands, and as records in memory they would take about
+/// twice their encoded size beside the blob.
 pub(super) struct Painted {
     pub(super) stream: Vec<u8>,
     pub(super) fixups: Fixups,
+    /// Both large buffers survived; final cursor/REP bytes may still put
+    /// the container over its limit.
+    pub(super) kept: bool,
     /// The stream's length, kept or not.
     pub(super) stream_len: usize,
     /// The encoded length of the cell fixups, kept or not.
@@ -161,13 +144,14 @@ pub(super) struct Painted {
 /// is the parser's REP character.
 ///
 /// The caller guarantees a clean boundary; the stream assumes a parser in
-/// its ground state with no update open.
+/// its ground state with no update open. `max_bytes` limits retention, never
+/// which bytes are chosen or how far an uncancelled paint runs.
 pub(super) fn paint(
     term: &Term<Listener>,
     preceding_char: Option<char>,
     content: Content,
     skip_titles: usize,
-    painting: Mode,
+    max_bytes: usize,
     cancel: &Cancel,
 ) -> Painted {
     let columns = term.columns();
@@ -183,7 +167,7 @@ pub(super) fn paint(
         columns,
         lines,
         content != Content::Nothing,
-        painting,
+        max_bytes,
         cancel.clone(),
     );
     let blank = Row::new(columns);
@@ -226,15 +210,15 @@ pub(super) fn paint(
         if painter.cancelled {
             return painter.finish();
         }
-        let fixed_before = painter.fixups.cursors.len();
+        let fixed_before = painter.w.fixups.cursors.len();
         painter.set_cursor(&primary.cursor, primary, GridSel::Inactive, false, None);
-        let cursor_fixed = painter.fixups.cursors.len() > fixed_before;
+        let cursor_fixed = painter.w.fixups.cursors.len() > fixed_before;
         // Entering the alternate screen saves the primary cursor, as the
         // stream placed it, over the primary saved cursor: a saved cursor
         // that differs from the cursor, or a cursor the stream could not
         // place (a fixup), needs a fixup of its own.
         if cursor_fixed || !cursor_eq(&primary.saved_cursor, &primary.cursor) {
-            painter.fixups.cursors.push(CursorFixup {
+            painter.w.fixups.cursors.push(CursorFixup {
                 grid: GridSel::Inactive,
                 saved: true,
                 cursor: primary.saved_cursor.clone(),
@@ -349,7 +333,7 @@ pub(super) fn paint(
     if !final_print && painter.w.last_printed != preceding_char {
         let placed = preceding_char.is_some_and(|c| painter.print_rep_char(active, c));
         if !placed {
-            painter.fixups.preceding_char = Some(preceding_char);
+            painter.w.fixups.preceding_char = Some(preceding_char);
         }
     }
 
@@ -389,7 +373,7 @@ pub(super) fn paint(
         origin_region,
     );
     if final_print && painter.w.last_printed != preceding_char {
-        painter.fixups.preceding_char = Some(preceding_char);
+        painter.w.fixups.preceding_char = Some(preceding_char);
     }
     // Only SI and SO choose a slot, so G2 and G3 are never active.
     if term.active_charset() == CharsetIndex::G1 {
@@ -416,7 +400,7 @@ pub(super) fn paint(
 pub(super) fn paint_history(
     term: &Term<Listener>,
     skip_history: usize,
-    mode: Mode,
+    max_bytes: usize,
     cancel: &Cancel,
 ) -> Painted {
     let columns = term.columns();
@@ -426,7 +410,7 @@ pub(super) fn paint_history(
     } else {
         term.grid()
     };
-    let mut painter = Painter::new(columns, lines, true, mode, cancel.clone());
+    let mut painter = Painter::new(columns, lines, true, max_bytes, cancel.clone());
     let blank = Row::new(columns);
     let history = history_len(primary, skip_history);
     let mut rows = grid_rows(primary, skip_history, &blank, true);
@@ -443,7 +427,7 @@ pub(super) fn paint_history(
     painter.w.plain();
     painter.w.raw("\x1b[H\x1b7");
     if painter.w.last_printed.is_some() {
-        painter.fixups.preceding_char = Some(None);
+        painter.w.fixups.preceding_char = Some(None);
     }
     painter.finish()
 }
@@ -799,10 +783,23 @@ fn push_color(params: &mut Vec<String>, color: &Color, base: u8, bright: u8, ext
     }
 }
 
+/// Tracks replay state and exact output costs independently of retention.
+///
+/// The stream and encoded cell fixups share a logical byte allowance. Each
+/// buffer reserves independently, at most that allowance, so writing one
+/// never forces a large reallocation of the other. Once their combined
+/// length cannot fit, both are freed immediately, even within one very large
+/// row. Cursor and REP metadata survive for final container sizing.
 struct Writer {
     out: Vec<u8>,
-    /// Bytes already dropped from `out` while measuring.
-    dropped: usize,
+    fixups: Fixups,
+    stream_len: usize,
+    cell_fixup_bytes: usize,
+    cell_fixup_count: usize,
+    /// The whole-blob budget less its header, counts and smallest REP field.
+    payload_budget: usize,
+    /// False permanently once the logical payload exceeds its allowance.
+    keeping: bool,
     columns: usize,
     /// The restoring emulator's cursor template, as far as SGR sets it.
     pen: Pen,
@@ -826,11 +823,64 @@ struct Writer {
 impl Writer {
     /// Everything written so far, dropped or not.
     fn written(&self) -> usize {
-        self.dropped + self.out.len()
+        self.stream_len
     }
 
+    /// Count every stream byte, keeping it only while both bulk buffers fit.
+    /// Replay state is still updated by the caller after retention ends.
     fn raw(&mut self, text: &str) {
-        self.out.extend_from_slice(text.as_bytes());
+        self.stream_len += text.len();
+        if self.keep() {
+            let needed = self.out.len() + text.len();
+            Self::reserve(&mut self.out, needed, self.payload_budget);
+            self.out.extend_from_slice(text.as_bytes());
+        }
+    }
+
+    /// Decide retention before any append or reserve, releasing both large
+    /// allocations together. Exact counters and small cursor metadata remain
+    /// valid after this irreversible transition to measurement.
+    fn keep(&mut self) -> bool {
+        if self.keeping && self.stream_len + self.cell_fixup_bytes > self.payload_budget {
+            self.keeping = false;
+            self.out = Vec::new();
+            self.fixups.cells.buf = Vec::new();
+        }
+        self.keeping
+    }
+
+    /// Avoid growing allocations during ordinary limited paints. The common
+    /// case has no cell fixups and never allocates their buffer at all.
+    /// Beyond the finite eager allowance, capped doubling follows actual
+    /// output without letting any individual capacity exceed the budget.
+    fn reserve(buffer: &mut Vec<u8>, needed: usize, budget: usize) {
+        if needed <= buffer.capacity() {
+            return;
+        }
+        let target = buffer
+            .capacity()
+            .saturating_mul(2)
+            .max(budget.min(EAGER_BUFFER_BYTES))
+            .max(needed)
+            .min(budget);
+        buffer.reserve_exact(target - buffer.len());
+    }
+
+    /// Count a whole cell record before writing any of it. Reserving its full
+    /// encoded size also keeps wire helpers from growing a buffer implicitly.
+    fn fix_cell(&mut self, grid: GridSel, line: i32, column: usize, cell: &Cell) {
+        let bytes = CELL_FIXUP_HEADER_BYTES + wire::cell_len(cell);
+        self.cell_fixup_count += 1;
+        self.cell_fixup_bytes += bytes;
+        if self.keep() {
+            let needed = self.fixups.cells.buf.len() + bytes;
+            Self::reserve(&mut self.fixups.cells.buf, needed, self.payload_budget);
+            let record = &mut self.fixups.cells;
+            record.u8(grid_number(grid));
+            record.i32(line);
+            record.len(column);
+            record.cell(cell);
+        }
     }
 
     /// Move to (`line`, `column`): nothing or CUF when the column on the
@@ -924,8 +974,7 @@ impl Writer {
 
     fn print(&mut self, c: char) {
         let mut buf = [0; 4];
-        self.out
-            .extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
+        self.raw(c.encode_utf8(&mut buf));
         self.last_printed = Some(c);
         if !c.is_ascii() {
             self.column_trusted = false;
@@ -991,16 +1040,14 @@ impl Writer {
 // ---------------------------------------------------------------------------
 // The painter: grids and cursors.
 
+/// Visits grids in replay order, recording history costs at row boundaries
+/// even after the writer has stopped retaining bytes.
 struct Painter {
     w: Writer,
-    fixups: Fixups,
     lines: usize,
     /// Whether cell contents are painted; when not, no cell fixup is made
     /// either (`Content::Nothing`).
     cells: bool,
-    mode: Mode,
-    cell_fixup_bytes: usize,
-    cell_fixup_count: usize,
     history_costs: Vec<usize>,
     /// Looked at every [`ROWS_PER_CANCEL_CHECK`] rows.
     cancel: Cancel,
@@ -1009,20 +1056,20 @@ struct Painter {
 }
 
 impl Painter {
-    fn new(columns: usize, lines: usize, cells: bool, mode: Mode, cancel: Cancel) -> Painter {
-        let (stream, cell_fixups) = match mode {
-            Mode::Keep {
-                stream,
-                cell_fixups,
-            } => (stream, cell_fixups),
-            Mode::Measure => (1 << 16, 0),
-        };
-        let mut fixups = Fixups::default();
-        fixups.cells.buf.reserve_exact(cell_fixups);
+    /// Start with empty buffers and room for the smallest container suffix.
+    /// Each bulk allocation is deferred until its first write.
+    fn new(columns: usize, lines: usize, cells: bool, max_bytes: usize, cancel: Cancel) -> Painter {
+        // Two four-byte fixup counts and the smallest one-byte REP tag.
+        let overhead = HEADER_BYTES + 9;
         Painter {
             w: Writer {
-                out: Vec::with_capacity(stream),
-                dropped: 0,
+                out: Vec::new(),
+                fixups: Fixups::default(),
+                stream_len: 0,
+                cell_fixup_bytes: 0,
+                cell_fixup_count: 0,
+                payload_budget: max_bytes.saturating_sub(overhead),
+                keeping: max_bytes >= overhead,
                 columns,
                 pen: Pen::plain(),
                 link: None,
@@ -1031,55 +1078,37 @@ impl Painter {
                 charsets: [StandardCharset::Ascii; 4],
                 last_printed: None,
             },
-            fixups,
             lines,
             cells,
-            mode,
-            cell_fixup_bytes: 0,
-            cell_fixup_count: 0,
             history_costs: Vec::new(),
             cancel,
             cancelled: false,
         }
     }
 
-    fn finish(mut self) -> Painted {
+    /// Return exact costs whether or not any encoded bytes survived.
+    /// Cancellation is carried to the container, which discards the result.
+    fn finish(self) -> Painted {
         let stream_len = self.w.written();
-        if !self.mode.keeps() {
-            self.w.out.clear();
-        }
         Painted {
             stream: self.w.out,
-            fixups: self.fixups,
+            fixups: self.w.fixups,
+            kept: self.w.keeping,
             stream_len,
-            cell_fixup_bytes: self.cell_fixup_bytes,
-            cell_fixup_count: self.cell_fixup_count,
+            cell_fixup_bytes: self.w.cell_fixup_bytes,
+            cell_fixup_count: self.w.cell_fixup_count,
             history_costs: self.history_costs,
             cancelled: self.cancelled,
         }
     }
 
+    /// Record cells the stream cannot reproduce, unless grids were omitted
+    /// entirely by the size ladder's final step.
     fn fix_cell(&mut self, grid: GridSel, line: i32, column: usize, cell: &Cell) {
         if !self.cells {
             return;
         }
-        self.cell_fixup_count += 1;
-        self.cell_fixup_bytes += CELL_FIXUP_HEADER_BYTES + wire::cell_len(cell);
-        if self.mode.keeps() {
-            let record = &mut self.fixups.cells;
-            record.u8(grid_number(grid));
-            record.i32(line);
-            record.len(column);
-            record.cell(cell);
-        }
-    }
-
-    /// While measuring, drop what has been written so far.
-    fn drop_measured(&mut self) {
-        if !self.mode.keeps() {
-            self.w.dropped += self.w.out.len();
-            self.w.out.clear();
-        }
+        self.w.fix_cell(grid, line, column, cell);
     }
 
     /// Paint `rows` (oldest first, each with its line number in the grid
@@ -1102,10 +1131,9 @@ impl Painter {
                 self.cancelled = true;
                 return;
             }
-            self.drop_measured();
             if index < history {
                 self.history_costs
-                    .push(self.w.written() + self.cell_fixup_bytes);
+                    .push(self.w.written() + self.w.cell_fixup_bytes);
             }
             let y = index.min(lines - 1) as i32;
             let screen_row = y as usize;
@@ -1239,21 +1267,21 @@ impl Painter {
         let template_paintable = pen_paintable(&cursor.template)
             && (cursor.template.flags - SGR_FLAGS) == Flags::empty();
         if !template_paintable {
-            fix(&mut self.fixups);
+            fix(&mut self.w.fixups);
         }
         // Under origin mode CUP cannot leave the scroll region, but DECRC can
         // put the cursor outside it (and an empty region has no inside).
         if let Some(region) = &origin_region
             && !region.contains(&line)
         {
-            fix(&mut self.fixups);
+            fix(&mut self.w.fixups);
             return;
         }
         let origin_top = origin_region.map(|region| region.start);
         let origin = origin_top.unwrap_or(0);
         if cursor.input_needs_wrap {
             if column != last {
-                fix(&mut self.fixups);
+                fix(&mut self.w.fixups);
             } else {
                 // Printing into the last column leaves a wrap pending, so
                 // reprint that cell (whether a print or a resize raised it).
@@ -1364,5 +1392,76 @@ impl Painter {
             }
         }
         false
+    }
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use super::*;
+
+    /// A caller may ask for an effectively unlimited snapshot of a tiny
+    /// terminal. That must not turn a small encode into an allocation failure;
+    /// both writers start with finite reservations driven by their first byte.
+    #[test]
+    fn a_large_budget_keeps_initial_reservations_finite() {
+        let mut painter = Painter::new(2, 1, true, usize::MAX, Cancel::never());
+        let w = &mut painter.w;
+        assert_eq!(w.out.capacity(), 0);
+        assert_eq!(w.fixups.cells.buf.capacity(), 0);
+        w.raw("x");
+        assert_eq!(w.fixups.cells.buf.capacity(), 0);
+        w.fix_cell(GridSel::Active, 0, 0, &Cell::default());
+        assert!(w.keeping);
+        assert_eq!(w.out, b"x");
+        assert_eq!(w.fixups.cells.buf.len(), w.cell_fixup_bytes);
+        assert!(w.out.capacity() <= EAGER_BUFFER_BYTES);
+        assert!(w.fixups.cells.buf.capacity() <= EAGER_BUFFER_BYTES);
+    }
+
+    /// Every write choke point must discard both allocations at the crossing
+    /// write, without waiting for another row. Subsequent writes still count
+    /// exact bytes and records and preserve the replay state used by later rows.
+    #[test]
+    fn crossing_at_raw_print_or_cell_write_frees_both_buffers_and_keeps_counting() {
+        for crossing in 0..3 {
+            let budget = 192;
+            let mut painter =
+                Painter::new(200, 1, true, HEADER_BYTES + 9 + budget, Cancel::never());
+            let w = &mut painter.w;
+            let cell = Cell::default();
+            w.fix_cell(GridSel::Active, 0, 0, &cell);
+            let cell_bytes = w.cell_fixup_bytes;
+            w.raw(&"x".repeat(budget - cell_bytes));
+            assert!(w.keeping, "premise: the combined payload fits exactly");
+            assert!(!w.out.is_empty() && !w.fixups.cells.buf.is_empty());
+            let (extra_stream, extra_cells) = match crossing {
+                0 => {
+                    w.raw("!");
+                    (1, 0)
+                }
+                1 => {
+                    w.print('中');
+                    assert_eq!(w.last_printed, Some('中'));
+                    assert!(!w.column_trusted);
+                    (3, 0)
+                }
+                _ => {
+                    w.fix_cell(GridSel::Active, 0, 1, &cell);
+                    (0, 1)
+                }
+            };
+            assert!(!w.keeping);
+            assert_eq!(w.out.capacity(), 0);
+            assert_eq!(w.fixups.cells.buf.capacity(), 0);
+            w.raw("more");
+            w.print('é');
+            w.fix_cell(GridSel::Active, 0, 2, &cell);
+            assert_eq!(w.written(), budget - cell_bytes + extra_stream + 6);
+            assert_eq!(w.cell_fixup_bytes, cell_bytes * (2 + extra_cells));
+            assert_eq!(w.cell_fixup_count, 2 + extra_cells);
+            assert_eq!(w.last_printed, Some('é'));
+            assert_eq!(w.out.capacity(), 0);
+            assert_eq!(w.fixups.cells.buf.capacity(), 0);
+        }
     }
 }
