@@ -355,6 +355,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   launch will resume the sandbox.
 - **TensorLake add-host sandbox dialog lacks structure.** The dialog for adding a TensorLake sandbox host is just a
   block of text with no visual structure. Fix TBD.
+- **Always show a host list for hosts needing attention.** While hosts are installing or updating it is hard to find
+  where to look; today you must click the separate host-list icon. Restore an always-present host list at the top,
+  populated with any host that currently has a problem, needs an update, or is updating, so nothing needing the user's
+  attention is hidden.
 
 ### Trivial
 
