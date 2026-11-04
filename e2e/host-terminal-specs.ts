@@ -44,6 +44,7 @@ export const SUITE_TERMINALS_METADATA = "suiteTerminals";
 /** The spec files (relative to tests/) a host-terminal run runs. */
 export const HOST_TERMINAL_SPECS: ReadonlySet<string> = new Set([
   "agent-relay.spec.ts",
+  "announcements.spec.ts",
   "appearance.spec.ts",
   "approval-layout.spec.ts",
   "auth.spec.ts",

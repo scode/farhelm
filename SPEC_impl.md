@@ -297,6 +297,14 @@ than every entry; a running `0.0.0-unreleased` build enqueues none. Only the pro
 release-notes destinations: stable entries link to their version's notes, and prereleases omit the link because curated
 notes need not exist. Queue storage, routes and consumers carry display-ready content and know nothing about releases.
 
+AppBar owns the announcement dialog and a once-per-load flag beneath the authentication and preference gates. It waits
+for the initial Welcome and its feedback handoff, then calls the separate `announcements::read_and_show` operation. That
+operation reads display-ready pending/history content without load state or version interpretation. The existing
+`HostModal` admission wrapper holds a late queue result until another modal leaves, without introducing an announcement
+event subscriber. Closing releases isolation before clearing the batch or writing its ids. A successful write prepends
+that showing to the client's known history; a failed write only logs. Help reopens known history without recording it
+again, and a reload refreshes both lists from the helm.
+
 The GUI's HTTP funnel orders reads and actions after this client's earlier configuration saves: quick-launch and
 number-key bindings, template save/delete, checkout folder, post-clone command, and ntfy settings. A save registers
 synchronously before its task is polled. Template name-validation reads capture their place before registering the save

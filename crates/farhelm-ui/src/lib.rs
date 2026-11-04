@@ -131,6 +131,7 @@ use serde::Deserialize;
 
 mod activity;
 mod anchored_popovers;
+mod announcements;
 mod api;
 mod app_bar;
 mod app_updater;

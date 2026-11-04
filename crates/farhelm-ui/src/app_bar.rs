@@ -73,6 +73,8 @@ enum BarMenuItem {
     KeyboardShortcuts,
     /// Always available help, even when no installed update waits for restart.
     ReleaseNotes,
+    /// Shared shown history, available only after a successful showing.
+    Announcements,
     /// Manual commands for hosts whose SSH authentication needs interaction.
     SshHelp,
     /// Reopen the introduction without resetting its shared dismissal.
@@ -95,7 +97,7 @@ impl BarMenuItem {
             Self::ChatOnDiscord => ActionGlyph::External,
             Self::Documentation | Self::ReleaseNotes | Self::WhatsNew => ActionGlyph::Document,
             Self::SshHelp | Self::KeyboardShortcuts => ActionGlyph::Terminal,
-            Self::Welcome => ActionGlyph::Info,
+            Self::Welcome | Self::Announcements => ActionGlyph::Info,
             Self::CheckForUpdates => ActionGlyph::Update,
             Self::RestartToUpdate => ActionGlyph::Restart,
         }
@@ -109,6 +111,7 @@ impl BarMenuItem {
             BarMenuItem::Documentation => "Documentation",
             BarMenuItem::KeyboardShortcuts => "Keyboard shortcuts",
             BarMenuItem::ReleaseNotes => "Release notes",
+            BarMenuItem::Announcements => "Announcements",
             BarMenuItem::SshHelp => "SSH needs 2FA?",
             BarMenuItem::Welcome => "Welcome",
             BarMenuItem::CheckForUpdates => "Check for updates",
@@ -141,6 +144,9 @@ impl BarMenuItem {
             BarMenuItem::Welcome => {
                 "Welcome: show the welcome card with Get started and how to send feedback"
             }
+            BarMenuItem::Announcements => {
+                "Announcements: show the announcements Farhelm has shown you before, newest first, such as serious changes you needed to act on"
+            }
             BarMenuItem::SshHelp => {
                 "SSH needs 2FA?: commands to start Farhelm's connections by hand when a host asks for approval on every SSH login"
             }
@@ -164,6 +170,7 @@ impl BarMenuItem {
             BarMenuItem::Documentation => "Opens farhelm.io/docs in your browser",
             BarMenuItem::KeyboardShortcuts => "Shows keys and your template bindings",
             BarMenuItem::ReleaseNotes => "Opens the release notes in your browser",
+            BarMenuItem::Announcements => "Shows previously shown announcements again",
             BarMenuItem::SshHelp => "Start a host's SSH connections yourself",
             BarMenuItem::Welcome => "Shows the welcome card again",
             BarMenuItem::CheckForUpdates => "Installs a newer Farhelm if there is one",
@@ -173,12 +180,13 @@ impl BarMenuItem {
     }
 }
 
-const BAR_MENU_ITEMS: [BarMenuItem; 10] = [
+const BAR_MENU_ITEMS: [BarMenuItem; 11] = [
     BarMenuItem::SendFeedback,
     BarMenuItem::ChatOnDiscord,
     BarMenuItem::Documentation,
     BarMenuItem::KeyboardShortcuts,
     BarMenuItem::ReleaseNotes,
+    BarMenuItem::Announcements,
     BarMenuItem::SshHelp,
     BarMenuItem::Welcome,
     BarMenuItem::CheckForUpdates,
@@ -189,17 +197,20 @@ const BAR_MENU_ITEMS: [BarMenuItem; 10] = [
 /// A bar menu's item list, in [`BAR_MENU_ITEMS`] order.
 type BarMenuOrder = MenuOrder<BarMenuItem, { BAR_MENU_ITEMS.len() }>;
 
-/// What the `?` menu offers: the update check only where an updater runs.
-fn help_menu_items(has_updater: bool) -> Vec<BarMenuItem> {
+/// History appears only after the helm has shown something; the update check
+/// remains last and exists only where an updater runs.
+fn help_menu_items(has_updater: bool, has_announcements: bool) -> Vec<BarMenuItem> {
     let mut items = vec![
         BarMenuItem::SendFeedback,
         BarMenuItem::ChatOnDiscord,
         BarMenuItem::Documentation,
         BarMenuItem::KeyboardShortcuts,
         BarMenuItem::ReleaseNotes,
-        BarMenuItem::SshHelp,
-        BarMenuItem::Welcome,
     ];
+    if has_announcements {
+        items.push(BarMenuItem::Announcements);
+    }
+    items.extend([BarMenuItem::SshHelp, BarMenuItem::Welcome]);
     if has_updater {
         items.push(BarMenuItem::CheckForUpdates);
     }
@@ -224,17 +235,17 @@ pub(crate) const DISCORD_URL: &str = "https://discord.gg/G3bukxTjXR";
 /// cannot.
 const RELEASE_NOTES_URL: &str = "https://farhelm.io/docs/release-notes/";
 
-/// Open a project help or community page through the page's shared link opener
+/// Open a trusted help, community or announcement link through the shared opener
 /// (`terminal-links.js`), which knows how to reach the system browser from
-/// the desktop webview and opens a new tab elsewhere. Callers pass a
-/// constant, so it needs none of the opener callers' validation.
+/// the desktop webview and opens a new tab elsewhere. Callers pass trusted
+/// content supplied by the app or helm, rather than a terminal's links.
 ///
 /// That opener is its own script asset, loaded asynchronously, so a click
 /// right after the page loads can arrive before it exists. The fallback
 /// repeats the opener's two branches (navigate the `dioxus:` page, which the
 /// desktop shell turns into a system-browser open; otherwise a `noopener`
 /// tab) so the item never silently does nothing.
-pub(crate) fn open_external_page(url: &'static str) {
+pub(crate) fn open_external_page(url: &str) {
     let url = serde_json::to_string(url).expect("a string always serializes");
     document::eval(&format!(
         "(() => {{
@@ -715,6 +726,63 @@ pub(crate) fn AppBar(
     let initial_welcome = use_context::<crate::welcome::WelcomeOnLoad>();
     let mut welcome_open = use_signal(move || *initial_welcome.0.peek());
     let mut welcome_from_load = use_signal(move || *initial_welcome.0.peek());
+    let mut announcements = use_signal(crate::announcements::AnnouncementState::default);
+    let mut announcements_checked_on_load = use_signal(|| false);
+    // AppBar mounts only after sign-in and the preference decision. Welcome
+    // wins that initial modal slot; its feedback handoff also finishes before
+    // announcements claim it. The reusable reader itself knows no load state.
+    let announcement_base = base.clone();
+    use_effect(move || {
+        if !announcements_checked_on_load() && !welcome_open() && !feedback_open() {
+            announcements_checked_on_load.set(true);
+            let base = announcement_base.clone();
+            spawn(async move {
+                crate::announcements::read_and_show(&base, announcements).await;
+            });
+        }
+    });
+    let dismiss_base = base.clone();
+    let close_announcements = use_callback(move |()| {
+        let (empty, from_history) = {
+            let state = announcements.peek();
+            (state.displayed.is_empty(), state.from_history)
+        };
+        if empty {
+            return;
+        }
+        if from_history {
+            crate::announcements::DIALOG.close(
+                &crate::modal_dialog::FocusTarget::new(".app-help-toggle", None, false).script(),
+            );
+        } else {
+            crate::announcements::DIALOG.close("window.farhelmTerm?.focusSelected();");
+        }
+        // Submit release while the root still exists, before clearing the
+        // rendered batch. Persistence cannot hold the modal or its focus.
+        let shown = std::mem::take(&mut announcements.write().displayed);
+        if !from_history {
+            let base = dismiss_base.clone();
+            spawn(async move {
+                let ids = shown.iter().map(|item| item.id.clone()).collect();
+                match crate::api::mark_announcements_shown(&base, ids).await {
+                    Ok(()) => {
+                        // A successful batch is the newest showing. Preserve
+                        // the server's existing history order and avoid copies
+                        // if a later trigger reread history while this saved.
+                        let mut state = announcements.write();
+                        let mut previous = std::mem::take(&mut state.history);
+                        previous.retain(|old| !shown.iter().any(|item| item.id == old.id));
+                        let mut history = shown;
+                        history.extend(previous);
+                        state.history = history;
+                    }
+                    Err(detail) => {
+                        dioxus::logger::tracing::warn!(target: "announcements", "could not mark announcements shown: {detail}");
+                    }
+                }
+            });
+        }
+    });
     // The success announcement lives here, outside the dialog: a status
     // region inserted together with its text is not reliably announced, and
     // the dialog closes itself moments after success. This one is always
@@ -828,7 +896,7 @@ pub(crate) fn AppBar(
         }
     });
     let has_updater = updater.is_some();
-    let help_items = help_menu_items(has_updater);
+    let help_items = help_menu_items(has_updater, !announcements.read().history.is_empty());
     let help_tooltip = if has_updater {
         "Help: send feedback, open the documentation or release notes, get SSH 2FA help, show Welcome, or check for updates"
     } else {
@@ -977,6 +1045,11 @@ pub(crate) fn AppBar(
                     }
                 }
                 BarMenuItem::ReleaseNotes => open_external_page(RELEASE_NOTES_URL),
+                BarMenuItem::Announcements => {
+                    let mut state = announcements.write();
+                    state.displayed = state.history.clone();
+                    state.from_history = true;
+                }
                 BarMenuItem::SshHelp => ssh_help_open.set(true),
                 BarMenuItem::Welcome => {
                     welcome_from_load.set(false);
@@ -1011,6 +1084,7 @@ pub(crate) fn AppBar(
                     | BarMenuItem::Documentation
                     | BarMenuItem::KeyboardShortcuts
                     | BarMenuItem::ReleaseNotes
+                    | BarMenuItem::Announcements
                     | BarMenuItem::SshHelp
                     | BarMenuItem::Welcome
                     | BarMenuItem::CheckForUpdates => {}
@@ -1045,6 +1119,16 @@ pub(crate) fn AppBar(
             crate::welcome::WelcomeDialog {
                 on_close: move |_| finish_welcome.call(false),
                 on_feedback: move |_| finish_welcome.call(true),
+            }
+        }
+        // A slow queue read can finish after another modal opens. Reuse the
+        // existing admission boundary so the ready batch waits for that owner.
+        if !announcements.read().displayed.is_empty() {
+            crate::modal_isolation::HostModal {
+                crate::announcements::AnnouncementsDialog {
+                    announcements: announcements.read().displayed.clone(),
+                    on_close: close_announcements,
+                }
             }
         }
         p { class: "visually-hidden feedback-notice", role: "status", "{feedback_notice}" }
@@ -1192,11 +1276,9 @@ mod tests {
         assert_eq!(displayed_version(Some(&skew)), "0.9.0-rc.1");
     }
 
-    /// Spec (Feedback): the `?` menu lists send feedback, Discord, documentation,
-    /// keyboard shortcuts, release notes, SSH help and welcome in that order.
-    /// Only a desktop app whose updater runs adds check for updates as the eighth item. The browser suite
-    /// never has an updater, so this is the one place the desktop order is
-    /// pinned.
+    /// Help keeps Discord after feedback and history after release notes.
+    /// Shown history adds its item without disturbing existing help; only a
+    /// desktop app whose updater runs adds the final update check.
     #[farhelm_testtrace::test]
     fn the_help_menu_keeps_discord_after_feedback_and_the_update_check_last() {
         let common = [
@@ -1208,10 +1290,16 @@ mod tests {
             BarMenuItem::SshHelp,
             BarMenuItem::Welcome,
         ];
-        assert_eq!(help_menu_items(false), common);
+        assert_eq!(help_menu_items(false, false), common);
         assert_eq!(
-            help_menu_items(true),
+            help_menu_items(true, false),
             [&common[..], &[BarMenuItem::CheckForUpdates]].concat()
+        );
+        let with_history = [&common[..5], &[BarMenuItem::Announcements], &common[5..]].concat();
+        assert_eq!(help_menu_items(false, true), with_history);
+        assert_eq!(
+            help_menu_items(true, true),
+            [with_history.as_slice(), &[BarMenuItem::CheckForUpdates]].concat()
         );
     }
 }
