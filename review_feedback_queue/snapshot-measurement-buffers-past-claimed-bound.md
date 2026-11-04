@@ -2,12 +2,36 @@
 
 Reviewed commit: ca9b0a19856dc136f63ad2d14f1076027edce1eb
 
+Current source status at c5ae8548439cc5bfa33c11ef7ce8da6129d8072a: 25fc266a replaces the old measurement buffering with
+bounded retention. The historical breach below is retained for explicit queue cleanup. Its later repetitions of "over 23
+MiB" remain an old unit error: 23,440,000 bytes is about 22.35 MiB, as the leading calculation already says.
+
 ## TLDR
 
 Sizing a checkpoint can retain a temporary stream beyond its claimed 16 MiB limit, even though final blob fitting
 remains correct.
 
 ## Details
+
+### Later buffering repair and arithmetic clarification
+
+At the additional reviewed tip, `crates/farhelm-terminal-emulator/src/snapshot/v1/paint.rs:831–884` counts every byte
+but checks the combined stream/fixup allowance before retaining it. Crossing the allowance releases both bulk buffers
+and keeps only counters and small formatting scratch. The container rejects a discarded paint and charges header and
+remaining fixup costs. The same allowance reaches the initial measurement and each fitting attempt through
+`snapshot/mod.rs:436–440,818–853,869–905` and `snapshot/v1/mod.rs:196–307`; later fitting no longer relies on an
+unbounded row-sized measurement buffer.
+
+Confidence: **source-confirmed repair of retained-length behavior**. This is not a measured RSS, allocator-rounding or
+scratch-capacity claim. For the historical example, the row is 22.35 MiB, not over 23 MiB; adding 16,822,272 title bytes
+exceeds 38 MiB. The source-derived 32/64 MiB capacity discussion is distinct from those byte-to-MiB corrections.
+
+The queue retained its old current-defect presentation after the repair. This addition reconciles the arithmetic and
+current status in the existing record, preserving historical evidence for explicit disposition. It does not create a
+second memory bug, delete the item, or claim a present availability/security consequence. Provenance: review run
+`ffa3b94e-5eb1-4569-8eb5-1a52b62110d1`, `g021/g021-1` and `g021/g021-4`.
+
+### Historical measurement behavior
 
 Suggested bucket: **other**. Confidence: **source-confirmed defect or conditional mechanism**. confirmed source
 behavior; no physical RSS, allocator peak or availability measurement. At tip paint.rs:832-834 appends unchecked,

@@ -2,11 +2,31 @@
 
 Reviewed commit: ca9b0a19856dc136f63ad2d14f1076027edce1eb
 
+Current source status at c5ae8548439cc5bfa33c11ef7ce8da6129d8072a: a new independent frozen fixture added by 978b0183
+covers strikeout. The original styles fixture is unchanged; the broader missing-coverage consequence below is
+historical. This review records the repair for explicit queue cleanup.
+
 ## TLDR
 
 The compatibility fixtures do not retain struck-through text, leaving that style outside their frozen-byte guard.
 
 ## Details
+
+### Later coverage repair
+
+Commit 978b0183 adds `style-removals-and-reset-tie` without regenerating old frozen bytes. At the additional reviewed
+tip, `crates/farhelm-terminal-emulator/tests/snapshot_golden.rs:162–175` prints retained cells with SGR 9 and removes
+strikeout separately with SGR 29. Its new `.state.txt` fixture at 16–23 explicitly retains STRIKEOUT, and its companion
+hex blob fixes the encoded representation. The directory-based restore check and script-to-frozen-bytes check consume
+these artifacts independently of current encoder/decoder agreement.
+
+Confidence: **source-confirmed coverage repair**, with no golden tests executed by this review. The original overwritten
+sample remains real, but no longer establishes that strikeout lacks a frozen-byte guard anywhere. The feedback file and
+index survived the repair. Keep that lifecycle evidence here for an explicit disposition; this addition neither removes
+the item nor reports a new production restoration bug. Provenance: review run `ffa3b94e-5eb1-4569-8eb5-1a52b62110d1`,
+`g021/g021-3`.
+
+### Historical fixture gap
 
 Suggested bucket: **other**. Confidence: **source-confirmed defect or conditional mechanism**. confirmed source-level
 missing golden coverage; no production restoration bug or measured test failure claimed.

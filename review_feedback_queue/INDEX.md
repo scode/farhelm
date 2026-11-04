@@ -8,6 +8,11 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 ## Highest priority: security or data loss
 
+- [`failed-tab-recovery-loses-delete-child-root.md`](failed-tab-recovery-loses-delete-child-root.md) — On macOS, a
+  failed tab or agent recovery can discard the child identity Delete needs, leaving its foreground program running
+  untracked after session deletion. The conditional source route is established; the exact sequence is not
+  runtime-reproduced.
+
 - [`tunnel-reuses-custom-helm-credential-origin.md`](tunnel-reuses-custom-helm-credential-origin.md) — A desktop tunnel
   can receive a previously used custom browser helm port and expose its retained device credential to remote HTML in the
   same browser profile. The default helm port and embedded desktop credentials are outside this conditional route.
@@ -98,8 +103,8 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 - [`resize-journal-exhaustion-does-not-trigger-checkpoint.md`](resize-journal-exhaustion-does-not-trigger-checkpoint.md)
   — Enough applied size changes on a quiet terminal can consume its retained journal without making a new checkpoint
-  due. A later supervisor crash can then lose recoverable output. The required count is extreme; the conditional route
-  is established.
+  due. A later crash, or the newer small-tail skip on a successful orderly stop, can then lose recoverable output. The
+  required count is extreme; the conditional routes are source-established.
 
 - [`retained-delete-approval-can-kill-new-tab.md`](retained-delete-approval-can-kill-new-tab.md) — A Delete approved
   when nothing was alive can later end a newly opened tab without asking about that work if its host becomes unreadable
@@ -113,6 +118,18 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   discover a URL in the new terminal model before that text has painted, opening a target the user has not yet seen.
   Chromium event batching supplies the conditional source route; the displayed-target guarantee and general redraw
   allowance leave coverage ambiguous.
+
+- [`stationary-hover-omits-canonical-ancestor-dependencies.md`](stationary-hover-omits-canonical-ancestor-dependencies.md)
+  — A terminal redraw can leave a required hyperlink mismatch warning absent through a click. The actual target stays
+  correctly disclosed; priority remains highest because independent consultation could not settle the security boundary.
+
+- [`selector-policy-drops-ordinary-formatting-input.md`](selector-policy-drops-ordinary-formatting-input.md) — New
+  terminals discard formatting codepoints even without selectors, changing stored and copied text. Priority remains
+  highest because independent consultation could not settle whether this retained-text loss is outside user-data loss.
+
+- [`emoji-continuation-drops-standalone-kirat-characters.md`](emoji-continuation-drops-standalone-kirat-characters.md) —
+  Standalone printable Kirat Rai characters disappear from stored terminal output and copied text. Priority remains
+  highest on the independently unresolved user-data boundary; no file corruption is claimed.
 
 ## High priority: material UX degradation
 
@@ -172,7 +189,8 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   channel can also leave an accepted Restart waiting for a history-seed reply after the runtime has ended.
 
 - [`extreme-history-numbering-hangs-selection.md`](extreme-history-numbering-hangs-selection.md) — Extreme peer-supplied
-  history numbering can hang the page when the user selects text in a later screen row.
+  history numbering can hang the page when the user selects text in a later screen row. The record now supplies its
+  missing hostile-host acceptance context and preserves the unresolved browser scope.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
@@ -251,8 +269,8 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   items leaves their machine-readable sweep exclusions orphaned.
 
 - [`landing-leaves-baseline-flake-unrecorded.md`](landing-leaves-baseline-flake-unrecorded.md) — Landing reports defer
-  recording recurring baseline flakes, including further template, host-action and sidebar Replace observations; private
-  runtime evidence was not authenticated here.
+  recording recurring baseline flakes, including quick-launch and further browser observations. Private browser evidence
+  remains unauthenticated; inspected Rust failures do not establish latent flakiness.
 
 - [`numeric-version-guard-hides-artifact-filenames.md`](numeric-version-guard-hides-artifact-filenames.md) — Some bare
   artifact filenames lose file actions under the numeric-version guard; acceptance is ambiguous.
@@ -1339,8 +1357,8 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   title-size cap.
 
 - [`snapshot-measurement-buffers-past-claimed-bound.md`](snapshot-measurement-buffers-past-claimed-bound.md) — Sizing a
-  checkpoint can retain a temporary stream beyond its claimed 16 MiB limit, even though final blob fitting remains
-  correct.
+  checkpoint historically retained a temporary stream beyond its claimed limit. Later bounded-retention repair and
+  corrected MiB arithmetic are recorded for explicit cleanup.
 
 - [`replay-work-model-omits-history-rotations.md`](replay-work-model-omits-history-rotations.md) — The checkpoint reader
   undercounts repeated history-buffer rearrangement for unusually large library-requested scrollback. No excessive
@@ -1354,7 +1372,8 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   checks can pass after terminal hyperlink identities or boundaries change.
 
 - [`style-fixture-overwrites-strikeout-sample.md`](style-fixture-overwrites-strikeout-sample.md) — The compatibility
-  fixtures do not retain struck-through text, leaving that style outside their frozen-byte guard.
+  styles fixture overwrites its strikeout sample. A later independent frozen fixture repairs the missing coverage; that
+  status is preserved for explicit cleanup.
 
 - [`peak-memory-test-lacks-baseline-headroom.md`](peak-memory-test-lacks-baseline-headroom.md) — The memory tests may
   hide an excessive checkpoint allocation below an earlier process memory peak. After source investigation, the physical
@@ -1466,7 +1485,8 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 - [`empty-history-queue-bypasses-bounds.md`](empty-history-queue-bypasses-bounds.md) — Empty deferred-history messages
   escape the row cap and an accumulated backlog would bypass yielding. The structural gap is confirmed; material backlog
-  or resource exhaustion remains unverified after investigation, and ordinary senders were not found.
+  or resource exhaustion remains unverified after investigation, and ordinary senders were not found. The record
+  supplies its missing acceptance context without settling browser scope.
 
 - [`bold-brightening-ignores-redefined-palette.md`](bold-brightening-ignores-redefined-palette.md) — A program
   redefining bright terminal colors still gets the original theme colors for bold text.
@@ -1487,7 +1507,8 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   subsequent drag/release reaches the terminal program and its original link no longer opens.
 
 - [`grid-drop-suppresses-refusal-explanation.md`](grid-drop-suppresses-refusal-explanation.md) — Dropping content onto a
-  grid terminal cancels the drop without displaying the promised instruction to copy and paste instead.
+  grid terminal historically suppressed its refusal explanation. The later native-drop repair is recorded for explicit
+  cleanup; physical delivery on every engine is not certified.
 
 - [`changed-file-hover-test-clicks-before-stat-readiness.md`](changed-file-hover-test-clicks-before-stat-readiness.md) —
   The file-link redraw regression can issue its only download click while the replacement file is still being checked,
@@ -1501,8 +1522,8 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   retained terminal logical line that extends more than 1000 wrapped rows from the click copies only part of that line.
 
 - [`nul-delimited-osc-identity-ambiguity.md`](nul-delimited-osc-identity-ambiguity.md) — Different hyperlink identities
-  can collide in the warning comparison's string key. Remote grid messages can supply those strings, but no route from
-  the collision to a wrong opening or required-disclosure bypass was established after investigation.
+  historically collided in a delimiter key without an established harmful opening. The later JSON-pair repair is
+  recorded alongside that investigated uncertainty for explicit cleanup.
 
 - [`hovered-link-double-click-selects-one-word.md`](hovered-link-double-click-selects-one-word.md) — A stable hovered
   hyperlink with multiword text copies only the clicked word on double-click in a grid terminal, whereas xterm selects
@@ -1613,3 +1634,63 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   — After a transient Linux terminal-write allocation failure, input discarded by the terminal host can be reported as
   written when a later input succeeds before their acknowledgements are sent. The conditional source route is
   established; production prompts are disabled, and no user-work loss is claimed.
+
+- [`new-terminal-guide-overstates-xterm-removal.md`](new-terminal-guide-overstates-xterm-removal.md) — The migration
+  guide says no xterm.js is involved although it still initializes and sizes the viewer before grid attachment.
+
+- [`emoji-report-names-wrong-vendored-patch.md`](emoji-report-names-wrong-vendored-patch.md) — An emoji landing-report
+  follow-up names the parser patch instead of the terminal emulator patch containing its cosmetic edits.
+
+- [`announcement-report-overstates-startup-validation.md`](announcement-report-overstates-startup-validation.md) —
+  Announcement table validation cannot exclude the database and creation-version failures omitted by the landing report.
+
+- [`self-ssh-guidance-misses-skipped-tests.md`](self-ssh-guidance-misses-skipped-tests.md) — Sandbox instructions
+  promise dependent test failures after missing self-SSH, although non-CI multi-host cases can skip instead.
+
+- [`agent-screen-tools-use-locale-decoder-for-utf8.md`](agent-screen-tools-use-locale-decoder-for-utf8.md) —
+  Agent-screen tools request UTF-8 tmux output but can decode it with a legacy Python encoding; the decoder mismatch is
+  verified conditionally.
+
+- [`feedback-discord-header-hides-send.md`](feedback-discord-header-hides-send.md) — The Discord header hides the
+  feedback Send pointer target in short narrow static layouts on both engines; native Tab restores it.
+
+- [`feedback-discord-link-omits-external-indicator.md`](feedback-discord-link-omits-external-indicator.md) — The
+  feedback dialog's Discord link omits the required external-link arrow.
+
+- [`drag-copy-guidance-gap-stays-stale-after-text-size-change.md`](drag-copy-guidance-gap-stays-stale-after-text-size-change.md)
+  — Changing terminal text size leaves visible drag-copy guidance at its old pixel gap instead of three current rows.
+
+- [`detached-grid-retains-program-drag-guidance.md`](detached-grid-retains-program-drag-guidance.md) — A retained
+  takeover screen can still raise guidance claiming its program handled a drag that the detached client cannot send.
+
+- [`pending-replace-recreates-announcement.md`](pending-replace-recreates-announcement.md) — Moving pending Replace
+  progress recreates its live region; repeated supported screen-reader speech remains unverified after investigation.
+
+- [`replace-source-removal-hides-progress-and-timeout.md`](replace-source-removal-hides-progress-and-timeout.md) —
+  Source removal can hide pending Replace progress and its eventual deadline explanation while navigation remains
+  locked.
+
+- [`joined-link-spec-omits-cursor-tail-exception.md`](joined-link-spec-omits-cursor-tail-exception.md) — The broad
+  joined-link comparison promise omits an accepted cursor-positioned tail exception.
+
+- [`announcement-close-missing-rendered-opening-token.md`](announcement-close-missing-rendered-opening-token.md) —
+  Announcement close lacks its rendered opening token; an old close reaching reopened history remains unverified after
+  investigation.
+
+- [`announcement-history-overwrites-waiting-pending-batch.md`](announcement-history-overwrites-waiting-pending-batch.md)
+  — Opening shown announcement history before modal admission can suppress this page's pending batch while durable rows
+  remain queued.
+
+- [`stable-recut-removes-retained-announcement-anchor.md`](stable-recut-removes-retained-announcement-anchor.md) — A
+  different-version stable re-cut can remove the website anchor still targeted by carried announcements.
+
+- [`recovered-agent-retains-stale-launch-hold-handle.md`](recovered-agent-retains-stale-launch-hold-handle.md) — After
+  agent recovery, Mac supervisor replacement can wait unnecessarily and falsely warn about version protection because it
+  checks the ended runtime.
+
+- [`recovery-gap-notice-lifetime-contract-conflict.md`](recovery-gap-notice-lifetime-contract-conflict.md) —
+  Same-supervisor recovery exposes contradictory product and implementation promises for the missing-output notice's
+  lifetime.
+
+- [`long-launch-status-crops-painted-edge.md`](long-launch-status-crops-painted-edge.md) — Long launch-status labels
+  crop the pill's decorative edge in both static engines; elapsed text remains visible.

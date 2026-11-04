@@ -2,6 +2,10 @@
 
 Reviewed commit: ca9b0a19856dc136f63ad2d14f1076027edce1eb
 
+Current source status at c5ae8548439cc5bfa33c11ef7ce8da6129d8072a: 8b4f1e16 replaces the ambiguous delimiter key with a
+JSON-encoded identity pair at both affected consumers. The historical consequence was never established; the original
+diagnosis below is retained for explicit queue cleanup rather than silently removed in this review.
+
 ## TLDR
 
 Different hyperlink identities can collide in the warning comparison's string key. Remote grid messages can supply those
@@ -9,6 +13,19 @@ strings, but no route from the collision to a wrong opening or required-disclosu
 investigation.
 
 ## Details
+
+### Later repair
+
+At the additional reviewed tip, `crates/farhelm-ui/assets/grid-buffer.js:339–342` encodes `[link.id, link.uri]` with
+`JSON.stringify`. The dependency deduplication path at 467–474 uses the same helper, and the adapter tag map at 642–659
+uses that pair identity too. Distinct string pairs no longer alias through embedded NUL delimiters. This is a
+**source-confirmed repair of the recorded mechanism**, not proof of every warning or activation invariant.
+
+The queue file still described only the old ambiguity after that repair. This status addition preserves both the
+original investigated uncertainty and the later source evidence; it makes no new exploit claim or triage decision.
+Provenance: review run `ffa3b94e-5eb1-4569-8eb5-1a52b62110d1`, `g018/g018-c06`.
+
+### Historical investigation
 
 The missing premise is a consequential route from the ambiguous comparison/dependency identity to a required disclosure
 or activation check being bypassed. Actual checks covered key creation, strict grouping, warning comparison, pending

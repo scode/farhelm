@@ -2,12 +2,32 @@
 
 Reviewed commit: ca9b0a19856dc136f63ad2d14f1076027edce1eb
 
+Current source status at c5ae8548439cc5bfa33c11ef7ce8da6129d8072a: the original grid-wide refusal cause was repaired by
+7c764927494f3e8529561809545be4bf154228ea. The historical diagnosis below remains for explicit queue cleanup; this review
+does not delete or triage the item.
+
 ## TLDR
 
 Dropping content onto a grid terminal cancels the drop without displaying the promised instruction to copy and paste
 instead.
 
 ## Details
+
+### Later repair
+
+The file-drop change removes the grid-only refusal branch and its disabled-drop option. At the additional reviewed tip,
+`crates/farhelm-ui/assets/terminal.js:2671–2703` prevents the native dragover default and chooses `dropEffect = "copy"`;
+recognized text enters the shared paste path, and files/images enter the upload path. The shared handler at 2618–2639
+visibly refuses disconnected uploads and directories. The page guard at 2876–2948 preserves terminal-handled events. The
+subsequent guidance change does not restore the removed cancellation path.
+
+Confidence: **source-confirmed repair of the named cause**. This does not certify physical native delivery on every
+engine, unusual `effectAllowed` restrictions, or missing/unsupported File projections. Those are distinct from the
+original unconditional grid refusal. The record and index survived the repair, contrary to the queue lifecycle rule;
+this additive status preserves that evidence without making a new recursive feedback item. Provenance: review run
+`ffa3b94e-5eb1-4569-8eb5-1a52b62110d1`, `g016/r1`, corroborated by `g054/g054-s1` and `g055/g055-l6`.
+
+### Historical diagnosis
 
 Suggested bucket: **other**. Confidence: **source-confirmed defect or conditional mechanism**. confirmed by application
 source plus primary browser specification; no runtime reproduction.

@@ -91,3 +91,39 @@ committed reporting/tracking discrepancy, other**. Private runs, causes and poss
 authenticated. No test or bug was reproduced. Preserve the historical observations and later source changes when
 deciding what to record. Provenance: run `ef6e18fa-8ac0-4850-a557-d59b8af5efb9`, `g138/f1`, `g141/f2`, `g144/f1`,
 `g145/f1`, `g146/f1`.
+
+### Further quick-launch and browser observations
+
+Additional reviewed commits: `0e73e0fe7d13063f54efe3fa5343b30d04dece4c`, `eb6a9eca040a18c86b94ec9632953015b6ae3051` and
+`5e299664265667224a655073ea2a9d263cbbccba`.
+
+`plans/reports/colored-harness-marks.report.md:204–213` and `plans/reports/faster-snapshot-encoder.report.md:260–269`
+describe the same two WebKit timeouts in fourteen attempts of “Closes a number popup below a new bolt chord.” Both timed
+out waiting for an already-successful save request to finish. The reports retain the failed observations but decline a
+flake record until another failure occurs. The existing test predates this series. Later main and rebuilt-stack passes
+do not erase the reported intermittency, and the recording rule supplies no minimum occurrence count. These repeated
+reports are one omission, with unknown cause; they do not establish that either plan caused the failures. Focused
+tracking searches found no matching flake, TODO or exclusion entry at the review tip. Confidence: **confirmed committed
+reporting discrepancy**; private browser artifacts and build identity were not independently authenticated.
+
+`plans/reports/launch-progress.report.md:198–207` also names four pre-existing browser cases that failed and then passed
+three retries: “create-intent-key-rebinds-on-host-change,” “an old session's band hides until the next visit,” “an idle
+session already seen uses its row's status foreground,” and “header controls stay interactive and text stays
+selectable.” It expressly leaves these unrecorded. Their tests predate the series, and the report establishes no shared
+load cause that would invoke the machine-load exception. This extension is **unverified after investigation** as to
+their latent-flake classification: source and committed fail/pass accounts were checked, but the private browser traces
+and environment cause were unavailable. Authenticate those traces and relevant build identities before recording a cause
+or attributing product regressions. Three passing retries alone are not a recording exception.
+
+The same report's three Rust failures are deliberately excluded from this extension. Read-only inspection of retained
+run `68783337-311c-45d3-b891-a1dfc3eb9f29` found two terminal-kind expectation mismatches and one foreground-pane
+refusal. Available pinned source explains the first two with stale expectations and the third with a six-field fake tmux
+reply where the parser requires seven fields. Those deterministic explanations do not establish latent flakiness. The
+run's recorded head was unavailable locally, so equivalence with the reviewed source is not claimed. No runtime test was
+run, and the retained run was not changed.
+
+Bucket remains **other**. No exact coverage or filter match was found for the additional browser observations. This
+records the reporting discrepancy and its uncertainty, without creating flake entries or fixing tests. Provenance:
+trailing-review run `ffa3b94e-5eb1-4569-8eb5-1a52b62110d1`, `g027/g027-l1`, `g030/g030-l2`, `g039/g039-l1` and
+`g041/g041-3`; the rejected Rust inference and its investigation remain under `g041/g041-2`. Proposed drop: none for the
+retained extension.
