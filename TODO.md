@@ -344,6 +344,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **TensorLake recipe Save button hidden until scrolling.** When adding a TensorLake recipe, the Save button is not
   visible until the view scrolls down to it; it must be reachable without hunting. Details TBD.
+- **TensorLake sandbox suspension must be confirmed before shown as suspended.** Suspending a TensorLake sandbox looks
+  suspiciously fast, so the user can get the impression it is suspended before that state is actually confirmed. The UI
+  must not present the sandbox as suspended until the suspension is confirmed.
 
 ### Trivial
 
