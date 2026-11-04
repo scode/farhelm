@@ -2,7 +2,7 @@
 
 One line per plan that has not landed, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` lines, at the end unless the maintainer places them elsewhere. A landed plan moves to `plans/REPORTS.md` until the maintainer has reviewed its report. This file is excluded from dprint so a line is never rewrapped.
 
-- [pending] `grid-repeated-link-warning.md` — Grid terminals: stop a link a program starts twice from showing a false "does not match" warning
+- [in-flight 211de0] `grid-repeated-link-warning.md` — Grid terminals: stop a link a program starts twice from showing a false "does not match" warning
 - [pending] `readopt-unavailable-hosts.md` — Re-adopt terminal hosts (agents and tabs) that become unavailable while the supervisor runs
 - [pending] `faster-snapshot-encoder.md` — Make terminal checkpoint encoding faster with byte-identical output, measured by a new benchmark
 - [pending] `stop-checkpoint-burst.md` — Gentler checkpoint burst at an orderly supervisor stop: skip small tails, half the cores, biggest first
