@@ -24,9 +24,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- Allow the user to manually reorder pinned sessions.
+- Allow the user to manually reorder pinned sessions. Plan: `plans/queue/pinned-session-order.md`.
 
-- Allow shift selection of multiple sessions for bulk actions such as closing them.
+- Allow shift selection of multiple sessions for bulk actions such as closing them. Plan:
+  `plans/queue/bulk-session-actions.md`.
 
 - **The desktop smoke's appearance leg on grid terminals.** The optional appearance leg of the Linux desktop smoke
   (`DESKTOP_SMOKE_APPEARANCE=1 scripts/desktop-smoke.sh`) checks each light/dark case's terminal too: its background
@@ -350,7 +351,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Always show a host list for hosts needing attention.** While hosts are installing or updating it is hard to find
   where to look; today you must click the separate host-list icon. Restore an always-present host list at the top,
   populated with any host that currently has a problem, needs an update, or is updating, so nothing needing the user's
-  attention is hidden.
+  attention is hidden. Plan: `plans/queue/host-attention-list.md`.
 
 ### Tensorlake
 
@@ -364,18 +365,21 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   named file on the host.
 
 - **TensorLake recipe Save button hidden until scrolling.** When adding a TensorLake recipe, the Save button is not
-  visible until the view scrolls down to it; it must be reachable without hunting. Details TBD.
+  visible until the view scrolls down to it; it must be reachable without hunting. Details TBD. Plan:
+  `plans/queue/tensorlake-ui-fixes.md`.
 - **TensorLake sandbox suspension must be confirmed before shown as suspended.** Suspending a TensorLake sandbox looks
   suspiciously fast, so the user can get the impression it is suspended before that state is actually confirmed. The UI
-  must not present the sandbox as suspended until the suspension is confirmed.
+  must not present the sandbox as suspended until the suspension is confirmed. Plan:
+  `plans/queue/tensorlake-ui-fixes.md`.
 - **TensorLake "Refresh sandboxes" button feels inert.** In the TensorLake settings menu, "Refresh sandboxes" sits below
   "New recipe" as a bare button and appears to do nothing; there may be an empty list above it. Unclear UX; fix TBD.
+  Plan: `plans/queue/tensorlake-ui-fixes.md`.
 - **Transient "selected host is unavailable" while launching on a suspended sandbox.** Launching a session on a
   suspended TensorLake sandbox briefly shows a "selected host is unavailable"-style message before the session starts
   (launch resumes the sandbox, so starting is expected). The UI should not flash a misleading unavailable state when
-  launch will resume the sandbox.
+  launch will resume the sandbox. Plan: `plans/queue/tensorlake-ui-fixes.md`.
 - **TensorLake add-host sandbox dialog lacks structure.** The dialog for adding a TensorLake sandbox host is just a
-  block of text with no visual structure. Fix TBD.
+  block of text with no visual structure. Fix TBD. Plan: `plans/queue/tensorlake-ui-fixes.md`.
 
 - **Tunnels outliving a killed desktop helm on macOS.** Each recipe tunnel is an `ssh -N -R` child of the helm. An
   orderly quit stops them, and on Linux the kernel kills them when the helm dies (`PR_SET_PDEATHSIG`), but macOS has no
@@ -389,7 +393,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   progress during that time; the launch-progress status ("Launching on …") deliberately starts only when the session
   create is sent, so it cannot be reused as is without claiming a launch that has not happened. Add a separately worded
   "Resuming host" preparation status (in the quick-launch surface too, where it can be reached), with its own failure
-  wording, which must not promise the session-create retry guarantees.
+  wording, which must not promise the session-create retry guarantees. Plan: `plans/queue/tensorlake-ui-fixes.md`.
 
 - **One click for a fresh checkout on a suspended host.** Launching a fresh GitHub checkout on a suspended Tensorlake
   host resumes the host, then stops and asks the user to review the refreshed checkout preview and press Launch again.
@@ -433,7 +437,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Host click in the navigation rail gives no feedback.** Clicking a host in the navigation rail shows no sign of what
   it did, especially with an empty session list. Make "No sessions match this filter" name the active filter — showing
   the host with icon and name when a host is filtered on — and show the host in the filter bar. Generally rethink the
-  filter experience.
+  filter experience. Plan: `plans/queue/host-filter-feedback.md`.
 
 ## Doc todo
 
