@@ -1,6 +1,6 @@
 ---
 title: Security model
-description: Why SSH is the only network path between your machines, and what that means for them.
+description: What Farhelm exposes and trusts, and the connections it makes on your behalf.
 sidebar:
   order: 3
   badge:
@@ -14,11 +14,12 @@ This page is planned but not written yet. The text below says what it will cover
 
 :::
 
-What Farhelm exposes and trusts: SSH as the only network path between machines, a web UI that listens only on loopback
-and that a link on a page from another local port cannot open, no relay or account, and nothing that needs root. Also
-how much the helm is trusted with on each host, since it can run commands there, and what an agent on one host can do to
-sessions on others through Farhelm, with your approval or a host's **Run farhelm commands without asking**, and the host
-changes (adding, editing or removing a host) that always need your approval
+What Farhelm exposes and trusts: SSH for reaching hosts, a web UI that listens only on loopback and that a link on a
+page from another local port cannot open, and no Farhelm relay or account. Adding an ordinary SSH host needs no root;
+[Tensorlake sandboxes](/docs/using/tensorlake-sandboxes/) use passwordless sudo to prepare user services and need a
+Tensorlake account. Also how much the helm is trusted with on each host, since it can run commands there, and what an
+agent on one host can do to sessions on others through Farhelm, with your approval or a host's **Run farhelm commands
+without asking**, and the host changes (adding, editing or removing a host) that always need your approval
 ([Approve what agents do](/docs/using/approve-agent-requests/)). The SSH prerequisite for adding a host is in
 [Add a remote host](/docs/get-started/add-a-remote-host/). It will also cover the connections that leave your machines:
 setting up or updating a host, including the automatic updates you can turn on, downloads Farhelm's release files from
@@ -43,3 +44,9 @@ local-network access and other programs using the tunnel
 [containerized session](/docs/agents/containerized-sessions/) keeps from an agent and what it does not: other host files
 and Farhelm's own credentials stay outside the container, but the network stays open, and Git hooks or settings it
 writes in the checkout can later run with your full access outside the container.
+
+It will also cover Tensorlake's API, which the helm calls over HTTPS with your saved API key, Farhelm's own SSH key for
+those sandboxes, and the API key and agent endpoint tokens stored unencrypted on the helm's machine. A recipe's
+[tunnels to your side](/docs/using/tensorlake-sandboxes/#tunnels-to-your-side) let anything in the sandbox reach the
+configured services through the helm's machine. These tunnels need direct access to Tensorlake's SSH gateway and do not
+use ProxyJump.

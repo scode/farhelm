@@ -22,3 +22,8 @@ configuration.
 Settings → Tensorlake lists Farhelm sandboxes in your account that no host or snapshot build on this helm owns, such as
 ones left behind when a helm lost its state, and can delete them with their snapshots. Sandboxes created by another
 helm are marked, since they may still be in use there.
+
+The Tensorlake API key and recipe endpoint tokens are stored unencrypted on the helm's machine, and Farhelm's ssh key
+has to be registered with Tensorlake once by hand. Agents on a sandbox authenticate through the recipe's API endpoints;
+subscription logins are not supported yet. Private GitHub checkouts need Git credentials set up on the sandbox.
+Uninstalling Farhelm does not delete sandboxes or their snapshots.

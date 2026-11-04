@@ -1,6 +1,6 @@
 ---
 title: Manage hosts
-description: Name, update, uninstall, and remove the hosts your helm knows about.
+description: Change host settings, update Farhelm, and suspend or delete Tensorlake sandboxes.
 sidebar:
   order: 6
 ---
@@ -32,6 +32,11 @@ release of Farhelm and installs it, as [Update or uninstall Farhelm](/docs/using
 browser, or in a copy of Farhelm that is not installed in `~/Applications`, it is greyed out instead.
 If **Retry** or **Adopt** fails, a dialog shows why.
 
+A [Tensorlake sandbox](/docs/using/tensorlake-sandboxes/) also offers **Suspend**, or **Resume** when suspended. It has
+**Delete sandbox** in place of **Remove**, and no **Uninstall**: Farhelm owns that machine, so deleting it loses its
+files and sessions. [Suspend or delete a Tensorlake sandbox](#suspend-or-delete-a-tensorlake-sandbox) covers those
+actions.
+
 ## Host settings
 
 <Screenshot
@@ -42,11 +47,11 @@ If **Retry** or **Adopt** fails, a dialog shows why.
 The destination is what you would type after `ssh`, such as `dev@build-box` or a name from your ssh configuration. The
 alias is only for display: it changes how the host is shown everywhere in Farhelm, up to 64 characters, and nothing on
 the host itself. Without an alias, the navigation rail and the session list show a short name instead: the first part
-of the hostname, or the whole IP address. Your Mac's destination cannot be changed. **Start YOLO sessions without asking** is the same choice the
+of the hostname, or the whole IP address. Your Mac's destination and a Tensorlake sandbox's destination cannot be changed. **Start YOLO sessions without asking** is the same choice the
 YOLO confirmation offers when you [start a session](/docs/using/start-a-session/#confirm-a-yolo-launch). **Run farhelm
 commands without asking** decides whether agents in this host's sessions ask you before they start, stop, change, or
 delete sessions, or edit or delete your launch templates; [Approve what agents do](/docs/using/approve-agent-requests/)
-explains it. An agent's request to add, edit or remove a host always asks, whatever this switch says
+explains it. An agent's request to add, edit or remove an SSH host always asks, whatever this switch says
 ([Host changes](/docs/using/approve-agent-requests/#host-changes)).
 
 **Open links without asking** and **Open local-network links without asking** are separate permissions for opening this
@@ -89,6 +94,8 @@ up when they reload.
 
 ## Uninstall Farhelm from a remote host
 
+This applies to SSH hosts. A Tensorlake host has [Delete sandbox](#suspend-or-delete-a-tensorlake-sandbox) instead.
+
 **Uninstall** first shows what it will remove from the host: the [supervisor](/docs/how-it-works/the-pieces/)'s service
 and Farhelm's program files, each with its path there. It also names the directory that holds the host's Farhelm data,
 which it keeps. It also stops what keeps the host's session terminals running: the small Farhelm process behind each
@@ -121,11 +128,24 @@ To remove Farhelm from your Mac, see [Uninstall Farhelm](/docs/get-started/unins
   alt="The remove host dialog, with the remove, don't ask again button explained."
 />
 
-As the dialog says, removing a host only makes Farhelm forget it. Nothing is stopped or uninstalled on the host, and
+For an SSH host, removing it only makes Farhelm forget it. Nothing is stopped or uninstalled on the host, and
 adding the same destination again brings back its sessions, though their pins, and which ones you had already looked
 at, start fresh. **Cancel** or Escape leaves the host where it was.
 The dialog stays open until Farhelm answers; if removal is refused, it shows why. If you chose to skip the confirmation,
 a refusal opens a short dialog instead.
+
+## Suspend or delete a Tensorlake sandbox
+
+**Suspend** pauses a Tensorlake host with its processes and sessions intact. It asks first if an agent is working or
+Farhelm cannot check activity reliably. A suspended host shows a grey **Suspended** state and a **Resume** button on its
+row; the menu offers **Resume** too. An open session offers **Resume host**. Tensorlake can also suspend the sandbox
+after its plan's idle limit; [Tensorlake sandboxes](/docs/using/tensorlake-sandboxes/#suspend-and-resume) explains the
+24-hour limit on Usage Credits and launching after resume.
+
+**Delete sandbox** permanently deletes the sandbox, its files, sessions and snapshots taken from it. It always asks,
+regardless of **Remove hosts without asking**. Keep work you need elsewhere first. If deletion fails, the host stays
+listed with the reason; try **Delete sandbox** again to finish. This needs a saved Tensorlake API key. Its recipe and
+the recipe's prepared snapshot remain available for new hosts.
 
 ## Turn the questions back on
 
@@ -138,10 +158,12 @@ The gear at the foot of the navigation rail, below **Hosts**, opens Settings at 
 section list for these two questions. Turning on **Set up new hosts without asking** or **Remove hosts without asking**
 skips that question for actions you start in the UI; turn it off to be asked again.
 [Agents' host requests](/docs/using/approve-agent-requests/#host-changes) still need your approval. These two apply to
-every host, and other open Farhelm windows pick up a change when they reload.
+SSH hosts, and other open Farhelm windows pick up a change when they reload. Tensorlake creation has its own
+**Create Tensorlake sandboxes without asking** switch under **Tensorlake**; deleting a sandbox always asks.
 
 Choose a section to see its settings. Unsaved fields keep what you typed while you switch sections; closing Settings
-discards those drafts. At phone width, **‹ Settings** returns to the section list.
+discards those drafts, except that an edited Tensorlake recipe asks whether to save or discard changes. At phone width,
+**‹ Settings** returns to the section list.
 
 **Sessions** holds **Color terminal frames by host**, **Name sessions on quick launch** (covered in
 [Launch templates](/docs/using/launch-templates/#quick-launch)), and **Skip session confirmations**, which covers
@@ -165,6 +187,11 @@ updates automatically**, which is about updating Farhelm itself; see
   name="manage-hosts/details"
   alt="The host list with Details switched on: each host's Farhelm version, sessions, and a renamed host's destination."
 />
+
+A Tensorlake host's details also show its sandbox name, recipe, CPU and memory, and tunnel mappings and status. A failed
+tunnel makes its dot amber and shows the reason. A suspended host's details say when suspension was noticed and whether
+it happened outside Farhelm. [Tensorlake sandboxes](/docs/using/tensorlake-sandboxes/) covers its recipes and account
+settings.
 
 ## Next
 

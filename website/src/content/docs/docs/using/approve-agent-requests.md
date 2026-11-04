@@ -72,15 +72,19 @@ double-click cannot answer a request you have not read.
 
 ## Host changes
 
-An agent can ask to add, edit or remove a host. Each request needs your approval, every time. **Run farhelm commands
-without asking** never covers host changes, and they never offer **Always allow from**.
+An agent can ask to add an SSH host, edit a host's appearance or remove an SSH host. Each request needs your approval,
+every time. **Run farhelm commands without asking** never covers host changes, and they never offer **Always allow
+from**.
+
+Agents cannot request new [Tensorlake sandboxes](/docs/using/tensorlake-sandboxes/) or delete Tensorlake hosts. Create
+those from **Add host**, and use **Delete sandbox** in the host's menu yourself.
 
 - `farhelm agent host add build-box --alias build` asks to add an ssh destination, with an optional display alias.
 - `farhelm agent host edit build --icon flask --color teal` asks to change a host's appearance. It can also set an alias
   with `--alias` or clear it with `--no-alias`. Edits cover only the alias, icon and color; an agent cannot change a
   host's destination or permissions. The card shows each changed field's old and new value.
 - `farhelm agent host remove build` asks Farhelm to [forget that host](/docs/using/manage-hosts/#remove-a-host). An
-  agent cannot remove the host its own session runs on or **Local (this machine)**.
+  agent cannot remove the host its own session runs on, **Local (this machine)**, or a Tensorlake host.
 
 For edit and remove, use the host's name from `farhelm agent hosts`. Both offer **Allow** and **Deny**.
 
