@@ -82,6 +82,9 @@ Tell each reviewer:
   A spec-accepted candidate that could be in the `highest` bucket is reported as a finding with `proposed_drop` citing
   the section, not only listed, so the independent drop check sees it.
 
+  A review procedure that keeps these fields in a durable record during the review may say how that record replaces or
+  feeds the final reply and these three parts, as long as every field above reaches the commissioner.
+
 Then, when collecting the replies:
 
 - Check each finding for coverage and filters as `review_feedback_queue/.agents/recording.md`, "Before recording a
