@@ -320,9 +320,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   (SPEC.md, Topology); a Mac can only be added today by running the supervisor binary by hand, and the remote
   provisioning and remote Update flows do not cover it. Make adding a macOS machine as a remote host a supported flow.
 
-- **Better feedback when launching sessions.** When a remote host is slow, a launch can feel hung: it is not clear
-  whether the session is succeeding, failing, still in flight, or stuck. Make the launch's state and progress visible so
-  a slow host reads as in flight rather than dead. Plan: `plans/queue/launch-progress.md`.
 - **Don't let git auto-gc run while a session is spawning.** On 2026-11-02, git auto-triggered gc on the farhelm repo
   itself when spawning a session — the user was actively waiting, which is exactly when auto-triggering is supposed to
   be deferred. Investigate what ran gc during the spawn (likely a jj/git operation in the colocated checkout) and move

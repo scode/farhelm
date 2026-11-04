@@ -26,6 +26,7 @@ use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
 use crate::hosts::{
     HostLookup, HostsRead, SessionUnavailableNotice, is_connected, stale_session_notice,
 };
+use crate::launch_progress::{LaunchAction, LaunchProgress, PendingLaunch};
 use crate::ops::{ConfirmSlot, ConfirmToken, OpGuard, ReadGate, use_confirm_slot};
 use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::reader::{SurfaceReader, Trigger, request_read, sleep_ms};
@@ -580,6 +581,9 @@ pub(crate) fn SessionView(
     // Whether a restart is in flight (disables the control and guards
     // re-entry, mirroring `ListView`'s `pending`).
     let mut restarting = use_signal(|| false);
+    // Plain Restart owns this request snapshot. Restart with also uses the
+    // `restarting` fence, but its launcher owns that operation's visible status.
+    let mut restart_progress = use_signal(|| None::<PendingLaunch>);
     // One family can be open at a time; confirmations keep their separate
     // consent slots and are admitted only after a menu action is chosen.
     let action_menu = use_signal(|| None::<ActionKind>);
@@ -622,6 +626,7 @@ pub(crate) fn SessionView(
     let replace_controller = ReplaceController::session(
         use_context::<crate::list::ReplaceIntent>().0,
         use_context::<crate::list::ReplaceYoloQuestions>().0,
+        use_context::<crate::replace::ReplaceProgress>(),
         replace_yolo,
         replace_yolo_error,
     );
@@ -1393,11 +1398,27 @@ pub(crate) fn SessionView(
         }
         begin_restart.call(());
         let base = restart_base.clone();
-        let id = current.read().id.raw().to_owned();
+        let source = current.read().clone();
+        let id = source.id.raw().to_owned();
         spawn(async move {
+            let pending = PendingLaunch::new(
+                LaunchAction::Restart,
+                source
+                    .host_name
+                    .as_ref()
+                    .map(|name| name.raw().to_owned())
+                    .unwrap_or_else(|| "this host".to_string()),
+                None,
+            );
+            restart_progress.set(Some(pending.clone()));
             let outcome = restart_session(&base, &id, stop_if_running, None, false).await;
+            restart_progress.set(None);
             if let Err(error) = &outcome {
-                restart_error.set(Some(error.text.clone()));
+                restart_error.set(Some(if error.deadline_expired {
+                    pending.unknown_outcome(false)
+                } else {
+                    error.text.clone()
+                }));
             }
             view_claim.set(None);
             finish_restart.call(outcome.is_ok());
@@ -2477,7 +2498,22 @@ pub(crate) fn SessionView(
                     }
                 }
             }
-            // The move to new terminals (`migration`): first below the top
+            // The action row never wraps and must keep every control visible
+            // at its supported width. A slow request uses the adjacent notice
+            // line rather than spending that row's width on an unbounded host.
+            // Padding belongs to the rendered status, so the empty two-second
+            // threshold costs no height. The interrupted card owns its copy.
+            if !interrupted_card_shown() {
+                div { class: "session-action-progress",
+                    if let Some(pending) = restart_progress() {
+                        LaunchProgress { pending }
+                    }
+                    if let Some(pending) = replace_controller.progress(shown.id.raw()) {
+                        LaunchProgress { pending }
+                    }
+                }
+            }
+            // The move to new terminals (`migration`): first ordinary notice below the top
             // row, so it is the first notice a visit to an old session shows,
             // and given the header's own reading of whether Restart can run.
             crate::migration::MigrationBand { session: shown.clone(), tabs: visible_tab_infos.clone(), restart_available }
@@ -2624,6 +2660,12 @@ pub(crate) fn SessionView(
                         } else {
                             "{interrupted_surface_text(shown.restart_offer, card_offers_replace_with, shown.agent_kind)}"
                         }
+                    }
+                    if let Some(pending) = restart_progress() {
+                        LaunchProgress { pending }
+                    }
+                    if let Some(pending) = replace_controller.progress(shown.id.raw()) {
+                        LaunchProgress { pending }
                     }
                     if restart_available {
                         button {

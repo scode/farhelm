@@ -1,15 +1,16 @@
-//! Plain Replace's retry identity and YOLO continuation, shared by both panes.
+//! Plain Replace's retry identity, pending status and YOLO continuation, shared by both panes.
 //!
 //! Admission, tasks and successful selection remain with the surface: sidebar
 //! rows can run independently, whereas the header owns a page operation guard.
 //! This controller owns the rules between those boundaries. A submitted source
 //! and its destructive precondition are snapshots of consent, never live reads.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use dioxus::prelude::*;
 
 use crate::api::{self, RefusalOutcome};
+use crate::launch_progress::{LaunchAction, PendingLaunch};
 use crate::ops::{ConfirmSlot, ConfirmToken};
 use crate::yolo_confirm::{YoloAsk, YoloReason};
 use crate::{DeleteGuard, HostId, Session};
@@ -58,6 +59,50 @@ pub(crate) struct ReplaceAttempt {
     answer: Option<ReplaceAnswer>,
 }
 
+/// The requests all Replace surfaces are waiting on, keyed by their source.
+///
+/// The page owns this signal so a sidebar request and the open session show
+/// the same start time. It is presentation only: existing row and lifecycle
+/// guards still decide which requests can run, independently of this map.
+#[derive(Clone, Copy)]
+pub(crate) struct ReplaceProgress(pub(crate) Signal<HashMap<String, PendingLaunch>>);
+
+/// Name the host captured by consent, never a refreshed or selected row.
+/// Both the pending label and a later unknown-outcome explanation use this
+/// snapshot so a host refresh cannot change which machine the request names.
+fn pending_progress(source: &Session) -> PendingLaunch {
+    PendingLaunch::new(
+        LaunchAction::Replace,
+        source
+            .host_name
+            .as_ref()
+            .map(|name| name.raw().to_owned())
+            .unwrap_or_else(|| "this host".to_string()),
+        None,
+    )
+}
+
+/// Clear only this request's status when its future ends, including cancellation.
+///
+/// A session view can unmount while a request is pending. The page-owned map
+/// outlives that task, so relying on the normal reply path would leave a spinner
+/// behind. The captured value also prevents an old task clearing a later run.
+struct ReplaceProgressGuard {
+    progress: ReplaceProgress,
+    source: String,
+    pending: PendingLaunch,
+}
+
+impl Drop for ReplaceProgressGuard {
+    fn drop(&mut self) {
+        if let Ok(mut requests) = self.progress.0.try_write()
+            && requests.get(&self.source) == Some(&self.pending)
+        {
+            requests.remove(&self.source);
+        }
+    }
+}
+
 /// The only results an adapter needs after the common request sequence ends.
 /// Question failures are already displayed on the question; ordinary refusal
 /// text still uses the surface's existing row or header presentation.
@@ -96,6 +141,7 @@ enum QuestionPolicy {
 pub(crate) struct ReplaceController {
     retry: Signal<Option<(String, Option<String>)>>,
     exclusions: Signal<HashSet<String>>,
+    progress: ReplaceProgress,
     question: ConfirmSlot<PendingReplace>,
     error: Signal<Option<String>>,
     policy: QuestionPolicy,
@@ -107,12 +153,14 @@ impl ReplaceController {
     pub(crate) fn sidebar(
         retry: Signal<Option<(String, Option<String>)>>,
         exclusions: Signal<HashSet<String>>,
+        progress: ReplaceProgress,
         question: ConfirmSlot<PendingReplace>,
         error: Signal<Option<String>>,
     ) -> Self {
         Self {
             retry,
             exclusions,
+            progress,
             question,
             error,
             policy: QuestionPolicy::Sidebar,
@@ -127,12 +175,34 @@ impl ReplaceController {
     pub(crate) fn session(
         retry: Signal<Option<(String, Option<String>)>>,
         exclusions: Signal<HashSet<String>>,
+        progress: ReplaceProgress,
         question: ConfirmSlot<PendingReplace>,
         error: Signal<Option<String>>,
     ) -> Self {
         Self {
             policy: QuestionPolicy::Session,
-            ..Self::sidebar(retry, exclusions, question, error)
+            ..Self::sidebar(retry, exclusions, progress, question, error)
+        }
+    }
+
+    /// Read the same pending request from a row, header or interrupted card.
+    /// No entry means no Replace POST is pending, even during key minting or
+    /// a permanent YOLO answer's host-setting save.
+    pub(crate) fn progress(self, source: &str) -> Option<PendingLaunch> {
+        self.progress.0.read().get(source).cloned()
+    }
+
+    /// Publish request-local timing after preparation and own its cleanup.
+    /// The source snapshot supplies the host; a later listing cannot relabel
+    /// a request already dispatched to a different host.
+    fn start_progress(mut self, source: &Session) -> ReplaceProgressGuard {
+        let pending = pending_progress(source);
+        let id = source.id.raw().to_owned();
+        self.progress.0.write().insert(id.clone(), pending.clone());
+        ReplaceProgressGuard {
+            progress: self.progress,
+            source: id,
+            pending,
         }
     }
 
@@ -412,6 +482,15 @@ impl ReplaceController {
         error: api::ActionRefusal,
     ) -> ReplaceResult {
         self.settle(source.id.raw(), &key, error.outcome);
+        let deadline_text = error.deadline_expired.then(|| {
+            // Sidebar rows may run independently, but only one plain Replace
+            // identity is retained. Starting another source can have ended
+            // this key while its POST was still waiting for a reply.
+            let retry_safe = self.retry.peek().as_ref().is_some_and(|(id, held)| {
+                id == source.id.raw() && held.as_deref() == Some(key.as_str())
+            });
+            pending_progress(&source).unknown_outcome(retry_safe)
+        });
         if error.outcome.requires_yolo() {
             let ask = YoloAsk {
                 host: source.host,
@@ -436,7 +515,7 @@ impl ReplaceController {
                 return ReplaceResult::QuestionHandled;
             }
         }
-        ReplaceResult::Refused(error.text)
+        ReplaceResult::Refused(deadline_text.unwrap_or(error.text))
     }
 
     /// Run the shared save → mint/reuse → Replace → settle sequence.
@@ -471,7 +550,11 @@ impl ReplaceController {
                 Err(reason) => return ReplaceResult::Refused(reason),
             },
         };
-        match api::replace_session(base, id, &key, guard, allow_yolo).await {
+        let progress = self.start_progress(&source);
+        let result = api::replace_session(base, id, &key, guard, allow_yolo).await;
+        // End the status before any callback changes the selected session.
+        drop(progress);
+        match result {
             Ok((session, notice)) => {
                 self.end_key(id, &key);
                 ReplaceResult::Replaced(Box::new(session), notice)
@@ -501,15 +584,18 @@ mod tests {
         fn app() -> Element {
             let retry = use_signal(|| None);
             let exclusions = use_signal(HashSet::new);
+            let progress = ReplaceProgress(use_signal(HashMap::new));
             let sidebar = ReplaceController::sidebar(
                 retry,
                 exclusions,
+                progress,
                 use_confirm_slot(),
                 use_signal(|| None),
             );
             let session = ReplaceController::session(
                 retry,
                 exclusions,
+                progress,
                 use_confirm_slot(),
                 use_signal(|| None),
             );
@@ -906,6 +992,100 @@ mod tests {
             ));
             assert_eq!(sidebar.error().as_deref(), Some("kept"));
             assert!(header.current_question().is_none());
+        });
+    }
+
+    /// A pending Replace has one clock across surfaces and no status after its
+    /// future is dropped. Unrelated rows retain their own request meanwhile.
+    #[farhelm_testtrace::test]
+    fn replace_progress_is_shared_and_cleared_by_request_ownership() {
+        with_controllers(|sidebar, header| {
+            assert!(sidebar.progress("A").is_none());
+            let first = sidebar.start_progress(&source("A"));
+            assert!(header.progress("A") == Some(first.pending.clone()));
+            let other = header.start_progress(&source("B"));
+            drop(first);
+            assert!(header.progress("A").is_none());
+            assert!(sidebar.progress("B") == Some(other.pending.clone()));
+            drop(other);
+            assert!(sidebar.progress("B").is_none());
+        });
+    }
+
+    /// A timeout changes the explanation but cannot retire an unresolved
+    /// replacement key. The same outcome on a real refusal keeps its own text.
+    #[farhelm_testtrace::test]
+    fn replace_timeout_preserves_retry_without_relabeling_real_refusals() {
+        with_controllers(|sidebar, header| {
+            sidebar.prepare(source("A"), DeleteGuard::NothingAlive, None);
+            sidebar.publish_key("A", "same-request");
+            let result = header.refused(
+                source("A"),
+                DeleteGuard::NothingAlive,
+                "same-request".to_string(),
+                api::ActionRefusal {
+                    outcome: RefusalOutcome::Unresolved,
+                    text: "request timed out".into(),
+                    deadline_expired: true,
+                },
+            );
+            assert!(
+                matches!(result, ReplaceResult::Refused(text) if text.contains("Still waiting on build box"))
+            );
+            assert_eq!(
+                sidebar
+                    .prepare(source("A"), DeleteGuard::NothingAlive, None)
+                    .retained,
+                Some("same-request".to_string())
+            );
+            let result = header.refused(
+                source("A"),
+                DeleteGuard::NothingAlive,
+                "same-request".to_string(),
+                api::ActionRefusal {
+                    outcome: RefusalOutcome::Unresolved,
+                    text: "host refused the replacement".into(),
+                    deadline_expired: false,
+                },
+            );
+            assert!(
+                matches!(result, ReplaceResult::Refused(text) if text == "host refused the replacement")
+            );
+        });
+    }
+
+    /// Independent sidebar operations can supersede the one retained identity.
+    /// A late timeout must not promise deduplication after another source took
+    /// that slot, and it must leave the newer source's retry untouched.
+    #[farhelm_testtrace::test]
+    fn a_superseded_replace_timeout_does_not_promise_a_safe_retry() {
+        with_controllers(|sidebar, header| {
+            sidebar.prepare(source("A"), DeleteGuard::NothingAlive, None);
+            sidebar.publish_key("A", "old-request");
+            header.prepare(source("B"), DeleteGuard::NothingAlive, None);
+            header.publish_key("B", "new-request");
+            let result = sidebar.refused(
+                source("A"),
+                DeleteGuard::NothingAlive,
+                "old-request".into(),
+                api::ActionRefusal {
+                    outcome: RefusalOutcome::Unresolved,
+                    text: "deadline".into(),
+                    deadline_expired: true,
+                },
+            );
+            let ReplaceResult::Refused(text) = result else {
+                panic!("a timeout needs an ordinary unknown-outcome explanation");
+            };
+            assert!(text.contains("Still waiting on build box"));
+            assert!(text.contains("before replacing again"));
+            assert!(!text.contains("second copy"));
+            assert_eq!(
+                header
+                    .prepare(source("B"), DeleteGuard::NothingAlive, None)
+                    .retained,
+                Some("new-request".into())
+            );
         });
     }
 }

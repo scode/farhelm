@@ -1794,6 +1794,12 @@ fn AppBody() -> Element {
     use_context_provider(|| {
         list::ReplaceYoloQuestions(Signal::new(std::collections::HashSet::new()))
     });
+    // Each pending Replace has one clock across its row and selected session.
+    // The request task clears its entry on reply or cancellation, independently
+    // of the longer-lived retry identity above.
+    use_context_provider(|| {
+        replace::ReplaceProgress(Signal::new(std::collections::HashMap::new()))
+    });
     use_context_provider(|| {
         claude_trust::OccurrenceDismissals(Signal::new(std::collections::HashSet::new()))
     });
