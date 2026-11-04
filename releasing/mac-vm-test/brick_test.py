@@ -31,7 +31,7 @@ from machine_profile import Profile, discover, filesystem_id, require_shared_sto
 from network import connect
 from fixture_probe import require_clean_pair
 from verify_release import require_comment
-from guest_tester import native_events, native_image_digests, request as tester_request, RESULT_STATES
+from guest_tester import execution_calls, native_events, native_image_digests, request as tester_request, RESULT_STATES
 from guest_workflow import (copy_credentials, execute as execute_guest, cancel as cancel_guest, require_setup,
                             source_url, task_for, Unavailable, CheckStopped, CleanupPending)
 from checkpoint_contract import turn_timeout
@@ -40,6 +40,35 @@ from checkpoint_contract import turn_timeout
 REPO = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
 ORIGIN = 'https://get.farhelm.io'
+PROVIDER_BACKOFF = (60, 120, 240)
+
+
+def rate_limited_without_actions(execution, events, protocol):
+    """Recognize only a provider refusal that provably preceded every test action.
+
+An uncertain command, GUI request, approval, product observation or failed
+cleanup must stop normally. Strict event/protocol whitelists deliberately
+reject partial or unfamiliar traces rather than guessing that replay is safe.
+The executor's separate stopped acknowledgement remains a caller prerequisite.
+"""
+    if (execution.get('format') != 1 or execution.get('status') != 'automation-failure' or execution.get('exit_code') != 1
+            or 'cleanup_error' not in execution
+            or execution.get('cleanup_error') is not None or execution.get('result') is not None
+            or execution.get('unverified_result') is not None or not events or not protocol):
+        return False
+    if events[-1].get('type') != 'turn.failed':
+        return False
+    for row in events:
+        kind = row.get('type')
+        if kind not in ('thread.started', 'turn.started', 'error', 'turn.failed'):
+            return False
+        if kind in ('error', 'turn.failed'):
+            message = row.get('message') if kind == 'error' else row.get('error', {}).get('message')
+            if not isinstance(message, str) or '429' not in message or 'Too Many Requests' not in message:
+                return False
+    return all(row.get('direction') in ('from-client', 'to-client', 'from-native', 'to-native')
+               and row.get('method') in (None, 'initialize', 'notifications/initialized', 'tools/list')
+               and row.get('error') is False and 'approval_tool' not in row for row in protocol)
 
 
 # Release discovery is read-only; the old source describes the update mechanism.
@@ -223,13 +252,14 @@ Continuity checkpoints require independent before/after receipts as well.
                   **({'update-discovery': True} if pass_id == 'p0-updater-upgrade' else {}),
                   'update-relaunch': True,
                   **({'local-supervisor-agent': True, 'local-old-session': True,
-                      'remote-supervisor-agent': True, 'remote-old-session': True}
+                      'remote-supervisor-agent': True, 'remote-old-session': True,
+                      'remote-host-remove': True, 'remote-host-uninstall': True}
                      if pass_id == 'p0-updater-upgrade' else {})})
         required = {key: {'gui': gui, 'command': gui, 'continuity': False, 'priority': 'P0'}
                     for key, gui in items.items()}
         if pass_id == 'p0-updater-upgrade':
             # Feedback uses the candidate already running on this pair. Its
-            # result must not become a sixth P0 obligation or prevent cleanup.
+            # result is separate from P0 and must not prevent ordinary cleanup.
             required['p1-feedback-send'] = {'gui': True, 'command': False,
                                              'continuity': False, 'priority': 'P1'}
         return required
@@ -383,7 +413,7 @@ reconciliation rather than guessed safe to retry.
 """
 
     def __init__(self, directory, profile, factory=Control, disk_usage=shutil.disk_usage, connector=connect,
-                 volume_id=filesystem_id, tester=execute_guest):
+                 volume_id=filesystem_id, tester=execute_guest, pause=time.sleep, clock=time.monotonic):
         """Bind lifecycle and tester execution to one profile's private evidence root.
 
 Injected services let orchestration tests observe the scheduling and evidence
@@ -399,6 +429,8 @@ claims no guests and does not read or alter the persisted workflow.
         self.connector = connector
         self.volume_id = volume_id
         self.tester = tester
+        self.pause = pause
+        self.clock = clock
         self.path = self.directory / 'workflow.json'
         self.data = None
 
@@ -639,15 +671,15 @@ live send or erase its independently retained outcome.
                         or execution.get('status') != 'pass' or execution.get('result', {}).get('status') != 'pass'
                         or execution.get('result', {}).get('identity') != identity):
                     raise Refused('native tester receipt does not match this checkpoint')
-                calls = native_events(events)
-                image_digests = native_image_digests(events)
+                calls = execution_calls(task, events)
+                image_digests = native_image_digests(events) if calls else set()
                 if spec['gui'] and (not calls or not any(hashlib.sha256(v).hexdigest() in native_image_digests(events)
                                                         for v in contents if is_image(v))):
                     raise Refused('GUI image was not returned by actual guest-native CUA')
-                if check_id == 'p1-feedback-send':
+                if check_id in ('p1-feedback-send', 'remote-host-remove', 'remote-host-uninstall'):
                     captures = {hashlib.sha256(v).hexdigest() for v in contents if is_image(v)}
                     if len(captures & native_image_digests(events)) < 2:
-                        raise Refused('P1 needs two distinct native images; review their before/after-Send meaning')
+                        raise Refused(f'{check_id} needs two distinct native images; review their action/result meaning')
             if spec.get('command') and not any(v and not is_image(v)
                                                and hashlib.sha256(v).hexdigest() not in image_digests
                                                for v in contents):
@@ -724,7 +756,9 @@ racing a live coordinator without guessing numeric PID ownership.
 The workflow lock protects the attempt claim and each imported result, but is
 released while the guest works so status remains queryable. Cleanup and another
 tester refuse the active claim. Every checkpoint gets a fresh bounded turn;
-failures retain their artifacts and stop the sequence without automatic retry.
+        failures retain their artifacts and stop the sequence. Only a proven
+pre-action provider 429 can back off into a separately retained fresh attempt;
+it never retries feedback, uncertain actions or failed cleanup.
 """
         source = Source() if source is None else source
         if type(timeout) is not int or not 30 <= timeout <= 3600:
@@ -818,18 +852,58 @@ failures retain their artifacts and stop the sequence without automatic retry.
                     entry['tester']['guest_directory'] = context['pass_directory'] + '/' + task['attempt']
                     entry['tester']['termination_observed'] = False
                     self.save()
-                with c.locked():
-                    label = self.tester(c, task, source_files)
-                with self.locked():
-                    self.selected(pass_id)['tester']['termination_observed'] = True
-                    self.save()
-                prefix = pass_id + '/' + label + '.tar::./'
-                native = {key: prefix + filename for key, filename in
-                          (('execution', 'execution.json'), ('events', 'events.jsonl'), ('task', 'task.json'))}
-                execution = json.loads(artifact(self.directory, native['execution']))
-                retained_task = json.loads(artifact(self.directory, native['task']))
-                if retained_task != task:
-                    raise Refused('retained guest envelope differs from the claimed attempt')
+                checkpoint_deadline = self.clock() + timeout
+                for provider_attempt in range(len(PROVIDER_BACKOFF) + 1):
+                    with c.locked():
+                        label = self.tester(c, task, source_files)
+                    with self.locked():
+                        self.selected(pass_id)['tester']['termination_observed'] = True
+                        self.save()
+                    prefix = pass_id + '/' + label + '.tar::./'
+                    native = {key: prefix + filename for key, filename in
+                              (('execution', 'execution.json'), ('events', 'events.jsonl'), ('task', 'task.json'))}
+                    execution = json.loads(artifact(self.directory, native['execution']))
+                    retained_task = json.loads(artifact(self.directory, native['task']))
+                    if retained_task != task:
+                        raise Refused('retained guest envelope differs from the claimed attempt')
+                    if (execution.get('status') != 'automation-failure' or is_p1
+                            or provider_attempt == len(PROVIDER_BACKOFF)):
+                        break
+                    try:
+                        retry_refs = dict(native, protocol=prefix + 'managed-protocol.jsonl')
+                        retry_bytes = {key: artifact(self.directory, ref) for key, ref in retry_refs.items()}
+                        event_rows = [json.loads(row) for row in retry_bytes['events'].splitlines() if row]
+                        protocol_rows = [json.loads(row) for row in retry_bytes['protocol'].splitlines() if row]
+                        safe = rate_limited_without_actions(execution, event_rows, protocol_rows)
+                    except (OSError, ValueError, RuntimeError, KeyError, TypeError, AttributeError, tarfile.TarError):
+                        safe = False
+                    delay = PROVIDER_BACKOFF[provider_attempt]
+                    if not safe or self.clock() + delay + 30 >= checkpoint_deadline:
+                        break
+                    with self.locked():
+                        entry = self.selected(pass_id)
+                        entry.setdefault('provider_retries', []).append({
+                            'check_id': check_id, 'attempt': task['attempt'], 'delay_seconds': delay,
+                            'detail': 'Provider 429 before any command, UI or approval; stopped acknowledgement retained.',
+                            'sha256': {retry_refs[key]: hashlib.sha256(raw).hexdigest()
+                                       for key, raw in retry_bytes.items()}})
+                        self.save()
+                        self.note('decision', f'Provider 429 before actions at `{pass_id}/{check_id}`; '
+                                  f'retain attempt `{task["attempt"]}`, back off {delay}s before a fresh attempt.')
+                    print(json.dumps({'pass': pass_id, 'check': check_id, 'provider_backoff_seconds': delay}), flush=True)
+                    self.pause(delay)
+                    with self.locked():
+                        entry = self.selected(pass_id)
+                        if check_id in ('update-discovery', 'update-relaunch') and (
+                                download(ORIGIN + '/latest').decode().strip() != entry['latest_at_selection']):
+                            raise Unavailable('public default changed during provider backoff; replan before update actions')
+                        remaining = int(checkpoint_deadline - self.clock())
+                        if remaining < 30:
+                            raise Unavailable('provider backoff exhausted the checkpoint deadline')
+                        task = task_for(self, pass_id, check_id, context, remaining)
+                        entry['tester'].update(attempt=task['attempt'], termination_observed=False,
+                            guest_directory=context['pass_directory'] + '/' + task['attempt'])
+                        self.save()
                 observation = execution.get('result') or execution.get('unverified_result')
                 identity = {key: task[key] for key in ('attempt', 'run_id', 'pass_id', 'check_id')}
                 if observation is not None and observation.get('identity') != identity:
@@ -1089,6 +1163,8 @@ including the larger bound for the guest-native event stream.
     def verdict(self, entry):
         """Missing, invalidated or skipped checks cannot become a release pass."""
         results = entry['results']
+        if any(not self.result_evidence_retained(row) for row in entry.get('provider_retries', [])):
+            return 'could not run'
         failure = entry.get('automation_failure', {})
         if failure.get('check_id') == 'native-preflight' or failure.get('check_id') in entry['required']:
             return 'could not run' if failure.get('status') == 'could-not-run' else 'fail'
@@ -1124,7 +1200,7 @@ including the larger bound for the guest-native event stream.
         """Report P0, P1, requested scope and full coverage independently.
 
 Every answer rechecks retained bytes. Legacy observations and fixture smoke
-remain distinguishable from the five declared P0 product checks; unfinished
+remain distinguishable from the declared P0 product checks; unfinished
 bonus work cannot erase a P0 pass or become a full acceptance pass. P1 is part
 of its fixture's full verdict but excluded from P0's projections.
 """
@@ -1148,7 +1224,11 @@ of its fixture's full verdict but excluded from P0's projections.
         if self.data.get('gui_backend') == 'guest-native':
             failures = {key: entry['automation_failure'] for key, entry in self.data['passes'].items()
                         if entry.get('automation_failure', {}).get('kind') == 'harness-failure'}
-            output['automation'] = {'verdict': 'fail' if failures else 'no failure observed', 'failures': failures}
+            retries = {key: entry['provider_retries'] for key, entry in self.data['passes'].items()
+                       if entry.get('provider_retries')}
+            output['automation'] = {'verdict': ('fail' if failures else 'recovered provider interruption'
+                                               if retries else 'no failure observed'),
+                                    'failures': failures, 'provider_retries': retries}
             # An aborted turn cannot prove a product failure, but losing turn
             # completion must not relabel its observed break as harmless setup.
             claims = [{ 'pass_id': key, 'check_id': entry['tester']['check_id'],
@@ -1171,7 +1251,7 @@ of its fixture's full verdict but excluded from P0's projections.
                     value for value in output['unverified_product_failures'] if value['pass_id'] in p0_ids
                     and self.selected(value['pass_id'])['required'][value['check_id']].get('priority', 'P0') == 'P0']
             if p0_ids:
-                # Publish the user's five questions, including separate local
+                # Publish each product boundary, including separate local
                 # and remote agent results, without weakening prerequisite or
                 # retained-evidence validation of the complete P0 verdict. Each
                 # host's old-session check answers part of that host's
@@ -1185,6 +1265,10 @@ of its fixture's full verdict but excluded from P0's projections.
                               ['local-supervisor-agent', 'local-old-session']),
                              ('remote-supervisor-agent', 'p0-updater-upgrade',
                               ['remote-supervisor-agent', 'remote-old-session'])]
+                # Saved runs retain the menu coverage they actually declared.
+                for check in ('remote-host-remove', 'remote-host-uninstall'):
+                    if check in self.selected('p0-updater-upgrade')['required']:
+                        questions.append((check, 'p0-updater-upgrade', [check]))
                 output['p0']['checks'] = {}
                 for label, pass_id, keys in questions:
                     entry = priority_entry(self.selected(pass_id), 'P0')
@@ -1334,7 +1418,7 @@ def main():
         if name == 'init':
             scope = child.add_mutually_exclusive_group()
             scope.add_argument('--stop-after-p0', action='store_true',
-                               help='complete the five P0 checks and refuse bonus fixtures')
+                               help='complete the seven P0 checks and refuse bonus fixtures')
             scope.add_argument('--stop-after-p1', action='store_true',
                                help='complete P0 and the feedback P1 check, then stop')
     sub.add_parser('smoke')

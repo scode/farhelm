@@ -693,7 +693,8 @@ image evidence so cleanup cannot silently skip its new obligation.
             self.assertEqual(report['p0']['verdict'], 'pass')
             self.assertEqual(list(report['p0']['checks']),
                              ['fresh-install-start', 'installer-upgrade', 'click-to-upgrade',
-                              'local-supervisor-agent', 'remote-supervisor-agent'])
+                              'local-supervisor-agent', 'remote-supervisor-agent',
+                              'remote-host-remove', 'remote-host-uninstall'])
             self.assertEqual(set(report['p0']['checks'].values()), {'pass'})
             self.assertEqual(report['verdict'], 'could not run')
         self.prepare('fresh')
@@ -754,9 +755,9 @@ image evidence so cleanup cannot silently skip its new obligation.
             with self.assertRaisesRegex(Refused, 'bonus passes'):
                 self.run.add_check('p0-updater-upgrade', 'extra-settings', gui=True)
 
-    def test_each_p0_agent_check_needs_command_evidence_and_reports_separately(self):
-        """A local success cannot conceal an untested remote agent, and GUI evidence alone is insufficient."""
-        # P0-only scope keeps this regression about agent evidence, without
+    def test_each_p0_agent_and_menu_check_needs_command_evidence_and_reports_separately(self):
+        """Agent and menu checks need independent command evidence; an earlier success cannot waive a later check."""
+        # P0-only scope keeps this regression about product-check evidence, without
         # inventing a feedback-send observation merely to clean its pair.
         self.enable_p0(p0_only=True)
         self.complete_p0('p0-fresh')
@@ -766,7 +767,8 @@ image evidence so cleanup cannot silently skip its new obligation.
         image = self.evidence_file('agent.png', PNG)
         command = self.evidence_file('agent.txt', b'synthetic agent response receipt')
         with self.run.locked():
-            for check in ('local-supervisor-agent', 'local-old-session', 'remote-supervisor-agent', 'remote-old-session'):
+            for check in ('local-supervisor-agent', 'local-old-session', 'remote-supervisor-agent', 'remote-old-session',
+                          'remote-host-remove', 'remote-host-uninstall'):
                 with self.assertRaisesRegex(Refused, 'command/identity evidence'):
                     self.run.record('p0-updater-upgrade', check, 'pass', [image], 'GUI alone is not execution evidence.')
                 self.run.record('p0-updater-upgrade', check, 'pass', [image, command], 'Synthetic evidence format only.')
@@ -782,7 +784,7 @@ image evidence so cleanup cannot silently skip its new obligation.
             self.run.cleanup('p0-updater-upgrade')
 
     def test_old_sessions_follow_each_hosts_agent_check_and_fold_into_its_question(self):
-        """The terminal transition is part of P0 without changing its five questions.
+        """The terminal transition belongs to each supervisor question, before the remote menu checks.
 
 Each old-session check must follow its host's new-session check, which tells it
 whether the candidate creates terminal hosts; the remote one must also follow
@@ -792,7 +794,7 @@ A manifest written before these checks still answers all five questions.
         self.assertEqual(list(checks('p0-updater-upgrade')),
                          ['artifact-verification', 'old-fixture', 'update-discovery', 'update-relaunch',
                           'local-supervisor-agent', 'local-old-session', 'remote-supervisor-agent',
-                          'remote-old-session', 'p1-feedback-send'])
+                          'remote-old-session', 'remote-host-remove', 'remote-host-uninstall', 'p1-feedback-send'])
         for check in ('local-old-session', 'remote-old-session'):
             self.assertEqual(checks('p0-updater-upgrade')[check],
                              {'gui': True, 'command': True, 'continuity': False, 'priority': 'P0'})
@@ -882,6 +884,23 @@ coordinator still answers all five questions without the keys it never declared.
             self.assertEqual(self.run.report()['p0']['verdict'], 'not planned')
             self.assertEqual(self.run.report()['p1']['verdict'], 'not planned')
 
+    def test_saved_five_check_run_keeps_its_original_p0_contract(self):
+        """Adding future coverage must not rewrite a retained release's accepted verdict or invent missing menu results."""
+        self.enable_p0(p0_only=True)
+        with self.run.locked():
+            required = self.run.selected('p0-updater-upgrade')['required']
+            for check in ('remote-host-remove', 'remote-host-uninstall'):
+                required.pop(check)
+            self.run.save()
+        for pass_id in self.run.data['plan']['p0_sequence']:
+            self.complete_p0(pass_id)
+        with self.run.locked():
+            report = self.run.report()['p0']
+            self.assertEqual(report['verdict'], 'pass')
+            self.assertEqual(len(report['checks']), 5)
+            self.assertNotIn('remote-host-remove', report['checks'])
+            self.assertNotIn('remote-host-uninstall', report['checks'])
+
     def ready_for_p1(self, p0_only=False, p1_only=False):
         """Leave the final candidate pair live after independently validated P0.
 
@@ -891,7 +910,7 @@ The two preceding pairs have already passed their evidence and cleanup gates.
         self.enable_p0(p0_only=p0_only, p1_only=p1_only)
         self.complete_p0('p0-fresh')
         self.complete_p0('p0-installer-upgrade')
-        children = self.complete_p0('p0-updater-upgrade', through='remote-old-session')
+        children = self.complete_p0('p0-updater-upgrade', through='remote-host-uninstall')
         self.assertTrue(all(child.poll() is None for child in children))
         with self.run.locked():
             self.assertEqual(self.run.report()['p0']['verdict'], 'pass')
@@ -975,7 +994,14 @@ lift that protection either: the scope fences future work, not evidence.
                     self.run.record('p0-updater-upgrade', 'p1-feedback-send', status, [image], 'Out of order.')
             command = self.evidence_file('remote-old-session.txt', b'synthetic remote old-session receipt')
             self.run.record('p0-updater-upgrade', 'remote-old-session', 'pass', [image, command],
-                            'Synthetic evidence; all P0 checks now recorded.')
+                            'Synthetic old-session evidence; menu checks are still required.')
+            self.assertEqual(self.run.report()['p0']['verdict'], 'could not run')
+            for check in ('remote-host-remove', 'remote-host-uninstall'):
+                for status in ('pass', 'fail', 'could-not-run'):
+                    with self.subTest(pending=check, status=status), self.assertRaisesRegex(Refused, 'complete all P0'):
+                        self.run.record('p0-updater-upgrade', 'p1-feedback-send', status, [image], 'Before menu checks.')
+                self.run.record('p0-updater-upgrade', check, 'pass', [image, command],
+                                'Synthetic menu evidence; no real host mutation claimed.')
             self.assertEqual(self.run.report()['p0']['verdict'], 'pass')
             # A previously accepted earlier fixture is still a prerequisite:
             # the last pair alone cannot authorize P1 after its bytes changed.

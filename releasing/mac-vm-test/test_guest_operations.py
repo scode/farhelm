@@ -6,6 +6,7 @@ fake native provider is deliberately not a Farhelm acceptance observation.
 
 import calendar
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -21,10 +22,11 @@ import types
 import unittest
 from unittest import mock
 
-from guest_operations import Operations, parse_mac_processes, select_hosts, serve, write_json
+from guest_operations import (Operations, installer_environment, parse_mac_processes, remote_host_snapshot,
+                              run_fixed, select_hosts, serve, write_json)
 from guest_tester import managed_result, native_args, prompt, TesterError
 from checkpoint_contract import (available_operations, require_agent_terminal, require_old_session,
-                                 required_operations, turn_timeout)
+                                 required_operations, require_remote_host_effect, turn_timeout)
 from guest_workflow import managed_instructions
 from test_guest_tester import task
 from test_window_geometry import observation
@@ -51,6 +53,97 @@ class ManagedOperationsTests(unittest.TestCase):
         """Use explicit fixture paths and optionally inject the fixed command boundary."""
         kwargs = {} if runner is None else {'runner': runner}
         return Operations(value or self.value, output or self.output, home=self.root / 'guest-home', **kwargs)
+
+    def test_remote_menu_effects_distinguish_remove_from_uninstall(self):
+        """An empty fixture or missing data cannot pass either menu check.
+
+Remove must preserve the live supervisor and installed resources, whereas
+Uninstall must remove them. Both retain the database, so swapped menu actions
+or a destructive cleanup cannot be accepted from a model's success claim.
+"""
+        before = {'service': {'LoadState': 'loaded', 'ActiveState': 'active', 'SubState': 'running', 'MainPID': '71'},
+                  'lib_present': True, 'unit_present': True, 'binary_sha256': 'binary', 'unit_sha256': 'unit',
+                  'data_present': True, 'database_present': True}
+        uninstalled = dict(before, service={'LoadState': 'not-found', 'ActiveState': 'inactive',
+                                           'SubState': 'dead', 'MainPID': '0'}, lib_present=False,
+                           unit_present=False, binary_sha256=None, unit_sha256=None)
+        require_remote_host_effect('remote-host-remove', before, before)
+        require_remote_host_effect('remote-host-uninstall', before, uninstalled)
+        for check, after in (('remote-host-remove', uninstalled), ('remote-host-uninstall', before)):
+            with self.subTest(swapped=check), self.assertRaises(RuntimeError):
+                require_remote_host_effect(check, before, after)
+        for check, after in (('remote-host-remove', before), ('remote-host-uninstall', uninstalled)):
+            for key in ('data_present', 'database_present'):
+                with self.subTest(check=check, lost=key), self.assertRaises(RuntimeError):
+                    require_remote_host_effect(check, before, dict(after, **{key: False}))
+            with self.subTest(empty_start=check), self.assertRaises(RuntimeError):
+                require_remote_host_effect(check, uninstalled, after)
+        for key, value in (('MainPID', '72'), ('ActiveState', 'inactive')):
+            with self.subTest(changed_service=key), self.assertRaises(RuntimeError):
+                require_remote_host_effect('remote-host-remove', before,
+                                          dict(before, service=dict(before['service'], **{key: value})))
+
+    def test_remote_snapshot_requires_manager_and_records_files_independently(self):
+        """A disconnected user bus cannot masquerade as a successful uninstall.
+
+Read real fixture files with the production probe; only systemctl is injected.
+Missing units may return exit 1, but only a positive manager probe and explicit
+not-found/inactive properties make that an acceptable absence observation.
+"""
+        home = self.root / 'remote-home'
+        for path, data in (('.local/lib/farhelm/farhelm', b'binary'),
+                           ('.config/systemd/user/farhelm-supervisor.service', b'unit'),
+                           ('.local/state/farhelm/supervisor.db', b'database')):
+            file = home / path
+            file.parent.mkdir(parents=True, exist_ok=True)
+            file.write_bytes(data)
+        loaded = b'LoadState=loaded\nActiveState=active\nSubState=running\nMainPID=71\n'
+        def reply(code, output):
+            """Expose exactly the subprocess text mode used by the Linux probe."""
+            return subprocess.CompletedProcess([], code, output.decode(), '')
+        with mock.patch('guest_operations.subprocess.run', side_effect=[reply(0, b'255\n'), reply(0, loaded)]):
+            snapshot = remote_host_snapshot(home)
+        self.assertEqual(snapshot['binary_sha256'], hashlib.sha256(b'binary').hexdigest())
+        self.assertEqual(snapshot['unit_sha256'], hashlib.sha256(b'unit').hexdigest())
+        self.assertTrue(snapshot['database_present'])
+        with mock.patch('guest_operations.subprocess.run', return_value=reply(1, b'')) as runner:
+            with self.assertRaisesRegex(RuntimeError, 'user manager'):
+                remote_host_snapshot(home)
+            self.assertEqual(runner.call_count, 1)
+        missing = b'LoadState=not-found\nActiveState=inactive\nSubState=dead\nMainPID=0\n'
+        with mock.patch('guest_operations.subprocess.run', side_effect=[reply(0, b'255\n'), reply(1, missing)]):
+            self.assertEqual(remote_host_snapshot(home)['service']['LoadState'], 'not-found')
+        with mock.patch('guest_operations.subprocess.run', side_effect=[reply(0, b'255\n'), reply(1, loaded)]):
+            with self.assertRaisesRegex(RuntimeError, 'service observation'):
+                remote_host_snapshot(home)
+
+    def test_remote_menu_snapshots_are_ordered_and_before_cannot_be_replaced(self):
+        """A late or overwritten baseline must not hide an earlier destructive menu action."""
+        self.value['check_id'] = 'remote-host-remove'
+        operations = self.operations()
+        with self.assertRaisesRegex(RuntimeError, 'required first'):
+            operations.perform('remote_host_after')
+        with mock.patch.object(operations, 'ssh', return_value={'stdout': '{}'}) as ssh:
+            operations.dispatch('remote_host_before')
+            operations.dispatch('remote_host_after')
+            self.assertIn('def remote_host_snapshot', ssh.call_args.args[0])
+            with self.assertRaisesRegex(RuntimeError, 'already retained'):
+                operations.dispatch('remote_host_before')
+        self.assertNotIn('remote_host_before', available_operations('remote-supervisor-agent', 'p0-updater-upgrade', 'override'))
+
+    def test_remote_menu_pass_requires_independent_effect_receipts(self):
+        """Native success text alone cannot waive the SSH before/after acceptance contract."""
+        for check in ('remote-host-remove', 'remote-host-uninstall'):
+            with self.subTest(check=check):
+                self.value['check_id'] = check
+                self.value['pass_id'] = 'p0-updater-upgrade'
+                write_json(self.output / 'managed-operations.json', {
+                    'completed': sorted(required_operations(check, 'p0-updater-upgrade', 'override') - {'remote_host_after'}),
+                    'observations': {}, 'receipts': [], 'continuity': None}, replace=True)
+                with self.assertRaisesRegex(TesterError, 'omitted operations: remote_host_after'):
+                    managed_result(self.value, self.output, {'status': 'pass', 'detail': 'Native success claim'})
+                self.assertIn('Remove' if check.endswith('remove') else 'Uninstall',
+                              managed_instructions(check, 'p0-updater-upgrade', 'override'))
 
     def test_failed_command_blocks_native_call_even_when_client_continues(self):
         """The old failure batched a failed receipt command and a restart; the second must never be forwarded."""
@@ -157,6 +250,121 @@ class ManagedOperationsTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'clean and verified'):
             operations.dispatch('install_previous')
         self.assertIsNotNone(operations.failure)
+
+    def test_installer_entrypoints_distinguish_fresh_fixtures_from_updates(self):
+        """The new installer's update-only refusal must not prevent fresh or old-fixture setup.
+
+Run a small installer contract fixture through the actual fixed operation and
+shell boundary. It refuses a checksum-file invocation without an existing app,
+and requires that same input for a manual upgrade of an existing app.
+"""
+        cases = (
+            ('p0-fresh', 'install', 'install_candidate', False),
+            ('fresh', 'install', 'install_candidate', False),
+            ('p0-installer-upgrade', 'old-fixture', 'install_previous', False),
+            ('upgrade-v0.31.0', 'old-fixture', 'install_previous', False),
+            ('p0-installer-upgrade', 'update-relaunch', 'install_candidate', True),
+            ('upgrade-v0.31.0', 'update-relaunch', 'install_candidate', True),
+        )
+        for number, (pass_id, check, operation, update) in enumerate(cases):
+            with self.subTest(pass_id=pass_id, check=check):
+                directory = self.root / f'install-{number}'
+                output = directory / 'attempt/output'
+                (output / 'work').mkdir(parents=True)
+                context = dict(self.value['context'], pass_directory=str(directory),
+                               signed_inputs=str(directory / 'signed'), update_path='manual')
+                value = dict(self.value, pass_id=pass_id, check_id=check, context=context)
+                signed = directory / ('old-signed-inputs' if operation == 'install_previous' else 'signed')
+                signed.mkdir()
+                version = context['previous' if operation == 'install_previous' else 'candidate']
+                script = signed / 'install.sh'
+                script.write_text('''if [ -n "${FARHELM_INSTALL_SUMS_FILE:-}" ]; then
+    test -d "$HOME/Applications/Farhelm.app" || exit 23
+    test "$FARHELM_INSTALL_SUMS_FILE" = "$EXPECTED_SUMS" || exit 24
+elif [ "$EXPECT_UPDATE" = 1 ]; then
+    exit 25
+fi
+test "$FARHELM_VERSION" = "$EXPECTED_VERSION" || exit 26
+printf 'installer contract satisfied\\n'
+''')
+                sums = signed / 'SHA256SUMS'
+                sums.write_text('fictional checksums\n')
+                write_json(signed / 'verification.json', {
+                    'version': version, 'installer_sha256': hashlib.sha256(script.read_bytes()).hexdigest(),
+                    'sha256sums_sha256': hashlib.sha256(sums.read_bytes()).hexdigest()})
+                home = directory / 'home'
+                if update:
+                    (home / 'Applications/Farhelm.app').mkdir(parents=True)
+
+                def runner(argv, **kwargs):
+                    """Give only the child its fixture home and the installer contract's expected mode."""
+                    kwargs['env'] = dict(kwargs['env'], HOME=str(home), EXPECT_UPDATE=str(int(update)),
+                                         EXPECTED_SUMS=str(sums), EXPECTED_VERSION=version)
+                    return subprocess.run(argv, **kwargs)
+
+                operations = Operations(value, output, runner=runner, home=home)
+                if operation == 'install_previous':
+                    operations.completed.update(('fixture_clean', 'verify_previous'))
+                with mock.patch.object(operations, 'version', return_value={'installed': version.removeprefix('v')}):
+                    result = operations.dispatch(operation)
+                self.assertEqual(result['observation']['installer']['stdout'], 'installer contract satisfied\n')
+                self.assertIn(operation, operations.completed)
+
+    def test_installer_mode_does_not_inherit_another_updaters_inputs(self):
+        """Ambient updater state must not turn setup into update-only or bind it to an unrelated generation."""
+        ambient = {'PATH': '/fictional/bin', 'FARHELM_VERSION': 'v0.1.0',
+                   'FARHELM_INSTALL_SUMS_FILE': '/other/SHA256SUMS', 'FARHELM_INSTALL_EXPECT': 'other-generation'}
+        original = dict(ambient)
+        for update in (False, True):
+            with self.subTest(update=update):
+                result = installer_environment(ambient, 'v0.32.0-rc.2', Path('/verified/SHA256SUMS'), update=update)
+                self.assertEqual(result['FARHELM_VERSION'], 'v0.32.0-rc.2')
+                self.assertEqual(result['PATH'], '/fictional/bin')
+                self.assertNotIn('FARHELM_INSTALL_EXPECT', result)
+                if update:
+                    self.assertEqual(result['FARHELM_INSTALL_SUMS_FILE'], '/verified/SHA256SUMS')
+                else:
+                    self.assertNotIn('FARHELM_INSTALL_SUMS_FILE', result)
+                self.assertEqual(ambient, original)
+
+    def test_fixed_check_runs_only_its_selected_operation_without_native_provider(self):
+        """Command-only acceptance must not spend a model turn or acquire a UI action lane."""
+        self.value.update(check_id='artifact-verification', gui=False)
+        operations = mock.Mock()
+        operations.dispatch.return_value = {'receipt': 'managed-001-verify-candidate.json'}
+        with mock.patch('sys.stdout', new_callable=io.StringIO) as stream:
+            run_fixed(self.value, self.output, factory=lambda task, output: operations)
+        operations.dispatch.assert_called_once_with('verify_candidate')
+        rows = [json.loads(row) for row in stream.getvalue().splitlines()]
+        self.assertEqual([row['type'] for row in rows], ['fixed.operation.completed', 'fixed.execution.completed'])
+        self.assertEqual(rows[0]['identity']['attempt'], self.value['attempt'])
+        self.assertEqual(json.loads((self.output / 'final.txt').read_text())['status'], 'pass')
+
+    def test_fixed_executor_refuses_gui_and_stops_after_an_operation_failure(self):
+        """Neither an unsupported checkpoint nor a failed command may manufacture fixed completion."""
+        with self.assertRaisesRegex(RuntimeError, 'requires the native tester'):
+            run_fixed(self.value, self.output, factory=lambda *args: self.fail('GUI acquired fixed commands'))
+        self.value.update(check_id='artifact-verification', gui=False)
+        operations = mock.Mock()
+        operations.dispatch.side_effect = RuntimeError('fixture command failed')
+        with mock.patch('sys.stdout', new_callable=io.StringIO) as stream:
+            with self.assertRaisesRegex(RuntimeError, 'fixture command failed'):
+                run_fixed(self.value, self.output, factory=lambda task, output: operations)
+        self.assertEqual(stream.getvalue(), '')
+        self.assertFalse((self.output / 'final.txt').exists())
+
+    def test_fixed_installation_cannot_pass_on_the_installers_exit_alone(self):
+        """A successful installer must agree with the installed marker, bundle and CLI before app startup."""
+        self.value.update(check_id='install', gui=False)
+        versions = {'installed': '0.30.0', 'bundle': '0.30.0', 'cli': {'stdout': 'farhelm 0.30.0\n'}}
+        path = self.output / 'managed-operations.json'
+        for field in ('installed', 'bundle', 'cli'):
+            with self.subTest(field=field):
+                wrong = dict(versions, **{field: {'stdout': 'farhelm 0.29.0\n'} if field == 'cli' else '0.29.0'})
+                write_json(path, {'completed': ['install_candidate'], 'receipts': ['fixture.json'],
+                    'observations': {'install_candidate': {'versions': wrong}}, 'continuity': None}, replace=True)
+                with self.assertRaisesRegex(TesterError, 'installation-version'):
+                    managed_result(self.value, self.output, {'status': 'pass', 'detail': 'unverified exit0'})
 
     def test_mutation_cannot_be_replayed_while_observations_can_poll(self):
         """A lost-looking UI response must not cause a second launch that conceals the first outcome."""
@@ -327,6 +535,107 @@ class ManagedOperationsTests(unittest.TestCase):
         self.assertIn('launch_override', required_operations('update-discovery', 'p0-updater-upgrade', 'override'))
         self.assertNotIn('launch_override', required_operations('update-relaunch', 'p0-updater-upgrade', 'override'))
         self.assertIn('launch_override', required_operations('update-relaunch', 'upgrade-v0.29.0', 'override'))
+
+    def test_p0_native_readiness_uses_a_normal_finder_window_before_images(self):
+        """Menu dismissal is a readiness premise, not an assumed effect of Escape.
+
+A Help menu left over the Desktop made the native provider refuse a capture
+before any product action. Every P0 fixture must establish the same ordinary
+window/search probe without adding bonus gesture prerequisites.
+"""
+        for pass_id in ('p0-fresh', 'p0-installer-upgrade', 'p0-updater-upgrade'):
+            with self.subTest(pass_id=pass_id):
+                text = managed_instructions('native-preflight', pass_id, None)
+                self.assertIn('normal file window', text)
+                self.assertIn('File > New\nFinder Window', text)
+                self.assertIn('Cancel secondary action', text)
+                self.assertIn('Escape alone is not proof', text)
+                self.assertIn('click its Search control', text)
+                self.assertIn('Do not open\nHelp or Go to Folder', text)
+                self.assertIn('P0 does not require drag or double-click probes', text)
+
+    def test_override_removal_accepts_exact_native_accessibility_version(self):
+        """Native version text proves the channel even when a tooltip image is unavailable.
+
+An unpromoted candidate and the public default must remain distinguishable.
+Neither generic Up to date text nor an endpoint that now names the candidate
+proves override removal. Keep this contract in both P0 and bonus upgrades.
+"""
+        for pass_id in ('p0-updater-upgrade', 'upgrade-v0.32.0'):
+            with self.subTest(pass_id=pass_id):
+                text = managed_instructions('update-relaunch', pass_id, 'override')
+                self.assertIn('fresh native UI text naming\nthe exact public default', text)
+                self.assertIn('accessibility text or its visible tooltip', text)
+                self.assertIn('A tooltip image is optional', text)
+                self.assertIn('An Up to date message alone does not distinguish', text)
+                self.assertIn('indistinguishable\noverride-removal observation as a gap', text)
+                self.assertIn('public_latest', required_operations('update-relaunch', pass_id, 'override'))
+                self.assertIn('candidate acceptance image', text)
+
+    def test_fast_discovery_keeps_durable_evidence_without_progress_images(self):
+        """A completed updater must not fail because its progress UI vanished before capture.
+
+The delivered contract still requires a native Restart offer and independent
+logs/version observations. Both P0 discovery and combined bonus upgrades must
+carry it; these assertions cover the contract, not native image meaning.
+"""
+        for path in ('ordinary', 'override'):
+            for check, pass_id in (('update-discovery', 'p0-updater-upgrade'),
+                                   ('update-relaunch', 'upgrade-v0.29.0')):
+                with self.subTest(path=path, check=check):
+                    text = managed_instructions(check, pass_id, path)
+                    self.assertIn('Capture the completed native Restart\nto update offer', text)
+                    self.assertIn('An installing-state screenshot is optional', text)
+                    self.assertIn('Call update_logs and versions', text)
+
+        self.value['check_id'] = 'update-discovery'
+        self.value['context']['update_path'] = 'ordinary'
+        write_json(self.output / 'managed-operations.json', {
+            'completed': ['update_logs', 'versions'], 'receipts': [], 'continuity': None,
+            'observations': {
+                'update_logs': {'available': True, 'lines': ['updater: 0.30.0 is installed; a restart finishes the update']},
+                'versions': {'installed': '0.30.0', 'bundle': '0.30.0',
+                             'running_versions': ['0.29.0'], 'cli': {'stdout': 'farhelm 0.30.0\n'}}}})
+        self.assertEqual(managed_result(self.value, self.output, {
+            'status': 'pass', 'detail': 'Native completed Restart offer observed; installation already finished.'})['status'], 'pass')
+
+    def test_discovery_requires_installed_candidate_despite_a_ui_success_claim(self):
+        """A UI success claim cannot hide an incomplete installation.
+
+The old process may remain alive until the next checkpoint, but the installed
+record, bundle and CLI must independently agree on the candidate already.
+"""
+        self.value['check_id'] = 'update-discovery'
+        self.value['context']['update_path'] = 'ordinary'
+        versions = {'installed': '0.30.0', 'bundle': '0.30.0', 'cli': {'stdout': 'farhelm 0.30.0\n'}}
+        for field in ('installed', 'bundle', 'cli'):
+            with self.subTest(field=field):
+                wrong = dict(versions, **{field: {'stdout': 'farhelm 0.29.0\n'} if field == 'cli' else '0.29.0'})
+                write_json(self.output / 'managed-operations.json', {
+                    'completed': ['update_logs', 'versions'], 'receipts': [], 'continuity': None,
+                    'observations': {'versions': wrong, 'update_logs': {'available': True, 'lines': []}}}, replace=True)
+                with self.assertRaisesRegex(TesterError, 'installation-version'):
+                    managed_result(self.value, self.output, {'status': 'pass', 'detail': 'Unverified UI claim'})
+
+    def test_remote_update_contract_accepts_direct_action_without_inventing_a_dialog(self):
+        """A product's direct Update now path must satisfy the same upgrade contract.
+
+P0 still needs a real remote agent response and independent service evidence;
+bonus upgrades still need original-process continuity. A confirmation dialog
+is conditional product UI, not an additional acceptance state to manufacture.
+"""
+        for check, pass_id in (('remote-supervisor-agent', 'p0-updater-upgrade'),
+                               ('remote-update', 'upgrade-v0.29.0')):
+            with self.subTest(check=check):
+                text = managed_instructions(check, pass_id, 'override')
+                self.assertIn('Update now when offered', text)
+                self.assertIn('confirmation if offered', text)
+                self.assertIn('do not require an extra', text.lower())
+                self.assertIn('absence of a confirmation is not', text.lower())
+                self.assertIn('repeat a completed update', text)
+                self.assertIn('remote_version', required_operations(check, pass_id, 'override'))
+        self.assertIn('actual\nanswer 42', managed_instructions('remote-supervisor-agent', 'p0-updater-upgrade', 'override'))
+        self.assertIn('continuity_remote_after', required_operations('remote-update', 'upgrade-v0.29.0', 'override'))
 
     def test_native_failure_record_omits_image_payload(self):
         """The latch remains small even when a provider returns a screenshot beside its error."""

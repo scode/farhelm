@@ -18,7 +18,7 @@ from unittest import mock
 
 from brick_test import plan
 from test_brick_test import FakeSource
-from guest_tester import (TesterError, child_exited, group_live, native_events, request, retain_native_captures,
+from guest_tester import (TesterError, child_exited, execution_calls, group_live, native_events, request, retain_native_captures,
                          run, stop_owned_group, validate_result)
 
 
@@ -46,6 +46,14 @@ def result(value, status='pass'):
     return {'identity': {key: value[key] for key in ('attempt', 'run_id', 'pass_id', 'check_id')},
             'status': status, 'detail': 'Observed the declared fixture action.',
             'evidence': ['native.jpg'], 'continuity': None}
+
+
+def fixed_events(value):
+    """Keep fictional fixed execution distinct from the native-image fixture above."""
+    identity = {key: value[key] for key in ('attempt', 'run_id', 'pass_id', 'check_id')}
+    return [{'type': 'fixed.operation.completed', 'identity': identity,
+             'operation': 'verify_candidate', 'receipt': 'managed-001-verify-candidate.json'},
+            {'type': 'fixed.execution.completed', 'identity': identity}]
 
 
 class GuestTesterTests(unittest.TestCase):
@@ -91,6 +99,74 @@ that cross-phase naming mismatch.
             validate_result(value, result(value), self.root, events())
         with self.assertRaisesRegex(TesterError, 'no actual'):
             validate_result(value, result(value), self.root, [{'type': 'turn.completed'}])
+
+    def test_fixed_provenance_is_complete_bound_and_never_native(self):
+        """Fixed completion can prove only its exact command-only task, never GUI input or a model turn."""
+        value = dict(task(False), check_id='artifact-verification', context={'managed_operations': True})
+        rows = fixed_events(value)
+        self.assertEqual(execution_calls(value, rows), [])
+        with self.assertRaisesRegex(TesterError, 'turn did not complete'):
+            native_events(rows)
+        invalid = [rows[:-1], rows + events(), fixed_events(dict(value, attempt='other')),
+                   [dict(rows[0], operation='install_candidate'), rows[1]]]
+        for changed in invalid:
+            with self.subTest(events=changed), self.assertRaises(TesterError):
+                execution_calls(value, changed)
+        for changed in (dict(value, gui=True), dict(value, check_id='app-start')):
+            with self.subTest(task=changed), self.assertRaises(TesterError):
+                execution_calls(changed, rows)
+
+    def test_command_checkpoint_uses_an_owned_fixed_child_instead_of_codex(self):
+        """The normal executor must retain fixed receipts while preserving its child ownership and export path."""
+        value = dict(task(False), check_id='artifact-verification', context={'managed_operations': True})
+        output = self.root / 'fixed'
+        value['settings']['python'] = sys.executable
+        final = {'status': 'pass', 'detail': 'Fixed verification fixture completed.'}
+        record = {'completed': ['verify_candidate'], 'receipts': ['managed-001-verify-candidate.json'],
+                  'observations': {}, 'continuity': None}
+        script = ('import json;from pathlib import Path; '
+                  'p=Path(' + repr(str(output)) + '); '
+                  '(p/"final.txt").write_text(' + repr(json.dumps(final)) + '); '
+                  '(p/"managed-operations.json").write_text(' + repr(json.dumps(record)) + '); '
+                  '(p/"work/managed-001-verify-candidate.json").write_text("{\\"fixture\\":true}"); '
+                  '[print(json.dumps(row),flush=True) for row in ' + repr(fixed_events(value)) + ']')
+        captured = []
+
+        def spawn(argv, **kwargs):
+            """Emulate only the fixed child; a Codex argv here is the regression this fixture must catch."""
+            captured.extend(argv)
+            return subprocess.Popen([sys.executable, '-c', script], **kwargs)
+
+        summary = run(value, output, spawner=spawn)
+        self.assertEqual(captured[0], sys.executable)
+        self.assertIn('--fixed', captured)
+        self.assertNotIn(value['settings']['codex'], captured)
+        self.assertEqual(summary['status'], 'pass')
+        self.assertEqual(summary['native_calls'], 0)
+        self.assertTrue((output / 'export/managed-001-verify-candidate.json').is_file())
+
+    def test_failed_fixed_child_keeps_its_command_receipt_without_a_final_reply(self):
+        """A command's stderr must survive even when no model or final JSON observation exists."""
+        value = dict(task(False), check_id='artifact-verification', context={'managed_operations': True})
+        output = self.root / 'fixed-failed'
+        record = {'completed': [], 'receipts': ['managed-001-failed-command.json'],
+                  'observations': {}, 'continuity': None}
+        script = ('import json;from pathlib import Path; '
+                  'p=Path(' + repr(str(output)) + '); '
+                  '(p/"managed-operations.json").write_text(' + repr(json.dumps(record)) + '); '
+                  '(p/"work/managed-001-failed-command.json").write_text("{\\"stderr\\":\\"fixture refusal\\"}"); '
+                  'raise SystemExit(1)')
+
+        def spawn(argv, **kwargs):
+            """Fail the fixed process after its durable command receipt, without returning a final observation."""
+            return subprocess.Popen([sys.executable, '-c', script], **kwargs)
+
+        with self.assertRaisesRegex(TesterError, 'process failed'):
+            run(value, output, spawner=spawn)
+        self.assertIn('fixture refusal', (output / 'export/managed-001-failed-command.json').read_text())
+        summary = json.loads((output / 'execution.json').read_text())
+        self.assertEqual(summary['status'], 'automation-failure')
+        self.assertEqual(summary['unverified_result']['status'], 'automation-failure')
 
     def test_managed_native_provenance_rejects_executable_ui_code(self):
         """A managed pass must use the structured bridge even if an unrestricted JS call returned a real image."""

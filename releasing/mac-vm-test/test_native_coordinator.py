@@ -16,7 +16,7 @@ import unittest
 import zlib
 from unittest import mock
 
-from brick_test import Run, smoke
+from brick_test import Run, rate_limited_without_actions, smoke
 from control import Refused
 from guest_workflow import CleanupPending
 import test_brick_test as fixtures
@@ -37,6 +37,18 @@ linkage and distinguish two retained observations, never a real dialog outcome.
         return struct.pack('>I', len(value)) + kind + value + struct.pack('>I', zlib.crc32(kind + value))
     return (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', 1, 1, 8, 6, 0, 0, 0))
             + chunk(b'IDAT', zlib.compress(b'\x00\xff\x00\x00\xff')) + chunk(b'IEND', b''))
+
+
+def provider_refusal():
+    """Model the observed provider 429 before any command, native action or approval."""
+    message = 'exceeded retry limit, last status: 429 Too Many Requests'
+    execution = {'format': 1, 'status': 'automation-failure', 'exit_code': 1,
+                 'cleanup_error': None, 'error': 'guest tester process failed'}
+    rows = [{'type': 'thread.started'}, {'type': 'turn.started'},
+            {'type': 'error', 'message': message}, {'type': 'turn.failed', 'error': {'message': message}}]
+    protocol = [{'direction': 'from-client', 'method': 'initialize', 'id': 0, 'error': False},
+                {'direction': 'from-client', 'method': 'tools/list', 'id': 1, 'error': False}]
+    return execution, rows, protocol
 
 
 class NativeCoordinatorTests(unittest.TestCase):
@@ -92,7 +104,7 @@ class NativeCoordinatorTests(unittest.TestCase):
             observation['evidence'] = ['native.png', 'native.bin']
             native_rows[0]['item']['result']['content'].append(
                 {'type': 'image', 'data': base64.b64encode(b'unknown-native-image-format').decode()})
-        if envelope['check_id'] == 'p1-feedback-send' and two_captures:
+        if envelope['check_id'] in ('p1-feedback-send', 'remote-host-remove', 'remote-host-uninstall') and two_captures:
             observation['evidence'].append('native-after.png')
             native_rows[0]['item']['result']['content'].append(
                 {'type': 'image', 'mimeType': 'image/png', 'data': base64.b64encode(after_capture()).decode()})
@@ -126,7 +138,7 @@ class NativeCoordinatorTests(unittest.TestCase):
             files['execution.json'] = json.dumps(summary).encode()
         if image_only:
             files['native.bin'] = b'unknown-native-image-format'
-        if envelope['check_id'] == 'p1-feedback-send' and two_captures:
+        if envelope['check_id'] in ('p1-feedback-send', 'remote-host-remove', 'remote-host-uninstall') and two_captures:
             files['native-after.png'] = after_capture()
         with tarfile.open(controller.directory / (label + '.tar'), 'w') as archive:
             for name, content in files.items():
@@ -142,6 +154,23 @@ class NativeCoordinatorTests(unittest.TestCase):
         self.assertIn('fixture_probe.py', files)
         self.assertEqual(envelope['settings'], self.fixture.profile.values['guest_tester']['settings'])
         return self.archive(controller, envelope)
+
+    def provider_archive(self, controller, envelope, action=False):
+        """Retain a failed attempt separately, including its exact task and side-effect boundary."""
+        execution, rows, protocol = provider_refusal()
+        if action:
+            protocol.append({'direction': 'from-client', 'method': 'tools/call', 'id': 2, 'error': False})
+        contents = {'task.json': json.dumps(envelope), 'execution.json': json.dumps(execution),
+                    'events.jsonl': '\n'.join(map(json.dumps, rows)),
+                    'managed-protocol.jsonl': '\n'.join(map(json.dumps, protocol))}
+        label = 'tester-' + envelope['attempt']
+        with tarfile.open(controller.directory / (label + '.tar'), 'w') as archive:
+            for name, value in contents.items():
+                raw = value.encode()
+                member = tarfile.TarInfo('./' + name)
+                member.size = len(raw)
+                archive.addfile(member, io.BytesIO(raw))
+        return label
 
     def prepare(self):
         """Require independently running owned peers before driving host import behavior."""
@@ -162,6 +191,95 @@ class NativeCoordinatorTests(unittest.TestCase):
             archive = self.run.directory / preflight.split('::', 1)[0]
             archive.write_bytes(b'changed capture archive')
             self.assertEqual(self.run.verdict(entry), 'could not run')
+
+    def test_provider_retry_classifier_refuses_actions_uncertainty_and_other_failures(self):
+        """A status code alone must never authorize replay of an uncertain test action."""
+        execution, rows, protocol = provider_refusal()
+        self.assertTrue(rate_limited_without_actions(execution, rows, protocol))
+        for changed in (dict(execution, cleanup_error='unknown group state'),
+                        dict(execution, unverified_result={'status': 'fail'}), dict(execution, exit_code=None)):
+            self.assertFalse(rate_limited_without_actions(changed, rows, protocol))
+        for method in ('tools/call', 'elicitation/create', 'unknown'):
+            self.assertFalse(rate_limited_without_actions(execution, rows,
+                protocol + [{'direction': 'from-client', 'method': method, 'error': False}]))
+        for changed in (rows[:-1], rows + [{'type': 'item.started'}],
+                        rows[:-1] + [{'type': 'turn.failed', 'error': {'message': 'permission refused'}}]):
+            self.assertFalse(rate_limited_without_actions(execution, changed, protocol))
+        self.assertFalse(rate_limited_without_actions(execution, rows, []))
+
+    def test_pre_action_provider_retry_preserves_attempt_and_its_evidence(self):
+        """A fresh attempt can recover a proven pre-action refusal without erasing its predecessor."""
+        self.prepare()
+        delays, refused = [], []
+        self.run.pause = delays.append
+
+        def execute(controller, envelope, files):
+            """Refuse the first native request before any action, then use ordinary accepted fixtures."""
+            if not refused:
+                refused.append(envelope['attempt'])
+                return self.provider_archive(controller, envelope)
+            return self.execute_fixture(controller, envelope, files)
+
+        self.run.tester = execute
+        self.run.test('p0-fresh', source=self.source)
+        self.assertEqual(delays, [60])
+        self.assertNotEqual(refused[0], self.seen[0]['attempt'])
+        with self.run.locked():
+            entry = self.run.selected('p0-fresh')
+            self.assertEqual(self.run.verdict(entry), 'pass')
+            history = entry['provider_retries']
+            self.assertEqual(history[0]['attempt'], refused[0])
+            self.assertEqual(self.run.report()['automation']['verdict'], 'recovered provider interruption')
+            reference = next(iter(history[0]['sha256']))
+            (self.run.directory / reference.split('::', 1)[0]).write_bytes(b'changed failed attempt')
+            self.assertEqual(self.run.verdict(entry), 'could not run')
+
+    def test_provider_retries_are_bounded_and_never_replay_an_action(self):
+        """Persistent quota refusal stops after the bound; a possibly dispatched tool gets no retry at all."""
+        for action, timeout, expected in ((False, 1200, 4), (True, 1200, 1), (False, 30, 1)):
+            with self.subTest(action=action, timeout=timeout):
+                case = NativeCoordinatorTests()
+                case.setUp()
+                self.addCleanup(case.doCleanups)
+                case.prepare()
+                attempts, delays = [], []
+                case.run.pause = delays.append
+
+                def execute(controller, envelope, files):
+                    """Make every attempt fail, optionally after the protocol could have dispatched an action."""
+                    attempts.append(envelope['attempt'])
+                    return case.provider_archive(controller, envelope, action=action)
+
+                case.run.tester = execute
+                with self.assertRaisesRegex(Refused, 'guest-native automation failed'):
+                    case.run.test('p0-fresh', source=case.source, timeout=timeout)
+                self.assertEqual(len(attempts), expected)
+                self.assertEqual(len(set(attempts)), expected)
+                self.assertEqual(delays, [60, 120, 240] if expected == 4 else [])
+
+    def test_p1_provider_failure_never_schedules_an_automatic_send_retry(self):
+        """The live feedback boundary stays conservative even if a provider refusal looks pre-action."""
+        self.finish_preceding_pairs()
+        self.approve_feedback()
+        with self.run.locked():
+            self.run.data['scope'] = 'full'
+            self.run.save()
+        self.fixture.prepare('p0-updater-upgrade')
+        delays = []
+        self.run.pause = delays.append
+
+        def execute(controller, envelope, files):
+            """Complete P0, then fail before the first P1 action without adding another send attempt."""
+            self.seen.append(envelope)
+            if envelope['check_id'] == 'p1-feedback-send':
+                return self.provider_archive(controller, envelope)
+            return self.archive(controller, envelope)
+
+        self.run.tester = execute
+        with mock.patch('brick_test.download', return_value=b'v0.24.0'), self.assertRaises(Refused):
+            self.run.test('p0-updater-upgrade', source=self.source)
+        self.assertEqual(delays, [])
+        self.assertEqual(sum(row['check_id'] == 'p1-feedback-send' for row in self.seen), 1)
 
     def test_unknown_native_image_cannot_supply_command_evidence(self):
         """Native bytes in an unfamiliar format cannot impersonate an independent command receipt."""
@@ -273,7 +391,7 @@ these fictional tags have no terminal host crate, so it gives no answer.
         self.assertEqual([value['check_id'] for value in self.seen],
                          ['native-preflight', 'artifact-verification', 'old-fixture', 'update-discovery',
                           'update-relaunch', 'local-supervisor-agent', 'local-old-session',
-                          'remote-supervisor-agent', 'remote-old-session'])
+                          'remote-supervisor-agent', 'remote-old-session', 'remote-host-remove', 'remote-host-uninstall'])
         self.assertTrue(all(value['context']['previous_can_create_hosts'] is None for value in self.seen))
         remote = next(value for value in self.seen if value['check_id'] == 'remote-old-session')
         self.assertIn('remote_host_survival', remote['instructions'])
@@ -487,9 +605,30 @@ The refusal names its cause and comes before credentials or any guest turn.
         def one_capture(controller, envelope, files):
             """Keep an otherwise valid P1 receipt with only one real modeled native capture."""
             self.seen.append(envelope)
-            return self.archive(controller, envelope, two_captures=False)
+            return self.archive(controller, envelope, two_captures=envelope['check_id'] != 'p1-feedback-send')
         with self.assertRaisesRegex(Refused, 'two distinct native'):
             self.drive_pair('p0-updater-upgrade', one_capture)
+
+    def test_remote_menu_pass_requires_action_and_result_native_captures(self):
+        """Neither a menu-only image nor a result-only image establishes the requested remote action.
+
+Exercise each checkpoint through the real import gate. Earlier checkpoints
+retain their valid captures so a refusal cannot accidentally come from P0
+setup, the agent reply or a different menu check.
+"""
+        for check in ('remote-host-remove', 'remote-host-uninstall'):
+            with self.subTest(check=check):
+                case = NativeCoordinatorTests()
+                case.setUp()
+                self.addCleanup(case.doCleanups)
+                case.finish_preceding_pairs()
+                def one_capture(controller, envelope, files):
+                    """Withhold only the selected menu result's second native capture."""
+                    case.seen.append(envelope)
+                    return case.archive(controller, envelope, two_captures=envelope['check_id'] != check)
+                with case.assertRaisesRegex(Refused, check + ' needs two distinct native'):
+                    case.drive_pair('p0-updater-upgrade', one_capture)
+                self.assertEqual(case.seen[-1]['check_id'], check)
 
     def assert_stopped_outcome(self, status, expected):
         """Drive a distinct owned run through readiness to one nonpass observation."""
