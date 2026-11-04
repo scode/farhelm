@@ -353,6 +353,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   suspended TensorLake sandbox briefly shows a "selected host is unavailable"-style message before the session starts
   (launch resumes the sandbox, so starting is expected). The UI should not flash a misleading unavailable state when
   launch will resume the sandbox.
+- **TensorLake add-host sandbox dialog lacks structure.** The dialog for adding a TensorLake sandbox host is just a
+  block of text with no visual structure. Fix TBD.
 
 ### Trivial
 
