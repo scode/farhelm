@@ -351,7 +351,7 @@
   --tunnel-fg: #a0d8cf;
   --tunnel-bg: #213b3b;
   --tunnel-border: #436b68;
-  --radius-pill: 999px; /* transient launch-sequence echo area */
+  --radius-pill: 999px; /* transient pills: the launch-sequence echo area and the launch-progress status */
   --radius-launch-sequence: 24px; /* wrapped hints must clear the pill's corners */
 
   /* The session row's two fixed leading tracks (status dot, locality glyph)
@@ -6159,6 +6159,49 @@ a:any-link,
    transparent backdrop blocks stale page clicks; no launcher fields are shown. */
 .launch-composer-backdrop.quick-launch-pending { background: transparent; }
 .launch-composer-backdrop .create-session-form[hidden] { display: none; }
+
+/* The hidden launch already owns this backdrop. Its wait indicator adds no
+   input layer and cannot receive clicks intended for the pending launcher. */
+.launch-progress-pill {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: calc(100vw - 40px);
+  pointer-events: none;
+}
+.launch-progress-pill .launch-progress {
+  padding: 10px 14px;
+  border: 1px solid var(--border-dialog);
+  border-radius: var(--radius-pill);
+  background: var(--bg-2);
+  box-shadow: var(--shadow-dialog);
+}
+.launch-progress {
+  min-width: 0;
+  max-width: 100%;
+  color: var(--fg-0);
+  font-size: 12px;
+}
+.launch-progress .delete-spinner {
+  border-color: color-mix(in srgb, currentColor 30%, transparent);
+  border-top-color: currentColor;
+}
+.launch-progress-visible {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.launch-progress-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.launch-progress-elapsed {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
 
 .launch-composer-backdrop .create-session-form {
   display: flex;

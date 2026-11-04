@@ -1918,10 +1918,10 @@ const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 /// Send one protected request and read the helm's build stamp off its reply
 /// (PLAN_M6.md item 6's client↔helm skew edge).
 ///
-/// Every protected request uses this function or [`send_read`] — the same
-/// funnel either way, differing only in the deadline — and that is the point
-/// rather than tidiness: the skew and authentication checks only mean
-/// anything if no protected path skips them. The sole bypass is
+/// Protected requests share the [`send_inner`] funnel, reached here, through
+/// [`send_read`], or through [`send_launch`] when the caller retains timeout
+/// evidence. The skew and authentication checks only mean anything if no
+/// protected path skips them. The sole bypass is
 /// [`exchange_token`], which cannot carry the credential it exists to mint
 /// and performs its own build-stamp observation.
 ///
@@ -1945,6 +1945,61 @@ fn send(
 ) -> impl Future<Output = Result<reqwest::Response, String>> {
     let sending = send_inner(request, REQUEST_TIMEOUT);
     async move { sending.await.map_err(send_error_text) }
+}
+
+/// Keep a launch's browser expiry fact alive through its success-body read.
+/// The endpoint's future already owns admission before this is polled; the
+/// common funnel still snapshots save ordering before its first await.
+async fn send_launch(
+    request: reqwest::RequestBuilder,
+) -> Result<(reqwest::Response, LaunchDeadline), SendError> {
+    let mut deadline = LaunchDeadline::default();
+    let response = send_inner_marked(request, REQUEST_TIMEOUT, true, Some(&mut deadline)).await?;
+    Ok((response, deadline))
+}
+
+/// Browser engines may replace a timeout abort's reason with a generic error.
+/// This request-owned marker records expiry independently of error wording.
+/// Reqwest remains the transport's abort owner; the extra callback only sets a
+/// fact, and dropping the reply/future cancels that callback. Native reqwest
+/// retains its typed timeout evidence, so the native value is zero-sized.
+#[derive(Default)]
+struct LaunchDeadline {
+    #[cfg(target_arch = "wasm32")]
+    expired: std::rc::Rc<std::cell::Cell<bool>>,
+    #[cfg(target_arch = "wasm32")]
+    timer: Option<gloo_timers::callback::Timeout>,
+}
+
+impl LaunchDeadline {
+    /// Register before reqwest's abort timer with the same remaining budget.
+    /// Both browser timers round to milliseconds; ordering makes the marker
+    /// visible when reqwest's rejected promise is processed, including body
+    /// reads. The callback owns only the flag, so there is no ownership cycle.
+    fn arm(&mut self, _timeout: std::time::Duration) {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let expired = self.expired.clone();
+            let millis =
+                u32::try_from(_timeout.as_millis()).expect("launch deadline fits a browser timer");
+            self.timer = Some(gloo_timers::callback::Timeout::new(millis, move || {
+                expired.set(true)
+            }));
+        }
+    }
+
+    /// A fired marker identifies transport expiry, never a semantic JSON error.
+    /// HTTP refusals bypass this classifier and keep their original evidence.
+    fn error(&self, error: reqwest::Error) -> SendError {
+        #[cfg(target_arch = "wasm32")]
+        if self.expired.get()
+            && !std::error::Error::source(&error)
+                .is_some_and(|cause| cause.is::<serde_json::Error>())
+        {
+            return SendError::DeadlineExpired(http_error_text(error));
+        }
+        SendError::request(error)
+    }
 }
 
 /// Register an explicit configuration save before its task can be polled.
@@ -2004,6 +2059,27 @@ enum SendError {
     /// It says nothing about an earlier create under a retained retry key.
     Refused(String),
     Request(String),
+    /// The transport deadline ended without a usable success response.
+    /// A mutation may still finish at the helm; this is not refusal evidence.
+    DeadlineExpired(String),
+}
+
+impl SendError {
+    /// Retain reqwest's timeout evidence before display formatting erases it.
+    /// Endpoint refusals and a never-dispatched save-order wait stay distinct.
+    fn request(error: reqwest::Error) -> Self {
+        if error.is_timeout() {
+            Self::DeadlineExpired(http_error_text(error))
+        } else {
+            Self::Request(http_error_text(error))
+        }
+    }
+
+    /// Whether dispatch or reading its success body exhausted the request budget.
+    /// Retry identity still follows endpoint evidence, never this display fact.
+    fn deadline_expired(&self) -> bool {
+        matches!(self, Self::DeadlineExpired(_))
+    }
 }
 
 /// Next id handed to a fetch receipt pair. Starts at 1 so a zero id in a
@@ -2120,7 +2196,9 @@ async fn execute_with_receipt(
 fn send_error_text(error: SendError) -> String {
     match error {
         SendError::Unauthenticated => "Authentication is required".to_string(),
-        SendError::Request(detail) | SendError::Refused(detail) => detail,
+        SendError::Request(detail)
+        | SendError::Refused(detail)
+        | SendError::DeadlineExpired(detail) => detail,
     }
 }
 
@@ -2143,6 +2221,18 @@ fn send_inner_ordered(
     timeout: std::time::Duration,
     dependent: bool,
 ) -> impl Future<Output = Result<reqwest::Response, SendError>> {
+    send_inner_marked(request, timeout, dependent, None)
+}
+
+/// The launch marker is optional so other endpoints keep their existing path.
+/// Its mutable borrow ends on the reply; the launch caller retains ownership
+/// through decoding, without a registry or a detached deadline task.
+fn send_inner_marked(
+    request: reqwest::RequestBuilder,
+    timeout: std::time::Duration,
+    dependent: bool,
+    mut deadline: Option<&mut LaunchDeadline>,
+) -> impl Future<Output = Result<reqwest::Response, SendError>> {
     let started = web_time::Instant::now();
     let waiting = dependent.then(|| CONFIGURATION_SAVES.preceding());
     async move {
@@ -2164,9 +2254,15 @@ fn send_inner_ordered(
         // bounds the 401 body read below too.
         let (client, built) = request.timeout(timeout).build_split();
         let built = built.map_err(|error| SendError::Request(http_error_text(error)))?;
+        if let Some(deadline) = deadline.as_deref_mut() {
+            deadline.arm(timeout);
+        }
         let resp = execute_with_receipt(&client, built)
             .await
-            .map_err(|error| SendError::Request(http_error_text(error)))?;
+            .map_err(|error| match deadline.as_deref() {
+                Some(deadline) => deadline.error(error),
+                None => SendError::request(error),
+            })?;
         // Called for its effect, in a statement of its own. Folding it into a
         // `.map()` reads as a transformation of the response and is not one —
         // the value is unchanged and the point is entirely the side effect.
@@ -2584,13 +2680,13 @@ pub(crate) async fn create_session(
     if allow_yolo {
         confirm_yolo(&mut body);
     }
-    let resp = send(client().post(&url).json(&body)).await?;
+    let (resp, deadline) = send_launch(client().post(&url).json(&body)).await?;
     if !resp.status().is_success() {
         return Err(CreateRefusal::read("POST", &url, resp).await);
     }
     resp.json::<Session>()
         .await
-        .map_err(|e| CreateRefusal::from(http_error_text(e)))
+        .map_err(|e| CreateRefusal::from(deadline.error(e)))
 }
 
 /// The helm's evidence about an unsuccessful launch attempt, before display text.
@@ -2656,6 +2752,8 @@ impl RefusalOutcome {
 pub(crate) struct CreateRefusal {
     pub(crate) outcome: RefusalOutcome,
     pub(crate) text: String,
+    /// Request deadline evidence, independent of the retry-key outcome.
+    pub(crate) deadline_expired: bool,
 }
 
 impl From<String> for CreateRefusal {
@@ -2664,6 +2762,18 @@ impl From<String> for CreateRefusal {
         CreateRefusal {
             outcome: RefusalOutcome::Unresolved,
             text,
+            deadline_expired: false,
+        }
+    }
+}
+
+impl From<SendError> for CreateRefusal {
+    /// A timeout changes the explanation, never the retained create identity.
+    fn from(error: SendError) -> Self {
+        Self {
+            outcome: RefusalOutcome::Unresolved,
+            deadline_expired: error.deadline_expired(),
+            text: send_error_text(error),
         }
     }
 }
@@ -2675,6 +2785,7 @@ impl CreateRefusal {
         CreateRefusal {
             outcome,
             text: refusal_text(method, url, resp).await,
+            deadline_expired: false,
         }
     }
 }
@@ -2687,6 +2798,8 @@ impl CreateRefusal {
 pub(crate) struct ActionRefusal {
     pub(crate) outcome: RefusalOutcome,
     pub(crate) text: String,
+    /// A timed-out mutation can still complete; server refusals stay ordinary.
+    pub(crate) deadline_expired: bool,
 }
 
 impl From<String> for ActionRefusal {
@@ -2695,6 +2808,7 @@ impl From<String> for ActionRefusal {
         ActionRefusal {
             outcome: RefusalOutcome::Unresolved,
             text,
+            deadline_expired: false,
         }
     }
 }
@@ -2705,6 +2819,7 @@ impl From<SendError> for ActionRefusal {
     fn from(error: SendError) -> Self {
         Self {
             outcome: RefusalOutcome::Unresolved,
+            deadline_expired: error.deadline_expired(),
             text: send_error_text(error),
         }
     }
@@ -2719,6 +2834,7 @@ impl ActionRefusal {
         ActionRefusal {
             outcome,
             text: refusal_text(method, url, resp).await,
+            deadline_expired: false,
         }
     }
 }
@@ -2812,11 +2928,13 @@ pub(crate) async fn replace_session_with(
         encode_path_segment(source)
     );
     let body = replace_with_payload(serde_json::json!(intent_key), with_body, guard);
-    let resp = send(client().post(&url).json(&body)).await?;
+    let (resp, deadline) = send_launch(client().post(&url).json(&body)).await?;
     if !resp.status().is_success() {
         return Err(CreateRefusal::read("POST", &url, resp).await);
     }
-    replace_reply(resp).await.map_err(CreateRefusal::from)
+    replace_reply(resp, deadline)
+        .await
+        .map_err(CreateRefusal::from)
 }
 
 /// The body of a "Replace with" request: the replace endpoint's own
@@ -2849,16 +2967,22 @@ fn replace_with_payload(
 /// The notice matters because a replacement in another folder can release the source's last
 /// checkout reference, and a checkout that could not be archived must never be released silently
 /// (SPEC.md "Managed checkouts"). An older helm sends no such field, which reads as no notice.
-async fn replace_reply(resp: reqwest::Response) -> Result<(Session, Option<String>), String> {
+/// The owned deadline keeps the browser expiry marker alive through the body
+/// read; a decoded body's schema error remains an ordinary failure.
+async fn replace_reply(
+    resp: reqwest::Response,
+    deadline: LaunchDeadline,
+) -> Result<(Session, Option<String>), SendError> {
     let mut body = resp
         .json::<serde_json::Value>()
         .await
-        .map_err(http_error_text)?;
+        .map_err(|error| deadline.error(error))?;
     let notice = body
         .as_object_mut()
         .and_then(|fields| fields.remove("delete_notice"))
         .and_then(|notice| notice.as_str().map(str::to_owned));
-    let session = serde_json::from_value::<Session>(body).map_err(|e| e.to_string())?;
+    let session =
+        serde_json::from_value::<Session>(body).map_err(|e| SendError::Request(e.to_string()))?;
     Ok((session, notice))
 }
 
@@ -2970,9 +3094,9 @@ pub(crate) async fn submit_fresh_create(
     body: &serde_json::Value,
 ) -> Result<(Session, Option<String>), FreshCreateError> {
     let (url, payload) = fresh_create_request(base, source, guard, body);
-    let resp = send(client().post(&url).json(&payload))
+    let (resp, deadline) = send_launch(client().post(&url).json(&payload))
         .await
-        .map_err(FreshCreateError::Unresolved)?;
+        .map_err(fresh_create_transport_error)?;
     if !resp.status().is_success() {
         if asks_yolo_confirmation(resp.headers()) {
             return Err(FreshCreateError::YoloConfirmation(
@@ -2994,9 +3118,19 @@ pub(crate) async fn submit_fresh_create(
     }
     // A plain create's reply has no `delete_notice`, so one reader serves
     // both.
-    replace_reply(resp)
+    replace_reply(resp, deadline)
         .await
-        .map_err(FreshCreateError::Unresolved)
+        .map_err(fresh_create_transport_error)
+}
+
+/// Preserve deadline evidence without changing a fresh checkout's retry policy.
+/// Ordinary unresolved replies and timed-out requests both retain their payload.
+fn fresh_create_transport_error(error: SendError) -> FreshCreateError {
+    if error.deadline_expired() {
+        FreshCreateError::DeadlineExpired(send_error_text(error))
+    } else {
+        FreshCreateError::Unresolved(send_error_text(error))
+    }
 }
 
 /// Where [`submit_fresh_create`] sends its retained body and what it wraps it
@@ -3246,13 +3380,13 @@ pub(crate) async fn restart_session(
     if allow_yolo {
         confirm_yolo(&mut body);
     }
-    let resp = send(client().post(&url).json(&body)).await?;
+    let (resp, deadline) = send_launch(client().post(&url).json(&body)).await?;
     if !resp.status().is_success() {
         return Err(ActionRefusal::read("POST", &url, resp).await);
     }
     resp.json::<Session>()
         .await
-        .map_err(|e| ActionRefusal::from(http_error_text(e)))
+        .map_err(|e| ActionRefusal::from(deadline.error(e)))
 }
 
 /// Preserve the absent-versus-present override distinction on the restart
@@ -3709,13 +3843,15 @@ pub(crate) async fn replace_session(
     if allow_yolo {
         confirm_yolo(&mut body);
     }
-    let resp = send_inner(client().post(&url).json(&body), REQUEST_TIMEOUT)
+    let (resp, deadline) = send_launch(client().post(&url).json(&body))
         .await
         .map_err(ActionRefusal::from)?;
     if !resp.status().is_success() {
         return Err(ActionRefusal::read("POST", &url, resp).await);
     }
-    replace_reply(resp).await.map_err(ActionRefusal::from)
+    replace_reply(resp, deadline)
+        .await
+        .map_err(ActionRefusal::from)
 }
 
 /// Delete with the precondition covered by the user's confirmation.
@@ -5685,6 +5821,8 @@ mod tests {
         assert_eq!(create.text, text);
         assert_eq!(action.outcome, RefusalOutcome::Unresolved);
         assert_eq!(action.text, text);
+        assert!(!create.deadline_expired);
+        assert!(!action.deadline_expired);
         for (failure, text) in [
             (SendError::Request("transport".into()), "transport"),
             (SendError::Unauthenticated, "Authentication is required"),
@@ -5698,7 +5836,32 @@ mod tests {
             assert_eq!(refusal.outcome, RefusalOutcome::Unresolved);
             assert!(!refusal.outcome.retires_retry());
             assert_eq!(refusal.text, text);
+            assert!(!refusal.deadline_expired);
         }
+    }
+
+    /// A deadline changes the user-facing uncertainty without settling a retry.
+    /// In particular an ordinary unresolved server refusal is not a timeout,
+    /// and a never-dispatched configuration wait cannot imply a late launch.
+    #[farhelm_testtrace::test]
+    fn deadline_evidence_is_separate_from_refusal_and_retry_outcomes() {
+        let create = CreateRefusal::from(SendError::DeadlineExpired("deadline".into()));
+        let action = ActionRefusal::from(SendError::DeadlineExpired("deadline".into()));
+        assert!(create.deadline_expired && action.deadline_expired);
+        assert_eq!(create.outcome, RefusalOutcome::Unresolved);
+        assert_eq!(action.outcome, RefusalOutcome::Unresolved);
+        assert!(!create.outcome.retires_retry());
+        assert!(!action.outcome.retires_retry());
+        for failure in [
+            SendError::Refused("request timed out on the host".into()),
+            SendError::Request("Request timed out waiting for earlier configuration saves".into()),
+        ] {
+            assert!(!CreateRefusal::from(failure).deadline_expired);
+        }
+        assert!(matches!(
+            fresh_create_transport_error(SendError::DeadlineExpired("deadline".into())),
+            FreshCreateError::DeadlineExpired(_)
+        ));
     }
 
     /// A successful delete reply yields its notice, `{}` yields none, and an

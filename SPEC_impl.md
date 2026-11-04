@@ -196,6 +196,16 @@ survives process crashes; like ordinary WAL/NORMAL state, it can be lost on an O
 permits retiring a dispatched binding, including after a lost reply; the composer then refreshes its preview and waits
 for another explicit submission. It never automatically substitutes a new key.
 
+Pending-launch status is local GUI state over the actual mutation request's lifetime, independent of preparation and the
+page-wide operation guard. One component renders its captured host/name and elapsed time after two seconds. Typed
+transport errors retain reqwest's timeout evidence separately from retry outcomes: an unresolved server refusal is not a
+client deadline, and expiry while waiting for earlier configuration saves has not dispatched the launch. Success-body
+reads retain the same request-owned deadline marker. Browser engines can replace even reqwest's dedicated abort reason
+with generic exceptions, so launches arm a signal-only callback with the same remaining millisecond budget before
+reqwest installs its abort timer. The caller owns that callback through body decoding; it records expiry without
+aborting, retrying or settling work. Native requests use reqwest's typed timeout. Neither error prose nor elapsed-time
+inference supplies deadline evidence; request deadlines and the helm's work stay unchanged.
+
 Motivation: the project's standing constraints — recorded here, because SPEC.md deliberately stays
 implementation-neutral and does not contain them: as much Rust as possible, one implementation for web and native, and a
 GUI that agents can test visually without a human in the loop. Those force a DOM-based Rust framework. Canvas-rendering

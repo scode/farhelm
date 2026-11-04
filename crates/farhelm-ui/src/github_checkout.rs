@@ -262,6 +262,9 @@ pub(crate) enum FreshCreateError {
     Unaccepted(String),
     /// No such proof: a transport failure or an unresolved/previously accepted key.
     Unresolved(String),
+    /// The request deadline ended while the helm may still be preparing it.
+    /// This retains the same request and key, just like other unknown outcomes.
+    DeadlineExpired(String),
     /// The helm refused a YOLO launch on a host that asks before YOLO launches; nothing was
     /// dispatched, and it will run only with an explicit confirmation.
     YoloConfirmation(String),
@@ -271,7 +274,10 @@ impl FreshCreateError {
     /// Preserve the actionable server text independently of outcome policy.
     pub(crate) fn message(&self) -> &str {
         match self {
-            Self::Unaccepted(text) | Self::Unresolved(text) | Self::YoloConfirmation(text) => text,
+            Self::Unaccepted(text)
+            | Self::Unresolved(text)
+            | Self::DeadlineExpired(text)
+            | Self::YoloConfirmation(text) => text,
         }
     }
 }
@@ -530,6 +536,7 @@ mod tests {
             serde_json::json!({"intent_key":"original", "github_checkout":{"repo":"acme/bar"}});
         let attempt = GithubAttempt::new("original".into(), body.clone(), "installation-a".into());
         assert!(!attempt.may_retire_after(&FreshCreateError::Unresolved("reply lost".into())));
+        assert!(!attempt.may_retire_after(&FreshCreateError::DeadlineExpired("deadline".into())));
         assert!(
             !attempt.may_retire_after(&FreshCreateError::Unresolved("generic conflict".into()))
         );

@@ -34,8 +34,10 @@
 //!   cancel control (so a cancel that is disabled while busy does nothing).
 //!
 //! One kind of element is deliberately left live: anything marked
-//! `data-modal-exempt` (today, only the agent approval cards in
-//! `approvals`). An agent that asks while a dialog is open is waiting on the
+//! `data-modal-exempt`: agent approval cards in `approvals`, and the
+//! display-only pending-launch pill beside its hidden launcher. The pill has
+//! no focus targets and takes no pointer input, but its status must remain in
+//! the accessibility tree. An agent that asks while a dialog is open is waiting on the
 //! card's answer, not on the dialog, and a card the user can see but not click
 //! would hold that agent for its whole wait. Only an exempt element that is
 //! itself a sibling of the dialog's ancestor chain is left live, which is

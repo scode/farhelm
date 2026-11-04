@@ -161,6 +161,7 @@ mod icons;
 mod keyboard_shortcuts;
 mod launch_composer;
 mod launch_controls;
+mod launch_progress;
 mod launch_sequence;
 mod list;
 mod menu_panel;
