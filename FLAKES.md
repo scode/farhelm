@@ -57,6 +57,29 @@ paragraphs. Classes are `readiness`, `replay-live`, `fixture-premise`, `peer-lif
 Confidence is `established`, `hypothesis`, or `unknown`; `Cause:` is the last line. These fields apply only to new
 entries. Missing historical fields are missing evidence, not an implicit cause classification.
 
+## 2026-11-04 — host-terminal startup-session check recurs (e2e/global-setup.ts)
+
+The host-terminal suite's global setup found no startup session in run `6e4fb56e-d4bf-4833-bf75-57115b19170d` and
+stopped before either selected launcher test ran. The stack logged that it was creating the session just before the
+failure, consistent with the earlier startup-race hypothesis below. A second run,
+`a74201be-2382-44b1-9b21-bcafb83e5626`, reached and passed both selected tests. The cause remains a hypothesis and the
+existing Deflake entry stays open; this setup check is not a test that can be excluded from a sweep.
+
+```text
+Error: the stack at <loopback URL> must list its startup session
+```
+
+Evidence: clean commit `c43d3600875b16dd3b2323d8b16c1f6b883f64bf`, shared x86_64 Linux, Chromium launcher warning-color
+selection with up to three workers and one stack each, retries disabled. The failure came after five seconds; concurrent
+load was not measured. Locale C.UTF-8; recorded tmux 3.7c executable SHA256
+`d60bcc711383c8282d560926854f2cb8d2d15e9af72641e1396e32f27af9a802`. The recorder retained `FARHELM_E2E_SUITE_TERMINALS`
+and supplied `FARHELM_TEST_TRACE_DIR`; other ambient Farhelm variables were scrubbed. Private evidence expires with
+temporary-file cleanup.
+
+Class: unknown
+
+Cause: hypothesis
+
 ## 2026-11-02 — `restart_with_resume::named_restart_with_uses_the_requested_target_and_only_reports_capture_it` (crates/farhelm/tests/e2e/restart_with_resume.rs)
 
 Observed as the one failure among 403 tests in run `adf66a9a-4f3f-4750-8aa6-93d6bf127ebf`, a wider host and terminal
