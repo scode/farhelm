@@ -1816,45 +1816,47 @@ enabled, with help explaining that the helm updates remote hosts as soon as upda
 and never updates its own machine this way. This shared choice survives helm restarts; other clients read it on reload,
 while the helm acts on a committed change immediately. A failed save restores the last known value and shows an adjacent
 error, then reconciles only this field with the helm if the request's outcome is uncertain. The **Tensorlake** section
-holds the helm's Tensorlake account, for hosts that are Tensorlake sandboxes. Its API key is explicitly saved helm
-configuration, shared by every client and kept outside the preference row like the ntfy token: the helm stores it
-unencrypted in its state directory, and the section says so plainly. The key is never returned; the form shows only
-whether one is saved. Pasting a key and pressing **Save** stores or replaces it (surrounding whitespace is dropped), a
-blank field keeps the saved key, and **Clear** removes it. **Test** lists the account's sandboxes with the saved key and
-reports how many it can see, or why Tensorlake refused, inline. Test uses the saved key, never unsaved text in the
-field. Until Farhelm's own Tensorlake SSH key (see [Security](#security)) exists, the section offers **Create SSH key**;
-opening Settings never creates it. Once it exists, the section shows the one-time command that registers it with the
-user's Tensorlake account, `tl sbx ssh keys add --name farhelm-<tag> '<public key>'`, with a **Copy** button. The
-command carries the public key's text, so it works on any machine where Tensorlake's `tl` CLI is signed in. The section
-says that Farhelm cannot check the registration, because an API key cannot list SSH keys. `<tag>` is the helm tag: four
-lowercase letters or digits derived from the helm's registry, stable for the life of its state, which the names of the
-sandboxes this helm creates also carry. Below the account, the section lists the helm's Tensorlake recipes with **New
-recipe** and an editor per recipe (see [Topology](#topology)). The off-by-default **Create Tensorlake sandboxes without
-asking** switch saves only when the helm acknowledges it and shows only the stored choice;
-`Set up new hosts without asking` never covers creating a sandbox. The section also notes that on Tensorlake's Usage
-Credits plan Tensorlake suspends a sandbox after 24 hours without a connection from Farhelm. The **Terminal** section
-chooses whether web links open in Farhelm without passing the click on (the default), open in Farhelm and also pass the
-click on, or only pass the click on. The latter two choices explain the risk of a second browser tab and that a program
-without mouse reporting cannot act on a click. This choice covers every client of the helm and takes effect in every
-mounted terminal of the current client immediately; other open clients pick it up when they reload, like the host
-choices. In the desktop app, the **Terminal** section also has tunnel consent and a free-form, comma-separated **File
-types to open with Cmd-click** field (Ctrl-click outside macOS). It defaults to `md, txt, json`; saving an empty list
-disables opening while downloads still save. This field requires an explicit, acknowledged save, but its value lives in
-the shared preference row. The dialog shows one prominent warning beside the field for each listed type outside `md`,
-`txt`, `json` and `log`; HTML-like types have a browser-specific warning, and all other unrecognized types have a
-generic warning. The warnings follow the draft as typed, including when another entry is malformed. A refused save
-leaves the draft and current helm policy unchanged and shows the reason inline. Under **Notifications**, sounds has
-three device switches (see Status), and **ntfy alerts** has an off-by-default switch, server URL (default
-`https://ntfy.sh`), topic, optional access token, and priority (Min, Low, Default, High, Urgent; default Default). These
-are explicitly saved helm configuration, shared by every client, outside the preference row. Save refusals appear
-inline. The stored token is never returned: the form shows whether one exists and allows replacing or clearing it.
-Changing to another server clears a saved token unless a new one is entered, and the form says so before saving. **Send
-test** uses the saved configuration, even while disabled, and reports success or failure inline. The **Checkouts**
-section holds the explicitly saved all-hosts checkout folder and, below it, a monospace multi-line post-clone command
-field and the default-on **Keep a checkout ready for faster launches** switch (see
-[Managed checkouts](#managed-checkouts)). The switch's help explains one extra checkout's disk space per repository and
-host, promptless login-shell preparation, earlier file times and Git hooks/filters, and discard on the next create or
-after 30 days unused; it links the full earlier-clone caveats. The folder's help explains expansion on each host,
+holds the helm's Tensorlake account, for hosts that are Tensorlake sandboxes. It opens, above the API key, with a large
+red warning that begins "EXPERIMENTAL:", says Tensorlake support is early and experimental and will change between
+releases, and makes the user responsible for sandboxes not running and billing when they do not want them to; it shows
+whether or not the section's settings load. Its API key is explicitly saved helm configuration, shared by every client
+and kept outside the preference row like the ntfy token: the helm stores it unencrypted in its state directory, and the
+section says so plainly. The key is never returned; the form shows only whether one is saved. Pasting a key and pressing
+**Save** stores or replaces it (surrounding whitespace is dropped), a blank field keeps the saved key, and **Clear**
+removes it. **Test** lists the account's sandboxes with the saved key and reports how many it can see, or why Tensorlake
+refused, inline. Test uses the saved key, never unsaved text in the field. Until Farhelm's own Tensorlake SSH key (see
+[Security](#security)) exists, the section offers **Create SSH key**; opening Settings never creates it. Once it exists,
+the section shows the one-time command that registers it with the user's Tensorlake account,
+`tl sbx ssh keys add --name farhelm-<tag> '<public key>'`, with a **Copy** button. The command carries the public key's
+text, so it works on any machine where Tensorlake's `tl` CLI is signed in. The section says that Farhelm cannot check
+the registration, because an API key cannot list SSH keys. `<tag>` is the helm tag: four lowercase letters or digits
+derived from the helm's registry, stable for the life of its state, which the names of the sandboxes this helm creates
+also carry. Below the account, the section lists the helm's Tensorlake recipes with **New recipe** and an editor per
+recipe (see [Topology](#topology)). The off-by-default **Create Tensorlake sandboxes without asking** switch saves only
+when the helm acknowledges it and shows only the stored choice; `Set up new hosts without asking` never covers creating
+a sandbox. The section also notes that on Tensorlake's Usage Credits plan Tensorlake suspends a sandbox after 24 hours
+without a connection from Farhelm. The **Terminal** section chooses whether web links open in Farhelm without passing
+the click on (the default), open in Farhelm and also pass the click on, or only pass the click on. The latter two
+choices explain the risk of a second browser tab and that a program without mouse reporting cannot act on a click. This
+choice covers every client of the helm and takes effect in every mounted terminal of the current client immediately;
+other open clients pick it up when they reload, like the host choices. In the desktop app, the **Terminal** section also
+has tunnel consent and a free-form, comma-separated **File types to open with Cmd-click** field (Ctrl-click outside
+macOS). It defaults to `md, txt, json`; saving an empty list disables opening while downloads still save. This field
+requires an explicit, acknowledged save, but its value lives in the shared preference row. The dialog shows one
+prominent warning beside the field for each listed type outside `md`, `txt`, `json` and `log`; HTML-like types have a
+browser-specific warning, and all other unrecognized types have a generic warning. The warnings follow the draft as
+typed, including when another entry is malformed. A refused save leaves the draft and current helm policy unchanged and
+shows the reason inline. Under **Notifications**, sounds has three device switches (see Status), and **ntfy alerts** has
+an off-by-default switch, server URL (default `https://ntfy.sh`), topic, optional access token, and priority (Min, Low,
+Default, High, Urgent; default Default). These are explicitly saved helm configuration, shared by every client, outside
+the preference row. Save refusals appear inline. The stored token is never returned: the form shows whether one exists
+and allows replacing or clearing it. Changing to another server clears a saved token unless a new one is entered, and
+the form says so before saving. **Send test** uses the saved configuration, even while disabled, and reports success or
+failure inline. The **Checkouts** section holds the explicitly saved all-hosts checkout folder and, below it, a
+monospace multi-line post-clone command field and the default-on **Keep a checkout ready for faster launches** switch
+(see [Managed checkouts](#managed-checkouts)). The switch's help explains one extra checkout's disk space per repository
+and host, promptless login-shell preparation, earlier file times and Git hooks/filters, and discard on the next create
+or after 30 days unused; it links the full earlier-clone caveats. The folder's help explains expansion on each host,
 first-use folder creation, and that command-line host overrides keep their folder. The command's help explains that it
 runs in each new checkout on its host, after cloning and before the agent starts, that changes affect future checkouts
 only, and that command-line host overrides keep their command. The installed desktop app's dialog also has an **App**
