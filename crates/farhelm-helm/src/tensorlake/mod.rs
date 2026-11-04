@@ -1,4 +1,5 @@
-//! Tensorlake sandboxes as hosts: the account side.
+//! Tensorlake sandboxes as hosts: the account, recipes, and the hosts'
+//! lifecycle against the API.
 //!
 //! Farhelm creates and manages Tensorlake sandboxes through Tensorlake's REST
 //! API, with an API key the user pastes into Settings → Tensorlake, and
@@ -18,10 +19,15 @@
 //! - [`build`]: snapshot builds of managed recipes, which run their scripts
 //!   ([`build_script`]) in a builder sandbox through [`shell`] over ssh with
 //!   Farhelm's Tensorlake ssh options ([`ssh`]).
+//! - [`hosts`]: what a Tensorlake host needs from the API once it exists: the
+//!   status check before every dial, and removal, which deletes the sandbox.
+//!   The host model itself (`HostKind::Tensorlake` and its columns) is in
+//!   [`crate::store`]; its ssh connections use the same [`ssh`] options as
+//!   the builder.
 //!
-//! These are the first slices of Tensorlake hosts. The hosts themselves,
-//! suspend and resume, and tunnels arrive in follow-up PRs and build on this
-//! service, which is why the client already carries the calls they need.
+//! Adding a Tensorlake host, suspend and resume, and tunnels arrive in
+//! follow-up PRs and build on this service, which is why the client already
+//! carries the calls they need.
 
 // The client carries the calls the follow-up PRs need (suspend and resume),
 // which nothing calls yet. The unit tests exercise every call, so the lint
@@ -41,6 +47,7 @@ mod config;
     expect(dead_code, reason = "calls typed now for the follow-up Tensorlake PRs")
 )]
 mod e2e;
+pub(crate) mod hosts;
 mod http;
 pub(crate) mod recipes;
 pub(crate) mod shell;
@@ -125,7 +132,7 @@ impl Tensorlake {
         } else {
             production_seams(state_dir)?
         };
-        let tensorlake_dir = std::path::absolute(state_dir)?.join("tensorlake");
+        let tensorlake_dir = tensorlake_dir(state_dir)?;
         Ok(Self(Arc::new(Inner::new(
             store,
             api,
@@ -234,6 +241,19 @@ impl Tensorlake {
             sandboxes: sandboxes.len() as u64,
         })
     }
+}
+
+/// The helm's Tensorlake directory, `<state>/tensorlake`, made absolute: the
+/// one place it is computed. Farhelm's ssh key ([`ssh_key`]) and the
+/// gateway's known_hosts file ([`ssh`]) live in it, and every user of either
+/// (the key store, the snapshot builder, a host's connections) finds them
+/// through here, so they cannot disagree about where the files are.
+/// Absolute because the registration command names the public key by path,
+/// and an ssh option naming a relative path would mean something else in
+/// another working directory; it also never starts with `~`, which ssh
+/// would expand.
+pub(crate) fn tensorlake_dir(state_dir: &Path) -> std::io::Result<std::path::PathBuf> {
+    Ok(std::path::absolute(state_dir)?.join("tensorlake"))
 }
 
 /// The name the key gets in the user's Tensorlake key list, and its comment:

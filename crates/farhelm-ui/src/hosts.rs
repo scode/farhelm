@@ -363,6 +363,7 @@ pub(crate) fn phase_label(state: &HostPhase) -> &'static str {
         HostPhase::IdentityMismatch { .. } => "identity-mismatch",
         HostPhase::IdentityUnverified { .. } => "identity-unverified",
         HostPhase::Duplicate { .. } => "duplicate",
+        HostPhase::Suspended { .. } => "suspended",
         HostPhase::Retired { .. } => "retired",
         HostPhase::Unrecognized => "unrecognized",
     }
@@ -391,6 +392,7 @@ pub(crate) fn phase_display_label(state: &HostPhase) -> &'static str {
         HostPhase::IdentityMismatch { .. } => "Identity mismatch",
         HostPhase::IdentityUnverified { .. } => "Identity unverified",
         HostPhase::Duplicate { .. } => "Duplicate",
+        HostPhase::Suspended { .. } => "Suspended",
         HostPhase::Retired { .. } => "Retired",
         HostPhase::Unrecognized => "Unrecognized",
     }
@@ -597,6 +599,10 @@ pub(crate) fn phase_class(state: &HostPhase) -> &'static str {
         HostPhase::Connected { .. } => "connected",
         HostPhase::Connecting { .. } => "connecting",
         HostPhase::Unreachable { .. } => "unreachable",
+        // Grey: nothing is wrong and nothing will change by itself until the
+        // sandbox is resumed; neither the amber of a host that comes back
+        // unaided nor the red of one that needs fixing.
+        HostPhase::Suspended { .. } => "suspended",
         HostPhase::VersionSkew { .. }
         | HostPhase::IdentityMismatch { .. }
         | HostPhase::IdentityUnverified { .. }
@@ -639,7 +645,12 @@ fn rail_presentation(
     let phase_words = phase_display_label(state);
     RailPresentation {
         phase: phase_class(state),
-        dimmed: matches!(state, HostPhase::Unreachable { .. }),
+        // A suspended host is as unusable as an unreachable one, so its
+        // identity mark dims the same way.
+        dimmed: matches!(
+            state,
+            HostPhase::Unreachable { .. } | HostPhase::Suspended { .. }
+        ),
         updating: operation.is_some(),
         update_available: update_available && operation.is_none() && !runs_newer_version(state),
         words: match operation {
@@ -1057,10 +1068,56 @@ pub(crate) fn state_detail(state: &HostPhase) -> Vec<DetailPart> {
                 vec![DetailPart::peer(reason)]
             }
         }
+        HostPhase::Suspended {
+            observed_at,
+            suspended_by_farhelm_at,
+            resume_failed,
+        } => suspended_detail(
+            *observed_at,
+            *suspended_by_farhelm_at,
+            resume_failed.as_ref(),
+        ),
         HostPhase::Unrecognized => vec![DetailPart::text(
             "This build does not know the state the helm is reporting for this host",
         )],
     }
+}
+
+/// The evidence behind a suspended Tensorlake host: since when, and who
+/// suspended it. A failed resume leads with Tensorlake's diagnosis, since
+/// that is what the user has to act on.
+///
+/// Farhelm's own suspend time comes from the host row; without one,
+/// something other than Farhelm suspended the sandbox, which in practice is
+/// Tensorlake's idle timeout, so the detail says what that is (goal 3.1).
+/// Times are UTC, like the session list's absolute stamps
+/// ([`crate::activity::utc_stamp`]), because this crate keeps no timezone
+/// database.
+fn suspended_detail(
+    observed_at: i64,
+    suspended_by_farhelm_at: Option<i64>,
+    resume_failed: Option<&crate::peer::PeerText>,
+) -> Vec<DetailPart> {
+    let mut parts = Vec::new();
+    if let Some(details) = resume_failed {
+        parts.push(DetailPart::text(
+            "Tensorlake could not resume the sandbox: ",
+        ));
+        parts.push(DetailPart::peer(details));
+        parts.push(DetailPart::text(". "));
+    }
+    parts.push(DetailPart::text(match suspended_by_farhelm_at {
+        Some(at) => format!(
+            "Suspended from Farhelm at {}",
+            crate::activity::utc_stamp(at / 1000)
+        ),
+        None => format!(
+            "Suspended outside Farhelm, noticed at {}. On Usage Credits, Tensorlake suspends a \
+             sandbox after 24 hours without a connection",
+            crate::activity::utc_stamp(observed_at / 1000)
+        ),
+    }));
+    parts
 }
 
 /// How a connected host's last cache refresh went, as the tail of
@@ -1137,9 +1194,12 @@ pub(crate) fn state_remedy(state: &HostPhase) -> Option<Vec<DetailPart>> {
                 ])
             }
         }
+        // A suspended sandbox's remedy is resuming it, which the host's own
+        // controls offer; the detail already says what happened.
         HostPhase::Unreachable { .. }
         | HostPhase::Connecting { .. }
         | HostPhase::Connected { .. }
+        | HostPhase::Suspended { .. }
         | HostPhase::Unrecognized => None,
         HostPhase::VersionSkew { remediation, .. } => {
             (!remediation.raw().trim().is_empty()).then(|| vec![DetailPart::peer(remediation)])
@@ -1461,6 +1521,7 @@ pub(crate) fn session_unavailable_cause(lookup: HostLookup<'_>) -> &'static str 
             HostPhase::IdentityMismatch { .. } => "Host identity mismatch",
             HostPhase::IdentityUnverified { .. } => "Host identity unverified",
             HostPhase::Duplicate { .. } => "Duplicate host",
+            HostPhase::Suspended { .. } => "Host suspended",
             HostPhase::Retired { .. } => "Host connection stopped",
             HostPhase::Unrecognized => "Host state unknown",
         },
@@ -1503,6 +1564,18 @@ pub(crate) fn stale_session_notice(
             vec![DetailPart::text("Refreshing this session's state.")],
             vec![],
         ),
+        // Not "not answering": the sandbox is paused on purpose and the
+        // session waits there for it, rather than this view retrying.
+        HostLookup::Known(host) if matches!(host.state, HostPhase::Suspended { .. }) => {
+            let mut explanation = name.clone();
+            explanation.push(DetailPart::text(
+                " is suspended; this session continues when it resumes.",
+            ));
+            let mut detail = name;
+            detail.push(DetailPart::text(": "));
+            detail.extend(state_detail(&host.state));
+            (explanation, detail)
+        }
         HostLookup::Known(host) => {
             let explanation = state_remedy(&host.state).unwrap_or_else(|| {
                 let mut parts = name.clone();
@@ -2159,10 +2232,14 @@ pub(crate) fn HostsPanel(
         };
         remove_error.set(None);
         remove_return_to_rail.set(rail_dialog_hosts.peek().contains(&id));
+        let skip = skips_remove_question(
+            snapshot.kind,
+            preferences.0.peek().skip_host_remove_confirmation,
+        );
         let opened = remove_slot.open(snapshot, ());
         // No render runs between this open and the answer, so the token
         // `open` returned is the showing this answer is for.
-        if preferences.0.peek().skip_host_remove_confirmation == Some(true) {
+        if skip {
             on_remove_confirm.call((opened, false, false));
         }
     });
@@ -3261,6 +3338,33 @@ type HostMenuItemHandles = menu_panel::MenuItemHandles<HostMenuAction>;
 /// `menu_panel::MenuWiring`'s own doc for what it bundles.
 type HostMenuWiring = menu_panel::MenuWiring<HostMenuAction, HostId, { HOST_MENU_ACTIONS.len() }>;
 
+/// Whether a removal goes ahead without its question: only when the user
+/// chose `Remove hosts without asking`, and never for a host whose removal
+/// deletes its machine. That preference covers forgetting an entry; deleting
+/// a sandbox, its files and sessions with it, always asks (goal 3.1).
+fn skips_remove_question(kind: HostKind, skip_preference: Option<bool>) -> bool {
+    skip_preference == Some(true) && !kind.removal_deletes_machine()
+}
+
+/// The host menu's removal item: "Delete sandbox" for a host whose removal
+/// deletes its machine, "Remove" for one that is only forgotten.
+fn remove_label(deletes_machine: bool) -> &'static str {
+    if deletes_machine {
+        "Delete sandbox"
+    } else {
+        "Remove"
+    }
+}
+
+/// The removal item's description line, matching [`remove_label`].
+fn remove_description(deletes_machine: bool) -> &'static str {
+    if deletes_machine {
+        "Terminate this Tensorlake sandbox and delete its snapshots"
+    } else {
+        "Forget this host"
+    }
+}
+
 /// Builds this render's host-menu item list from the row's own state: the
 /// bridge between `adoptable`/`manageable`'s booleans and the shared
 /// `MenuOrder::pack`'s generic `(action) -> bool` predicate.
@@ -4057,10 +4161,12 @@ fn HostRow(
     // The local row is not management surface: SPEC.md has it always
     // present, never registered, never removed. An unrecognized kind is not
     // management surface either — see this component's docs.
-    let manageable = host.kind.is_manageable();
+    let manageable = host.kind.is_removable();
+    let deletes_machine = host.kind.removal_deletes_machine();
     let kind_attribute = match host.kind {
         HostKind::Local => "local",
         HostKind::Ssh => "ssh",
+        HostKind::Tensorlake => "tensorlake",
         HostKind::Unrecognized => "unrecognized",
     };
     // Raw for the request, escaped for the label — the asymmetry `adoptable`
@@ -4350,7 +4456,7 @@ fn HostRow(
                         HostMark { icon: host.icon, color: host.color, local: true }
                         span { class: "visually-hidden", "Local" }
                     },
-                    HostKind::Ssh => rsx! {
+                    HostKind::Ssh | HostKind::Tensorlake => rsx! {
                         HostMark { icon: host.icon, color: host.color }
                         span { class: "visually-hidden", "Remote" }
                     },
@@ -4891,9 +4997,9 @@ fn HostRow(
                                         },
                                         HostMenuActionIcon { action: HostMenuAction::Remove }
                                         menu_panel::MenuItemCopy {
-                                            label: rsx! { "Remove" },
+                                            label: rsx! { "{remove_label(deletes_machine)}" },
                                             description_id: "host-menu-remove-description",
-                                            description: rsx! { "Forget this host" },
+                                            description: rsx! { "{remove_description(deletes_machine)}" },
                                         }
                                     }
                                 }
@@ -5964,6 +6070,7 @@ mod tests {
             local_links_without_asking: false,
             icon: Default::default(),
             color: Default::default(),
+            tensorlake: None,
         }
     }
 
@@ -6576,6 +6683,11 @@ mod tests {
                 identity: "sentinel-duplicate-identity".into(),
                 twin_name: None,
             },
+            HostPhase::Suspended {
+                observed_at: 1_700_000_000_000,
+                suspended_by_farhelm_at: None,
+                resume_failed: None,
+            },
             HostPhase::Retired {
                 reason: "sentinel-retired-reason".into(),
             },
@@ -6619,6 +6731,7 @@ mod tests {
             ("needs-attention", "Identity mismatch", false),
             ("needs-attention", "Identity unverified", false),
             ("needs-attention", "Duplicate", false),
+            ("suspended", "Suspended", true),
             ("needs-attention", "Retired", false),
             ("needs-attention", "Unrecognized", false),
         ];
@@ -6718,6 +6831,7 @@ mod tests {
                 "identity-mismatch",
                 "identity-unverified",
                 "duplicate",
+                "suspended",
                 "retired",
                 "unrecognized",
             ]
@@ -7562,6 +7676,7 @@ mod tests {
             "Host identity mismatch",
             "Host identity unverified",
             "Duplicate host",
+            "Host suspended",
             "Host connection stopped",
             "Host state unknown",
         ];
@@ -7589,6 +7704,119 @@ mod tests {
         let notice = stale_session_notice("local", HostLookup::Known(&local));
         assert_eq!(notice.cause, "Waiting for supervisor");
         assert_eq!(Some(notice.explanation), state_remedy(&local.state));
+    }
+
+    /// Spec: a suspended host's detail says when Farhelm suspended it, or,
+    /// when Farhelm did not, when the helm noticed and what Tensorlake's
+    /// 24-hour idle suspension is; a failed resume leads with Tensorlake's
+    /// diagnosis as a peer value. A session on a suspended host says it
+    /// continues when the host resumes, not that the host is not answering.
+    ///
+    /// Why: goal 3.1 asks the details to say since when and whether
+    /// Tensorlake suspended the sandbox on its own, and a suspended sandbox
+    /// does not come back by itself, so "reattaches by itself" would mislead.
+    #[farhelm_testtrace::test]
+    fn a_suspended_host_says_since_when_and_who_suspended_it() {
+        let by_farhelm = state_detail(&HostPhase::Suspended {
+            observed_at: 1_700_000_100_000,
+            suspended_by_farhelm_at: Some(1_700_000_000_000),
+            resume_failed: None,
+        });
+        assert_eq!(
+            detail_text(&by_farhelm),
+            format!(
+                "Suspended from Farhelm at {}",
+                crate::activity::utc_stamp(1_700_000_000)
+            )
+        );
+        let outside = detail_text(&state_detail(&HostPhase::Suspended {
+            observed_at: 1_700_000_100_000,
+            suspended_by_farhelm_at: None,
+            resume_failed: None,
+        }));
+        assert!(
+            outside.starts_with(&format!(
+                "Suspended outside Farhelm, noticed at {}",
+                crate::activity::utc_stamp(1_700_000_100)
+            )),
+            "{outside}"
+        );
+        assert!(
+            outside.contains("24 hours without a connection"),
+            "{outside}"
+        );
+        let failed = state_detail(&HostPhase::Suspended {
+            observed_at: 1_700_000_100_000,
+            suspended_by_farhelm_at: None,
+            resume_failed: Some("snapshot \u{202e}lost".into()),
+        });
+        assert_eq!(failed[1], DetailPart::peer("snapshot \u{202e}lost"));
+        assert!(detail_text(&failed).starts_with("Tensorlake could not resume the sandbox: "));
+
+        let host = host(HostPhase::Suspended {
+            observed_at: 1_700_000_100_000,
+            suspended_by_farhelm_at: None,
+            resume_failed: None,
+        });
+        let notice = stale_session_notice("gpu dev", HostLookup::Known(&host));
+        assert_eq!(notice.cause, "Host suspended");
+        assert_eq!(
+            detail_text(&notice.explanation),
+            "gpu dev is suspended; this session continues when it resumes."
+        );
+        assert_eq!(phase_class(&host.state), "suspended");
+        assert_eq!(phase_display_label(&host.state), "Suspended");
+    }
+
+    /// Spec: a Tensorlake host offers removal as "Delete sandbox", never
+    /// skips its question whatever `Remove hosts without asking` says, and
+    /// offers neither destination editing nor Uninstall; an ssh host keeps
+    /// "Remove" and honours the preference.
+    ///
+    /// Why: deleting a sandbox destroys its files and sessions (D6), so the
+    /// panel must say so and always ask (goal 3.1); an Uninstall would only
+    /// forget the row and leave the sandbox billing.
+    #[farhelm_testtrace::test]
+    fn a_tensorlake_host_is_deleted_not_removed() {
+        assert_eq!(
+            remove_label(HostKind::Tensorlake.removal_deletes_machine()),
+            "Delete sandbox"
+        );
+        assert_eq!(
+            remove_label(HostKind::Ssh.removal_deletes_machine()),
+            "Remove"
+        );
+        assert!(!skips_remove_question(HostKind::Tensorlake, Some(true)));
+        assert!(skips_remove_question(HostKind::Ssh, Some(true)));
+        assert!(!skips_remove_question(HostKind::Ssh, None));
+        assert!(HostKind::Tensorlake.is_removable());
+        assert!(!HostKind::Tensorlake.edits_destination());
+        assert!(!HostKind::Tensorlake.uninstalls_from_panel());
+        assert!(HostKind::Tensorlake.updates_from_panel());
+        assert!(!HostKind::Tensorlake.is_this_machine());
+        assert!(!HostKind::Local.is_removable());
+        assert!(HostKind::Ssh.edits_destination() && HostKind::Ssh.is_removable());
+        assert!(!HostKind::Unrecognized.is_removable());
+
+        let mut sandbox = host(HostPhase::Unrecognized);
+        sandbox.kind = HostKind::Tensorlake;
+        sandbox.tensorlake = Some(crate::TensorlakeHost {
+            sandbox: "farhelm-host-k7q2-gpu-dev-m3x9".into(),
+            recipe: "gpu-dev".into(),
+            size: None,
+        });
+        let copy = settings_dialog::RemoveCopy::for_host(&sandbox);
+        assert_eq!(copy.title, "Delete sandbox");
+        assert_eq!(copy.confirm_label, "Delete sandbox");
+        assert!(!copy.offers_dont_ask);
+        assert!(copy.explanation.contains("farhelm-host-k7q2-gpu-dev-m3x9"));
+        assert!(
+            copy.explanation
+                .contains("files and the sessions on it will be gone")
+        );
+        let ordinary = settings_dialog::RemoveCopy::for_host(&host(HostPhase::Unrecognized));
+        assert_eq!(ordinary.confirm_label, "Remove");
+        assert!(ordinary.offers_dont_ask);
     }
 
     /// `is_connected` decides presentation only, and must agree with the
@@ -7958,6 +8186,7 @@ mod tests {
             local_links_without_asking: false,
             icon: Default::default(),
             color: Default::default(),
+            tensorlake: None,
         }
     }
 

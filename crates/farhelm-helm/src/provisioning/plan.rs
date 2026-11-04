@@ -3,6 +3,7 @@
 
 use super::backend::{BackendFailure, Reach};
 use super::http::ProvisioningRequestError;
+use crate::ssh::SshAccessKind;
 use crate::store::HostRow;
 use crate::units::{SupervisorUnitInputs, render_supervisor_unit};
 use serde::Serialize;
@@ -55,7 +56,29 @@ impl ProvisioningOperation {
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub(super) enum ProvisioningTarget {
     Local,
-    Ssh { destination: String },
+    /// A remote host over ssh. A Tensorlake sandbox is one of these, with
+    /// `access` naming Farhelm's own key; it is deliberately not a variant
+    /// of its own, so every `Ssh { .. }` decision (upload the payloads,
+    /// ride the provisioning connection) holds for sandboxes too. `access`
+    /// is left out of a serialized plan for an ordinary ssh host, which
+    /// keeps that plan's shape as it was.
+    Ssh {
+        destination: String,
+        #[serde(skip_serializing_if = "SshAccessKind::is_user_config")]
+        access: SshAccessKind,
+    },
+}
+
+#[cfg(test)]
+impl ProvisioningTarget {
+    /// An ordinary ssh host reached with the user's own ssh setup, for the
+    /// tests' plan and backend fixtures.
+    pub(super) fn ssh(destination: impl Into<String>) -> Self {
+        Self::Ssh {
+            destination: destination.into(),
+            access: SshAccessKind::UserConfig,
+        }
+    }
 }
 
 /// Installation artifacts selected independently; callers must never use a
@@ -441,7 +464,7 @@ impl ProvisioningPlan {
             },
             match &self.target {
                 ProvisioningTarget::Local => "the local host".to_string(),
-                ProvisioningTarget::Ssh { destination } => destination.clone(),
+                ProvisioningTarget::Ssh { destination, .. } => destination.clone(),
             },
             if self.host_distro_id.is_empty() {
                 "unknown distribution"

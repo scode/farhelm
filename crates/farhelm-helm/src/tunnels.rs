@@ -19,7 +19,7 @@ use tokio::sync::oneshot;
 use tokio::task::{JoinHandle, JoinSet};
 
 use crate::manager::SessionClaim;
-use crate::store::{HostId, HostKind, SessionKey};
+use crate::store::{HostId, SessionKey};
 use crate::{AppState, SupervisorError, http_error};
 
 /// A canonical supervisor target. None asks it to try IPv4 then IPv6 loopback.
@@ -358,7 +358,7 @@ async fn open_from(
                     "the tunnel's host is no longer registered",
                 )
             })?;
-        if host.kind != HostKind::Ssh {
+        if !host.kind.is_remote() {
             return Err(invalid("sessions on this machine do not need a tunnel"));
         }
         state.tunnels.prune();
@@ -473,7 +473,7 @@ pub(crate) async fn list_tunnels(
                     "the tunnel's host is no longer registered",
                 )
             })?;
-        let available = host.kind == HostKind::Ssh;
+        let available = host.kind.is_remote();
         Ok(TunnelList {
             available,
             host_name: crate::aggregate::host_display_name(
@@ -999,7 +999,7 @@ mod tests {
                 .manager
                 .snapshots()
                 .into_iter()
-                .find(|host| host.kind == HostKind::Local)
+                .find(|host| host.kind == crate::store::HostKind::Local)
                 .unwrap()
                 .id,
             "sess-1",

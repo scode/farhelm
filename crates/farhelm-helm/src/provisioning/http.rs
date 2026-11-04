@@ -19,8 +19,9 @@ pub(super) enum ProvisioningRequestError {
     /// supplied handoff or manual-install instruction.
     #[error("{0}")]
     Refused(String),
-    /// Uninstall cannot safely remove the installation, but forgetting the
-    /// host leaves it untouched and is an available remedy.
+    /// Uninstall cannot (or need not) remove the installation, and removing
+    /// the host from the list is the remedy: forgetting it, which leaves the
+    /// machine untouched, or for a Tensorlake host deleting its sandbox.
     #[error("{0}")]
     RemoveInstead(String),
     #[error("the provisioning plan is unknown or has already been used; probe again")]

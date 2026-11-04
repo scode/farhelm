@@ -340,7 +340,9 @@ pub(crate) fn HostDialogHeader(
             HostKind::Local => {
                 Some(rsx! { HostMark { icon: host.icon, color: host.color, local: true } })
             }
-            HostKind::Ssh => Some(rsx! { HostMark { icon: host.icon, color: host.color } }),
+            HostKind::Ssh | HostKind::Tensorlake => {
+                Some(rsx! { HostMark { icon: host.icon, color: host.color } })
+            }
             HostKind::Unrecognized => None,
         },
         None => Some(rsx! { HostMark {} }),
@@ -414,7 +416,7 @@ pub(super) fn HostSettingsDialog(
     // Same gates the row's panel used: a destination exists only for a kind
     // the registry manages, and the alias editor only against a helm that
     // sent the `alias` key at all (see `Host.alias`), whatever the kind.
-    let manageable = host.kind.is_manageable();
+    let manageable = host.kind.edits_destination();
     let alias_supported = host.alias.is_some();
     let destination = host.destination.clone().unwrap_or_default();
     let alias = host.alias.clone().flatten();
@@ -729,6 +731,11 @@ pub(super) fn HostSettingsDialog(
 /// `on_cancel` from Cancel, the header's dismiss and Escape alike. That lets
 /// the panel refuse an answer drawn for a showing that is no longer the open
 /// one, and otherwise remove exactly the entry this dialog named.
+///
+/// A Tensorlake host's removal deletes its sandbox, so the same dialog asks
+/// in those words instead ([`RemoveCopy::for_host`]) and offers no "don't ask
+/// again": deleting a sandbox always asks, whatever `Remove hosts without
+/// asking` says (goal 3.1).
 #[component]
 pub(super) fn HostRemoveDialog(
     shown: ConfirmToken<Host>,
@@ -739,8 +746,18 @@ pub(super) fn HostRemoveDialog(
 ) -> Element {
     let host = shown.key().clone();
     let shown_name = gui_host_name(host.name.raw(), host.kind.is_this_machine());
-    // The shortened heading must leave the complete destination readable.
-    let destination = host.destination.as_ref().unwrap_or(&host.name).escaped();
+    let copy = RemoveCopy::for_host(&host);
+    // The shortened heading must leave the complete destination readable;
+    // for a sandbox, the sandbox's own name is what the user can look up.
+    let destination = match &host.tensorlake {
+        Some(sandbox) => sandbox.sandbox.escaped(),
+        None => host.destination.as_ref().unwrap_or(&host.name).escaped(),
+    };
+    let title = copy.title;
+    let explanation = copy.explanation.clone();
+    let confirm_label = copy.confirm_label;
+    let confirm_tooltip = copy.confirm_tooltip;
+    let offers_dont_ask = copy.offers_dont_ask;
     rsx! {
         div { class: "host-settings-backdrop", role: "presentation",
             ModalDialog {
@@ -752,7 +769,7 @@ pub(super) fn HostRemoveDialog(
                 class: "host-settings-dialog host-remove-dialog host-dialog-framed",
                 role: "dialog",
                 aria_modal: "true",
-                aria_label: "Remove host · {shown_name}",
+                aria_label: "{title} · {shown_name}",
                 tabindex: "-1",
                 on_escape: {
                     let shown = shown.clone();
@@ -764,7 +781,7 @@ pub(super) fn HostRemoveDialog(
                 },
                 HostDialogHeader {
                     host: Some(host.clone()),
-                    title: rsx! { "Remove host · " span { class: "peer-value", dir: "ltr", "{shown_name}" } },
+                    title: rsx! { "{title} · " span { class: "peer-value", dir: "ltr", "{shown_name}" } },
                     summary: error.as_ref().map(|_| "Farhelm refused this action".to_string()),
                     summary_danger: error.is_some(),
                     dismiss_label: "Cancel host removal",
@@ -782,9 +799,7 @@ pub(super) fn HostRemoveDialog(
                     handle: DIALOG, selector: ".host-settings-body", name: "Host removal details",
                     recovery: RecoveryFocus::new(".host-settings-close", None, true, RecoveryDelay::OneFrame),
                     p { class: "host-settings-value peer-value host-dialog-destination", dir: "ltr", "{destination}" }
-                    p { class: "host-remove-explanation",
-                        "Farhelm will forget this host. Its supervisor and sessions keep running, and adding the destination again finds them."
-                    }
+                    p { class: "host-remove-explanation", "{explanation}" }
                     if let Some(reason) = error {
                         PeerLine {
                             class: "host-refusal-reason",
@@ -793,8 +808,10 @@ pub(super) fn HostRemoveDialog(
                     }
                 }
                 crate::modal_dialog::DialogFooter { class: "host-dialog-footer",
+                    if offers_dont_ask {
                     p { id: "host-remove-permanent-hint", class: "dialog-footer-hint host-dialog-permanent-hint",
                         "Undo \"don't ask again\" with the gear at the foot of the navigation rail"
+                    }
                     }
                     crate::modal_dialog::DialogActions { class: "host-remove-actions",
                         button {
@@ -813,6 +830,7 @@ pub(super) fn HostRemoveDialog(
                             },
                             "Cancel"
                         }
+                        if offers_dont_ask {
                         button {
                             r#type: "button",
                             class: "btn btn-danger btn-outline",
@@ -826,19 +844,68 @@ pub(super) fn HostRemoveDialog(
                             },
                             "Remove, don't ask again"
                         }
+                        }
                         button {
                             r#type: "button",
                             class: "btn btn-danger host-remove-confirm",
-                            "data-tooltip": "Remove: forget this host; its supervisor and sessions keep running",
+                            "data-tooltip": confirm_tooltip,
                             disabled: busy,
                             autofocus: !busy,
                             onkeydown: crate::guard_confirmation_enter,
                             onclick: move |_| on_remove.call((shown.clone(), false)),
-                            "Remove"
+                            "{confirm_label}"
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+/// The words of the removal question for one host: an ordinary entry is
+/// forgotten and its machine keeps running, while a Tensorlake host's
+/// sandbox is deleted, its files and sessions with it. Kept as data so the
+/// two wordings are pinned by tests rather than by a browser.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct RemoveCopy {
+    pub(super) title: &'static str,
+    pub(super) explanation: String,
+    pub(super) confirm_label: &'static str,
+    pub(super) confirm_tooltip: &'static str,
+    /// Whether the dialog offers "don't ask again". Never for a sandbox,
+    /// whose deletion always asks.
+    pub(super) offers_dont_ask: bool,
+}
+
+impl RemoveCopy {
+    pub(super) fn for_host(host: &Host) -> Self {
+        if host.kind.removal_deletes_machine() {
+            let sandbox = host
+                .tensorlake
+                .as_ref()
+                .map(|binding| binding.sandbox.escaped())
+                .unwrap_or_else(|| "this host's sandbox".to_string());
+            return Self {
+                title: "Delete sandbox",
+                explanation: format!(
+                    "Farhelm will terminate the Tensorlake sandbox {sandbox} and delete its \
+                     snapshots, then remove the host. The sandbox's files and the sessions on it \
+                     will be gone."
+                ),
+                confirm_label: "Delete sandbox",
+                confirm_tooltip: "Delete sandbox: terminate it and delete its snapshots; its \
+                                  files and sessions are gone",
+                offers_dont_ask: false,
+            };
+        }
+        Self {
+            title: "Remove host",
+            explanation: "Farhelm will forget this host. Its supervisor and sessions keep \
+                          running, and adding the destination again finds them."
+                .to_string(),
+            confirm_label: "Remove",
+            confirm_tooltip: "Remove: forget this host; its supervisor and sessions keep running",
+            offers_dont_ask: true,
         }
     }
 }

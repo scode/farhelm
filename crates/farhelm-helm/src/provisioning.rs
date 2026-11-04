@@ -380,6 +380,9 @@ mod tests {
     /// registration-order, and in-flight barriers.
     struct FakeBackend {
         probe: Mutex<Option<Result<ProbeObservation, BackendFailure>>>,
+        /// How many probes reached this backend: what proves a refusal
+        /// came before anything dialed the host.
+        probes: std::sync::atomic::AtomicUsize,
         reach: Mutex<ReachOutcome>,
         /// What this machine's `systemd/user` directory holds for the unit
         /// the local-row rule asks about. `Ok(None)` is "no such file",
@@ -455,6 +458,7 @@ mod tests {
         fn absent(home: PathBuf) -> Arc<Self> {
             Arc::new(Self {
                 probe: Mutex::new(Some(Ok(ProbeObservation::Absent))),
+                probes: std::sync::atomic::AtomicUsize::new(0),
                 reach: Mutex::new(ReachOutcome::Supported(Reach {
                     user_unit_dir: home.join(".config/systemd/user"),
                     home,
@@ -558,6 +562,8 @@ mod tests {
     #[async_trait]
     impl ProvisioningBackend for FakeBackend {
         async fn probe(&self, _target: &ProbeTarget) -> Result<ProbeObservation, BackendFailure> {
+            self.probes
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             if let Some(once) = self.probe.lock().unwrap().take() {
                 return once;
             }
@@ -889,14 +895,7 @@ mod tests {
         assert!(!root.path().join("lib").exists() && !root.path().join("units").exists());
         for operation in [ProvisioningOperation::Add, ProvisioningOperation::Update] {
             let error = layout
-                .plan(
-                    operation,
-                    ProvisioningTarget::Ssh {
-                        destination: "host".to_string(),
-                    },
-                    &reach,
-                    "nonce",
-                )
+                .plan(operation, ProvisioningTarget::ssh("host"), &reach, "nonce")
                 .expect_err("dollar paths cannot produce a plan");
             let failure = error
                 .downcast_ref::<BackendFailure>()
@@ -943,16 +942,10 @@ mod tests {
                 local_links_without_asking: false,
                 icon: Default::default(),
                 color: Default::default(),
+                tensorlake: None,
             };
             let error = layout(root.path())
-                .plan_for_row(
-                    &row,
-                    ProvisioningTarget::Ssh {
-                        destination: "user@host".to_string(),
-                    },
-                    &reach,
-                    "nonce",
-                )
+                .plan_for_row(&row, ProvisioningTarget::ssh("user@host"), &reach, "nonce")
                 .expect_err("a componentless executable must be refused, not panic");
             // A configuration refusal (409), not a host failure (502).
             assert!(
@@ -1006,16 +999,10 @@ mod tests {
             local_links_without_asking: false,
             icon: Default::default(),
             color: Default::default(),
+            tensorlake: None,
         };
         let plan = PlanLayout::production(root.path().join("state"))
-            .plan_for_row(
-                &row,
-                ProvisioningTarget::Ssh {
-                    destination: "user@host".to_string(),
-                },
-                &reach,
-                "nonce",
-            )
+            .plan_for_row(&row, ProvisioningTarget::ssh("user@host"), &reach, "nonce")
             .expect("an absolute registered binary plans an update");
 
         let private = home.join(".local/lib/farhelm");
@@ -1104,9 +1091,7 @@ mod tests {
         let plan = layout(root.path())
             .plan(
                 ProvisioningOperation::Update,
-                ProvisioningTarget::Ssh {
-                    destination: "user@updating".to_string(),
-                },
+                ProvisioningTarget::ssh("user@updating"),
                 &reach,
                 "nonce",
             )
@@ -1242,6 +1227,7 @@ mod tests {
             local_links_without_asking: false,
             icon: Default::default(),
             color: Default::default(),
+            tensorlake: None,
         };
         let reach = Reach {
             home: root.path().join("home"),
@@ -1252,14 +1238,7 @@ mod tests {
             host_tmux: None,
         };
         let error = layout(root.path())
-            .plan_for_row(
-                &row,
-                ProvisioningTarget::Ssh {
-                    destination: "user@host".to_string(),
-                },
-                &reach,
-                "nonce",
-            )
+            .plan_for_row(&row, ProvisioningTarget::ssh("user@host"), &reach, "nonce")
             .expect_err("a PATH-resolved executable cannot be updated in place");
         assert!(
             matches!(
@@ -2818,7 +2797,7 @@ mod tests {
         };
         assert!(matches!(
             plan.target,
-            ProvisioningTarget::Ssh { destination } if destination == "local"
+            ProvisioningTarget::Ssh { destination, .. } if destination == "local"
         ));
     }
 
@@ -3800,6 +3779,161 @@ mod tests {
             error
                 .to_string()
                 .contains("duplicates another registry row")
+        );
+        assert!(backend.operations.lock().unwrap().is_empty());
+    }
+
+    /// A Tensorlake status source whose answer a test switches between
+    /// running and suspended.
+    struct SwitchedSandboxes(Mutex<crate::manager::SandboxCheck>);
+
+    impl SwitchedSandboxes {
+        fn new(status: crate::tensorlake::api::SandboxStatus) -> Arc<Self> {
+            let switched = Arc::new(Self(Mutex::new(crate::manager::SandboxCheck::Missing)));
+            switched.set(status);
+            switched
+        }
+
+        fn set(&self, status: crate::tensorlake::api::SandboxStatus) {
+            *self.0.lock().unwrap() = crate::manager::SandboxCheck::Status {
+                status,
+                error_details: None,
+            };
+        }
+    }
+
+    #[async_trait]
+    impl crate::manager::SandboxStatusSource for SwitchedSandboxes {
+        async fn check(&self, _sandbox: &str) -> crate::manager::SandboxCheck {
+            self.0.lock().unwrap().clone()
+        }
+    }
+
+    /// A helm with one planted Tensorlake host whose sandbox `sandboxes`
+    /// reports on; returns the harness and the host's id.
+    async fn sandbox_harness(sandboxes: Arc<SwitchedSandboxes>) -> (Harness, HostId) {
+        let harness = FleetBuilder::new().await.sandboxes(sandboxes).start().await;
+        let host = crate::tensorlake::hosts::test_support::plant(
+            &harness.store,
+            "gpu dev",
+            "farhelm-host-k7q2-gpu-dev-m3x9",
+            "gpu-dev",
+            Some("sbx-1"),
+        )
+        .await;
+        harness.manager.sync_registry().await.unwrap();
+        (harness, host)
+    }
+
+    /// Why: every provisioning action opens ssh to the host, and a
+    /// suspended sandbox refuses new connections and hangs new sessions on
+    /// old ones (goal criterion 4); Farhelm must not dial a sandbox it knows
+    /// to be suspended, and the user needs to hear that resuming comes first.
+    ///
+    /// Spec: with the host Suspended, planning an Update and probing to set
+    /// the host up again are both refused with a resume-first message, and
+    /// the backend sees no probe at all.
+    #[farhelm_testtrace::test]
+    async fn a_suspended_sandbox_is_never_probed_for_update_or_setup() {
+        let (harness, host) = sandbox_harness(SwitchedSandboxes::new(
+            crate::tensorlake::api::SandboxStatus::Suspended,
+        ))
+        .await;
+        harness
+            .await_state(host, |state| matches!(state, HostState::Suspended { .. }))
+            .await;
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::absent(root.path().to_path_buf());
+        let service = service(&harness, backend.clone(), root.path());
+        let update = service
+            .plan_update(host)
+            .await
+            .expect_err("a suspended sandbox is not updated");
+        assert!(
+            format!("{update:#}").contains("resume the sandbox first"),
+            "{update:#}"
+        );
+        let setup = service
+            .probe(ProbeRequest {
+                target: ProbeDestination::Ssh {
+                    destination: crate::tensorlake::hosts::test_support::destination(
+                        "farhelm-host-k7q2-gpu-dev-m3x9",
+                    ),
+                },
+                remote_farhelm: None,
+                remote_state_dir: None,
+                new_entry: None,
+            })
+            .await
+            .expect_err("a suspended sandbox is not set up again");
+        assert!(
+            format!("{setup:#}").contains("resume the sandbox first"),
+            "{setup:#}"
+        );
+        assert_eq!(
+            backend.probes.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "nothing reached the host"
+        );
+    }
+
+    /// Why: a plan is confirmed some time after it was made, and a sandbox
+    /// suspended in between must not be dialed by the confirmed run.
+    ///
+    /// Spec: a setup planned while the sandbox ran (one probe), confirmed
+    /// after it was found suspended, fails with the resume-first message
+    /// before its preflight probe, so the backend still saw only the
+    /// planning probe and ran no action.
+    #[farhelm_testtrace::test]
+    async fn a_plan_made_while_running_does_not_run_once_suspended() {
+        let sandboxes = SwitchedSandboxes::new(crate::tensorlake::api::SandboxStatus::Running);
+        let (harness, host) = sandbox_harness(Arc::clone(&sandboxes)).await;
+        harness
+            .await_state(host, |state| matches!(state, HostState::Connected { .. }))
+            .await;
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::absent(root.path().to_path_buf());
+        let service = service(&harness, backend.clone(), root.path());
+        let planned = service
+            .probe(ProbeRequest {
+                target: ProbeDestination::Ssh {
+                    destination: crate::tensorlake::hosts::test_support::destination(
+                        "farhelm-host-k7q2-gpu-dev-m3x9",
+                    ),
+                },
+                remote_farhelm: None,
+                remote_state_dir: None,
+                new_entry: None,
+            })
+            .await
+            .unwrap();
+        let ProbeResponse::Provisionable { probe_id, .. } = planned else {
+            panic!("an absent supervisor must be offered setup: {planned:?}")
+        };
+        assert_eq!(backend.probes.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+        sandboxes.set(crate::tensorlake::api::SandboxStatus::Suspended);
+        harness.fleet.kill_connection(host);
+        harness
+            .await_state(host, |state| matches!(state, HostState::Suspended { .. }))
+            .await;
+        let accepted = service
+            .start_add(ProvisionRequest { probe_id })
+            .await
+            .unwrap();
+        let view = wait_finished(&service, accepted.host_id).await;
+        assert_eq!(view.status, RunStatus::Failed);
+        assert!(
+            view.message
+                .as_deref()
+                .unwrap_or_default()
+                .contains("resume the sandbox first"),
+            "{view:?}"
+        );
+        assert_eq!(
+            backend.probes.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "the confirmed run probed nothing"
         );
         assert!(backend.operations.lock().unwrap().is_empty());
     }
@@ -6113,9 +6247,7 @@ mod tests {
         ));
 
         let target = ProbeTarget {
-            transport: ProvisioningTarget::Ssh {
-                destination: "scripted.example".to_string(),
-            },
+            transport: ProvisioningTarget::ssh("scripted.example"),
             probe_farhelm: PathBuf::from("farhelm"),
             probe_state_dir: None,
         };
@@ -6239,9 +6371,7 @@ mod tests {
         }
 
         let remote_target = ProbeTarget {
-            transport: ProvisioningTarget::Ssh {
-                destination: "scripted.example".to_string(),
-            },
+            transport: ProvisioningTarget::ssh("scripted.example"),
             probe_farhelm: PathBuf::from("farhelm"),
             probe_state_dir: None,
         };
@@ -6562,9 +6692,7 @@ mod tests {
         let task = tokio::spawn(async move {
             backend
                 .upload_path(
-                    &ProvisioningTarget::Ssh {
-                        destination: "scripted.example".to_owned(),
-                    },
+                    &ProvisioningTarget::ssh("scripted.example"),
                     PayloadKind::Farhelm,
                     &prepared,
                     &destination,
@@ -7108,9 +7236,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let mode_of = |path: &Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o7777;
         let local = ProvisioningTarget::Local;
-        let remote = ProvisioningTarget::Ssh {
-            destination: "scripted.example".to_string(),
-        };
+        let remote = ProvisioningTarget::ssh("scripted.example");
         for target in [local, remote] {
             let root = tempfile::tempdir().unwrap();
             let backend = SystemBackend {
@@ -7194,9 +7320,7 @@ mod tests {
             fail_before_rename: false,
         };
         let target = ProbeTarget {
-            transport: ProvisioningTarget::Ssh {
-                destination: "scripted.example".to_string(),
-            },
+            transport: ProvisioningTarget::ssh("scripted.example"),
             probe_farhelm: PathBuf::from("farhelm"),
             probe_state_dir: None,
         };
@@ -7310,9 +7434,7 @@ mod tests {
             fail_before_rename: false,
         };
         let target = ProbeTarget {
-            transport: ProvisioningTarget::Ssh {
-                destination: "scripted.example".to_string(),
-            },
+            transport: ProvisioningTarget::ssh("scripted.example"),
             probe_farhelm: PathBuf::from("farhelm"),
             probe_state_dir: None,
         };
@@ -7519,9 +7641,7 @@ mod tests {
             runtime_units: false,
             fail_before_rename: false,
         };
-        let target = ProvisioningTarget::Ssh {
-            destination: "scripted.example".into(),
-        };
+        let target = ProvisioningTarget::ssh("scripted.example");
         let state = root.path().join("missing-state");
         let socket = root.path().join("missing.sock");
         let tmux = root.path().join("removed-tmux");
@@ -7692,9 +7812,7 @@ mod tests {
             runtime_units: false,
             fail_before_rename: false,
         };
-        let target = ProvisioningTarget::Ssh {
-            destination: "scripted.example".into(),
-        };
+        let target = ProvisioningTarget::ssh("scripted.example");
         let stop = |farhelm: &Path| {
             let (system, target, state, tmux, socket) = (&system, &target, &state, &tmux, &socket);
             let farhelm = farhelm.to_path_buf();
@@ -8022,9 +8140,7 @@ mod tests {
             runtime_units: false,
             fail_before_rename: false,
         };
-        let target = ProvisioningTarget::Ssh {
-            destination: "scripted.example".into(),
-        };
+        let target = ProvisioningTarget::ssh("scripted.example");
         let tmux = root.path().join("no-tmux");
         let socket = state.join("tmux.sock");
         let outcome = system
@@ -8206,9 +8322,7 @@ mod tests {
         async fn inspect(&self, paths: &[&Path]) -> UninstallInspection {
             self.system
                 .inspect_uninstall(
-                    &ProvisioningTarget::Ssh {
-                        destination: "scripted.example".to_string(),
-                    },
+                    &ProvisioningTarget::ssh("scripted.example"),
                     "farhelm-supervisor.service",
                     paths,
                     &self.lib,
@@ -8310,9 +8424,7 @@ mod tests {
             service.plan_uninstall(host).await.unwrap().plan.state_dir,
             fixture.state
         );
-        let target = ProvisioningTarget::Ssh {
-            destination: "scripted.example".to_string(),
-        };
+        let target = ProvisioningTarget::ssh("scripted.example");
         fixture
             .system
             .remove_unit(&target, &fixture.unit)
@@ -8720,9 +8832,7 @@ mod tests {
         // terminal hosts to end, and running that farhelm would fail them.
         let no_farhelm = root.path().join("no-farhelm");
         let system = backend(false);
-        let target = ProvisioningTarget::Ssh {
-            destination: "scripted.example".to_string(),
-        };
+        let target = ProvisioningTarget::ssh("scripted.example");
         let unit = root.path().join("farhelm-supervisor.service");
         let lib = root.path().join("lib");
         tokio::fs::create_dir_all(&lib).await.unwrap();
@@ -9218,9 +9328,7 @@ mod tests {
             runtime_units: false,
             fail_before_rename: false,
         };
-        let target = ProvisioningTarget::Ssh {
-            destination: "scripted.example".to_string(),
-        };
+        let target = ProvisioningTarget::ssh("scripted.example");
         let setup_unit = format!("{}\n[Unit]\n", crate::units::MANAGED_MARKER);
         tokio::fs::write(&unit, &setup_unit).await.unwrap();
         let error = backend
@@ -9270,9 +9378,7 @@ mod tests {
         let plan = layout(root.path())
             .plan(
                 ProvisioningOperation::Add,
-                ProvisioningTarget::Ssh {
-                    destination: "host".to_string(),
-                },
+                ProvisioningTarget::ssh("host"),
                 &Reach {
                     home: root.path().join("home"),
                     user_unit_dir: root.path().join("home/.config/systemd/user"),
@@ -9332,9 +9438,7 @@ mod tests {
         let named = layout(root.path())
             .plan(
                 ProvisioningOperation::Add,
-                ProvisioningTarget::Ssh {
-                    destination: "host".to_string(),
-                },
+                ProvisioningTarget::ssh("host"),
                 &reach("centos"),
                 "nonce",
             )
@@ -9347,9 +9451,7 @@ mod tests {
         let unknown = layout(root.path())
             .plan(
                 ProvisioningOperation::Add,
-                ProvisioningTarget::Ssh {
-                    destination: "host".to_string(),
-                },
+                ProvisioningTarget::ssh("host"),
                 &reach(""),
                 "nonce",
             )
@@ -9381,9 +9483,7 @@ mod tests {
         for (target, expected_state) in [
             (ProvisioningTarget::Local, local_state),
             (
-                ProvisioningTarget::Ssh {
-                    destination: "host.example".to_string(),
-                },
+                ProvisioningTarget::ssh("host.example"),
                 home.join(".local/state/farhelm"),
             ),
         ] {
@@ -10493,9 +10593,7 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn remote_metadata_distinguishes_absence_from_hash_failure() {
         let root = tempfile::tempdir().unwrap();
-        let target = ProvisioningTarget::Ssh {
-            destination: "scripted.example".to_string(),
-        };
+        let target = ProvisioningTarget::ssh("scripted.example");
         let digest = "a".repeat(64);
         let passing = ScriptLauncher::new([format!("printf '{digest}  -\\n755\\n'")]);
         let mut backend = test_system_backend(root.path());
@@ -10614,9 +10712,7 @@ mod tests {
         };
         let error = backend
             .install_uploaded_source(
-                &ProvisioningTarget::Ssh {
-                    destination: "scripted.example".to_string(),
-                },
+                &ProvisioningTarget::ssh("scripted.example"),
                 "0000000000000000000000000000000000000000000000000000000000000000",
                 &destination,
                 &temporary,
@@ -10659,9 +10755,7 @@ mod tests {
             .await
             .unwrap();
         tokio::fs::write(&source, b"new bytes").await.unwrap();
-        let target = ProvisioningTarget::Ssh {
-            destination: "scripted.example".to_string(),
-        };
+        let target = ProvisioningTarget::ssh("scripted.example");
         let prepared = stage_payload(&source).await.unwrap();
         for (bytes, exit_status, diagnostic) in [
             ("partial", 23, "transferring"),
@@ -10733,9 +10827,7 @@ mod tests {
             runtime_units: false,
             fail_before_rename: false,
         };
-        let target = ProvisioningTarget::Ssh {
-            destination: "scripted.example".to_string(),
-        };
+        let target = ProvisioningTarget::ssh("scripted.example");
         let prepared = stage_payload(&source).await.unwrap();
 
         backend
@@ -10799,9 +10891,7 @@ mod tests {
             runtime_units: false,
             fail_before_rename: false,
         };
-        let target = ProvisioningTarget::Ssh {
-            destination: "scripted.example".to_string(),
-        };
+        let target = ProvisioningTarget::ssh("scripted.example");
         let prepared = stage_payload(&source).await.unwrap();
         assert!(matches!(
             backend
@@ -12266,9 +12356,7 @@ mod tests {
             "nonce process-only stop: {stopped:?}"
         );
         let backend = SystemBackend::with_simulated_linger(root.path().to_path_buf(), Ok(()), true);
-        let target = ProvisioningTarget::Ssh {
-            destination: "localhost".to_string(),
-        };
+        let target = ProvisioningTarget::ssh("localhost");
         // The fixture root, the stop's state directory, has no `hosts`, so
         // the farhelm the stop would run for terminal hosts is never needed.
         let no_farhelm = root.path().join("no-farhelm");

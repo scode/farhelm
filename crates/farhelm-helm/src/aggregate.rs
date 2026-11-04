@@ -132,6 +132,17 @@ pub(crate) fn host_display_name(
         // for the one host the registry deliberately keeps address-less.
         HostKind::Local => "this machine".to_string(),
         HostKind::Ssh => destination.unwrap_or_default().to_string(),
+        // The sandbox's name: the part before `@` of a destination that
+        // repeats it as `<name>@<name>.sandbox.tensorlake.ai`. A Tensorlake
+        // host is always added with the user's name as its alias, so this
+        // only shows once that alias is cleared.
+        HostKind::Tensorlake => {
+            let destination = destination.unwrap_or_default();
+            destination
+                .split_once('@')
+                .map_or(destination, |(sandbox, _)| sandbox)
+                .to_string()
+        }
     }
 }
 

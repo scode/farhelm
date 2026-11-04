@@ -238,6 +238,75 @@
           "status": "pending"
         }
       }
+    },
+    {
+      "alias": "alias11",
+      "destination": "user@host11",
+      "id": 11,
+      "identity": "identity11",
+      "incarnation": 4,
+      "kind": "tensorlake",
+      "tensorlake": {
+        "sandbox": "farhelm-host-k7q2-host11-m3x9",
+        "recipe": "rust-dev",
+        "size": {
+          "cpus": 2,
+          "memory_gb": 4,
+          "disk_gb": 20
+        }
+      },
+      "name": "host11",
+      "remote_farhelm": "~/.local/bin/farhelm",
+      "remote_state_dir": "~/.local/state/farhelm",
+      "yolo_without_asking": false,
+      "commands_without_asking": false,
+      "links_without_asking": false,
+      "local_links_without_asking": false,
+      "icon": "cloud",
+      "color": "default",
+      "state": {
+        "build_version": "0.16.0",
+        "identity": "identity11",
+        "old_version": false,
+        "newer_version": false,
+        "phase": "connected",
+        "refresh": {
+          "status": "ok",
+          "sessions": 1
+        }
+      }
+    },
+    {
+      "alias": "alias12",
+      "destination": "user@host12",
+      "id": 12,
+      "identity": "identity12",
+      "incarnation": 4,
+      "kind": "tensorlake",
+      "tensorlake": {
+        "sandbox": "farhelm-host-k7q2-host12-m3x9",
+        "recipe": "rust-dev",
+        "size": {
+          "cpus": 2,
+          "memory_gb": 4,
+          "disk_gb": 20
+        }
+      },
+      "name": "host12",
+      "remote_farhelm": "~/.local/bin/farhelm",
+      "remote_state_dir": "~/.local/state/farhelm",
+      "yolo_without_asking": false,
+      "commands_without_asking": false,
+      "links_without_asking": false,
+      "local_links_without_asking": false,
+      "icon": "cloud",
+      "color": "default",
+      "state": {
+        "phase": "suspended",
+        "observed_at": 1700000100000,
+        "suspended_by_farhelm_at": 1700000000000,
+        "resume_failed": null
+      }
     }
   ]
 }

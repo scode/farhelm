@@ -9,6 +9,14 @@ use crate::store::HostKind;
 const REMOVE_INSTEAD: &str =
     "To stop using the host without uninstalling, remove it from the list instead";
 
+/// Why the panel's uninstall does not apply to a Tensorlake host
+/// (`HostKind::panel_uninstalls`): its removal deletes the sandbox, which is
+/// the only way such a host goes. Answered as a "remove instead" refusal so
+/// the UI offers the removal in its place.
+pub(super) const TENSORLAKE_DELETE_INSTEAD: &str = "This host is a Tensorlake sandbox, so Farhelm \
+     does not uninstall from it. Choose Delete sandbox instead, which terminates the sandbox and \
+     deletes its snapshots";
+
 /// Explain why an answering host cannot be checked before uninstalling it.
 ///
 /// Only these states offer Remove: no usable connection exists through this
@@ -90,6 +98,11 @@ pub(super) fn unusable_host(state: &HostState, twin: Option<(&str, HostKind)>) -
                 Some((_, HostKind::Ssh)) => format!(
                     "To remove Farhelm from that machine, choose uninstall on {other}, \
                      then remove this entry"
+                ),
+                // A sandbox has no uninstall; deleting it is how it goes.
+                Some((_, HostKind::Tensorlake)) => format!(
+                    "That machine is the Tensorlake sandbox of {other}. To stop using it, \
+                     delete that sandbox, then remove this entry"
                 ),
                 // No twin means the registry no longer holds the entry that owned
                 // the machine: it was removed, and this entry stays a duplicate

@@ -5235,26 +5235,27 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   loudly (the registry is authority for which hosts exist at all).
 - One connection actor per registry row, the local row included (PLAN_M6.md item 4), each owning its transport
   connection, its reconnect state machine, and its slice of the session cache. A row's connection is always in exactly
-  one of six states, and the last three exist because folding them into "unreachable" would throw away the only
-  information that makes the situation fixable: **connecting** (active retries in progress), **unreachable-reprobing**
-  (the active window is spent, background probes continue forever, no give-up), **connected**, **version-skew** (the
-  hello was answered and refused; carries both protocol versions, the peer's build, and the remediation text, since
-  SPEC.md demands actionable rather than merely diagnostic errors), **identity-mismatch** (frozen, carrying both
-  identities, connecting nothing until the user adopts or fixes the destination), and **duplicate** (this entry's
-  identity is already another entry's; frozen like identity-mismatch, connecting nothing until a Retry, an edit of the
-  entry, or a helm restart asks again, while the entry stays visible naming the other one). First contact checks whether
-  another entry holds the reported identity before comparing it with the one this entry recorded, so an entry that
-  recorded one install and now reaches another entry's machine is a duplicate; and an adopt prompt shown before the
-  other entry recorded the identity turns into the duplicate state when its adoption is refused, because the refusal
-  starts the entry's next attempt. The local row's unreachable state additionally distinguishes "no supervisor is
-  running on this machine" from a generic transport failure, because that is the one case whose remedy is a command on
-  the machine the user is already sitting at — a manual-path hint, never an offer to install (provisioning is M7's). A
-  seventh state exists that is not about the host at all — **retired** — for an entry whose actor has stopped: a
-  panicked task, or one that outlived its own registry row. Without it, an actor's last published status stands forever
-  after the actor is gone, so a task that died mid-connection would leave the entry reading connected, with a routable
-  client, and nothing left running to ever correct it. Each actor is therefore supervised by the task the manager
-  actually holds, which publishes the retired state (client dropped) when the actor it wraps finishes for any reason
-  other than being cancelled on purpose.
+  one of six states (a Tensorlake host has a seventh, below), and the last three exist because folding them into
+  "unreachable" would throw away the only information that makes the situation fixable: **connecting** (active retries
+  in progress), **unreachable-reprobing** (the active window is spent, background probes continue forever, no give-up),
+  **connected**, **version-skew** (the hello was answered and refused; carries both protocol versions, the peer's build,
+  and the remediation text, since SPEC.md demands actionable rather than merely diagnostic errors),
+  **identity-mismatch** (frozen, carrying both identities, connecting nothing until the user adopts or fixes the
+  destination), and **duplicate** (this entry's identity is already another entry's; frozen like identity-mismatch,
+  connecting nothing until a Retry, an edit of the entry, or a helm restart asks again, while the entry stays visible
+  naming the other one), and, for a Tensorlake host only, **suspended** (Tensorlake reports the sandbox suspended or
+  failed to resume; nothing is dialed, see "Tensorlake hosts"). First contact checks whether another entry holds the
+  reported identity before comparing it with the one this entry recorded, so an entry that recorded one install and now
+  reaches another entry's machine is a duplicate; and an adopt prompt shown before the other entry recorded the identity
+  turns into the duplicate state when its adoption is refused, because the refusal starts the entry's next attempt. The
+  local row's unreachable state additionally distinguishes "no supervisor is running on this machine" from a generic
+  transport failure, because that is the one case whose remedy is a command on the machine the user is already sitting
+  at — a manual-path hint, never an offer to install (provisioning is M7's). A seventh state exists that is not about
+  the host at all — **retired** — for an entry whose actor has stopped: a panicked task, or one that outlived its own
+  registry row. Without it, an actor's last published status stands forever after the actor is gone, so a task that died
+  mid-connection would leave the entry reading connected, with a routable client, and nothing left running to ever
+  correct it. Each actor is therefore supervised by the task the manager actually holds, which publishes the retired
+  state (client dropped) when the actor it wraps finishes for any reason other than being cancelled on purpose.
 - A host's state and its live connection are read TOGETHER, from one borrow of the actor's published status. The pair
   has an invariant — a client exists exactly while the state is connected — and session routing is built on it, so two
   separate reads straddling a transition would let a caller refuse an operation against a host that is up, or route one
@@ -5739,10 +5740,10 @@ separate columns because they have separate writers: a save replaces only `spec_
 record of a billed Tensorlake resource. The one save that touches the state is a switch away from packages, which moves
 the built snapshot to the retired list in the same immediate transaction. This is why recipes are not launch templates'
 last-write-wins "PUT creates or replaces": `POST` creates and answers 409 for an existing name, `PUT /{name}` updates
-and answers 404 for a missing one, and no route renames. `DELETE /{name}` checks host use inside its own transaction;
-until Tensorlake hosts exist that check always finds none. The store also refuses the delete while `state_json` records
-a snapshot, a builder, a retired snapshot or a build start, so no path forgets a billed resource; the route cleans those
-up first (see below).
+and answers 404 for a missing one, and no route renames. `DELETE /{name}` checks host use inside its own transaction,
+counting the hosts rows whose `tensorlake_recipe` names the recipe. The store also refuses the delete while `state_json`
+records a snapshot, a builder, a retired snapshot or a build start, so no path forgets a billed resource; the route
+cleans those up first (see below).
 
 The wire types and validation live in `farhelm_proto::tensorlake::recipes`, shared with the UI, which runs the same
 checks before sending. The name grammar is narrower than a template's because the name is embedded verbatim in the
@@ -5809,18 +5810,21 @@ Its production implementation runs `ssh` with `ssh_oneshot_args` (the connection
 would carry commands to a terminated sandbox, where a new channel hangs. The Tensorlake ssh options
 (`tensorlake/ssh.rs`, shared with Tensorlake hosts) are Farhelm's key with `IdentitiesOnly=yes`; `UserKnownHostsFile` in
 `<state>/tensorlake/known_hosts` with `GlobalKnownHostsFile=/dev/null`, `HostKeyAlias=sandbox.tensorlake.ai` (every
-sandbox name presents the gateway's one host key) and `StrictHostKeyChecking=accept-new`; and `ServerAliveInterval=30`
-with `ServerAliveCountMax=3`, inside the gateway's measured 300 to 400 second silent-drop window; and `LogLevel=ERROR`,
-which drops the gateway's login banner from every command's stderr. Paths are encoded for ssh_config with every `%`
-doubled. The child runs in its own process group and is captured through provisioning's bounded `capture_child`, which
-fails past 64 KiB of output, so every script logs to `/var/tmp/farhelm-build-<step>.log` on the sandbox and sends back
-only the log's last 8 KiB on failure; the helm keeps the last 12 lines, at most 2000 characters, stripped of
-presentation-unsafe characters. Exit 255 with OpenSSH's `Permission denied (publickey` is a refused key and fails at
-once with the registration hint; any other 255 is unreachable, retried for up to 60 seconds while connecting, since sshd
-can lag the sandbox's running state. The readiness script refuses a PID 1 other than systemd, polls
-`systemctl is-system-running` every 2 seconds for up to 180 until it says (right after boot it answers nothing, even
-with `--wait`) `running` or `degraded`, and requires `sudo -n`. The package script runs `dpkg --configure -a`,
-`apt-get update` and `apt-get install ca-certificates curl <packages>` through
+sandbox name presents the gateway's one host key), `StrictHostKeyChecking=accept-new` and `UpdateHostKeys=no`; and
+`ServerAliveInterval=30` with `ServerAliveCountMax=3`, inside the gateway's measured 300 to 400 second silent-drop
+window. The builder alone adds `LogLevel=ERROR`, which drops the gateway's login banner from every command's stderr; a
+host's connections leave it out, because their failure text is ssh's stderr tail and OpenSSH logs a server's disconnect
+reason below that level. Paths are encoded for ssh_config with every `%` doubled, and a path containing `${`, which ssh
+would expand, is refused. The Tensorlake directory both use is computed in one place (`tensorlake::tensorlake_dir`). The
+child runs in its own process group and is captured through provisioning's bounded `capture_child`, which fails past 64
+KiB of output, so every script logs to `/var/tmp/farhelm-build-<step>.log` on the sandbox and sends back only the log's
+last 8 KiB on failure; the helm keeps the last 12 lines, at most 2000 characters, stripped of presentation-unsafe
+characters. Exit 255 with OpenSSH's `Permission denied (publickey` is a refused key and fails at once with the
+registration hint; any other 255 is unreachable, retried for up to 60 seconds while connecting, since sshd can lag the
+sandbox's running state. The readiness script refuses a PID 1 other than systemd, polls `systemctl is-system-running`
+every 2 seconds for up to 180 until it says (right after boot it answers nothing, even with `--wait`) `running` or
+`degraded`, and requires `sudo -n`. The package script runs `dpkg --configure -a`, `apt-get update` and
+`apt-get install ca-certificates curl <packages>` through
 `sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a` with `DPkg::Lock::Timeout=600` and `confdef`/`confold`,
 each package shell-quoted. Each agent script downloads its installer with `curl --proto '=https' --tlsv1.2 -fsSL` into a
 file and runs that file (`bash` for `https://claude.ai/install.sh`, `CODEX_NON_INTERACTIVE=1 sh` for
@@ -5829,6 +5833,62 @@ file and runs that file (`bash` for `https://claude.ai/install.sh`, `CODEX_NON_I
 agent's updater when it re-points its own entry), and prints the bare command's `--version`, which the build records.
 The preparation script runs `apt-get clean`, truncates `/etc/machine-id` to empty (so each clone generates its own ID at
 boot) and removes the build logs. Logind and linger preparation is not part of the build; each host gets it at setup.
+
+## Tensorlake hosts
+
+A Tensorlake host is a `hosts` row with `kind = 'ssh'` and a non-null `tensorlake_sandbox` (schema 72 added that column
+and four more: the sandbox's id once a create answers, the recipe's name, the size as recipe-size JSON, and the time
+Farhelm's own Suspend finished). The kind CHECK is not widened, because that needs a rebuild of `hosts`, and about ten
+tables cascade-delete from it; only the sandbox column has a CHECK (`kind = 'ssh' OR tensorlake_sandbox IS NULL`), since
+relaxing a column CHECK later costs a rebuild too (schema 58). Rust still derives a distinct `HostKind::Tensorlake` from
+the pair, in every reader, so that each exhaustive match and named predicate on `HostKind` decides what a sandbox does:
+it has a remote install and is updated like an ssh host, is remote for browser links and tunnels, has no panel
+uninstall, no editable destination and no manual 2FA connections, and its removal deletes the machine. A reader that
+decoded `kind` alone would let a sandbox row be retargeted or forgotten as an ssh row.
+
+Connections to a sandbox use the ordinary ssh argv, with its shared connections, plus the snapshot builder's Tensorlake
+ssh options (see "Tensorlake snapshot builds") before the option terminator, so builders and hosts share Farhelm's key,
+one known-hosts file and one host key alias. The user's ssh config is still read, since a network may need its
+`ProxyCommand`; command-line options win where they overlap. A state directory whose path contains `${` is refused with
+an error naming it, because OpenSSH expands `${NAME}` in these options even inside quotes and has no escape for it.
+Provisioning targets keep the `Ssh` shape with an `access` field (omitted from a plan for an ordinary host), so every
+decision keyed on an ssh target, the payload uploads included, holds for sandboxes.
+
+Before each connection attempt on a Tensorlake host, the connection actor asks the API for the sandbox's status through
+a source the manager owns (`SandboxStatusSource`, implemented by the Tensorlake service), inside the attempt's 20-second
+budget and bounded at 10 seconds itself. Running dials. Suspended, suspending and resume-failed publish the `suspended`
+state without dialing; the first time, the actor also runs `ssh -O exit` on both of the host's shared masters (5 seconds
+each, best effort), because a master survives the suspension and a new session on it hangs. A starting, snapshotting or
+unknown status fails the attempt so the ladder retries; a terminated or missing sandbox fails it with the advice to
+delete the host. When the API cannot answer, the actor dials anyway and adds the reason to a failed dial's text: a new
+connection to a suspended sandbox is refused promptly by the gateway, while refusing to dial would cut off every running
+sandbox whenever the key is cleared or the API is down. The check is made per attempt and never while connected, so a
+connected host costs no API traffic and a suspended one one call per re-probe (45 seconds). A sandbox suspended under a
+live connection is noticed when the 30-second refresh timeout tears the connection down. `suspended` carries the time
+this helm first saw it; the host list adds the row's own suspend time, so the UI can tell Farhelm's suspension from
+Tensorlake's idle timeout across helm restarts. Provisioning does not go through the actor's gate, so it checks the same
+state itself: Update and setting a host up again are refused for a host the manager shows suspended, before anything is
+probed and again before a confirmed run's preflight probe, with a resume-first message, and the panel offers neither
+while the host is suspended.
+
+Removal (`DELETE /api/hosts/{id}`, the GUI's only removal) first holds the host's connection actor: the manager
+publishes a not-connected state with no client, interrupts whatever the actor was doing, and waits until it parks, after
+which neither a nudge nor retry time makes it dial or publish (the hold flag is checked inside the same `send_modify`
+every actor publication takes). A dead actor's replacement inherits the hold and its displayed state under the actor-map
+lock before its start gate opens, including a hold acquired while Retry is reading the registry; its parking
+acknowledgement starts empty because it belongs to the new task. Release after a failure and stop after success address
+the current entry, so replacing the actor cannot end the host's hold. Only then does removal close the host's shared
+masters, which the actor can no longer reopen, and terminate the sandbox (resolving its id by name when the row has none
+and saving that id before terminating, so a retry still finds the sandbox's snapshots after its name stops resolving; a
+missing sandbox counts as terminated). It then polls until Tensorlake reports it terminated (at most 30 seconds, so a
+snapshot a suspend was still writing exists before the sweep), lists the namespace's snapshots and deletes those whose
+`sandbox_id` is the sandbox's (a missing one counts as deleted), and only then forgets the row. Each API call is bounded
+at 20 seconds. Every step accepts that its work was done, so removing again after a failure finishes the job. The store
+enforces the order: `remove_host_row` forgets a Tensorlake row only when handed a `SandboxDeleted` proof for that row,
+which only the Tensorlake teardown constructs, and refuses otherwise; a retarget of such a row is refused the same way.
+The hold lasts until the actor stops with the row; a failed removal releases it with a fresh retry. Without an API key
+the removal is refused (409) rather than falling back to forgetting. The panel's uninstall is refused with a "delete the
+sandbox instead" remedy, and an agent's host remove is refused before any card.
 
 ## Feedback forwarding
 

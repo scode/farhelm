@@ -823,6 +823,21 @@ pub struct Host {
     /// Identity tint only; connection and permission colors stay separate.
     #[serde(default)]
     pub color: farhelm_proto::host_appearance::HostColor,
+    /// The sandbox behind a [`HostKind::Tensorlake`] host; absent for every
+    /// other host (the helm leaves the key out), and from older helms.
+    #[serde(default)]
+    pub tensorlake: Option<TensorlakeHost>,
+}
+
+/// A Tensorlake host's sandbox as the helm lists it (farhelm-helm's
+/// `TensorlakeHostView`): the sandbox's name in Tensorlake, the recipe it was
+/// made from, and the size it was created with, which the recipe may no
+/// longer say. `size` is `None` when the helm could not read it back.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct TensorlakeHost {
+    pub sandbox: peer::PeerText,
+    pub recipe: peer::PeerText,
+    pub size: Option<farhelm_proto::tensorlake::recipes::RecipeSize>,
 }
 
 impl Host {
@@ -871,6 +886,10 @@ pub enum HostKind {
     Local,
     /// A registered ssh destination.
     Ssh,
+    /// A Tensorlake sandbox Farhelm created: reached over ssh like [`Self::Ssh`],
+    /// but its destination is the sandbox's, removing it deletes the sandbox,
+    /// and it can be suspended.
+    Tensorlake,
     #[serde(other)]
     Unrecognized,
 }
@@ -881,13 +900,34 @@ pub enum HostKind {
 /// a comparison defaults to.
 #[warn(clippy::wildcard_enum_match_arm)]
 impl HostKind {
-    /// Whether the row offers user management (edit its destination,
-    /// remove it). The local row is never registered or removable, and an
+    /// Whether the user may edit the row's destination. The local row has
+    /// none, a sandbox's is its sandbox's and cannot change, and an
     /// unrecognized kind gets no verbs this build cannot vouch for.
-    pub(crate) fn is_manageable(self) -> bool {
+    pub(crate) fn edits_destination(self) -> bool {
         match self {
             HostKind::Ssh => true,
+            HostKind::Local | HostKind::Tensorlake | HostKind::Unrecognized => false,
+        }
+    }
+
+    /// Whether the row can be removed from the list at all. The local row is
+    /// never removable; a Tensorlake host is, by deleting its sandbox
+    /// ([`Self::removal_deletes_machine`]).
+    pub(crate) fn is_removable(self) -> bool {
+        match self {
+            HostKind::Ssh | HostKind::Tensorlake => true,
             HostKind::Local | HostKind::Unrecognized => false,
+        }
+    }
+
+    /// Whether removing the row deletes the machine behind it: a Tensorlake
+    /// host's removal terminates its sandbox and deletes its snapshots, so
+    /// the panel calls it "Delete sandbox" and always confirms it, whatever
+    /// `Remove hosts without asking` says.
+    pub(crate) fn removal_deletes_machine(self) -> bool {
+        match self {
+            HostKind::Tensorlake => true,
+            HostKind::Local | HostKind::Ssh | HostKind::Unrecognized => false,
         }
     }
 
@@ -895,7 +935,7 @@ impl HostKind {
     /// stay closed until this client understands their defaults and routes.
     pub(crate) fn supports_appearance(self) -> bool {
         match self {
-            HostKind::Local | HostKind::Ssh => true,
+            HostKind::Local | HostKind::Ssh | HostKind::Tensorlake => true,
             HostKind::Unrecognized => false,
         }
     }
@@ -904,7 +944,7 @@ impl HostKind {
     /// a remote ssh update. Local setup and anything unrecognized confirm.
     pub(crate) fn updates_automatically(self) -> bool {
         match self {
-            HostKind::Ssh => true,
+            HostKind::Ssh | HostKind::Tensorlake => true,
             HostKind::Local | HostKind::Unrecognized => false,
         }
     }
@@ -915,7 +955,7 @@ impl HostKind {
     /// unrecognized kind is offered nothing.
     pub(crate) fn offers_provisioning_actions(self) -> bool {
         match self {
-            HostKind::Local | HostKind::Ssh => true,
+            HostKind::Local | HostKind::Ssh | HostKind::Tensorlake => true,
             HostKind::Unrecognized => false,
         }
     }
@@ -933,7 +973,7 @@ impl HostKind {
     /// happen to agree today.
     pub(crate) fn updates_from_panel(self) -> bool {
         match self {
-            HostKind::Ssh => true,
+            HostKind::Ssh | HostKind::Tensorlake => true,
             HostKind::Local | HostKind::Unrecognized => false,
         }
     }
@@ -946,7 +986,7 @@ impl HostKind {
     pub(crate) fn uninstalls_from_panel(self) -> bool {
         match self {
             HostKind::Ssh => true,
-            HostKind::Local | HostKind::Unrecognized => false,
+            HostKind::Local | HostKind::Tensorlake | HostKind::Unrecognized => false,
         }
     }
 
@@ -956,7 +996,7 @@ impl HostKind {
     pub(crate) fn sets_up_locally(self) -> bool {
         match self {
             HostKind::Local => true,
-            HostKind::Ssh | HostKind::Unrecognized => false,
+            HostKind::Ssh | HostKind::Tensorlake | HostKind::Unrecognized => false,
         }
     }
 
@@ -966,7 +1006,7 @@ impl HostKind {
     pub(crate) fn is_this_machine(self) -> bool {
         match self {
             HostKind::Local => true,
-            HostKind::Ssh | HostKind::Unrecognized => false,
+            HostKind::Ssh | HostKind::Tensorlake | HostKind::Unrecognized => false,
         }
     }
 }
@@ -1098,6 +1138,19 @@ pub enum HostPhase {
         /// still applies its existing second escaping pass.
         #[serde(skip)]
         twin_name: Option<PeerText>,
+    },
+    /// A Tensorlake host whose sandbox is suspended (or failed to resume):
+    /// nothing is dialed until it runs again. Times are unix ms.
+    /// `observed_at` is when the helm first saw the suspension;
+    /// `suspended_by_farhelm_at` is when Farhelm's own Suspend finished, and
+    /// `None` means Farhelm did not suspend it (Tensorlake's idle timeout, or
+    /// someone else). `resume_failed` is Tensorlake's diagnosis of a failed
+    /// resume.
+    #[serde(rename = "suspended")]
+    Suspended {
+        observed_at: i64,
+        suspended_by_farhelm_at: Option<i64>,
+        resume_failed: Option<PeerText>,
     },
     /// No connection actor is running for this row. Reported rather than
     /// hidden, because an operation refused against it has to have something

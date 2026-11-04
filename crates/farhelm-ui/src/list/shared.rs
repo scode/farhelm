@@ -1063,6 +1063,7 @@ pub(super) mod tests {
             local_links_without_asking: false,
             icon: Default::default(),
             color: Default::default(),
+            tensorlake: None,
         }];
         let options = host_options(&catalog);
         assert_eq!(options[0].id, 7);
@@ -1203,6 +1204,7 @@ pub(super) mod tests {
             local_links_without_asking: false,
             icon: Default::default(),
             color: Default::default(),
+            tensorlake: None,
         }
     }
 

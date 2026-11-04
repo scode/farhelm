@@ -146,6 +146,10 @@ struct MenuFacts {
     /// The host runs a newer farhelm than the helm
     /// (`hosts::runs_newer_version`).
     too_new: bool,
+    /// The host is a Tensorlake sandbox the helm reports suspended: nothing
+    /// can reach it until it is resumed, so neither Update nor a rerun of
+    /// setup is offered (the helm refuses both anyway, before dialing).
+    suspended: bool,
 }
 
 impl ProvisioningMenuState {
@@ -169,6 +173,7 @@ impl ProvisioningMenuState {
             update_owned,
             can_retry_local_setup,
             too_new,
+            suspended,
         } = facts;
         // A pending plan is conservatively modal-producing, even for the
         // defensive Update-plan branch. Ordinary Updates never enter it.
@@ -178,7 +183,7 @@ impl ProvisioningMenuState {
             // A failed Update is not offered again on a too-new host either:
             // the rerun is the same downgrade. A failed uninstall is never a
             // rerun: its own menu item continues it.
-            rerun: (update_allowed && !plan_in_flight)
+            rerun: (update_allowed && !plan_in_flight && !suspended)
                 .then_some(failed_operation)
                 .flatten()
                 .filter(|operation| !(too_new && *operation == ProvisioningOperation::Update))
@@ -189,7 +194,12 @@ impl ProvisioningMenuState {
                 && !plan_in_flight
                 && failed_operation.is_none()
                 && can_retry_local_setup,
-            update: !run_active && update_allowed && !local_setup && !plan_in_flight && !too_new,
+            update: !run_active
+                && update_allowed
+                && !local_setup
+                && !plan_in_flight
+                && !too_new
+                && !suspended,
             uninstall: !run_active && uninstall_allowed && !plan_in_flight,
             planning: plan_in_flight,
             confirmation_may_open,
@@ -1599,7 +1609,10 @@ async fn prepare(
         ProvisioningOperation::Add => {
             let probed = match host.kind {
                 HostKind::Local => probe_local_host(base).await?,
-                HostKind::Ssh => {
+                // Setting a sandbox up again is an ssh probe of its stored
+                // destination; the helm reaches it with Farhelm's own key
+                // because it knows the destination as a Tensorlake host's.
+                HostKind::Ssh | HostKind::Tensorlake => {
                     let destination = host
                         .destination
                         .as_ref()
@@ -3748,9 +3761,15 @@ pub(crate) fn ProvisioningPanel(
     // A host running a newer farhelm than the helm is never offered Update:
     // it would install the helm's older build (`hosts::runs_newer_version`).
     let menu_too_new = crate::hosts::runs_newer_version(&host.state);
+    let menu_suspended = matches!(host.state, crate::HostPhase::Suspended { .. });
     use_effect(use_reactive(
-        (&local_setup, &menu_host_kind, &menu_too_new),
-        move |(local_setup, menu_host_kind, menu_too_new)| {
+        (
+            &local_setup,
+            &menu_host_kind,
+            &menu_too_new,
+            &menu_suspended,
+        ),
+        move |(local_setup, menu_host_kind, menu_too_new, menu_suspended)| {
             let snapshot = progress();
             let is_planning = planning().is_some();
             let has_pending_plan = offer.is_open();
@@ -3776,6 +3795,7 @@ pub(crate) fn ProvisioningPanel(
                 update_owned: owned,
                 can_retry_local_setup,
                 too_new: menu_too_new,
+                suspended: menu_suspended,
             });
             if menu_states.peek().get(&host_id).copied() != Some(next) {
                 menu_states.write().insert(host_id, next);
@@ -5402,6 +5422,38 @@ mod tests {
             .rerun,
             None,
             "rerunning a failed Update is the same downgrade"
+        );
+    }
+
+    /// A suspended Tensorlake host is offered neither Update nor a rerun of
+    /// a failed setup, while the same host running is offered both.
+    ///
+    /// Why it matters: either would open ssh to a sandbox that refuses new
+    /// connections until it is resumed (goal criterion 4), so the offer could
+    /// only fail; the helm refuses it before dialing as well. Specified: with
+    /// every other fact allowing them, `suspended` withdraws exactly Update
+    /// and the rerun.
+    #[farhelm_testtrace::test]
+    fn a_suspended_host_is_not_offered_update_or_rerun() {
+        let ready = MenuFacts {
+            update_allowed: true,
+            failed_operation: Some(ProvisioningOperation::Add),
+            ..MenuFacts::default()
+        };
+        let running = ProvisioningMenuState::offered(ready);
+        assert!(running.update);
+        assert_eq!(running.rerun, Some(ProvisioningOperation::Add));
+        let suspended = ProvisioningMenuState::offered(MenuFacts {
+            suspended: true,
+            ..ready
+        });
+        assert_eq!(
+            suspended,
+            ProvisioningMenuState {
+                update: false,
+                rerun: None,
+                ..running
+            }
         );
     }
 

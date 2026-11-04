@@ -1023,7 +1023,9 @@ impl Harness {
                 feedback,
                 ..AppState::new(
                     Arc::clone(&manager),
-                    store,
+                    store.clone(),
+                    crate::tensorlake::Tensorlake::production(store, _dir.path())
+                        .expect("build the restarted Tensorlake service"),
                     _dir.path().to_path_buf(),
                     crate::provisioning::PayloadSelection::Default,
                     cfg!(farhelm_release_build),
@@ -1156,6 +1158,9 @@ pub(crate) struct FleetBuilder {
     /// The shell behind the helm's snapshot builds, when a test scripts it;
     /// `None` keeps it offline.
     tensorlake_shell: Option<Arc<dyn crate::tensorlake::shell::SandboxShell>>,
+    /// What the actors ask before dialing a Tensorlake host, when a test
+    /// scripts it; otherwise the manager's "cannot ask" default.
+    sandboxes: Option<Arc<dyn crate::manager::SandboxStatusSource>>,
 }
 
 impl FleetBuilder {
@@ -1181,6 +1186,15 @@ impl FleetBuilder {
         shell: Arc<dyn crate::tensorlake::shell::SandboxShell>,
     ) -> Self {
         self.tensorlake_shell = Some(shell);
+        self
+    }
+    /// Let the actors ask `sandboxes` about Tensorlake hosts' sandboxes, so
+    /// a test can put a planted Tensorlake host into the Suspended state.
+    pub(crate) fn sandboxes(
+        mut self,
+        sandboxes: Arc<dyn crate::manager::SandboxStatusSource>,
+    ) -> Self {
+        self.sandboxes = Some(sandboxes);
         self
     }
     /// A fresh helm.db with only its reserved local row, and a local host
@@ -1223,6 +1237,7 @@ impl FleetBuilder {
             approval_wait: None,
             tensorlake_api: None,
             tensorlake_shell: None,
+            sandboxes: None,
         }
     }
 
@@ -1353,6 +1368,14 @@ impl FleetBuilder {
                 client,
             )
             .await
+        } else if let Some(sandboxes) = self.sandboxes {
+            ConnectionManager::start_with_sandboxes(
+                self.store.clone(),
+                Arc::clone(&self.fleet) as Arc<dyn HostTransport>,
+                cadence,
+                sandboxes,
+            )
+            .await
         } else {
             ConnectionManager::start(
                 self.store.clone(),
@@ -1382,7 +1405,9 @@ impl FleetBuilder {
             ),
             ..AppState::new(
                 Arc::clone(&manager),
-                self.store,
+                self.store.clone(),
+                crate::tensorlake::Tensorlake::production(self.store, &state_dir)
+                    .expect("build the harness Tensorlake service"),
                 state_dir,
                 crate::provisioning::PayloadSelection::Default,
                 cfg!(farhelm_release_build),

@@ -917,6 +917,14 @@ fn refusal_text(host: store::HostId, state: &manager::HostState) -> String {
             "this entry reaches the machine host {twin} already holds, so nothing is connected; \
              remove that entry or change this one's destination, then press Retry"
         ),
+        manager::HostState::Suspended { resume_failed, .. } => match resume_failed {
+            None => "the host's Tensorlake sandbox is suspended; it runs again once it is \
+                     resumed"
+                .to_string(),
+            Some(details) => format!(
+                "the host's Tensorlake sandbox is suspended and its last resume failed: {details}"
+            ),
+        },
         manager::HostState::Retired { reason } => reason.clone(),
         // Unreachable in practice — a connected host has a client and
         // never reaches this function — but stated rather than

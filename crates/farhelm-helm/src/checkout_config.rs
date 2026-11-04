@@ -2979,6 +2979,12 @@ mod tests {
                  ALTER TABLE hosts DROP COLUMN yolo_without_asking;
                  ALTER TABLE hosts DROP COLUMN links_without_asking;
                  ALTER TABLE hosts DROP COLUMN local_links_without_asking;
+                 -- Schema 72 added the Tensorlake host columns.
+                 ALTER TABLE hosts DROP COLUMN tensorlake_sandbox;
+                 ALTER TABLE hosts DROP COLUMN tensorlake_sandbox_id;
+                 ALTER TABLE hosts DROP COLUMN tensorlake_recipe;
+                 ALTER TABLE hosts DROP COLUMN tensorlake_resources;
+                 ALTER TABLE hosts DROP COLUMN tensorlake_suspended_at;
                  -- Schema 62 added host entry UUIDs, which v26 did not have.
                  DROP INDEX hosts_entry_uuid;
                  ALTER TABLE hosts DROP COLUMN entry_uuid;

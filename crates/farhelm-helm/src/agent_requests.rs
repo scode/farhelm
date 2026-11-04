@@ -3156,6 +3156,16 @@ async fn remove_host_for_agent(
             crate::store::HostStoreError::LocalHostImmutable,
         ));
     }
+    // Removing a Tensorlake host deletes its sandbox, files and sessions
+    // included. Agents get no part in a sandbox's lifecycle in phase 1 (they
+    // cannot request one either), so this is refused before any card rather
+    // than offered as an ordinary removal the card would misdescribe.
+    if row.kind.removal_deletes_machine() {
+        return Err(crate::sessions::invalid_request(format!(
+            "{host_name} is a Tensorlake sandbox; removing it deletes the sandbox, so only the \
+             user can do that, in Farhelm"
+        )));
+    }
     if host == origin.host {
         return Err(crate::sessions::invalid_request(
             "a session cannot remove its own host: that would cut the connection this request \
@@ -4433,6 +4443,7 @@ mod tests {
             id,
             entry_uuid: format!("{id:08x}-0000-4000-8000-000000000000"),
             kind,
+            tensorlake: None,
             name: name.to_string(),
             destination: None,
             alias: None,
@@ -13516,6 +13527,51 @@ mod tests {
         assert!(h.state.approvals.list().is_empty(), "no card was shown");
         assert!(host_row(&h, local).await.is_some());
         assert!(host_row(&h, remote).await.is_some());
+    }
+
+    /// Spec: an agent's remove of a Tensorlake host is refused at once,
+    /// naming the host and saying only the user can delete a sandbox; no
+    /// card is shown and the host stays.
+    ///
+    /// Why: removing a Tensorlake host deletes its sandbox, files and
+    /// sessions included (D6), and phase 1 keeps agents out of a sandbox's
+    /// lifecycle; the ordinary remove card would describe a forget that
+    /// cannot happen.
+    #[farhelm_testtrace::test]
+    async fn host_remove_refuses_a_tensorlake_host_without_a_card() {
+        let (h, _local, remote) = host_fleet().await;
+        let sandbox = crate::tensorlake::hosts::test_support::plant(
+            &h.store,
+            "gpu dev",
+            "farhelm-host-k7q2-gpu-dev-m3x9",
+            "gpu-dev",
+            Some("sbx-1"),
+        )
+        .await;
+        h.state.manager.sync_registry().await.unwrap();
+        let _gui = h.state.manager.events().admit(1).expect("a GUI seat");
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let (kind, message) = refused(
+            tokio::time::timeout(
+                std::time::Duration::from_secs(20),
+                handler.handle(
+                    origin_of(&h, remote),
+                    "remote-a",
+                    AgentVerb::HostRemove {
+                        host: "gpu dev".to_string(),
+                    },
+                ),
+            )
+            .await
+            .expect("refused at once rather than waiting on a card"),
+        );
+        assert_eq!(kind, ErrorKind::InvalidRequest);
+        assert!(
+            message.contains("gpu dev") && message.contains("Tensorlake sandbox"),
+            "{message}"
+        );
+        assert!(h.state.approvals.list().is_empty(), "no card was shown");
+        assert!(host_row(&h, sandbox).await.is_some());
     }
 
     /// Spec: an allowed host remove does what the GUI's remove does: the

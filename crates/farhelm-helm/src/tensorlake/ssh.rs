@@ -14,13 +14,16 @@
 //! Tensorlake rotates it.
 //!
 //! The snapshot builder uses these options with a one-shot argv
-//! ([`crate::ssh::ssh_oneshot_args`]); Tensorlake hosts reuse the same set
-//! for their shared connections, so builders and hosts share one key policy
-//! and one known_hosts file.
+//! ([`crate::ssh::ssh_oneshot_args`], plus [`TensorlakeSshAccess::oneshot_options`]'
+//! quieter log level); Tensorlake hosts use the same set for their shared
+//! connections ([`crate::ssh::SshAccess::Tensorlake`]), so builders and hosts
+//! share one key policy, one known_hosts file and one host key alias.
 //!
 //! The user's ssh config is still read (`-F` is not passed): a user who needs
 //! a proxy to reach Tensorlake keeps it. Its `IdentityFile` lines are still
 //! offered, but after Farhelm's key, which is what the gateway decides on.
+//! The options here are on the command line, so they win over the config
+//! for the same keywords.
 
 use std::path::{Path, PathBuf};
 
@@ -57,17 +60,29 @@ impl TensorlakeSshAccess {
         }
     }
 
+    /// The access a Tensorlake host's connections use: Farhelm's key where
+    /// the key store keeps it under `state_dir`'s Tensorlake directory
+    /// ([`super::tensorlake_dir`]), whether or not it exists yet. Naming the
+    /// file never creates it, so a dial cannot generate a key; a missing one
+    /// makes the gateway refuse the login until the user creates it in
+    /// Settings → Tensorlake.
+    pub(crate) fn for_state_dir(state_dir: &Path) -> std::io::Result<Self> {
+        let dir = super::tensorlake_dir(state_dir)?;
+        Ok(Self::new(&dir, super::ssh_key::private_key_path(&dir)))
+    }
+
     /// The `-o` options every Tensorlake ssh command carries after the
-    /// connection overrides, in a fixed order. Paths are config-encoded, so a
-    /// state directory with spaces, quotes or `%` still names the right file.
+    /// connection overrides, in a fixed order, for the builder's one-shot
+    /// commands and a host's shared connections alike. Paths are
+    /// config-encoded ([`crate::ssh::ssh_config_path_option`]), so a state
+    /// directory with spaces, quotes or `%` still names the right file.
     ///
     /// `GlobalKnownHostsFile=/dev/null` keeps a system-wide entry for the
     /// alias (unlikely, but outside Farhelm's control) from overriding the
-    /// one Farhelm recorded. `LogLevel=ERROR` drops the gateway's login
-    /// banner and ssh's "Permanently added" note, which would otherwise
-    /// open every failed command's stderr; a refused key's "Permission
-    /// denied (publickey)" is an error and still shows (checked live). Fails only for a path that is not UTF-8, which
-    /// ssh's option text cannot carry.
+    /// one Farhelm recorded, and `UpdateHostKeys=no` keeps ssh from
+    /// rewriting Farhelm's file on its own. Fails, naming the path, for a
+    /// path that is not UTF-8 (which ssh's option text cannot carry) or that
+    /// holds `${` (which ssh would expand).
     pub(crate) fn options(&self) -> Result<Vec<String>, String> {
         let text = |path: &Path| {
             path.to_str().map(str::to_string).ok_or_else(|| {
@@ -78,16 +93,34 @@ impl TensorlakeSshAccess {
             })
         };
         Ok(vec![
-            crate::ssh::ssh_config_path_option("IdentityFile", &text(&self.identity_file)?),
+            crate::ssh::ssh_config_path_option("IdentityFile", &text(&self.identity_file)?)?,
             "IdentitiesOnly=yes".to_string(),
-            crate::ssh::ssh_config_path_option("UserKnownHostsFile", &text(&self.known_hosts)?),
+            crate::ssh::ssh_config_path_option("UserKnownHostsFile", &text(&self.known_hosts)?)?,
             "GlobalKnownHostsFile=/dev/null".to_string(),
             format!("HostKeyAlias={GATEWAY_HOST_KEY_ALIAS}"),
             "StrictHostKeyChecking=accept-new".to_string(),
+            "UpdateHostKeys=no".to_string(),
             format!("ServerAliveInterval={SERVER_ALIVE_INTERVAL}"),
             format!("ServerAliveCountMax={SERVER_ALIVE_COUNT_MAX}"),
-            "LogLevel=ERROR".to_string(),
         ])
+    }
+
+    /// [`Self::options`] plus `LogLevel=ERROR`, for the builder's one-shot
+    /// commands only. It drops the gateway's login banner and ssh's
+    /// "Permanently added" note, which would otherwise open every failed
+    /// build step's stderr; a refused key's "Permission denied (publickey)"
+    /// is an error and still shows (checked live), which is all
+    /// [`classify`] reads.
+    ///
+    /// Not for a host's shared connections: their failure text is ssh's
+    /// stderr tail, and OpenSSH logs a server's disconnect reason
+    /// ("Received disconnect from …", how the gateway says why it refused a
+    /// connection) at its informational level, which `LogLevel=ERROR` would
+    /// hide from the host's diagnostics.
+    pub(crate) fn oneshot_options(&self) -> Result<Vec<String>, String> {
+        let mut options = self.options()?;
+        options.push("LogLevel=ERROR".to_string());
+        Ok(options)
     }
 }
 
@@ -135,8 +168,9 @@ mod tests {
 
     /// Spec: the options are Farhelm's key with `IdentitiesOnly`, Farhelm's
     /// known_hosts beside the key directory under the gateway alias with no
-    /// global file, trust on first use, a 30-second keepalive, and errors
-    /// only in ssh's own output, in that order; paths with spaces, quotes and `%` survive ssh's config
+    /// global file, trust on first use with no host-key updates, a 30-second
+    /// keepalive, and (for the builder's one-shot commands only) errors only
+    /// in ssh's own output, in that order; paths with spaces, quotes and `%` survive ssh's config
     /// parsing. Composed with the one-shot argv, `--` still precedes the
     /// destination.
     ///
@@ -149,7 +183,7 @@ mod tests {
         let access = TensorlakeSshAccess::new(dir, dir.join("ssh-key/id_ed25519"));
         assert_eq!(access.known_hosts, dir.join("known_hosts"));
         assert_eq!(
-            access.options().unwrap(),
+            access.oneshot_options().unwrap(),
             [
                 r#"IdentityFile="/state dir/te'n%%s\"or/tensorlake/ssh-key/id_ed25519""#,
                 "IdentitiesOnly=yes",
@@ -157,14 +191,22 @@ mod tests {
                 "GlobalKnownHostsFile=/dev/null",
                 "HostKeyAlias=sandbox.tensorlake.ai",
                 "StrictHostKeyChecking=accept-new",
+                "UpdateHostKeys=no",
                 "ServerAliveInterval=30",
                 "ServerAliveCountMax=3",
                 "LogLevel=ERROR",
             ]
         );
+        let shared = access.options().unwrap();
+        assert_eq!(
+            shared[..],
+            access.oneshot_options().unwrap()[..shared.len()],
+            "hosts get the same set without the builder's log level"
+        );
+        assert!(!shared.iter().any(|option| option.starts_with("LogLevel")));
         let argv = crate::ssh::ssh_oneshot_args(
             &destination("farhelm-build-k7q2-rust"),
-            &access.options().unwrap(),
+            &access.oneshot_options().unwrap(),
         );
         assert_eq!(
             &argv[argv.len() - 2..],

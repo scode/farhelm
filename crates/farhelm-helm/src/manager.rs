@@ -575,6 +575,27 @@ pub enum HostState {
         /// without a second lookup.
         identity: String,
     },
+    /// The host is a Tensorlake sandbox that Tensorlake reports suspended
+    /// (or failed to resume), so nothing is dialed: a new ssh connection to
+    /// a suspended sandbox is refused, and a new session on an old one
+    /// hangs.
+    ///
+    /// Entered from any attempt whose status check before the dial gets that
+    /// answer (see [`SandboxStatusSource`]), whoever suspended the sandbox:
+    /// the user, Tensorlake's idle timeout, or the `tl` CLI. Entering it also
+    /// closes the host's shared ssh connections. Re-probed on
+    /// [`Cadence::reprobe`], one status call each time and no dial, so a
+    /// sandbox resumed outside Farhelm comes back on its own; Farhelm never
+    /// resumes one by itself.
+    Suspended {
+        /// When this helm first saw the suspension (unix ms): the "since"
+        /// for a suspension Farhelm did not make. Kept across re-probes.
+        /// Farhelm's own suspend time is on the host row, not here.
+        observed_at: i64,
+        /// Tensorlake's diagnosis when the sandbox's status is
+        /// `resume_failed`; `None` for an ordinary suspension.
+        resume_failed: Option<String>,
+    },
     /// This entry has no actor any more: the task that owned its
     /// connection finished, and nothing here will attempt anything until
     /// the next [`ConnectionManager::sync_registry`] gives it a new one.
@@ -614,6 +635,7 @@ impl HostState {
             HostState::IdentityMismatch { .. } => "identity-mismatch",
             HostState::IdentityUnverified { .. } => "identity-unverified",
             HostState::Duplicate { .. } => "duplicate",
+            HostState::Suspended { .. } => "suspended",
             HostState::Retired { .. } => "retired",
         }
     }
@@ -966,6 +988,20 @@ struct ActorStatus {
     /// host's every re-probe would wake every client for a number nobody
     /// shows.
     refusal_attempt: u64,
+    /// The hold in force on this host, by its number, or `None`. Set and
+    /// cleared only by the manager ([`ConnectionManager::hold_connection`],
+    /// [`ConnectionManager::release_hold`]). While set, the actor dials
+    /// nothing and none of its publications land: the check is inside the
+    /// same `send_modify` every publication takes, so an attempt that was
+    /// already in flight cannot put a client back after the hold. Replacing
+    /// the actor carries this token and its presentation into the new handle
+    /// before starting it; the hold belongs to the host, not one task.
+    hold: Option<u64>,
+    /// The hold the actor last parked for: written by the actor when it
+    /// stops at its loop's top under a hold, which is how
+    /// [`ConnectionManager::hold_connection`] knows no attempt of its is
+    /// still running.
+    parked: Option<u64>,
 }
 
 /// An out-of-band request from the manager to one actor: stop whatever you
@@ -1110,6 +1146,8 @@ pub struct ConnectionManager {
     attempts: Arc<std::sync::atomic::AtomicU64>,
     store: HelmStore,
     transport: Arc<dyn HostTransport>,
+    /// Where actors ask about a Tensorlake host's sandbox before dialing it.
+    sandboxes: Arc<dyn SandboxStatusSource>,
     cadence: Cadence,
     /// The test gate every actor of this manager checks before publishing
     /// a duplicate result; see [`DuplicateGateSlot`].
@@ -1408,6 +1446,23 @@ impl ConnectionManager {
         Ok(manager)
     }
 
+    /// [`Self::start`] with the source every actor asks before dialing a
+    /// Tensorlake host, installed before any actor runs. What the helm
+    /// itself uses; plain `start` serves managers with no Tensorlake hosts.
+    pub(crate) async fn start_with_sandboxes(
+        store: HelmStore,
+        transport: Arc<dyn HostTransport>,
+        cadence: Cadence,
+        sandboxes: Arc<dyn SandboxStatusSource>,
+    ) -> anyhow::Result<Arc<ConnectionManager>> {
+        let mut manager = Self::unstarted(store, transport, cadence);
+        Arc::get_mut(&mut manager)
+            .expect("unstarted manager has one owner")
+            .sandboxes = sandboxes;
+        manager.sync_registry().await?;
+        Ok(manager)
+    }
+
     /// Start a fixture with its outbound capability installed before any actor
     /// observes a list. Ordinary test managers remain offline by construction.
     #[cfg(test)]
@@ -1440,6 +1495,7 @@ impl ConnectionManager {
             attempts: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             store,
             transport,
+            sandboxes: Arc::new(NoTensorlake),
             cadence,
             #[cfg(test)]
             duplicate_gate: DuplicateGateSlot::default(),
@@ -1476,6 +1532,95 @@ impl ConnectionManager {
         handler: Arc<dyn crate::agent_requests::AgentRequestHandler>,
     ) {
         let _ = self.agent_requests.set(handler);
+    }
+
+    /// Stop `host`'s connection and keep it stopped until
+    /// [`Self::release_hold`]: publish `shown` with no client (so nothing is
+    /// routed to the host from this moment), interrupt whatever the actor
+    /// is doing, and wait until it has parked, so no dial of it is still
+    /// running when this returns. Returns whether the host had an actor.
+    ///
+    /// For work that must not race the host's own connection: deleting a
+    /// Tensorlake host's sandbox now, suspending one later. Closing a
+    /// sandbox's shared ssh connections only sticks once their owner cannot
+    /// open new ones, which is why callers hold first and release the
+    /// masters second. Publishing in the actor-map lock keeps snapshots
+    /// coherent, and minting a new incarnation invalidates every claim made
+    /// on the old connection. A reconnect or a retry while held only wakes
+    /// the parked actor, which parks again. If that actor dies, registry
+    /// reconciliation and Retry transfer the hold before its replacement
+    /// starts; release and removal always address the current map entry.
+    ///
+    /// The wait for the actor is bounded ([`HOLD_PARK_TIMEOUT`]): the
+    /// only step it cannot interrupt is a bounded `ssh -O exit`, and a
+    /// caller is better served by going on (the hold already blocks every
+    /// new dial and every publication) than by waiting on a wedged process.
+    pub(crate) async fn hold_connection(&self, host: HostId, shown: HostState) -> bool {
+        let (mut status, hold, running, withdrawn) = {
+            let map = self.actors.lock().expect("actor map mutex poisoned");
+            let Some(handle) = map.actors.get(&host) else {
+                return false;
+            };
+            let mut withdrawn = None;
+            let mut hold = 0;
+            handle.status.send_modify(|status| {
+                status.state = shown;
+                withdrawn = status.client.take();
+                status.live_sessions = None;
+                status.incarnation = self
+                    .incarnations
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                hold = status.incarnation;
+                status.hold = Some(hold);
+            });
+            handle.nudge.send_modify(|nudge| {
+                nudge.revision += 1;
+                nudge.fresh_window = false;
+            });
+            let running = !handle.task.is_finished() && !handle.nudge.is_closed();
+            (handle.status.subscribe(), hold, running, withdrawn)
+        };
+        retire_withdrawn(withdrawn);
+        self.events.bump();
+        if running
+            && tokio::time::timeout(
+                HOLD_PARK_TIMEOUT,
+                status.wait_for(|status| status.parked == Some(hold)),
+            )
+            .await
+            .is_err()
+        {
+            warn!(
+                host,
+                "the connection actor did not stop within {HOLD_PARK_TIMEOUT:?}; holding it anyway"
+            );
+        }
+        true
+    }
+
+    /// End a hold [`Self::hold_connection`] placed and let the actor dial
+    /// again, with the full retry ladder when `fresh_window` (the host
+    /// should be back now) or one probe otherwise. The held state stays
+    /// published until the actor's next publication replaces it.
+    pub(crate) fn release_hold(&self, host: HostId, fresh_window: bool) {
+        let map = self.actors.lock().expect("actor map mutex poisoned");
+        if let Some(handle) = map.actors.get(&host) {
+            handle.status.send_modify(|status| {
+                status.hold = None;
+                status.parked = None;
+            });
+            handle.nudge.send_modify(|nudge| {
+                nudge.revision += 1;
+                nudge.fresh_window = fresh_window;
+            });
+        }
+    }
+
+    /// The transport every actor dials through, for work on a host's
+    /// connections outside an actor: closing a Tensorlake host's shared ssh
+    /// connections before its sandbox is deleted.
+    pub(crate) fn transport(&self) -> &Arc<dyn HostTransport> {
+        &self.transport
     }
 
     /// The fleet's revision counter — what the invalidation socket
@@ -1592,6 +1737,7 @@ impl ConnectionManager {
                             "the host's connection actor is gone; respawning it"
                         );
                         let mut replacement = self.spawn_actor(row);
+                        Self::carry_connection_hold(handle, &replacement);
                         if let Some(start) = replacement.start.take() {
                             started.push(start);
                         }
@@ -1720,7 +1866,26 @@ impl ConnectionManager {
         Ok(())
     }
 
-    /// Start one actor and hand back the manager's handle on it.
+    /// Preserve host-level exclusion across replacement of an actor task.
+    ///
+    /// Call under the actor-map lock, with the replacement's start gate still
+    /// closed. Reading the current entry here includes holds acquired while
+    /// a revival was awaiting the registry. Parking is task-local: the new
+    /// actor must acknowledge the inherited hold itself.
+    fn carry_connection_hold(previous: &ActorHandle, replacement: &ActorHandle) {
+        let previous = previous.status.borrow();
+        if let Some(hold) = previous.hold {
+            replacement.status.send_modify(|status| {
+                status.hold = Some(hold);
+                status.state = previous.state.clone();
+                status.parked = None;
+            });
+        }
+    }
+
+    /// Start one dormant actor and hand back the manager's handle on it.
+    /// The caller installs it and transfers any existing connection hold
+    /// before releasing its start gate.
     fn spawn_actor(&self, row: HostRow) -> ActorHandle {
         let status = Arc::new(watch::Sender::new(ActorStatus {
             state: HostState::Connecting {
@@ -1735,6 +1900,8 @@ impl ConnectionManager {
             incarnation: 0,
             refusal_attempt: 0,
             list_truncated: false,
+            hold: None,
+            parked: None,
         }));
         let (nudge_tx, nudge_rx) = watch::channel(Nudge::default());
         let (refresh_tx, refresh_rx) = watch::channel(0u64);
@@ -1755,6 +1922,7 @@ impl ConnectionManager {
             id: row.id,
             store: self.store.clone(),
             transport: Arc::clone(&self.transport),
+            sandboxes: Arc::clone(&self.sandboxes),
             cadence: self.cadence.clone(),
             status: Arc::clone(&status),
             #[cfg(test)]
@@ -2750,6 +2918,7 @@ impl ConnectionManager {
                 // dial anything.
                 return Ok(true);
             }
+            Self::carry_connection_hold(existing, &replacement);
         }
         // Install FIRST, release SECOND: the actor does nothing until the
         // gate opens, so the map is the single arbiter of which actor owns
@@ -2906,6 +3075,8 @@ struct HostActor {
     id: HostId,
     store: HelmStore,
     transport: Arc<dyn HostTransport>,
+    /// Asked before each attempt on a Tensorlake host; see [`HostActor::attempt`].
+    sandboxes: Arc<dyn SandboxStatusSource>,
     cadence: Cadence,
     status: Arc<watch::Sender<ActorStatus>>,
     /// This actor's manager's test gate; see [`DuplicateGateSlot`].
@@ -2969,7 +3140,9 @@ struct HostActor {
 /// What [`HostActor::reload_row`] found, distinguishing "removed" from
 /// "could not tell" — see that method for why two negatives are not one.
 enum RowStatus {
-    Present(HostRow),
+    /// Boxed because a row is several hundred bytes and the other two
+    /// variants carry nothing.
+    Present(Box<HostRow>),
     /// The registry no longer holds this id: the actor retires.
     Removed,
     /// The registry could not be read at all: the caller keeps the row it
@@ -3083,6 +3256,132 @@ struct DuplicatePublicationGate {
 #[cfg(test)]
 type DuplicateGateSlot = Arc<Mutex<Option<Arc<DuplicatePublicationGate>>>>;
 
+/// How long [`ConnectionManager::hold_connection`] waits for the actor to
+/// park. Everything an actor awaits races its nudge except the release of a
+/// suspended sandbox's shared connections (two bounded `ssh -O exit`s), so
+/// this only has to outlast those.
+const HOLD_PARK_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// What Tensorlake says about a host's sandbox, as the dial gate reads it
+/// ([`SandboxStatusSource::check`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum SandboxCheck {
+    /// Tensorlake answered with the sandbox's state, and its diagnosis when
+    /// it has one (a failed resume's, say).
+    Status {
+        status: crate::tensorlake::api::SandboxStatus,
+        error_details: Option<String>,
+    },
+    /// Tensorlake has no sandbox by that name.
+    Missing,
+    /// Tensorlake could not answer: no API key saved, a rejected key, the
+    /// network, a timeout. The sentence says which.
+    Unavailable(String),
+}
+
+/// Where the connection actors learn a Tensorlake host's sandbox status.
+///
+/// A trait the manager owns, so the actor's state machine can be tested
+/// against scripted answers under a paused clock; production implements it
+/// for [`crate::tensorlake::Tensorlake`], which asks the API. Asked once per
+/// attempt on a Tensorlake host and never while the host is connected, so a
+/// connected host costs no API traffic and a suspended one costs one call
+/// per re-probe.
+#[async_trait::async_trait]
+pub(crate) trait SandboxStatusSource: Send + Sync {
+    async fn check(&self, sandbox: &str) -> SandboxCheck;
+}
+
+/// The status source of a manager started without one ([`ConnectionManager::start`]):
+/// every check is unavailable, so a Tensorlake row would be dialed as the
+/// gate's fallback says. Only test managers and helms with no Tensorlake
+/// service use it, and none of their rows are sandboxes.
+struct NoTensorlake;
+
+#[async_trait::async_trait]
+impl SandboxStatusSource for NoTensorlake {
+    async fn check(&self, _sandbox: &str) -> SandboxCheck {
+        SandboxCheck::Unavailable("this helm has no Tensorlake account to ask".to_string())
+    }
+}
+
+/// What a Tensorlake host's attempt does with its status check.
+#[derive(Debug, PartialEq, Eq)]
+enum SandboxGate {
+    /// Dial. `unanswered` holds why Tensorlake could not answer, when it
+    /// could not, for the failure text should the dial fail too.
+    Dial { unanswered: Option<String> },
+    /// Do not dial; the host is suspended.
+    Suspended { resume_failed: Option<String> },
+    /// Do not dial; the attempt fails with this text and the ladder retries.
+    Refuse(String),
+}
+
+/// Decide an attempt from its status check. Pure, so the table is pinned by
+/// tests on its own.
+///
+/// Running dials. Suspended, suspending and a failed resume are Suspended.
+/// A sandbox that is starting or snapshotting, or in a state this build
+/// does not know, is not dialed but retried, since it may be running in a
+/// moment. A missing or terminated sandbox fails with the remedy, deleting
+/// the host, because nothing Farhelm can do brings it back.
+///
+/// When Tensorlake cannot answer, the gate dials anyway (a decision recorded
+/// in the design): a NEW ssh connection to a suspended sandbox is refused
+/// promptly by Tensorlake's gateway, so dialing blind costs a failed
+/// attempt at worst, while refusing to dial would turn a cleared API key or
+/// an API outage into every Tensorlake host going dark.
+fn sandbox_gate(check: SandboxCheck, sandbox: &str) -> SandboxGate {
+    use crate::tensorlake::api::SandboxStatus;
+    match check {
+        SandboxCheck::Status {
+            status,
+            error_details,
+        } => match status {
+            SandboxStatus::Running => SandboxGate::Dial { unanswered: None },
+            SandboxStatus::Suspended | SandboxStatus::Suspending => SandboxGate::Suspended {
+                resume_failed: None,
+            },
+            SandboxStatus::ResumeFailed => SandboxGate::Suspended {
+                resume_failed: Some(
+                    error_details.unwrap_or_else(|| "Tensorlake gave no reason".to_string()),
+                ),
+            },
+            SandboxStatus::Pending | SandboxStatus::Snapshotting | SandboxStatus::Unknown => {
+                SandboxGate::Refuse(format!(
+                    "sandbox {sandbox} is {}; Farhelm connects once it is running",
+                    match status {
+                        SandboxStatus::Pending => "starting",
+                        SandboxStatus::Snapshotting => "taking a snapshot",
+                        _ => "in a state Farhelm does not know",
+                    }
+                ))
+            }
+            SandboxStatus::Terminated => SandboxGate::Refuse(gone(sandbox)),
+        },
+        SandboxCheck::Missing => SandboxGate::Refuse(gone(sandbox)),
+        SandboxCheck::Unavailable(reason) => SandboxGate::Dial {
+            unanswered: Some(reason),
+        },
+    }
+}
+
+/// The failure text for a sandbox Tensorlake no longer runs.
+fn gone(sandbox: &str) -> String {
+    format!(
+        "Tensorlake has no running sandbox {sandbox}; it was deleted outside Farhelm. Delete \
+         this host to remove it from the list"
+    )
+}
+
+/// Wall-clock now in unix milliseconds, for timestamps the UI shows. A clock
+/// before the epoch reads as 0 rather than failing.
+fn unix_millis() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_millis() as i64)
+}
+
 /// How one connection attempt ended — the actor's whole decision surface,
 /// named so [`HostActor::run`]'s loop reads as the state machine it is
 /// rather than as nested error handling.
@@ -3102,6 +3401,10 @@ enum AttemptOutcome {
     Unverified { recorded: String },
     /// The peer's identity belongs to another registry row.
     Duplicate { twin: HostId, identity: String },
+    /// Tensorlake reports the host's sandbox suspended (or failed to
+    /// resume); nothing was dialed. Settles at once, like a refusal: retrying
+    /// within the ladder would only ask Tensorlake the same question again.
+    Suspended { resume_failed: Option<String> },
     /// No usable connection was established, including a hello that succeeded
     /// but whose identity recording or browser-link setup then failed.
     Failed {
@@ -3306,7 +3609,7 @@ impl HostActor {
             // Read BEFORE the reload: see `PublishGuard::WhileIncarnation`.
             let incarnation = self.status.borrow().incarnation;
             match self.reload_row().await {
-                RowStatus::Present(fresh) => row = fresh,
+                RowStatus::Present(fresh) => row = *fresh,
                 RowStatus::Removed => {
                     info!("registry row is gone; the connection actor is stopping");
                     return;
@@ -3315,6 +3618,20 @@ impl HostActor {
             }
             *self.destination.lock().expect("destination mutex poisoned") =
                 display_destination(&row);
+
+            // Parked under a hold: say so, then wait for nudges until the
+            // manager releases it. Whatever the hold's own nudge interrupted
+            // (a dial, a live connection, a wait) has already been dropped
+            // on the way here, so from this point the actor reaches nothing.
+            let hold = self.status.borrow().hold;
+            if let Some(hold) = hold {
+                self.status.send_modify(|status| status.parked = Some(hold));
+                let request = next_nudge(&mut nudge).await;
+                // The release asks for the ladder when the host should be
+                // tried in earnest again (a teardown that failed, a resume).
+                active |= request.fresh_window;
+                continue;
+            }
 
             // An empty ladder is one attempt and no retries — exactly what
             // a background re-probe is. See this function's own docs on
@@ -3436,6 +3753,23 @@ impl HostActor {
                     self.set_state(HostState::Unreachable {
                         cause,
                         last_error: error,
+                    });
+                    active = self.hold(&mut nudge, self.cadence.reprobe).await;
+                }
+                AttemptOutcome::Suspended { resume_failed } => {
+                    let previous = match &self.status.borrow().state {
+                        HostState::Suspended { observed_at, .. } => Some(*observed_at),
+                        _ => None,
+                    };
+                    // On the way in only: a master opened before the
+                    // suspension would hang the next session on it, and
+                    // the re-probes that follow open nothing.
+                    if previous.is_none() {
+                        self.transport.release_shared_connections(&row).await;
+                    }
+                    self.set_state(HostState::Suspended {
+                        observed_at: previous.unwrap_or_else(unix_millis),
+                        resume_failed,
                     });
                     active = self.hold(&mut nudge, self.cadence.reprobe).await;
                 }
@@ -3677,10 +4011,7 @@ impl HostActor {
         build_version: String,
         progress: &AttemptProgress,
     ) -> AttemptOutcome {
-        let enabled = match row.kind {
-            HostKind::Local => false,
-            HostKind::Ssh => true,
-        };
+        let enabled = row.kind.is_remote();
         if let Err(error) = client.set_browser_forwarding(enabled).await {
             let snapshot = if let Some(ssh) = progress.ssh.as_ref() {
                 // Pending RPCs fail before the background task publishes its
@@ -3728,9 +4059,47 @@ impl HostActor {
             progress,
             match row.kind {
                 HostKind::Local => ConnectionStage::ConnectingToSupervisor,
-                HostKind::Ssh => ConnectionStage::ConnectingToHost,
+                HostKind::Ssh | HostKind::Tensorlake => ConnectionStage::ConnectingToHost,
             },
         );
+        let Some(binding) = row.tensorlake.as_ref() else {
+            return self.dial(row, progress).await;
+        };
+        match sandbox_gate(
+            self.sandboxes.check(&binding.sandbox).await,
+            &binding.sandbox,
+        ) {
+            SandboxGate::Dial { unanswered: None } => self.dial(row, progress).await,
+            SandboxGate::Dial {
+                unanswered: Some(reason),
+            } => match self.dial(row, progress).await {
+                // The dial is what failed, but the user also needs to know
+                // the status check could not tell whether the sandbox was
+                // even running.
+                AttemptOutcome::Failed { cause, error } => AttemptOutcome::Failed {
+                    cause,
+                    error: format!(
+                        "{error} (Farhelm could not ask Tensorlake whether the sandbox is \
+                         running: {})",
+                        peer_text(&reason)
+                    ),
+                },
+                outcome => outcome,
+            },
+            SandboxGate::Suspended { resume_failed } => AttemptOutcome::Suspended {
+                resume_failed: resume_failed.map(|details| peer_text(&details)),
+            },
+            SandboxGate::Refuse(error) => AttemptOutcome::Failed {
+                cause: UnreachableCause::TransportFailure,
+                error,
+            },
+        }
+    }
+
+    /// The dial itself: open the transport, say hello, settle identity and
+    /// browser links. [`Self::attempt`] runs it after a Tensorlake host's
+    /// status check allows it, and at once for every other host.
+    async fn dial(&self, row: &HostRow, progress: &mut AttemptProgress) -> AttemptOutcome {
         let dialed = DialedAs::of(row);
         let TransportConnection {
             io: (reader, writer),
@@ -3746,7 +4115,9 @@ impl HostActor {
             SshCapability::for_dial(&mut capability, &dialed).latest = Some(ssh.observation());
         }
         progress.ssh = ssh;
-        if row.kind == HostKind::Local {
+        // Without ssh there is no connected marker to wait for: a socket
+        // that opened is already waiting for the hello.
+        if row.kind.ssh_access().is_none() {
             self.advance_attempt(progress, ConnectionStage::WaitingForHello);
         }
         // `start_for_host`, not `start`: this connection is the ONE path an
@@ -4518,7 +4889,7 @@ impl HostActor {
     async fn reload_row(&self) -> RowStatus {
         match self.store.list_hosts().await {
             Ok(rows) => match rows.into_iter().find(|row| row.id == self.id) {
-                Some(row) => RowStatus::Present(row),
+                Some(row) => RowStatus::Present(Box::new(row)),
                 None => RowStatus::Removed,
             },
             Err(error) => {
@@ -4632,6 +5003,11 @@ impl HostActor {
         let mut withdrawn: Option<Arc<SupervisorClient>> = None;
         let mut applied = false;
         self.status.send_modify(|status| {
+            // Under a hold the manager owns what is published (see
+            // `ActorStatus::hold`); the actor's own word waits.
+            if status.hold.is_some() {
+                return;
+            }
             // A guarded publish that a withdrawal has overtaken is dropped
             // whole. See `PublishGuard`.
             let overtaken = match guard {
@@ -5076,6 +5452,7 @@ mod tests {
             local_links_without_asking: false,
             icon: Default::default(),
             color: Default::default(),
+            tensorlake: None,
         }
     }
 
@@ -5732,6 +6109,7 @@ mod tests {
             local_links_without_asking: false,
             icon: Default::default(),
             color: Default::default(),
+            tensorlake: None,
         };
         let remote = row(7, HostKind::Ssh, Some("box.example"));
         let older = skew_remediation(&remote, 9, 10);
@@ -6308,6 +6686,9 @@ mod tests {
         /// its client would leave the peer's read loop parked forever, and
         /// nothing observable on the helm side would say so.
         closures: watch::Sender<Vec<HostId>>,
+        /// Every host whose shared connections were released, in order
+        /// ([`HostTransport::release_shared_connections`]).
+        releases: watch::Sender<Vec<HostId>>,
     }
 
     impl ScriptedTransport {
@@ -6322,7 +6703,17 @@ mod tests {
                 origin: tokio::time::Instant::now(),
                 kill,
                 closures: watch::Sender::new(Vec::new()),
+                releases: watch::Sender::new(Vec::new()),
             })
+        }
+
+        /// How many times `host`'s shared connections were released.
+        fn releases(&self, host: HostId) -> usize {
+            self.releases
+                .borrow()
+                .iter()
+                .filter(|id| **id == host)
+                .count()
         }
 
         /// Wait until at least `n` of `host`'s peers have seen their
@@ -6452,6 +6843,14 @@ mod tests {
                     Box::new(w) as Box<dyn AsyncWrite + Send + Unpin>,
                 )))
             })
+        }
+
+        fn release_shared_connections<'a>(
+            &'a self,
+            host: &'a HostRow,
+        ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+            self.releases.send_modify(|log| log.push(host.id));
+            Box::pin(std::future::ready(()))
         }
     }
 
@@ -11325,6 +11724,7 @@ mod tests {
             attempts: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             store,
             transport: ScriptedTransport::new(),
+            sandboxes: Arc::new(NoTensorlake),
             cadence: Cadence::default(),
             duplicate_gate: DuplicateGateSlot::default(),
             refresh_gate: DuplicateGateSlot::default(),
@@ -11929,6 +12329,7 @@ mod tests {
             local_links_without_asking: false,
             icon: Default::default(),
             color: Default::default(),
+            tensorlake: None,
         };
         let cases = [
             (
@@ -11988,6 +12389,7 @@ mod tests {
             local_links_without_asking: false,
             icon: Default::default(),
             color: Default::default(),
+            tensorlake: None,
         };
         let error = classify_local_dial(anyhow::Error::new(std::io::Error::new(
             std::io::ErrorKind::ConnectionRefused,
@@ -12136,5 +12538,496 @@ mod tests {
             peer.abort();
             drop(kill);
         }
+    }
+
+    // ---- Tensorlake hosts: the status check before every dial ----------
+
+    /// A scripted Tensorlake status source: answers whatever the test last
+    /// set, and logs the virtual time of every check so a test can count
+    /// them and see their spacing.
+    struct ScriptedSandboxes {
+        answer: Mutex<SandboxCheck>,
+        checks: watch::Sender<Vec<Duration>>,
+        origin: tokio::time::Instant,
+    }
+
+    impl ScriptedSandboxes {
+        fn new(answer: SandboxCheck) -> Arc<Self> {
+            Arc::new(Self {
+                answer: Mutex::new(answer),
+                checks: watch::Sender::new(Vec::new()),
+                origin: tokio::time::Instant::now(),
+            })
+        }
+
+        fn answer(&self, answer: SandboxCheck) {
+            *self.answer.lock().unwrap() = answer;
+        }
+
+        fn checks(&self) -> Vec<Duration> {
+            self.checks.borrow().clone()
+        }
+
+        async fn wait_for_checks(&self, n: usize) -> Vec<Duration> {
+            let mut rx = self.checks.subscribe();
+            let _ = rx.wait_for(|log| log.len() >= n).await;
+            self.checks()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl SandboxStatusSource for ScriptedSandboxes {
+        async fn check(&self, _sandbox: &str) -> SandboxCheck {
+            let at = self.origin.elapsed();
+            self.checks.send_modify(|log| log.push(at));
+            self.answer.lock().unwrap().clone()
+        }
+    }
+
+    fn sandbox_status(status: crate::tensorlake::api::SandboxStatus) -> SandboxCheck {
+        SandboxCheck::Status {
+            status,
+            error_details: None,
+        }
+    }
+
+    /// A fixture whose registry holds one Tensorlake host (besides the
+    /// local row), with `sandboxes` installed before any actor runs.
+    /// Returns the fixture and the Tensorlake host's id.
+    async fn sandbox_fixture(
+        sandboxes: Arc<ScriptedSandboxes>,
+        script: Script,
+    ) -> (Fixture, HostId) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = HelmStore::open(&dir.path().join("helm.db"))
+            .await
+            .expect("open store");
+        let transport = ScriptedTransport::new();
+        transport.set_script(
+            local_id(&store).await,
+            Script {
+                reachable: false,
+                ..Script::default()
+            },
+        );
+        let host = crate::tensorlake::hosts::test_support::plant(
+            &store,
+            "gpu dev",
+            "farhelm-host-k7q2-gpu-dev-m3x9",
+            "gpu-dev",
+            Some("sbx-1"),
+        )
+        .await;
+        transport.set_script(host, script);
+        let mut manager = ConnectionManager::unstarted(
+            store.clone(),
+            Arc::clone(&transport) as Arc<dyn HostTransport>,
+            Cadence::default(),
+        );
+        Arc::get_mut(&mut manager)
+            .expect("unstarted manager has one owner")
+            .sandboxes = sandboxes;
+        manager.sync_registry().await.expect("start manager");
+        (
+            Fixture {
+                _dir: dir,
+                store,
+                transport,
+                manager,
+            },
+            host,
+        )
+    }
+
+    /// Why: the dial decision for a Tensorlake host is this table, and each
+    /// row is a promise to the user (goal criterion 4, P7): a suspended
+    /// sandbox is never dialed, a deleted one says how to get rid of the
+    /// host, and an API outage does not take running hosts down with it.
+    ///
+    /// Spec: running dials; suspended and suspending are Suspended with no
+    /// diagnosis; a failed resume is Suspended with Tensorlake's diagnosis
+    /// (or a stand-in when it gave none); starting, snapshotting and unknown
+    /// states refuse with "connects once it is running"; terminated and
+    /// missing refuse with the delete remedy; an unanswered check dials,
+    /// carrying the reason.
+    #[farhelm_testtrace::test]
+    fn the_sandbox_gate_decides_every_status() {
+        use crate::tensorlake::api::SandboxStatus;
+        let name = "farhelm-host-k7q2-x-m3x9";
+        assert_eq!(
+            sandbox_gate(sandbox_status(SandboxStatus::Running), name),
+            SandboxGate::Dial { unanswered: None }
+        );
+        for status in [SandboxStatus::Suspended, SandboxStatus::Suspending] {
+            assert_eq!(
+                sandbox_gate(sandbox_status(status), name),
+                SandboxGate::Suspended {
+                    resume_failed: None
+                }
+            );
+        }
+        assert_eq!(
+            sandbox_gate(
+                SandboxCheck::Status {
+                    status: SandboxStatus::ResumeFailed,
+                    error_details: Some("restore failed".into()),
+                },
+                name
+            ),
+            SandboxGate::Suspended {
+                resume_failed: Some("restore failed".into())
+            }
+        );
+        assert!(matches!(
+            sandbox_gate(sandbox_status(SandboxStatus::ResumeFailed), name),
+            SandboxGate::Suspended {
+                resume_failed: Some(_)
+            }
+        ));
+        for status in [
+            SandboxStatus::Pending,
+            SandboxStatus::Snapshotting,
+            SandboxStatus::Unknown,
+        ] {
+            assert!(matches!(
+                sandbox_gate(sandbox_status(status), name),
+                SandboxGate::Refuse(text) if text.contains(name) && text.contains("once it is running")
+            ));
+        }
+        for check in [
+            sandbox_status(SandboxStatus::Terminated),
+            SandboxCheck::Missing,
+        ] {
+            assert!(matches!(
+                sandbox_gate(check, name),
+                SandboxGate::Refuse(text) if text.contains(name) && text.contains("Delete this host")
+            ));
+        }
+        assert_eq!(
+            sandbox_gate(SandboxCheck::Unavailable("no key".into()), name),
+            SandboxGate::Dial {
+                unanswered: Some("no key".into())
+            }
+        );
+    }
+
+    /// Why: dialing a suspended sandbox is refused by the gateway at best
+    /// and hangs on a stale shared connection at worst; the host must read
+    /// Suspended instead, cost one API call per re-probe, and come back on
+    /// its own when the sandbox is resumed elsewhere (P7, D5).
+    ///
+    /// Spec: with Tensorlake reporting the sandbox suspended, the actor
+    /// publishes Suspended without ever dialing, releases the host's shared
+    /// ssh connections once on the way in, and checks again once per
+    /// re-probe interval with the first observation time kept. When the
+    /// answer turns to running, the next re-probe dials and connects.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn a_suspended_sandbox_is_never_dialed_and_resumes_by_itself() {
+        use crate::tensorlake::api::SandboxStatus;
+        let sandboxes = ScriptedSandboxes::new(sandbox_status(SandboxStatus::Suspended));
+        let (fixture, host) = sandbox_fixture(Arc::clone(&sandboxes), Script::default()).await;
+        let first = fixture
+            .manager
+            .wait_for_state(host, |state| matches!(state, HostState::Suspended { .. }))
+            .await
+            .expect("actor is running");
+        let HostState::Suspended {
+            observed_at,
+            resume_failed: None,
+        } = first
+        else {
+            panic!("expected an ordinary suspension, got {first:?}");
+        };
+        assert_eq!(fixture.transport.releases(host), 1);
+        let checks = sandboxes.wait_for_checks(3).await;
+        assert_eq!(
+            checks
+                .windows(2)
+                .map(|pair| pair[1] - pair[0])
+                .collect::<Vec<_>>(),
+            [REPROBE_INTERVAL, REPROBE_INTERVAL],
+            "one check per re-probe, none in between"
+        );
+        assert!(fixture.transport.attempts(host).is_empty(), "never dialed");
+        assert_eq!(
+            fixture.transport.releases(host),
+            1,
+            "released on the way in only"
+        );
+        assert_eq!(
+            fixture.manager.state(host),
+            Some(HostState::Suspended {
+                observed_at,
+                resume_failed: None
+            }),
+            "re-probes keep the first observation time"
+        );
+
+        sandboxes.answer(sandbox_status(SandboxStatus::Running));
+        fixture
+            .manager
+            .wait_for_state(host, |state| matches!(state, HostState::Connected { .. }))
+            .await
+            .expect("the host connects once the sandbox runs again");
+        assert_eq!(fixture.transport.attempts(host).len(), 1);
+    }
+
+    /// Why: a connected Tensorlake host must cost no API traffic, and a
+    /// running sandbox must connect exactly as any ssh host does.
+    ///
+    /// Spec: with the sandbox running, the actor checks once, dials once
+    /// and connects; while it stays connected, through several refreshes, no
+    /// further check is made.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn a_running_sandbox_is_dialed_and_not_checked_while_connected() {
+        use crate::tensorlake::api::SandboxStatus;
+        let sandboxes = ScriptedSandboxes::new(sandbox_status(SandboxStatus::Running));
+        let (fixture, host) = sandbox_fixture(Arc::clone(&sandboxes), Script::default()).await;
+        fixture
+            .manager
+            .wait_for_state(host, |state| matches!(state, HostState::Connected { .. }))
+            .await
+            .expect("actor is running");
+        // Several refresh intervals of an established connection.
+        tokio::time::sleep(REFRESH_INTERVAL * 10).await; // sleep-ok: an observation window over which no check may happen
+        assert!(
+            fixture.transport.requests(host).len() >= 5,
+            "premise: refreshes ran"
+        );
+        assert!(matches!(
+            fixture.manager.state(host),
+            Some(HostState::Connected { .. })
+        ));
+        assert_eq!(sandboxes.checks().len(), 1);
+        assert_eq!(fixture.transport.attempts(host).len(), 1);
+        assert_eq!(fixture.transport.releases(host), 0);
+    }
+
+    /// Why: an API outage or a cleared key must not take running Tensorlake
+    /// hosts offline (a decision recorded in the design), but a failure
+    /// must still say that Tensorlake could not be asked.
+    ///
+    /// Spec: with the check unavailable, the actor dials; a reachable host
+    /// connects, and an unreachable one ends Unreachable with both the dial's
+    /// failure and the check's reason in its error.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn an_unanswered_status_check_dials_anyway() {
+        let sandboxes = ScriptedSandboxes::new(SandboxCheck::Unavailable(
+            "no Tensorlake API key is saved".into(),
+        ));
+        let (fixture, host) = sandbox_fixture(Arc::clone(&sandboxes), Script::default()).await;
+        fixture
+            .manager
+            .wait_for_state(host, |state| matches!(state, HostState::Connected { .. }))
+            .await
+            .expect("a reachable host connects without an answer");
+
+        let sandboxes = ScriptedSandboxes::new(SandboxCheck::Unavailable(
+            "no Tensorlake API key is saved".into(),
+        ));
+        let (fixture, host) = sandbox_fixture(
+            Arc::clone(&sandboxes),
+            Script {
+                reachable: false,
+                ..Script::default()
+            },
+        )
+        .await;
+        let state = fixture
+            .manager
+            .wait_for_state(host, |state| matches!(state, HostState::Unreachable { .. }))
+            .await
+            .expect("actor is running");
+        let HostState::Unreachable { last_error, .. } = state else {
+            unreachable!()
+        };
+        assert!(last_error.contains("is down"), "{last_error}");
+        assert!(
+            last_error.contains("could not ask Tensorlake")
+                && last_error.contains("no Tensorlake API key is saved"),
+            "{last_error}"
+        );
+        assert_eq!(
+            fixture.transport.attempts(host).len(),
+            7,
+            "the whole ladder dialed"
+        );
+    }
+
+    /// Why: a sandbox deleted outside Farhelm can never come back, so the
+    /// host must say so and how to remove it, without dialing a name that no
+    /// longer exists.
+    ///
+    /// Spec: with Tensorlake reporting no such sandbox, every attempt of the
+    /// ladder fails without a dial and the host settles Unreachable with the
+    /// delete remedy.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn a_deleted_sandbox_is_unreachable_with_the_remedy() {
+        let sandboxes = ScriptedSandboxes::new(SandboxCheck::Missing);
+        let (fixture, host) = sandbox_fixture(Arc::clone(&sandboxes), Script::default()).await;
+        let state = fixture
+            .manager
+            .wait_for_state(host, |state| matches!(state, HostState::Unreachable { .. }))
+            .await
+            .expect("actor is running");
+        let HostState::Unreachable { last_error, .. } = state else {
+            unreachable!()
+        };
+        assert!(last_error.contains("Delete this host"), "{last_error}");
+        assert!(fixture.transport.attempts(host).is_empty(), "never dialed");
+        assert_eq!(
+            sandboxes.checks().len(),
+            7,
+            "one check per attempt of the ladder"
+        );
+    }
+
+    /// A hold acquired while revival reads the registry must reach the
+    /// replacement, rather than being captured before the await. The store
+    /// mutex and manual poll establish that boundary without relying on task
+    /// scheduling. The new actor must park without dialing, preserve the
+    /// displayed reason, and reconnect when the current entry is released.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn a_hold_acquired_during_revivals_registry_read_is_preserved() {
+        let fixture = fixture(Cadence::default(), |store, transport| async move {
+            let host = store
+                .add_ssh_host("held-revival.example", None, None)
+                .await
+                .unwrap();
+            transport.set_script(
+                host,
+                Script {
+                    panic_on_dial: true,
+                    ..Script::default()
+                },
+            );
+        })
+        .await;
+        let host = fixture.store.list_hosts().await.unwrap()[1].id;
+        fixture
+            .manager
+            .wait_for_state(host, |state| matches!(state, HostState::Retired { .. }))
+            .await
+            .expect("premise: the actor has retired before revival");
+        fixture
+            .transport
+            .edit(host, |script| script.panic_on_dial = false);
+        let previous = {
+            let map = fixture.manager.actors.lock().unwrap();
+            Arc::clone(&map.actors.get(&host).unwrap().status)
+        };
+        let dials = fixture.transport.attempts(host).len();
+        let connection = fixture.store.connection_for_test();
+        let mut revival = std::pin::pin!(fixture.manager.retry_now(host));
+        {
+            let _registry_gate = connection.lock();
+            let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+            assert!(revival.as_mut().poll(&mut cx).is_pending());
+            assert!(
+                fixture.manager.reconcile.try_lock().is_err(),
+                "premise: revival owns admission and awaits the registry"
+            );
+        }
+        // Revival stays unpolled after its store await, so the hold arrives
+        // after its initial liveness check and before replacement installation.
+        let shown = HostState::Unreachable {
+            cause: UnreachableCause::TransportFailure,
+            last_error: "held during revival".into(),
+        };
+        assert!(fixture.manager.hold_connection(host, shown.clone()).await);
+        let hold = previous.borrow().hold.expect("hold was acquired");
+        assert!(revival.await.unwrap());
+        let replacement = {
+            let map = fixture.manager.actors.lock().unwrap();
+            Arc::clone(&map.actors.get(&host).unwrap().status)
+        };
+        assert!(
+            !Arc::ptr_eq(&previous, &replacement),
+            "the dead actor was replaced"
+        );
+        assert_eq!(replacement.borrow().hold, Some(hold));
+        assert_eq!(
+            replacement.borrow().parked,
+            None,
+            "the replacement must acknowledge parking for itself"
+        );
+        let mut status = replacement.subscribe();
+        tokio::time::timeout(
+            HOLD_PARK_TIMEOUT,
+            status.wait_for(|status| status.parked == Some(hold)),
+        )
+        .await
+        .expect("the replacement parks")
+        .unwrap();
+        assert_eq!(fixture.transport.attempts(host).len(), dials);
+        assert_eq!(fixture.manager.state(host), Some(shown));
+        assert!(fixture.manager.status(host).unwrap().client.is_none());
+
+        fixture.manager.release_hold(host, true);
+        fixture
+            .manager
+            .wait_for_state(host, HostState::is_connected)
+            .await
+            .expect("the released replacement connects");
+        assert_eq!(fixture.transport.attempts(host).len(), dials + 1);
+    }
+
+    /// Why: deleting a Tensorlake host's sandbox closes its shared ssh
+    /// connections and then waits on Tensorlake, and the host's own actor
+    /// must not reopen a connection (or offer one for routing) in between;
+    /// Suspend will rely on the same hold.
+    ///
+    /// Spec: holding a connected host publishes the given state with no
+    /// client at once and returns only once the actor has parked; while
+    /// held, neither a retry nudge nor minutes of retry time produce a dial
+    /// or a publication; releasing with a fresh window dials at once and
+    /// connects again.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn a_held_connection_dials_nothing_until_released() {
+        let fixture = fixture(Cadence::default(), |store, _transport| async move {
+            store
+                .add_ssh_host("held.example", None, None)
+                .await
+                .unwrap();
+        })
+        .await;
+        let host = fixture.store.list_hosts().await.unwrap()[1].id;
+        fixture
+            .manager
+            .wait_for_state(host, |state| matches!(state, HostState::Connected { .. }))
+            .await
+            .expect("actor is running");
+        let shown = HostState::Unreachable {
+            cause: UnreachableCause::TransportFailure,
+            last_error: "held for the test".to_string(),
+        };
+        assert!(fixture.manager.hold_connection(host, shown.clone()).await);
+        let status = fixture.manager.status(host).unwrap();
+        assert_eq!(status.state, shown);
+        assert!(status.client.is_none(), "nothing is routable while held");
+        fixture.transport.wait_for_closures(host, 1).await;
+        let dials = fixture.transport.attempts(host).len();
+
+        fixture.manager.retry_now(host).await.unwrap();
+        // sleep-ok: an observation window, many retry and re-probe intervals long, in which no dial may happen
+        tokio::time::sleep(REPROBE_INTERVAL * 4).await;
+        assert_eq!(
+            fixture.transport.attempts(host).len(),
+            dials,
+            "no dial while held"
+        );
+        assert_eq!(
+            fixture.manager.state(host),
+            Some(shown),
+            "no publication while held"
+        );
+
+        fixture.manager.release_hold(host, true);
+        fixture
+            .manager
+            .wait_for_state(host, |state| matches!(state, HostState::Connected { .. }))
+            .await
+            .expect("the released host connects again");
+        assert_eq!(fixture.transport.attempts(host).len(), dials + 1);
     }
 }
