@@ -567,6 +567,12 @@ that its required systemd or SSH substrate ran.
   (`-E 'binary(memory)'`, release, Linux; its numbers print only with `--no-capture`, which the recorder's generic mode
   accepts), and `write_missing_golden_fixtures`, which writes the fixtures of a new golden script and never overwrites
   one.
+- `python3 scripts/record-test-run.py --kind development --selection 'snapshot encoder benchmark' --concurrency 'one test; fixtures sequential' --tmux none -- cargo nextest run -p farhelm-terminal-emulator --release --run-ignored only -E 'binary(encode_speed)' --no-capture`
+  — the ignored snapshot encoder benchmark (`tests/encode_speed.rs`): typical, true-color and image-like output at 200
+  columns, 60 screen rows and 12,000 history lines, measured in sequence. Each reports five encodes' median and spread,
+  blob size and history dropped. Fixture shape and repeated bytes are asserted; elapsed time is not. Compare on the same
+  machine with load recorded. Generic recording permits `--no-capture`; the controlled nextest mode does not. Run it
+  when the snapshot encoder changes, beside correctness and memory checks; minutes, no tmux or network.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'emulator parity with tmux' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run -p farhelm-supervisor --lib -E 'test(emulator_parity::)'`
   — the terminal emulator against the pinned tmux 3.7c, run with Farhelm's server configuration in a private server per
   test (`crates/farhelm-supervisor/src/emulator_parity/`): screen text, cursor, title and query answers compared at

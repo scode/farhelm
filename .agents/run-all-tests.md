@@ -127,6 +127,9 @@ Generic recorder wrapping is fine but not required for these; record each result
 - The terminal emulator's ignored tests from `.agents/validation.md`, in release: the snapshot spike's full round-trip
   configuration, the review's short scripts and hostile blobs, and the per-terminal memory measurement (on Linux), whose
   assertions fail when an emulator exceeds the crate's stated budget; the workspace batteries skip ignored tests
+- The snapshot encoder benchmark from `.agents/validation.md`, in release, recording machine load and its five-sample
+  medians and spreads for typical, true-color and image-like output. It asserts fixture shape and repeated bytes, not
+  speed; the workspace batteries skip this ignored measurement too.
 - The recorded portable brick-test helper suite from `.agents/validation.md`, with process-group inspection available;
   this exercises compiled task contracts, fixed operations, structured native actions, restart handoff failures and
   calibrated window-trace and bonus gesture-readiness gates. The guest-only Swift helper separately needs SDK type-check
