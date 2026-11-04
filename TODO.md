@@ -141,13 +141,21 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   of true-color history each) and watch CPU and the "left a terminal host its previous snapshot at exit" log lines.
   Plan: `plans/queue/stop-checkpoint-burst.md`.
 
-- **Assess the grid terminal's history memory.** Grid terminals (terminals in a terminal host) keep their scrollback in
-  the page as one JavaScript object per run of styled text, plus a style object per distinct color pair, where xterm.js
-  packs each cell into about 12 bytes. Measured in WebKit (the Mac desktop app's engine) at the 12,000-line scrollback
-  cap, 200 columns, growth in resident memory once settled: typical output 44 MiB (xterm.js 65), a different 256-color
-  color in every cell 364 MiB (xterm.js 408), a different true color in every cell 737 MiB (xterm.js 502). Not a
-  blocker; assess whether a more compact history representation (decoded on demand for the rows on screen and for
-  selection and link lookups) is worth it. Method and harness: the grid client's WebKit memory benchmark.
+- **Overhaul the grid stream's encoding and the grid client's history storage.** Grid terminals (terminals in a terminal
+  host) get their screen and history from the supervisor as JSON messages, and the page keeps every history line
+  decoded, as one JavaScript object per run of styled text plus a style object per distinct color pair. Measured in
+  WebKit (the Mac desktop app's engine) at the 12,000-line scrollback cap, 200 columns, growth in resident memory once
+  settled: typical output 44 MiB (xterm.js 65), a different 256-color color in every cell 364 MiB (xterm.js 408), a
+  different true color in every cell 737 MiB (xterm.js 502). The benchmark behind those numbers was never committed. On
+  2026-11-03 the maintainer asked for the wire encoding and the in-memory representation to be overhauled together so
+  that neither is hideously inefficient, and judged making history compact without changing the encoding a waste of
+  time. The shape discussed: one compact binary encoding for the grid stream, which the page stores history in nearly as
+  it arrives, decoding only the rows on screen and the rows that selection, copying, word and link lookups touch.
+  Drawing (one element per visible row) stays as it is, and compressing older history is something to measure afterwards
+  rather than assume. The grid stream is not a permanent format, so a new encoding is an ordinary protocol bump
+  (`crates/farhelm-proto/src/grid.rs`, "Why this shape", which chose JSON for readable traces and to avoid a
+  hand-written binary decoder in the browser, the place where bounds would be easy to get wrong). Commit a benchmark
+  that measures memory, attach size and attach time before and after.
 
 - **Emoji made wide by a variation selector in grid terminals.** In tmux, an emoji followed by the emoji variation
   selector (U+FE0F, as in "❤️") takes two columns; the emulator behind terminals in a terminal host gives it one, as
@@ -458,7 +466,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Built-in questions tool.** A built-in questions tool in the style of the interactive artifacts: how an agent asks
   the user a structured question (multiple choice, say), presented like those artifacts rather than as plain text.
 - **Move the session hover pop-up to the right of the session list.** Hovering a session in the session list shows a
-  pop-up that covers nearby sessions; position it beside the list so it does not hide them.
+  pop-up that covers nearby sessions; position it beside the list so it does not hide them. Plan:
+  `plans/queue/session-summary-beside-list.md`.
 - **Jittery/jiggling characters when switching between sessions.** Switching between sessions makes characters jitter or
   jiggle: something is being re-drawn or laid out for no reason. Find what triggers the needless re-draw/re-layout on
   session switch.

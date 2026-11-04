@@ -11,3 +11,4 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [in-flight c96b93] `grid-drop-and-drag-notice.md` — Grid terminals: accept dropped files and show the drag-copy notice, placed 3 rows off the pointer
 - [pending] `in-app-announcements.md` — An announcement queue the app shows once per helm, fed for now by announcements built into releases
 - [in-flight 1c9e9a] `launch-progress.md` — Show a live "Launching on host… 14 s" status while a launch, Restart or Replace waits
+- [pending] `session-summary-beside-list.md` — Show the session hover summary card beside the session list, level with the row, instead of over neighbouring rows
