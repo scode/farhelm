@@ -4,14 +4,12 @@ Notable user-facing changes in each stable release of Farhelm. Release candidate
 
 ## v0.35.0 - 2026-11-04
 
-**DRAFT release notes - not yet finalized**
-
 ### 🚀 Added
 
 - When a session launch, Restart or Replace is slow, Farhelm now shows which host it is waiting on and for how long, beside the button or, for a quick launch, at the bottom of the window. If the app stops waiting after a minute, it says that the operation may still finish. (#2970, #2974)
 - In the session launcher's search, you can now choose Guarded or YOLO before choosing an agent, as the permission buttons already allowed. If the agent you then choose replaces that choice with a riskier mode, the launcher shows its red warning with Undo. (#2989)
-- You can now drop files, images and text onto a new terminal, in a session's agent and in its terminal tabs, as with old terminals. (#2965)
-- New terminals now show the hint about holding Shift (Option on a Mac) when a program that uses the mouse keeps a drag from selecting text, as old terminals do. In both kinds of terminal, the hint now appears a few rows above where you let go, or below when there is no room above, so it stays off the text you dragged over. (#2969)
+- You can now drop files, images and text onto a new terminal, in a session's agent and in its terminal tabs (this functionality temporarily got dropped in the transition away from tmux/xterm.js). (#2965)
+- New terminals now show the hint about holding Shift (Option on a Mac) when a program that uses the mouse keeps a drag from selecting text (fixing another regression from when tmux/xterm.js was replaced). In both kinds of terminal, the hint now appears a few rows above where you let go, or below when there is no room above, so it stays off the text you dragged over. (#2969)
 - **Chat on Discord**, in the **Help** menu and in the feedback dialog, opens Farhelm's Discord, where you can talk with the maintainer and other users. (#2963)
 
 ### 🔄 Changed
@@ -24,15 +22,15 @@ Notable user-facing changes in each stable release of Farhelm. Release candidate
 
 ### 🔧 Fixes worth highlighting
 
-- A session's agent or terminal tab in a new terminal now recovers by itself after briefly losing contact with the process that runs it, instead of staying unavailable until the supervisor restarted. After repeated losses, Farhelm waits at least a minute before reconnecting. (#2950, #2956)
-- An emoji drawn wide by a variation selector, as in ❤️, now takes two columns in a new terminal, so the rest of its line is no longer one column off. (#2971)
+- **Uninstall Farhelm** on a remote host no longer fails with "the remote probe answered without reporting its resolved binary" when Farhelm's ssh connection to that host is shared between commands, which is how Farhelm normally connects. Checking a remote host before updating it could fail the same way. (#3005)
+- Adding or updating a remote host no longer hangs if copying Farhelm to the host stalls; it now fails, leaving the host free for another attempt. (#3006)
 
 ### 🩹 Misc fixes
 
 *Fixes that would normally be summed up as a single "various bug fixes" line. In the interest of transparency, the complete list is included.*
 
-- **Uninstall Farhelm** on a remote host no longer fails with "the remote probe answered without reporting its resolved binary" when Farhelm's ssh connection to that host is shared between commands, which is how Farhelm normally connects. Checking a remote host before updating it could fail the same way. (#3005)
-- Adding or updating a remote host no longer hangs if copying Farhelm to the host stalls; it now fails, leaving the host free for another attempt. (#3006)
+- A session's agent or terminal tab in a new terminal now recovers by itself after briefly losing contact with the process that runs it, instead of staying unavailable until the supervisor restarted. After repeated losses, Farhelm waits at least a minute before reconnecting. (#2950, #2956)
+- An emoji drawn wide by a variation selector, as in ❤️, now takes two columns in a new terminal, so the rest of its line is no longer one column off. (#2971)
 - In a new terminal, hovering a link that a program printed in several pieces now underlines the whole link and no longer warns falsely that "Link text does not match where it goes", also when the link wraps onto the next row. (#2949)
 
 ## v0.34.0 - 2026-11-03
