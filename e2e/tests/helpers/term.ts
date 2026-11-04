@@ -35,7 +35,7 @@ import { recordPage } from "./timeline";
  * For `test.skip(onHostTerminals(), reason)` on a test whose assertion is
  * about the old terminal's implementation (xterm.js's DOM, its write
  * callbacks, tmux's own behavior), or about something terminals in terminal
- * hosts deliberately do not have yet (drag and drop, the drag-copy notice):
+ * hosts deliberately do not have yet (the drag-copy notice):
  * such a test stays in the suite and runs on every ordinary run, and the
  * reason says why it has no grid counterpart or where that counterpart lives.
  */

@@ -1752,8 +1752,8 @@ large history in slices between frames so that the screen stays usable, and the 
 queue instead.
 
 Not built for grid terminals, each a near-term entry in `TODO.md`: showing an input method's composition at the cursor
-(committed text is sent), dropping files (refused with a message to paste instead), and the drag-copy notice. An emoji
-widened by a variation selector is one column in the emulator where tmux gives it two, an open decision in `TODO.md`.
+(committed text is sent), and the drag-copy notice. An emoji widened by a variation selector is one column in the
+emulator where tmux gives it two, an open decision in `TODO.md`.
 
 ## Terminal host
 

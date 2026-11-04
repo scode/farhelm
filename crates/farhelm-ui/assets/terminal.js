@@ -32,13 +32,12 @@
 // mounts the grid component in its place (`adoptGrid`). Byte streams never
 // see a difference.
 //
-// A grid island gets today's paste interception (with drops prevented and
-// answered, not acted on: drag and drop into a grid terminal is not built
-// yet), selection copying through the page's clipboard queue, today's links
+// A grid island gets the shared paste and drop interception, selection
+// copying through the page's clipboard queue, today's links
 // (web links, the hyperlink mismatch warning, file-path hovers and
 // downloads, the desktop app's tunnels; see `createGridLinks`), and the
 // frozen screen kept across a reconnect or a takeover. Not built for grid
-// terminals: drag and drop, the drag-copy notice, and showing an input
+// terminals: the drag-copy notice, and showing an input
 // method's composition at the cursor. Flow control's pause and resume are
 // never sent for a grid stream: the component applies every frame as it
 // arrives and draws once per animation frame, so no backlog builds up on
@@ -257,11 +256,11 @@
 // carry it is dead). What is left here is genuinely thin: read the
 // payload, look the answer up, upload, insert.
 //
-// Insertion goes through `term.paste()` — the same call xterm's own paste
-// handler makes — so bracketed paste, application cursor keys, and every
-// other mode the pane is in are handled by the code that already handles
-// them, and the path lands at whatever cursor position is current when the
-// transfer finishes. Nothing here ever calls `focus()`: an upload
+// Insertion goes through the terminal's paste path: `term.paste()` for
+// xterm.js, or grid paste messages bracketed by the supervisor. The code
+// that already handles the terminal's modes frames the input, and the path
+// lands at whatever cursor position is current when the transfer finishes.
+// Nothing here ever calls `focus()`: an upload
 // completing must not steal the caret from wherever the user has since put
 // it.
 //
@@ -2050,15 +2049,6 @@
   const ATTACH_STORE_KEY = "__farhelmAttachStore";
 
   /**
-   * What a drop on a grid terminal says. Dragging files or text into a
-   * terminal that runs in a terminal host is not built yet (the
-   * maintainer's call for the grid client's first release, with a TODO
-   * entry); paste works, including for copied files.
-   */
-  const DROP_UNSUPPORTED_TEXT =
-    "Dropping into this terminal is not supported yet; copy and paste instead";
-
-  /**
    * Register one island's paste/drop interception on its own element and
    * return the handle `unmount()` uses to take it all back down, or `null`
    * when there is nothing to install (no policy, or the element is gone).
@@ -2068,10 +2058,9 @@
    * `pasteText(text)` hands text to the terminal as a paste (xterm.js's
    * `term.paste`, or the grid component's `paste`, which sends `paste`
    * messages); `isConnected` reports whether this island's socket is open
-   * right now. `acceptDrops: false` (grid terminals, whose drag and drop is
-   * not built yet) still prevents every drop, so the page cannot navigate
-   * to a dropped file, but answers it with `DROP_UNSUPPORTED_TEXT` instead of
-   * acting on it.
+   * right now. Both terminal kinds use the same payload classification and
+   * uploads, so a drop and a paste differ only in how the engine supplies
+   * their files and text.
    * Everything below is scoped to this one island: its own listeners, its
    * own in-flight and queued uploads, its own `AbortController`, its own
    * readers. The one exception is the list of messages on the status line,
@@ -2106,7 +2095,7 @@
    *   message and an upload that OUTLIVES its socket reports the published
    *   path instead of pasting into the void.
    */
-  function installAttachments(spec, baseUrl, policy, pasteText, dismissSelectionSoon, isConnected, acceptDrops = true) {
+  function installAttachments(spec, baseUrl, policy, pasteText, dismissSelectionSoon, isConnected) {
     // No policy at all means no interception rather than an exception:
     // `sync()` is called from Rust, and a caller that predates item 7
     // (or a future one that turns this off) must still get a working
@@ -2681,16 +2670,6 @@
 
     const onDrop = (ev) => {
       ev.preventDefault();
-      if (!acceptDrops) {
-        // Still this island's drop (prevented above, so the page-wide guard
-        // leaves it alone rather than calling the terminal disconnected),
-        // and never silently lost. Earlier failures stay: this drop acts on
-        // nothing, so it supersedes nothing; a repeat replaces its own line.
-        const earlier = errors.indexOf(DROP_UNSUPPORTED_TEXT);
-        if (earlier >= 0) errors.splice(earlier, 1);
-        fail(DROP_UNSUPPORTED_TEXT);
-        return;
-      }
       const payload = payloadFrom("drag", ev.dataTransfer, null);
       const flavor = interpret(payload);
       // Nothing this island knows how to act on. Returning before
@@ -2716,8 +2695,7 @@
     // way HTML drag and drop is wired up wrong.
     const onDragOver = (ev) => {
       ev.preventDefault();
-      // Without drops, the cursor says so instead of promising a copy.
-      if (ev.dataTransfer) ev.dataTransfer.dropEffect = acceptDrops ? "copy" : "none";
+      if (ev.dataTransfer) ev.dataTransfer.dropEffect = "copy";
     };
 
     el.addEventListener("paste", onPaste, true);
@@ -5290,8 +5268,8 @@
          * down is what only makes sense for xterm.js: its terminal (which
          * removes its element from `el`), its copy-on-select and link
          * listeners, and its paste and drop interception, which is installed
-         * again for the grid (pasting through `paste` messages, drops
-         * refused). The grid brings its own selection copying and links
+         * again for the grid (inserting through `paste` messages). The grid
+         * brings its own selection copying and links
          * (`createGridLinks`). The island's record is updated in place so
          * `stepFontSize`, focus, `unmount` and the test registry reach the
          * grid from now on.
@@ -5364,10 +5342,9 @@
           webLeaveTimer = null;
           term.dispose();
           grid = created;
-          // Paste interception as for xterm.js (SPEC.md "Attachments"): the
+          // Paste and drop interception as for xterm.js (SPEC.md "Attachments"): the
           // same classification, uploads and status line, inserting through
-          // the grid's `paste` messages. Drops are prevented and answered,
-          // not acted on (see `installAttachments`).
+          // the grid's `paste` messages.
           attachments = installAttachments(
             spec,
             baseUrl,
@@ -5375,7 +5352,6 @@
             (text) => grid.paste(text),
             () => grid.clearSelection(),
             () => ws.readyState === WebSocket.OPEN,
-            false,
           );
           if (islandEntry) {
             Object.assign(islandEntry, { kind: "grid", grid, term: null, fit: null, attachments, stopCopyOnSelect: null, linkGesture: null });

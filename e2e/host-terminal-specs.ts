@@ -14,7 +14,7 @@
 // the terminal-family helpers (tests/helpers/term.ts, terminal-readiness.ts,
 // terminal-suite.ts, real-agent.ts): their tests hold on both kinds, a test that is about the
 // old terminal alone, or about something the new one deliberately does not have
-// yet (drag and drop into a terminal, the drag-copy notice), skipping itself
+// yet (the drag-copy notice), skipping itself
 // with `onHostTerminals()` and saying why and where the grid's counterpart is
 // pinned. Spec files that never reach a terminal are left out: a host run has
 // nothing to add to them. Terminal files left out whole, because every test in

@@ -62,6 +62,9 @@
 //! drag and a real clipboard image have never been exercised anywhere.
 //! What the operator has to do in the self-contained desktop app (a release
 //! bundle, or the development bundle started by `scripts/desktop-smoke.sh`):
+//! run these checks with both old terminals and terminals in terminal hosts.
+//! The browser's shared attachment tests cannot establish that native file
+//! drags reach either terminal surface in the app.
 //!
 //! 1. Drag a real file from the file manager onto the AGENT terminal of an
 //!    open session. Expect: an "Attaching …" line, then the host path
