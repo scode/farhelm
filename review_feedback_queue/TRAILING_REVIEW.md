@@ -1,6 +1,6 @@
 # Trailing code review checkpoint
 
-Last reviewed commit: `ca9b0a19856dc136f63ad2d14f1076027edce1eb`
+Last reviewed commit: `c5ae8548439cc5bfa33c11ef7ce8da6129d8072a`
 
 This is the exclusive starting point for the next trailing code review of `main`. Advance it only after completing the
 procedure in `review_feedback_queue/.agents/trailing-review.md`, together with any resulting queue updates. A proposed
@@ -9,76 +9,76 @@ checkpoint reaches `main` only when its review-result PR is merged.
 This file holds only the checkpoint and the latest run's completion record. Earlier runs' records are in
 `review_feedback_queue/TRAILING_REVIEW_HISTORY.md`.
 
-## Review through ca9b0a19
+## Review through c5ae8548
 
-Reviewed range: `a98147fb2eaaefb448473107529ada69114d7b03..ca9b0a19856dc136f63ad2d14f1076027edce1eb`, 41 commits. The
-exclusive base and inclusive main tip were fetched and pinned, with ancestry verified. All 851 individual commit/path
-patches, including intermediate and deleted text and all vendored changes, were reconstructed exactly from 882 immutable
-parts and assigned once across 203 bounded functional groups. Every mandatory group stayed below 2,000 lines and 64 KiB.
-Surrounding code and coverage sections were inspected selectively; no assigned patch text remains unread.
+Reviewed range: `ca9b0a19856dc136f63ad2d14f1076027edce1eb..c5ae8548439cc5bfa33c11ef7ce8da6129d8072a`, 91 commits. The
+exclusive base and inclusive main tip were fetched and pinned, with ancestry verified. All 502 individual commit/path
+patch parts were reconstructed exactly, including intermediate, reverted and deleted text: 38,917 lines, 2,640,331
+bytes, assigned once across 59 functional groups. Each group stayed below 2,000 lines and 64 KiB; actual sizes were
+75–1,258 lines. No assigned patch text remains unread. Surrounding code and recording coverage were inspected
+selectively.
 
-The primary review is **complete** under persistent-review: all 203 original identities completed initial review,
-later-turn synthesis after verified delivery, and a separate credible final empty discovery search. There were 643
-completed primary turns and 237 discovery passes. Thirty distinct source-confirmed concerns emerged during discovery;
-new findings received further searches. Material additions to known cleanup and snapshot-link families retain their
-original identities and subsequent search evidence. New local IDs, aliases and source witnesses were not counted as new
-global defects.
+The primary persistent review is **complete**. All 59 original external Codex `gpt-6.1-sol` identities, high reasoning,
+completed initial review, later-turn synthesis after verified delivery, and a credible final empty discovery search.
+There were 186 completed primary turns: 59 initial, 59 synthesis, 67 discovery and one focused layout investigation,
+with at most nineteen concurrent reviewers. Discovery retained two new source-confirmed concerns and one investigated
+uncertainty; the latter was subsequently verified without counting it twice. Further searches followed those additions.
+Every substantive lead has a final disposition, and no cross-group input remains pending. The final scheduler state has
+all 59 groups complete and no live or queued turn.
 
-Another 105 fresh independent reviewers checked potentially highest exclusions, including withdrawals, misleading
-severity flags and prose-only candidates. The maintainer clarified during this run that these exclusion-gate reviewers
-do not require persistent-review; only the primary review does. The orchestrator had unnecessarily applied full cycles
-to them before that clarification. Their 324 completed turns remain evidence, but no saturation claim or additional gate
-cycle is required. The last optional search was deliberately stopped, with exit 143 and its already appended findings
-preserved; it receives no completed-turn credit. Its inspected initial and synthesis judgments remain valid. No required
-independent judgment is outstanding.
+Supported delivery audits cover every assignment. Historical clipped packets receive no credit; their missing content
+was delivered in smaller packets. No manual transcript-payload fallback or hidden-reasoning inspection was used. Each
+reviewer's three-part final record was rendered once from its final append-only log, replies and audit ranges. Delivery
+does not prove attention, understanding, correctness or exhaustiveness.
 
-All reviewers used Codex `gpt-6.1-sol`, high reasoning, with at most nineteen concurrent external reviewers. The 308
-identities completed 967 actual turns. Supported delivery audits cover every required assignment, including the added
-neighbor-link context. Historical clipped reads receive no credit. One optional audit of five already delivered primary
-replies lacks only each final blank line; those tails remain uncredited and were not required assigned text. No manual
-transcript-payload fallback or hidden-reasoning inspection was used.
+There are **22 new items: four highest, zero high and eighteen other**, plus extensions to eight existing queue records.
+Twenty new items have source-confirmed defects or complete conditional mechanisms. Two remain **unverified after
+investigation**: an old announcement close reaching a reopened history dialog, and repeated screen-reader speech when
+pending Replace progress changes surfaces. Their records preserve matching framework checks, confirmed source
+transitions, missing event/assistive-technology premises and the evidence needed to settle them.
 
-There are **114 new items: eleven highest, three high and 100 other**. Of these, 108 have source-confirmed narrow
-defects or complete conditional mechanisms; six remain **unverified after investigation**. Those six concern width-table
-history restoration, physical headroom in snapshot-memory tests, incidental directory replacement during shutdown,
-placeholder-test re-adoption timing, hyperlink identity collisions, and the replacement-history test's effective false
-pass. Their records preserve actual checks, missing premises, unavailable evidence and what would settle them. A
-confirmed structural bound or accounting omission does not establish its separately qualified material availability
-consequence.
+The eight extended records gain hostile-host acceptance context in two browser findings, later repair evidence for grid
+drop refusal, NUL-separated link identities, checkpoint measurement buffering and strikeout fixtures, the orderly-stop
+consequence of resize-filled journals, and further baseline-browser reporting evidence. The last extension separately
+retains an investigated uncertainty about four browser observations' latent-flake classification. An inspected retained
+Rust run did not establish latent flakes: available source explains its stale assertions and malformed fixture, while
+exact recorded-head equivalence remains unverified. No existing item was fixed, removed or triaged.
 
-The highest findings concern colliding interrupted starts, gap recovery changing Bash paste submission, remote control
-bytes in debug traces, hidden live tmux tabs, displaced input crossing takeover, asynchronous signal authority, a test
-selecting another directory's host, resize-only journal pressure, retained Delete consent, and two distinct printed-URL
-target mismatches. Each keeps its configuration, source, timing and acceptance qualifications. The high findings concern
-late host adoption, a retained Restart seed reply and extreme browser history numbering. No runtime damage, occurrence
-rate or deployed exploitability is claimed.
+Consolidated dispositions contain **28 verified and three unverified-after-investigation groups**, representing the new
+and extended concerns. One additional duplicate-only group is already retained by the existing hidden-live-tmux highest
+item. The raw reviewer logs contain 61 open findings and 376 candidates across 437 local IDs and 837 events; these are
+not 437 independent bugs. There are no stale, conflicting, undecided, under-investigation or open-lead records.
 
-Five existing records gain named callers or scope: child ownership before cleanup registration, second-create failure,
-sequential session cleanup, inherited Git repository selection, and frozen grid file links after copying. All five have
-source-confirmed narrow mechanisms. The grid file-link addition preserves the earlier discard's narrower classic web
-scope. No existing finding is fixed, removed or triaged. Together the new and extended records represent 119 retained
-concerns: 113 source-confirmed and six investigated uncertainties.
+Independent exclusion consultation covered 62 named judgments: sixteen fresh one-turn external Codex `gpt-6.1-sol`, high
+reviewers checked sixty, and one fresh native consultant checked the two Unicode priority boundaries. The native
+consultant inherited the orchestrator's defaults; separate model/effort metadata is unavailable. Fifty-nine judgments
+agree only with their stated narrow scopes. Three are ambiguous about outside-highest placement: stale hyperlink
+mismatch warnings and deletion of ordinary formatting or standalone printable Kirat Rai characters from retained
+terminal text. All three remain highest. Correct destination disclosure, unproved irreversible useful-work loss, and the
+refuted filler-width theory retain their qualifications. No ambiguous verdict was treated as permission to drop or lower
+a finding. The failed-recovery child-root finding remains highest under its conditional documented macOS route; it was
+not reproduced end to end.
 
-Independent exclusions remain narrow: exact accepted crash and proven older-release subsets, synchronous or same-run
-tooling PID limits, captured identities and row evidence, actual whole-paste queueing, exact recovery fallbacks, source
-refutations and existing queue/ledger coverage. Harness intent does not prove disposable shell work; output-task joins
-do not join input pumps; pending-link guards do not cover omitted hover dependencies. The mixed input-acknowledgement
-concern was later source-confirmed through Linux allocation failure and coalescing, replacing its earlier missing
-reopen-producer premise. Production agent prompts remain disabled, so its record does not promote the dormant prompt
-consequence to an established highest finding.
+Five recorder-wrapped focused attempts informed the findings: one Python decoder check, two feedback-layout probes and
+two launch-pill geometry attempts. The decoder condition is established under explicit legacy-encoding startup
+conditions, not through a real tmux capture. Both feedback probes completed measurement successfully in static
+Chromium/WebKit fixtures and showed native Tab recovery. Both pill attempts completed with exit 1 at their final bounds
+assertion; failed evidence is retained. The first included overlong invalid aliases; the second corrected them and also
+rediscovered the archived fixture, whose invalid repeats receive no credit. Corrected samples confirm decorative-edge
+clipping while refuting elapsed-text loss. These observations do not certify compiled Dioxus, native macOS, real
+feedback submission or assistive-technology behavior. No live installation was changed, and no broad product runtime
+suite ran.
 
-Private evidence remains under run `37478d09-7e36-409b-8efa-b13d1f793dd5`. `completion.md` and `completion.json`
-preserve exact assignments, roles, model configuration, identities, actual turns, manifests, audits, replies and
-stopping states. `dispositions.json`, both finding catalogs, parent notes and the explicit confidence/novelty ledgers
-preserve all 1,010 reviewer-local identities and 1,989 append-only events. The 989 latest open and 21 withdrawn records
-include duplicates and audit verdicts, not 1,010 bugs. Delivery establishes neither attention, understanding,
-correctness nor exhaustiveness.
+Private evidence remains under run `ffa3b94e-5eb1-4569-8eb5-1a52b62110d1`. `completion.json` and `completion.md`
+preserve exact commit/path/range assignments, manifests, session identities, actual turns, per-pass novelty judgments,
+final replies, audit evidence and stopping states. Per-group `final-record.md` files preserve all three reporting parts;
+`consolidated.json` and `dispositions.jsonl` preserve semantic deduplication and confidence. The seq800/seq804 drop
+registers, `independent-verdicts.json`, `unicode-priority/verdicts.json` and `recording-gate-final.json` preserve
+complete screening, exact consulted scopes, verdicts and the final constructor-citation correction.
 
-Recording-time main is `fadc3be725c00657383494c7045443c5a6e7acba`, with the original checkpoint still saved there. Its
-queue, ledger, product specification, planned work and known bugs were unchanged; later relevant source and
-implementation specification changes were checked for repairs or acceptance without expanding the reviewed range. This
-was source-only: no product runtime suite, reproduction, browser/native experiment, vendor-agent turn or live-install
-action ran, and no historical runtime pass was reused. Private bookkeeping helpers received separate recorder-wrapped
-checks, with their same-session failure evidence retained. Repository checks cover changed Markdown, whitespace,
-queue/index consistency, required fields, exact assignments and instruction pointers. This result stays in one draft PR
-for separate manual merging; preparing it does not advance main.
+Recording-time main is `1c6732f7d869f434b385880e4e30db9c335de3f0`, with the original checkpoint unchanged. Later TODO,
+planning-state and report changes were reconciled without expanding the pinned review range. The product specs, known
+bugs, ledger and relevant queue coverage remained unchanged; the only unlanded plan concerns launcher permission words
+and warning colors. Repository validation inspects changed Markdown, whitespace, queue/index consistency, required
+fields, portable provenance and instruction pointers. The result stays in one draft PR for separate manual merging;
+preparing it does not advance main.

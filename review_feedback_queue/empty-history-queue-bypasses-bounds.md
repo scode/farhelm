@@ -10,6 +10,23 @@ not found.
 
 ## Details
 
+### Availability acceptance and browser scope
+
+Additional reviewed commit: c5ae8548439cc5bfa33c11ef7ce8da6129d8072a. The acceptance referenced below is SPEC.md,
+"Remote input, session defaults, and availability", 4045–4099, especially 4085–4092: denial of service of the helm or
+desktop app by a malicious or arbitrarily broken host is accepted outright, even when Farhelm could avoid it. Existing
+mitigations remain. The rule does not accept corruption of the helm's state or effects on other hosts' security or data.
+SPEC_impl.md, "Supervisor metadata retention and nonresponse", 76–90 points to that broader acceptance rather than
+narrowing it to selectively unanswered requests.
+
+That text expressly names the helm and desktop app. Whether it also settles this browser-only availability consequence
+remains ambiguous. The separate bundled-terminal-library exception does not by itself settle a defect in Farhelm's own
+grid queue. This addition supplies the missing antecedent for the coverage paragraph below; it does not decide that
+coverage question, change the bucket, or establish material exhaustion. Provenance: review run
+`ffa3b94e-5eb1-4569-8eb5-1a52b62110d1`, `g015/g015-l1`.
+
+### Original mechanism and investigation
+
 Suggested bucket: **other**. Confidence: **source-confirmed defect or conditional mechanism**. confirmed structural
 accounting gap; material availability consequence unverified after investigation
 

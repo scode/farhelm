@@ -8,6 +8,21 @@ Extreme peer-supplied history numbering can hang the page when the user selects 
 
 ## Details
 
+### Availability acceptance and browser scope
+
+Additional reviewed commit: c5ae8548439cc5bfa33c11ef7ce8da6129d8072a. The acceptance referenced below is SPEC.md,
+"Remote input, session defaults, and availability", 4045–4099, especially 4085–4092: denial of service of the helm or
+desktop app by a malicious or arbitrarily broken host is accepted outright, even when Farhelm could avoid it. It retains
+existing mitigations and does not accept corruption of the helm's state or effects on other hosts' security or data.
+SPEC_impl.md, "Supervisor metadata retention and nonresponse", 76–90 explicitly points to that broader rule.
+
+The rule expressly names the helm and desktop app; its application to this browser-only consequence remains ambiguous.
+The separate bundled-terminal-library exception does not by itself settle Farhelm's own nonterminating selection loop.
+This supplies the missing acceptance text and browser qualification referenced below. It is not a triage decision or a
+bucket change. Provenance: review run `ffa3b94e-5eb1-4569-8eb5-1a52b62110d1`, `g015/g015-l1`.
+
+### Original mechanism and investigation
+
 Suggested bucket: **high**. Confidence: **source-confirmed defect or conditional mechanism**. confirmed source mechanism
 and loop consequence, not executed.
 
