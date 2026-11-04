@@ -8,6 +8,6 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [pending] `vs16-emoji-width.md` — Grid terminals: size emoji variation sequences (U+FE0F, U+FE0E) the way Ghostty does
 - [in-flight 56bf16] `colored-harness-marks.md` — Color the sidebar's harness marks where brand terms allow, official colors first
 - [in-flight 66b8cd] `discord-link-in-app.md` — Add "Chat on Discord" to the ? menu and the feedback dialog
-- [pending] `grid-drop-and-drag-notice.md` — Grid terminals: accept dropped files and show the drag-copy notice, placed 3 rows off the pointer
+- [in-flight c96b93] `grid-drop-and-drag-notice.md` — Grid terminals: accept dropped files and show the drag-copy notice, placed 3 rows off the pointer
 - [pending] `in-app-announcements.md` — An announcement queue the app shows once per helm, fed for now by announcements built into releases
 - [pending] `launch-progress.md` — Show a live "Launching on host… 14 s" status while a launch, Restart or Replace waits
