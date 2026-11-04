@@ -72,6 +72,14 @@ fn test_message(result: TestResult) -> String {
     }
 }
 
+/// The warning at the top of the Tensorlake section, in the maintainer's exact
+/// words (2026-11-04), doubled "your" included. Browser tests compare it
+/// verbatim.
+pub(crate) const EXPERIMENTAL_WARNING: &str = "EXPERIMENTAL: Tensorlake support is currently early and \
+    experimental. User experience is not yet reasonable. Expect rough edges. Things will change randomly between \
+    releases. Try at your your own risk. You are responsible for making sure sandboxes are not running and billing \
+    you when you don't want them to.";
+
 /// The Tensorlake panel's content below its heading.
 ///
 /// The snapshot (`settings`) is the helm's last answer and the only source
@@ -158,6 +166,13 @@ pub(crate) fn TensorlakeSettings() -> Element {
     let toggle_mounted = mounted.clone();
 
     rsx! {
+        // First in the section, ahead of the API key that every Tensorlake user
+        // has to set up, so nobody starts without seeing it. The wording is the
+        // maintainer's, reproduced exactly (2026-11-04); change it only on their
+        // say. It shows unconditionally, even when Settings cannot load.
+        div { class: "tensorlake-experimental", role: "note", aria_label: "Tensorlake support is experimental",
+            p { "{EXPERIMENTAL_WARNING}" }
+        }
         p { class: "host-settings-help",
             "Tensorlake sandboxes are cloud machines Farhelm can create and use as hosts. Farhelm creates them in the Tensorlake project your API key belongs to."
         }

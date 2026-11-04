@@ -5,6 +5,13 @@ sidebar:
   order: 6.5
 ---
 
+:::caution[Experimental]
+
+Tensorlake support is early and experimental. Expect rough edges, and expect it to change between releases. You are
+responsible for making sure your sandboxes are not running, and billing you, when you do not want them to.
+
+:::
+
 A Tensorlake sandbox is a Linux machine in your Tensorlake project that Farhelm creates and uses as a host. You choose
 its size and software in a saved recipe, then start [sessions](/docs/using/start-a-session/) on it like any other host.
 You can suspend it with its processes and sessions intact, then resume where you left off.

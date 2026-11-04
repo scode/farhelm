@@ -2,6 +2,10 @@
 kind: added
 ---
 
+Tensorlake support is experimental: it is early, rough in places, and may change between releases, and the Tensorlake
+section in Settings opens with a red warning saying so. You are responsible for making sure your sandboxes are not
+running and billing you when you do not want them to.
+
 You can now add a Tensorlake sandbox as a host from a saved recipe, with setup progress in Hosts. Creating it confirms
 that it bills while running; deleting it also deletes its snapshots.
 

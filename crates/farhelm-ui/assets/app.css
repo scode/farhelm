@@ -3883,6 +3883,22 @@ a:any-link,
    dialogs; priority segments share the same draft and require explicit Save. */
 .ntfy-settings .checkout-root-label { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .ntfy-settings > .btn { justify-self: start; }
+/* The experimental warning heads the Tensorlake section, above the API key
+   every user must set, and is meant to be impossible to skim past: the same
+   filled red as the terminal's link-mismatch warning, larger and bold. It
+   holds still, like that warning, rather than drawing the eye with motion. */
+.tensorlake-experimental {
+  margin: 0 0 14px;
+  padding: 14px 16px;
+  background: var(--danger-bg);
+  color: var(--on-fill);
+  border: 2px solid var(--danger-strong);
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+.tensorlake-experimental p { margin: 0; }
 /* Tensorlake's key field follows ntfy's explicit-save layout. Its registration
    command and public key keep their exact text reachable at phone width:
    they wrap anywhere rather than widen the dialog, and the Copy button stays

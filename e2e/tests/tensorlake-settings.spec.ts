@@ -340,6 +340,37 @@ test("Tensorlake's create-without-asking switch shows only the stored choice", a
  *
  * Spec: a failed load shows the error with every control locked; Retry loads
  * the helm's snapshot and unlocks them. */
+/**
+ * Why: Tensorlake support is experimental and bills real money, and the maintainer wants every user to meet that
+ * warning before they can use it. Everyone has to open this section to save an API key, so the warning heads it.
+ *
+ * Spec: the section shows the maintainer's exact warning text, ahead of the API key, and still shows it when the
+ * section's settings fail to load.
+ */
+test("Tensorlake settings open with the experimental warning", async ({ page }) => {
+  const warning = "EXPERIMENTAL: Tensorlake support is currently early and experimental. User experience is not yet "
+    + "reasonable. Expect rough edges. Things will change randomly between releases. Try at your your own risk. You "
+    + "are responsible for making sure sandboxes are not running and billing you when you don't want them to.";
+  await page.route("**/api/tensorlake", async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({ status: 500, body: "could not read Tensorlake settings" });
+    } else await route.continue();
+  });
+  await page.goto("/");
+  const dialog = await openSettings(page, "tensorlake");
+  const note = dialog.getByRole("note", { name: "Tensorlake support is experimental", exact: true });
+  await expect(note).toHaveText(warning);
+  const apiKey = dialog.getByRole("region", { name: "Tensorlake API key", exact: true });
+  // Premise of the order check: the load really failed, and both elements are in the page.
+  await expect(apiKey.getByRole("alert")).toHaveText("could not read Tensorlake settings");
+  const precedes = await note.evaluate(
+    (warningElement, keyElement) =>
+      Boolean(warningElement.compareDocumentPosition(keyElement as Node) & Node.DOCUMENT_POSITION_FOLLOWING),
+    await apiKey.elementHandle(),
+  );
+  expect(precedes, "the warning comes before the API key").toBe(true);
+});
+
 test("Tensorlake settings load failure locks the section until a retry succeeds", async ({ page }) => {
   let reads = 0;
   await page.route("**/api/tensorlake", async (route) => {
