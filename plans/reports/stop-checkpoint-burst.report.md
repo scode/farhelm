@@ -72,3 +72,81 @@ and deterministic gates plus recovery tests directly exercise it. No end-to-end 
 
 Each PR passed a separate fresh-context gpt-6.1-sol high adversarial review, including the full test-authoring
 checklist, with no findings. Both commit messages received valid cold reads.
+
+### Landing
+
+Landed with one test fix at landing, together with readopt-unavailable-hosts, which was stacked below it in the same
+round. An orderly supervisor stop now saves the terminals with the most new output first, uses at most half the cores
+for it, and leaves terminals with less than 1 MiB of new output for the next supervisor to replay.
+
+- #2952: the largest-first order and the cap on concurrent saves.
+- #2954: skipping the save for small output tails.
+
+#### What the landing fixed, and why
+
+An existing test, that a restarted supervisor keeps a terminal tab attachable with its screen, asserted that the orderly
+stop left the tab's host a snapshot. With #2954 a tab that has printed only one short line gets no snapshot at the stop
+(the next supervisor replays its output instead), so the test failed on the combined stack. Neither executor had run it
+on code with #2954: this plan's executor did not run the tab tests, and readopt-unavailable-hosts' executor ran them
+without this plan. The landing gave that test the same setting this plan already gave its own restart tests, saving
+every tail at the stop, so it still tests recovery from a stop's snapshot; no product code changed. The other way would
+have been to keep the shipped setting and check that the tab comes back by replaying its output. As landed, no tab test
+runs an orderly stop under the shipped skipping of small tails; adding one would be a follow-up.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the plan's base, main gained the grid terminal's link fix (#2949: no product code outside the browser, plus a
+supervisor test and protocol comments) and four PRs that only added TODO entries and plans; none interacts with this
+plan; two more such PRs (#2962, #2966) landed while the round's checks ran. readopt-unavailable-hosts, landed just
+before this plan, rewrites the same supervisor code for recovering unavailable terminals; a fresh-context review read
+the two against each other and found no harmful interaction (its landing notes say what was checked). The whole Rust
+workspace ran on the combined stack (below). The rebase conflicted only in TODO.md and in one implementation-notes
+paragraph both plans edit in different sentences; both were resolved keeping each side's changes, and a check confirmed
+each commit changes exactly the sentences it changed when tested.
+
+#### Things you should know
+
+- The TODO entry about typing into a new terminal pausing while its checkpoint is encoded (planned as
+  faster-snapshot-encoder) still says every orderly stop saves a checkpoint and points at the entry this plan removed.
+  That plan is in flight and changes its own entry when it lands, so the landing left it alone.
+- The validation inventory's selection for terminal hosts across supervisor restarts does not list this plan's new
+  tests, and its advice to run it when the orderly stop changes does not mention the tab tests, which is how the failing
+  tab test went unrun. Updating it would be a follow-up.
+- The whole workspace run had three failures that also failed, the same way, in one run on main without either plan, in
+  code neither plan changes (the checks below say what they cover).
+
+#### Checks
+
+This round landed readopt-unavailable-hosts and stop-checkpoint-burst, stacked in that order on main `e499b218`. On that
+stack:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, the check that every test delay states its reason
+  (`python -B scripts/check-test-sleeps.py`, 403 delays, none without a reason), `dprint check`,
+  `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py` (no errors; three warnings about
+  older reports) and the workspace debug build: all passed.
+- The whole Rust workspace, `cargo nextest run --workspace --exclude farhelm-desktop`, with the pinned test runner and
+  tmux, no retries, on a machine with rootless Podman, run `7670d6ed-f91a-4c68-a7ca-38594df84b0f`: 5412 passed, 69 left
+  out by the test runner (tests marked ignored), 5 failed. "A restarted supervisor keeps a host tab attachable with its
+  screen" is the test the landing fixed (stop-checkpoint-burst's notes). "Shallow pause resumes without reset or replay"
+  is a recorded open flake, in terminal code neither plan touches. Three more failed the same way in one run on main
+  `e499b218` without either plan (run `03a4af08-649b-48ca-88bb-5c5adf9d199d`, in which the tab test, as a control,
+  passed), so they are not this round's. Two cover sessions whose tmux session or server died across a supervisor
+  restart, which must stay listed, as exited, while attaching to them fails ("restart gap is decided per session" and
+  "restart gap lists sessions without a terminal and attach fails"); in both, the listing no longer names tmux as the
+  session's agent terminal where the test expects it. The third, a supervisor unit test, covers an OMP agent's report
+  that arrives before its session's pane is known ("OMP publication gap parent report succeeds"), which was refused with
+  "the session's foreground pane is unavailable". Each failed fast, within about a second, in both runs. They are in
+  neither FLAKES.md nor TODO.md; the landing monitor told the maintainer in conversation, and finding the cause,
+  starting with a narrow rerun, is a follow-up.
+- After the landing's test fix: `cargo fmt --all -- --check`, `cargo clippy -p farhelm --all-targets -- -D warnings`,
+  the test-delay check and `dprint check` passed, and the end-to-end `host_tabs::` and `host_restarts::` modules with
+  the supervisor's `core::tests::host_terminals::` unit module
+  (`cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E '...'`), run
+  `a086105a-8f62-4573-ac14-924962a8644c`: all 83 passed.
+- Reused: nothing. Not run: the browser, desktop and JavaScript tests (no user interface code changed) and the doctests
+  (no doc examples changed).
+
+The executor's report names its commits before the landing's rebase and test fix, and calls the PRs drafts; what landed
+is those commits rebased, with the test fix added to #2954's. Its test list does not include the tab test the landing
+fixed. Nothing else in it became untrue at landing.
