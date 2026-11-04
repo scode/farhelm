@@ -34,7 +34,7 @@ import { Page, APIRequestContext } from "@playwright/test";
 import path from "node:path";
 import fs from "node:fs";
 import { createSession, listSessions } from "./helpers/fleet";
-import { attachSession, cleanupSession, fillCreateForm, termText, waitForTermText, terminalInput, terminalScreen, terminalSize, onHostTerminals } from "./helpers/term";
+import { attachSession, cleanupSession, fillCreateForm, termText, waitForTermText, terminalInput, terminalScreen, terminalSize, recordInput, type InputFrame } from "./helpers/term";
 import { addTab, selectTerminal } from "./helpers/terminal-suite";
 import { stackScratchDir } from "./helpers/scratch";
 import { waitForIslandMounted, waitForSessionMounted, waitForSessionRevealed } from "./helpers/terminal-readiness";
@@ -449,7 +449,7 @@ test("mouse-modes-restored-on-reattach", async ({ page, request }) => {
 // OSC 52 itself. terminal.js then shows a notice (copy-on-select.js's
 // "The drag that copies nothing" has the decision). These two tests drive it
 // through real pointer events against real panes, on both engines, because
-// the notice depends on xterm's live mouse-tracking state, the pane's OSC 52
+// the notice depends on the terminal's live mouse-tracking state, the pane's OSC 52
 // stream and the page's DOM together, none of which the node unit tests see.
 
 /** The notice element of the agent terminal (session_view.rs's
@@ -480,11 +480,16 @@ function mouseProgramScript(ready: string): string {
   );
 }
 
-/** Wait until the agent terminal's program has mouse tracking on, as xterm
- * itself reports it: the precondition every drag below depends on. */
+/** Wait for the mounted surface's committed mouse mode before dragging.
+ * A ready line alone does not prove that either renderer has applied the
+ * program's tracking mode, which decides who owns the gesture. */
 async function waitForMouseTracking(page: Page): Promise<void> {
   await expect
-    .poll(() => page.evaluate(() => (window as any).__farhelmTerm.modes.mouseTrackingMode), {
+    .poll(() => page.evaluate(() => {
+      const island = (window as any).__farhelmIslands?.terminal;
+      if (island?.grid) return island.grid.model.state.mouse === "off" ? "none" : island.grid.model.state.mouse;
+      return island?.term?.modes.mouseTrackingMode ?? "none";
+    }), {
       timeout: 15_000,
       message: "the program must have turned mouse tracking on before the drag",
     })
@@ -492,20 +497,22 @@ async function waitForMouseTracking(page: Page): Promise<void> {
 }
 
 /** A plain left-button drag across the agent terminal's screen, well past
- * the drag threshold, starting a few rows down so it is on the screen.
+ * the drag threshold, deep enough in the screen for the notice to fit above.
  * Use integer CSS pixels so the returned point is also the MouseEvent's
  * client position; fractional font metrics must not make the expected anchor
  * differ from the release the notice actually receives. */
-async function dragAcrossTerminal(page: Page): Promise<{ x: number; y: number }> {
-  const box = await page.locator("#terminal .xterm-screen").boundingBox();
+async function dragAcrossTerminal(page: Page): Promise<{ x: number; y: number; rowHeight: number }> {
+  const box = await terminalScreen(page).boundingBox();
   if (!box) throw new Error("the agent terminal's screen has no box");
-  const y = Math.floor(box.y + Math.min(60, box.height / 2));
+  const size = await terminalSize(page);
+  if (!size) throw new Error("the agent terminal has no committed size");
+  const y = Math.floor(box.y + box.height * 0.75);
   const releaseX = Math.floor(box.x + 160);
   await page.mouse.move(box.x + 20, y);
   await page.mouse.down();
   await page.mouse.move(releaseX, y, { steps: 8 });
   await page.mouse.up();
-  return { x: releaseX, y };
+  return { x: releaseX, y, rowHeight: box.height / size.rows };
 }
 
 /** The forcing modifier the page itself will name, from the shipped rule. */
@@ -523,22 +530,25 @@ async function pageForcingModifier(page: Page): Promise<string> {
  * Why: the notice is only useful if it appears exactly when a drag copied
  * nothing. The stub program copies only on its first byte, so the negative
  * OSC 52 case runs first. Later drags exercise repeat visibility and input
- * isolation for the dismiss button against xterm's actual event handlers.
+ * isolation for the dismiss button against each surface's actual event handlers.
  */
 test("drag-copy notice: shown only for a drag the program kept without copying", async ({
   page,
   request,
 }) => {
-  // The drag-copy notice is not built for grid terminals (the
-  // maintainer's call: a near-term TODO entry, not part of the switch), so
-  // on terminal hosts there is nothing for this test to observe.
-  test.skip(onHostTerminals(), "the drag-copy notice is not built for terminals in terminal hosts");
   test.setTimeout(90_000);
   const ready = `DRAG-NOTICE-READY-${Date.now()}`;
   const session = await createSession(request, {
     title: `drag-notice-${Date.now()}`,
     cwd: "/tmp",
     invocation: `sh -c '${mouseProgramScript(ready)}'`,
+  });
+  // Observe the real input socket before attaching, for either wire format.
+  // The earlier program-owned drag proves this observer is live before the
+  // dismiss button's absence-of-input assertion depends on it.
+  const input: InputFrame[] = [];
+  page.on("websocket", (socket) => {
+    if (new URL(socket.url()).pathname.endsWith("/term")) recordInput(socket, input);
   });
   try {
     await page.goto("/");
@@ -559,7 +569,7 @@ test("drag-copy notice: shown only for a drag the program kept without copying",
     await expect(notice, "a drag the program copied must not raise the notice").toBeHidden();
 
     // A click is not a drag, whatever the program does with it.
-    const box = await page.locator("#terminal .xterm-screen").boundingBox();
+    const box = await terminalScreen(page).boundingBox();
     await page.mouse.click(box!.x + 40, box!.y + Math.min(60, box!.height / 2));
     // sleep-ok: observation window for a notice that must not appear, past the OSC 52 grace period.
     await page.waitForTimeout(NO_NOTICE_WINDOW_MS);
@@ -579,17 +589,14 @@ test("drag-copy notice: shown only for a drag the program kept without copying",
     expect(noticeBox.x + noticeBox.width).toBeLessThanOrEqual(viewport.width - 4);
     expect(noticeBox.y + noticeBox.height).toBeLessThanOrEqual(viewport.height - 4);
     expect(Math.abs(noticeBox.x + noticeBox.width / 2 - release.x)).toBeLessThan(2);
-    expect(noticeBox.y).toBeCloseTo(Math.max(4, release.y - 6 - noticeBox.height), 0);
+    expect(noticeBox.y + noticeBox.height).toBeCloseTo(release.y - 3 * release.rowHeight, 0);
 
     const textarea = terminalInput(page);
     await expect(textarea).toBeFocused();
-    // Observe xterm's real input doorway: a plain terminal press must emit
+    // Observe the terminal's real input doorway: a plain press must emit
     // a mouse report, whereas × must not produce any input through it.
-    await page.evaluate(() => {
-      const state = window as any;
-      state.__noticeInput = [];
-      state.__farhelmTerm.onData((data: string) => state.__noticeInput.push(data));
-    });
+    expect(input.length, "the observer saw the earlier program-owned drag").toBeGreaterThan(0);
+    input.length = 0;
     const dismiss = notice.getByRole("button", { name: "Dismiss drag-copy notice" });
     await expect(dismiss).toHaveAttribute("data-tooltip", "Dismiss this notice");
     await dismiss.hover();
@@ -598,14 +605,14 @@ test("drag-copy notice: shown only for a drag the program kept without copying",
     await dismiss.click();
     await expect(notice).toBeHidden();
     await expect(textarea).toBeFocused();
-    expect(await page.evaluate(() => (window as any).__noticeInput)).toEqual([]);
+    expect(input).toEqual([]);
 
     await dragAcrossTerminal(page);
     await expect(notice).toBeVisible({ timeout: 10_000 });
-    await page.evaluate(() => { (window as any).__noticeInput = []; });
+    input.length = 0;
     await page.mouse.click(box!.x + 40, box!.y + Math.min(60, box!.height / 2));
     await expect(notice).toBeHidden();
-    await expect.poll(() => page.evaluate(() => (window as any).__noticeInput.length)).toBeGreaterThan(0);
+    await expect.poll(() => input.length).toBeGreaterThan(0);
 
     // Hidden × must not eat input at its old location. Inspect the actual
     // hit-test owner rather than treating an invisible box as proof.
@@ -648,10 +655,6 @@ test("drag-copy notice: a Codex session gets Codex's own instruction", async ({
   page,
   request,
 }) => {
-  // The drag-copy notice is not built for grid terminals (the
-  // maintainer's call: a near-term TODO entry, not part of the switch), so
-  // on terminal hosts there is nothing for this test to observe.
-  test.skip(onHostTerminals(), "the drag-copy notice is not built for terminals in terminal hosts");
   test.setTimeout(90_000);
   const ready = `DRAG-NOTICE-CODEX-READY-${Date.now()}`;
   const dir = stackScratchDir("drag-notice-codex-");

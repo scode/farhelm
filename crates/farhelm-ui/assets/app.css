@@ -7624,10 +7624,11 @@ a:any-link,
   background: var(--bg-2);
 }
 
-/* Guidance sits above the drag-release pointer, using the tooltip's
-   viewport placement rule. It takes no terminal layout space (which would
-   resize the pty). Only the dismiss button accepts pointer input; visibility
-   hides that button too when the deadline or a terminal press retires it. */
+/* Guidance sits three rows above the release pointer, or below when only
+   that fits the pane; short panes use the viewport-clamped fallback. It takes
+   no terminal layout space (which would resize the pty). Only the dismiss
+   button accepts pointer input; visibility hides that button too when the
+   deadline or a terminal press retires it. */
 .drag-copy-notice {
   position: fixed;
   left: 0;

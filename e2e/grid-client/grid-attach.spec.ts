@@ -170,6 +170,10 @@ ${SCRIPTS.map((name) => `<script src="/assets/${name}"></script>`).join("\n")}
     <div id="status" class="attach-status"></div>
     <div id="connecting" class="terminal-connecting"></div>
     <div id="term" class="terminal"></div>
+    <div id="notice" class="drag-copy-notice" role="status" aria-live="polite">
+      <span class="drag-copy-notice-text"></span>
+      <button class="drag-copy-notice-dismiss" aria-label="Dismiss drag-copy notice" data-tooltip="Dismiss this notice">×</button>
+    </div>
   </div>
 </div>
 </body>
@@ -613,6 +617,74 @@ function linkScreen(osc: string, rev = 2): string[] {
   ];
 }
 
+/** Enable program-owned drags before testing whether guidance is suppressed. */
+async function trackGridMouse(page: Page): Promise<void> {
+  await socket(page, "binary", JSON.stringify({ t: "state", mouse: "click", focus: false, alt_screen: false, default_fg: null, default_bg: null, history_trimmed: false, exit: null }));
+  await page.waitForFunction(() => (window as any).__farhelmIslands.term.grid.model.state.mouse === "click");
+}
+
+/** Drag across non-link cells, so the program owns a gesture past the threshold. */
+async function plainGridDrag(page: Page, cols = 20): Promise<void> {
+  const from = await gridCell(page, 2, 2, cols);
+  const to = await gridCell(page, 12, 2, cols);
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(to.x, to.y, { steps: 3 });
+  await page.mouse.up();
+}
+
+test("a program's primary-selection write suppresses grid drag guidance without copying it", async ({ page }) => {
+  // A positive drag first proves the notice driver is live. The second
+  // gesture differs only by a completed primary write during its grace;
+  // local selection copying must not be mistaken for a program write.
+  await page.addInitScript(() => {
+    const w = window as any;
+    w.copied = [];
+    w.__farhelmNativeClipboardWrite = (text: string) => w.copied.push(text);
+  });
+  await mountTerminal(page, undefined, { spec: { notice: "notice" } });
+  await attachGrid(page);
+  await trackGridMouse(page);
+  const notice = page.locator("#notice");
+  await plainGridDrag(page);
+  await expect(notice).toBeVisible({ timeout: 5_000 });
+  await plainGridDrag(page);
+  await expect(notice).toBeHidden();
+  await socket(page, "binary", JSON.stringify({ t: "clipboard", target: "primary", text: "program selection", last: true }));
+  // sleep-ok: observe beyond the 1500 ms program-copy grace; this notice must never appear.
+  await page.waitForTimeout(3_000);
+  await expect(notice).toBeHidden();
+  expect(await page.evaluate(() => (window as any).copied)).toEqual([]);
+});
+
+test("a withheld grid link drag dismisses guidance and never raises it again", async ({ page }) => {
+  // The positive non-link drag distinguishes link interception from a dead
+  // notice driver. A withheld gesture belongs to Farhelm, not the program.
+  await mountTerminal(page, undefined, { spec: { notice: "notice" } });
+  await attachGrid(page);
+  await page.evaluate((lines) => {
+    for (const line of lines) (window as any).FakeSocket.all[0].binary(line);
+  }, linkScreen("https://docs.example/x"));
+  await trackGridMouse(page);
+  const notice = page.locator("#notice");
+  await plainGridDrag(page, 30);
+  await expect(notice).toBeVisible({ timeout: 5_000 });
+  expect((await inputMessages(page)).length).toBeGreaterThan(0);
+  await page.evaluate(() => ((window as any).FakeSocket.all[0].sent = []));
+  const from = await gridCell(page, 1, 1, 30);
+  const to = await gridCell(page, 25, 2, 30);
+  await page.mouse.move(from.x, from.y);
+  await expect(page.locator("#term .terminal-link-target")).toBeVisible();
+  await page.mouse.down();
+  await expect(notice).toBeHidden();
+  await page.mouse.move(to.x, to.y, { steps: 3 });
+  await page.mouse.up();
+  // sleep-ok: observe beyond the grace to reject guidance from a withheld link press.
+  await page.waitForTimeout(3_000);
+  await expect(notice).toBeHidden();
+  expect(await inputMessages(page)).toEqual([]);
+});
+
 test("links in a grid terminal open under today's rules", async ({ page }) => {
   // A text URL opens on click; an OSC 8 web link shows its target on hover
   // and opens; the link-click setting's "program only" opens nothing; a
@@ -683,8 +755,14 @@ test("a dropped connection keeps the grid's last screen while it recovers, and a
     w.copied = [];
     w.__farhelmNativeClipboardWrite = (text: string) => w.copied.push(text);
   });
-  await mountTerminal(page, undefined, { reconnect: RECONNECT_POLICY });
+  await mountTerminal(page, undefined, { reconnect: RECONNECT_POLICY, spec: { notice: "notice" } });
   await attachGrid(page);
+  await trackGridMouse(page);
+  await plainGridDrag(page);
+  await expect(page.locator("#notice")).toBeVisible({ timeout: 5_000 });
+  // Teardown must cancel an already pending grace as well as remove the
+  // frozen grid's notice listeners. Frozen selections still copy below.
+  await plainGridDrag(page);
   await socket(page, "close");
   await expect(page.locator("#connecting")).toHaveAttribute("data-reconnect-phase", "retrying");
   await page.evaluate(() => (window as any).farhelmTerm.reconnectNow("term"));
@@ -707,14 +785,23 @@ test("a dropped connection keeps the grid's last screen while it recovers, and a
   await expect(snapshot).toHaveCount(1);
   await expect(snapshot).not.toHaveClass(/terminal-snapshot/);
   await expect(snapshot.locator(".grid-terminal-row").nth(0)).toHaveText("$ echo");
-  // Selecting on the snapshot still copies.
+  // A plain drag on a frozen screen never raises guidance. The frozen
+  // model retains mouse tracking, so forcing is still needed to select.
+  await plainGridDrag(page);
+  // sleep-ok: observe beyond any pending live grace and the new frozen drag's grace.
+  await page.waitForTimeout(3_000);
+  await expect(page.locator("#notice")).toBeHidden();
+  // Forced selection on that same snapshot still copies.
   const from = await gridCell(page, 0, 0);
   // Clearly past boundary 5, so the selection ends there in both engines.
   const to = await gridCell(page, 5, 0, 20, 4, 0.2);
+  const forcing = (await viewerIsMac(page)) ? "Alt" : "Shift";
+  await page.keyboard.down(forcing);
   await page.mouse.move(from.x - 2, from.y);
   await page.mouse.down();
   await page.mouse.move(to.x, to.y, { steps: 3 });
   await page.mouse.up();
+  await page.keyboard.up(forcing);
   await expect.poll(() => page.evaluate(() => (window as any).copied)).toEqual(["$ ech"]);
   // Take control attaches again from scratch: the snapshot goes, a new
   // socket opens, and the replay rebuilds the screen.

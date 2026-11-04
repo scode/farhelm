@@ -63,13 +63,9 @@ above the terminal.
 Old terminals keep working exactly as before for now. You use both kinds the same way: type to the agent, scroll back,
 select and copy, paste or drop text, screenshots and files, and open links.
 
-A few things do not work in a new terminal yet:
-
-- Typing with an input method, as for Chinese, Japanese or Korean. What you commit reaches the agent, but the text you
-  are composing, and the input method's list of candidates, do not appear at the terminal's cursor while you type.
-- The hint after a drag that copied nothing. In an old terminal, when a program that uses the mouse keeps a plain drag
-  from selecting text, Farhelm shows where to hold Shift (Option on a Mac) to select anyway. A new terminal does not
-  show that hint, though holding the key works the same.
+Typing with an input method, as for Chinese, Japanese or Korean, does not work fully in a new terminal yet. What you
+commit reaches the agent, but the text you are composing, and the input method's list of candidates, do not appear at
+the terminal's cursor while you type.
 
 One display difference has no decided fix yet: an emoji drawn wide by a variation selector, as in ❤️, takes one column
 in a new terminal where tmux gave it two, so a program that counts two columns for it can leave the rest of that line

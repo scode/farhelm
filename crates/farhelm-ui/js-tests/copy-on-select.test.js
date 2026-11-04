@@ -218,6 +218,9 @@ function noticeFixture() {
     },
   };
   const viewport = { width: 800, height: 600 };
+  // Nonzero pane bounds catch treating the pane's height as a page
+  // coordinate; row height is the terminal's, not the notice's font size.
+  const geometry = { rowHeight: 20, pane: { top: 100, bottom: 500 } };
   const el = {
     querySelector: (selector) => selector.endsWith("-text") ? text : dismiss,
     classList: { add: (name) => showing.add(name), remove: (name) => showing.delete(name) },
@@ -237,11 +240,12 @@ function noticeFixture() {
   const controller = createDragCopyNotice(el, {
     place: placeTooltip,
     viewport: () => viewport,
+    geometry: () => geometry,
     setTimeout: (fn, ms) => { const id = ++nextId; timers.set(id, { fn, at: now + ms }); return id; },
     clearTimeout: (id) => timers.delete(id),
   });
   return {
-    controller, el, text, showing, listeners, timers, viewport,
+    controller, el, text, showing, listeners, timers, viewport, geometry,
     advance(ms) {
       now += ms;
       for (const [id, timer] of timers) {
@@ -251,11 +255,44 @@ function noticeFixture() {
   };
 }
 
-/** Placement must follow the release point, including drags at every window edge. */
-test("the notice stays above the release and entirely inside the viewport", () => {
+/** Three terminal rows keep the notice clear of the release row; above wins when it fits. */
+test("the notice sits three rows above the release inside its pane", () => {
   const f = noticeFixture();
   f.controller.show("copied nothing", { x: 300, y: 400 });
-  assert.deepEqual(f.el.style, { left: "200px", top: "344px" });
+  assert.deepEqual(f.el.style, { left: "200px", top: "290px" });
+  f.controller.show("copied nothing", { x: 300, y: 210 });
+  assert.deepEqual(f.el.style, { left: "200px", top: "100px" }, "an exact fit at the pane's top is enough room");
+});
+
+/** A release near the pane's top uses the same three-row gap below instead of covering it. */
+test("the notice sits three rows below when only that side fits", () => {
+  const f = noticeFixture();
+  f.controller.show("copied nothing", { x: 300, y: 130 });
+  assert.deepEqual(f.el.style, { left: "200px", top: "190px" });
+});
+
+/** A short pane cannot honor either gap, so it retains the established window-clamped fallback. */
+test("a pane too short for either side keeps the old clamped placement", () => {
+  const f = noticeFixture();
+  f.geometry.pane.bottom = 180;
+  f.controller.show("copied nothing", { x: 300, y: 140 });
+  assert.deepEqual(f.el.style, { left: "200px", top: "84px" });
+});
+
+/** Font-size changes alter the gap in terminal rows while horizontal centering stays unchanged. */
+test("the notice reads current row height when it shows or repositions", () => {
+  const f = noticeFixture();
+  f.controller.show("copied nothing", { x: 300, y: 400 });
+  for (const [rowHeight, top] of [[10, "320px"], [20, "290px"], [30, "260px"]]) {
+    f.geometry.rowHeight = rowHeight;
+    f.controller.reposition();
+    assert.deepEqual(f.el.style, { left: "200px", top });
+  }
+});
+
+/** Pane placement and its fallback must still keep the notice inside every viewport edge. */
+test("the notice remains entirely inside the viewport", () => {
+  const f = noticeFixture();
   for (const point of [{ x: 0, y: 0 }, { x: 800, y: 600 }, { x: 300, y: 10 }]) {
     f.controller.show("copied nothing", point);
     const left = parseFloat(f.el.style.left), top = parseFloat(f.el.style.top);
