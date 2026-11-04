@@ -157,6 +157,15 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   output was not checked. The difference is pinned in the supervisor's emulator parity tests
   (`crates/farhelm-supervisor/src/emulator_parity/generated.rs`). Plan: `plans/queue/vs16-emoji-width.md`.
 
+- **Revisit exact Ghostty matching for emoji variation selectors.** Decided by the maintainer on 2026-11-04, answering
+  the vs16-emoji-width plan's block: new terminals follow Ghostty's widths for U+FE0F and U+FE0E except in two cases,
+  pinned in tests. At the last column with autowrap off, Farhelm cannot tell an empty cell from a space the program
+  printed (its saved snapshots store both the same way), so it treats a printed space as empty and a selector can widen
+  a character Ghostty leaves narrow. On a terminal one column wide, today's wide-character handling stays, so after a
+  too-wide character and a pending wrap the cursor can end on a different row than Ghostty's. Matching Ghostty exactly
+  needs new saved cell state, a new snapshot format with a fallback for existing snapshots, and changed one-column
+  handling.
+
 - **Revisit keeping full durability for the host identity under WAL.** Decided on the maintainer's behalf on 2026-10-30
   when the sqlite-wal landing was blocked: SPEC.md's rule that lasting damage is never accepted, however unlikely the
   trigger, was read as taking precedence over the plan's decision that no write keeps full durability. The plan went
