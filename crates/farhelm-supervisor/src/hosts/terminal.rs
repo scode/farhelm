@@ -272,7 +272,7 @@
 //!   know); others can pass (a connect that timed out on a loaded machine,
 //!   a host that was briefly stopped, a child that could not be pinned, a
 //!   connection that kept ending; [`Unavailability::may_pass`]). In the
-//!   supervisor, an agent's host is tried again with a new runtime while
+//!   supervisor, an agent's or tab's host is tried again with a new runtime while
 //!   its reason may pass, whether startup could not adopt it or its runtime
 //!   became unavailable later (`service::core::host_handover`, "Adopting
 //!   again"). The retry does not resume this ended runtime: it adopts the
@@ -578,7 +578,7 @@ pub enum Unavailability {
 
 impl Unavailability {
     /// Whether this can pass on its own, so that adopting the host again is
-    /// worth trying (a supervisor retries an agent's host for such a reason,
+    /// worth trying (a supervisor retries an agent's or tab's host for such a reason,
     /// at startup or after its runtime ran; `service::core::host_handover`,
     /// "Adopting again"):
     /// a host that did not answer in time, closed or stopped taking
@@ -1963,6 +1963,39 @@ impl HostTerminal {
         reason: Unavailability,
         peer: Option<HostProcess>,
     ) -> HostTerminal {
+        Self::ended(socket, Liveness::Unavailable { reason, peer }, None)
+    }
+
+    /// A host a retry found gone, retaining any process its earlier runtime
+    /// adopted. A missing socket alone does not prove that process ended:
+    /// a tab's close must still confirm it before removing the tab's record.
+    /// This handle runs no terminal task and has no program screen.
+    /// Like [`Self::unavailable`], it must be made within a tokio runtime.
+    pub fn gone(socket: &Path, adopted: Option<HostProcess>) -> HostTerminal {
+        Self::ended(socket, Liveness::Gone, adopted)
+    }
+
+    /// A retry failed without disproving the host process pinned by this
+    /// handle. Keep that identity through every failed retry: a later
+    /// missing socket still cannot prove the original process ended.
+    /// `peer` describes this failure's evidence; it does not replace the
+    /// separate identity that cleanup must confirm gone.
+    pub(crate) fn unavailable_again(
+        &self,
+        reason: Unavailability,
+        peer: Option<HostProcess>,
+    ) -> HostTerminal {
+        Self::ended(
+            self.socket(),
+            Liveness::Unavailable { reason, peer },
+            self.adopted_process(),
+        )
+    }
+
+    /// A handle with final liveness and closed request channels. Used when
+    /// no runtime can drive the host; the blank emulator keeps the handle's
+    /// representation uniform, but is never a recovered program screen.
+    fn ended(socket: &Path, liveness: Liveness, adopted: Option<HostProcess>) -> HostTerminal {
         let size = farhelm_terminal_emulator::Size {
             columns: 80,
             lines: 24,
@@ -1971,7 +2004,7 @@ impl HostTerminal {
         let modes = emulator.modes();
         let (notices, _) = broadcast::channel(1);
         let (_, status) = watch::channel(HostStatus {
-            liveness: Liveness::Unavailable { reason, peer },
+            liveness,
             child_pid: 0,
             child_start: None,
             position: Position::default(),
@@ -2003,7 +2036,7 @@ impl HostTerminal {
                 paste_budget: Arc::new(tokio::sync::Semaphore::new(MAX_PASTE)),
                 encodes: Encodes::new(),
                 task: tokio::spawn(async {}).abort_handle(),
-                adopted: None,
+                adopted,
                 placeholder: true,
                 tag: None,
             }),
@@ -2023,8 +2056,8 @@ impl HostTerminal {
         self.inner.reconnected.load(Ordering::SeqCst)
     }
 
-    /// Whether this handle is a placeholder [`Self::unavailable`] made for a
-    /// host the supervisor could not adopt, rather than a runtime that ran.
+    /// Whether this handle stands in for a host no runtime drives, made by
+    /// [`Self::unavailable`] or [`Self::gone`], rather than an adopted runtime.
     /// This describes how the handle was made, not whether re-adoption
     /// retries it: a runtime that ran may also become unavailable for a
     /// reason that passes ([`Liveness::may_readopt`]).
@@ -2377,6 +2410,8 @@ impl HostTerminal {
     /// the identity and the command line again), and it never becomes a
     /// process that later answered at the host's socket, which a new
     /// connection could reach instead (`Unavailability::Replaced`).
+    /// A [`Self::gone`] handle made after a retry keeps this value from the
+    /// old runtime, so cleanup still confirms that original process ended.
     pub fn adopted_process(&self) -> Option<HostProcess> {
         self.inner.adopted
     }

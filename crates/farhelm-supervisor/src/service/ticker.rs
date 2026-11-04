@@ -13,7 +13,7 @@
 //! announces its program's exit on the supervisor's liveness notifier
 //! (`crate::hosts::LivenessNotifier`), and the task wakes on that the same
 //! way. Passing unavailability changes also wake the re-adoption task, so
-//! recovering an agent's host need not wait for a periodic tick. The
+//! recovering an agent's or tab's host need not wait for a periodic tick. The
 //! periodic snapshot remains the fallback for a missed hook or an
 //! attachment registered after the earlier observation.
 //!

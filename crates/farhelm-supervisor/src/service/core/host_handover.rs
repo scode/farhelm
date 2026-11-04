@@ -168,12 +168,12 @@
 //!
 //! ## Adopting again
 //!
-//! An agent's host that is unavailable for a reason that can pass is retried
+//! An agent's or tab's host that is unavailable for a reason that can pass is retried
 //! while the supervisor runs, whether startup could not adopt it or its
 //! runtime became unavailable later. The task started with the supervisor
 //! ([`Supervisor::start_readoption`]) retries one at a time, after 1 s and
 //! then doubling to a minute. The attempt count survives a successful
-//! adoption for that session and launch, so repeated failures never return
+//! adoption for that session and launch, or that tab, so repeated failures never return
 //! to the fastest retries. Each episode in which a runtime gave up after
 //! repeated reconnects (`Unstable`) waits at least the whole reconnect
 //! window before its first try: re-adoption must not immediately renew a
@@ -185,7 +185,8 @@
 //!    a Stop, Restart or Delete in progress, is retried later), and holds it
 //!    to the end, so nothing else acts on the session's host meanwhile;
 //! 2. checks that the session's entry still holds that very handle for
-//!    the same launch generation, and that no orderly stop has begun;
+//!    the same launch generation, or its tab cell still holds it for the
+//!    same tab id, and that no orderly stop has begun;
 //! 3. looks at the one socket the handle names, and nothing else: a
 //!    scan restricted to that name, which a launch drew for itself, so no
 //!    host another runtime of this supervisor holds or is starting can be
@@ -198,6 +199,11 @@
 //!    placeholder, or no terminal for a host that has ended), keeping the
 //!    entry's run and session cells; a runtime it made that is not
 //!    installed is stopped, leaving its host as it was.
+//!    A tab keeps its id, known creation stamp and scope, or learns those
+//!    from its tag when startup left them unknown. A tab's host found gone
+//!    is kept as a finished handle for the reap to close and remove its
+//!    record, retaining the old adopted process for that close's check.
+//!    A tab whose close already failed belongs to the reap and is not retried.
 //!
 //! The ticker forwards passing unavailability changes to this task's wake,
 //! so a runtime that becomes unavailable is scheduled without waiting for a
@@ -429,8 +435,14 @@ impl Supervisor {
     /// Unlike the agent's, a tab's runtime stays in its cell, stopped: it
     /// keeps answering from its last status, as every runtime in the map
     /// does once the stop has closed it.
+    ///
+    /// Before a stop, republication wakes re-adoption: a pass while Restart
+    /// had the entry off-map may have parked with no active retry. The
+    /// caller holds the session map through publication, so the woken task
+    /// cannot inspect it before the tabs are visible again.
     pub(crate) fn fence_republished_tabs(&self, tabs: &super::HostTabs) {
         if !self.hosts_stopping() {
+            self.readoption_wake.notify_one();
             return;
         }
         for tab in super::host_tabs_of(tabs) {
@@ -1230,12 +1242,13 @@ const READOPT_FIRST: Duration = Duration::from_secs(1);
 /// The longest wait between two retries of one unavailable host.
 const READOPT_MAX: Duration = Duration::from_secs(60);
 
-/// The launch whose retries share one backoff, even across healthy runs.
-/// A new generation starts its own count; a replacement runtime for the
-/// same launch does not.
+/// The terminal whose retries share one backoff, even across healthy runs.
+/// An agent's new generation starts its own count; a tab belongs to the
+/// session across those generations, and keeps its count until it closes.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum ReadoptKey {
     Agent { id: String, generation: i64 },
+    Tab { id: String, tab_id: String },
 }
 
 /// Retry history kept for each session and launch while it still exists.
@@ -1280,6 +1293,31 @@ impl ReadoptSchedule {
             .expect("the launch was scheduled")
             .due = tokio::time::Instant::now();
     }
+
+    /// Retries made for a tab, including ones deferred by a busy session.
+    /// The key has no agent generation, so Restart cannot reset its backoff.
+    #[cfg(test)]
+    pub(super) fn tab_attempts(&self, id: &str, tab_id: &str) -> Option<u32> {
+        self.due
+            .get(&ReadoptKey::Tab {
+                id: id.to_string(),
+                tab_id: tab_id.to_string(),
+            })
+            .map(|retry| retry.attempts)
+    }
+
+    /// Make a scheduled tab due after a test asserted its real deadline,
+    /// without waiting through an unstable runtime's reconnect window.
+    #[cfg(test)]
+    pub(super) fn make_tab_due(&mut self, id: &str, tab_id: &str) {
+        self.due
+            .get_mut(&ReadoptKey::Tab {
+                id: id.to_string(),
+                tab_id: tab_id.to_string(),
+            })
+            .expect("the tab was scheduled")
+            .due = tokio::time::Instant::now();
+    }
 }
 
 /// How long to wait after retry number `attempts` (1 for the first) before
@@ -1291,7 +1329,7 @@ fn readopt_delay(attempts: u32) -> Duration {
 }
 
 impl Supervisor {
-    /// Start the task that retries unavailable agent hosts (module docs,
+    /// Start the task that retries unavailable agent and tab hosts (module docs,
     /// "Adopting again"), for a supervisor that holds its state directory.
     /// It holds the supervisor weakly, ends with it, and returns once the
     /// supervisor is stopping.
@@ -1299,7 +1337,7 @@ impl Supervisor {
     /// It wakes when a retry is due, and when [`Self::readoption_wake`] is
     /// notified (`serve`'s reload left placeholders, the ticker saw a
     /// passing unavailability change, or a stop began). With no active
-    /// episode it waits for a wake, even while it keeps healthy launches'
+    /// episode it waits for a wake, even while it keeps healthy terminals'
     /// retry histories.
     pub(super) fn start_readoption(self: &Arc<Self>) {
         let weak = Arc::downgrade(self);
@@ -1332,12 +1370,12 @@ impl Supervisor {
     }
 
     /// Whether an orderly stop has begun (`Self::checkpoint_hosts_for_exit`).
-    fn hosts_stopping(&self) -> bool {
+    pub(super) fn hosts_stopping(&self) -> bool {
         self.stopping.load(std::sync::atomic::Ordering::SeqCst)
     }
 
-    /// Schedule and retry unavailable agent hosts, keeping each launch's
-    /// backoff across successful adoptions. Every new episode starts from
+    /// Schedule and retry unavailable agent and tab hosts, keeping each
+    /// terminal's backoff across successful adoptions. Every new episode starts from
     /// that kept backoff, or at least [`RECONNECT_WINDOW`] when its runtime
     /// gave up as unstable. Healthy launches contribute no next due time.
     ///
@@ -1352,52 +1390,64 @@ impl Supervisor {
             return None;
         }
         let sessions = self.sessions.lock().await;
-        let current: HashSet<ReadoptKey> = sessions
-            .iter()
-            .map(|(id, entry)| ReadoptKey::Agent {
+        let mut current = HashSet::new();
+        let mut unavailable = Vec::new();
+        for (id, entry) in sessions.iter() {
+            let agent = ReadoptKey::Agent {
                 id: id.clone(),
                 generation: entry.generation,
-            })
-            .collect();
-        let unavailable: Vec<(String, i64, HostTerminal)> = sessions
-            .iter()
-            .filter_map(|(id, entry)| match &entry.terminal {
-                Some(Terminal::Host(host)) if host.liveness().may_readopt() => {
-                    Some((id.clone(), entry.generation, host.clone()))
+            };
+            current.insert(agent.clone());
+            if let Some(Terminal::Host(host)) = &entry.terminal
+                && host.liveness().may_readopt()
+            {
+                unavailable.push((agent, host.clone()));
+            }
+            for tab in super::host_tabs::host_tabs_of(&entry.session.host_tabs) {
+                let key = ReadoptKey::Tab {
+                    id: id.clone(),
+                    tab_id: tab.tab_id.clone(),
+                };
+                current.insert(key.clone());
+                if !tab.end_failed && tab.host.liveness().may_readopt() {
+                    unavailable.push((key, tab.host));
                 }
-                Some(Terminal::Host(_) | Terminal::Tmux(_)) | None => None,
-            })
-            .collect();
+            }
+        }
+        // A Restart temporarily takes its entry off the map, but its tab
+        // cell remains the session's. Keep those retry counts while it is
+        // off-map, without probing anything until the entry returns.
+        for (id, cell) in self
+            .restarting_tabs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+        {
+            for tab in super::host_tabs::host_tabs_of(cell) {
+                current.insert(ReadoptKey::Tab {
+                    id: id.clone(),
+                    tab_id: tab.tab_id,
+                });
+            }
+        }
         drop(sessions);
         // Start an episode's wait after observing its unavailable handle.
         // Time spent waiting for the session map must not consume any of
         // an unstable runtime's reconnect window.
         let now = tokio::time::Instant::now();
-        let active: HashSet<ReadoptKey> = unavailable
-            .iter()
-            .map(|(id, generation, _)| ReadoptKey::Agent {
-                id: id.clone(),
-                generation: *generation,
-            })
-            .collect();
+        let active: HashSet<ReadoptKey> = unavailable.iter().map(|(key, _)| key.clone()).collect();
         schedule.due.retain(|key, retry| {
             if !active.contains(key) {
                 retry.active = false;
             }
             current.contains(key)
         });
-        for (id, generation, old) in unavailable {
-            let retry = schedule
-                .due
-                .entry(ReadoptKey::Agent {
-                    id: id.clone(),
-                    generation,
-                })
-                .or_insert_with(|| Retry {
-                    attempts: 0,
-                    due: now + READOPT_FIRST,
-                    active: false,
-                });
+        for (key, old) in unavailable {
+            let retry = schedule.due.entry(key.clone()).or_insert_with(|| Retry {
+                attempts: 0,
+                due: now + READOPT_FIRST,
+                active: false,
+            });
             if !retry.active {
                 let delay = if matches!(
                     old.liveness(),
@@ -1421,7 +1471,13 @@ impl Supervisor {
             // Clear the episode at the successful swap, even if the new
             // runtime fails before the next pass sees it healthy. In
             // particular, each new unstable runtime must wait its window.
-            if self.readopt_one(&id, generation, &old).await {
+            let recovered = match key {
+                ReadoptKey::Agent { id, generation } => {
+                    self.readopt_one(&id, generation, &old).await
+                }
+                ReadoptKey::Tab { id, tab_id } => self.readopt_tab_one(&id, &tab_id, &old).await,
+            };
+            if recovered {
                 retry.active = false;
             }
             if self.hosts_stopping() {
