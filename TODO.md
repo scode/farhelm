@@ -31,16 +31,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   Chrome and Korean input that arrives outside composition events), which failed the complexity gate of the
   terminal-host work. Verifying it needs real input methods, not only synthetic composition events.
 
-- **Dropping files onto grid terminals.** xterm.js terminals accept dropped files and images through the attachment
-  handling that pasting uses; grid terminals (terminals in a terminal host) refuse a drop with a message saying to copy
-  and paste instead. Left out of the terminal-host work by decision. Turning it on is mostly passing `acceptDrops: true`
-  where the grid terminal installs the paste interception, plus tests on both browser engines. Plan:
-  `plans/queue/grid-drop-and-drag-notice.md`.
-
-- **The drag-copy notice in grid terminals.** In xterm.js terminals, a plain drag over a program that uses the mouse
-  copies nothing and shows a notice saying how to select instead (Shift-drag, or Option-drag on a Mac). Grid terminals
-  do not show it yet; left out of the terminal-host work by decision. Plan: `plans/queue/grid-drop-and-drag-notice.md`.
-
 - **The desktop smoke's appearance leg on grid terminals.** The optional appearance leg of the Linux desktop smoke
   (`DESKTOP_SMOKE_APPEARANCE=1 scripts/desktop-smoke.sh`) checks each light/dark case's terminal too: its background
   color, that typing reaches the agent, and that a 512-line burst arrives whole and in order on the same attachment.

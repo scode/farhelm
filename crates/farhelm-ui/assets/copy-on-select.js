@@ -223,15 +223,17 @@
    *
    * Only the text span changes: replacing the live region or its children
    * would discard the dismiss button and make announcements unreliable.
-   * `place` is the shared tooltip placement rule, used with a point-shaped
-   * target at the drag's release. Timers and viewport are injected so tests
-   * can prove the actual lifetime without waiting thirty seconds.
+   * `place` keeps the shared tooltip's horizontal centering and viewport
+   * clamping. `geometry` supplies this terminal's row height and pane bounds:
+   * the notice sits three rows above the release, or below it when only
+   * that fits. A pane too short for either keeps the old clamped placement.
+   * Timers and layout are injected so tests can prove the exact boundaries.
    *
    * Hiding clears the text as well as the showing class, allowing a repeated
    * notice to be announced. The stylesheet makes the entire hidden subtree
    * inert to the pointer; the dismiss button alone accepts clicks when shown.
    */
-  function createDragCopyNotice(el, { place, viewport, setTimeout, clearTimeout }) {
+  function createDragCopyNotice(el, { place, viewport, geometry, setTimeout, clearTimeout }) {
     const text = el.querySelector(".drag-copy-notice-text");
     const dismiss = el.querySelector(".drag-copy-notice-dismiss");
     let timer = null;
@@ -263,10 +265,18 @@
         windowSize,
       );
       el.style.left = `${position.left}px`;
-      // Tooltip placement shares horizontal centering and edge clamping.
-      // This notice stays above the release rather than flipping below it;
-      // at the top edge it overlaps the pointer instead of leaving the window.
-      const top = Math.max(4, Math.min(point.y - 6 - size.height, windowSize.height - 4 - size.height));
+      // Keep guidance away from the row the user just dragged over. Pane
+      // bounds decide where there is room; the viewport still bounds a pane
+      // partly outside the window and the short-pane fallback.
+      const terminal = geometry();
+      const gap = 3 * terminal.rowHeight;
+      const above = point.y - gap - size.height;
+      const below = point.y + gap;
+      const first = Math.max(4, terminal.pane.top);
+      const last = Math.min(windowSize.height - 4, terminal.pane.bottom);
+      const fits = (top) => top >= first && top + size.height <= last;
+      const top = fits(above) ? above : fits(below) ? below
+        : Math.max(4, Math.min(point.y - 6 - size.height, windowSize.height - 4 - size.height));
       el.style.top = `${top}px`;
     }
 

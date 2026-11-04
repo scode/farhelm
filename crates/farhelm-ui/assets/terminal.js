@@ -36,11 +36,11 @@
 // copying through the page's clipboard queue, today's links
 // (web links, the hyperlink mismatch warning, file-path hovers and
 // downloads, the desktop app's tunnels; see `createGridLinks`), and the
-// frozen screen kept across a reconnect or a takeover. Not built for grid
-// terminals: the drag-copy notice, and showing an input
-// method's composition at the cursor. Flow control's pause and resume are
-// never sent for a grid stream: the component applies every frame as it
-// arrives and draws once per animation frame, so no backlog builds up on
+// frozen screen kept across a reconnect or a takeover. Both surfaces show
+// guidance after a program-owned drag that copied nothing. Showing an input
+// method's composition at the cursor is not built for grid terminals. Flow
+// control's pause and resume are never sent for a grid stream: the component
+// applies every frame as it arrives and draws once per animation frame, so no backlog builds up on
 // this side to measure (the supervisor coalesces screen frames itself).
 //
 // ## One island per terminal, reconciled declaratively (PLAN_M4.md item 6)
@@ -5269,8 +5269,9 @@
          * removes its element from `el`), its copy-on-select and link
          * listeners, and its paste and drop interception, which is installed
          * again for the grid (inserting through `paste` messages). The grid
-         * brings its own selection copying and links
-         * (`createGridLinks`). The island's record is updated in place so
+         * brings its own selection copying and links (`createGridLinks`);
+         * this driver still owns guidance for a drag the program did not
+         * copy. The island's record is updated in place so
          * `stepFontSize`, focus, `unmount` and the test registry reach the
          * grid from now on.
          */
@@ -5280,6 +5281,11 @@
           // focused before the notice arrives, and disposing xterm.js would
           // drop that focus on the page.
           const hadFocus = el.contains(document.activeElement);
+          // Guidance counts completed writes from this program, including
+          // primary-selection writes the browser does not put on its own
+          // clipboard. Local selection copies are the grid's separate path.
+          let gridOsc52Writes = 0;
+          let gridPressed = null;
           // Today's links on the grid (`createGridLinks`); a tunnel that
           // cannot open explains itself where the xterm.js path's does.
           const gridLinks = createGridLinks({
@@ -5311,19 +5317,29 @@
               // browser has no primary selection), through the page's one
               // clipboard queue, silently best-effort.
               onClipboard: (text, target) => {
+                // Primary writes still mean the program handled its drag,
+                // even though only clipboard writes reach the browser sink.
+                gridOsc52Writes += 1;
                 if (target === "clipboard") enqueueClipboardWrite(text);
               },
               // A completed local selection, through the same queue (this
               // file's header, "Copy to the system clipboard").
               onCopy: enqueueClipboardWrite,
               links: gridLinks.provider,
-              linkPress: (event, link) => window.farhelmTerminalLinks.interceptLinkPress({
-                button: event.button,
-                tracking: true,
-                forced: false,
-                webLink: link.web,
-                mode: currentLinkClickMode(),
-              }),
+              linkPress: (event, link) => {
+                const withheld = window.farhelmTerminalLinks.interceptLinkPress({
+                  button: event.button,
+                  tracking: true,
+                  forced: false,
+                  webLink: link.web,
+                  mode: currentLinkClickMode(),
+                });
+                // The capture listener below saw this press before the
+                // grid asked. Farhelm withheld it, so guidance about the
+                // program failing to copy would be misleading.
+                if (withheld && gridPressed) gridPressed.withheld = true;
+                return withheld;
+              },
               onDispose: () => gridLinks.dispose(),
               // A bad history row found while history is applied after the
               // frame that carried it: the same ending as a bad frame.
@@ -5353,8 +5369,96 @@
             () => grid.clearSelection(),
             () => ws.readyState === WebSocket.OPEN,
           );
+          // The grid copies its own selections. Only program-owned drags
+          // need this notice driver; sharing xterm's driver would also pull
+          // in its selection copying and mouse-report suppression gates.
+          const noticeElement = spec.notice ? document.getElementById(spec.notice) : null;
+          const dragNotice = noticeElement
+            ? window.farhelmCopyOnSelect.createDragCopyNotice(noticeElement, {
+              place: window.farhelmTooltip.placeTooltip,
+              viewport: () => ({ width: window.innerWidth, height: window.innerHeight }),
+              geometry: () => {
+                const screen = created.element.querySelector(".grid-terminal-screen");
+                const row = screen.querySelector(".grid-terminal-row");
+                return {
+                  // A resize frame can precede its paint. A rendered row
+                  // measures the screen's current metrics at that boundary.
+                  rowHeight: row ? row.getBoundingClientRect().height : screen.getBoundingClientRect().height / created.model.rows,
+                  pane: created.element.closest(".terminal-pane").getBoundingClientRect(),
+                };
+              },
+              setTimeout: window.setTimeout.bind(window),
+              clearTimeout: window.clearTimeout.bind(window),
+            })
+            : null;
+          let gridNoticeActive = true;
+          let gridNoticeGrace = null;
+          let gridPressSequence = 0;
+          /** A new press dismisses old guidance, even on the grid's own scrollbar. */
+          const handleGridNoticePress = (event) => {
+            gridPressSequence += 1;
+            if (gridNoticeGrace !== null) clearTimeout(gridNoticeGrace);
+            gridNoticeGrace = null;
+            if (dragNotice) dragNotice.hide();
+            gridPressed = {
+              sequence: gridPressSequence,
+              x: event.clientX,
+              y: event.clientY,
+              button: event.button,
+              onScreen: !!event.target?.closest?.(".grid-terminal-screen"),
+              trackingAtPress: created.model.state.mouse !== "off",
+              forced: window.farhelmCopyOnSelect.pressForcesSelection(event, navigator.platform),
+              osc52AtPress: gridOsc52Writes,
+              withheld: false,
+            };
+          };
+          /** Allow the program its existing grace to answer a plain drag with a copy. */
+          const handleGridNoticeRelease = (event) => {
+            const press = gridPressed;
+            gridPressed = null;
+            if (!press || press.withheld || !window.farhelmCopyOnSelect.dragMayHaveCopiedNothing({
+              button: press.button,
+              moved: Math.hypot(event.clientX - press.x, event.clientY - press.y),
+              onScreen: press.onScreen,
+              trackingAtPress: press.trackingAtPress,
+              forced: press.forced,
+              osc52SincePress: gridOsc52Writes !== press.osc52AtPress,
+            })) return;
+            const release = { x: event.clientX, y: event.clientY };
+            gridNoticeGrace = setTimeout(() => {
+              gridNoticeGrace = null;
+              if (!gridNoticeActive || !alive || press.sequence !== gridPressSequence || gridOsc52Writes !== press.osc52AtPress) return;
+              if (!dragNotice || noticeElement.closest(".terminal-pane:not(.selected)")) return;
+              dragNotice.show(window.farhelmCopyOnSelect.dragCopyNoticeText({
+                platform: navigator.platform,
+                appHint: spec.copyHint,
+              }), release);
+            }, window.farhelmCopyOnSelect.OSC52_GRACE_MS);
+          };
+          // Capture includes scrollbar presses (which dismiss guidance)
+          // and runs before the grid decides whether a link owns a press.
+          if (dragNotice) {
+            created.element.addEventListener("mousedown", handleGridNoticePress, true);
+            document.addEventListener("mouseup", handleGridNoticeRelease);
+            window.addEventListener("resize", dragNotice.reposition);
+          }
+          stopCopyOnSelect = () => {
+            // A kept grid becomes a non-live snapshot. Its own selection
+            // still works, but no queued guidance may outlive this driver.
+            gridNoticeActive = false;
+            gridPressSequence += 1;
+            gridPressed = null;
+            if (gridNoticeGrace !== null) clearTimeout(gridNoticeGrace);
+            gridNoticeGrace = null;
+            if (dragNotice) {
+              created.element.removeEventListener("mousedown", handleGridNoticePress, true);
+              document.removeEventListener("mouseup", handleGridNoticeRelease);
+              window.removeEventListener("resize", dragNotice.reposition);
+              dragNotice.dispose();
+            }
+          };
           if (islandEntry) {
-            Object.assign(islandEntry, { kind: "grid", grid, term: null, fit: null, attachments, stopCopyOnSelect: null, linkGesture: null });
+            Object.assign(islandEntry, { kind: "grid", grid, term: null, fit: null, attachments, stopCopyOnSelect, linkGesture: null });
           }
           publishIsland(spec.el, { kind: "grid", grid, ws, test: testHook });
           if (spec.primary) {
@@ -5786,6 +5890,9 @@
         // — the addon's own parser-driven path, never routed through this
         // listener at all — are untouched by this change.
         let gestureStartedHere = false;
+        // The mount stays alive when it swaps xterm for a grid. This
+        // driver's deferred copy and grace callbacks must stop there too.
+        let copyOnSelectActive = true;
         // The copy decision and drag-copy notice's view of the gesture
         // (copy-on-select.js's "The drag that copies nothing"): where the
         // press was, whether the
@@ -5813,6 +5920,10 @@
           ? window.farhelmCopyOnSelect.createDragCopyNotice(noticeElement, {
             place: window.farhelmTooltip.placeTooltip,
             viewport: () => ({ width: window.innerWidth, height: window.innerHeight }),
+            geometry: () => ({
+              rowHeight: term.element.querySelector(".xterm-screen").getBoundingClientRect().height / term.rows,
+              pane: term.element.closest(".terminal-pane").getBoundingClientRect(),
+            }),
             setTimeout: window.setTimeout.bind(window),
             clearTimeout: window.clearTimeout.bind(window),
           })
@@ -5840,7 +5951,7 @@
         // shows guidance; a pane switched away during the wait stays silent.
         const showDragCopyNotice = (press, release) => {
           noticeGraceTimer = null;
-          if (!alive || press.sequence !== pressSequence || osc52Writes !== press.osc52AtPress) return;
+          if (!copyOnSelectActive || !alive || press.sequence !== pressSequence || osc52Writes !== press.osc52AtPress) return;
           if (!dragNotice || noticeElement.closest(".terminal-pane:not(.selected)")) return;
           const text = window.farhelmCopyOnSelect.dragCopyNoticeText({
             platform: navigator.platform,
@@ -5854,13 +5965,11 @@
           const press = pressed;
           pressed = null;
           setTimeout(() => {
-            // `alive` (declared further down, with the rest of this
-            // mount's deferred-work guards) is the same token
-            // `disposeDeferred` clears on teardown — this callback outlives
-            // its own dispatch by design now, so it checks the same flag
-            // every other deferred callback in this file does before
-            // touching a `term` that may by now be disposed.
-            if (!alive) return;
+            // This callback outlives its dispatch. Mount teardown clears
+            // `alive`; the xterm-to-grid swap clears this driver's private
+            // token while keeping the mount alive. Either ending makes
+            // touching the old terminal unsafe.
+            if (!copyOnSelectActive || !alive) return;
             const hasSelection = term.hasSelection();
             const selectionText = hasSelection ? term.getSelection() : "";
             if (
@@ -5954,6 +6063,10 @@
         // nothing else in this file's teardown would ever take it down on
         // its own.
         stopCopyOnSelect = () => {
+          copyOnSelectActive = false;
+          pressSequence += 1;
+          gestureStartedHere = false;
+          pressed = null;
           term.element.removeEventListener("mousedown", handleTerminalMouseDown);
           linkScreen.removeEventListener('mousedown', withholdLinkPress);
           for (const type of ['mousedown', 'mousemove', 'mouseup']) {

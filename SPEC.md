@@ -2295,17 +2295,19 @@ whatever the agent renders is what you see. There is no composer, no message abs
   to the selected terminal; it does not authorize a program to query the clipboard. Every completed selection re-copies,
   even one identical to what is already on the clipboard. When a plain drag goes to a program under mouse reporting and
   the program copies nothing (no OSC 52 write follows), the terminal shows a notice that the program handles selection
-  itself: use its own copy command, or hold the forcing modifier while dragging. It appears on every such drag, just
-  above the release pointer and clamped inside the window. It stays for 30 seconds, or until its × is clicked or the
-  next mouse press in that terminal. Dismissal preserves terminal focus and sends no input to the program; the rest of
-  the notice is pointer-transparent. For a Codex session's agent terminal the notice names Codex's own copy key instead.
-  It is guidance about the program, not a report of a clipboard failure. A new terminal does not show this notice yet
-  (TODO.md); the forcing modifier selects there all the same. Clipboard operations are explicitly best-effort and silent
-  on failure — permission policy, secure-context requirements, and an engine's own clipboard behavior are outside this
-  system's control — a deliberate, named exception to the Errors and diagnostics section's surface-every-error rule
-  below, not a lapse in it. Farhelm assumes the host's system clipboard works. A broken, hung or slow clipboard is not
-  something Farhelm adds complexity to support well: copies may be dropped while it is in that state, but nothing else
-  in Farhelm may stall because of it.
+  itself: use its own copy command, or hold the forcing modifier while dragging. It appears on every such drag, with its
+  bottom edge three terminal rows above the release pointer when it fits inside the terminal's pane and the window.
+  Otherwise its top edge sits three rows below; if neither fits, it falls back to six pixels above, clamped inside the
+  window. It stays centred horizontally on the pointer, clamped inside the window. It stays for 30 seconds, or until its
+  × is clicked or the next mouse press in that terminal. Dismissal preserves terminal focus and sends no input to the
+  program; the rest of the notice is pointer-transparent. For a Codex session's agent terminal the notice names Codex's
+  own copy key instead. It is guidance about the program, not a report of a clipboard failure. Both kinds of terminal
+  show it; any completed program clipboard write, including a primary-selection write, suppresses it during the grace
+  window. Clipboard operations are explicitly best-effort and silent on failure — permission policy, secure-context
+  requirements, and an engine's own clipboard behavior are outside this system's control — a deliberate, named exception
+  to the Errors and diagnostics section's surface-every-error rule below, not a lapse in it. Farhelm assumes the host's
+  system clipboard works. A broken, hung or slow clipboard is not something Farhelm adds complexity to support well:
+  copies may be dropped while it is in that state, but nothing else in Farhelm may stall because of it.
 - Dragging across a terminal link never opens its target, downloads a file or opens a saved file, including while a
   program has mouse reporting on. Small pointer jitter still counts as a click.
 - Links in terminal output open their http(s) target on click, with no confirmation or prompt of any kind, unless the

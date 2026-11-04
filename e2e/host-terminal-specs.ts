@@ -12,10 +12,9 @@
 //
 // The list holds every spec file that drives a terminal, directly or through
 // the terminal-family helpers (tests/helpers/term.ts, terminal-readiness.ts,
-// terminal-suite.ts, real-agent.ts): their tests hold on both kinds, a test that is about the
-// old terminal alone, or about something the new one deliberately does not have
-// yet (the drag-copy notice), skipping itself
-// with `onHostTerminals()` and saying why and where the grid's counterpart is
+// terminal-suite.ts, real-agent.ts): their tests hold on both kinds. A test
+// about the old terminal alone skips itself with `onHostTerminals()`, saying
+// why and where the grid's counterpart is
 // pinned. Spec files that never reach a terminal are left out: a host run has
 // nothing to add to them. Terminal files left out whole, because every test in
 // them is about xterm.js itself, are `HOST_TERMINAL_LEFT_OUT`, with the reason.

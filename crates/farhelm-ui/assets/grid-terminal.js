@@ -87,7 +87,8 @@
 // resize, the alternate screen switching, a history reset, or input sent to
 // the program clears it. Every gesture that ends with a selection copies it
 // (`onCopy`, through copy-on-select.js's decision), even when it is the
-// same text again. The drag-copy notice is not built for grid terminals.
+// same text again. The drag-copy notice, for drags the program owns, is not
+// part of this component: terminal.js drives it around the grid.
 //
 // ## Links
 //
