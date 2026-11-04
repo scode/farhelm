@@ -347,6 +347,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **TensorLake sandbox suspension must be confirmed before shown as suspended.** Suspending a TensorLake sandbox looks
   suspiciously fast, so the user can get the impression it is suspended before that state is actually confirmed. The UI
   must not present the sandbox as suspended until the suspension is confirmed.
+- **TensorLake "Refresh sandboxes" button feels inert.** In the TensorLake settings menu, "Refresh sandboxes" sits below
+  "New recipe" as a bare button and appears to do nothing; there may be an empty list above it. Unclear UX; fix TBD.
 
 ### Trivial
 
