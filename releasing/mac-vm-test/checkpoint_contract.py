@@ -109,6 +109,20 @@ Whether the resumed agent remembers the earlier turn stays the UI's to report.
         raise ValueError('the old terminal host is still running after Restart')
 
 
+def fixed_operations(task):
+    """Identify command-only checkpoints whose acceptance needs no UI judgment.
+
+Keep this whitelist smaller than the command API. In particular, installation
+inside a GUI upgrade checkpoint still belongs to the native tester's sequence.
+The enclosing executor owns deadlines, cancellation and retained failures for
+these child processes just as it does for model-driven checkpoints.
+"""
+    if task['gui'] or not task['context'].get('managed_operations'):
+        return None
+    return {'artifact-verification': ('verify_candidate',),
+            'fixture-clean': ('fixture_clean',), 'install': ('install_candidate',)}.get(task['check_id'])
+
+
 def required_operations(check, pass_id, update_path):
     """Return independent command premises for exactly this checkpoint and path."""
     requirements = {
@@ -124,6 +138,8 @@ def required_operations(check, pass_id, update_path):
         # once; the final sample is refused unless the comparison ran first.
         'local-old-session': {'prior_receipts', 'host_survival', 'old_session_after'},
         'remote-old-session': {'prior_receipts', 'remote_host_survival', 'remote_old_session_after'},
+        'remote-host-remove': {'remote_host_before', 'remote_host_after', 'remote_version'},
+        'remote-host-uninstall': {'remote_host_before', 'remote_host_after'},
         'remote-provision': {'remote_version'}, 'codex-conversation': {'inspect_state'},
         'seed-state': {'inspect_state', 'versions'},
         'continuity-before': {'continuity_before'}, 'preserved-state': {'inspect_state'},
@@ -148,6 +164,34 @@ def required_operations(check, pass_id, update_path):
             check == 'update-relaunch' and pass_id.startswith('upgrade-'))):
         result.add('launch_override')
     return result
+
+
+def require_remote_host_effect(check, before, after):
+    """Distinguish forgetting a host from uninstalling its managed resources.
+
+Both menu checks must start with a real provisioned host and retained data.
+Remove must leave the original service and files alone; uninstall must remove
+them while keeping the data. Native images separately prove the registry and
+session behavior, which these independent SSH observations cannot establish.
+"""
+    service = before['service']
+    if (service['ActiveState'] != 'active' or service['SubState'] != 'running'
+            or not service['MainPID'].isdigit() or int(service['MainPID']) <= 0
+            or not all(before[key] for key in ('lib_present', 'unit_present', 'binary_sha256',
+                                              'unit_sha256', 'data_present', 'database_present'))):
+        raise RuntimeError('remote menu check did not start from a provisioned running host with data')
+    if not after['data_present'] or not after['database_present']:
+        raise RuntimeError('remote menu action lost the retained data directory or database')
+    if check == 'remote-host-remove':
+        if before != after:
+            raise RuntimeError('Remove changed remote resources or the running supervisor')
+    elif check == 'remote-host-uninstall':
+        if (after['lib_present'] or after['unit_present'] or after['binary_sha256'] or after['unit_sha256']
+                or after['service']['MainPID'] != '0' or after['service']['ActiveState'] != 'inactive'
+                or after['service']['LoadState'] != 'not-found'):
+            raise RuntimeError('Uninstall left remote binaries, unit or supervisor running')
+    else:
+        raise ValueError('not a remote host menu checkpoint')
 
 
 def available_operations(check, pass_id, update_path):
@@ -183,12 +227,18 @@ def update_instructions(check, pass_id, update_path):
 
 P0 discovery and relaunch are separate checkpoints. Bonus upgrades combine
 them, while the installer fixture never carries override-removal obligations.
+Discovery must prove completed installation, not win a race to capture a
+progress indicator that a fast installer may replace before the next image.
+Override removal depends on the version returned by the new app's check, not
+whether the native provider can reveal a particular tooltip in an image.
 """
     if update_path not in ('manual', 'ordinary', 'override'):
         raise ValueError('an update checkpoint needs a settled update path')
     discovery = '''Click the old app's actual Check for updates. Wait for observed candidate
 installation and Restart to update. Call update_logs and versions to retain
-installer and installed-version evidence. Capture native installing/ready states.'''
+installer and installed-version evidence. Capture the completed native Restart
+to update offer. An installing-state screenshot is optional: do not require a
+transient progress image or fail when installation finishes before capture.'''
     if update_path == 'override':
         discovery = '''Quit the old app normally through native CUA, then call launch_override.
 Call update_logs and require the startup override announcement.\n''' + discovery
@@ -213,10 +263,63 @@ native acceptance state. Remote upgrade belongs to its later checkpoint.'''
     if update_path == 'override':
         result += '''\nThe retained discovery receipt establishes the startup override announcement;
 do not infer an old temporary log path. Call public_latest, ask the candidate
-to Check for updates through native CUA, and capture its actual hover naming
-the public default rather than the candidate. If the endpoint moved to the
-candidate, report the indistinguishable override-removal observation as a gap.'''
+to Check for updates through native CUA. Require fresh native UI text naming
+the exact public default as the latest release, rather than the candidate.
+The update control's accessibility text or its visible tooltip can establish
+that version; retain the native observation and a candidate acceptance image.
+A tooltip image is optional when the accessibility text names the version.
+An Up to date message alone does not distinguish the public default from the
+candidate. If the endpoint moved to the candidate, report the indistinguishable
+override-removal observation as a gap.'''
     return result
+
+
+def remote_host_instructions(check):
+    """Exercise the remote menu before feedback, using the agent fixture already proved by P0.
+
+Remove runs first while both genuine remote sessions are still alive. Uninstall
+then ends those sessions through the product before confirming the destructive
+plan. The fixed SSH operations observe effects only; they never remove files,
+stop services or substitute for either menu item.
+"""
+    if check == 'remote-host-remove':
+        return '''Call prior_receipts for the connected candidate Linux host and its genuine
+remote Codex sessions, including the old-session check's migrated/resumed one.
+Record that host/supervisor and both session identities from the native UI.
+Leave both remote sessions alive; do not Stop, delete or uninstall either.
+Call remote_host_before BEFORE selecting Remove.
+Open this exact remote host's menu and choose Remove, handling its ordinary
+confirmation if offered without changing confirmation preferences. Require the
+remote host and its cached sessions disappear from Farhelm; retain a native image.
+BEFORE re-adding anything call remote_host_after: its independent SSH snapshot
+must show the same running supervisor PID, binary, unit and retained database.
+Then add context.ssh.alias through Farhelm's ordinary Add host GUI. Require
+discovery of the existing candidate supervisor and the SAME remote sessions,
+including their previous conversations, without installing, updating or
+creating replacement sessions. Call remote_version and retain native images
+showing the reconnected candidate host and recovered sessions. Local host and
+local session remain available. This proves Remove forgets the registration
+without uninstalling or ending the remote session.'''
+    if check == 'remote-host-uninstall':
+        return '''Call prior_receipts for the re-added candidate Linux host/session. Through
+Farhelm's native UI Stop BOTH remote sessions, the old migrated/resumed one
+and the new agent check's one, confirming if offered. Require all remote
+sessions ended and close any remote terminal tabs; keep their data. Do not
+delete their data or stop a service through commands. Local host and
+local session stay untouched. Call remote_host_before while the remote
+supervisor is still connected/running and its data/database still exist.
+Open this exact remote host's menu and choose Uninstall. Inspect the actual
+plan BEFORE confirming: it removes the supervisor service/unit and private lib
+directory and explicitly KEEPS the Farhelm data directory. Retain a native
+image of that plan. Confirm once through its ordinary Uninstall action, without
+changing confirmation preferences. Wait for completion and require the remote
+host/cached sessions disappear and the kept-data removal notice appears.
+Call remote_host_after; require no remote lib/binary or unit file, no loaded or
+running supervisor, and the original data directory/database still present.
+Retain a final native image of completion and the usable candidate app/local
+host. Do not re-add, reinstall, retry an uncertain uninstall or remove files to
+manufacture success. P1 feedback follows on this still-running Mac candidate.'''
+    raise ValueError('not a remote host menu checkpoint')
 
 
 def window_instructions():

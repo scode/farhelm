@@ -91,14 +91,44 @@ proof that the provisioned service failed.
 ## Guest commands and app launch
 
 Actual release checks use `brick_test.py test`, which stages an independent guest executor and checkpoint envelope
-through this journaled channel. Each checkpoint starts a fresh Codex process with shell tools disabled and explicit
-approval for the guest test server's fixed operations and native CUA tools. The disposable guest is the isolation
-boundary; Codex uses `danger-full-access` with `approval_policy=never` there because its read-only sandbox generates
-nested native approval requests that cannot be answered unattended. The bridge forwards approvals unchanged, never
-accepting them itself. Its owned process group is terminated on timeout or completion, including surviving MCP children;
-Python `waitid`/`WNOWAIT` preserves identity through teardown. Export includes only bounded executor diagnostics and
-validated evidence references. A permission block is retained as automation failure; no host UI rescue or manual
-approval is allowed during actual testing.
+through this journaled channel. Signature verification, fixture cleanliness and fresh installation use fixed
+command-only children, retaining operation receipts and explicit fixed-execution events without model or native-provider
+calls. GUI checkpoints start a fresh Codex process with shell tools disabled and explicit approval for the guest test
+server's fixed operations and native CUA tools. Both paths retain the same owned process-group deadline, cancellation
+and cleanup. The disposable guest is the isolation boundary; Codex uses `danger-full-access` with
+`approval_policy=never` there because its read-only sandbox generates nested native approval requests that cannot be
+answered unattended. The bridge forwards approvals unchanged, never accepting them itself. Its owned process group is
+terminated on timeout or completion, including surviving MCP children; Python `waitid`/`WNOWAIT` preserves identity
+through teardown. Export includes only bounded executor diagnostics and validated evidence references. A permission
+block is retained as automation failure; no host UI rescue or manual approval is allowed during actual testing.
+
+Updater discovery retains the completed native Restart to update offer, updater logs and installed-version receipts. The
+installed record, bundle and CLI must all name the candidate, while the old process can remain running until the
+separate restart checkpoint. An image of the brief installing state is optional: a fast update can finish between native
+observations, so missing that progress image does not invalidate completed installation evidence.
+
+Remote Update may ask for an ordinary product confirmation or complete directly from Update now. Handle a confirmation
+when the app offers one; never repeat an already completed update to manufacture a dialog. Acceptance still requires the
+connected candidate host, independent service/version evidence and the checkpoint's agent response or continuity.
+
+P0's final remote menu checks run after the genuine remote-agent reply and before feedback. `remote_host_before` and
+`remote_host_after` are fixed read-only probes over the pinned SSH connection, independent of Farhelm's registration.
+They establish user-manager readiness, service state/PID, binary and unit hashes, lib/unit presence and retained data
+and database presence. Remove must preserve the snapshot before the host is re-added through native UI; Uninstall must
+remove the service/unit and lib while retaining data, after the remote session is stopped through Farhelm. A probe never
+uninstalls, stops a service or repairs state. Native captures still establish the actual menu, disappearance, recovered
+session, uninstall plan and kept-data completion notice.
+
+After an override update, the candidate's own native update control must name the exact public latest release after a
+fresh Check for updates. Its accessibility text is sufficient when the provider cannot expose the tooltip in an image;
+retain that native observation alongside the endpoint receipt and candidate image. Generic Up to date text is
+insufficient, and an endpoint that now names the candidate cannot distinguish override removal.
+
+Provider HTTP 429 refusal can recover only when both event and protocol traces prove that no test command, native action
+or approval was attempted, no product observation was made, and stopped cleanup was acknowledged. The coordinator keeps
+the owner lease, retains each failed attempt with hashes, and backs off before a new attempt, at most three times within
+the original checkpoint deadline. Any uncertain action stops instead. P1 feedback is never automatically retried. Status
+reports recovered provider interruptions separately rather than calling the run uninterrupted.
 
 The executor persists native image bytes directly from the private tool event stream, retaining up to ten recent
 distinct captures that fit its evidence budget. Window-drag retains ten separate occurrences, including identical
@@ -124,7 +154,11 @@ appeared, is returned explicitly; unexpected command or transport failures close
 
 `checkpoint_contract.py` binds the host-selected update path to both the offered operations and the required evidence.
 The model receives only that path's instructions: a manual installer test cannot acquire override-removal obligations.
-Installers and app launches run at most once per attempt; repeated observations can poll for actual readiness.
+Installers and app launches run at most once per attempt; repeated observations can poll for actual readiness. Fresh
+candidate and old-fixture installations use the ordinary version-pinned installer after verifying its signed inputs.
+Only a manual upgrade supplies `FARHELM_INSTALL_SUMS_FILE`: newer installers also interpret that input as update-only,
+so using it on a clean fixture refuses instead of installing. An unrelated updater's checksum-file or
+installation-generation inputs are removed from the child environment before choosing the intended entrypoint.
 
 The version observation counts the app's own supervisor: its direct child, or, while the app runs, the process its
 supervisor record (`desktop-supervisor.json` in the state directory) names, when the live process matches the record's
@@ -157,6 +191,11 @@ Exact text uses the native provider's `paste`, which restores the guest clipboar
 characters in the P1 message during validation, so the structured tool does not offer it. Verify the complete reactive
 field value before submitting; successful input delivery is not inferred from the tool's exit. Host clipboard sharing
 stays disabled.
+
+P0 native readiness uses a normal Finder file window and its Search field. Inspect AX first, create a file window when
+only Desktop exists, and dismiss any menu with its actual Cancel secondary action before requesting images. Escape alone
+left Help open in one retained readiness failure, and opening Go to Folder over that menu made the native provider
+refuse its screenshot. This is a fixture failure before Farhelm installation, not a product result.
 
 Each task includes its complete acceptance contract, including P1's literal message and the selected bonus stage. The
 tester does not browse staged recipes or evidence directories through Finder to discover its instructions. Bonus

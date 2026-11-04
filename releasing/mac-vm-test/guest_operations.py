@@ -11,6 +11,7 @@ import argparse
 import calendar
 from collections import deque
 import hashlib
+import inspect
 import json
 import os
 from pathlib import Path
@@ -21,7 +22,7 @@ import sys
 import time
 from urllib.request import urlopen
 
-from checkpoint_contract import SIDES, available_operations, host_identity, require_applicable_operation
+from checkpoint_contract import SIDES, available_operations, fixed_operations, host_identity, require_applicable_operation
 from guest_ui import NativeUI, tool_definition, wait_running
 from window_geometry import calibrate, select_frame
 
@@ -29,6 +30,7 @@ from window_geometry import calibrate, select_frame
 LIMIT = 512 * 1024
 OPERATIONS = ('prerequisites', 'verify_candidate', 'verify_previous', 'fixture_clean', 'install_candidate',
               'install_previous', 'launch', 'launch_override', 'versions', 'remote_version',
+              'remote_host_before', 'remote_host_after',
               'update_logs', 'public_latest', 'inspect_state', 'remote_inspect_state', 'terminal_hosts',
               'remote_terminal_hosts', 'host_survival', 'remote_host_survival', 'old_session_after',
               'remote_old_session_after', 'continuity_command',
@@ -135,6 +137,55 @@ as found; whether exactly one live child is required is the caller's premise.
                            if child['ppid'] == row['pid']), key=lambda child: child['pid'])
         hosts.append({'pid': row['pid'], 'start': row['start'], 'socket': socket, 'children': children})
     return sorted(hosts, key=lambda host: host['pid'])
+
+
+def remote_host_snapshot(home=None):
+    """Observe installed resources without depending on a registered Farhelm host.
+
+The same read-only probe runs over pinned SSH before and after the GUI action.
+Check the user manager first: an absent unit is evidence only when its manager
+answered, not when SSH or the session bus failed. No database contents or
+authentication files enter this receipt.
+"""
+    home = Path.home() if home is None else Path(home)
+    manager = subprocess.run(['systemctl', '--user', 'show', '--property=Version', '--value'],
+                             capture_output=True, text=True, timeout=20)
+    if manager.returncode or not manager.stdout.strip():
+        raise RuntimeError('remote user manager is unavailable')
+    service = subprocess.run(['systemctl', '--user', 'show', 'farhelm-supervisor.service',
+                              '--property=LoadState,ActiveState,SubState,MainPID'],
+                             capture_output=True, text=True, timeout=20)
+    fields = dict(line.split('=', 1) for line in service.stdout.splitlines() if '=' in line)
+    if (not {'LoadState', 'ActiveState', 'SubState', 'MainPID'} <= fields.keys()
+            or service.returncode not in (0, 1)
+            or (service.returncode and fields['LoadState'] != 'not-found')):
+        raise RuntimeError('remote service observation failed')
+    lib = home / '.local/lib/farhelm'
+    unit = home / '.config/systemd/user/farhelm-supervisor.service'
+    binary = lib / 'farhelm'
+    data = home / '.local/state/farhelm'
+    return {'service': fields, 'lib_present': lib.exists(), 'unit_present': unit.exists(),
+            'binary_sha256': hashlib.sha256(binary.read_bytes()).hexdigest() if binary.is_file() else None,
+            'unit_sha256': hashlib.sha256(unit.read_bytes()).hexdigest() if unit.is_file() else None,
+            'data_present': data.is_dir(), 'database_present': (data / 'supervisor.db').is_file()}
+
+
+def installer_environment(environment, version, sums, *, update):
+    """Select the published installer's fresh or updater entrypoint explicitly.
+
+The checksum-file input also means update-only in newer releases: it protects
+against an old app's updater reinstalling a removed app. Fresh candidate and
+old-fixture installations must use the ordinary version-pinned entrypoint.
+Only a manual upgrade hands over the verified checksums. Neither path inherits
+another updater's checksum file or installation-generation expectation.
+"""
+    value = dict(environment)
+    value.pop('FARHELM_INSTALL_SUMS_FILE', None)
+    value.pop('FARHELM_INSTALL_EXPECT', None)
+    value['FARHELM_VERSION'] = version
+    if update:
+        value['FARHELM_INSTALL_SUMS_FILE'] = str(sums)
+    return value
 
 
 def write_json(path, value, replace=False):
@@ -428,7 +479,8 @@ print(json.dumps(dict(cli=r.stdout.strip(),authentication_metadata='private regu
                     or hashlib.sha256((directory / 'install.sh').read_bytes()).hexdigest() != verification['installer_sha256']
                     or hashlib.sha256((directory / 'SHA256SUMS').read_bytes()).hexdigest() != verification['sha256sums_sha256']):
                 raise RuntimeError('installer differs from the verified release')
-            environ = dict(os.environ, FARHELM_VERSION=version, FARHELM_INSTALL_SUMS_FILE=str(directory / 'SHA256SUMS'))
+            environ = installer_environment(os.environ, version, directory / 'SHA256SUMS',
+                                            update=check == 'update-relaunch')
             receipt = self.command(['/bin/sh', str(directory / 'install.sh')], env=environ, timeout=300)
             if operation == 'install_previous':
                 state = self.home / '.local/state/farhelm'
@@ -474,13 +526,23 @@ print(json.dumps(rows))
 raise SystemExit(0 if all(r['returncode']==0 for r in rows) else 1)
 ''')
             rows = json.loads(value['stdout'])
-            if check in ('old-fixture', 'remote-update', 'remote-supervisor-agent'):
+            if check in ('old-fixture', 'remote-update', 'remote-supervisor-agent', 'remote-host-remove'):
                 expected = previous if check == 'old-fixture' else candidate
                 if rows[0]['stdout'].strip() != 'farhelm ' + expected.removeprefix('v'):
                     raise RuntimeError('remote binary is not the expected release')
                 if 'ActiveState=active' not in rows[1]['stdout'] or 'SubState=running' not in rows[1]['stdout']:
                     raise RuntimeError('remote supervisor is not active and running')
             return value
+        if operation in ('remote_host_before', 'remote_host_after'):
+            # Freeze the before premise once. Replacing it after the GUI action
+            # would let an uninstall manufacture its own empty starting state.
+            if operation == 'remote_host_before' and operation in self.completed:
+                raise RuntimeError('remote host starting snapshot is already retained')
+            if operation == 'remote_host_after' and 'remote_host_before' not in self.completed:
+                raise RuntimeError('remote host starting snapshot is required first')
+            script = ('from pathlib import Path\nimport subprocess,hashlib,json\n'
+                      + inspect.getsource(remote_host_snapshot) + '\nprint(json.dumps(remote_host_snapshot()))\n')
+            return json.loads(self.ssh(script)['stdout'])
         if operation == 'public_latest':
             with urlopen('https://get.farhelm.io/latest', timeout=30) as response:
                 value = response.read(256).decode().strip()
@@ -910,12 +972,16 @@ def serve(task, output, native, incoming, emit, operations=None, observe=None):
 
 
 def main():
-    """Launch the official guest native provider without another host permission surface."""
+    """Run a fixed command checkpoint or serve structured actions through the native provider."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--task', required=True, type=Path)
     parser.add_argument('--output', required=True, type=Path)
+    parser.add_argument('--fixed', action='store_true')
     args = parser.parse_args()
     task = json.loads(args.task.read_text())
+    if args.fixed:
+        run_fixed(task, args.output)
+        return
     # A lost bridge may have completed an installer or click before its reply
     # was lost. Refuse an automatic client restart instead of replaying actions.
     write_json(args.output / 'managed-bridge.json', {'attempt': task['attempt'], 'started': True})
@@ -944,6 +1010,27 @@ def main():
         finally:
             native.terminate()
             native.wait(timeout=10)
+
+
+def run_fixed(task, output, factory=Operations):
+    """Run a whitelisted command checkpoint without starting a model or native provider.
+
+Events use their own execution type: they never impersonate a model turn or
+native screenshot. The parent still imports exact operation receipts and
+validates the selected checkpoint's independent acceptance premises.
+"""
+    selected = fixed_operations(task)
+    if selected is None:
+        raise RuntimeError('checkpoint requires the native tester, not fixed execution')
+    operations = factory(task, output)
+    identity = {key: task[key] for key in ('attempt', 'run_id', 'pass_id', 'check_id')}
+    for operation in selected:
+        result = operations.dispatch(operation)
+        print(json.dumps({'type': 'fixed.operation.completed', 'identity': identity,
+                          'operation': operation, 'receipt': result['receipt']}), flush=True)
+    write_json(Path(output) / 'final.txt', {'status': 'pass',
+        'detail': 'Fixed executor completed ' + ', '.join(selected) + '; independent receipts retained.'})
+    print(json.dumps({'type': 'fixed.execution.completed', 'identity': identity}), flush=True)
 
 
 if __name__ == '__main__':

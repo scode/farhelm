@@ -131,10 +131,13 @@ Generic recorder wrapping is fine but not required for these; record each result
   medians and spreads for typical, true-color and image-like output. It asserts fixture shape and repeated bytes, not
   speed; the workspace batteries skip this ignored measurement too.
 - The recorded portable brick-test helper suite from `.agents/validation.md`, with process-group inspection available;
-  this exercises compiled task contracts, fixed operations, structured native actions, restart handoff failures and
-  calibrated window-trace and bonus gesture-readiness gates. The guest-only Swift helper separately needs SDK type-check
-  and read-only runtime validation in an owned disposable guest. Neither establishes live release product checks. Report
-  platform skips.
+  this exercises compiled task contracts, fixed operations, fresh-versus-update installer entrypoints, fixed
+  command-only execution and provenance, bounded pre-action provider recovery, structured native actions, restart
+  handoff failures, durable update evidence, exact native update-channel readouts, normal Finder readiness, conditional
+  product confirmations, remote menu Remove/re-add and Uninstall with independent effect receipts, old-session
+  survival/migration and calibrated window-trace and bonus gesture-readiness gates. The guest-only Swift helper
+  separately needs SDK type-check and read-only runtime validation in an owned disposable guest. None establishes live
+  release product checks. Report platform skips.
 - Terminal host coverage and mutation testing from `.agents/validation.md`
   (`cargo +nightly llvm-cov -p terminal-host --branch -- --test-threads=1`, and
   `RUST_TEST_THREADS=1 cargo mutants -p terminal-host` run the contained way that entry gives; both on one test thread,

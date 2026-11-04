@@ -17,7 +17,7 @@ from urllib.parse import urlparse
 
 from control import Refused
 from guest_tester import request
-from checkpoint_contract import update_instructions, window_instructions
+from checkpoint_contract import update_instructions, window_instructions, remote_host_instructions
 
 
 HERE = Path(__file__).resolve().parent
@@ -219,6 +219,8 @@ Most bonus checkpoints map onto RECIPE steps through the generic text below;
 window-drag carries its own contract because its gestures, observation and
 could-not-run boundary are too specific to leave to that mapping.
 """
+    if check_id in ('remote-host-remove', 'remote-host-uninstall'):
+        return remote_host_instructions(check_id)
     contracts = {
         'p1-feedback-send': '''This is the separately authorized P1 check after all P0 checks passed.
 Require context feedback_authorized true before opening Send; otherwise report
@@ -330,7 +332,8 @@ candidate app to return usable. Do NOT open the candidate manually if its helper
 fails. An old app that runs its supervisor detached leaves it running when it
 quits; the candidate replaces it on first launch, so wait for the connected
 candidate local supervisor. For override path prove startup forwarding and removal after relaunch
-using the public latest observation and new app update hover; report an
+using the public latest observation and fresh native update-control text naming
+the exact latest release (accessibility text or visible tooltip); report an
 indistinguishable endpoint as a gap. Retain native image and version/command
 receipts. Do not require the remote supervisor upgraded in this checkpoint.''',
         'local-supervisor-agent': '''Require connected candidate local supervisor; its managed relaunch normally
@@ -399,9 +402,16 @@ def managed_instructions(check_id, pass_id, update_path=None):
 Explicit ordering matters at quit, install and relaunch boundaries. A stable
 operation vocabulary replaces fresh model-written scripts without replacing
 the GUI acceptance checks or weakening the historical upgrade obligations.
+Product confirmations are conditional interactions: a direct Update now action
+can complete without another dialog, while still requiring the same outcome.
+Finder readiness establishes a normal file window before taking acceptance
+images: a menu over the Desktop can leave screenshots unavailable even when
+native input and ordinary window captures work.
 """
     if check_id in ('update-discovery', 'update-relaunch'):
         return update_instructions(check_id, pass_id, update_path)
+    if check_id in ('remote-host-remove', 'remote-host-uninstall'):
+        return remote_host_instructions(check_id)
     if check_id == 'native-preflight' and not pass_id.startswith('p0-'):
         return '''Call prerequisites. This bonus fixture needs native window gestures as well
 as screenshots, clicks and exact text. Bind Finder and establish exactly one
@@ -419,9 +429,15 @@ require navigation. Capture actual final native state. If either gesture is
 unsupported or has no effect, report could-not-run and stop before Farhelm
 installation. No product state, OS permissions or authentication changes.'''
     contracts = {
-        'native-preflight': '''Call brick_action prerequisites. Bind Finder using native CUA, capture its
-actual image/AX, click an ordinary control and enter nonsecret text. Verify the
-reactive field and capture the final native image. No Farhelm product state.''',
+        'native-preflight': '''Call brick_action prerequisites. Bind Finder and inspect fresh AX state before
+requesting an image. Establish a normal file window using native File > New
+Finder Window if only Desktop is present. If a menu is open, use its actual
+Cancel secondary action and verify the standard file window returned before
+requesting an image; Escape alone is not proof that the menu closed. Capture
+the normal window, click its Search control and paste nonsecret text. Verify
+the complete reactive field and capture the final native image. Do not open
+Help or Go to Folder as input probes. No Farhelm product state, OS permissions
+or authentication changes. P0 does not require drag or double-click probes.''',
         'artifact-verification': 'Call brick_action verify_candidate. Require its verified release receipt.',
         'fixture-clean': 'Call brick_action fixture_clean. Require both roles clean; never repair residue.',
         'install': 'Call brick_action install_candidate. Require successful installer and exact candidate CLI version.',
@@ -447,7 +463,11 @@ fail. Either kind passes here. Leave the old session from old-fixture
 untouched. Leave this new session running;
 the old-session check samples its terminal. Retain actual native images,
 including the details.''',
-        'remote-supervisor-agent': '''Through Farhelm native GUI use remote Update and its ordinary confirmation.
+        'remote-supervisor-agent': '''Through Farhelm native GUI use remote Update, including Update now when offered.
+Handle an ordinary product confirmation if offered; do not require an extra
+dialog. Update now can complete directly, and absence of a confirmation is not
+a failure. Do not change confirmation preferences or repeat a completed update
+to obtain a dialog.
 Require connected candidate remote, then call remote_version. Launch one genuine
 remote Codex session, gpt-6.1-sol low effort YOLO and per-run trust where offered.
 Send: What is 17 + 25? Explain in one short sentence. Require a separate actual
@@ -501,14 +521,17 @@ compare with the seed receipt. Capture the real resumed answer and session.''',
         'continuity-before': '''Call continuity_command and start its exact command as a Farhelm plain-command
 session on the pinned Linux host, with agent type none. Call continuity_before
 to establish original identity and advancing counters independently over SSH.''',
-        'remote-update': '''Call continuity_remote_before. Use remote Update through native GUI and its normal
-confirmation; require candidate remote connected. Call remote_version and
+        'remote-update': '''Call continuity_remote_before. Use remote Update through native GUI, including
+Update now when offered. Handle an ordinary product confirmation if offered;
+do not require an extra dialog. Absence of a confirmation is not a failure.
+Do not change confirmation preferences or repeat a completed update to obtain
+a dialog. Require candidate remote connected. Call remote_version and
 continuity_remote_after. Both must establish the original process survived.''',
         'reopen': '''Call continuity_reopen_before. Quit the candidate normally through native UI,
 then call launch. Require usable candidate, both connected hosts, retained
 sessions and responsiveness. Call versions, remote_version, inspect_state and
 continuity_reopen_after. Capture final native image.''',
-        'p1-feedback-send': '''Call prior_receipts. This is the separately approved P1 send after all five P0 checks passed.
+        'p1-feedback-send': '''Call prior_receipts. This is the separately approved P1 send after all declared P0 checks passed.
 Require context.feedback_authorized true. Open the normal ? > send feedback
 dialog. Use native paste for exactly this message, replacing vX.Y.Z only with
 context.candidate:

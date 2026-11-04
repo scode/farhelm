@@ -53,14 +53,14 @@ can capture a different foreground app and cannot replace that image.
 
 ## P0 checks: install, upgrade and basic agent execution
 
-Run these five checks immediately after environment readiness and basic coverage planning, in order. P0 is a named
-group: report all five results and a separate P0 verdict. Stop at the first failed or unavailable check and retain its
+Run these seven checks immediately after environment readiness and basic coverage planning, in order. P0 is a named
+group: report all seven results and a separate P0 verdict. Stop at the first failed or unavailable check and retain its
 diagnostics. A successful step never substitutes for a later step. A request to **stop after P0 checks** ends after P0
 evidence is recorded and its successful fixtures are cleaned up, without sending feedback. Otherwise, report P0
 promptly, run P1 on the last pair, and only then continue bonus work.
 
 Use three independent guest pairs: `p0-fresh` for step 1, `p0-installer-upgrade` for step 2, and `p0-updater-upgrade`
-for steps 3–5. Both upgrades start from the previous promoted stable and use its actual installed state. For each pair,
+for steps 3–7. Both upgrades start from the previous promoted stable and use its actual installed state. For each pair,
 verify the candidate's published bytes against that stable's compiled trust ring as described in BRICK-TEST.md.
 Export/record evidence and clean up each successful pair before starting the next. Unless scope is P0-only, keep the
 last pair's candidate app running for P1 before that pair's final export and cleanup.
@@ -133,6 +133,22 @@ not successful agent execution.
    does that host create terminal hosts and show the band. Save version, service and GUI/command evidence. The counter
    workload's process survival and final quit/reopen belong to bonus coverage.
 
+6. **Remove and re-add the remote host.** Keep both remote sessions from step 5 alive and record their identities. Call
+   `remote_host_before`, then select the remote host menu's **Remove**, handling its ordinary confirmation if offered.
+   Require the host and cached sessions to disappear; capture that native state. Call `remote_host_after` before
+   re-adding: the original supervisor PID, binary, unit and data/database must remain. Re-add the same pinned SSH
+   destination through Farhelm. Require discovery of the existing candidate supervisor and both original sessions with
+   their conversations, without provisioning or creating replacements. Retain native images and `remote_version`
+   evidence (`remote-host-remove`). Remove must not uninstall or end the sessions.
+7. **Uninstall from the remote host.** Through Farhelm Stop both remote sessions, handle any ordinary confirmations,
+   require all remote sessions ended and close any remote terminal tabs. Keep their data. Call `remote_host_before`
+   while the connected supervisor still runs. Select the remote host menu's **Uninstall**, inspect and capture its
+   actual removal plan and kept-data note, then confirm once. Require completion, disappearance of the host/cached
+   sessions and the removal notice. Call `remote_host_after`: the lib directory/binary and unit file must be absent, the
+   supervisor unloaded and stopped, and the data directory/database retained (`remote-host-uninstall`). Retain native
+   completion evidence with the candidate app/local host still usable. Never use command-line uninstall or direct
+   file/service changes to manufacture this result.
+
 P0 deliberately carries no template, changed setting or counter workload. The old sessions in steps 3–5 are its one
 exception, made at the maintainer's request while terminals move from tmux to terminal hosts: an upgrading user's
 existing sessions are what that move can break. Branch only on terminal kinds observed during the run, never on a
@@ -140,15 +156,15 @@ release version: nobody can say in advance which release first creates terminal 
 has no terminal host at all, its old session must be on tmux.
 
 Keep setup, signature verification and bounded evidence capture alongside the P0 step they support. Do not expand P0
-with release-specific feature checks or wait for historical-version investigations. Once all five checks pass, answer
+with release-specific feature checks or wait for historical-version investigations. Once all seven checks pass, answer
 **did P0 checks succeed?** with that P0 result, candidate and previous stable, and the evidence references. Do not imply
 that broader checks ran. Older manifests without these separate fixtures have no P0 verdict; retain their observations
 as historical coverage rather than rewriting them.
 
 ## P1 check: send feedback from the candidate
 
-Run only after all five P0 checks passed with valid retained evidence. Use the Mac guest of `p0-updater-upgrade`, on the
-candidate app those steps left running; do not create a new clone or install another app. Permission preflight must
+Run only after all seven P0 checks passed with valid retained evidence. Use the Mac guest of `p0-updater-upgrade`, on
+the candidate app those steps left running; do not create a new clone or install another app. Permission preflight must
 already cover the live send to `farhelm.io`, which creates an issue in the maintainer's private feedback inbox. This
 check does not run in stop-after-P0 scope.
 
@@ -292,13 +308,16 @@ Apply the first matching rule and record it in the report:
    `open --env FARHELM_DESKTOP_UPDATE_LATEST=v<version> "$HOME/Applications/Farhelm.app"` **inside the Mac guest**. This
    command is a recommendation pending bring-up verification of the guest's `open` syntax, environment forwarding and
    log capture. Require the startup override announcement, then use the in-app update. Every existing verification check
-   still applies. After Restart to update, ask the new app to Check for updates and require the hover to name the
-   version `/latest` currently names, rather than the candidate. With an unpromoted candidate these differ, so this
-   observes that the override is gone; save the endpoint observation and hover together. If `/latest` moved to the
-   candidate meanwhile, the results no longer distinguish the probes: report that coverage gap, not proof that the
-   override was removed. If support in the old release is unknown, establish it from its source before choosing this
-   path; for example, `git grep FARHELM_DESKTOP_UPDATE_LATEST v<previous> -- crates/farhelm-ui/src/desktop/updater.rs`
-   shows whether the source carries the variable. Do not infer support from a successful ordinary check.
+   still applies. After Restart to update, ask the new app to Check for updates and require fresh native UI text to name
+   the version `/latest` currently names as the latest release, rather than the candidate. The update control's
+   accessibility text or visible tooltip can establish the exact version; a tooltip image is optional when accessibility
+   text names it. Save that native observation, the endpoint observation and a candidate acceptance image together. An
+   Up to date message alone cannot distinguish the two versions. With an unpromoted candidate they differ, so the exact
+   latest-release readout observes that the override is gone. If `/latest` moved to the candidate meanwhile, the results
+   no longer distinguish the probes: report that coverage gap, not proof that the override was removed. If support in
+   the old release is unknown, establish it from its source before choosing this path; for example,
+   `git grep FARHELM_DESKTOP_UPDATE_LATEST v<previous> -- crates/farhelm-ui/src/desktop/updater.rs` shows whether the
+   source carries the variable. Do not infer support from a successful ordinary check.
 3. Otherwise (including every RC or dev candidate and an old app without the override): use the candidate installer by
    hand **while the old app runs**. Inside the Mac guest, download its version-path `install.sh` and `SHA256SUMS` to a
    private run directory. Use the previous release's key ring, signature and trusted-comment verification, and
@@ -344,7 +363,7 @@ hostnames, usernames or private paths. `window-drag` instead keeps exactly the t
 ```text
 Verdict: pass | fail | could not run
 Scope: full | stop after P0 | stop after P1
-P0 verdict and five named results:
+P0 verdict and seven named results:
 P1 verdict and p1-feedback-send result: pass | fail | could not run | not planned
 Requested-scope verdict:
 Candidate / previous stable / extra pairs:
@@ -358,7 +377,7 @@ Coverage gaps: unrun checks, manual-verification omissions, untested version pai
 Cleanup: owned clones deleted or retained by agreement; evidence retained
 ```
 
-“P0 pass” requires all five P0 checks to run and pass. “P1 pass” requires the feedback send after valid P0. “Full pass”
+“P0 pass” requires all seven P0 checks to run and pass. “P1 pass” requires the feedback send after valid P0. “Full pass”
 additionally requires P1 and every planned bonus check to run and pass. A product failure makes the relevant verdict
 fail; a missing test environment with no demonstrated product failure makes it could not run. Never treat a skipped
 check or a clean process exit as a pass. This result covers the actual versions, artifacts and paths exercised, not zero

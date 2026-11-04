@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the independent UI tester inside an already prepared Mac guest.
+"""Execute fixed release checks and the independent UI tester in a prepared Mac guest.
 
 Fixture setup owns permissions and authentication. This executor never grants
 either: an approval request during a product check is an automation failure,
@@ -21,7 +21,7 @@ import subprocess
 import time
 
 from checkpoint_contract import (SIDES, old_session_side, require_agent_terminal, require_old_session,
-                                 required_operations)
+                                 fixed_operations, required_operations, require_remote_host_effect)
 from window_geometry import require_drag_delivery, require_window_trace
 
 
@@ -289,6 +289,19 @@ Its original final reply remains separate from the enriched evidence record.
         missing = expected - set(record['completed'])
         if missing:
             raise TesterError('managed checkpoint omitted operations: ' + ', '.join(sorted(missing)))
+        if task['check_id'] in ('remote-host-remove', 'remote-host-uninstall'):
+            try:
+                require_remote_host_effect(task['check_id'], record['observations']['remote_host_before'],
+                                           record['observations']['remote_host_after'])
+            except (RuntimeError, KeyError, TypeError, ValueError) as error:
+                raise TesterError('managed remote host effect premise failed: ' + str(error)) from error
+        if task['check_id'] in ('install', 'update-discovery'):
+            versions = (record['observations']['install_candidate']['versions']
+                        if task['check_id'] == 'install' else record['observations']['versions'])
+            version = task['context']['candidate'].removeprefix('v')
+            if (versions['installed'] != version or versions['bundle'] != version
+                    or versions.get('cli', {}).get('stdout', '').strip() != 'farhelm ' + version):
+                raise TesterError('managed installation-version premise was not established')
         if task['check_id'] in ('app-start', 'old-fixture', 'seed-state', 'update-relaunch', 'local-supervisor-agent', 'reopen'):
             versions = record['observations']['versions']
             tag = task['context']['previous'] if task['check_id'] in ('old-fixture', 'seed-state') else task['context']['candidate']
@@ -328,6 +341,30 @@ Its original final reply remains separate from the enriched evidence record.
                 raise TesterError('managed window measurement premise failed: ' + str(error)) from error
     return {'identity': {key: task[key] for key in ('attempt', 'run_id', 'pass_id', 'check_id')},
             **value, 'evidence': record['receipts'], 'continuity': record['continuity']}
+
+
+def execution_calls(task, events):
+    """Distinguish fixed execution from native-model provenance without weakening either.
+
+Historical command checks may still carry real model events. New fixed events
+are accepted only for whitelisted non-GUI tasks, with exact identity, operation
+order and terminal completion. They can never establish native input or images.
+"""
+    if not any(row.get('type', '').startswith('fixed.') for row in events):
+        return native_events(events)
+    selected = fixed_operations(task)
+    identity = {key: task[key] for key in ('attempt', 'run_id', 'pass_id', 'check_id')}
+    if selected is None or len(events) != len(selected) + 1:
+        raise TesterError('fixed execution is not complete or applicable to this checkpoint')
+    for operation, row in zip(selected, events):
+        if (set(row) != {'type', 'identity', 'operation', 'receipt'}
+                or row['type'] != 'fixed.operation.completed' or row['identity'] != identity
+                or row['operation'] != operation or not isinstance(row['receipt'], str)
+                or not re.fullmatch(r'managed-[0-9]{3}-[a-z-]+\.json', row['receipt'])):
+            raise TesterError('fixed execution operation differs from the claimed task')
+    if events[-1] != {'type': 'fixed.execution.completed', 'identity': identity}:
+        raise TesterError('fixed execution did not complete')
+    return []
 
 
 def native_events(events):
@@ -512,14 +549,16 @@ cannot grant native completion or a product pass.
 
 
 def validate_result(task, value, directory, events):
-    """A pass needs a completed native stream, beyond merely export-safe observations.
+    """A pass needs its selected execution provenance, beyond export-safe observations.
 
-Failure diagnostics use the structural validator separately: losing native
-completion must not discard an otherwise safe screenshot or failure receipt.
+Native GUI tasks require a completed model stream and actual tool images;
+fixed command tasks require their exact operation/completion stream. Failure
+diagnostics use the structural validator separately, so losing completion does
+not discard an otherwise safe screenshot or failure receipt.
 """
     value = validate_observation(task, value, directory)
     root = Path(directory).resolve()
-    calls = native_events(events)
+    calls = execution_calls(task, events)
     if task['context'].get('managed_operations') and any(call.get('tool') != 'brick_ui' for call in calls):
         raise TesterError('managed test used executable UI code instead of structured native actions')
     if (value['status'] == 'pass' and task['context'].get('managed_operations')
@@ -709,9 +748,10 @@ product-failure claim. The normal success path still parses every row strictly.
 
 
 def run(task, directory, spawner=subprocess.Popen, clock=time.monotonic, pause=time.sleep):
-    """Execute one fresh, bounded tester turn and retain success and failure records.
+    """Execute one bounded, owned child and retain success and failure records.
 
-Fresh turns avoid growing a release-long model context. The attempt directory
+GUI tasks use fresh turns rather than a release-long model context; whitelisted
+command tasks run directly without a model or native provider. The attempt directory
 is exclusive and logs are private; a hard size/deadline boundary covers vendor
 silence as well as verbose tool output. Neither runner environment nor parent
 authentication configuration is changed.
@@ -742,6 +782,9 @@ authentication configuration is changed.
         'exec', *options, '-m', task['settings']['model'], '--skip-git-repo-check',
         '--json', '-C', str(work), '-o', str(root / 'final.txt'), prompt(task),
     ]
+    if fixed_operations(task) is not None:
+        argv = [task['settings']['python'], str(Path(__file__).with_name('guest_operations.py')),
+                '--fixed', '--task', str(root / 'task.json'), '--output', str(root)]
     process = None
     cleanup_ok = False
     try:
@@ -803,7 +846,7 @@ authentication configuration is changed.
         if value['status'] == 'automation-failure':
             raise TesterError('tester reported automation failure: ' + value['detail'])
         summary = {'format': 1, 'status': value['status'], 'result': value,
-                   'native_calls': len(native_events(events)), 'exit_code': process.returncode}
+                   'native_calls': len(execution_calls(task, events)), 'exit_code': process.returncode}
     except BaseException as error:
         cleanup_error = None
         if process is not None and process.returncode is None:
@@ -819,6 +862,15 @@ authentication configuration is changed.
                    'exit_code': process.returncode if process is not None else None}
         result = work / 'result.json'
         try:
+            operations = root / 'managed-operations.json'
+            if managed and not result.exists() and operations.is_file():
+                # A fixed child can fail before returning a final observation.
+                # Preserve its checked command receipts without inventing a
+                # product verdict or requiring another model to serialize them.
+                record = json.loads(operations.read_text())
+                result.write_text(json.dumps({'identity': {key: task[key] for key in
+                    ('attempt', 'run_id', 'pass_id', 'check_id')}, 'status': 'automation-failure',
+                    'detail': str(error)[:4000], 'evidence': record['receipts'], 'continuity': None}))
             accepted = root / 'result.json'
             if accepted.is_file():
                 summary['unverified_result'] = validate_observation(task, json.loads(accepted.read_text()), work)
@@ -844,7 +896,7 @@ authentication configuration is changed.
 
 
 def main():
-    """Refuse accidental host execution before reading task input or starting Codex."""
+    """Refuse accidental host execution before reading task input or starting any test child."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--task', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
