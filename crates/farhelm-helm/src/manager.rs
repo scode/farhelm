@@ -4065,6 +4065,16 @@ impl HostActor {
         let Some(binding) = row.tensorlake.as_ref() else {
             return self.dial(row, progress).await;
         };
+        // A reused image can already answer as a copied supervisor. Only
+        // initial setup's copied-state check may authorize this row's first
+        // dial, by durably recording both install coordinates. The explicit
+        // provisioning hold alone cannot survive a manager restart.
+        if row.remote_farhelm.is_none() || row.remote_state_dir.is_none() {
+            return AttemptOutcome::Failed {
+                cause: UnreachableCause::TransportFailure,
+                error: "initial Tensorlake setup has not passed the supervisor state check; run setup again to continue".into(),
+            };
+        }
         match sandbox_gate(
             self.sandboxes.check(&binding.sandbox).await,
             &binding.sandbox,
@@ -12619,6 +12629,13 @@ mod tests {
         )
         .await;
         transport.set_script(host, script);
+        // These status-gate fixtures represent hosts whose initial setup
+        // already admitted their supervisor; unadmitted images have a
+        // separate durable dial gate before any API status check.
+        store
+            .admit_tensorlake_install(host, "/fixture/farhelm", "/fixture/state")
+            .await
+            .expect("record admitted install coordinates");
         let mut manager = ConnectionManager::unstarted(
             store.clone(),
             Arc::clone(&transport) as Arc<dyn HostTransport>,

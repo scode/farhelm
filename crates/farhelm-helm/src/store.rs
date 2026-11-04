@@ -334,7 +334,7 @@ pub struct FolderHistoryEntry {
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 72;
+const SCHEMA_VERSION: i64 = 73;
 
 /// Schema 72's columns on `hosts`, in the order the migration appends them,
 /// each with the exact definition text the fresh-create DDL in
@@ -833,7 +833,7 @@ impl HostKind {
     }
 }
 
-/// What ties a Tensorlake host row to its sandbox (schema 72's columns).
+/// What ties a Tensorlake host row to its sandbox (schemas 72 and 73).
 /// `Some` on [`HostRow::tensorlake`] exactly when the row's kind is
 /// [`HostKind::Tensorlake`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -845,6 +845,10 @@ pub struct TensorlakeBinding {
     /// `None` until then. Needed after termination, when the name no longer
     /// resolves, to find the snapshots the sandbox left behind.
     pub sandbox_id: Option<String>,
+    /// Unix seconds when a create was sent without a settled outcome. A
+    /// missing sandbox is not proof of absence until the shared create
+    /// settle window has passed. Recording an observed id clears this.
+    pub pending_create_at: Option<i64>,
     /// The recipe the host was made from. Kept as a name rather than a copy:
     /// tunnels and the host's details read the recipe as it is now.
     pub recipe: String,
@@ -951,6 +955,8 @@ type RawHostRow = (
     Option<String>,
     Option<String>,
     Option<String>,
+    Option<i64>,
+    // Schema 73: an unresolved create must survive a helm restart.
     Option<i64>,
 );
 
@@ -1741,6 +1747,11 @@ pub enum HostStoreError {
     /// [`HostKind::destination_is_editable`]).
     #[error("this host's address belongs to its Tensorlake sandbox and cannot be changed")]
     DestinationManaged,
+    /// Ordinary SSH discovery or planning cannot admit a sandbox whose
+    /// initial setup has not passed its copied-supervisor check. Checked
+    /// inside the convergence transaction, after any remote probe returns.
+    #[error("host {0} needs initial Tensorlake setup; run setup again from its host row")]
+    TensorlakeSetupRequired(HostId),
     /// [`HelmStore::remove_host_row`] was asked to forget a Tensorlake host
     /// without proof that its sandbox was deleted. Reaching this is a bug in
     /// the caller, not a user error: every user-facing removal of such a
@@ -1869,13 +1880,6 @@ impl NewHostEntry {
 /// ([`HelmStore::register_tensorlake_host`]): the destination and sandbox
 /// name Farhelm chose, the user's name for the host (its alias), and the
 /// recipe and size the sandbox will be created from.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the add flow that creates Tensorlake hosts follows in the next PR"
-    )
-)]
 pub(crate) struct NewTensorlakeHost {
     pub(crate) destination: String,
     pub(crate) entry: NewHostEntry,
@@ -2445,6 +2449,8 @@ pub struct HelmStore {
 ///   recipe, resources, Farhelm's own suspend time), null on every existing
 ///   row. A non-null sandbox name is what makes an ssh row a Tensorlake host;
 ///   only that column carries a CHECK, which keeps it off the local row.
+/// - 73: persist the time of an unresolved Tensorlake host create, so a
+///   transient missing lookup cannot forget a still-starting sandbox.
 fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -2547,6 +2553,7 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
                  tensorlake_recipe TEXT,
                  tensorlake_resources TEXT,
                  tensorlake_suspended_at INTEGER,
+                 tensorlake_pending_create_at INTEGER,
                  CHECK (
                      (kind = 'local' AND destination IS NULL AND remote_farhelm IS NULL
                           AND remote_state_dir IS NULL)
@@ -2765,7 +2772,7 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 72;",
+              PRAGMA user_version = 73;",
             announcement_schema = crate::announcements::SCHEMA,
         ))
         .context("creating schema")?;
@@ -4379,6 +4386,20 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
             .context("migrating helm.db to schema version 72")?;
         version = 72;
     }
+    if version == 72 {
+        let present: bool = tx.query_row(
+            "SELECT count(*) != 0 FROM pragma_table_info('hosts') WHERE name = 'tensorlake_pending_create_at'",
+            [],
+            |row| row.get(0),
+        )?;
+        if !present {
+            tx.execute_batch("ALTER TABLE hosts ADD COLUMN tensorlake_pending_create_at INTEGER;")
+                .context("adding the outstanding Tensorlake host create marker")?;
+        }
+        tx.execute_batch("PRAGMA user_version = 73;")
+            .context("migrating helm.db to schema version 73")?;
+        version = 73;
+    }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
         // release the write lock cleanly rather than leaving it to an
@@ -4511,7 +4532,7 @@ fn ensure_local_row(conn: &Connection) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Decode schema 72's Tensorlake columns into the row's binding: `None` for
+/// Decode the Tensorlake columns into the row's binding: `None` for
 /// every row whose sandbox column is null, and an error for a sandbox row
 /// without a recipe, which only a hand edit can produce (every writer sets
 /// both together). The resources JSON is display-only, so JSON this build
@@ -4523,6 +4544,7 @@ fn tensorlake_binding(
     recipe: Option<String>,
     resources: Option<String>,
     suspended_at: Option<i64>,
+    pending_create_at: Option<i64>,
 ) -> anyhow::Result<Option<TensorlakeBinding>> {
     let Some(sandbox) = sandbox else {
         return Ok(None);
@@ -4533,6 +4555,7 @@ fn tensorlake_binding(
     Ok(Some(TensorlakeBinding {
         sandbox,
         sandbox_id,
+        pending_create_at,
         recipe,
         resources: resources.and_then(|json| serde_json::from_str(&json).ok()),
         suspended_at,
@@ -6111,7 +6134,7 @@ impl HelmStore {
                      host_identity, cache_truncated, yolo_without_asking, commands_without_asking, icon, color, \
                      links_without_asking, local_links_without_asking, entry_uuid, \
                      tensorlake_sandbox, tensorlake_sandbox_id, tensorlake_recipe, \
-                     tensorlake_resources, tensorlake_suspended_at \
+                     tensorlake_resources, tensorlake_suspended_at, tensorlake_pending_create_at \
                      FROM hosts ORDER BY id ASC",
                 )
                 .context("preparing host list query")?;
@@ -6138,6 +6161,7 @@ impl HelmStore {
                                 r.get(17)?,
                                 r.get(18)?,
                                 r.get(19)?,
+                                r.get(20)?,
                             ))
                         })
                         .context("querying hosts")?
@@ -6166,6 +6190,7 @@ impl HelmStore {
                                 tensorlake_recipe,
                                 tensorlake_resources,
                                 tensorlake_suspended_at,
+                                tensorlake_pending_create_at,
                             )| {
                                 let host_kind =
                                     HostKind::from_columns(&kind, tensorlake_sandbox.as_deref())?;
@@ -6177,6 +6202,7 @@ impl HelmStore {
                                     tensorlake_recipe,
                                     tensorlake_resources,
                                     tensorlake_suspended_at,
+                                    tensorlake_pending_create_at,
                                 )?;
                                 Ok(HostRow {
                                     id,
@@ -6380,13 +6406,6 @@ impl HelmStore {
     /// fresh entry UUID. New Tensorlake hosts start YOLO sessions without
     /// asking (D17, a user decision); the other three permissions start
     /// asking, as on every host.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the add flow that creates Tensorlake hosts follows in the next PR"
-        )
-    )]
     pub(crate) async fn register_tensorlake_host(
         &self,
         new: NewTensorlakeHost,
@@ -6436,6 +6455,7 @@ impl HelmStore {
     /// Record Tensorlake's id for `host`'s sandbox: once a create answers,
     /// and when a removal finds a sandbox by name that the row has no id for
     /// (before terminating it, so a retry can still find its snapshots).
+    /// Saving the id also settles any outstanding create in the same write.
     /// Returns whether a Tensorlake row was there to update.
     pub(crate) async fn set_tensorlake_sandbox_id(
         &self,
@@ -6449,7 +6469,7 @@ impl HelmStore {
                 move |conn: &mut Connection| -> anyhow::Result<bool> {
                     let changed = conn
                         .execute(
-                            "UPDATE hosts SET tensorlake_sandbox_id = ?2 \
+                            "UPDATE hosts SET tensorlake_sandbox_id = ?2, tensorlake_pending_create_at = NULL \
                              WHERE id = ?1 AND tensorlake_sandbox IS NOT NULL",
                             rusqlite::params![host, sandbox_id],
                         )
@@ -6458,6 +6478,22 @@ impl HelmStore {
                 },
             )
             .await
+    }
+
+    /// Mark an outstanding create before sending it, or clear it after a
+    /// definite refusal or a settled missing lookup. Host provisioning and
+    /// deletion serialize through the existing per-host provision lock.
+    pub(crate) async fn set_tensorlake_pending_create(
+        &self,
+        host: HostId,
+        sent: Option<i64>,
+    ) -> anyhow::Result<bool> {
+        self.conn.call("set Tensorlake pending create task panicked", move |conn| {
+            Ok(conn.execute(
+                "UPDATE hosts SET tensorlake_pending_create_at = ?2 WHERE id = ?1 AND tensorlake_sandbox IS NOT NULL",
+                rusqlite::params![host, sent],
+            )? == 1)
+        }).await
     }
 
     /// Record (`Some`, unix ms) or clear (`None`) the time Farhelm's own
@@ -6490,6 +6526,31 @@ impl HelmStore {
             .await
     }
 
+    /// Admit a Tensorlake install after its copied-supervisor check passed.
+    ///
+    /// Only the Tensorlake setup executor uses this write for initial
+    /// admission. Both coordinates become durable together, opening the
+    /// connection actor's gate; no discovered identity is adopted here.
+    /// Reruns may refresh an already admitted install's paths. Returns false
+    /// if the host is gone or no longer a Tensorlake row.
+    pub(crate) async fn admit_tensorlake_install(
+        &self,
+        host: HostId,
+        remote_farhelm: &str,
+        remote_state_dir: &str,
+    ) -> anyhow::Result<bool> {
+        require_storable_remote_paths(Some(remote_farhelm), Some(remote_state_dir))
+            .map_err(anyhow::Error::new)?;
+        let remote_farhelm = remote_farhelm.to_string();
+        let remote_state_dir = remote_state_dir.to_string();
+        self.conn.call("admit Tensorlake install task panicked", move |conn| {
+            Ok(conn.execute(
+                "UPDATE hosts SET remote_farhelm = ?2, remote_state_dir = ?3 WHERE id = ?1 AND tensorlake_sandbox IS NOT NULL",
+                rusqlite::params![host, remote_farhelm, remote_state_dir],
+            )? == 1)
+        }).await
+    }
+
     /// Register a supervisor discovered through one resolved SSH dial.
     ///
     /// The connection-defining paths and reported identity land in the same
@@ -6500,6 +6561,10 @@ impl HelmStore {
     /// caller whose live-registry reconciliation fails can roll back only
     /// the row it owns rather than deleting a concurrent registration. A new row
     /// gets a fresh entry UUID; convergence keeps the existing entry UUID.
+    /// An unfinished Tensorlake row refuses convergence inside this same
+    /// transaction: a row registered while discovery was in flight must
+    /// still pass its own copied-state check before coordinates or identity
+    /// can be written. Only [`Self::admit_tensorlake_install`] opens that gate.
     ///
     /// A genuinely NEW destination matching another host's explicit alias
     /// or unaliased local display name is refused as
@@ -6548,21 +6613,25 @@ impl HelmStore {
                         new_entry_conflict(&tx, &destination, entry)?;
                     }
                     let alias = new_entry.as_ref().and_then(NewHostEntry::alias);
-                    let existing: Option<(HostId, Option<String>)> = tx
+                    let existing: Option<(HostId, Option<String>, bool)> = tx
                         .query_row(
                             concat!(
-                                "SELECT id, host_identity FROM hosts \
+                                "SELECT id, host_identity, tensorlake_sandbox IS NOT NULL AND \
+                                 (remote_farhelm IS NULL OR remote_state_dir IS NULL) FROM hosts \
                                  WHERE kind = '",
                                 host_kind_sql!(ssh),
                                 "' AND destination = ?1"
                             ),
                             rusqlite::params![destination],
-                            |row| Ok((row.get(0)?, row.get(1)?)),
+                            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                         )
                         .optional()
                         .context("looking up a discovered ssh destination")?;
 
-                    let (host, inserted) = if let Some((host, recorded)) = existing {
+                    let (host, inserted) = if let Some((host, recorded, unfinished_tensorlake)) = existing {
+                        if unfinished_tensorlake {
+                            return Err(anyhow::Error::new(HostStoreError::TensorlakeSetupRequired(host)));
+                        }
                         if let (Some(recorded), Some(reported)) = (&recorded, &host_identity)
                             && recorded != reported
                         {
@@ -9464,6 +9533,7 @@ mod tests {
                  ALTER TABLE hosts DROP COLUMN tensorlake_recipe;
                  ALTER TABLE hosts DROP COLUMN tensorlake_resources;
                  ALTER TABLE hosts DROP COLUMN tensorlake_suspended_at;
+                 ALTER TABLE hosts DROP COLUMN tensorlake_pending_create_at;
                  DROP INDEX hosts_entry_uuid;
                  ALTER TABLE hosts DROP COLUMN entry_uuid;
                  PRAGMA user_version = 27;",
@@ -14849,6 +14919,7 @@ mod tests {
                  ALTER TABLE hosts DROP COLUMN tensorlake_recipe;
                  ALTER TABLE hosts DROP COLUMN tensorlake_resources;
                  ALTER TABLE hosts DROP COLUMN tensorlake_suspended_at;
+                 ALTER TABLE hosts DROP COLUMN tensorlake_pending_create_at;
                  DROP INDEX hosts_entry_uuid;
                  ALTER TABLE hosts DROP COLUMN entry_uuid;
                  PRAGMA user_version = 22;",

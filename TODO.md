@@ -342,6 +342,22 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   jiggle: something is being re-drawn or laid out for no reason. Find what triggers the needless re-draw/re-layout on
   session switch.
 
+- **Always show a host list for hosts needing attention.** While hosts are installing or updating it is hard to find
+  where to look; today you must click the separate host-list icon. Restore an always-present host list at the top,
+  populated with any host that currently has a problem, needs an update, or is updating, so nothing needing the user's
+  attention is hidden.
+
+### Tensorlake
+
+- **Agent-requested Tensorlake hosts.** Let an agent request a host by naming an existing recipe, behind the user's
+  approval.
+
+- **Agent subscription logins in Tensorlake sandboxes.** Support subscription logins and credential upload for agents in
+  sandboxes, alongside the existing API endpoint settings.
+
+- **GH_TOKEN in Tensorlake sandboxes.** Inject `GH_TOKEN` into Tensorlake sandboxes like containerized sessions, from a
+  named file on the host.
+
 - **TensorLake recipe Save button hidden until scrolling.** When adding a TensorLake recipe, the Save button is not
   visible until the view scrolls down to it; it must be reachable without hunting. Details TBD.
 - **TensorLake sandbox suspension must be confirmed before shown as suspended.** Suspending a TensorLake sandbox looks
@@ -355,10 +371,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   launch will resume the sandbox.
 - **TensorLake add-host sandbox dialog lacks structure.** The dialog for adding a TensorLake sandbox host is just a
   block of text with no visual structure. Fix TBD.
-- **Always show a host list for hosts needing attention.** While hosts are installing or updating it is hard to find
-  where to look; today you must click the separate host-list icon. Restore an always-present host list at the top,
-  populated with any host that currently has a problem, needs an update, or is updating, so nothing needing the user's
-  attention is hidden.
 
 ### Trivial
 
@@ -789,19 +801,11 @@ are not.
   a build order are in `lore/2026-08-30-fly-sprites-as-a-host-kind.md`. The same entry sizes the related "native app
   attaches to a remote helm" mode and the cheaper installed-web-app alternative.
 
-- Tensorlake sandboxes as a host kind: the same idea assessed 2026-09-01 against a real sandbox, in
-  `lore/2026-09-01-tensorlake-sandboxes-as-a-host-kind.md`. Fits better than sprites — a real SSH gateway makes the
-  transport farhelm's existing ssh path with zero code changes (binary stdio and sftp both verified), suspend/resume
-  preserves running processes under the same boot id, and platform-managed processes replace the missing systemd — at
-  the cost of resume needing an explicit `tl sbx resume` (plain ssh refuses a suspended sandbox) and, today, an sshd
-  session leak that defeats idle-suspend until the leaked sessions are reaped (evidence in the lore entry; worth
-  reporting upstream).
-
 - **Pluggable host creation.** Let users plug in their own scripts that spawn and destroy hosts for sessions to run on,
-  rather than Farhelm knowing each provider itself. Related to the Sprites and Tensorlake host-kind entries above, which
-  assess building specific providers in.
+  rather than Farhelm knowing each provider itself. Related to Tensorlake hosts and the Sprites host-kind entry above,
+  which build specific providers in.
 
-- Sandboxed agents with scoped GitLab credentials, especially on the Tensorlake and Fly.io Sprites host kinds above:
+- Sandboxed agents with scoped GitLab credentials, especially on Tensorlake hosts and the proposed Fly.io Sprites hosts:
   give an agent a token that reaches only the repositories it works on, minted per sandbox. GitLab rather than GitHub
   because GitLab lets the token creation be automated, while GitHub's scoped tokens have to be created by hand in a
   browser.

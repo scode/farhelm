@@ -680,13 +680,67 @@ async fn the_status_check_tells_answers_from_unavailability() {
 // The host model in the store (schema 72)
 // ---------------------------------------------------------------------------
 
+/// Planned setup and discovery share the convergence writer. Neither may
+/// open an unfinished sandbox's dial gate, even without a reported identity;
+/// only explicit admission after the copied-state check may record paths.
+#[farhelm_testtrace::test]
+async fn ordinary_ssh_convergence_requires_tensorlake_install_admission() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
+    let host = plant(
+        &store,
+        "dev",
+        "farhelm-host-test-dev-aaaa",
+        "test-recipe",
+        None,
+    )
+    .await;
+    let before = store.list_hosts().await.unwrap();
+    for identity in [None, Some("copied-identity")] {
+        let error = store
+            .register_probed_ssh_host(
+                &super::test_support::destination("farhelm-host-test-dev-aaaa"),
+                Some("/copied/farhelm"),
+                Some("/copied/state"),
+                identity,
+                None,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error.downcast_ref::<HostStoreError>(), Some(HostStoreError::TensorlakeSetupRequired(id)) if *id == host)
+        );
+        assert_eq!(store.list_hosts().await.unwrap(), before);
+    }
+    assert!(
+        store
+            .admit_tensorlake_install(host, "/admitted/farhelm", "/admitted/state")
+            .await
+            .unwrap()
+    );
+    let row = store
+        .list_hosts()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|row| row.id == host)
+        .unwrap();
+    assert_eq!(row.remote_farhelm.as_deref(), Some("/admitted/farhelm"));
+    assert_eq!(row.remote_state_dir.as_deref(), Some("/admitted/state"));
+    assert!(
+        row.host_identity.is_none(),
+        "admission never imports a discovered identity"
+    );
+}
+
 /// Why: an upgraded helm's existing hosts must stay exactly what they were;
 /// only a row Farhelm registers as a sandbox may become one.
 ///
 /// Spec: a database rewound to schema 71 without the five Tensorlake columns
-/// (and with an ssh host in it) reopens at 72 with all five columns present
+/// (and with an ssh host in it) reopens at 73 with all six columns present
 /// and null, and the ssh host still decodes as an ordinary ssh host with no
-/// binding.
+/// binding. Reopening runs both the schema-72 binding migration and the
+/// schema-73 pending-create migration; the final version must include both.
 #[farhelm_testtrace::test]
 async fn schema_72_leaves_every_existing_host_ordinary() {
     let dir = tempfile::tempdir().unwrap();
@@ -701,6 +755,7 @@ async fn schema_72_leaves_every_existing_host_ordinary() {
         "tensorlake_recipe",
         "tensorlake_resources",
         "tensorlake_suspended_at",
+        "tensorlake_pending_create_at",
     ] {
         conn.execute_batch(&format!("ALTER TABLE hosts DROP COLUMN {column};"))
             .unwrap();
@@ -728,17 +783,18 @@ async fn schema_72_leaves_every_existing_host_ordinary() {
     assert_eq!(ssh_row.tensorlake, None);
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
-    assert_eq!(columns(&conn), 5);
+    assert_eq!(columns(&conn), 6);
     assert_eq!(
         conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
             .unwrap(),
-        71
+        73
     );
     let nulls: i64 = conn
         .query_row(
             "SELECT count(*) FROM hosts WHERE tensorlake_sandbox IS NULL \
              AND tensorlake_sandbox_id IS NULL AND tensorlake_recipe IS NULL \
-             AND tensorlake_resources IS NULL AND tensorlake_suspended_at IS NULL",
+             AND tensorlake_resources IS NULL AND tensorlake_suspended_at IS NULL \
+             AND tensorlake_pending_create_at IS NULL",
             [],
             |row| row.get(0),
         )
@@ -808,6 +864,7 @@ async fn a_tensorlake_host_decodes_with_its_binding() {
         Some(crate::store::TensorlakeBinding {
             sandbox: "farhelm-host-k7q2-gpu-dev-m3x9".into(),
             sandbox_id: None,
+            pending_create_at: None,
             recipe: "gpu-dev".into(),
             resources: Some(farhelm_proto::tensorlake::recipes::RecipeSize {
                 cpus: 2,
@@ -1086,6 +1143,13 @@ async fn helm_with_sandbox_host(
         Some("sbx-1"),
     )
     .await;
+    // Removal exercises an installed host. Initial setup's durable gate
+    // stays closed on rows without these coordinates, before any dial.
+    harness
+        .store
+        .admit_tensorlake_install(host, "/fixture/farhelm", "/fixture/state")
+        .await
+        .unwrap();
     harness.state.manager.sync_registry().await.unwrap();
     (harness, host)
 }

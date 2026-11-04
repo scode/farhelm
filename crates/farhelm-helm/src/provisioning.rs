@@ -1,17 +1,22 @@
 //! Discovery-first supervisor provisioning and its host-scoped REST state.
 //!
 //! Provisioning is a convergence operation, not an installer transaction.
-//! The confirmed [`plan::ProvisioningPlan`] is the only description of the work:
+//! For an existing machine, the confirmed [`plan::ProvisioningPlan`] describes the work:
 //! the helm describes each frozen action once for confirmation and progress,
 //! and the executor walks those same actions after confirmation. A failed
 //! action leaves completed work in place so rerunning can resume from content
 //! and hash comparisons.
+//!
+//! A Tensorlake add instead confirms a frozen recipe and sandbox creation.
+//! There is no machine to inspect yet: its inner Farhelm plan is computed
+//! during the run and spliced into progress without another confirmation.
 //!
 //! Transport is deliberately below that plan. Local setup executes and
 //! copies directly; remote setup uses the user's `ssh` for everything,
 //! payload uploads included, sharing the option-safe SSH prefix with the
 //! steady-state connection manager.
 
+mod agent_endpoints;
 /// The release asset inventory (plan §1) — the archive and binary names a
 /// GitHub release publishes. Drives every Rust payload source directly
 /// (this module's own docstring is the authoritative account of who reads
@@ -201,7 +206,11 @@ mod tests {
             let script = shell_words::split(&remote)
                 .ok()
                 .and_then(|words| words.get(2).cloned());
-            if script.as_deref() == Some(upload_script(&self.temporary).unwrap().as_str()) {
+            if script
+                .as_deref()
+                .and_then(|script| script.strip_prefix(REMOTE_RUNTIME_PREFIX))
+                == Some(upload_script(&self.temporary).unwrap().as_str())
+            {
                 child.arg("-c").arg(format!(
                     "cat >/dev/null; printf '%s' {} > {}; exit {}",
                     shell_words::quote(self.bytes),
@@ -249,9 +258,9 @@ mod tests {
                 .to_string_lossy();
             let words = shell_words::split(&remote).unwrap();
             let upload = upload_script(&self.temporary).unwrap();
-            let script = if words[2] == upload {
+            let script = if words[2].strip_prefix(REMOTE_RUNTIME_PREFIX) == Some(upload.as_str()) {
                 format!(
-                    "({upload}); result=$?; printf '%s' $$ > {started}.pending && mv {started}.pending {started} || exit 1; \
+                    "umask 022; ({upload}); result=$?; printf '%s' $$ > {started}.pending && mv {started}.pending {started} || exit 1; \
                      while [ ! -e {release} ]; do sleep 0.01; done; exit \"$result\"",
                     started = shell_path(&self.started).unwrap(),
                     release = shell_path(&self.release).unwrap(),
@@ -403,6 +412,9 @@ mod tests {
         entered: tokio::sync::Notify,
         release: tokio::sync::Notify,
         block_first: std::sync::atomic::AtomicBool,
+        /// Pause discovery after the service's initial registry read. Shares
+        /// the fixture's notifications with the existing action gate.
+        block_probe: std::sync::atomic::AtomicBool,
         stateful: std::sync::atomic::AtomicBool,
         /// Run once when the named operation is recorded: what that step
         /// "did" to the far side, for a test that needs the host to change
@@ -478,6 +490,7 @@ mod tests {
                 entered: tokio::sync::Notify::new(),
                 release: tokio::sync::Notify::new(),
                 block_first: std::sync::atomic::AtomicBool::new(false),
+                block_probe: std::sync::atomic::AtomicBool::new(false),
                 stateful: std::sync::atomic::AtomicBool::new(false),
                 on_operation: Mutex::new(None),
                 present: Mutex::new(None),
@@ -564,6 +577,13 @@ mod tests {
         async fn probe(&self, _target: &ProbeTarget) -> Result<ProbeObservation, BackendFailure> {
             self.probes
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if self
+                .block_probe
+                .swap(false, std::sync::atomic::Ordering::SeqCst)
+            {
+                self.entered.notify_one();
+                self.release.notified().await;
+            }
             if let Some(once) = self.probe.lock().unwrap().take() {
                 return once;
             }
@@ -3809,8 +3829,9 @@ mod tests {
         }
     }
 
-    /// A helm with one planted Tensorlake host whose sandbox `sandboxes`
-    /// reports on; returns the harness and the host's id.
+    /// A helm with one installed Tensorlake host whose sandbox `sandboxes`
+    /// reports on. Its coordinates admit dialing before the status check;
+    /// unfinished initial setup has its own earlier durable gate.
     async fn sandbox_harness(sandboxes: Arc<SwitchedSandboxes>) -> (Harness, HostId) {
         let harness = FleetBuilder::new().await.sandboxes(sandboxes).start().await;
         let host = crate::tensorlake::hosts::test_support::plant(
@@ -3821,8 +3842,202 @@ mod tests {
             Some("sbx-1"),
         )
         .await;
+        harness
+            .store
+            .admit_tensorlake_install(host, "/fixture/farhelm", "/fixture/state")
+            .await
+            .unwrap();
         harness.manager.sync_registry().await.unwrap();
         (harness, host)
+    }
+
+    /// A discovery begun before the sandbox row exists must not admit copied
+    /// state after Tensorlake setup refuses it. The gate holds discovery at
+    /// its remote probe, after the initial registry read; only a transactional
+    /// refusal can keep both coordinates and identity unset when it returns.
+    #[farhelm_testtrace::test]
+    async fn late_ssh_discovery_cannot_admit_a_refused_tensorlake_install() {
+        use crate::tensorlake::{Tensorlake, e2e::E2eTensorlake};
+        use farhelm_proto::tensorlake::{SaveSettings, recipes::RecipeSource};
+        let harness = FleetBuilder::new().await.start().await;
+        let root = tempfile::tempdir().unwrap();
+        let api_dir = root.path().join("api");
+        let backend_dir = root.path().join("backend");
+        for (dir, marker) in [
+            (&api_dir, "farhelm-e2e-tensorlake-v1\n"),
+            (&backend_dir, "farhelm-e2e-provisioning-v1\n"),
+        ] {
+            std::fs::create_dir(dir).unwrap();
+            std::fs::write(dir.join("ENABLED"), marker).unwrap();
+            std::fs::write(dir.join("config.json"), "{}").unwrap();
+        }
+        std::fs::write(backend_dir.join("config.json"), r#"{"default":{"fail_action":"check-supervisor-state","message":"image contains Farhelm supervisor state"}}"#).unwrap();
+        let api = Arc::new(E2eTensorlake::new(api_dir, root.path()).unwrap());
+        let tensorlake = Tensorlake::production(harness.store.clone(), root.path())
+            .unwrap()
+            .with_api(api);
+        harness
+            .store
+            .save_tensorlake_config(SaveSettings {
+                api_key: Some("fixture-key".into()),
+                ..Default::default()
+            })
+            .await
+            .ok()
+            .expect("save fixture Tensorlake settings");
+        let mut recipe = crate::tensorlake::recipes::tests_support::save();
+        recipe.source = RecipeSource::Image {
+            image: "example/systemd".into(),
+        };
+        harness
+            .store
+            .create_tensorlake_recipe("test-recipe".into(), recipe)
+            .await
+            .unwrap()
+            .unwrap();
+        let sandbox_service = ProvisioningService::injected(
+            harness.store.clone(),
+            Arc::clone(&harness.manager),
+            Arc::new(E2eProvisioningBackend::new(backend_dir.clone(), root.path()).unwrap()),
+            Arc::new(E2ePayloads(backend_dir.join("ENABLED"))),
+            PlanLayout::production(root.path().to_path_buf()),
+            "/fixture/farhelm".into(),
+        );
+        let ProbeResponse::TensorlakeProvisionable {
+            probe_id,
+            destination,
+            ..
+        } = sandbox_service
+            .probe_tensorlake(
+                ProbeRequest {
+                    target: ProbeDestination::Tensorlake {
+                        name: "Race host".into(),
+                        recipe: "test-recipe".into(),
+                    },
+                    remote_farhelm: None,
+                    remote_state_dir: None,
+                    new_entry: None,
+                },
+                tensorlake.clone(),
+            )
+            .await
+            .unwrap()
+        else {
+            panic!("expected sandbox offer")
+        };
+        let backend = FakeBackend::supervisor(root.path().to_path_buf());
+        backend
+            .block_probe
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let ordinary_service = service(&harness, backend.clone(), root.path());
+        let discovery = tokio::spawn({
+            let ordinary_service = ordinary_service.clone();
+            let destination = destination.clone();
+            async move {
+                ordinary_service
+                    .probe(ProbeRequest {
+                        target: ProbeDestination::Ssh { destination },
+                        remote_farhelm: Some("/copied/farhelm".into()),
+                        remote_state_dir: Some("/copied/state".into()),
+                        new_entry: None,
+                    })
+                    .await
+            }
+        });
+        tokio::time::timeout(Duration::from_secs(5), backend.entered.notified())
+            .await
+            .expect("ordinary discovery reaches its probe gate");
+        assert!(
+            harness
+                .store
+                .list_hosts()
+                .await
+                .unwrap()
+                .iter()
+                .all(|row| row.destination.as_deref() != Some(destination.as_str())),
+            "premise: initial discovery read saw no sandbox row"
+        );
+        let accepted = sandbox_service
+            .start_add(ProvisionRequest { probe_id })
+            .await
+            .unwrap();
+        let failed = wait_finished(&sandbox_service, accepted.host_id).await;
+        assert_eq!(failed.status, RunStatus::Failed);
+        assert!(failed.message.unwrap().contains("supervisor state"));
+        let row = harness
+            .store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == accepted.host_id)
+            .unwrap();
+        assert!(
+            row.tensorlake.as_ref().unwrap().sandbox_id.is_some(),
+            "premise: the refused sandbox was created"
+        );
+        assert!(
+            row.remote_farhelm.is_none()
+                && row.remote_state_dir.is_none()
+                && row.host_identity.is_none()
+        );
+        harness.fleet.edit(row.id, |script| {
+            script.reachable = true;
+            script.identity = Some("test-identity".into());
+        });
+        backend.release.notify_one();
+        let error = tokio::time::timeout(Duration::from_secs(5), discovery)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap_err();
+        assert!(
+            matches!(error.downcast_ref::<crate::store::HostStoreError>(), Some(crate::store::HostStoreError::TensorlakeSetupRequired(host)) if *host == row.id),
+            "late convergence must refuse: {error:#}"
+        );
+        let unchanged = harness
+            .store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|r| r.id == row.id)
+            .unwrap();
+        assert_eq!(
+            unchanged, row,
+            "late discovery writes neither coordinates nor identity"
+        );
+        drop(ordinary_service);
+        drop(sandbox_service);
+        drop(tensorlake);
+        let harness = harness.restart_with(|_| {}).await;
+        harness.await_state(row.id, |state| matches!(state, HostState::Unreachable { last_error, .. } if last_error.contains("supervisor state check"))).await;
+        let restarted = harness
+            .store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|r| r.id == row.id)
+            .unwrap();
+        assert!(
+            restarted.remote_farhelm.is_none()
+                && restarted.remote_state_dir.is_none()
+                && restarted.host_identity.is_none()
+        );
+        assert_eq!(harness.fleet.dials(row.id), 0);
+        // The same peer answers once explicitly admitted; a dead peer must
+        // not make the zero-dial assertion pass accidentally.
+        assert!(
+            harness
+                .store
+                .admit_tensorlake_install(row.id, "/fixture/farhelm", "/fixture/state")
+                .await
+                .unwrap()
+        );
+        harness.manager.sync_registry().await.unwrap();
+        harness.manager.retry_now(row.id).await.unwrap();
+        harness.await_refreshed_as(row.id, "test-identity", 0).await;
     }
 
     /// Why: every provisioning action opens ssh to the host, and a
@@ -6744,6 +6959,75 @@ mod tests {
         assert!(
             *launcher.launches.lock().unwrap() > after,
             "digest verification must resume command launches after the upload exits"
+        );
+    }
+
+    /// Token-bearing uploads must be unreadable to other users before the
+    /// finishing chmod/rename, even in an existing traversable agent directory.
+    /// The launcher sets only the child's umask, leaving the test process alone.
+    #[cfg(target_os = "linux")]
+    #[farhelm_testtrace::test]
+    async fn agent_upload_temporary_is_private_before_finishing() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let agent_dir = root.path().join(".claude");
+        std::fs::create_dir(&agent_dir).unwrap();
+        std::fs::set_permissions(&agent_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let temporary = agent_dir.join(".settings.nonce");
+        let destination = agent_dir.join("settings.json");
+        let launcher = Arc::new(GatedUploadLauncher {
+            temporary: temporary.clone(),
+            started: root.path().join("started"),
+            release: root.path().join("release"),
+            launches: Mutex::new(0),
+        });
+        let backend = SystemBackend {
+            control_dir: root.path().to_path_buf(),
+            linger: LingerBehavior::Simulated(Ok(())),
+            launcher: launcher.clone(),
+            runtime_units: false,
+            fail_before_rename: false,
+        };
+        let task_temporary = temporary.clone();
+        let task_destination = destination.clone();
+        let task = tokio::spawn(async move {
+            backend
+                .install_bytes(
+                    &ProvisioningTarget::ssh("scripted.example"),
+                    b"private endpoint token",
+                    &task_destination,
+                    &task_temporary,
+                    0o600,
+                )
+                .await
+        });
+        let ready = wait_for_fixture_file(&launcher.started, Duration::from_secs(5)).await;
+        if !ready {
+            tokio::fs::write(&launcher.release, b"").await.unwrap();
+            let result = tokio::time::timeout(Duration::from_secs(5), task).await;
+            panic!("upload did not reach its pre-finish gate: {result:?}");
+        }
+        assert!(!task.is_finished(), "premise: finishing has not run");
+        assert!(!destination.exists());
+        assert_eq!(
+            std::fs::metadata(&agent_dir).unwrap().permissions().mode() & 0o777,
+            0o755
+        );
+        assert_eq!(
+            std::fs::read(&temporary).unwrap(),
+            b"private endpoint token"
+        );
+        let mode = std::fs::metadata(&temporary).unwrap().permissions().mode() & 0o777;
+        tokio::fs::write(&launcher.release, b"").await.unwrap();
+        tokio::time::timeout(Duration::from_secs(5), task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(mode, 0o600, "temporary must be private before chmod");
+        assert_eq!(
+            std::fs::metadata(destination).unwrap().permissions().mode() & 0o777,
+            0o600
         );
     }
 

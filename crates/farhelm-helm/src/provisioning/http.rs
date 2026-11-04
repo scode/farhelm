@@ -65,6 +65,8 @@ pub(crate) struct NewEntryRequest {
 pub(super) enum ProbeDestination {
     Local,
     Ssh { destination: String },
+    Tensorlake { name: String, recipe: String },
+    TensorlakeHost { host: HostId },
 }
 
 /// The opaque reference returned with a confirmed provisioning plan.
@@ -79,6 +81,15 @@ pub(crate) struct ProvisionRequest {
 #[derive(Debug, Serialize)]
 #[serde(tag = "result", rename_all = "kebab-case")]
 pub(super) enum ProbeResponse {
+    TensorlakeProvisionable {
+        probe_id: String,
+        sandbox: String,
+        destination: String,
+        recipe: String,
+        resources: farhelm_proto::tensorlake::recipes::RecipeSize,
+        confirmation: String,
+        steps: Box<PlanSteps>,
+    },
     Discovered {
         host_id: HostId,
         build_version: String,
@@ -204,7 +215,18 @@ pub(crate) async fn probe_host(
     State(state): State<Arc<AppState>>,
     axum::Json(request): axum::Json<ProbeRequest>,
 ) -> Response {
-    match state.provisioning.probe(request).await {
+    let result = if matches!(
+        request.target,
+        ProbeDestination::Tensorlake { .. } | ProbeDestination::TensorlakeHost { .. }
+    ) {
+        state
+            .provisioning
+            .probe_tensorlake(request, state.tensorlake.clone())
+            .await
+    } else {
+        state.provisioning.probe(request).await
+    };
+    match result {
         Ok(response) => axum::Json(response).into_response(),
         Err(error) => provisioning_error(error),
     }

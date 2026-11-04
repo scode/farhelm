@@ -144,6 +144,9 @@ pub(crate) struct CreateSandbox {
     /// fails promptly with 409 `SANDBOX_AUTO_RESUME_DISABLED` instead. Always
     /// sent, so the choice is explicit at every call site.
     pub(crate) auto_resume: bool,
+    /// Bound capacity waiting at Tensorlake as well as the client's wait.
+    /// A lost response can otherwise leave an unbounded pending create.
+    pub(crate) max_pending_secs: u64,
 }
 
 /// The create reply. A waiting create answers `status`; an accepted, still

@@ -162,6 +162,10 @@ Everything else — no usable systemd user manager, or an architecture with no p
 (run the binary yourself), which always remains available, on the best-effort basis described in
 [Supported host setup](#supported-host-setup).
 
+Tensorlake sandboxes get a preparation step before that inspection: Farhelm uses passwordless sudo to start the login
+manager and enable lingering for the sandbox user. A reused image must have systemd installed, enabled, and running as
+the init system at startup; otherwise setup refuses with an explanation.
+
 Provisioning is idempotent and doubles as recovery: re-running it against an already-provisioned host — including from a
 brand-new helm whose registry was lost — detects the existing supervisor and re-registers the host with all its sessions
 intact. Losing the helm never strands a provisioned host.
@@ -240,16 +244,17 @@ between them scroll. A remote host offers sixteen icons, with the cloud as the d
 one of seven identity colors: lavender, orchid, teal, steel, sand, copper and red. The local host starts with the laptop
 in red, but offers the same choices. The choice is kept by the helm and shared with every client. It tints the icon, and
 the host's terminal frames when **Color terminal frames by host** is on, never a status or the host name; red identifies
-a host and says nothing about its state. Every host asks before YOLO launches, and before carrying out an acting
-`farhelm` command from one of its sessions, and both link permissions start off, until the user explicitly turns them
-on, including hosts that existed before the settings did. Adopting a new identity for a host, described next, resets all
-four permissions to asking: each is a judgment about the install the user knew, and a new identity, whether a reinstall
-or a different machine, is one they have not judged. If a destination turns out to present a different identity than
-recorded (a wiped and reinstalled host, a recycled address), the helm says so and asks whether to adopt the new host or
-fix the destination — it never silently merges. An entry that reaches a machine another entry already holds connects
-nothing: it says which entry holds the machine, by name, and asks the user to remove that entry or change this one's
-destination and then press Retry. Farhelm never connects two entries to one machine and never resolves this on its own.
-Last-known sessions of a host that is permanently gone are disposed of by removing the host from the registry.
+a host and says nothing about its state. Every host except a new Tensorlake host asks before YOLO launches, and every
+host asks before carrying out an acting `farhelm` command from one of its sessions, and both link permissions start off,
+until the user explicitly turns them on, including hosts that existed before the settings did. Adopting a new identity
+for a host, described next, resets all four permissions to asking: each is a judgment about the install the user knew,
+and a new identity, whether a reinstall or a different machine, is one they have not judged. If a destination turns out
+to present a different identity than recorded (a wiped and reinstalled host, a recycled address), the helm says so and
+asks whether to adopt the new host or fix the destination — it never silently merges. An entry that reaches a machine
+another entry already holds connects nothing: it says which entry holds the machine, by name, and asks the user to
+remove that entry or change this one's destination and then press Retry. Farhelm never connects two entries to one
+machine and never resolves this on its own. Last-known sessions of a host that is permanently gone are disposed of by
+removing the host from the registry.
 
 A host that is a Tensorlake sandbox Farhelm created is the exception to two of those rules, because Farhelm owns the
 machine and not only the entry: removing it is not merely forgetting it, and its destination cannot be corrected.
@@ -267,6 +272,28 @@ whether Tensorlake suspended it on its own. Farhelm checks again once per re-pro
 the sandbox runs again; it never resumes a sandbox on its own. A sandbox Tensorlake no longer has makes the host
 unreachable with the advice to delete it. When Tensorlake cannot answer at all (no key, an outage), Farhelm dials anyway
 rather than cutting off a sandbox that may be running.
+
+**Add host** offers **SSH** and **Tensorlake sandbox**. A sandbox needs a Name and a saved recipe; **New recipe…** opens
+the full recipe editor inside the dialog and saves it under its name. Without an API key, the form points to Settings →
+Tensorlake. Continue shows the sandbox name, size and setup steps, says it bills while running, links to Tensorlake
+pricing, and explains the 24-hour idle-suspend limit on Usage Credits. Only **Create Tensorlake sandboxes without
+asking** skips this confirmation, including for setup reruns; the ordinary host-setup preference does not, and sandbox
+confirmation never changes that ordinary preference. Cancelling retires the displayed creation offer immediately. The
+host appears as soon as its setup run is accepted, before a snapshot is built or a sandbox is created, and shows
+progress in the usual setup view. Its details show the sandbox name, recipe, CPU and memory. New Tensorlake hosts start
+with **Start YOLO sessions without asking** on; the other three host permissions remain off.
+
+Setup builds a managed recipe's snapshot if missing (or joins a build already running), creates the named sandbox at the
+recipe's size with the plan's maximum idle timeout and automatic resume off, prepares its user manager, writes any
+recipe agent endpoints, and installs Farhelm's supervisor. A reuse recipe builds nothing and installs no agents. Claude
+Code's endpoint is merged into its settings' environment; Codex gets a Farhelm model provider. Unrelated settings are
+preserved, malformed files are refused, and unset endpoints leave their files alone. Updates do not reapply these
+settings. Token-bearing settings files are private from the start of upload. A reused image or snapshot that already
+contains Farhelm supervisor state is refused: it would copy another host's identity. Farhelm does not connect to that
+supervisor after refusing it, including after the helm restarts. Failed setup keeps the host and its sandbox listed;
+rerunning continues against the same sandbox. When a create's outcome is unknown and the sandbox is not yet visible,
+setup and Delete sandbox keep the host listed until that request settles. A later retry finds and cleans up a sandbox
+that appeared after the failed reply; absence settles only after 15 minutes from the create request.
 
 Confirmed 2026-10-10: a host entry is one logical host from the user's point of view. Correcting its destination, or
 adopting a new identity for it, changes the machine or installation behind the entry, not which host it is to the user;
@@ -3667,7 +3694,7 @@ Further requirements:
   forwarding. (Automatic SSH transport for the helm-to-supervisor edge is in scope; see Topology.)
 - IDE functionality, diff viewers, code review UI.
 - Built-in Git branch management, stacked-PR tooling, or a `jj` graph editor.
-- Cloud-hosted execution or multi-user collaboration.
+- Multi-user collaboration and cloud-hosted execution beyond Tensorlake sandboxes added as ordinary hosts.
 - Reimplementing or wrapping agent internals (ACP or structured agent protocols may come later but must never displace
   raw terminal mode).
 

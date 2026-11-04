@@ -1046,6 +1046,7 @@ mod tests {
             tensorlake: Some(crate::store::TensorlakeBinding {
                 sandbox: "sbx".into(),
                 sandbox_id: Some("sbx-1".into()),
+                pending_create_at: None,
                 recipe: "rust".into(),
                 resources: None,
                 suspended_at: None,

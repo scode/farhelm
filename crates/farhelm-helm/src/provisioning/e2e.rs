@@ -229,6 +229,31 @@ impl E2eProvisioningBackend {
 
 #[async_trait]
 impl ProvisioningBackend for E2eProvisioningBackend {
+    async fn prepare_tensorlake_sandbox(
+        &self,
+        target: &ProvisioningTarget,
+    ) -> Result<PathBuf, BackendFailure> {
+        self.action(target, "prepare-sandbox").await?;
+        Ok(self.behavior(target).await?.home.into())
+    }
+
+    async fn read_small_file(
+        &self,
+        target: &ProvisioningTarget,
+        _path: &Path,
+    ) -> Result<Option<Vec<u8>>, BackendFailure> {
+        self.action(target, "read-agent-settings").await?;
+        Ok(None)
+    }
+
+    async fn refuse_copied_supervisor(
+        &self,
+        target: &ProvisioningTarget,
+        _state_dir: &Path,
+    ) -> Result<(), BackendFailure> {
+        self.action(target, "check-supervisor-state").await?;
+        Ok(())
+    }
     async fn probe(&self, target: &ProbeTarget) -> Result<ProbeObservation, BackendFailure> {
         self.record(&target.transport, "probe").await?;
         let behavior = self.behavior(&target.transport).await?;

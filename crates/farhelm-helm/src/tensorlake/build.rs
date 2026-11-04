@@ -89,7 +89,7 @@ pub(crate) const BUILDER_PREFIX: &str = "farhelm-build-";
 /// it, leaving a suspend snapshot the next build sweeps.
 pub(crate) const BUILDER_IDLE_TIMEOUT_SECS: u64 = 900;
 
-/// How long after a create was sent a lookup of the builder's name that
+/// How long after a create was sent a lookup of its pre-chosen name that
 /// finds nothing proves the create made nothing.
 ///
 /// Right after a create whose answer was lost, an empty lookup proves
@@ -548,15 +548,28 @@ impl RecipeBuilds {
         name: &str,
         events: Arc<FleetEvents>,
     ) -> Result<(), StartRefusal> {
+        self.start_definition(name, events, None).await
+    }
+
+    /// Build the definition a host's confirmation froze, while retaining the
+    /// same per-recipe admission as Settings' rebuild action. The public
+    /// rebuild route passes no override and reads the current definition.
+    async fn start_definition(
+        self: &Arc<Self>,
+        name: &str,
+        events: Arc<FleetEvents>,
+        frozen: Option<StoredRecipe>,
+    ) -> Result<(), StartRefusal> {
         if self.is_building(name) {
             return Ok(());
         }
-        let (spec, _) = self
+        let (stored, _) = self
             .store
             .tensorlake_recipe_row(name)
             .await
             .map_err(StartRefusal::Storage)?
             .ok_or(StartRefusal::Missing)?;
+        let spec = frozen.unwrap_or(stored);
         let RecipeSource::Packages { packages } = spec.source else {
             return Err(StartRefusal::NotManaged);
         };
@@ -625,6 +638,83 @@ impl RecipeBuilds {
         *active.task.lock().expect("build task slot poisoned") = Some(task);
         registry.active.insert(name.to_string(), active);
         Ok(())
+    }
+
+    /// Return a managed recipe's prepared snapshot, building it when absent
+    /// and joining an already running rebuild. A host keeps its confirmed
+    /// definition; edits made while confirmation was open cannot change the
+    /// packages or size of a build it starts. Existing snapshots keep the
+    /// recipe's explicit-rebuild semantics (package edits alone do not rebuild).
+    /// Progress follows the same watch channel Settings reads, without a
+    /// second builder, detached waiter, or polling timer.
+    pub(crate) async fn ensure_snapshot<F, Fut>(
+        self: &Arc<Self>,
+        name: &str,
+        frozen: &StoredRecipe,
+        events: Arc<FleetEvents>,
+        mut progress: F,
+    ) -> anyhow::Result<String>
+    where
+        F: FnMut(String) -> Fut,
+        Fut: Future<Output = ()>,
+    {
+        let (_, state) = self
+            .store
+            .tensorlake_recipe_row(name)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("the recipe no longer exists"))?;
+        if !self.is_building(name)
+            && let Some(snapshot) = state.snapshot
+        {
+            anyhow::ensure!(
+                snapshot.disk_gb <= frozen.size.disk_gb,
+                "the recipe's snapshot needs a larger disk; increase the recipe's disk size or rebuild its snapshot"
+            );
+            return Ok(snapshot.id);
+        }
+        self.start_definition(name, events, Some(frozen.clone()))
+            .await
+            .map_err(|reason| {
+                anyhow::anyhow!(match reason {
+                    StartRefusal::Missing => "the recipe no longer exists".into(),
+                    StartRefusal::NotManaged => "this recipe does not build a snapshot".into(),
+                    StartRefusal::NoApiKey =>
+                        "save a Tensorlake API key in Settings → Tensorlake first".into(),
+                    StartRefusal::NoSshKey(message) => message,
+                    StartRefusal::Deleting => "the recipe is being deleted".into(),
+                    StartRefusal::Storage(_) => "Farhelm could not read the recipe".into(),
+                })
+            })?;
+        let receiver = self
+            .registry()
+            .active
+            .get(name)
+            .map(|active| active.progress.subscribe());
+        if let Some(mut receiver) = receiver {
+            loop {
+                let step = receiver.borrow_and_update().step;
+                progress(format!("Snapshot build: {step:?}")).await;
+                if receiver.changed().await.is_err() {
+                    break;
+                }
+            }
+        }
+        let (_, state) = self
+            .store
+            .tensorlake_recipe_row(name)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("the recipe no longer exists"))?;
+        if let Some(failure) = state.last_failure {
+            anyhow::bail!("{}", failure.message);
+        }
+        let snapshot = state.snapshot.ok_or_else(|| {
+            anyhow::anyhow!("the snapshot build ended without a snapshot; run setup again")
+        })?;
+        anyhow::ensure!(
+            snapshot.disk_gb <= frozen.size.disk_gb,
+            "the recipe's snapshot needs a larger disk; increase the recipe's disk size or rebuild its snapshot"
+        );
+        Ok(snapshot.id)
     }
 
     /// Farhelm's ssh access, or why it has none. The key is never created
@@ -919,6 +1009,7 @@ impl RecipeBuilds {
             },
             timeout_secs: BUILDER_IDLE_TIMEOUT_SECS,
             auto_resume: false,
+            max_pending_secs: 900,
         };
         let id = match self.api.create_sandbox(&ctx.key, &request).await {
             Ok(created) => created.sandbox_id,
@@ -1330,7 +1421,7 @@ impl RecipeBuilds {
 
 /// Whether a create failure is Tensorlake refusing the request, which
 /// creates nothing, as opposed to an answer that leaves the outcome open.
-fn create_was_refused(error: &TensorlakeError) -> bool {
+pub(crate) fn create_was_refused(error: &TensorlakeError) -> bool {
     matches!(
         error,
         TensorlakeError::Auth { .. }
