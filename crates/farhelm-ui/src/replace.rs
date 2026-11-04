@@ -889,6 +889,7 @@ mod tests {
             let refusal = || api::ActionRefusal {
                 outcome: RefusalOutcome::NeedsYoloConfirmation,
                 text: "refused".to_owned(),
+                deadline_expired: false,
             };
             assert!(sidebar.open_question(pending("A", "a1"), Some("kept".to_owned())));
             assert!(

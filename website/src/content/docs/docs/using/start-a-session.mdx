@@ -18,6 +18,9 @@ In the Farhelm app on your Mac, Cmd+N opens the launcher too, even while you are
 When you launch, the launcher closes, the new session appears in the [session list](/docs/using/session-list/), and its
 terminal opens. You can type your first prompt there, or supply it in the launcher.
 
+If the host takes more than about two seconds to answer, the launcher shows a spinner, the host's name and how many
+seconds you have been waiting. A quick launch or template shortcut shows that status at the bottom of the window.
+
 ## The launcher at a glance
 
 <Screenshot
@@ -339,6 +342,9 @@ in a **Not launched.** alert beside the launch button and keeps your choices, so
 the agent itself fails to start, for example because it is not installed on that host, the session is created and its
 status shows error; the agent's page in [Supported agents](/docs/agents/) says what to install. An agent that starts and
 then quits shows exited. [Read the session list](/docs/using/session-list/) explains each status.
+
+If Farhelm gives up waiting after a minute, the launcher says **Still waiting** instead: the session may still start
+and appear in the session list. Your choices stay in the launcher.
 
 ## Next
 

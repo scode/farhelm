@@ -1002,6 +1002,13 @@ adjacent to the actions in a bounded scroll region, so long content cannot displ
 panel remains inline in the scrolling body. Project registration (associating metadata with a directory) is optional
 convenience and never a prerequisite.
 
+Once a launch request has waited about two seconds, its footer shows a spinner and a status beside the disabled actions:
+Launching, Restarting or Replacing, the captured host's name and elapsed seconds, updated about once a second. A hidden
+quick launch or template shortcut shows the same status in a small pill at the bottom of the window, including the
+session name when supplied. Neither adds a control or blocks anything beyond the launch's existing in-flight guard. The
+status disappears on the reply; replies within the threshold leave the usual appearance unchanged. Assistive technology
+gets one polite announcement when the status appears, not one for each elapsed second.
+
 Creation guards against accidental double submission (a double-click, a retry after a timeout): one intended create
 yields one session or a clear error, never two silently. Deliberately creating several sessions with identical
 parameters — same directory, same launch — is a sanctioned workflow, not a duplicate to be suppressed.
@@ -1060,6 +1067,14 @@ technology. Restart mode uses the same alert beside Restart, with "Restart error
 that are not a refused launch, such as "Save as template" refusing a wrapper, keep the plain line. When the refusal says
 the folder does not exist, is not a directory or is not usable, the folder field is also marked and says so under it,
 naming the host, for as long as the form still names that host, its connection and that folder.
+
+The GUI's sixty-second request deadline is not a refusal: the helm may still finish the launch. On that deadline the
+launcher stays open and its alert instead starts "Still waiting on <host>." It says the session may still start and will
+appear in the sidebar if it does, and that launching again with the same settings will not start a second copy. Restart
+with has no such retry guarantee: its alert says the restart may still finish and to check the session before restarting
+again. A real refusal, including an unresolved refusal, and failures other than the request deadline keep their existing
+wording and retry behavior. A fresh managed checkout uses this same deadline explanation rather than adding a second
+explanation of its retained request.
 
 ### Managed checkouts
 

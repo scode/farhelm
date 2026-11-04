@@ -65,6 +65,7 @@ export const HOST_TERMINAL_SPECS: ReadonlySet<string> = new Set([
   "keyboard-scroll.spec.ts",
   "keyboard-shortcuts.spec.ts",
   "launch-refusal.spec.ts",
+  "launch-progress.spec.ts",
   "launcher-tabs.spec.ts",
   "listing-mutation-fence.spec.ts",
   "menu-highlight.spec.ts",

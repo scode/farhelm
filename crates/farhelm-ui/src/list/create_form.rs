@@ -34,6 +34,7 @@ use crate::github_checkout::{
     PreviewState, RepositoryAuthority, repository_choices,
 };
 use crate::launch_controls::{DestinationTypeControl, LaunchControls, enter_choice};
+use crate::launch_progress::{LaunchAction, LaunchProgress, PendingLaunch};
 use crate::modal_dialog::{
     DialogActions, DialogFocus, DialogFooter, DialogHandle, DialogHeader, DialogRoot, FocusTarget,
     InitialFocus, ModalDialog, RecoveryDelay, RecoveryFocus, ScrollRegion,
@@ -71,6 +72,34 @@ pub(super) struct ShortcutApplyRequest {
 /// create anybody is waiting on. Bounded rather than a bare loop because
 /// spinning is a worse answer than saying so.
 const MINT_ATTEMPTS: usize = 3;
+
+/// The footer's explanation distinguishes a refusal from an unknown outcome.
+/// Keeping this in the existing attempted-state slot gives validation and
+/// template errors the same reset boundaries they had before timeout wording.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LaunchAttempt {
+    None,
+    Refused,
+    Unknown,
+}
+
+impl LaunchAttempt {
+    /// Both finished outcomes reveal hidden launchers and use the loud alert.
+    /// The unknown variant changes its prose, never its retry identity.
+    fn was_attempted(self) -> bool {
+        self != Self::None
+    }
+
+    /// A deadline cannot claim refusal, even though it uses the same alert.
+    /// Ordinary refused attempts retain the mode-specific prefix users know.
+    fn prefix(self, restart: bool) -> &'static str {
+        match (self, restart) {
+            (Self::Refused, true) => "Restart error. ",
+            (Self::Refused, false) => "Not launched. ",
+            (Self::None | Self::Unknown, _) => "",
+        }
+    }
+}
 
 /// Shared by visible invalidation and both submission checks so an explicit
 /// destination correction can retire only this refusal, not an unrelated error.
@@ -2843,7 +2872,10 @@ pub(super) fn CreateSessionForm(
     // An untouched dialog is allowed to be incomplete. Once attempted, its
     // prerequisite reason follows the current draft and disappears when ready;
     // request failures retain the helm's own words until the next attempt.
-    let mut launch_attempted = use_signal(|| false);
+    let mut launch_attempted = use_signal(|| LaunchAttempt::None);
+    // Only this launch API call owns the snapshot. Launcher preparation and
+    // another page operation may be busy too, but neither is this request's wait.
+    let mut pending_launch = use_signal(|| None::<PendingLaunch>);
     // A YOLO launch the helm refused because its host asks before YOLO launches, and the
     // user's confirmation of one (see `yolo_confirm`). Both are tied to the intent key the
     // refused request carried, not to "the next submit": the key is bound to the whole
@@ -4720,7 +4752,7 @@ pub(super) fn CreateSessionForm(
             // a fallback to show, rather than readiness to wait for invisibly.
             if !host_available {
                 auto_launch_pending.set(false);
-                launch_attempted.set(true);
+                launch_attempted.set(LaunchAttempt::Refused);
                 quick_launch_hidden.set(false);
                 return;
             }
@@ -4758,7 +4790,7 @@ pub(super) fn CreateSessionForm(
             }
             auto_launch_pending.set(false);
             if has_refusal || template_error().is_some() {
-                launch_attempted.set(true);
+                launch_attempted.set(LaunchAttempt::Refused);
                 quick_launch_hidden.set(false);
                 return;
             }
@@ -4770,7 +4802,7 @@ pub(super) fn CreateSessionForm(
             && (error().is_some()
                 || template_error().is_some()
                 || yolo_refusal.is_open()
-                || (launch_attempted() && !ops.busy_now()))
+                || (launch_attempted().was_attempted() && !ops.busy_now()))
         {
             quick_launch_hidden.set(false);
         }
@@ -4946,7 +4978,7 @@ pub(super) fn CreateSessionForm(
                 quick_launch_hidden.set(false);
                 return;
             }
-            launch_attempted.set(true);
+            launch_attempted.set(LaunchAttempt::Refused);
             error.set(None);
             preparation_error.set(None);
             if template_panel().is_some() || template_saving() {
@@ -5263,7 +5295,7 @@ pub(super) fn CreateSessionForm(
                 // An admitted restart is progress. The shared busy refusal
                 // must not become an announced error while its POST or host
                 // preference write is still running.
-                launch_attempted.set(false);
+                launch_attempted.set(LaunchAttempt::None);
                 error.set(None);
                 spawn(async move {
                     let held = intent_key.peek().clone().filter(|(_, held)| held == &bound);
@@ -5275,7 +5307,7 @@ pub(super) fn CreateSessionForm(
                                 key
                             }
                             Err(reason) => {
-                                launch_attempted.set(true);
+                                launch_attempted.set(LaunchAttempt::Refused);
                                 error.set(Some(reason));
                                 return;
                             }
@@ -5297,7 +5329,7 @@ pub(super) fn CreateSessionForm(
                         return;
                     }
                     if create_target.peek().as_ref() != target_now.as_ref() {
-                        launch_attempted.set(true);
+                        launch_attempted.set(LaunchAttempt::Refused);
                         error.set(Some("The source host changed while preparing restart; close and reopen restart with".into()));
                         return;
                     }
@@ -5306,7 +5338,7 @@ pub(super) fn CreateSessionForm(
                         .try_read()
                         .is_ok_and(|shown| shown.launch.as_ref() == opened_launch.as_deref());
                     if !same_launch {
-                        launch_attempted.set(true);
+                        launch_attempted.set(LaunchAttempt::Refused);
                         error.set(Some(
                             "This session's launch settings changed; close and reopen restart with"
                                 .into(),
@@ -5314,10 +5346,13 @@ pub(super) fn CreateSessionForm(
                         return;
                     }
                     if let Err(reason) = bridge.begin(edit.clone()) {
-                        launch_attempted.set(true);
+                        launch_attempted.set(LaunchAttempt::Refused);
                         error.set(Some(reason));
                         return;
                     }
+                    let pending =
+                        PendingLaunch::new(LaunchAction::Restart, host_name.clone(), None);
+                    pending_launch.set(Some(pending.clone()));
                     let result = api::restart_session(
                         &base,
                         &source,
@@ -5326,6 +5361,7 @@ pub(super) fn CreateSessionForm(
                         allow_yolo,
                     )
                     .await;
+                    pending_launch.set(None);
                     bridge.finish(result.is_ok());
                     match result {
                         Ok(_) => {
@@ -5349,8 +5385,16 @@ pub(super) fn CreateSessionForm(
                             );
                         }
                         Err(refusal) => {
-                            launch_attempted.set(true);
-                            error.set(Some(refusal.text));
+                            launch_attempted.set(if refusal.deadline_expired {
+                                LaunchAttempt::Unknown
+                            } else {
+                                LaunchAttempt::Refused
+                            });
+                            error.set(Some(if refusal.deadline_expired {
+                                pending.unknown_outcome(false)
+                            } else {
+                                refusal.text
+                            }));
                         }
                     }
                 });
@@ -5489,7 +5533,7 @@ pub(super) fn CreateSessionForm(
                 .unwrap_or_else(|| "This host".to_string());
             // An admitted attempt is progress, not a refusal. Do not show
             // the busy prerequisite merely because its request is running.
-            launch_attempted.set(false);
+            launch_attempted.set(LaunchAttempt::None);
             error.set(None);
             folder_refusal.set(None);
             let catalog_for_recheck = catalog_for_submit.clone();
@@ -5528,7 +5572,7 @@ pub(super) fn CreateSessionForm(
                         break (key, held_binding);
                     }
                     if attempts >= MINT_ATTEMPTS {
-                        launch_attempted.set(true);
+                        launch_attempted.set(LaunchAttempt::Refused);
                         error.set(Some(
                             "The form kept changing while an idempotency key was being \
                              generated, so this create was not sent; try again"
@@ -5547,7 +5591,7 @@ pub(super) fn CreateSessionForm(
                             // what failed rather than blaming the
                             // request, since nothing the user typed
                             // caused it.
-                            launch_attempted.set(true);
+                            launch_attempted.set(LaunchAttempt::Refused);
                             error.set(Some(format!(
                                 "Could not generate an idempotency key for this create, so \
                                  it was not sent (a retry could otherwise create a second \
@@ -5587,13 +5631,13 @@ pub(super) fn CreateSessionForm(
                                 live_destination.peek().as_ref(),
                             ),
                         ) {
-                            launch_attempted.set(true);
+                            launch_attempted.set(LaunchAttempt::Refused);
                             error.set(Some(reason));
                             drop(op_guard);
                             return;
                         }
                         if current.harness().is_none() {
-                            launch_attempted.set(true);
+                            launch_attempted.set(LaunchAttempt::Refused);
                             error.set(Some(
                                 "The structured launch choice changed while its idempotency key was being generated; choose a harness and press Launch again".to_string(),
                             ));
@@ -5603,7 +5647,7 @@ pub(super) fn CreateSessionForm(
                         match wrapper_words(&structured_wrapper()) {
                             Ok(_) => {}
                             Err(reason) => {
-                                launch_attempted.set(true);
+                                launch_attempted.set(LaunchAttempt::Refused);
                                 error.set(Some(reason));
                                 drop(op_guard);
                                 return;
@@ -5619,7 +5663,7 @@ pub(super) fn CreateSessionForm(
                                 catalog_for_recheck.as_deref(),
                             )
                         {
-                            launch_attempted.set(true);
+                            launch_attempted.set(LaunchAttempt::Refused);
                             error.set(Some(
                                 "The structured launch choice changed while its idempotency key was being generated; review it and press Launch again".to_string(),
                             ));
@@ -5664,7 +5708,7 @@ pub(super) fn CreateSessionForm(
                     remembered_destination.peek().as_ref(),
                     live_destination.peek().as_ref(),
                 ) {
-                    launch_attempted.set(true);
+                    launch_attempted.set(LaunchAttempt::Refused);
                     error.set(Some(REMEMBERED_DESTINATION_CHANGED.to_string()));
                     intent_key.set(None);
                     return;
@@ -5674,7 +5718,7 @@ pub(super) fn CreateSessionForm(
                         || live_destination.peek().as_ref() != target_now.as_ref()
                         || (!replaying_fresh && *live_preview_authority.peek() != fresh_authority))
                 {
-                    launch_attempted.set(true);
+                    launch_attempted.set(LaunchAttempt::Refused);
                     error.set(Some("The checkout draft changed while preparing the request; review the preview and press Launch again".into()));
                     return;
                 }
@@ -5721,6 +5765,16 @@ pub(super) fn CreateSessionForm(
                 // — resolution, guards, key minting — has already run
                 // identically for both; only the network call itself
                 // forks.
+                let pending = PendingLaunch::new(
+                    if bound.replace_source.is_some() {
+                        LaunchAction::Replace
+                    } else {
+                        LaunchAction::Launch
+                    },
+                    yolo_host_name.clone(),
+                    quick_launch_hidden().then(|| bound.title.clone()),
+                );
+                pending_launch.set(Some(pending.clone()));
                 let create_result = if let Some(checkout) = &bound.github_checkout {
                     let attempt = github_attempt
                         .peek()
@@ -5766,6 +5820,7 @@ pub(super) fn CreateSessionForm(
                             Err(api::CreateRefusal {
                                 outcome: api::RefusalOutcome::NeedsYoloConfirmation,
                                 text,
+                                deadline_expired: false,
                             })
                         }
                         Err(failure) => {
@@ -5780,7 +5835,11 @@ pub(super) fn CreateSessionForm(
                             } else {
                                 github_attempt.set(Some((bound.clone(), attempt)));
                             }
-                            Err(api::CreateRefusal::from(format!(
+                            let deadline_expired = matches!(
+                                &failure,
+                                crate::github_checkout::FreshCreateError::DeadlineExpired(_)
+                            );
+                            let mut refusal = api::CreateRefusal::from(format!(
                                 "{}; {}",
                                 failure.message(),
                                 if retired {
@@ -5788,7 +5847,9 @@ pub(super) fn CreateSessionForm(
                                 } else {
                                     "the original request is retained; retry reconciles that request without allocating a different checkout"
                                 }
-                            )))
+                            ));
+                            refusal.deadline_expired = deadline_expired;
+                            Err(refusal)
                         }
                     }
                 } else {
@@ -5825,6 +5886,7 @@ pub(super) fn CreateSessionForm(
                         }
                     }
                 };
+                pending_launch.set(None);
                 match create_result {
                     Ok(session) => {
                         // The callback may open quick-launch naming, which
@@ -5871,6 +5933,7 @@ pub(super) fn CreateSessionForm(
                             let api::CreateRefusal {
                                 outcome,
                                 text: prose,
+                                deadline_expired,
                             } = e;
                             if outcome.requires_yolo() {
                                 // The key deliberately survives: this
@@ -5927,15 +5990,32 @@ pub(super) fn CreateSessionForm(
                             // Dispatch cleared the attempt mark so the busy
                             // prerequisite would not show while the request
                             // ran; a refusal is a finished attempt again, and
-                            // the mark is what labels it "Not launched.".
-                            launch_attempted.set(true);
-                            error.set(Some(prose));
+                            // only a genuine refusal is labelled "Not launched.".
+                            launch_attempted.set(if deadline_expired {
+                                LaunchAttempt::Unknown
+                            } else {
+                                LaunchAttempt::Refused
+                            });
+                            error.set(Some(if deadline_expired {
+                                pending.unknown_outcome(true)
+                            } else {
+                                prose
+                            }));
                         } else {
                             // The old request still ended unsuccessfully.
                             // Say so without leaking its host-specific prose
                             // or retiring the new target's retry identity.
-                            launch_attempted.set(true);
-                            error.set(Some("A launch for an earlier setup was refused".into()));
+                            launch_attempted.set(if e.deadline_expired {
+                                LaunchAttempt::Unknown
+                            } else {
+                                LaunchAttempt::Refused
+                            });
+                            error.set(Some(if e.deadline_expired {
+                                "A launch for an earlier setup timed out; its outcome is unknown"
+                                    .into()
+                            } else {
+                                "A launch for an earlier setup was refused".into()
+                            }));
                         }
                         drop(op_guard);
                     }
@@ -6002,12 +6082,12 @@ pub(super) fn CreateSessionForm(
             }
             PreviewState::Failed { message, .. } => {
                 guarded_submit_pending.set(None);
-                launch_attempted.set(true);
+                launch_attempted.set(LaunchAttempt::Refused);
                 error.set(Some(message));
             }
             PreviewState::Ready { .. } => {
                 guarded_submit_pending.set(None);
-                launch_attempted.set(true);
+                launch_attempted.set(LaunchAttempt::Refused);
                 error.set(Some(
                     "Wait for a current checkout preview before launching".into(),
                 ));
@@ -6049,6 +6129,7 @@ pub(super) fn CreateSessionForm(
     );
     let footer_error = error.read().clone().or_else(|| {
         launch_attempted()
+            .was_attempted()
             .then_some(launch_refusal)
             .flatten()
             .map(str::to_string)
@@ -6080,6 +6161,13 @@ pub(super) fn CreateSessionForm(
                     on_cancel.call(());
                 }
             },
+            if quick_launch_hidden() {
+                if let Some(pending) = pending_launch() {
+                    div { class: "launch-progress-pill", "data-modal-exempt": "",
+                        LaunchProgress { pending }
+                    }
+                }
+            }
         ModalDialog {
             handle: COMPOSER_DIALOG,
             root: DialogRoot::Form,
@@ -7604,6 +7692,11 @@ pub(super) fn CreateSessionForm(
             }
 
                         }
+                        if !quick_launch_hidden() {
+                            if let Some(pending) = pending_launch() {
+                                LaunchProgress { pending }
+                            }
+                        }
                         DialogActions { class: "launch-composer-actions",
                 button {
                     r#type: "button",
@@ -7650,7 +7743,7 @@ pub(super) fn CreateSessionForm(
                             if !draft_transition_allowed(ops) || template_saving() || template_panel().is_some() { return; }
                             if draft.snapshot().tab() == LaunchTab::Agent
                                 && let Err(reason) = draft.snapshot().container().config() {
-                                launch_attempted.set(false);
+                                launch_attempted.set(LaunchAttempt::None);
                                 error.set(Some(reason));
                                 return;
                             }
@@ -7661,7 +7754,7 @@ pub(super) fn CreateSessionForm(
                                 // Not a launch refusal, so it must not read
                                 // "Not launched."; the next launch press
                                 // marks the line as one again.
-                                launch_attempted.set(false);
+                                launch_attempted.set(LaunchAttempt::None);
                                 error.set(Some(reason));
                                 return;
                             }
@@ -7706,14 +7799,15 @@ pub(super) fn CreateSessionForm(
                 // still get the same escaping and directional isolation. A
                 // refused launch is a bordered, announced alert: the plain red
                 // line it used to be was easy to miss (TODO.md, 2026-10-22).
-                // Only a launch press sets `launch_attempted`, which keeps
-                // other errors in this slot from reading "Not launched.".
-                if launch_attempted() {
+                // Only a launch press marks this slot as an attempted launch.
+                // Deadline expiry keeps the alert but cannot claim refusal;
+                // template errors still use the ordinary unbordered line.
+                if launch_attempted().was_attempted() {
                     div { class: "create-session-error launch-composer-refusal launch-composer-refusal-alert", role: "alert",
                         span { class: "launch-composer-refusal-icon", aria_hidden: "true", "⚠" }
                         PeerLine {
                             class: "launch-composer-refusal-text".to_string(),
-                            parts: vec![DetailPart::text(if restart_mode { "Restart error. " } else { "Not launched. " }), DetailPart::peer(err)],
+                            parts: vec![DetailPart::text(launch_attempted().prefix(restart_mode)), DetailPart::peer(err)],
                         }
                     }
                 } else {
