@@ -433,8 +433,9 @@ impl Emulator {
             skip_history: min_skip,
         };
         let trimmed_for = self.trimmed_for(min_skip > 0);
-        let with_titles =
-            |skip_titles, mode| v1::encode(self, screens, skip_titles, trimmed_for, mode, cancel);
+        let with_titles = |skip_titles, budget| {
+            v1::encode(self, screens, skip_titles, trimmed_for, budget, cancel)
+        };
         let cancelled = |_: CancelledEncode| SnapshotStopped::Cancelled;
         let without_titles = match fit_titles(&titles, max_bytes, with_titles).map_err(cancelled)? {
             TitleFit::Fits { blob, dropped } => {
@@ -451,14 +452,14 @@ impl Emulator {
         // Step 2: no titles, and the oldest history. The title step's last
         // measurement already used this min_skip and trimmed mark, so the
         // first history cut can use its costs without another full paint.
-        let with_history = |skip, mode| {
+        let with_history = |skip, budget| {
             let content = v1::Content::Cells { skip_history: skip };
             v1::encode(
                 self,
                 content,
                 all_titles,
                 self.trimmed_for(skip > 0),
-                mode,
+                budget,
                 cancel,
             )
         };
@@ -478,15 +479,16 @@ impl Emulator {
         // Step 3: no cells, and as many titles as fit.
         let nothing = v1::Content::Nothing;
         let trimmed_for = self.trimmed_for(history > 0);
-        let without_screens =
-            |skip_titles, mode| v1::encode(self, nothing, skip_titles, trimmed_for, mode, cancel);
+        let without_screens = |skip_titles, budget| {
+            v1::encode(self, nothing, skip_titles, trimmed_for, budget, cancel)
+        };
         // Without screens or titles, what is left fits `MIN_SNAPSHOT_LIMIT`;
         // below that it is returned even if it does not fit.
         let (blob, dropped_titles) =
             match fit_titles(&titles, max_bytes, without_screens).map_err(cancelled)? {
                 TitleFit::Fits { blob, dropped } => (blob, dropped),
                 TitleFit::TooLarge(_) => {
-                    let last_resort = without_screens(all_titles, v1::Mode::KEEP);
+                    let last_resort = without_screens(all_titles, MIN_SNAPSHOT_LIMIT);
                     if last_resort.cancelled {
                         return Err(SnapshotStopped::Cancelled);
                     }
@@ -536,8 +538,9 @@ impl Emulator {
     ) -> Result<Snapshot, SnapshotStopped> {
         let history = self.primary_grid().history_size();
         let min_skip = history.saturating_sub(self.restorable_history());
-        let with_history =
-            |skip, mode| v1::encode_history(self, skip, self.trimmed_for(skip > 0), mode, cancel);
+        let with_history = |skip, budget| {
+            v1::encode_history(self, skip, self.trimmed_for(skip > 0), budget, cancel)
+        };
         // Without history a seed is a few dozen bytes, which only a
         // `max_bytes` far below `MIN_SNAPSHOT_LIMIT` refuses; it is returned
         // even then.
@@ -547,7 +550,7 @@ impl Emulator {
         {
             return Ok(fitted);
         }
-        let last_resort = with_history(history, v1::Mode::KEEP);
+        let last_resort = with_history(history, MIN_SNAPSHOT_LIMIT);
         if last_resort.cancelled {
             return Err(SnapshotStopped::Cancelled);
         }
@@ -805,31 +808,28 @@ enum TitleFit {
     TooLarge(v1::Encoded),
 }
 
-/// Steps 1 and 3 of the size ladder: `encode(skip, mode)` encodes, or
+/// Steps 1 and 3 of the size ladder: `encode(skip, max_bytes)` encodes, or
 /// measures, with the `skip` oldest title stack entries left out, `costs`
 /// saying what each entry adds. The blob with the fewest titles dropped that
 /// fits `max_bytes`, and how many were; otherwise the measurement with all
-/// titles removed. Measured first, like [`fit_history`], so that a screen
-/// too large to fit is never held whole.
+/// titles removed. Like [`fit_history`], it keeps bytes during the paint
+/// only while they can fit, so a fitting result needs no second paint and
+/// a screen too large to fit is never held whole.
 fn fit_titles(
     costs: &[usize],
     max_bytes: usize,
-    encode: impl Fn(usize, v1::Mode) -> v1::Encoded,
+    encode: impl Fn(usize, usize) -> v1::Encoded,
 ) -> Result<TitleFit, CancelledEncode> {
     let mut skip = 0;
     loop {
-        let measurement = encode(skip, v1::Mode::Measure);
+        let measurement = encode(skip, max_bytes);
         if measurement.cancelled {
             return Err(CancelledEncode);
         }
         let measured = measurement.len;
         if measured <= max_bytes {
-            let encoded = encode(skip, measurement.keep());
-            if encoded.cancelled {
-                return Err(CancelledEncode);
-            }
             return Ok(TitleFit::Fits {
-                blob: encoded.blob,
+                blob: measurement.blob,
                 dropped: skip,
             });
         }
@@ -854,14 +854,14 @@ fn fit_titles(
 }
 
 /// The history step of the size ladder (module docs, "Size"):
-/// `with_history(skip, mode)` encodes, or measures, with the `skip` oldest of
+/// `with_history(skip, max_bytes)` encodes, or measures, with the `skip` oldest of
 /// `history` lines left out, starting from `min_skip`. The snapshot leaving
 /// out the fewest lines that fits `max_bytes`, or `None` if none does.
 ///
-/// Sizes are found by measuring, which paints without keeping the stream,
-/// and only a snapshot known to fit is encoded for real: a hostile state can
-/// paint to hundreds of megabytes, which the supervisor must not hold even
-/// briefly.
+/// A fitting paint retains its blob. Once its stream and cell fixups cannot
+/// fit, it frees their buffers and finishes counting the exact costs needed
+/// to choose the next cut: a hostile state can paint to hundreds of megabytes,
+/// which the supervisor must not hold even briefly.
 ///
 /// `first` may supply the title step's final measurement only when its
 /// content, omitted titles and trimmed mark equal `with_history(min_skip)`.
@@ -871,25 +871,21 @@ fn fit_history(
     history: usize,
     max_bytes: usize,
     mut first: Option<v1::Encoded>,
-    with_history: impl Fn(usize, v1::Mode) -> v1::Encoded,
+    with_history: impl Fn(usize, usize) -> v1::Encoded,
 ) -> Result<Option<Snapshot>, CancelledEncode> {
     let mut skip = min_skip.min(history);
     loop {
         let measured = first
             .take()
-            .unwrap_or_else(|| with_history(skip, v1::Mode::Measure));
+            .unwrap_or_else(|| with_history(skip, max_bytes));
         if measured.cancelled {
             return Err(CancelledEncode);
         }
         let excess = measured.len.saturating_sub(max_bytes);
         if excess == 0 {
-            let encoded = with_history(skip, measured.keep());
-            if encoded.cancelled {
-                return Err(CancelledEncode);
-            }
-            debug_assert_eq!(encoded.blob.len(), measured.len);
+            debug_assert_eq!(measured.blob.len(), measured.len);
             return Ok(Some(Snapshot {
-                blob: encoded.blob,
+                blob: measured.blob,
                 dropped_history_lines: skip,
                 dropped_screens: false,
                 dropped_titles: 0,
@@ -952,11 +948,11 @@ mod cancel_tests {
     /// at the full limit and at a limit that makes the encoder trim history,
     /// cancellation at any check an uncancelled encode takes yields
     /// `SnapshotStopped::Cancelled` with no further checks, so it stopped
-    /// there rather than painting on. A fitting snapshot takes two
-    /// full paints; trimming takes one full measurement, one measurement of
-    /// the retained rows and one paint keeping those rows. These exact counts
-    /// catch a duplicated full measurement independently of timing. A cancel
-    /// that fires only after all looks yields the same blob as `snapshot`.
+    /// there rather than painting on. A fitting snapshot takes one full
+    /// paint; trimming takes one full measurement and one paint keeping the
+    /// retained rows. These exact counts catch a duplicated full measurement
+    /// independently of timing. A cancel that fires only after all looks
+    /// yields the same blob as `snapshot`.
     #[test]
     fn a_cancel_landing_at_any_look_stops_the_encode() {
         let emulator = with_history(500);
@@ -974,10 +970,10 @@ mod cancel_tests {
                     uncancelled.dropped_history_lines > 0,
                     "premise: history is trimmed"
                 );
-                full_paint + 2 * kept_paint
+                full_paint + kept_paint
             } else {
                 assert_eq!(uncancelled.dropped_history_lines, 0);
-                2 * full_paint
+                full_paint
             };
             assert_eq!(looks, expected, "{limit}: exact number of paints");
             assert_eq!(uncancelled.blob, emulator.snapshot(limit).unwrap().blob);
