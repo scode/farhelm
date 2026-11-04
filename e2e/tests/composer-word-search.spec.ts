@@ -38,6 +38,51 @@ type ListedSession = {
   launch?: StoredLaunch | null;
 };
 
+/** Refusals used to blend into the search rows, while red also meant an
+ * automatic permission escalation. Both palettes must distinguish warnings
+ * from ordinary typing hints and retain the bordered Launch alert.
+ */
+for (const appearance of ["dark", "light"] as const) {
+  test(`launcher refusals use warning colors in ${appearance} appearance`, async ({ page }) => {
+    await page.addInitScript((choice) => localStorage.setItem("farhelm.appearance", choice), appearance);
+    await page.goto("/");
+    await expect(page.locator("html")).toHaveAttribute("data-appearance", appearance);
+    await page.locator(".new-session-button").click();
+    const form = page.locator('.create-session-form[role="dialog"]');
+    const search = form.locator('.launch-composer-search input[role="combobox"]');
+    const message = form.locator(".launch-composer-search-message");
+    // Effort still requires a harness when permission words become available
+    // before one, so this rejection remains meaningful across both changes.
+    await search.fill("effort:high");
+    await expect(message).toHaveText("Choose a harness first");
+    await expect(message).toHaveClass(/launch-composer-search-warning/);
+    const warningColor = await form.evaluate((node) => {
+      const probe = document.createElement("span");
+      probe.style.color = "var(--warn-bright)";
+      node.append(probe);
+      const color = getComputedStyle(probe).color;
+      probe.remove();
+      return color;
+    });
+    await expect(message).toHaveCSS("color", warningColor);
+    await search.fill("name:");
+    await expect(message).toHaveText("Type a session name after name:");
+    await expect(message).not.toHaveClass(/launch-composer-search-warning/);
+    await expect(message).not.toHaveCSS("color", warningColor);
+
+    await search.fill("");
+    await expect(search).toBeFocused();
+    await expect(form.locator(".create-session-submit")).toHaveAttribute("aria-disabled", "true");
+    await search.press("Enter");
+    const refusal = form.locator(".launch-composer-refusal-alert");
+    await expect(refusal).toHaveAttribute("role", "alert");
+    await expect(refusal).toContainText("Choose a structured harness before launching");
+    await expect(refusal).toHaveCSS("color", warningColor);
+    await expect(refusal).toHaveCSS("border-top-style", "solid");
+    await expect(refusal.locator(".launch-composer-refusal-icon")).toHaveText("⚠");
+  });
+}
+
 /** Read the release-owned catalog and establish the model/effort premise:
  * a Codex model that offers at least one effort word. */
 async function codexCatalogModel(request: APIRequestContext) {
