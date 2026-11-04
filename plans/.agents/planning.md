@@ -22,9 +22,11 @@ one-to-two sentence summary.
   in product terms per `AGENTS.md`, "Talking to the user". Leave the keys and their order alone.
 - Recheck the bucket's unplanned entries against the skeleton before showing the page. If TODO.md moved, rerun the
   skeleton and refresh the summaries. Use the skill's picker markup, with a stable id mapped to each entry's key, a
-  "plan this" choice and a free-text field for instructions. Write the body fragment as `page.html` in a private page
-  directory inside your scratch directory, and follow the skill for serving it and waiting for submissions. Do not run
-  the legacy picker server.
+  "plan this" choice and a free-text field for instructions. Group entries under their TODO.md subsection headings when
+  present, keeping entries directly under the bucket separate. Unless the maintainer asks otherwise, pre-check "plan
+  this" for every unplanned entry in the Near term bucket's Trivial subsection; the maintainer can uncheck them before
+  submitting. Write the body fragment as `page.html` in a private page directory inside your scratch directory, and
+  follow the skill for serving it and waiting for submissions. Do not run the legacy picker server.
 - When the maintainer submits, run "plan to implement" (`plans/.agents/planning.md`, "Planning: "plan to implement
   <TODO items>"") on exactly the selected entries, mapped back through the saved keys. A free-text instruction for an
   entry also selects it, as the old picker's comment box did; a question or request for elaboration is answered on the
