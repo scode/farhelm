@@ -611,9 +611,14 @@ impl SystemBackend {
     /// long-lived proxy (see the `crate::ssh` module docs). Every caller in
     /// this file goes through here, so no provisioning step can land on the
     /// supervisor connection by accident.
+    ///
+    /// `access` is the target's: a Tensorlake sandbox is provisioned with
+    /// Farhelm's own key, like every other connection to it, and the payload
+    /// uploads and probes inherit that by coming through here too.
     fn ssh_command(
         &self,
         destination: &str,
+        access: crate::ssh::SshAccessKind,
         remote_command: String,
     ) -> anyhow::Result<tokio::process::Command> {
         let mut command = tokio::process::Command::new("ssh");
@@ -621,6 +626,7 @@ impl SystemBackend {
             destination,
             &self.control_dir,
             crate::ssh::SharedConnection::Provisioning,
+            &crate::ssh::SshAccess::resolve(access, &self.control_dir)?,
         )?);
         // ssh concatenates its trailing argv and reparses it remotely. Keep
         // the complete `sh -c` invocation in one shell-quoted string so the
@@ -701,8 +707,11 @@ impl SystemBackend {
                 command.args(["-c", script]);
                 command
             }
-            ProvisioningTarget::Ssh { destination } => self
-                .ssh_command(destination, script.to_string())
+            ProvisioningTarget::Ssh {
+                destination,
+                access,
+            } => self
+                .ssh_command(destination, *access, script.to_string())
                 .map_err(|error| {
                     BackendFailure::new("building the ssh command", error.to_string())
                 })?,
@@ -1002,9 +1011,11 @@ impl SystemBackend {
             }
             ProvisioningTarget::Ssh {
                 destination: ssh_destination,
+                access,
             } => {
                 async {
-                    self.ssh_put(ssh_destination, source, temporary).await?;
+                    self.ssh_put(ssh_destination, *access, source, temporary)
+                        .await?;
                     // Same first-line test as `units::is_managed`, run in the
                     // command that renames so no plan can outlive it.
                     // `head -n 1` for the same reasons the reach check uses
@@ -1074,6 +1085,7 @@ impl SystemBackend {
     ) -> Result<ActionOutcome, BackendFailure> {
         let ProvisioningTarget::Ssh {
             destination: ssh_destination,
+            access,
         } = target
         else {
             return Err(BackendFailure::new(
@@ -1098,7 +1110,8 @@ impl SystemBackend {
         }
         self.remove_temporary(target, temporary).await?;
         let upload = async {
-            self.ssh_put(ssh_destination, source, temporary).await?;
+            self.ssh_put(ssh_destination, *access, source, temporary)
+                .await?;
             self.require_shell(
                 target,
                 &format!(
@@ -1237,6 +1250,7 @@ impl SystemBackend {
     async fn ssh_put(
         &self,
         destination: &str,
+        access: crate::ssh::SshAccessKind,
         source: &Path,
         remote: &Path,
     ) -> Result<(), BackendFailure> {
@@ -1245,7 +1259,7 @@ impl SystemBackend {
             .map_err(|error| BackendFailure::new("reading staged payload size", error.to_string()))?
             .len();
         let mut command = self
-            .ssh_command(destination, upload_script(remote)?)
+            .ssh_command(destination, access, upload_script(remote)?)
             .map_err(|error| {
                 BackendFailure::new("building the payload transfer command", error.to_string())
             })?;
@@ -1352,7 +1366,10 @@ impl SystemBackend {
                 }
                 command
             }
-            ProvisioningTarget::Ssh { destination } => {
+            ProvisioningTarget::Ssh {
+                destination,
+                access,
+            } => {
                 let farhelm = shell_path(&target.probe_farhelm)?;
                 let state = target
                     .probe_state_dir
@@ -1360,9 +1377,10 @@ impl SystemBackend {
                     .map(|path| shell_path(path))
                     .transpose()?;
                 let script = Self::probe_script(&farhelm, state.as_deref());
-                self.ssh_command(destination, script).map_err(|error| {
-                    BackendFailure::new("building the ssh probe", error.to_string())
-                })?
+                self.ssh_command(destination, *access, script)
+                    .map_err(|error| {
+                        BackendFailure::new("building the ssh probe", error.to_string())
+                    })?
             }
         };
         command
@@ -3525,7 +3543,12 @@ mod tests {
         };
         let result = tokio::time::timeout(
             CAPTURE_PIPE_GRACE + Duration::from_secs(10),
-            backend.ssh_put("held.example", &source, &root.path().join("upload")),
+            backend.ssh_put(
+                "held.example",
+                crate::ssh::SshAccessKind::UserConfig,
+                &source,
+                &root.path().join("upload"),
+            ),
         )
         .await;
         // End the holder whatever happened; its pid file is complete once present.

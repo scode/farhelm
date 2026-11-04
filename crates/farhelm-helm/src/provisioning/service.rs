@@ -270,6 +270,12 @@ fn attach_refusal(state: &HostState) -> Option<BackendFailure> {
              one's destination, then press Retry",
             peer_text(identity),
         ),
+        // Not a refusal of the supervisor, but just as final for this run:
+        // nothing is dialed while the sandbox is suspended, so waiting out
+        // the attach would only time out.
+        HostState::Suspended { .. } => "the host's Tensorlake sandbox was suspended during \
+             setup; resume it and run setup again"
+            .to_string(),
         _ => return None,
     };
     Some(BackendFailure::new(sentence, ""))
@@ -428,7 +434,13 @@ impl ProvisioningService {
     }
 
     /// Split one request into probe transport and eventual registry input.
-    fn target(&self, request: &ProbeRequest) -> anyhow::Result<(ProbeTarget, ProbeRegistration)> {
+    /// `access` is how the stored row for an ssh destination is reached, or
+    /// the user's own setup when there is none.
+    fn target(
+        &self,
+        request: &ProbeRequest,
+        access: crate::ssh::SshAccessKind,
+    ) -> anyhow::Result<(ProbeTarget, ProbeRegistration)> {
         match &request.target {
             ProbeDestination::Local => {
                 if request.remote_farhelm.is_some()
@@ -472,6 +484,7 @@ impl ProvisioningService {
                     ProbeTarget {
                         transport: ProvisioningTarget::Ssh {
                             destination: destination.clone(),
+                            access,
                         },
                         probe_farhelm: PathBuf::from(
                             request.remote_farhelm.as_deref().unwrap_or("farhelm"),
@@ -618,11 +631,27 @@ impl ProvisioningService {
         // installed path recorded at registration, not fall back to PATH.
         // A brand-new helm has no such row; the remote probe itself also
         // checks the standard flat install path for that recovery case.
+        // Setting up a known host again is refused while its sandbox is
+        // suspended, before anything dials it (see `suspended_refusal`).
+        if let Some(reason) = stored
+            .as_ref()
+            .and_then(|row| self.suspended_refusal(row.id))
+        {
+            return Err(anyhow::Error::new(ProvisioningRequestError::Refused(
+                reason.to_string(),
+            )));
+        }
+        // A destination this helm knows as a Tensorlake host is reached
+        // with Farhelm's key, whichever form of the request named it.
+        let access = stored
+            .as_ref()
+            .and_then(|row| row.kind.ssh_access())
+            .unwrap_or(crate::ssh::SshAccessKind::UserConfig);
         if let Some(row) = stored {
             request.remote_farhelm = request.remote_farhelm.or(row.remote_farhelm);
             request.remote_state_dir = request.remote_state_dir.or(row.remote_state_dir);
         }
-        let (target, registration) = self.target(&request)?;
+        let (target, registration) = self.target(&request, access)?;
         // An add from the add host dialog is refused before anything
         // contacts the destination when the destination is already a host
         // entry or the alias is already a host's name. Registration checks
@@ -1116,6 +1145,11 @@ impl ProvisioningService {
             .await
             .expect("the provisioning planning semaphore is never closed");
         let row = self.host_row(host).await?;
+        if let Some(reason) = self.suspended_refusal(host) {
+            return Err(anyhow::Error::new(ProvisioningRequestError::Refused(
+                reason.to_string(),
+            )));
+        }
         self.require_update_trusted(host)
             .map_err(anyhow::Error::new)?;
         let original_target = self.probe_target_for_row(&row);
@@ -1369,9 +1403,17 @@ impl ProvisioningService {
     async fn plan_uninstall_owned(&self, host: HostId) -> anyhow::Result<HostPlanResponse> {
         let row = self.host_row(host).await?;
         if !row.kind.panel_uninstalls() {
-            return Err(anyhow::Error::new(ProvisioningRequestError::Refused(
-                LOCAL_UNINSTALL_HANDOFF.to_string(),
-            )));
+            // The refusal names the remedy for this kind: the local row is
+            // removed by `farhelm uninstall` on its machine, a sandbox by
+            // deleting it (which the UI offers through the remove remedy).
+            return Err(anyhow::Error::new(match row.kind {
+                HostKind::Tensorlake => ProvisioningRequestError::RemoveInstead(
+                    super::uninstall_refusal::TENSORLAKE_DELETE_INSTEAD.to_string(),
+                ),
+                HostKind::Local | HostKind::Ssh => {
+                    ProvisioningRequestError::Refused(LOCAL_UNINSTALL_HANDOFF.to_string())
+                }
+            }));
         }
         let _slot = self
             .plan_slots
@@ -1842,13 +1884,19 @@ impl ProvisioningService {
     /// The order is Remove's: the cache-write lock so no cache write
     /// interleaves with the deletion, the row, the helm's memory of the
     /// host, then the actor, and its lock only after the row is gone.
+    ///
+    /// `deleted` is the proof a Tensorlake host's sandbox is gone, without
+    /// which the store refuses to forget such a host
+    /// ([`crate::store::HelmStore::remove_host_row`]); `None` for every
+    /// other kind.
     pub(crate) async fn delete_registered_host(
         &self,
         host: HostId,
         run_task: RunTask,
+        deleted: Option<&crate::tensorlake::hosts::SandboxDeleted>,
     ) -> anyhow::Result<bool> {
         let serialized = self.manager.host_write_lock(host).await;
-        self.store.remove_ssh_host(host).await?;
+        self.store.remove_host_row(host, deleted).await?;
         let task = self.forget_host_memory(host).await;
         if run_task == RunTask::Abort
             && let Some(task) = task
@@ -1919,6 +1967,7 @@ impl ProvisioningService {
             } => {
                 self.require_registration_unchanged(host, registration)
                     .await?;
+                self.require_not_suspended(host)?;
                 let mut observation = self.backend.probe(original_target).await?;
                 let installed_target = ProbeTarget {
                     transport: pending.plan.target.clone(),
@@ -2003,6 +2052,7 @@ impl ProvisioningService {
             } => {
                 self.require_registration_unchanged(host, registration)
                     .await?;
+                self.require_not_suspended(host)?;
                 self.require_update_trusted(host)?;
                 let observation = self.backend.probe(target).await?;
                 let (plan, discovered) = match observation {
@@ -2141,6 +2191,31 @@ impl ProvisioningService {
             ));
         }
         Ok(())
+    }
+
+    /// Why provisioning must not reach `host` now, when it is a Tensorlake
+    /// host whose sandbox the connection manager knows to be suspended.
+    ///
+    /// Every setup, rerun and Update step opens ssh to the host, and the
+    /// connection actor deliberately stops dialing a suspended sandbox: a new
+    /// connection is refused, and one on a surviving shared connection hangs
+    /// until the probe's deadline. Nothing here resumes a sandbox, so the
+    /// answer is to resume it first. Asked before planning probes anything and
+    /// again before a confirmed run does, so a plan made while the sandbox ran
+    /// cannot proceed after it was suspended.
+    fn suspended_refusal(&self, host: HostId) -> Option<&'static str> {
+        matches!(self.manager.state(host), Some(HostState::Suspended { .. })).then_some(
+            "this host's Tensorlake sandbox is suspended, so Farhelm cannot reach it; resume the \
+             sandbox first, then try again",
+        )
+    }
+
+    /// [`Self::suspended_refusal`] as the failure a confirmed run ends with.
+    fn require_not_suspended(&self, host: HostId) -> Result<(), BackendFailure> {
+        match self.suspended_refusal(host) {
+            Some(reason) => Err(BackendFailure::new(reason, "")),
+            None => Ok(()),
+        }
     }
 
     /// UPDATE cannot resolve an identity decision that the connection
@@ -2520,7 +2595,9 @@ impl ProvisioningService {
             // row, which is why the confirming client builds its success
             // notice from the plan it already holds.
             ProvisioningAction::ForgetHost => {
-                self.delete_registered_host(host, RunTask::Detach)
+                // Never a Tensorlake host: uninstall refuses those before
+                // planning, and the store would refuse to forget one anyway.
+                self.delete_registered_host(host, RunTask::Detach, None)
                     .await
                     .map_err(|error| {
                         BackendFailure::new(
@@ -2651,9 +2728,13 @@ impl ProvisioningService {
                 probe_farhelm: self.local_farhelm.clone(),
                 probe_state_dir: Some(self.layout.local_state_dir.clone()),
             },
-            HostKind::Ssh => ProbeTarget {
+            HostKind::Ssh | HostKind::Tensorlake => ProbeTarget {
                 transport: ProvisioningTarget::Ssh {
                     destination: row.destination.clone().expect("ssh row destination"),
+                    access: row
+                        .kind
+                        .ssh_access()
+                        .expect("every remote kind is reached over ssh"),
                 },
                 probe_farhelm: PathBuf::from(row.remote_farhelm.as_deref().unwrap_or("farhelm")),
                 probe_state_dir: row.remote_state_dir.as_deref().map(PathBuf::from),
@@ -2718,7 +2799,9 @@ async fn require_no_running_sessions(
 fn registration_for_row(row: &HostRow) -> anyhow::Result<ProbeRegistration> {
     match row.kind {
         HostKind::Local => Ok(ProbeRegistration::Local),
-        HostKind::Ssh => Ok(ProbeRegistration::Ssh {
+        // A sandbox's row is converged by its destination like any ssh
+        // row's; registration never changes its kind or its binding.
+        HostKind::Ssh | HostKind::Tensorlake => Ok(ProbeRegistration::Ssh {
             destination: row
                 .destination
                 .clone()

@@ -251,6 +251,23 @@ nothing: it says which entry holds the machine, by name, and asks the user to re
 destination and then press Retry. Farhelm never connects two entries to one machine and never resolves this on its own.
 Last-known sessions of a host that is permanently gone are disposed of by removing the host from the registry.
 
+A host that is a Tensorlake sandbox Farhelm created is the exception to two of those rules, because Farhelm owns the
+machine and not only the entry: removing it is not merely forgetting it, and its destination cannot be corrected.
+Removing it deletes the sandbox: Farhelm terminates it, deletes every snapshot taken from it (suspend snapshots outlive
+their sandbox and keep billing), and forgets the entry only after both succeed. A removal Tensorlake refuses, or one
+made without a saved API key, leaves the host listed with the reason, and removing it again finishes the job; there is
+no way to forget such a host while its sandbox may still bill. The hosts panel calls this **Delete sandbox** instead of
+Remove, offers no Uninstall for these hosts, and always asks first with a plain dialog naming the sandbox and saying its
+files and sessions will be gone; `Remove hosts without asking` never skips it. An agent's `farhelm agent host remove` of
+such a host is refused: only the user deletes a sandbox. Before each connection attempt such a host asks Tensorlake
+whether its sandbox is running, and never while it is connected. A sandbox that is suspended, by Tensorlake's idle
+timeout or anything else, shows the host as **Suspended**, a grey state, and Farhelm does not dial it: a new ssh
+connection to a suspended sandbox is refused, and a new request on an old one hangs. Its details say since when, and
+whether Tensorlake suspended it on its own. Farhelm checks again once per re-probe interval and connects by itself when
+the sandbox runs again; it never resumes a sandbox on its own. A sandbox Tensorlake no longer has makes the host
+unreachable with the advice to delete it. When Tensorlake cannot answer at all (no key, an outage), Farhelm dials anyway
+rather than cutting off a sandbox that may be running.
+
 Confirmed 2026-10-10: a host entry is one logical host from the user's point of view. Correcting its destination, or
 adopting a new identity for it, changes the machine or installation behind the entry, not which host it is to the user;
 a user who wants a different host replaces the entry instead. Approvals, settings changes and confirmed operations

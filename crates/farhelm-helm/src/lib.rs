@@ -601,15 +601,19 @@ impl AppState {
     /// live in ONE place — the test harness stands this up too, and a
     /// harness that quietly used a different subscriber cap or its own count
     /// cache would be testing something the product does not do.
+    ///
+    /// `tensorlake` is built by the caller, before the manager: the manager's
+    /// actors ask it about Tensorlake hosts' sandboxes from their first
+    /// attempt, so both must hold the same service.
     fn new(
         manager: Arc<manager::ConnectionManager>,
         store: store::HelmStore,
+        tensorlake: tensorlake::Tensorlake,
         state_dir: PathBuf,
         payload_selection: provisioning::PayloadSelection,
         release_build: bool,
         mode: ServingMode,
     ) -> anyhow::Result<AppState> {
-        let tensorlake = tensorlake::Tensorlake::production(store.clone(), &state_dir)?;
         let provisioning = provisioning::ProvisioningService::production(
             store.clone(),
             Arc::clone(&manager),
@@ -2327,7 +2331,10 @@ async fn serve_with_ready(
     if let Some(path) = args.ensure_hosts.as_deref() {
         ensure::ingest(&store, path).await?;
     }
-    let manager = manager::ConnectionManager::start(
+    // Before the manager: its actors check a Tensorlake host's sandbox
+    // through this service before every dial, from their first attempt on.
+    let tensorlake = tensorlake::Tensorlake::production(store.clone(), &state_dir)?;
+    let manager = manager::ConnectionManager::start_with_sandboxes(
         store.clone(),
         Arc::new(manager::SystemTransport::new(&state_dir)),
         manager::Cadence {
@@ -2336,12 +2343,14 @@ async fn serve_with_ready(
                 .map_or(manager::REFRESH_INTERVAL, std::time::Duration::from_secs),
             ..manager::Cadence::default()
         },
+        Arc::new(tensorlake.clone()),
     )
     .await?;
 
     let mut app = AppState::new(
         manager,
         store,
+        tensorlake,
         state_dir.clone(),
         args.payload_selection(),
         // D13: release payload selection follows this binary's build, not
@@ -2507,6 +2516,8 @@ fn error_kind(e: &anyhow::Error) -> ErrorKind {
             | store::HostStoreError::AliasTaken(_)
             | store::HostStoreError::AlreadyAdded(_)
             | store::HostStoreError::LocalHostImmutable
+            | store::HostStoreError::DestinationManaged
+            | store::HostStoreError::SandboxNotDeleted(_)
             | store::HostStoreError::IdentityMismatch { .. }
             | store::HostStoreError::IdentityClaimed { .. }
             | store::HostStoreError::IdentityClaimedBeforeRegistration { .. }

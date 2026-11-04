@@ -520,10 +520,9 @@ async fn tokens_never_appear_in_replies() {
 /// message naming the recipe and the count, and the other refusals map to
 /// their statuses.
 ///
-/// Why: no host can use a recipe until Tensorlake hosts exist, so the store's
-/// usage check returns zero today and this refusal cannot be reached through
-/// the route yet; the mapping is pinned here so the hosts change only has to
-/// fill in `hosts_using_recipe`.
+/// Why: the route answers what the store refuses, and the in-use refusal
+/// must name how many hosts block the delete (the store's own count is
+/// pinned in `tensorlake::hosts::tests::a_recipe_in_use_cannot_be_deleted`).
 #[farhelm_testtrace::test]
 async fn refusals_map_to_statuses() {
     for (refusal, status) in [

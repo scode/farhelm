@@ -758,6 +758,7 @@ html.host-rail-open .host-rail-footer .app-bar-menu > .btn { flex: 1 1 auto; }
 .host-rail-state.connected { color: var(--ok); }
 .host-rail-state.old-version, .host-rail-state.too-new, .host-rail-state.unreachable { color: var(--warn); }
 .host-rail-state.needs-attention { color: var(--danger-strong); }
+.host-rail-state.suspended { color: var(--fg-1); }
 /* Attention is independent of the connection dot, update badge and running
    ring. Keeping its own corner lets a retry remain visibly busy without
    acknowledging the failure that prompted it. */
@@ -5640,6 +5641,12 @@ a:any-link,
    something that failed. */
 .host-status.unreachable {
   color: var(--warn);
+}
+
+/* Grey: a suspended Tensorlake sandbox is neither failing nor coming back
+   on its own; it waits, unchanged, until someone resumes it. */
+.host-status.suspended {
+  color: var(--fg-1);
 }
 
 /* The red-family case, and the only one that is: skew, both identity

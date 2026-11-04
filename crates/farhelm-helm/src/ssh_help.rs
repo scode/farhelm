@@ -12,7 +12,6 @@ use crate::{
     AppState,
     aggregate::host_display_name,
     ssh::{SharedConnection, manual_master_command},
-    store::HostKind,
 };
 
 /// An optional unregistered destination from the still-open add-host form.
@@ -90,7 +89,7 @@ pub(crate) async fn commands(
     };
     let hosts = rows
         .iter()
-        .filter(|row| row.kind == HostKind::Ssh)
+        .filter(|row| row.kind.offers_manual_ssh_masters())
         .map(|row| {
             for_host(
                 host_display_name(row.kind, row.destination.as_deref(), row.alias.as_deref()),

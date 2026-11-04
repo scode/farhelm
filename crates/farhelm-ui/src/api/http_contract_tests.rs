@@ -162,7 +162,7 @@ fn the_helm_session_list_fixture_decodes_with_every_mirrored_field() {
 fn the_helm_host_list_fixture_decodes_every_phase_as_recognized() {
     let listing: HostListing = serde_json::from_str(HOST_LIST_JSON).unwrap();
     let phases: Vec<&HostPhase> = listing.hosts.iter().map(|h| &h.state).collect();
-    assert_eq!(phases.len(), 10);
+    assert_eq!(phases.len(), 12);
     assert!(
         listing
             .hosts
@@ -288,4 +288,31 @@ fn the_helm_host_list_fixture_decodes_every_phase_as_recognized() {
             refresh: RefreshHealth::Pending,
         }
     );
+    // The two Tensorlake hosts: their sandbox details, and the Suspended
+    // phase with both of its times.
+    let sandbox = &listing.hosts[10];
+    assert_eq!(sandbox.kind, HostKind::Tensorlake);
+    assert_eq!(
+        sandbox.tensorlake,
+        Some(crate::TensorlakeHost {
+            sandbox: "farhelm-host-k7q2-host11-m3x9".into(),
+            recipe: "rust-dev".into(),
+            size: Some(farhelm_proto::tensorlake::recipes::RecipeSize {
+                cpus: 2,
+                memory_gb: 4,
+                disk_gb: 20,
+            }),
+        })
+    );
+    assert!(matches!(phases[10], HostPhase::Connected { .. }));
+    assert_eq!(listing.hosts[11].kind, HostKind::Tensorlake);
+    assert_eq!(
+        *phases[11],
+        HostPhase::Suspended {
+            observed_at: 1_700_000_100_000,
+            suspended_by_farhelm_at: Some(1_700_000_000_000),
+            resume_failed: None,
+        }
+    );
+    assert_eq!(listing.hosts[1].tensorlake, None, "other kinds carry none");
 }

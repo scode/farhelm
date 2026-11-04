@@ -64,7 +64,7 @@ type BackendEvent = { event: string; target: string };
 
 type Host = {
   id: number;
-  kind: "local" | "ssh";
+  kind: "local" | "ssh" | "tensorlake";
   destination: string | null;
   state: Record<string, unknown>;
 };

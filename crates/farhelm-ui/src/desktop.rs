@@ -2153,6 +2153,7 @@ mod tests {
         let host = |kind, state| crate::Host {
             id: 1,
             kind,
+            tensorlake: None,
             color: Default::default(),
             icon: Default::default(),
             destination: None,
@@ -2295,6 +2296,7 @@ mod tests {
         let host = |state| crate::Host {
             id: 1,
             kind: crate::HostKind::Local,
+            tensorlake: None,
             color: Default::default(),
             icon: Default::default(),
             destination: None,

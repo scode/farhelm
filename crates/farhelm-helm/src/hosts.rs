@@ -53,9 +53,14 @@ pub(crate) struct HostView {
     #[serde(skip)]
     pub(crate) entry_uuid: String,
     /// `"local"` for the one reserved row, `"ssh"` for a registered
-    /// destination. The distinction is not cosmetic: it is what tells a
-    /// client which rows offer edit and remove at all.
+    /// destination, `"tensorlake"` for a sandbox Farhelm created. The
+    /// distinction is not cosmetic: it is what tells a client which rows
+    /// offer edit and remove at all, and what removing one does.
     pub(crate) kind: &'static str,
+    /// The sandbox behind a `"tensorlake"` host, for its details. Left out of
+    /// the JSON for every other host, so their shape is unchanged.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) tensorlake: Option<TensorlakeHostView>,
     /// `None` for the local row, always `Some` for an ssh row.
     pub(crate) destination: Option<String>,
     /// The stored optional alias, kept distinct from `name` so clients can
@@ -108,6 +113,26 @@ pub(crate) struct HostView {
     ///
     /// `0` is "never connected".
     pub(crate) incarnation: u64,
+}
+
+/// A Tensorlake host's sandbox as `GET /api/hosts` reports it: its name in
+/// Tensorlake, the recipe it was made from, and the size it was created
+/// with (`None` when the stored size cannot be read).
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub(crate) struct TensorlakeHostView {
+    pub(crate) sandbox: String,
+    pub(crate) recipe: String,
+    pub(crate) size: Option<farhelm_proto::tensorlake::recipes::RecipeSize>,
+}
+
+impl From<&crate::store::TensorlakeBinding> for TensorlakeHostView {
+    fn from(binding: &crate::store::TensorlakeBinding) -> Self {
+        Self {
+            sandbox: binding.sandbox.clone(),
+            recipe: binding.recipe.clone(),
+            size: binding.resources,
+        }
+    }
 }
 
 /// How one host's [`HostState`] crosses the REST boundary.
@@ -191,6 +216,20 @@ pub(crate) enum HostStateView {
     /// this one's destination, then presses Retry.
     #[serde(rename = "duplicate")]
     Duplicate { twin: HostId, identity: String },
+    /// A Tensorlake host whose sandbox Tensorlake reports suspended (or
+    /// failed to resume); nothing is dialed until it runs again. Times are
+    /// unix ms: `observed_at` is when this helm first saw the suspension,
+    /// `suspended_by_farhelm_at` when Farhelm's own Suspend finished (from
+    /// the host row, so it survives a helm restart; `None` when Farhelm did
+    /// not suspend it, which is how the UI tells "suspended from Farhelm"
+    /// from an idle timeout). `resume_failed` is Tensorlake's diagnosis of a
+    /// failed resume.
+    #[serde(rename = "suspended")]
+    Suspended {
+        observed_at: i64,
+        suspended_by_farhelm_at: Option<i64>,
+        resume_failed: Option<String>,
+    },
     /// No actor is running for this row — it retired with its registry row,
     /// or its task panicked. Reported rather than hidden so an operation
     /// refused against it has something honest to name.
@@ -199,7 +238,7 @@ pub(crate) enum HostStateView {
 }
 
 impl HostStateView {
-    /// This state's stable phase label — the same eight strings
+    /// This state's stable phase label — the same nine strings
     /// [`HostState::phase`] produces and the same strings the `#[serde(
     /// rename)]`s above put on the wire.
     ///
@@ -222,6 +261,7 @@ impl HostStateView {
             HostStateView::IdentityMismatch { .. } => "identity-mismatch",
             HostStateView::IdentityUnverified { .. } => "identity-unverified",
             HostStateView::Duplicate { .. } => "duplicate",
+            HostStateView::Suspended { .. } => "suspended",
             HostStateView::Retired { .. } => "retired",
         }
     }
@@ -322,6 +362,16 @@ impl From<&HostState> for HostStateView {
             HostState::Duplicate { twin, identity } => HostStateView::Duplicate {
                 twin: *twin,
                 identity: identity.clone(),
+            },
+            // Farhelm's own suspend time is on the host row, not the
+            // state; `host_views` fills it in.
+            HostState::Suspended {
+                observed_at,
+                resume_failed,
+            } => HostStateView::Suspended {
+                observed_at: *observed_at,
+                suspended_by_farhelm_at: None,
+                resume_failed: resume_failed.clone(),
             },
             HostState::Retired { reason } => HostStateView::Retired {
                 reason: reason.clone(),
@@ -425,7 +475,11 @@ pub(crate) async fn host_views(state: &AppState) -> anyhow::Result<Vec<HostView>
                 kind: match snapshot.kind {
                     HostKind::Local => "local",
                     HostKind::Ssh => "ssh",
+                    HostKind::Tensorlake => "tensorlake",
                 },
+                tensorlake: registry
+                    .and_then(|row| row.tensorlake.as_ref())
+                    .map(TensorlakeHostView::from),
                 name: host_display_name(
                     snapshot.kind,
                     snapshot.destination.as_deref(),
@@ -443,11 +497,32 @@ pub(crate) async fn host_views(state: &AppState) -> anyhow::Result<Vec<HostView>
                     .is_some_and(|row| row.local_links_without_asking),
                 icon: registry.map(|row| row.icon).unwrap_or_default(),
                 color: registry.map(|row| row.color).unwrap_or_default(),
-                state: (&snapshot.state).into(),
+                state: state_view(&snapshot.state, registry),
                 incarnation: snapshot.incarnation,
             }
         })
         .collect())
+}
+
+/// A host's state as the list shows it: the actor's state, with what only
+/// the registry row knows filled in. Today that is one fact, when Farhelm's
+/// own Suspend of a Tensorlake host finished, which the actor never holds
+/// (a helm restart would otherwise lose it).
+fn state_view(state: &HostState, registry: Option<&HostRow>) -> HostStateView {
+    match HostStateView::from(state) {
+        HostStateView::Suspended {
+            observed_at,
+            resume_failed,
+            ..
+        } => HostStateView::Suspended {
+            observed_at,
+            suspended_by_farhelm_at: registry
+                .and_then(|row| row.tensorlake.as_ref())
+                .and_then(|binding| binding.suspended_at),
+            resume_failed,
+        },
+        view => view,
+    }
 }
 
 /// One host's view by id, or a 404-shaped error — the reply every mutation
@@ -1115,6 +1190,12 @@ pub(crate) async fn registry_row(state: &AppState, host: HostId) -> anyhow::Resu
 /// under a fresh host id. Refuses the reserved local row (409) and an
 /// unknown id (404).
 ///
+/// The one exception is a Tensorlake host, whose removal deletes its
+/// sandbox first (see [`forget_host_locked`]). That takes a few API calls,
+/// each bounded, so the answer can take seconds; a failure answers with
+/// Tensorlake's reason (409 without an API key, 503 otherwise) and the host
+/// stays listed.
+///
 /// FAILS CLOSED through an INFALLIBLE teardown rather than a reconcile.
 /// `stop_actor` takes the id this handler already committed and needs no
 /// registry read, so it cannot fail — which matters because the general
@@ -1207,15 +1288,55 @@ fn provision_lock_or_busy(
 /// delete the row and its cached sessions, purge the host's provisioning
 /// memory, and stop its actor, with the provisioning lock the caller took
 /// held throughout and released only once the actor is gone.
+///
+/// A Tensorlake host's sandbox is deleted first (D6), in an order that
+/// keeps the host's own connection out of the way: the connection is held
+/// (no client is routable, no dial runs or starts), then its shared ssh
+/// connections are closed, then the sandbox is terminated and its snapshots
+/// are deleted, and only that proof lets the store forget the row. The hold
+/// lasts until the actor is stopped with the row. A failure leaves the host
+/// listed, releases the hold with a fresh retry, and answers with
+/// Tensorlake's reason; removing again picks up where it stopped.
 async fn forget_host_locked(
     state: &AppState,
     host: HostId,
     provisioning: crate::manager::ProvisionLockGuard,
 ) -> anyhow::Result<()> {
-    let stopped = state
+    let row = registry_row(state, host).await?;
+    let deleted = if row.kind.removal_deletes_machine() {
+        state
+            .manager
+            .hold_connection(host, deleting_sandbox_state())
+            .await;
+        state
+            .manager
+            .transport()
+            .release_shared_connections(&row)
+            .await;
+        match state.tensorlake.delete_sandbox(&row).await {
+            Ok(deleted) => Some(deleted),
+            Err(error) => {
+                state.manager.release_hold(host, true);
+                return Err(error);
+            }
+        }
+    } else {
+        None
+    };
+    let stopped = match state
         .provisioning
-        .delete_registered_host(host, crate::provisioning::RunTask::Abort)
-        .await?;
+        .delete_registered_host(host, crate::provisioning::RunTask::Abort, deleted.as_ref())
+        .await
+    {
+        Ok(stopped) => stopped,
+        Err(error) => {
+            // Only a sandbox host was held; any other is left as it was.
+            if deleted.is_some() {
+                state.manager.release_hold(host, true);
+            }
+            return Err(error);
+        }
+    };
     drop(provisioning);
     tracing::info!(
         host,
@@ -1223,6 +1344,15 @@ async fn forget_host_locked(
         "host removed from the registry and its connection actor stopped"
     );
     Ok(())
+}
+
+/// What a Tensorlake host shows while its removal holds its connection and
+/// deletes its sandbox: not connected, with the reason in the usual place.
+fn deleting_sandbox_state() -> crate::manager::HostState {
+    crate::manager::HostState::Unreachable {
+        cause: crate::manager::UnreachableCause::TransportFailure,
+        last_error: "Farhelm is deleting this host's Tensorlake sandbox".to_string(),
+    }
 }
 
 /// The body of `POST /api/hosts/{id}/adopt`: the identity the user was
@@ -1324,6 +1454,66 @@ pub(crate) async fn retry_host(
 #[cfg(test)]
 mod tests {
     use super::{HostStateView, RefreshView};
+
+    /// Spec: a suspended Tensorlake host's view carries the actor's
+    /// observation time and diagnosis plus the registry row's own suspend
+    /// time (`None` when Farhelm did not suspend it, or with no row); every
+    /// other state converts unchanged.
+    ///
+    /// Why: the UI says "suspended from Farhelm at …" or "Tensorlake
+    /// suspended it" from exactly this field (goal 3.1), and the time lives
+    /// on the row so a helm restart keeps it.
+    #[farhelm_testtrace::test]
+    fn a_suspended_view_takes_farhelms_suspend_time_from_the_row() {
+        use crate::manager::HostState;
+        let suspended = HostState::Suspended {
+            observed_at: 20,
+            resume_failed: Some("restore failed".into()),
+        };
+        let mut row = crate::store::HostRow {
+            id: 2,
+            entry_uuid: "00000000-0000-4000-8000-000000000002".into(),
+            kind: crate::store::HostKind::Tensorlake,
+            destination: Some("sbx@sbx.sandbox.tensorlake.ai".into()),
+            alias: None,
+            remote_farhelm: None,
+            remote_state_dir: None,
+            host_identity: None,
+            cache_truncated: false,
+            yolo_without_asking: true,
+            commands_without_asking: false,
+            links_without_asking: false,
+            local_links_without_asking: false,
+            icon: Default::default(),
+            color: Default::default(),
+            tensorlake: Some(crate::store::TensorlakeBinding {
+                sandbox: "sbx".into(),
+                sandbox_id: None,
+                recipe: "rust".into(),
+                resources: None,
+                suspended_at: Some(10),
+            }),
+        };
+        let expected = |by_farhelm| HostStateView::Suspended {
+            observed_at: 20,
+            suspended_by_farhelm_at: by_farhelm,
+            resume_failed: Some("restore failed".into()),
+        };
+        assert_eq!(
+            super::state_view(&suspended, Some(&row)),
+            expected(Some(10))
+        );
+        assert_eq!(super::state_view(&suspended, None), expected(None));
+        row.tensorlake.as_mut().unwrap().suspended_at = None;
+        assert_eq!(super::state_view(&suspended, Some(&row)), expected(None));
+        let retired = HostState::Retired {
+            reason: "gone".into(),
+        };
+        assert_eq!(
+            super::state_view(&retired, Some(&row)),
+            HostStateView::from(&retired)
+        );
+    }
     use crate::rest_harness::{self, FleetBuilder, Harness, HostScript};
     use axum::http::StatusCode;
     use serde_json::Value;
@@ -1374,6 +1564,11 @@ mod tests {
             HostStateView::Duplicate {
                 twin: 1,
                 identity: "a".to_string(),
+            },
+            HostStateView::Suspended {
+                observed_at: 1,
+                suspended_by_farhelm_at: None,
+                resume_failed: None,
             },
             HostStateView::Retired {
                 reason: "removed".to_string(),

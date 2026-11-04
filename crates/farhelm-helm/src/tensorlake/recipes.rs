@@ -194,14 +194,16 @@ pub(crate) enum Refusal {
 /// transaction so a host cannot start using it between the check and the
 /// delete.
 ///
-/// Always zero for now: no host can use a recipe until Tensorlake hosts
-/// exist. The hosts change wires this to its link from hosts to recipes (the
-/// design suggests a nullable `hosts.tensorlake_recipe` column referencing
-/// `tensorlake_recipes(name)`, which also makes the refusal a schema
-/// invariant). Keeping the check and its refusal in place now means that
-/// change only has to fill in this function.
-fn hosts_using_recipe(_conn: &Connection, _name: &str) -> anyhow::Result<u32> {
-    Ok(0)
+/// A host uses a recipe when its `tensorlake_recipe` column names it (schema
+/// 71). That column is a plain name with no foreign key, so this count is
+/// the whole rule.
+fn hosts_using_recipe(conn: &Connection, name: &str) -> anyhow::Result<u32> {
+    conn.query_row(
+        "SELECT count(*) FROM hosts WHERE tensorlake_recipe = ?1",
+        [name],
+        |row| row.get(0),
+    )
+    .context("counting the hosts that use a Tensorlake recipe")
 }
 
 /// Refuse a reuse source that is a snapshot Farhelm built for a recipe

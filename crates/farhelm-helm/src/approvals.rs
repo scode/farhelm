@@ -425,7 +425,7 @@ pub(crate) async fn ask_with_answer(
             tunnel_available,
         } => {
             *tunnel_available = state.link_opener.is_some()
-                && row.kind == crate::store::HostKind::Ssh
+                && row.kind.is_remote()
                 && crate::tunnels::classify_url(url).is_ok();
             let allowed = if *local_network {
                 row.local_links_without_asking
@@ -716,9 +716,9 @@ pub(crate) async fn answer_approval(
                         && crate::tunnels::classify_url(&url).is_ok()
                         && crate::agent_requests::origin_is_live(&state, origin)
                         && match state.store.list_hosts().await {
-                            Ok(rows) => rows.iter().any(|row| {
-                                row.id == origin.host && row.kind == crate::store::HostKind::Ssh
-                            }),
+                            Ok(rows) => rows
+                                .iter()
+                                .any(|row| row.id == origin.host && row.kind.is_remote()),
                             Err(error) => return http_error(error),
                         }
                 }

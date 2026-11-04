@@ -3,7 +3,9 @@
 //!
 //! Farhelm never speaks ssh itself — it shells out to the user's own
 //! `ssh`, which is the whole point of SPEC.md's transport story (their
-//! config, their keys, their agent, their jump hosts). The config governs
+//! config, their keys, their agent, their jump hosts). A Tensorlake sandbox
+//! is the one host reached with a key Farhelm keeps itself ([`SshAccess`]);
+//! the user's config still applies to it. The config governs
 //! reaching and authenticating to the host; it does not get to forward
 //! anything over Farhelm's connections or replace or wrap Farhelm's remote
 //! command (see [`CONNECTION_OVERRIDES`]). What is left on this side is
@@ -180,6 +182,73 @@ impl SharedConnection {
     }
 }
 
+/// How ssh authenticates to a host and checks its host key, as a plain
+/// choice that can travel in a plan or a registry decision
+/// ([`crate::store::HostKind::ssh_access`]); [`SshAccess::resolve`] turns
+/// it into the files it names.
+///
+/// Serialized into provisioning plans, where an ordinary ssh host omits it
+/// (see `ProvisioningTarget::Ssh`), so plans for existing hosts keep their
+/// shape.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum SshAccessKind {
+    /// The user's own ssh setup: their keys, agent and known hosts.
+    UserConfig,
+    /// Farhelm's own Tensorlake key and known-hosts file, on top of the
+    /// user's config (see [`crate::tensorlake::ssh`]).
+    Tensorlake,
+}
+
+impl SshAccessKind {
+    /// For `skip_serializing_if`: the default needs no mention in a plan.
+    pub(crate) fn is_user_config(&self) -> bool {
+        *self == SshAccessKind::UserConfig
+    }
+}
+
+/// [`SshAccessKind`] with its files resolved: what [`ssh_base_args`] needs
+/// to add the right options.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SshAccess {
+    /// Nothing beyond the overrides every connection gets; the argv is
+    /// byte-for-byte what it was before Tensorlake hosts existed.
+    UserConfig,
+    /// Farhelm's key and known-hosts file for Tensorlake's gateway: the same
+    /// access, and the same option set, the snapshot builder uses
+    /// ([`crate::tensorlake::ssh`]).
+    Tensorlake(crate::tensorlake::ssh::TensorlakeSshAccess),
+}
+
+impl SshAccess {
+    /// Resolve `kind` against the helm's state directory, where Farhelm's
+    /// Tensorlake key and known-hosts file live. Pure: it names the files
+    /// and never creates them, so a dial can never generate a key (only the
+    /// user's Create SSH key in Settings does). Fails only when a relative
+    /// state directory cannot be made absolute.
+    pub(crate) fn resolve(
+        kind: SshAccessKind,
+        state_dir: &std::path::Path,
+    ) -> anyhow::Result<SshAccess> {
+        Ok(match kind {
+            SshAccessKind::UserConfig => SshAccess::UserConfig,
+            SshAccessKind::Tensorlake => SshAccess::Tensorlake(
+                crate::tensorlake::ssh::TensorlakeSshAccess::for_state_dir(state_dir)
+                    .context("locating Farhelm's Tensorlake ssh key")?,
+            ),
+        })
+    }
+
+    /// This access's own `-o` values, placed after the connection options
+    /// and before the option terminator. Empty for [`SshAccess::UserConfig`].
+    fn options(&self) -> anyhow::Result<Vec<String>> {
+        match self {
+            SshAccess::UserConfig => Ok(Vec::new()),
+            SshAccess::Tensorlake(access) => access.options().map_err(anyhow::Error::msg),
+        }
+    }
+}
+
 /// The ssh argv prefix shared by every remote command: the options, the
 /// terminator, and the destination, with `connection` choosing which of the
 /// host's shared connections the command rides.
@@ -210,7 +279,12 @@ pub(crate) fn ssh_base_args(
     dest: &str,
     control_dir: &std::path::Path,
     connection: SharedConnection,
+    access: &SshAccess,
 ) -> anyhow::Result<Vec<String>> {
+    let access_options = access
+        .options()?
+        .into_iter()
+        .flat_map(|option| ["-o".to_string(), option]);
     let Some(control_path) = control_socket(control_dir, connection) else {
         // Too long to bind or unsafe to represent: sharing is an optimization, so ssh
         // runs without it rather than failing every connection. Both
@@ -219,6 +293,7 @@ pub(crate) fn ssh_base_args(
         // trip over) a ControlPath from the user's own ssh config.
         let mut args =
             options_with_overrides(&["BatchMode=yes", "ControlMaster=no", "ControlPath=none"]);
+        args.extend(access_options);
         args.extend(["--".to_string(), dest.to_string()]);
         return Ok(args);
     };
@@ -254,6 +329,7 @@ pub(crate) fn ssh_base_args(
         &control_path,
         "ControlPersist=60",
     ]);
+    args.extend(access_options);
     // See this function's own docs: the terminator precedes the destination
     // so an option-shaped destination can never be read as an option.
     args.extend(["--".to_string(), dest.to_string()]);
@@ -291,15 +367,61 @@ pub(crate) fn ssh_oneshot_args(dest: &str, extra_options: &[String]) -> Vec<Stri
 /// parser: quotes and backslashes escaped, and every `%` doubled, because
 /// those keywords expand percent tokens and a path is never meant to hold
 /// one. Unlike [`ssh_control_path_option`], no trailing token survives.
+/// The one encoder for these options, shared by Tensorlake hosts and the
+/// snapshot builder.
+///
+/// Refuses a path containing `${`, naming it. OpenSSH expands `${NAME}` in
+/// these options even inside config quotes, and has no escape for it: an
+/// unset variable makes ssh exit with "invalid environment variable
+/// expansion", and a set one silently names another file. A path that
+/// cannot be passed literally is therefore an error the user can fix (by
+/// moving the state directory), never an argv that means something else.
+/// [`control_socket`] makes the same call for the ControlPath, where it can
+/// fall back to not sharing; a key file has no such fallback.
 ///
 /// `raw` must already be UTF-8 text; the caller owns that check, as
 /// [`ssh_base_args`] does for the control path.
-pub(crate) fn ssh_config_path_option(keyword: &str, raw: &str) -> String {
-    let escaped = raw
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('%', "%%");
-    format!("{keyword}=\"{escaped}\"")
+pub(crate) fn ssh_config_path_option(keyword: &str, raw: &str) -> Result<String, String> {
+    if raw.contains("${") {
+        return Err(format!(
+            "path {raw} contains \"${{\", which ssh would expand as an environment variable in \
+             its {keyword} option; move Farhelm's state directory (--state-dir) to a path \
+             without it"
+        ));
+    }
+    Ok(format!("{keyword}=\"{}\"", escape_config_path(raw)))
+}
+
+/// The argv that tells `connection`'s shared master for `dest` to exit
+/// (`ssh -O exit`), or `None` when this helm never shares that connection
+/// (see [`control_socket`]), so there is no master to stop.
+///
+/// The same prefix as [`ssh_base_args`] reproduces the same `%C`, which
+/// hashes the resolved host, port and user, so the command reaches exactly
+/// the master the helm's own clients ride. Needed because a master outlives
+/// the sandbox it reaches: once a Tensorlake sandbox is suspended or
+/// deleted, a new session on its old master hangs instead of failing, and
+/// the master would otherwise linger for its 60-second `ControlPersist`
+/// after the last client.
+pub(crate) fn ssh_control_exit_args(
+    dest: &str,
+    control_dir: &std::path::Path,
+    connection: SharedConnection,
+    access: &SshAccess,
+) -> anyhow::Result<Option<Vec<String>>> {
+    if control_socket(control_dir, connection).is_none() {
+        return Ok(None);
+    }
+    let mut args = ssh_base_args(dest, control_dir, connection, access)?;
+    let terminator = args
+        .iter()
+        .rposition(|arg| arg == "--")
+        .expect("ssh_base_args always ends with the terminator and the destination");
+    args.splice(
+        terminator..terminator,
+        ["-O".to_string(), "exit".to_string()],
+    );
+    Ok(Some(args))
 }
 
 /// The ssh argv for reaching a remote supervisor, as a pure function so
@@ -317,10 +439,11 @@ pub(crate) fn ssh_config_path_option(keyword: &str, raw: &str) -> String {
 pub(crate) fn ssh_stdio_args(
     dest: &str,
     control_dir: &std::path::Path,
+    access: &SshAccess,
     remote_farhelm: &str,
     remote_state_dir: Option<&str>,
 ) -> anyhow::Result<Vec<String>> {
-    let mut args = ssh_base_args(dest, control_dir, SharedConnection::Supervisor)?;
+    let mut args = ssh_base_args(dest, control_dir, SharedConnection::Supervisor, access)?;
     args.extend([
         shell_quote(remote_farhelm),
         "internal".to_string(),
@@ -481,11 +604,15 @@ fn ssh_control_path_option(raw: &str) -> String {
     let (prefix, suffix) = raw
         .strip_suffix("%C")
         .map_or((raw, ""), |prefix| (prefix, "%C"));
-    let escaped = prefix
-        .replace('\\', "\\\\")
+    format!("ControlPath=\"{}{suffix}\"", escape_config_path(prefix))
+}
+
+/// Config quoting for a path inside double quotes: backslashes and quotes
+/// escaped for the tokenizer, `%` doubled so percent expansion leaves it.
+fn escape_config_path(raw: &str) -> String {
+    raw.replace('\\', "\\\\")
         .replace('"', "\\\"")
-        .replace('%', "%%");
-    format!("ControlPath=\"{escaped}{suffix}\"")
+        .replace('%', "%%")
 }
 
 #[cfg(test)]
@@ -510,7 +637,8 @@ mod tests {
             for option in ["BatchMode=no", "ControlMaster=yes", "ControlPersist=yes"] {
                 assert!(argv.windows(2).any(|pair| pair == ["-o", option]));
             }
-            let ordinary = super::ssh_base_args(dest, dir, kind).unwrap();
+            let ordinary =
+                super::ssh_base_args(dest, dir, kind, &super::SshAccess::UserConfig).unwrap();
             let ordinary_from_manual = argv[3..]
                 .iter()
                 .map(|arg| match arg.as_str() {
@@ -641,7 +769,14 @@ mod tests {
     #[farhelm_testtrace::test]
     fn ssh_args_quote_a_control_path_containing_spaces() {
         let dir = std::path::Path::new("/home/u/my state");
-        let args = super::ssh_stdio_args("user@host", dir, "farhelm", None).unwrap();
+        let args = super::ssh_stdio_args(
+            "user@host",
+            dir,
+            &super::SshAccess::UserConfig,
+            "farhelm",
+            None,
+        )
+        .unwrap();
         assert!(
             args.contains(&"ControlPath=\"/home/u/my state/%C\"".to_string()),
             "ControlPath must be quoted for ssh's own parser: {args:?}"
@@ -655,7 +790,14 @@ mod tests {
     #[farhelm_testtrace::test]
     fn ssh_args_escape_control_path_config_syntax() {
         let dir = std::path::Path::new("/home/u/%d/\"quoted\"/back\\slash");
-        let args = super::ssh_stdio_args("user@host", dir, "farhelm", None).unwrap();
+        let args = super::ssh_stdio_args(
+            "user@host",
+            dir,
+            &super::SshAccess::UserConfig,
+            "farhelm",
+            None,
+        )
+        .unwrap();
         assert!(
             args.contains(
                 &"ControlPath=\"/home/u/%%d/\\\"quoted\\\"/back\\\\slash/%C\"".to_string()
@@ -703,7 +845,13 @@ mod tests {
 
         let deep = std::path::PathBuf::from(format!("/{}", "d".repeat(199)));
         for connection in [SharedConnection::Supervisor, SharedConnection::Provisioning] {
-            let args = super::ssh_base_args("user@host", &deep, connection).unwrap();
+            let args = super::ssh_base_args(
+                "user@host",
+                &deep,
+                connection,
+                &super::SshAccess::UserConfig,
+            )
+            .unwrap();
             assert!(args.contains(&"ControlMaster=no".to_string()), "{args:?}");
             assert!(args.contains(&"ControlPath=none".to_string()), "{args:?}");
             assert!(
@@ -720,7 +868,9 @@ mod tests {
     fn literal_environment_references_disable_connection_sharing() {
         let path = std::path::Path::new("/state/${FARHELM_SOCKET}");
         for connection in [SharedConnection::Supervisor, SharedConnection::Provisioning] {
-            let args = super::ssh_base_args("user@host", path, connection).unwrap();
+            let args =
+                super::ssh_base_args("user@host", path, connection, &super::SshAccess::UserConfig)
+                    .unwrap();
             assert!(args.contains(&"ControlMaster=no".to_string()), "{args:?}");
             assert!(args.contains(&"ControlPath=none".to_string()), "{args:?}");
             assert!(!args.iter().any(|arg| arg.contains("${")), "{args:?}");
@@ -757,10 +907,20 @@ mod tests {
     #[farhelm_testtrace::test]
     fn the_supervisor_connection_and_provisioning_use_different_sockets() {
         let dir = std::path::Path::new("/home/u/%d/\"quoted\"/state");
-        let supervisor =
-            super::ssh_base_args("user@host", dir, SharedConnection::Supervisor).unwrap();
-        let provisioning =
-            super::ssh_base_args("user@host", dir, SharedConnection::Provisioning).unwrap();
+        let supervisor = super::ssh_base_args(
+            "user@host",
+            dir,
+            SharedConnection::Supervisor,
+            &super::SshAccess::UserConfig,
+        )
+        .unwrap();
+        let provisioning = super::ssh_base_args(
+            "user@host",
+            dir,
+            SharedConnection::Provisioning,
+            &super::SshAccess::UserConfig,
+        )
+        .unwrap();
         assert!(
             supervisor.contains(&"ControlPath=\"/home/u/%%d/\\\"quoted\\\"/state/%C\"".to_string()),
             "{supervisor:?}"
@@ -797,8 +957,24 @@ mod tests {
         for dir in [std::path::Path::new("/state"), deep.as_path()] {
             let hostile = "-oProxyCommand=touch /tmp/pwned";
             assert_eq!(
-                mask(super::ssh_base_args(hostile, dir, SharedConnection::Supervisor).unwrap()),
-                mask(super::ssh_base_args(hostile, dir, SharedConnection::Provisioning).unwrap()),
+                mask(
+                    super::ssh_base_args(
+                        hostile,
+                        dir,
+                        SharedConnection::Supervisor,
+                        &super::SshAccess::UserConfig
+                    )
+                    .unwrap()
+                ),
+                mask(
+                    super::ssh_base_args(
+                        hostile,
+                        dir,
+                        SharedConnection::Provisioning,
+                        &super::SshAccess::UserConfig
+                    )
+                    .unwrap()
+                ),
             );
         }
     }
@@ -863,11 +1039,17 @@ mod tests {
             "user@host",
             std::path::Path::new("/state"),
             SharedConnection::Supervisor,
+            &super::SshAccess::UserConfig,
         )
         .unwrap();
         let deep = std::path::PathBuf::from(format!("/{}", "d".repeat(199)));
-        let unshared =
-            super::ssh_base_args("user@host", &deep, SharedConnection::Supervisor).unwrap();
+        let unshared = super::ssh_base_args(
+            "user@host",
+            &deep,
+            SharedConnection::Supervisor,
+            &super::SshAccess::UserConfig,
+        )
+        .unwrap();
         assert!(shared.iter().any(|arg| arg == "ControlPersist=60"));
         assert!(unshared.iter().any(|arg| arg == "ControlPath=none"));
         for args in [shared, unshared] {
@@ -918,6 +1100,7 @@ mod tests {
         let args = super::ssh_stdio_args(
             hostile,
             std::path::Path::new("/state"),
+            &super::SshAccess::UserConfig,
             "farhelm",
             Some("/remote/state"),
         )
@@ -954,6 +1137,7 @@ mod tests {
         let args = super::ssh_stdio_args(
             "user@host",
             std::path::Path::new("/state"),
+            &super::SshAccess::UserConfig,
             "/opt/far helm's/{a,b}/$bin",
             None,
         )
@@ -979,6 +1163,7 @@ mod tests {
         let args = super::ssh_stdio_args(
             "user@host",
             std::path::Path::new("/state"),
+            &super::SshAccess::UserConfig,
             "farhelm",
             Some("/home/u/my state/farhelm"),
         )
@@ -1014,7 +1199,14 @@ mod tests {
         use std::os::unix::ffi::OsStrExt;
 
         let non_utf8 = std::path::Path::new(OsStr::from_bytes(b"/home/u/\xffstate"));
-        let err = super::ssh_stdio_args("user@host", non_utf8, "farhelm", None).unwrap_err();
+        let err = super::ssh_stdio_args(
+            "user@host",
+            non_utf8,
+            &super::SshAccess::UserConfig,
+            "farhelm",
+            None,
+        )
+        .unwrap_err();
         let rendered = format!("{err:#}");
         assert!(
             rendered.contains(&non_utf8.to_string_lossy().into_owned()),
@@ -1065,8 +1257,166 @@ mod tests {
     #[farhelm_testtrace::test]
     fn path_options_escape_quotes_backslashes_and_every_percent() {
         assert_eq!(
-            super::ssh_config_path_option("IdentityFile", r#"/a b/"q"\x/%d/%C"#),
+            super::ssh_config_path_option("IdentityFile", r#"/a b/"q"\x/%d/%C"#).unwrap(),
             r#"IdentityFile="/a b/\"q\"\\x/%%d/%%C""#
+        );
+    }
+
+    /// The access options a Tensorlake connection must carry, as ssh will
+    /// read them back: the config-quoted value of every `-o` pair.
+    fn option_values(args: &[String]) -> Vec<&str> {
+        args.windows(2)
+            .filter(|pair| pair[0] == "-o")
+            .map(|pair| pair[1].as_str())
+            .collect()
+    }
+
+    /// Why: a Tensorlake host is reached only with Farhelm's own key and
+    /// known-hosts file (D3, P6); a missing option would offer the user's
+    /// keys first (which the gateway refuses outright) or trust the gateway
+    /// through the user's `~/.ssh`. Every ordinary ssh host must keep its
+    /// argv byte for byte.
+    ///
+    /// Spec: the Tensorlake argv is the user-config argv with exactly the
+    /// shared Tensorlake access options (no builder log level) inserted before the option terminator, in both
+    /// shared and unshared shapes, with both paths config-quoted (spaces,
+    /// quotes and `%` survive); the user-config argv has none of them.
+    #[farhelm_testtrace::test]
+    fn tensorlake_access_adds_its_options_before_the_terminator() {
+        let state = std::path::Path::new("/state dir/50%");
+        let access = super::SshAccess::resolve(super::SshAccessKind::Tensorlake, state).unwrap();
+        let super::SshAccess::Tensorlake(crate::tensorlake::ssh::TensorlakeSshAccess {
+            identity_file,
+            known_hosts,
+        }) = &access
+        else {
+            panic!("a Tensorlake access names its files");
+        };
+        assert_eq!(
+            identity_file,
+            std::path::Path::new("/state dir/50%/tensorlake/ssh-key/id_ed25519")
+        );
+        assert_eq!(
+            known_hosts,
+            std::path::Path::new("/state dir/50%/tensorlake/known_hosts")
+        );
+        let expected = [
+            r#"IdentityFile="/state dir/50%%/tensorlake/ssh-key/id_ed25519""#,
+            "IdentitiesOnly=yes",
+            r#"UserKnownHostsFile="/state dir/50%%/tensorlake/known_hosts""#,
+            "GlobalKnownHostsFile=/dev/null",
+            "HostKeyAlias=sandbox.tensorlake.ai",
+            "StrictHostKeyChecking=accept-new",
+            "UpdateHostKeys=no",
+            "ServerAliveInterval=30",
+            "ServerAliveCountMax=3",
+        ];
+        let deep = std::path::PathBuf::from(format!("/{}", "d".repeat(199)));
+        for dir in [std::path::Path::new("/state"), deep.as_path()] {
+            for connection in [SharedConnection::Supervisor, SharedConnection::Provisioning] {
+                let plain = super::ssh_base_args(
+                    "sbx@sbx.sandbox.tensorlake.ai",
+                    dir,
+                    connection,
+                    &super::SshAccess::UserConfig,
+                )
+                .unwrap();
+                let sandbox =
+                    super::ssh_base_args("sbx@sbx.sandbox.tensorlake.ai", dir, connection, &access)
+                        .unwrap();
+                let terminator = plain.len() - 2;
+                assert_eq!(plain[terminator], "--");
+                let mut inserted = plain[..terminator].to_vec();
+                for option in expected {
+                    inserted.extend(["-o".to_string(), option.to_string()]);
+                }
+                inserted.extend(plain[terminator..].iter().cloned());
+                assert_eq!(sandbox, inserted, "{dir:?} {connection:?}");
+                assert!(
+                    !option_values(&plain)
+                        .iter()
+                        .any(|value| expected.contains(value)),
+                    "the user-config argv carries no Tensorlake option"
+                );
+            }
+        }
+    }
+
+    /// Why: OpenSSH expands `${NAME}` in `IdentityFile` and
+    /// `UserKnownHostsFile` even inside config quotes, with no escape, so a
+    /// state directory spelled that way would make every Tensorlake dial
+    /// fail or, worse, read another known-hosts file.
+    ///
+    /// Spec: a Tensorlake access under a state directory containing `${`
+    /// refuses to build any argv, base or `-O exit`, with an error naming the
+    /// path and the fix; the same directory still builds the user-config argv
+    /// (whose ControlPath falls back to no sharing), and a `$` without a
+    /// brace is passed through literally.
+    #[farhelm_testtrace::test]
+    fn tensorlake_access_refuses_a_path_ssh_would_expand() {
+        let state = std::path::Path::new("/state/${FARHELM_LITERAL}");
+        let access = super::SshAccess::resolve(super::SshAccessKind::Tensorlake, state).unwrap();
+        for connection in [SharedConnection::Supervisor, SharedConnection::Provisioning] {
+            let error = super::ssh_base_args("sbx@sbx", state, connection, &access)
+                .expect_err("a ${ path is never handed to ssh");
+            let message = format!("{error:#}");
+            assert!(
+                message.contains("/state/${FARHELM_LITERAL}/tensorlake"),
+                "{message}"
+            );
+            assert!(message.contains("--state-dir"), "{message}");
+            assert!(
+                super::ssh_control_exit_args("sbx@sbx", state, connection, &access).is_err()
+                    || super::control_socket(state, connection).is_none()
+            );
+            assert!(
+                super::ssh_base_args("sbx@sbx", state, connection, &super::SshAccess::UserConfig)
+                    .is_ok()
+            );
+        }
+        let dollar = std::path::Path::new("/state/$HOME-literal");
+        let access = super::SshAccess::resolve(super::SshAccessKind::Tensorlake, dollar).unwrap();
+        let args =
+            super::ssh_base_args("sbx@sbx", dollar, SharedConnection::Supervisor, &access).unwrap();
+        assert!(
+            args.iter()
+                .any(|arg| arg
+                    == r#"IdentityFile="/state/$HOME-literal/tensorlake/ssh-key/id_ed25519""#),
+            "{args:?}"
+        );
+    }
+
+    /// Why: a shared master outlives a sandbox's suspension, and a session
+    /// on it then hangs; releasing it only helps if `-O exit` reaches the
+    /// very socket the helm's clients use.
+    ///
+    /// Spec: the exit argv is the base argv (same options, so the same
+    /// `ControlPath` and `%C`) with `-O exit` just before the terminator, for
+    /// each connection; with no shareable socket there is nothing to stop
+    /// and no argv.
+    #[farhelm_testtrace::test]
+    fn control_exit_targets_the_shared_socket() {
+        let dir = std::path::Path::new("/state");
+        let access = super::SshAccess::resolve(super::SshAccessKind::Tensorlake, dir).unwrap();
+        for connection in [SharedConnection::Supervisor, SharedConnection::Provisioning] {
+            let base = super::ssh_base_args("dest", dir, connection, &access).unwrap();
+            let exit = super::ssh_control_exit_args("dest", dir, connection, &access)
+                .unwrap()
+                .expect("a shared socket fits");
+            let terminator = base.len() - 2;
+            assert_eq!(&exit[..terminator], &base[..terminator]);
+            assert_eq!(&exit[terminator..], ["-O", "exit", "--", "dest"]);
+        }
+        let deep = std::path::PathBuf::from(format!("/{}", "d".repeat(199)));
+        assert_eq!(
+            super::ssh_control_exit_args(
+                "dest",
+                &deep,
+                SharedConnection::Supervisor,
+                &super::SshAccess::UserConfig
+            )
+            .unwrap(),
+            None
         );
     }
 }

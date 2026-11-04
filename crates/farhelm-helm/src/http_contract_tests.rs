@@ -119,12 +119,13 @@ fn host_list_body() -> serde_json::Value {
         id,
         entry_uuid: "11111111-1111-4111-8111-111111111111".to_string(),
         kind,
-        destination: (kind == "ssh").then(|| format!("user@host{id}")),
-        alias: (kind == "ssh").then(|| format!("alias{id}")),
+        tensorlake: None,
+        destination: (kind != "local").then(|| format!("user@host{id}")),
+        alias: (kind != "local").then(|| format!("alias{id}")),
         name: format!("host{id}"),
         identity: Some(format!("identity{id}")),
-        remote_farhelm: (kind == "ssh").then(|| "~/.local/bin/farhelm".to_string()),
-        remote_state_dir: (kind == "ssh").then(|| "~/.local/state/farhelm".to_string()),
+        remote_farhelm: (kind != "local").then(|| "~/.local/bin/farhelm".to_string()),
+        remote_state_dir: (kind != "local").then(|| "~/.local/state/farhelm".to_string()),
         yolo_without_asking: false,
         commands_without_asking: false,
         links_without_asking: false,
@@ -228,10 +229,51 @@ fn host_list_body() -> serde_json::Value {
                 refresh: RefreshView::Pending,
             },
         ),
+        // A Tensorlake host carries its sandbox, recipe and size; the other
+        // kinds leave `tensorlake` out entirely.
+        HostView {
+            tensorlake: Some(tensorlake_view(11)),
+            ..host(
+                11,
+                "tensorlake",
+                HostStateView::Connected {
+                    identity: Some("identity11".to_string()),
+                    build_version: "0.16.0".to_string(),
+                    old_version: false,
+                    newer_version: false,
+                    refresh: RefreshView::Ok { sessions: 1 },
+                },
+            )
+        },
+        HostView {
+            tensorlake: Some(tensorlake_view(12)),
+            ..host(
+                12,
+                "tensorlake",
+                HostStateView::Suspended {
+                    observed_at: 1_700_000_100_000,
+                    suspended_by_farhelm_at: Some(1_700_000_000_000),
+                    resume_failed: None,
+                },
+            )
+        },
     ];
     // The route builds its envelope with `json!` rather than a struct
     // (`hosts::list_hosts`); this is the same envelope.
     serde_json::json!({ "hosts": hosts })
+}
+
+/// The sandbox view of contract host `id`.
+fn tensorlake_view(id: i64) -> crate::hosts::TensorlakeHostView {
+    crate::hosts::TensorlakeHostView {
+        sandbox: format!("farhelm-host-k7q2-host{id}-m3x9"),
+        recipe: "rust-dev".to_string(),
+        size: Some(farhelm_proto::tensorlake::recipes::RecipeSize {
+            cpus: 2,
+            memory_gb: 4,
+            disk_gb: 20,
+        }),
+    }
 }
 
 /// Parse a fixture, naming the file on failure so a hand edit that broke the

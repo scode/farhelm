@@ -71,6 +71,22 @@ pub trait HostTransport: Send + Sync + 'static {
         &'a self,
         host: &'a HostRow,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<TransportConnection>> + Send + 'a>>;
+
+    /// Close the shared ssh connections this transport keeps to `host`
+    /// (both masters, see [`crate::ssh::SharedConnection`]), best effort and
+    /// bounded. Called when a Tensorlake sandbox is found suspended and
+    /// before one is deleted: a master outlives its sandbox's suspension,
+    /// and a new session on it hangs rather than failing.
+    ///
+    /// The default does nothing, which is right for every transport that
+    /// keeps no shared connections (the scripted test peers).
+    fn release_shared_connections<'a>(
+        &'a self,
+        host: &'a HostRow,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        let _ = host;
+        Box::pin(std::future::ready(()))
+    }
 }
 
 /// The production transport: unix socket for the reserved local row, the
@@ -117,6 +133,18 @@ impl SystemTransport {
             ssh_program: ssh_program.into(),
         }
     }
+
+    /// How ssh authenticates to `host`, resolved against this helm's state
+    /// directory. The local row never reaches here; anything without an
+    /// ssh access choice gets the user's own setup.
+    fn access(&self, host: &HostRow) -> anyhow::Result<crate::ssh::SshAccess> {
+        crate::ssh::SshAccess::resolve(
+            host.kind
+                .ssh_access()
+                .unwrap_or(crate::ssh::SshAccessKind::UserConfig),
+            &self.state_dir,
+        )
+    }
 }
 
 /// Marker attached to a local-row dial that failed because nothing is
@@ -148,16 +176,20 @@ impl HostTransport for SystemTransport {
                         Box::new(w) as Box<dyn AsyncWrite + Send + Unpin>,
                     )))
                 }
-                HostKind::Ssh => {
+                // A sandbox is an ssh host reached with Farhelm's own key;
+                // the kind's access choice is the only difference here.
+                HostKind::Ssh | HostKind::Tensorlake => {
                     let dest = host.destination.as_deref().context(
                         "an ssh registry row has no destination; the schema's CHECK constraint \
                          should have made this impossible",
                     )?;
+                    let access = self.access(host)?;
 
                     let mut cmd = tokio::process::Command::new(&self.ssh_program);
                     cmd.args(crate::ssh::ssh_stdio_args(
                         dest,
                         &self.state_dir,
+                        &access,
                         host.remote_farhelm.as_deref().unwrap_or("farhelm"),
                         host.remote_state_dir.as_deref(),
                     )?);
@@ -188,7 +220,80 @@ impl HostTransport for SystemTransport {
             }
         })
     }
+
+    /// `ssh -O exit` on both of the host's masters, one after the other,
+    /// each bounded by [`RELEASE_TIMEOUT`]. A host without a master (none was
+    /// ever opened, or the helm never shares connections there) makes ssh
+    /// exit non-zero, which is logged at debug level and otherwise ignored:
+    /// the goal is that no master remains, and none does.
+    fn release_shared_connections<'a>(
+        &'a self,
+        host: &'a HostRow,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(async move {
+            let Some(dest) = host.destination.as_deref() else {
+                return;
+            };
+            if host.kind.ssh_access().is_none() {
+                return;
+            }
+            let access = match self.access(host) {
+                Ok(access) => access,
+                Err(error) => {
+                    warn!(host = host.id, error = %format!("{error:#}"), "could not build the ssh -O exit command");
+                    return;
+                }
+            };
+            for connection in [
+                crate::ssh::SharedConnection::Supervisor,
+                crate::ssh::SharedConnection::Provisioning,
+            ] {
+                let args = match crate::ssh::ssh_control_exit_args(
+                    dest,
+                    &self.state_dir,
+                    connection,
+                    &access,
+                ) {
+                    Ok(Some(args)) => args,
+                    Ok(None) => continue,
+                    Err(error) => {
+                        warn!(host = host.id, %error, "could not build the ssh -O exit command");
+                        continue;
+                    }
+                };
+                let output = tokio::process::Command::new(&self.ssh_program)
+                    .args(args)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::piped())
+                    .kill_on_drop(true)
+                    .output();
+                match tokio::time::timeout(RELEASE_TIMEOUT, output).await {
+                    Ok(Ok(output)) => tracing::debug!(
+                        host = host.id,
+                        ?connection,
+                        status = %output.status,
+                        stderr = %String::from_utf8_lossy(&output.stderr).trim(),
+                        "asked a shared ssh connection to exit"
+                    ),
+                    Ok(Err(error)) => {
+                        warn!(host = host.id, ?connection, %error, "could not run ssh -O exit")
+                    }
+                    Err(_) => warn!(
+                        host = host.id,
+                        ?connection,
+                        "ssh -O exit did not finish within {RELEASE_TIMEOUT:?}"
+                    ),
+                }
+            }
+        })
+    }
 }
+
+/// How long one `ssh -O exit` may take. It only talks to a local socket, so
+/// anything near this bound means a wedged master; the caller goes on
+/// without it rather than holding up a suspension or a removal.
+const RELEASE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Keep the process alive through either an active reader or failure diagnosis.
 ///
@@ -763,6 +868,7 @@ mod tests {
             local_links_without_asking: false,
             icon: farhelm_proto::host_appearance::HostIcon::default(),
             color: farhelm_proto::host_appearance::HostColor::default(),
+            tensorlake: None,
         }
     }
 
@@ -930,5 +1036,105 @@ mod tests {
             "the open drainer was aborted"
         );
         drop(held_open);
+    }
+
+    /// [`ssh_row`] as a Tensorlake host: the same row with a sandbox bound.
+    fn tensorlake_row() -> HostRow {
+        HostRow {
+            kind: HostKind::Tensorlake,
+            destination: Some("sbx@sbx.sandbox.tensorlake.ai".into()),
+            tensorlake: Some(crate::store::TensorlakeBinding {
+                sandbox: "sbx".into(),
+                sandbox_id: Some("sbx-1".into()),
+                recipe: "rust".into(),
+                resources: None,
+                suspended_at: None,
+            }),
+            ..ssh_row()
+        }
+    }
+
+    /// Why: the transport is where a row's kind becomes an argv; a
+    /// Tensorlake host dialed with the user's own ssh setup would offer the
+    /// wrong key and never connect (D3).
+    ///
+    /// Spec: dialing a Tensorlake row runs ssh with Farhelm's key file under
+    /// the helm's state directory and `IdentitiesOnly=yes`; an ordinary ssh
+    /// row's argv names neither. The stand-in ssh prints its argv on stdout,
+    /// which the connection's reader returns.
+    #[farhelm_testtrace::test]
+    async fn a_tensorlake_row_is_dialed_with_farhelms_key() {
+        let (directory, program) = fake_ssh("printf '%s\\n' \"$@\"");
+        let transport = SystemTransport::with_ssh_program(directory.path(), program);
+        let argv = |row: HostRow| {
+            let transport = &transport;
+            async move {
+                let connection = transport.connect(&row).await.unwrap();
+                let (mut reader, _writer) = connection.io;
+                let mut out = String::new();
+                reader.read_to_string(&mut out).await.unwrap();
+                out
+            }
+        };
+        let key = directory
+            .path()
+            .join("tensorlake/ssh-key/id_ed25519")
+            .display()
+            .to_string();
+        let sandbox = argv(tensorlake_row()).await;
+        assert!(
+            sandbox.contains(&format!("IdentityFile=\"{key}\"")),
+            "{sandbox}"
+        );
+        assert!(
+            sandbox.lines().any(|line| line == "IdentitiesOnly=yes"),
+            "{sandbox}"
+        );
+        let plain = argv(ssh_row()).await;
+        assert!(!plain.contains("IdentityFile"), "{plain}");
+        assert!(!plain.contains("IdentitiesOnly"), "{plain}");
+    }
+
+    /// Why: a suspended or deleted sandbox's shared masters must go, or the
+    /// next session on them hangs (P7); the release has to reach both of the
+    /// host's masters with the argv that names their sockets.
+    ///
+    /// Spec: releasing a Tensorlake row runs `ssh ... -O exit -- <dest>`
+    /// twice, once per shared connection (the supervisor's `%C` and
+    /// provisioning's `p%C` sockets), each with Farhelm's key options, and
+    /// returns even though the stand-in ssh fails as it would with no master
+    /// running.
+    #[farhelm_testtrace::test]
+    async fn releasing_a_sandbox_exits_both_shared_masters() {
+        let log = tempfile::tempdir().unwrap();
+        let log_path = log.path().join("argv");
+        let (directory, program) = fake_ssh(&format!(
+            "printf '%s\\n' \"$@\" >> '{}'\nprintf 'END\\n' >> '{}'\nexit 255",
+            log_path.display(),
+            log_path.display()
+        ));
+        let transport = SystemTransport::with_ssh_program(directory.path(), program);
+        transport
+            .release_shared_connections(&tensorlake_row())
+            .await;
+        let logged = std::fs::read_to_string(&log_path).unwrap();
+        let runs: Vec<Vec<&str>> = logged
+            .split("END\n")
+            .filter(|run| !run.is_empty())
+            .map(|run| run.lines().collect())
+            .collect();
+        assert_eq!(runs.len(), 2, "{logged}");
+        let state = directory.path().display().to_string();
+        for (run, socket) in runs.iter().zip(["%C", "p%C"]) {
+            assert_eq!(
+                &run[run.len() - 4..],
+                ["-O", "exit", "--", "sbx@sbx.sandbox.tensorlake.ai"]
+            );
+            assert!(
+                run.contains(&format!("ControlPath=\"{state}/{socket}\"").as_str()),
+                "{run:?}"
+            );
+            assert!(run.contains(&"IdentitiesOnly=yes"), "{run:?}");
+        }
     }
 }

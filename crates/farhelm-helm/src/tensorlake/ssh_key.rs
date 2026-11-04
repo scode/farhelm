@@ -41,6 +41,19 @@ const TEMP_PREFIX: &str = ".ssh-key.tmp-";
 /// bound only stops a wedged process from holding the generation lock.
 const KEYGEN_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Where the key pair lives under the helm's Tensorlake directory.
+fn key_dir(tensorlake_dir: &Path) -> PathBuf {
+    tensorlake_dir.join(KEY_DIR)
+}
+
+/// The private key's path under `tensorlake_dir`, whether or not it exists:
+/// what ssh is pointed at for a Tensorlake host. Pure, so that dialing a host
+/// can never generate a key; only the user's explicit request does
+/// ([`SshKeyStore::ensure`]).
+pub(crate) fn private_key_path(tensorlake_dir: &Path) -> PathBuf {
+    key_dir(tensorlake_dir).join(PRIVATE_KEY)
+}
+
 /// A ready key pair on disk.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SshKey {
@@ -98,7 +111,7 @@ impl SshKeyStore {
     }
 
     fn key_dir(&self) -> PathBuf {
-        self.tensorlake_dir.join(KEY_DIR)
+        key_dir(&self.tensorlake_dir)
     }
 
     /// The existing pair, `None` when there is none yet. Never creates one. A key directory
@@ -111,7 +124,7 @@ impl SshKeyStore {
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(_) => return Err(format!("Farhelm could not read {}", dir.display())),
         }
-        let private_key_path = dir.join(PRIVATE_KEY);
+        let private_key_path = private_key_path(&self.tensorlake_dir);
         let public_key_path = dir.join(PUBLIC_KEY);
         let unreadable = || {
             format!(

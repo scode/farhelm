@@ -134,7 +134,7 @@ pub(crate) fn script_argv(
     sandbox: &str,
     script: &str,
 ) -> Result<Vec<String>, String> {
-    let mut argv = crate::ssh::ssh_oneshot_args(&destination(sandbox), &access.options()?);
+    let mut argv = crate::ssh::ssh_oneshot_args(&destination(sandbox), &access.oneshot_options()?);
     argv.push(format!("sh -c {}", crate::ssh::shell_quote(script)));
     Ok(argv)
 }
