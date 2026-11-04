@@ -478,13 +478,13 @@ pub(crate) fn LaunchControls(
                         }
                         if harness.is_none_or(|harness| harness.offers_permission(LaunchPermission::Guarded)) {
                             span { class: "visually-hidden", id: "{guarded_help_id}",
-                                {harness.map(|harness| launch_composer::permission_help(harness, Some(LaunchPermission::Guarded))).unwrap_or_else(|| "Guarded: choose an agent to see its automatic safety mode".to_string())}
+                                {launch_composer::guarded_permission_help(harness)}
                             }
                             button {
                                 r#type: "button",
                                 class: if permissions == Some(LaunchPermission::Guarded)
                                     || (permissions.is_none() && (harness.is_none() || omitted_permission == Some(LaunchPermission::Guarded))) { "selected" } else { "" },
-                                "data-tooltip": harness.map(|harness| launch_composer::permission_help(harness, Some(LaunchPermission::Guarded))).unwrap_or_else(|| "Guarded: choose an agent to see its automatic safety mode".to_string()),
+                                "data-tooltip": launch_composer::guarded_permission_help(harness),
                                 "data-tooltip-paragraphs": "true",
                                 aria_describedby: "{guarded_help_id}",
                                 aria_pressed: permissions == Some(LaunchPermission::Guarded)

@@ -499,7 +499,7 @@ fn note_completed_permission_switch(
     if !automatic || before.tab != LaunchTab::Agent || current.tab() != LaunchTab::Agent {
         return;
     }
-    let (Some(_), Some(harness)) = (before.harness, after) else {
+    let Some(harness) = after else {
         return;
     };
     let permission = harness.request_permission(current.permissions());
@@ -2355,10 +2355,7 @@ fn search_result_tooltip(
             "Use the agent's default reasoning effort".to_string()
         }
         ComposerSearchResult::Permissions(ComposerPermission::Guarded) => {
-            crate::launch_composer::permission_help(
-                harness.expect("a permission result needs a harness"),
-                Some(LaunchPermission::Guarded),
-            )
+            crate::launch_composer::guarded_permission_help(harness)
         }
         ComposerSearchResult::Permissions(ComposerPermission::OwnSetting) => {
             "Use the agent's own setting, which Farhelm cannot force or classify".to_string()
@@ -4317,7 +4314,9 @@ pub(super) fn CreateSessionForm(
             local: host.local,
         })
         .collect::<Vec<_>>();
+    let agent_without_harness = launch_tab() == LaunchTab::Agent && structured_harness().is_none();
     let mut search_rows = crate::launch_composer::search_results(
+        agent_without_harness,
         &recent_history,
         &catalog_models,
         &composer_search(),
@@ -4372,7 +4371,6 @@ pub(super) fn CreateSessionForm(
         false,
         false,
     );
-    let agent_without_harness = launch_tab() == LaunchTab::Agent && structured_harness().is_none();
     let search_rows = crate::launch_composer::finish_search_results(
         &composer_search(),
         search_rows,
@@ -6440,6 +6438,7 @@ pub(super) fn CreateSessionForm(
                                 .then(&*structured_model)
                                 .flatten();
                             let mut rows = crate::launch_composer::search_results(
+                                draft.snapshot().tab() == LaunchTab::Agent && active_harness.is_none(),
                                 &promoted_history,
                                 &catalog_models_for_search_input,
                                 &evt.value(),

@@ -1152,11 +1152,12 @@ wheel/touch gestures retain native scrolling; the nav still owns scroll-driven m
 text copies are aria-hidden; the button's display name, distinct remote destination and state remain its one accessible
 name and tooltip. Raw peer values use ordinary escaping and direction isolation.
 
-The `perms:` scope offers guarded, YOLO, custom, own-setting and approval-mode choices only where the active harness
-supports them. Bare `yolo` and `guarded` join the ordinary combined search and get exact-word preselection; own setting,
-custom and the approval modes require `perms:`. Bare `own` and `custom` would match too many unrelated queries. Applying
-a permission row updates the same explicit-choice bookkeeping as the segmented control and leaves the other draft fields
-intact. Command mode has no active structured harness, so it offers no permission actions.
+The `perms:` scope offers guarded and YOLO before a harness on the Agent tab, matching its permission buttons; custom,
+own-setting and approval-mode choices require an active harness that supports them. Bare `yolo` and `guarded` join the
+ordinary combined search and get exact-word preselection; own setting, custom and the approval modes require `perms:`.
+Bare `own` and `custom` would match too many unrelated queries. Applying a permission row updates the same
+explicit-choice bookkeeping as the segmented control and leaves the other draft fields intact. Command mode has no
+active structured harness, so it offers no permission actions.
 
 The `effort:` scope offers `default` whenever the chosen harness offers effort, even while the model catalog is empty.
 Bare `default` does not offer an effort action. Accepting it clears the explicit effort, as the default button does.
@@ -5014,17 +5015,19 @@ word does not say which harness supplied it. No second default-mode table or pre
 
 The launcher observes completed agent-switch transactions for permission escalation, including cross-agent model picks
 and search. A template's explicit permission is a deliberate choice, not an automatic fallback; compare after its full
-replay rather than after each inner edit. The comparison uses effective request permissions, including passive memory
-seeds, ordered as Chat/Approve, SmartApprove/Guarded, then YOLO/Custom/own-setting. The existing reconciliation and
-remembered-choice rules are unchanged. One transient notice retains the complete pre-switch draft and raw editor
-ownership, but never retry intent, connection evidence or cache contents. Undo invalidates browse/preview work and
-retires ordinary create/replace authority. An ambiguous managed-checkout attempt still reconciles through its retained
-key when the request binding matches; Undo does not rewind or discard that attempt. Notice generations fence queued
-Undo, dismiss and expiry callbacks. Undo also checks the live launcher opening generation, and a new opening or prefill
-clears the notice, so a mounted Clone/Replace reseed cannot receive another source's saved draft. CSS supplies the
-slide, permission outline and a separate visually constant eight-second lifetime animation; hover, focus within the
-banner and the existing inactive-window rule pause that lifetime. Reduced motion keeps only the lifetime animation and a
-static outline. Removing the notice's controls returns focus through the existing launcher helper.
+replay rather than after each inner edit. Between harnesses, the comparison uses effective request permissions,
+including passive memory seeds. Before the first harness, only an explicit permission choice counts; a passive memory
+seed or displayed default cannot trigger the notice. Permissions are ordered as Chat/Approve, SmartApprove/Guarded, then
+YOLO/Custom/own-setting. The existing reconciliation and remembered-choice rules are unchanged. One transient notice
+retains the complete pre-switch draft and raw editor ownership, but never retry intent, connection evidence or cache
+contents. Undo invalidates browse/preview work and retires ordinary create/replace authority. An ambiguous
+managed-checkout attempt still reconciles through its retained key when the request binding matches; Undo does not
+rewind or discard that attempt. Notice generations fence queued Undo, dismiss and expiry callbacks. Undo also checks the
+live launcher opening generation, and a new opening or prefill clears the notice, so a mounted Clone/Replace reseed
+cannot receive another source's saved draft. CSS supplies the slide, permission outline and a separate visually constant
+eight-second lifetime animation; hover, focus within the banner and the existing inactive-window rule pause that
+lifetime. Reduced motion keeps only the lifetime animation and a static outline. Removing the notice's controls returns
+focus through the existing launcher helper.
 
 Protocol 49 adds the closed `Custom` permission and `LaunchSelection::permission_flags`, an optional vector present
 exactly with Custom. Older peers refuse the new protocol and older releases cannot read custom sessions or templates;
