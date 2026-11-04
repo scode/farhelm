@@ -11,11 +11,13 @@ commit after the last trailing-reviewed commit through the current tip of `main`
 queue's existing recording flow. The saved checkpoint is in `review_feedback_queue/TRAILING_REVIEW.md`; the procedure is
 `review_feedback_queue/.agents/trailing-review.md`, "Procedure".
 
-Use the `persistent-review` skill for the reviews, with an adversarial charter emphasizing security and correctness.
-Default to the current agent's backend, model and reasoning effort. Honor any requested backend, agents, models, effort
-or review emphasis, subject to the skill's supported backends and observable-delegation requirements. Do not ask the
-user to choose a reviewer when they have not specified one. If the requested or default configuration cannot meet the
-skill's requirements, report the limitation and leave the review incomplete rather than silently substituting.
+Use the `persistent-review` skill for the primary review of the pinned range, with an adversarial charter emphasizing
+security and correctness. Only the primary review runs under the skill; the independent drop check
+(`review_feedback_queue/.agents/recording.md`, "Independent drop check") does not. Default to the current agent's
+backend, model and reasoning effort. Honor any requested backend, agents, models, effort or review emphasis, subject to
+the skill's supported backends and observable-delegation requirements. Do not ask the user to choose a reviewer when
+they have not specified one. If the requested or default configuration cannot meet the skill's requirements, report the
+limitation and leave the review incomplete rather than silently substituting.
 
 ## Procedure
 
@@ -33,23 +35,32 @@ triage, fixes, or execution of triage outcomes.
    diff between the endpoints is not sufficient: it can hide changes introduced and later reverted within the range. Use
    the pinned revisions rather than an unrelated or dirty working tree. Give each reviewer the two full hashes, the
    complete commit list, its assigned scope, and the instructions in `review_feedback_queue/.agents/recording.md`,
-   "Running an agent review that feeds this queue".
+   "Running an agent review that feeds this queue". Also tell each reviewer to record every proposed drop of a finding
+   in its findings log, whatever bucket it suggests, with the proposed basis and the exact spec, TODO, `BUGS.md`, queue,
+   ledger or filter text it relies on; a drop mentioned only in prose is not recorded. The skill's findings log and
+   progress files are required and stay in the agent scratch space; they are not the report files the queue's reviewer
+   instructions forbid.
 3. Run the groups under `persistent-review`, including concurrent launches, immediate findings logs, delivery audits,
    same-session continuation and later-turn synthesis. Monitor them as described under "Monitoring reviewers" below.
    Keep the skill's manifests, logs and completion evidence in the session's agent scratch space. Reviewers still return
    the queue's required findings and candidate fields in their final replies; the persistent logs supplement those
    replies. Reconcile the logs, including withdrawn findings, with the replies so candidates cannot disappear before the
-   queue's independent-review checks. Apply the usual coverage, deduplication, filtering, and independent-review
-   requirements before recording findings. Record retained findings in feedback files and `INDEX.md`, preserving their
-   reviewed commits and provenance. A trailing review is an automated review of committed code for the purposes of
-   `FILTER.md`.
+   queue's independent drop check. A drop that appears only in a reply's prose goes back to its reviewer to be recorded
+   in its log: in its existing synthesis or discovery turn, or, when its turns are over, in one continuation that asks
+   only for that and starts no new discovery. Apply the usual coverage, deduplication and filtering requirements. Then
+   build the check's register: every withdrawn finding, every finding with `proposed_drop` and every finding whose
+   latest event lowers its consequence gets an entry regardless of bucket (do not filter this register by bucket), along
+   with every drop you proposed while applying those requirements. Run the check as
+   `review_feedback_queue/.agents/recording.md`, "Independent drop check", describes, outside `persistent-review`.
+   Record retained findings in feedback files and `INDEX.md`, preserving their reviewed commits and provenance. A
+   trailing review is an automated review of committed code for the purposes of `FILTER.md`.
 4. Only after every group meets `persistent-review`'s completion requirements, every commit in the range has been
    reviewed, every finding and proposed drop has been handled, and all retained findings have been recorded, update
    `TRAILING_REVIEW.md` to `review-tip` in the same change as the queue updates. Findings need not be fixed for the
-   review to be complete. An incomplete persistent review, unread scope, or an unresolved recording or
-   independent-review step leaves the checkpoint unchanged; retain findings already produced and report the gap. Do not
-   advance to commits that landed after the pinned tip, and do not overwrite a checkpoint another run has advanced
-   without reconciling its coverage and queue changes.
+   review to be complete. An incomplete persistent review, unread scope, or an unresolved recording step or independent
+   drop check leaves the checkpoint unchanged; retain findings already produced and report the gap. Do not advance to
+   commits that landed after the pinned tip, and do not overwrite a checkpoint another run has advanced without
+   reconciling its coverage and queue changes.
 5. Use `jjstack` to put the checkpoint update and any queue updates in one review-result commit and draft PR, including
    when there are no retained findings. The checkpoint on `main` advances when that PR is merged; preparing the result
    alone does not advance it there. Merging is a separate manual step for the maintainer. Do not merge automatically.

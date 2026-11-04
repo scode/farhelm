@@ -1,9 +1,10 @@
 # Recording review findings
 
 This file covers what every finding goes through before it is written to the queue, how to run an agent review whose
-findings feed the queue (including what each reviewer is told), and what a feedback file contains. It belongs to the
-"Recording a finding", "Commissioning an agent review that feeds the queue", "Reviewer delegate prompt" and "Trailing
-code review" reading lists in `review_feedback_queue/AGENTS.md`.
+findings feed the queue (including what each reviewer is told), how the independent check before dropping a finding is
+run, and what a feedback file contains. It belongs to the "Recording a finding", "Commissioning an agent review that
+feeds the queue", "Reviewer delegate prompt" and "Trailing code review" reading lists in
+`review_feedback_queue/AGENTS.md`.
 
 > NOTE: In an unattended run (plan executor, landing monitor, delegate), an instruction here to ask, confirm with, or
 > propose to the maintainer follows `AGENTS.md`, "Unattended runs".
@@ -33,13 +34,13 @@ tell them what covers it and let them decide.
 NOTE: A finding whose consequence would put it in the `highest` bucket (security, or loss of user data, credentials,
 processes, or other user-owned work; `review_feedback_queue/AGENTS.md`, "Priority buckets", defines the buckets) is
 never dropped on one agent's judgment. Before dropping it for any of the reasons in
-`review_feedback_queue/.agents/recording.md`, "Before recording a finding", give an independent reviewer with fresh
+`review_feedback_queue/.agents/recording.md`, "Before recording a finding", give an independent agent with fresh
 context, one that neither produced the finding nor proposed the drop, the finding, the proposed basis for dropping it,
-and the spec, TODO, `BUGS.md`, queue, ledger, or filter text that basis relies on. Drop the finding only when that
-reviewer agrees the drop is justified. If the reviewer disagrees, or its verdict is ambiguous, record the finding. The
-same applies when it is unclear whether a finding belongs in the `highest` bucket: treat it as if it does. A wrongly
-dropped security or data-loss finding is gone without anyone having looked at it, while a wrongly recorded one costs a
-few minutes of triage.
+and the spec, TODO, `BUGS.md`, queue, ledger, or filter text that basis relies on. Drop the finding only when that agent
+agrees the drop is justified. If the agent disagrees, or its verdict is ambiguous, record the finding. The same applies
+when it is unclear whether a finding belongs in the `highest` bucket: treat it as if it does. A wrongly dropped security
+or data-loss finding is gone without anyone having looked at it, while a wrongly recorded one costs a few minutes of
+triage. `review_feedback_queue/.agents/recording.md`, "Independent drop check", says how to run that check.
 
 ## Running an agent review that feeds this queue
 
@@ -56,8 +57,7 @@ Tell each reviewer:
 - Create, modify or delete nothing in the checkout, helper scripts included; scratch goes in the agent scratch space
   `AGENTS.md`, "Agent scratch space", describes. One audit agent left a stray script in the repository root.
 - Return findings in the final reply rather than in a report file. Harnesses commonly refuse report files written by
-  subagents. For trailing reviews, also keep the private findings logs and progress artifacts `persistent-review`
-  requires; those artifacts supplement the final reply and stay outside the checkout.
+  subagents.
 - Do not spawn nested helper agents. In the audited run, helpers' caveats and dropped candidates were not carried
   forward by the reviewers that spawned them.
 - Flag a GUI handler that decides what a user-confirmed action acts on by reading live state when it runs (whichever
@@ -78,16 +78,67 @@ Tell each reviewer:
 
 Then, when collecting the replies:
 
-- Send every proposed drop of a finding that could be in the `highest` bucket to the independent reviewer the NOTE under
-  `review_feedback_queue/.agents/recording.md`, "Before recording a finding", describes, including drops that appear
-  only in the list of unreported candidates or in passing prose. In the audited run most reviewers mentioned such drops
-  only in passing. "Too rare" or "by design" with no spec, TODO, `BUGS.md`, queue, ledger or filter citation is not
-  coverage.
+- Send every proposed drop of a finding that could be in the `highest` bucket to the independent drop check
+  (`review_feedback_queue/.agents/recording.md`, "Independent drop check"), including drops that appear only in the list
+  of unreported candidates or in passing prose. In the audited run most reviewers mentioned such drops only in passing.
+  Finding those drops is your job as commissioner, done when building the check's register; the check itself only judges
+  them. "Too rare" or "by design" with no spec, TODO, `BUGS.md`, queue, ledger or filter citation is not coverage.
 - Compare each reviewer's stated coverage with its scope, and tell the user which parts went unread rather than
   presenting a quiet area as clean.
 - When writing a finding into a feedback file, keep the reviewer's confidence, suggested bucket, possible cover and
   caveats alongside the TLDR and details. Triage needs them to judge coverage, and in the audited run they were lost in
   transcription.
+
+## Independent drop check
+
+NOTE: This check is a consultation, not a review. It judges drops that have already been found and stated; it does not
+search for drops or new findings, and it does not reread the reviewers' output.
+
+The check has two steps: you state every drop in a register, then fresh agents judge the register.
+
+### The drop register
+
+Run the check after every other decision about which findings to keep, so that it sees all of them. A register entry is
+any of these, for a finding that could be in the `highest` bucket (including one whose bucket is unclear):
+
+- a drop as covered or filtered, whether a reviewer proposed it or you did while checking coverage, deduplicating or
+  filtering;
+- a finding a reviewer reported and later withdrew;
+- a finding whose consequence a reviewer later lowered out of the `highest` range. Its entry asks whether the finding is
+  outside `highest`, not whether to drop it.
+
+Each entry holds who proposed it and how they labelled the finding, the finding's original and latest wording, the
+proposed basis, the exact spec, TODO, `BUGS.md`, queue, ledger or filter text that basis cites, and source references at
+the reviewed revisions.
+
+When the findings come from an agent review, check the register against the reviewers' output before consulting anyone:
+every finding with `proposed_drop`, every covered candidate that could be in the `highest` bucket, and every withdrawn
+or lowered finding has an entry. A drop that appears only in a reply's prose goes back to the reviewer that made it as a
+named question, so that its entry carries that reviewer's own basis and citation. When that reviewer can no longer be
+asked, record the finding. This completeness check stays with you; it is not handed to the agents that judge the
+register.
+
+### The consultation
+
+Give the register entries to one or more fresh agents, none of which produced or proposed any entry it receives:
+
+- Put the entries and their cited text in the prompt. The agent may read source at the reviewed revisions and the cited
+  coverage sources as they stand now to check a basis. Nothing else is required of it as input, and it does not have to
+  show that it read anything beyond the prompt.
+- Batch entries by subsystem, so one agent's reading of the surrounding code serves several verdicts. Keep a batch small
+  enough that the agent can actually check each basis against source.
+- Ask for one verdict per entry: AGREE with the entry as narrowly stated, DISAGREE, or AMBIGUOUS, naming the file and
+  line or the cited text it checked and the exact scope of any agreement.
+- Run it as one turn. Continue the same agent for a second turn only when a verdict is unclear or does not address the
+  stated basis.
+- A concern the agent notices that is not a register entry comes back to you as a lead for whoever reviewed that scope.
+  The agent does not go looking for more. When nobody can take the lead, record it as a finding, keeping its
+  uncertainty.
+
+Act on an entry only on AGREE. An AGREE that names nothing it checked, and anything short of a clear verdict after the
+second turn, counts as AMBIGUOUS. An AGREE narrower than the entry covers only the agreed part: record the rest and name
+what covers the agreed part. On DISAGREE or AMBIGUOUS, record the finding, and keep a lowered finding treated as
+`highest`.
 
 ## What goes in a feedback file
 

@@ -105,7 +105,7 @@ read these in full:
 - `review_feedback_queue/FILTER.md`
 - the coverage sources, for each finding
 
-Fence: a finding that could be in the `highest` bucket is never dropped without an independent fresh-context reviewer
+Fence: a finding that could be in the `highest` bucket is never dropped without an independent fresh-context agent
 agreeing; `INDEX.md` changes in the same change as the feedback files.
 
 ### Commissioning an agent review that feeds the queue
@@ -125,7 +125,8 @@ and reading lists" (the same files plus the coverage sources).
 
 Fence: each reviewer gets the instructions in `review_feedback_queue/.agents/recording.md`, "Running an agent review
 that feeds this queue", and the reviewer delegate prompt's reading list in `review_feedback_queue/AGENTS.md`, "Flows and
-reading lists"; every proposed drop of a finding that could be in the `highest` bucket goes to an independent reviewer.
+reading lists"; every proposed drop of a finding that could be in the `highest` bucket goes to the independent drop
+check (`review_feedback_queue/.agents/recording.md`, "Independent drop check").
 
 ### Reviewer delegate prompt (the instructions each reviewer is given)
 
@@ -159,12 +160,12 @@ Triggers: "perform trailing code review", or similar wording around "trailing co
 - `AGENTS.md`, "Conventional Commits" (root, already in context for agents started at the checkout root)
 - the coverage sources, for each finding
 
-Fence: use `persistent-review` for the reviews; the request authorizes recording findings and updating the checkpoint
-only, not triage, fixes or execution; the checkpoint advances only after every commit in the range meets the skill's
-completion requirements and every finding is handled; the review-result PR stays a draft and is never merged
-automatically. Trailing-review result and merge reports end with a loud Markdown banner only when the review is
-incomplete or checkpoint handling is exceptional; an ordinary draft PR awaiting merge needs no banner. Follow
-`review_feedback_queue/.agents/trailing-review.md`, "Closing status banner".
+Fence: use `persistent-review` for the primary review of the pinned range, and not for the independent drop check; the
+request authorizes recording findings and updating the checkpoint only, not triage, fixes or execution; the checkpoint
+advances only after every commit in the range meets the skill's completion requirements and every finding is handled;
+the review-result PR stays a draft and is never merged automatically. Trailing-review result and merge reports end with
+a loud Markdown banner only when the review is incomplete or checkpoint handling is exceptional; an ordinary draft PR
+awaiting merge needs no banner. Follow `review_feedback_queue/.agents/trailing-review.md`, "Closing status banner".
 
 ### Triage ("triage review feedback")
 
