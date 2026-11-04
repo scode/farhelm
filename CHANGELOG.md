@@ -4,17 +4,15 @@ Notable user-facing changes in each stable release of Farhelm. Release candidate
 
 ## v0.34.0 - 2026-11-03
 
-**DRAFT release notes - not yet finalized**
-
 ### 💥 Breaking
 
 - This release *requires* you to update your remote hosts. (#2882)
 
 ### 🔄 Changed
 
-- New sessions and terminal tabs no longer run inside tmux. Each new terminal runs in a small Farhelm process of its own on its host, so a tmux upgrade or crash no longer takes every session on the host down at once. tmux is still required. [Move sessions to new terminals](https://farhelm.io/docs/using/new-terminals/) explains what changes and how to move the sessions you already have. (#2875, #2917)
+- Farhelm started life running agent sessions and side terminals inside a tmux that was meant to be an implementation detail, and used xterm.js in the local UI. Farhelm is replacing this with a new system that drops both of those dependencies. New sessions and terminal tabs no longer run inside tmux. Old sessions still use tmux and xterm.js, but a future release will entirely drop support. tmux is still required as a matter of installation dependency for now, until a future release when old sessions running in tmux stop being supported (see next bullet). [Move sessions to new terminals](https://farhelm.io/docs/using/new-terminals/) explains what changes and how to move the sessions you already have. (#2875, #2917)
 - Sessions that were already running keep working in tmux, with a note at the top saying that a future release will stop supporting it. Restarting, replacing or cloning a session moves its agent to a new terminal, but its old shell tabs move only when you close them and open new ones. (#2907, #2908, #2917, #2922, #2927)
-- Dropping a file onto a new terminal is refused with a message saying to paste it instead. (#2899, #2917)
+- Dropping a file onto a new terminal is refused with a message saying to paste it instead. File drag and drop may come back in a later release. (#2899, #2917)
 - In a new terminal, text you compose with an input method, as for Chinese, Japanese or Korean, does not show at the cursor until you commit it. (#2899, #2917)
 - A new terminal does not show the hint about holding Shift (Option on a Mac) when a drag over a program that uses the mouse selects nothing; holding the key still works. (#2899, #2917)
 - In a new terminal, an emoji with a variation selector, as in ❤️, takes one column where tmux gave it two, which can leave the rest of that line one column off. (#2880, #2917)
