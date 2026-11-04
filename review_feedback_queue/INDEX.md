@@ -1489,10 +1489,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`grid-drop-suppresses-refusal-explanation.md`](grid-drop-suppresses-refusal-explanation.md) — Dropping content onto a
   grid terminal cancels the drop without displaying the promised instruction to copy and paste instead.
 
-- [`anonymous-hyperlink-restarts-cause-false-warning.md`](anonymous-hyperlink-restarts-cause-false-warning.md) — An
-  honest hyperlink emitted through consecutive anonymous OSC 8 starts with the same destination can show a false
-  destination-mismatch warning and underline only its tail.
-
 - [`changed-file-hover-test-clicks-before-stat-readiness.md`](changed-file-hover-test-clicks-before-stat-readiness.md) —
   The file-link redraw regression can issue its only download click while the replacement file is still being checked,
   then treat the correctly ignored click as a download regression.

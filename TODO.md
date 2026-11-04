@@ -49,25 +49,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   other checks still run). Migrating it means reading the grid's model for the burst (as the browser suite's terminal
   helpers do), typing through the grid's input messages, and finding the grid's own background color and focus target.
 
-- **A hyperlink a program starts twice shows a false mismatch warning in grid terminals.** When a program starts the
-  same OSC 8 hyperlink twice in a row without naming an id, hovering the second piece shows the loud "Link text does not
-  match where it goes" warning, with "Text says:" holding only the tail of the link's text, and the hover underline
-  covers only that piece. Seen on a real agent's markdown link list (it showed `ews.com/article/…` for a link to
-  `https://apnews.com/article/…`); it healed once the agent redrew the line in one go, which is why it comes and goes.
-  Reproduce in any terminal with
-  `printf '\e]8;;https://apnews.com/x\e\\https://apn\e]8;;https://apnews.com/x\e\\ews.com/x\e]8;;\e\\\n'` and hover
-  `ews.com/x`. Cause: each OSC 8 start without an id gets a fresh id in the emulator
-  (`vendor/alacritty_terminal/src/term/cell.rs`, `HyperlinkInner::new`, ids ending in `_alacritty`); the supervisor
-  sends that id with the target as the link's identity (`crates/farhelm-supervisor/src/grid_output.rs`, `link_key`); the
-  grid joins neighbouring runs into one link only when id and target both match
-  (`crates/farhelm-ui/assets/grid-buffer.js`, `rowLinks` and `sameLink`, and `taggedLines` across rows), so the row
-  holds two links; the hover then checks the text of the one under the pointer (`crates/farhelm-ui/assets/terminal.js`,
-  `oscLink`, `found.ranges[0]` passed to `linkHoverText`). Old (tmux, xterm.js) terminals show the same bug (the repro
-  above, 2026-11-03); fix only the grid path. Likely fix: treat neighbouring runs with the same target and no id from
-  the program as one link, for the underline and for the text the mismatch check reads, across wrapped rows too. A link
-  to a different target stays separate, so a disguised link still warns. Test with the repro bytes in the grid-client
-  browser specs and the buffer's unit tests. Plan: `plans/queue/grid-repeated-link-warning.md`.
-
 - **A terminal whose terminal host becomes unavailable stays unavailable until the supervisor restarts.** When a running
   supervisor loses the use of a terminal host, the terminal stays unavailable for the rest of that supervisor's life
   even after the cause has passed: the session lists with an unknown status, its terminal does not attach ("the terminal

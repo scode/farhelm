@@ -43,6 +43,9 @@
 // row with a space in it, 2048 characters either way). A text URL that
 // overlaps an OSC 8 run is dropped. Targets are data: what may be opened is
 // decided at the click by terminal-links.js's rules, never here.
+// Generated OSC ids also continue directly adjacent same-target pieces,
+// across soft wraps. SPEC_impl.md explains the spelling dependency and why
+// the mismatch check may use this chain as one hyperlink.
 (function (root) {
   "use strict";
 
@@ -283,6 +286,68 @@
     return null;
   }
 
+  /**
+   * Resolve a run's link to its chain's first piece, within one question.
+   * Only numeric emulator-generated ids may inherit a neighbour's identity;
+   * explicit ids keep their ordinary id/target identity. A row boundary
+   * continues only at a soft wrap with no intervening cell of real text.
+   *
+   * Resolve whole rows forwards after looking back at most 128 lines. The
+   * per-question cache makes one-cell restarts linear in the runs examined,
+   * rather than walking the chain again for every run or evidence row.
+   */
+  function linkIdentities(source) {
+    const rows = new Map();
+    const generated = (link) => !!link && /^\d+_alacritty$/.test(link.id);
+    const joins = (a, b) => generated(a) && generated(b) && a.uri === b.uri;
+    const previousPiece = (abs, line) => {
+      const first = line.row.runs[0];
+      if (!first || first.col !== 0 || !generated(first.link)) return null;
+      const previous = source.line(abs - 1);
+      const last = previous && previous.row.runs[previous.row.runs.length - 1];
+      if (!previous || !previous.row.wrapped || !last || !joins(last.link, first.link)) return null;
+      const end = last.col + last.width;
+      return end === previous.width || (end === previous.width - 1 && padsWideWrap(source, abs - 1, previous))
+        ? previous
+        : null;
+    };
+    return (abs) => {
+      const pending = [];
+      let at = abs;
+      for (let n = 0; n <= 128 && !rows.has(at); n++, at--) {
+        const line = source.line(at);
+        if (!line) break;
+        pending.push([at, line]);
+        if (!previousPiece(at, line)) break;
+      }
+      for (let i = pending.length - 1; i >= 0; i--) {
+        const [number, line] = pending[i];
+        const keys = [];
+        const previous = previousPiece(number, line);
+        const above = previous && rows.get(number - 1);
+        for (const [index, run] of line.row.runs.entries()) {
+          const before = line.row.runs[index - 1];
+          const contiguous = before && before.col + before.width === run.col && joins(before.link, run.link);
+          keys.push(contiguous ? keys[index - 1] : index === 0 && above ? above[above.length - 1] : run.link);
+        }
+        rows.set(number, keys);
+      }
+      return rows.get(abs) || [];
+    };
+  }
+
+  /** The stable id/target pair, including a generated chain's first id. */
+  function linkKey(link) {
+    return link ? JSON.stringify([link.id, link.uri]) : null;
+  }
+
+  /**
+   * Whether two resolved links are the same id/target pair. The hover's
+   * per-run checks use this rather than comparing `linkKey`s: a key is as long
+   * as the target, and a screen any program can print (128 links per row with
+   * 2 KB targets, compared across 257 rows) made building one per run cost
+   * seconds per hover lookup.
+   */
   function sameLink(a, b) {
     return !!a && !!b && a.id === b.id && a.uri === b.uri;
   }
@@ -295,20 +360,26 @@
    * `[start, end)` cell ranges it covers, one per line, for the hover
    * underline. An OSC 8 link is one contiguous stretch of runs of the same
    * link on this line (xterm.js's OSC provider makes one link per such
-   * stretch); a text URL's ranges may cross soft wraps.
+   * stretch), including a generated-id continuation chain. A chain's tag
+   * replaces later pieces' tags, so a later piece continued by cursor
+   * movement onto an unwrapped row no longer joins that row by its own id.
+   * A text URL's ranges may cross soft wraps.
    */
   function rowLinks(source, abs) {
     const line = source.line(abs);
     if (!line) return [];
+    const identities = linkIdentities(source);
+    const keys = identities(abs);
     const found = [];
     let current = null;
-    for (const run of line.row.runs) {
-      if (current && run.link && sameLink(run.link, current.link) && current.end === run.col) {
+    for (const [index, run] of line.row.runs.entries()) {
+      const link = keys[index];
+      if (current && sameLink(link, current.link) && current.end === run.col) {
         current.end = run.col + run.width;
         continue;
       }
       if (current) found.push(current);
-      current = run.link ? { link: run.link, start: run.col, end: run.col + run.width } : null;
+      current = link ? { link, start: run.col, end: run.col + run.width } : null;
     }
     if (current) found.push(current);
     const links = found.map(({ link, start, end }) => ({
@@ -317,7 +388,7 @@
       uri: link.uri,
       ranges: [{ start: { abs, col: start }, end: { abs, col: end } }],
       // The lines its hover text is joined from (see `taggedLines`).
-      evidence: taggedLines(source, abs, link.id, link.uri),
+      evidence: taggedLines(source, abs, link.id, link.uri, identities),
     }));
     const window = urlWindow(source, abs);
     const { text, chars } = mappedText(source, window.first, window.last);
@@ -337,15 +408,13 @@
 
   /**
    * The lines an OSC 8 link's hover text depends on: the run of adjacent
-   * lines carrying the same link (id and target), as terminal-links.js's
+   * lines carrying the same resolved link (id and target), as terminal-links.js's
    * `linkHoverText` joins them (at most 128 either way), and the line just
    * beyond each end, whose gaining the link would extend the join.
    */
-  function taggedLines(source, abs, id, uri) {
-    const carries = (at) => {
-      const line = source.line(at);
-      return !!line && line.row.runs.some((run) => run.link && run.link.id === id && run.link.uri === uri);
-    };
+  function taggedLines(source, abs, id, uri, identities = linkIdentities(source)) {
+    const wanted = { id, uri };
+    const carries = (at) => identities(at).some((link) => sameLink(link, wanted));
     let first = abs;
     while (abs - first < 128 && carries(first - 1)) first--;
     let last = abs;
@@ -396,12 +465,13 @@
       for (let at = Math.min(window.first, abs) - 1; at <= window.last + 1; at++) lines.add(at);
     }
     const seen = new Set();
-    for (const run of line ? line.row.runs : []) {
-      if (!run.link) continue;
-      const key = `${run.link.id}\u0000${run.link.uri}`;
+    const identities = linkIdentities(source);
+    for (const link of identities(abs)) {
+      if (!link) continue;
+      const key = linkKey(link);
       if (seen.has(key)) continue;
       seen.add(key);
-      for (const at of taggedLines(source, abs, run.link.id, run.link.uri)) lines.add(at);
+      for (const at of taggedLines(source, abs, link.id, link.uri, identities)) lines.add(at);
     }
     return lines;
   }
@@ -515,17 +585,22 @@
   // no run covers reads as empty chars with width 1, a wide character's
   // second cell as empty chars with width 0, and only cells a run covers
   // count toward the trimmed length. OSC 8 tags are small integers, equal
-  // for runs whose links have the same id and target (the format's rule for
-  // one link), assigned per adapter: callers ask a fresh adapter per
+  // for runs whose links resolve to the same id and target, including direct
+  // generated-id continuations (see SPEC_impl.md), assigned per adapter:
+  // callers ask a fresh adapter per
   // question, so the table never outlives one hover.
 
-  /** One line in xterm.js's `IBufferLine` shape (see above). */
+  /**
+   * Present one grid row through the existing link helpers' buffer API.
+   * `tagOf(index)` resolves the run at its row position: a generated id's
+   * tag may come from an earlier piece, rather than from the raw wire id.
+   */
   function lineView(line, previous, tagOf) {
     const { row, width } = line;
     const cells = new Array(width);
     let trimmed = 0;
-    for (const run of row.runs) {
-      const tag = run.link ? tagOf(run.link) : 0;
+    for (const [index, run] of row.runs.entries()) {
+      const tag = run.link ? tagOf(index) : 0;
       if (run.text.length === run.width && PRINTABLE_ASCII.test(run.text)) {
         for (let i = 0; i < run.width && run.col + i < width; i++) cells[run.col + i] = { chars: run.text[i], width: 1, tag };
       } else {
@@ -566,8 +641,9 @@
    */
   function xtermBuffer(source) {
     const tags = new Map();
+    const identities = linkIdentities(source);
     const tagOf = (link) => {
-      const key = `${link.id}\u0000${link.uri}`;
+      const key = linkKey(link);
       let tag = tags.get(key);
       if (tag === undefined) {
         tag = tags.size + 1;
@@ -579,7 +655,8 @@
       getLine(y) {
         if (!Number.isSafeInteger(y)) return undefined;
         const line = source.line(y);
-        return line ? lineView(line, source.line(y - 1), tagOf) : undefined;
+        const keys = line && identities(y);
+        return line ? lineView(line, source.line(y - 1), (index) => tagOf(keys[index])) : undefined;
       },
     };
   }
