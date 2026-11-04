@@ -345,6 +345,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   jiggle: something is being re-drawn or laid out for no reason. Find what triggers the needless re-draw/re-layout on
   session switch.
 
+### Trivial
+
+- **Launcher keywords for guarded/YOLO modes are dead.** Typing "yolo" or "guarded" in the launcher used to select those
+  permission modes; it no longer does. Restore that selection.
+
 ## Doc todo
 
 - Tell users that a working-copy (checkout) root must be a location only they can write: Farhelm is not designed for
