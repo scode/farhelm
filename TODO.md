@@ -476,6 +476,20 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   global setup starts once the helm answers; waiting for the listing to name the session would close it (FLAKES.md,
   2026-11-04).
 
+- **The launcher's YOLO question does not take its answer on WebKit.** `answerYolo` in `e2e/tests/helpers/term.ts`
+  (through `fillCreateForm`) failed with "Clicking the checkbox did not change its state" in three tests in three
+  rounds: two in `e2e/tests/terminal-multihost.spec.ts` and one in `e2e/tests/terminal-create-idempotency.spec.ts` (runs
+  `a865423e-2157-473d-bd78-5bafcce7811e`, `7033e514-e01f-435e-993c-57b6e4ba5126`,
+  `55c4bee4-892d-4118-968c-d37cca4c920f`); each passed three re-runs. The step is shared, so other tests can fail the
+  same way. Hypothesis: the click lands while the launcher re-renders the question (FLAKES.md, 2026-11-04).
+
+- **A pending post-clone save's ordering times out on WebKit.**
+  `a pending post-clone save orders reopened settings before the next save` in `e2e/tests/settings.spec.ts` waited 60
+  seconds for an already-answered intercepted save to finish (runs `d70c7024-ae4f-4172-87da-c21680228f62`,
+  `ecb2845b-15c7-4d2d-bef1-2db8b4b42936`, `f4743ad3-5245-4951-bd1f-d78e374312dc`), like the carriage-return test that
+  draft PR #2549 records. Hypothesis: WebKit sometimes never reports an intercepted request as finished (FLAKES.md,
+  2026-11-04).
+
 ### Difficult deflake
 
 - Restore the release integration gate and remove the remaining ignored binary-output test when the named Rust flakes
