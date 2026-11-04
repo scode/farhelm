@@ -24,6 +24,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- Allow the user to manually reorder pinned sessions.
+
 - Allow shift selection of multiple sessions for bulk actions such as closing them.
 
 - **The desktop smoke's appearance leg on grid terminals.** The optional appearance leg of the Linux desktop smoke
