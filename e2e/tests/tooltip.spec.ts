@@ -123,6 +123,14 @@ test("a session's title and open area share its summary card", async ({ page, re
       await row.locator(".session-title").hover();
       const card = tooltip(page).locator(".session-summary");
       await expect(card).toBeVisible();
+      // Each density uses the same row-owned opt-in. Measuring the outer
+      // tooltip includes its padding, which must also clear the sidebar.
+      const tipBox = (await tooltip(page).boundingBox())!;
+      const sidebarBox = (await page.locator(".app-sidebar").boundingBox())!;
+      const rowBox = (await row.locator(".session-row-open").boundingBox())!;
+      await expect(tooltip(page)).toHaveAttribute("data-side", "right");
+      expect(tipBox.x).toBeCloseTo(sidebarBox.x + sidebarBox.width + 6, 0);
+      expect(tipBox.y).toBeCloseTo(Math.max(4, Math.min(rowBox.y, page.viewportSize()!.height - 4 - tipBox.height)), 0);
       await expect(card.locator(".session-summary-title")).toHaveText("A <peer> title");
       await expect(card.locator(".session-summary-state-word")).toHaveText("Running");
       await expect(card.locator(".session-summary-agent")).toContainText("Codex");
@@ -174,6 +182,36 @@ test("a session's title and open area share its summary card", async ({ page, re
   } finally {
     await resetPreferences(request);
   }
+});
+
+/** A narrow window must keep the established above/below rule, not push
+ * the card left over neighbouring rows while claiming to be beside them. */
+test("a session summary falls back to ordinary placement when the window is too narrow", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const row = await loadRow(page);
+  await parkPointer(page);
+  await row.locator(".session-title").hover();
+  await expect(tooltip(page)).toBeVisible();
+  await expect(tooltip(page)).toHaveAttribute("data-side", "right");
+  const sidebar = (await page.locator(".app-sidebar").boundingBox())!;
+  // Leave less than the 310px card needs beside the actual stored sidebar
+  // width, rather than assuming this shared stack still has the default.
+  await page.setViewportSize({ width: Math.floor(sidebar.x + sidebar.width + 300), height: 800 });
+  // Keep the pointer resting: a fixed sidebar can leave the target's box
+  // unchanged, but the showing card must still notice the narrower window.
+  await expect(tooltip(page)).not.toHaveAttribute("data-side", "right");
+  await expect(tooltip(page)).toHaveAttribute("data-kind", "card");
+  await expect(tooltip(page)).toBeVisible();
+  const actual = (await tooltip(page).boundingBox())!;
+  expect(sidebar.x + sidebar.width + 6 + actual.width).toBeGreaterThan(page.viewportSize()!.width - 4);
+  const expected = await row.locator(".session-row-open").evaluate((open, size) =>
+    (window as any).farhelmTooltip.placeTooltip(open.getBoundingClientRect(), size, {
+      width: window.innerWidth, height: window.innerHeight,
+    }), { width: actual.width, height: actual.height });
+  await expect(tooltip(page)).toHaveAttribute("data-side", expected.side);
+  expect(expected.side).not.toBe("right");
+  expect(actual.x).toBeCloseTo(expected.left, 0);
+  expect(actual.y).toBeCloseTo(expected.top, 0);
 });
 
 /**

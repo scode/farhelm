@@ -14,7 +14,7 @@
 // the terminal scrolls under live output) are behaviors, not crashes.
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { placeTooltip, instantFollowOn, scrollMovesTarget, install } = require("../assets/tooltip.js");
+const { placeTooltip, placeSessionCard, instantFollowOn, scrollMovesTarget, install } = require("../assets/tooltip.js");
 const { installMenuFocus } = require("../assets/menu-focus.js");
 
 const VIEWPORT = { width: 1000, height: 800 };
@@ -72,6 +72,45 @@ test("a tooltip that fits on neither side takes the roomier side, clamped inside
   // so its bottom stays 4 px above the window's bottom edge.
   const upper = placeTooltip(rect(500, 100, 20, 20), { width: 100, height: 300 }, small);
   assert.deepEqual(upper, { left: 460, top: 96, side: "below" });
+});
+
+// ---------------------------------------------------------------------------
+// Session summary placement
+// ---------------------------------------------------------------------------
+
+/** The card clears the sidebar, rather than just the narrower open button. */
+test("a session card sits six pixels past the sidebar level with its row", () => {
+  assert.deepEqual(placeSessionCard(rect(60, 200, 300, 50), 396, { width: 310, height: 180 }, VIEWPORT), {
+    left: 402, top: 200, side: "right",
+  });
+});
+
+/** Lower rows move only far enough up to keep the whole card in view. */
+test("a session card near the bottom stays four pixels inside the window", () => {
+  assert.deepEqual(placeSessionCard(rect(60, 700, 300, 50), 396, { width: 310, height: 180 }, VIEWPORT), {
+    left: 402, top: 616, side: "right",
+  });
+});
+
+/** One pixel decides whether to use the side or preserve the old placement. */
+test("a session card fits exactly beside the list and falls back one pixel short", () => {
+  const target = rect(60, 200, 300, 50);
+  const size = { width: 310, height: 180 };
+  assert.deepEqual(placeSessionCard(target, 396, size, { width: 716, height: 800 }), {
+    left: 402, top: 200, side: "right",
+  });
+  const narrow = { width: 715, height: 800 };
+  assert.deepEqual(placeSessionCard(target, 396, size, narrow), placeTooltip(target, size, narrow));
+});
+
+/** Both ordinary fallback branches survive; no new leftward placement hides rows. */
+test("a cramped session card uses ordinary above or below placement", () => {
+  const viewport = { width: 600, height: 800 };
+  const size = { width: 310, height: 180 };
+  for (const top of [10, 400]) {
+    const target = rect(60, top, 300, 50);
+    assert.deepEqual(placeSessionCard(target, 396, size, viewport), placeTooltip(target, size, viewport));
+  }
 });
 
 // ---------------------------------------------------------------------------

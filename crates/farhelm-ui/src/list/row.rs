@@ -1660,6 +1660,9 @@ pub(super) fn SessionRow(
                     // the open button, in either sidebar density. The marks
                     // keep their own nearer hover targets.
                     "data-tooltip-card": "{card_id}",
+                    // Clear neighbouring rows without changing the marks'
+                    // ordinary tooltip placement or the card's ownership.
+                    "data-tooltip-anchor": "session-card",
                     // The accessible counterpart of the visual highlight:
                     // the sidebar is a navigation-shaped list of open
                     // buttons, and `aria-current` is the native way to say
