@@ -823,6 +823,39 @@ test("an OSC 8 link whose text is another address warns, judging the text across
   await expect.poll(() => page.evaluate(() => (window as any).opened.slice())).toEqual([target]);
 });
 
+test("restarted anonymous links hover as a whole address while a different target still warns", async ({ page }) => {
+  // The emulator's two id-less OSC starts produce these two wire runs.
+  // Hover either half: the displayed text and the underline must describe
+  // one honest address. A target change must retain the warning boundary.
+  await mountTerminal(page);
+  await attachGrid(page);
+  const target = "https://apnews.com/x";
+  const row = { w: false, r: [[0, 11, "https://apn", [0, -1, -1], 0], [11, 9, "ews.com/x", [0, -1, -1], 1]] };
+  await showScreen(page, [row], { cols: 30, links: [["0_alacritty", target], ["1_alacritty", target]] });
+  const display = page.locator("#term .terminal-link-target");
+  const underline = page.locator("#term .grid-terminal-link-underline > div");
+  const first = await gridCell(page, 0, 0, 30);
+  const last = await gridCell(page, 19, 0, 30);
+  for (const column of [2, 14]) {
+    const cell = await gridCell(page, column, 0, 30);
+    await page.mouse.move(cell.x, cell.y);
+    await expect(display).toBeVisible();
+    await expect(display).not.toHaveClass(/terminal-link-target-mismatch/);
+    await expect(display).toContainText("apnews.com");
+    await expect(underline).toHaveCount(1);
+    const bounds = (await underline.boundingBox())!;
+    expect(bounds.x).toBeLessThan(first.x);
+    expect(bounds.x + bounds.width).toBeGreaterThan(last.x);
+  }
+  await page.mouse.move(0, 0);
+  await showScreen(page, [row], { cols: 30, rev: 3, links: [["0_alacritty", target], ["1_alacritty", "https://other.example/x"]] });
+  const tail = await gridCell(page, 14, 0, 30);
+  await page.mouse.move(tail.x, tail.y);
+  await expect(display).toHaveClass(/terminal-link-target-mismatch/);
+  await expect(display).toContainText("Text says: ews.com/x");
+  await expect(display).toContainText("other.example");
+});
+
 test("hostile link text and targets stay data in the hover display", async ({ page }) => {
   // Program-controlled text and targets reach the page only as text, with
   // presentation-unsafe characters made visible, and a scheme outside the

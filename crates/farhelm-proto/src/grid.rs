@@ -129,10 +129,14 @@
 //! ([`Link`]), at most [`GRID_MAX_LINKS`] entries, `id` at most
 //! [`GRID_MAX_LINK_ID_BYTES`] and `uri` at most [`GRID_MAX_LINK_URI_BYTES`]
 //! (the emulator's own caps). `id` is the program's explicit OSC 8 id, or a
-//! sender-chosen id for a link without one. Two runs belong to the same link
-//! (for the mismatch warning, which compares across rows of one link) when
-//! their entries have equal `id` and `uri`, including across messages. The
-//! client treats `uri` as data and opens only what the existing link-scheme
+//! sender-chosen `<digits>_alacritty` id for a link without one. Two runs
+//! belong to the same link (for the mismatch warning, which compares across rows) when
+//! their entries have equal `id` and `uri`, including across messages. The grid
+//! client also joins generated ids with equal targets when the pieces directly
+//! continue on one row or across a soft wrap; explicit ids stay separate from
+//! generated ones. SPEC_impl.md explains this spelling dependency and the
+//! mismatch check's safety argument. The client treats `uri` as data and
+//! opens only what the existing link-scheme
 //! rules allow (`terminal-links.js`). An absent `links` is an empty one.
 //!
 //! The sender must fit every message in [`GRID_MAX_MESSAGE`], and a row
@@ -908,7 +912,7 @@ impl From<ScreenRow> for (u16, Row) {
 #[serde(from = "(String, String)", into = "(String, String)")]
 pub struct Link {
     /// The program's explicit OSC 8 id, or one the sender chose for a link
-    /// without one. Runs whose links have equal `id` and `uri` are one link.
+    /// without one. See the module's hyperlink identity and continuation rules.
     pub id: String,
     /// The target, as the program wrote it. Data, never trusted: the client
     /// opens only what its link-scheme rules allow.

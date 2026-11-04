@@ -304,6 +304,100 @@ test("an OSC 8 link's text is joined across its rows for the mismatch warning", 
   assert.deepEqual(alone, { kind: "whole", text: "https://goo" });
 });
 
+test("restarted anonymous hyperlinks underline and compare their whole adjacent text", () => {
+  // Every id-less OSC start gets a new emulator id. The browser must recover
+  // the honest address from those pieces rather than judge its tail alone.
+  const target = "https://apnews.com/x";
+  const model = build({ cols: 24, screen: [wire([[0, "https://apn", 0], [11, "ews.com/", 1], [19, "x", 2]])], links: [["0_alacritty", target], ["1_alacritty", target], ["2_alacritty", target]] });
+  const source = buffer.modelSource(model);
+  const base = model.screenBase;
+  const found = buffer.rowLinks(source, base);
+  assert.equal(found.length, 1);
+  assert.deepEqual(found[0].ranges, [{ start: at(base, 0), end: at(base, 20) }]);
+  const term = termOver(model);
+  const row = term.buffer.active.getLine(base);
+  assert.equal(row.getCell(0).extended.urlId, row.getCell(19).extended.urlId);
+  assert.deepEqual(links.linkHoverText(term, buffer.toXtermRange(found[0].ranges[0]), target), { kind: "whole", text: target });
+});
+
+test("anonymous links join through three soft-wrapped rows and retain redraw evidence", () => {
+  // The third row must invalidate a hover on the first, and the first must
+  // contribute to a hover on the last; a two-row special case misses this.
+  const target = "https://apnews.com/x";
+  const model = build({ cols: 8, screen: [wire([[0, "https://", 0]], true), wire([[0, "apnews.c", 1]], true), wire([[0, "om/x", 2]])], links: [["0_alacritty", target], ["1_alacritty", target], ["2_alacritty", target]] });
+  const source = buffer.modelSource(model);
+  const base = model.screenBase;
+  const term = termOver(model);
+  for (let y = 0; y < 3; y++) {
+    const found = buffer.linkAt(source, at(base + y, 1));
+    assert.deepEqual(found.evidence, [base - 1, base, base + 1, base + 2, base + 3]);
+    assert.deepEqual(links.linkHoverText(term, buffer.toXtermRange(found.ranges[0]), target), { kind: "whole", text: target });
+    assert.ok(buffer.answerLines(source, base + y).has(base + 2));
+    assert.ok(buffer.answerLines(source, base + y).has(base));
+  }
+});
+
+test("anonymous chains omit only the padding before a wrapped wide character", () => {
+  // The sender omits this synthetic cell. Requiring the link to end at the
+  // full width would split a chain exactly where a wide character wraps.
+  const target = "https://example.com/";
+  const model = build({ cols: 4, screen: [wire([[0, "abc", 0]], true), { w: false, r: [[0, 2, "中", PLAIN, 1]] }], links: [["0_alacritty", target], ["1_alacritty", target]] });
+  const term = termOver(model);
+  const base = model.screenBase;
+  assert.equal(term.buffer.active.getLine(base).getCell(0).extended.urlId, term.buffer.active.getLine(base + 1).getCell(0).extended.urlId);
+  const found = buffer.linkAt(buffer.modelSource(model), at(base + 1, 0));
+  assert.deepEqual(links.linkHoverText(term, buffer.toXtermRange(found.ranges[0]), target), { kind: "whole", text: "abc中" });
+});
+
+test("different targets, explicit ids and real gaps never become anonymous continuations", () => {
+  // Preserve the distinction a program chose, and never hide intervening
+  // text from the mismatch check by treating proximity as continuation.
+  const target = "https://example.com/";
+  for (const ids of [["0_alacritty", "named"], ["named", "0_alacritty"], ["0_alacritty", "x_alacritty"], ["0_alacritty", "_alacritty"]]) {
+    const model = build({ screen: [wire([[0, "a", 0], [1, "b", 1]])], links: ids.map((id) => [id, target]) });
+    assert.equal(buffer.rowLinks(buffer.modelSource(model), model.screenBase).length, 2);
+  }
+  const different = build({ screen: [wire([[0, "a", 0], [1, "b", 1]])], links: [["0_alacritty", target], ["1_alacritty", "https://other.example/"]] });
+  assert.equal(buffer.rowLinks(buffer.modelSource(different), different.screenBase).length, 2);
+  const gap = build({ screen: [wire([[0, "a", 0], [1, " "], [2, "b", 1]])], links: [["0_alacritty", target], ["1_alacritty", target]] });
+  assert.equal(buffer.rowLinks(buffer.modelSource(gap), gap.screenBase).length, 2);
+  for (const screen of [
+    [wire([[0, "abcd", 0]]), wire([[0, "e", 1]])],
+    [wire([[0, "abc", 0]], true), wire([[0, "e", 1]])],
+    [wire([[0, "abcd", 0]], true), wire([[1, "e", 1]])],
+  ]) {
+    const model = build({ cols: 4, screen, links: [["0_alacritty", target], ["1_alacritty", target]] });
+    const adapter = termOver(model).buffer.active;
+    assert.notEqual(adapter.getLine(model.screenBase).getCell(0).extended.urlId, adapter.getLine(model.screenBase + 1).getCell(screen[1].r[0][0]).extended.urlId);
+  }
+});
+
+test("a chain's later piece does not join an unwrapped row through its old generated id", () => {
+  // Canonicalizing a piece to the first id changes its cursor-moved
+  // continuation: that other row is now judged alone, as the plan accepts.
+  const target = "https://apnews.com/x";
+  const model = build({ cols: 12, screen: [wire([[0, "https://apn", 0], [11, "e", 1]]), wire([[0, "ws.com/x", 1]])], links: [["0_alacritty", target], ["1_alacritty", target]] });
+  const source = buffer.modelSource(model);
+  const found = buffer.linkAt(source, at(model.screenBase + 1, 0));
+  assert.deepEqual(links.linkHoverText(termOver(model), buffer.toXtermRange(found.ranges[0]), target), { kind: "whole", text: "ws.com/x" });
+});
+
+test("one-cell anonymous restarts resolve a long chain without repeated backward walks", () => {
+  // Hostile output can restart OSC 8 at every cell. Exercise many runs and
+  // rows while asserting identity and evidence, with no timing threshold.
+  const cols = 256;
+  const count = 100;
+  const target = "https://example.com/";
+  const entries = Array.from({ length: cols }, (_, i) => [`${i}_alacritty`, target]);
+  const screen = Array.from({ length: count }, (_, y) => wire(Array.from({ length: cols }, (_, x) => [x, "a", x]), y < count - 1));
+  const model = build({ cols, screen, links: entries });
+  const source = buffer.modelSource(model);
+  const found = buffer.rowLinks(source, model.screenBase + 50);
+  assert.equal(found.length, 1);
+  assert.deepEqual(found[0].ranges, [{ start: at(model.screenBase + 50, 0), end: at(model.screenBase + 50, cols) }]);
+  assert.equal(found[0].evidence.length, count + 2);
+});
+
 test("today's printed-path detector finds paths in grid text, across soft wraps", () => {
   const model = build({ cols: 10, screen: [wire([[0, "see /usr/s"]], true), wire([[0, "hare/x.txt"]]), wire([[0, "v1.2.3 ok"]])] });
   const term = termOver(model);

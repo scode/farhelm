@@ -280,6 +280,41 @@ fn links_share_one_table_entry() {
     );
 }
 
+/// Anonymous OSC restarts keep distinct numeric emulator ids on the wire.
+///
+/// The grid client's continuation rule recognizes this spelling because
+/// the protocol has no explicit/generated flag. Pin the literal user's
+/// reproduction here so a vendor upgrade cannot silently defeat that rule.
+#[test]
+fn anonymous_link_restarts_carry_generated_ids() {
+    let emulator = emulator(
+        30,
+        2,
+        100,
+        b"\x1b]8;;https://apnews.com/x\x1b\\https://apn\x1b]8;;https://apnews.com/x\x1b\\ews.com/x\x1b]8;;\x1b\\\n",
+    );
+    let screen = screen(&emulator);
+    let messages = rows_messages(&[(0, &screen.lines[0])]);
+    let GridOutput::Rows { rows, links } = &messages[0] else {
+        panic!("a rows message, got {messages:?}");
+    };
+    assert_eq!(links.len(), 2);
+    assert_ne!(links[0].id, links[1].id);
+    for link in links {
+        let digits = link
+            .id
+            .strip_suffix("_alacritty")
+            .expect("generated id suffix");
+        assert!(!digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit()));
+        assert_eq!(link.uri, "https://apnews.com/x");
+    }
+    assert_eq!(rows[0].row.runs.len(), 2);
+    assert_eq!(rows[0].row.runs[0].text, "https://apn");
+    assert_eq!(rows[0].row.runs[0].link, Some(0));
+    assert_eq!(rows[0].row.runs[1].text, "ews.com/x");
+    assert_eq!(rows[0].row.runs[1].link, Some(1));
+}
+
 /// A row with more distinct links than one message can carry keeps its
 /// text and styles and loses the links that do not fit.
 ///

@@ -1703,6 +1703,21 @@ is two or more letters, which keeps version and directory text such as `v1.2/` o
 not judging scheme-less IP text. The warning shows the link's text with Unicode format characters (bidi controls,
 zero-width characters) as visible escapes, because the terminal stores them unapplied and HTML would apply them.
 
+In grid terminals, `grid-buffer.js` resolves directly continuing pieces with generated ids matching `^\d+_alacritty$`
+and equal targets to the first piece's id and target. Pieces continue when adjacent on a row, or from a soft-wrapped
+row's last cell into column zero of the next (including the synthetic padding before a wrapped wide character). Explicit
+program ids stay separate from generated ids. Per-question row caching keeps resolution linear in the runs examined,
+with at most 128 rows of backward discovery. The underline and the buffer adapter's tags use the same identity, as do
+the rows captured as hover and late-answer evidence.
+
+Only the spelling distinguishes generated ids: a program can send `id=7_alacritty` itself. This is acceptable because
+joining requires equal targets, and such a contiguous chain is a subset of what a shared explicit id already joins. The
+compared text is the underlined chain's text; it stays quiet only when it reads the real target under the existing
+comparison rules. Misclassifying a program's id can extend an underline across touching same-target links, or cause a
+false alarm, but gives no quieter display for text naming a different place than the explicit-id rule already allows.
+The repeated-complete-address rule above still applies. Once a piece inherits the chain's first id, cursor movement onto
+an unwrapped row carrying that piece's original generated id no longer joins that other row.
+
 ### The grid client
 
 A terminal in a terminal host is interpreted by the supervisor's emulator ("The supervisor's terminal emulator"), so the
