@@ -3417,3 +3417,107 @@ assertion `left == right` failed: no resurrected actor may still be dialing
 Class: product
 
 Cause: hypothesis
+
+## 2026-11-04 — trash dialog's PageDown check (e2e/tests/trash-dialog.spec.ts)
+
+`trash header and global confirmation remain reachable at width 1000` and `... at width 360` (Chromium) open the Delete
+all confirmation in a 300-pixel-tall window, focus its Cancel button, press Home, then PageDown, and expect the
+confirmation's scroll area to move down. In the failures it stays at the top for the whole 5-second wait. Seen in the
+plans landing monitor's sandbox runs: once at width 360 in run `1a264a30-cd27-4f6e-bd2c-f3c3853fe0b6` (2026-11-04, round
+170's stack, tested commit `e66294bd`, which did not include launch-progress); at both widths in run
+`e57f9fe2-36de-43f7-aade-46eadb89f6ee` and at width 360 in the host-terminal run `89a737f6-3967-42aa-a519-a90238061970`
+(round 171's stack, `2cdad584`); once in six in `e6e3b26c-8418-4e4a-9cfc-c3c976c4c8bf` (same build, width 1000). Twenty
+runs each (ten per width) on one sandbox: main `5c5af756` passed all (`7ce0fa35-3abc-400d-ab8d-5fc457bb0731`); main with
+vs16-emoji-width and launch-progress (`65c836a5`) failed two, both at width 1000
+(`d30273b9-fc29-4e19-b4c0-036465123b34`); that plus session-summary-beside-list (`5d9a312c`) failed three, all at width
+1000 (`03eda759-efdb-41ff-956b-564f134ad83d`). The same check also failed three times in a discarded pass of round 170
+whose ssh-reached second host never connected. It fails on stacks with and without launch-progress, so it is not that
+plan's alone, but whether launch-progress's waiting status makes it more frequent is not settled. WebKit's copies of the
+test did not fail. The round 170 landing notes called the width-360 failure a cleanup failure; the cleanup failed after
+this check did. Open; excluded from deflake sweeps; no fix attempted.
+
+```text
+Error: expect(received).toBeGreaterThan(expected)
+Expected: > 0
+Received:   0
+> 878 |     await expect.poll(() => region.evaluate(node => node.scrollTop)).toBeGreaterThan(0);
+```
+
+Evidence: Tensorlake sandboxes (4-vCPU x86_64 Linux virtual machines booting systemd, each running only its shard with
+three Playwright workers and one owned stack each; load average not measured), the recorder's generic mode
+(`python3 scripts/record-test-run.py --kind development --tmux required -- npx playwright test --project=<engine>-<spec> ... --retries=0 --reporter=line`),
+Node 24.16 with the Playwright and browser builds the tested tree pins. Recorded tmux 3.7c executable SHA256
+`1f51ad46eb731a90b75e74afc35719666405e8231fa73ab58ff35a5e9e6f92cd`, locale C.UTF-8, child `FARHELM_TEST_TRACE_DIR` (and
+`FARHELM_E2E_SUITE_TERMINALS` in the host-terminal run) after the recorder scrubbed ambient `FARHELM_*`. The tracked
+tree differed from the tested commit only in `scripts/tensorlake/run-shard.sh` (the sandbox self-ssh fix, since landed
+in #2981), which no test reads. Run UUIDs address retained temporary evidence, which expires with cleanup. The failing
+attempts took the 5-second poll each; the rest of each run's shard passed.
+
+Class: unknown
+
+Cause: unknown
+
+## 2026-11-04 — feedback dialog's disabled Send color, on Chromium and the other way round (e2e/tests/feedback.spec.ts)
+
+`the dialog refuses blank and over-long messages without sending`, recorded open on 2026-10-30 and 2026-10-31 for
+WebKit, failed on Chromium in the plans landing monitor's sandbox run `e1ea38c4-f840-4bc6-8813-ab0c139a5b56`
+(2026-11-04, round 170's stack, tested commit `e66294bd`): in the dark-scheme pass, the disabled Send button's
+`background-color` was `rgb(233, 237, 244)` (the light palette's `--bg-1`) where the test expected `rgb(29, 34, 44)`,
+for the whole 5-second wait. Every earlier failure was in the light pass keeping a dark value; this one kept a light
+value in the dark pass, on the other engine. That widens the hypothesis from WebKit to both engines: the button can keep
+the palette from before the test's emulated color-scheme switch, whichever way the switch goes. The stack included
+discord-link-in-app, which adds a line to that dialog, but its only stylesheet change lays out the dialog's summary, not
+the Send button. Run alone three times on the same build (`d56a02bc-fb89-4fc5-a2de-cbd08bda9ce9`), it passed all three.
+Open; still excluded from deflake sweeps.
+
+```text
+Error: expect(locator).toHaveCSS(expected) failed
+Locator:  getByRole('dialog', { name: 'Send feedback', exact: true }).getByRole('button', { name: 'Send', exact: true })
+Expected: "rgb(29, 34, 44)"
+Received: "rgb(233, 237, 244)"
+Timeout:  5000ms
+```
+
+Evidence: Tensorlake sandboxes (4-vCPU x86_64 Linux virtual machines booting systemd, each running only its shard with
+three Playwright workers and one owned stack each; load average not measured), the recorder's generic mode
+(`python3 scripts/record-test-run.py --kind development --tmux required -- npx playwright test --project=<engine>-<spec> ... --retries=0 --reporter=line`),
+Node 24.16 with the Playwright and browser builds the tested tree pins. Recorded tmux 3.7c executable SHA256
+`1f51ad46eb731a90b75e74afc35719666405e8231fa73ab58ff35a5e9e6f92cd`, locale C.UTF-8, child `FARHELM_TEST_TRACE_DIR` (and
+`FARHELM_E2E_SUITE_TERMINALS` in the host-terminal run) after the recorder scrubbed ambient `FARHELM_*`. The tracked
+tree differed from the tested commit only in `scripts/tensorlake/run-shard.sh` (the sandbox self-ssh fix, since landed
+in #2981), which no test reads. Run UUIDs address retained temporary evidence, which expires with cleanup.
+
+Class: unknown
+
+Cause: hypothesis
+
+## 2026-11-04 — host-terminal run's startup-session check races its stack (e2e/global-setup.ts)
+
+The browser suite's host-terminal run (`FARHELM_E2E_SUITE_TERMINALS=host`) checks, in global setup, that each stack's
+startup session runs in a terminal host (`expectHostTerminals`, after authenticating the stack). Twice that check found
+no startup session at all ("the stack at ... must list its startup session") and the whole run stopped before any test:
+in the plans landing monitor's sandbox run `9f66f369-97d3-44e9-985c-e92d4fd84753` (2026-11-04, round 170's stack, tested
+commit `e66294bd`; its sixteen projects then passed on their own), and in launch-progress's executor's run
+`1287cb5b-7bcd-4ba4-9628-87100731c260`, recorded in its report. In the first, the stack's own log printed "creating the
+startup session" about a tenth of a second before the check failed and "startup complete" just after it. Hypothesis:
+global setup reaches a stack once its helm answers and its stack-info file exists, before `start-stack.sh` has created
+the startup session, so the check can run first; a setup that waits for the listing to name the session would close it.
+Only the host-terminal run makes this check. Open; it is not a test, so it has no deflake exclusion.
+
+```text
+Error: the stack at http://127.0.0.1:34549 must list its startup session
+   at ../global-setup.ts:131
+```
+
+Evidence: Tensorlake sandboxes (4-vCPU x86_64 Linux virtual machines booting systemd, each running only its shard with
+three Playwright workers and one owned stack each; load average not measured), the recorder's generic mode
+(`python3 scripts/record-test-run.py --kind development --tmux required -- npx playwright test --project=<engine>-<spec> ... --retries=0 --reporter=line`),
+Node 24.16 with the Playwright and browser builds the tested tree pins. Recorded tmux 3.7c executable SHA256
+`1f51ad46eb731a90b75e74afc35719666405e8231fa73ab58ff35a5e9e6f92cd`, locale C.UTF-8, child `FARHELM_TEST_TRACE_DIR` (and
+`FARHELM_E2E_SUITE_TERMINALS` in the host-terminal run) after the recorder scrubbed ambient `FARHELM_*`. The tracked
+tree differed from the tested commit only in `scripts/tensorlake/run-shard.sh` (the sandbox self-ssh fix, since landed
+in #2981), which no test reads. Run UUIDs address retained temporary evidence, which expires with cleanup.
+
+Class: unknown
+
+Cause: hypothesis
