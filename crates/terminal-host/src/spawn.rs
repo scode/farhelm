@@ -759,6 +759,11 @@ mod tests {
     fn the_descriptor_flag_helpers_set_and_never_toggle() {
         let (read, _write) = pipe().expect("fixture: a pipe");
         let fd = read.as_raw_fd();
+        // Linux's pipe helper already sets close-on-exec. Clear it so the
+        // first call must set the flag, then the second must leave it set.
+        // SAFETY: fd is an open descriptor owned by this test.
+        assert_eq!(unsafe { libc::fcntl(fd, libc::F_SETFD, 0) }, 0);
+        assert_eq!(flags(fd).0 & libc::FD_CLOEXEC, 0);
         let (_, before) = flags(fd);
         for _ in 0..2 {
             set_cloexec(fd).unwrap();
