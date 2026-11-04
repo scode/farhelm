@@ -176,8 +176,9 @@ impl HostTransport for SystemTransport {
                         Box::new(w) as Box<dyn AsyncWrite + Send + Unpin>,
                     )))
                 }
-                // A sandbox is an ssh host reached with Farhelm's own key;
-                // the kind's access choice is the only difference here.
+                // A sandbox uses Farhelm's key and negotiates the helper's
+                // silence limit. Ordinary SSH retains the legacy command;
+                // its caller has made no heartbeat/expiry contract.
                 HostKind::Ssh | HostKind::Tensorlake => {
                     let dest = host.destination.as_deref().context(
                         "an ssh registry row has no destination; the schema's CHECK constraint \

@@ -6500,10 +6500,6 @@ impl HelmStore {
     /// Suspend of `host`'s sandbox finished. Wording only; see
     /// [`TensorlakeBinding::suspended_at`]. Returns whether a Tensorlake row
     /// was there to update.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "Suspend and Resume follow in a later PR")
-    )]
     pub(crate) async fn set_tensorlake_suspended_at(
         &self,
         host: HostId,

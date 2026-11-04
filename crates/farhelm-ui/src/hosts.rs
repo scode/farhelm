@@ -216,6 +216,8 @@ pub(crate) enum HostRefusalAction {
     Setup,
     Update,
     Uninstall,
+    Suspend,
+    Resume,
     Retry,
     Adopt,
     Remove,
@@ -238,6 +240,8 @@ fn HostRefusalDialog(
         HostRefusalAction::Setup => "Set up host",
         HostRefusalAction::Update => "Update host",
         HostRefusalAction::Uninstall => "Uninstall Farhelm",
+        HostRefusalAction::Suspend => "Suspend host",
+        HostRefusalAction::Resume => "Resume host",
         HostRefusalAction::Retry => "Retry host",
         HostRefusalAction::Adopt => "Adopt host",
         HostRefusalAction::Remove => "Remove host",
@@ -1539,6 +1543,8 @@ pub(crate) struct SessionUnavailableNotice {
     pub cause: &'static str,
     pub explanation: Vec<DetailPart>,
     pub detail: Vec<DetailPart>,
+    /// Explicit user action available while the session is retained offline.
+    pub resume_host: Option<HostId>,
 }
 
 /// Explain an unavailable session without conflating host failure, a registry
@@ -1559,6 +1565,12 @@ pub(crate) fn stale_session_notice(
         )]
     } else {
         vec![DetailPart::peer(host_name)]
+    };
+    let resume_host = match &lookup {
+        HostLookup::Known(host) if matches!(host.state, HostPhase::Suspended { .. }) => {
+            Some(host.id)
+        }
+        _ => None,
     };
     let cause = session_unavailable_cause(lookup.clone());
     let (explanation, detail) = match lookup {
@@ -1614,6 +1626,7 @@ pub(crate) fn stale_session_notice(
         cause,
         explanation,
         detail,
+        resume_host,
     }
 }
 
@@ -1687,6 +1700,20 @@ enum HostRequestDisplay {
         action: HostRefusalAction,
     },
     RemoveDialog,
+}
+
+/// Suspend is immediate only with current, conclusive inactivity evidence.
+/// A stale classification or the create-time Unknown placeholder tells us
+/// nothing about whether an agent is working now, so both require consent.
+/// This checks one row only; the caller also requires a connected host after
+/// the listing read, since an empty offline cache has no rows to check.
+fn suspend_status_needs_confirmation(status: &crate::SessionStatus, stale: bool) -> bool {
+    use crate::SessionStatus::*;
+    stale
+        || match status {
+            Unknown | Running => true,
+            Waiting | Idle | Exited { .. } | Error { .. } | Interrupted => false,
+        }
 }
 
 /// The permanent host list: every registered host, its state, and the
@@ -2138,6 +2165,77 @@ pub(crate) fn HostsPanel(
             },
         );
     };
+
+    let mut suspend_question = use_signal(|| None::<Host>);
+    let lifecycle_base = base.clone();
+    let lifecycle = use_callback(move |(snapshot, resume): (Host, bool)| {
+        let host = snapshot.id;
+        let base = lifecycle_base.clone();
+        run(
+            host,
+            Box::pin(async move {
+                if resume {
+                    crate::api::resume_host(&base, host).await?;
+                } else {
+                    crate::api::suspend_host(&base, host).await?;
+                }
+                Ok(Commit::Confirmed)
+            }),
+            HostRequestDisplay::Refusal {
+                host: Box::new(snapshot),
+                action: if resume {
+                    HostRefusalAction::Resume
+                } else {
+                    HostRefusalAction::Suspend
+                },
+            },
+        );
+    });
+    let suspend_base = base.clone();
+    let on_lifecycle = use_callback(move |(host, resume): (HostId, bool)| {
+        host_menu_open.set(None);
+        let Some(snapshot) = hosts
+            .peek()
+            .hosts()
+            .and_then(|rows| rows.iter().find(|row| row.id == host).cloned())
+        else {
+            return;
+        };
+        if resume {
+            lifecycle.call((snapshot, true));
+            return;
+        }
+        let base = suspend_base.clone();
+        spawn(async move {
+            // Read the full host's sessions, independent of the list's current
+            // search/filter. A failed read cannot establish that no agent works.
+            let filter = crate::api::SessionFilter {
+                host: Some(host),
+                ..Default::default()
+            };
+            let listing =
+                crate::api::fetch_sessions(&base, &filter, crate::api::ListSort::default()).await;
+            // A successful empty listing may be an offline cache, with no
+            // stale row to expose its uncertainty. Check current availability
+            // after the await: the click's snapshot cannot authorize immediate
+            // Suspend if a disconnect was detected while the read was pending.
+            // lookup also refuses a failed host refresh's retained snapshot.
+            let connected = matches!(hosts.peek().lookup(Some(host)),
+                HostLookup::Known(current) if is_connected(&current.state));
+            match listing {
+                Ok(listing)
+                    if connected
+                        && !listing.truncated
+                        && listing.sessions.iter().all(|session| {
+                            !suspend_status_needs_confirmation(&session.status, session.stale)
+                        }) =>
+                {
+                    lifecycle.call((snapshot, false))
+                }
+                _ => suspend_question.set(Some(snapshot)),
+            }
+        });
+    });
 
     let adopt_base = base.clone();
     // The `reported` identity travels from the RENDERED state to the
@@ -3072,6 +3170,7 @@ pub(crate) fn HostsPanel(
                                 }
                             },
                             on_retry: on_retry.clone(),
+                            on_lifecycle,
                             on_adopt: on_adopt.clone(),
                             on_settings_start: move |id: HostId| {
                                 // ADD/Uninstall preparation owns no page lock yet,
@@ -3194,6 +3293,25 @@ pub(crate) fn HostsPanel(
                     },
                 }
             }
+            if let Some(host) = suspend_question() {
+                crate::modal_isolation::HostModal {
+                    div { class: "host-settings-backdrop", role: "presentation",
+                        ModalDialog {
+                            handle: DialogHandle::new(".host-suspend-dialog"),
+                            focus: DialogFocus::remembered(".host-suspend-cancel", Some(".host-suspend-cancel"), true, None),
+                            class: "host-settings-dialog host-suspend-dialog host-dialog-framed",
+                            role: "dialog", aria_modal: "true", aria_label: "Suspend host",
+                            on_escape: move |_| { suspend_question.set(None); },
+                            p { "An agent on " span { class: "peer-value", dir: "ltr", "{host.name.escaped()}" }
+                                " is working, or its status could not be checked. Suspend keeps it as it is and it continues when you resume the host." }
+                            button { class: "btn host-suspend-cancel", onclick: move |_| { suspend_question.set(None); }, "Cancel" }
+                            button { class: "btn", onclick: move |_| {
+                                suspend_question.set(None); lifecycle.call((host.clone(), false));
+                            }, "Suspend" }
+                        }
+                    }
+                }
+            }
             if let Some(entry) = visible_refusal {
                 crate::modal_isolation::HostModal { key: "{entry.host.id}",
                 HostRefusalDialog {
@@ -3245,13 +3363,11 @@ pub(crate) fn HostsPanel(
 // together ran wider than the default sidebar leaves room for — `remove`
 // rendered clipped off the right edge by `.app-sidebar`'s
 // `overflow: hidden auto`, invisible and unclickable, with nothing in the
-// DOM or in Playwright's `toBeVisible` to notice. Folding every verb but
-// the always-visible name/status into one "⋯" menu — built the same way as
-// the session row's (PR #239, mechanics shared via `menu_panel`) — leaves
-// `.host-row-main` exactly three children regardless of host kind, so
-// there is no longer a control count for the sidebar's width to run out
-// on. The host verbs keep this menu because the same narrow-sidebar
-// constraint still applies.
+// DOM or in Playwright's `toBeVisible` to notice. Routine verbs therefore
+// live in one "⋯" menu, built like the session row's (PR #239, mechanics
+// shared via `menu_panel`). Only the deliberate inline Update and Resume
+// offers accompany the name/status; adding another routine verb must not
+// consume more of the sidebar's constrained width.
 
 /// One command in a host row's actions menu, in the order the menu offers
 /// them.
@@ -3262,14 +3378,17 @@ pub(crate) fn HostsPanel(
 /// `Settings` is offered on every host, because whether YOLO launches need a
 /// confirmation is a setting of every host, the local one included (what the
 /// settings dialog offers beyond that, a destination and an alias, it decides
-/// itself); and `Remove` only appears on an ssh row (see `HostRow`'s own doc
-/// for why an unmanageable kind cannot be removed). The separator before
+/// itself); Suspend/Resume belong to every Tensorlake row;
+/// and `Remove` appears on removable remote rows, labelled Delete sandbox
+/// for Tensorlake. The separator before
 /// `Remove` is drawn in the rsx, not modeled here — see
 /// `MenuOrder` in `menu_panel` for why a separator is never counted as an
 /// item.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum HostMenuAction {
     Retry,
+    Suspend,
+    Resume,
     Adopt,
     Rerun,
     AutomaticSetup,
@@ -3288,7 +3407,10 @@ enum HostMenuAction {
 fn HostMenuActionIcon(action: HostMenuAction) -> Element {
     use crate::icons::{ActionGlyph, ActionIcon};
     let glyph = match action {
-        HostMenuAction::Retry | HostMenuAction::Rerun => ActionGlyph::Restart,
+        HostMenuAction::Retry | HostMenuAction::Rerun | HostMenuAction::Resume => {
+            ActionGlyph::Restart
+        }
+        HostMenuAction::Suspend => ActionGlyph::Stop,
         HostMenuAction::Adopt => ActionGlyph::Adopt,
         HostMenuAction::AutomaticSetup => ActionGlyph::Setup,
         HostMenuAction::Update => ActionGlyph::Update,
@@ -3312,8 +3434,10 @@ fn HostMenuActionIcon(action: HostMenuAction) -> Element {
 /// identical reason: the canonical order lives in one place so the
 /// rendered list and the navigable list cannot disagree about what "the
 /// first item" or "the last item" means.
-const HOST_MENU_ACTIONS: [HostMenuAction; 8] = [
+const HOST_MENU_ACTIONS: [HostMenuAction; 10] = [
     HostMenuAction::Retry,
+    HostMenuAction::Suspend,
+    HostMenuAction::Resume,
     HostMenuAction::Adopt,
     HostMenuAction::Rerun,
     HostMenuAction::AutomaticSetup,
@@ -3377,6 +3501,7 @@ fn host_menu_order(
 ) -> HostMenuOrder {
     HostMenuOrder::pack(HOST_MENU_ACTIONS, |action| match action {
         HostMenuAction::Retry => true,
+        HostMenuAction::Suspend | HostMenuAction::Resume => false,
         HostMenuAction::Adopt => adoptable,
         HostMenuAction::Rerun => provisioning.rerun.is_some(),
         HostMenuAction::AutomaticSetup => provisioning.automatic_setup,
@@ -4111,6 +4236,7 @@ fn HostRow(
     /// The feed-driven setup/update surface built by the panel.
     provisioning_section: Element,
     on_retry: EventHandler<HostId>,
+    #[props(default)] on_lifecycle: EventHandler<(HostId, bool)>,
     on_adopt: EventHandler<(HostId, String)>,
     /// Open this host's settings dialog (the menu's Settings item).
     on_settings_start: EventHandler<HostId>,
@@ -4189,7 +4315,22 @@ fn HostRow(
     // below has to notice an item withdrawn (a poll turning `adoptable` off)
     // even while a menu built against the wider list is still up.
     let adoptable_now = adopt_identity.is_some();
-    let menu_order = host_menu_order(adoptable_now, manageable, provisioning_menu);
+    let suspended = matches!(host.state, HostPhase::Suspended { .. });
+    let lifecycle_action = if host.kind.suspends() {
+        Some(if suspended {
+            HostMenuAction::Resume
+        } else {
+            HostMenuAction::Suspend
+        })
+    } else {
+        None
+    };
+    let menu_order = HostMenuOrder::pack(HOST_MENU_ACTIONS, |action| {
+        Some(action) == lifecycle_action
+            || host_menu_order(adoptable_now, manageable, provisioning_menu)
+                .position(action)
+                .is_some()
+    });
     // Setup still refuses behind the page lock, so its items stay disabled
     // while another operation holds it. Update planning mutates nothing and
     // its submission claim retries reactively, so the update item answers
@@ -4354,9 +4495,19 @@ fn HostRow(
     // `menu_panel::reconcile_menu_focus`'s own doc for the general rule
     // this applies.
     use_effect(use_reactive(
-        (&adoptable_now, &manageable, &provisioning_menu),
-        move |(adoptable, manageable, provisioning_menu)| {
-            let order = host_menu_order(adoptable, manageable, provisioning_menu);
+        (
+            &adoptable_now,
+            &manageable,
+            &provisioning_menu,
+            &lifecycle_action,
+        ),
+        move |(adoptable, manageable, provisioning_menu, lifecycle_action)| {
+            let order = HostMenuOrder::pack(HOST_MENU_ACTIONS, |action| {
+                Some(action) == lifecycle_action
+                    || host_menu_order(adoptable, manageable, provisioning_menu)
+                        .position(action)
+                        .is_some()
+            });
             item_handles
                 .write()
                 .retain(|action, _| order.position(*action).is_some());
@@ -4465,6 +4616,9 @@ fn HostRow(
                     HostKind::Unrecognized => rsx! {},
                 }
                 span { class: "host-name peer-value", dir: "ltr", "{shown_name}" }
+                if suspended {
+                    button { class: "btn host-resume", disabled: busy, onclick: move |_| { if !busy { on_lifecycle.call((id, true)); } }, "Resume" }
+                }
                 span {
                     // `updating` lets the status group shrink so the step
                     // name, not the `⋯` toggle, absorbs width pressure.
@@ -4675,6 +4829,20 @@ fn HostRow(
                                         label: rsx! { "Retry" },
                                         description_id: "host-menu-retry-description",
                                         description: rsx! { "Try the connection again" },
+                                    }
+                                }
+                                if let Some(action) = lifecycle_action {
+                                    button { class: "btn menu-item host-row-menu-item", role: "menuitem",
+                                        disabled: busy,
+                                        tabindex: if menu_tab_stop == Some(action) { "0" } else { "-1" },
+                                        "data-menu-focus": menu_panel::menu_item_focus_key(menu_wiring, action),
+                                        onmounted: move |element| remember_menu_item(menu_wiring, action, element.data()),
+                                        onfocusin: move |_| record_menu_item_focus(menu_wiring, action),
+                                        onfocusout: move |_| menu_focus.set(None),
+                                        onkeydown: move |evt| handle_menu_key(&evt, menu_order.position(action), menu_wiring, &id),
+                                        onclick: move |_| { if !busy { on_lifecycle.call((id, suspended)); } },
+                                        HostMenuActionIcon { action }
+                                        if suspended { "Resume" } else { "Suspend" }
                                     }
                                 }
                                 if let (Some(reported), Some(label)) = (adopt_identity, adopt_label) {
@@ -5945,6 +6113,35 @@ fn AddHostForm(
 mod tests {
     use super::*;
     use crate::peer::detail_text;
+
+    /// Unknown or cached activity cannot establish that Suspend will leave
+    /// no working agent paused. Definite Idle/Waiting and terminal outcomes
+    /// may act immediately, but stale copies of any of them must ask.
+    #[farhelm_testtrace::test]
+    fn suspend_confirmation_requires_current_non_working_evidence() {
+        use crate::SessionStatus::*;
+        for status in [
+            Unknown,
+            Running,
+            Waiting,
+            Idle,
+            Exited { exit_code: Some(0) },
+            Error {
+                detail: "exec failed".into(),
+            },
+            Interrupted,
+        ] {
+            assert_eq!(
+                suspend_status_needs_confirmation(&status, false),
+                matches!(status, Unknown | Running),
+                "{status:?}"
+            );
+            assert!(
+                suspend_status_needs_confirmation(&status, true),
+                "stale {status:?}"
+            );
+        }
+    }
 
     /// A label-sized rect at `top`, 100px wide and 16px tall, starting 40px
     /// from the viewport's left edge.
@@ -7786,6 +7983,7 @@ mod tests {
         });
         let notice = stale_session_notice("gpu dev", HostLookup::Known(&host));
         assert_eq!(notice.cause, "Host suspended");
+        assert_eq!(notice.resume_host, Some(host.id));
         assert_eq!(
             detail_text(&notice.explanation),
             "gpu dev is suspended; this session continues when it resumes."
@@ -8666,6 +8864,8 @@ mod tests {
     /// on every fleet refresh. Sixty-four refreshes rather than one, because a
     /// prop that compares equal by accident on the first pass — a recycled
     /// allocation, say — will not keep doing it.
+    /// Supply the panel's stable lifecycle callback too: omitting it builds
+    /// a fresh default handler, which is not the panel's prop identity.
     #[farhelm_testtrace::test]
     fn repeated_parent_refreshes_do_not_rerender_an_unchanged_host_row() {
         fn app() -> Element {
@@ -8695,6 +8895,7 @@ mod tests {
                     remote_update_available: false,
                     provisioning_section: dioxus::core::VNode::empty(),
                     on_retry,
+                    on_lifecycle: use_callback(|_: (HostId, bool)| {}),
                     on_adopt,
                     on_settings_start: use_callback(|_: HostId| {}),
                     on_remove_start,
@@ -8728,8 +8929,10 @@ mod tests {
     /// fleet-wide repaint. A field that
     /// drops out of what memoization compares, or a group that starts
     /// invalidating rows it does not describe, moves these per-row counts.
-    /// Exercising `HostRowControls` and `HostRowActivity` in the same virtual
-    /// DOM is what makes the test say which of the two broke.
+    /// Every callback, including lifecycle actions, has the same stable
+    /// handle the panel supplies. Exercising `HostRowControls` and
+    /// `HostRowActivity` in the same virtual DOM is what makes the test say
+    /// which of the two broke.
     #[farhelm_testtrace::test]
     fn only_the_host_rows_whose_state_changed_rerender() {
         // Both facts live OUTSIDE the virtual DOM — the test moves them
@@ -8770,6 +8973,7 @@ mod tests {
                         remote_update_available: false,
                         provisioning_section: dioxus::core::VNode::empty(),
                         on_retry,
+                        on_lifecycle: use_callback(|_: (HostId, bool)| {}),
                         on_adopt,
                         on_settings_start: use_callback(|_: HostId| {}),
                         on_remove_start,

@@ -336,7 +336,8 @@ pub const GITHUB_REPO_RESULTS_CAP: usize = 25;
 pub const BUILD_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Frame kind tags on the wire. `Control` is JSON on channel 0; `Data` is
-/// raw bytes on an attachment channel.
+/// raw bytes on an attachment channel. An empty `Data` on channel zero is
+/// the helm's lightweight heartbeat; it has no routing or reply semantics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrameKind {
     Control,
@@ -348,6 +349,9 @@ pub enum FrameKind {
 /// `Attach` for a terminal stream, `BeginUpload` for an attachment upload,
 /// `BeginDownload` for a file read, or `BeginTcpRelay` for bidirectional TCP.
 /// That request fixes the channel's permitted directions and meaning.
+/// Empty data on channel zero is an exception: it is a heartbeat, ignored by
+/// supervisors (including older peers, whose data router has no channel zero).
+/// It introduces no control-message variant or protocol-version requirement.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Frame {
     pub kind: FrameKind,

@@ -5950,6 +5950,32 @@ releases it with a fresh retry. Without an API key the removal is refused (409) 
 The panel's uninstall is refused with a "delete the sandbox instead" remedy, and an agent's host remove is refused
 before any card.
 
+Explicit Tensorlake Suspend and Resume use `POST /api/hosts/{id}/suspend` and `/resume`, on helm-owned tasks so a closed
+tab cannot strand a hold. Both take the host's provisioning lock before reading its binding, excluding setup, update and
+removal. Suspend holds the actor, releases both shared SSH masters, asks Tensorlake to suspend, waits at most 60
+seconds, and records the completion time. Resume asks Tensorlake to resume, waits at most 120 seconds for running,
+clears the timestamp and releases the hold with a fresh retry. Already-at-target states succeed; conflicts are
+reconciled by reading status. An actual resume withdraws any pre-suspension connection and releases both masters before
+retrying, even if the actor has not yet detected an external suspension. Only an already-running sandbox with an
+already-connected actor skips recovery, preserving its viewers on repeated Resume. Every failure releases the hold. The
+launcher's existing-folder path binds the fresh connection token after resume; fresh checkouts require a second click to
+accept the newly fetched preview.
+
+The remote `internal stdio` proxy has no input deadline by default. Only Tensorlake's steady-state SSH command opts in
+with `--stdin-idle-limit-secs 120`, after probing that executable's `internal stdio --help` for the advertised option.
+The probe's stdout is captured, not forwarded into the protocol. A helper without the option receives the legacy
+invocation, so clap cannot reject an unknown flag before the usual hello/version-skew handling. An older helm never
+passes the flag; ordinary SSH argv stays unchanged.
+
+For Tensorlake hosts the client's writer emits an empty data frame on channel zero every 30 seconds, giving due
+heartbeats priority between queued frames. No channel can be allocated at zero, so the supervisor's data router ignores
+it, including older supervisors; there is no new control variant or protocol bump. The timer belongs to the writer,
+independently of refresh/cache/database completion. Only byte activity on the helper's stdin resets its watchdog. The
+watchdog runs outside the copy pump, so blocked supervisor writes or stdout backpressure cannot defeat expiry; expiry
+exits the process with status 1 and closes the socket even while the gateway retains its TCP peer. Clean stdin EOF
+disables the watchdog, half-closes the socket and drains pending replies. Process tests pass a short budget directly to
+their child, without changing the test process's environment.
+
 ## Feedback forwarding
 
 SPEC.md's Feedback section is implemented as one protected UI route on the helm, `POST /api/feedback`, behind the same

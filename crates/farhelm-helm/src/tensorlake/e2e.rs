@@ -28,8 +28,8 @@
 //!
 //! The model itself, [`FakeModel`], is plain data with Tensorlake's rules
 //! (name uniqueness, 404s, a snapshot that completes after some polls); the
-//! helm's unit tests drive the same model in memory. Suspend and resume are
-//! not modeled yet and answer 501.
+//! helm's unit tests drive the same model in memory. Suspend and resume
+//! preserve the sandbox's identity and resources, as the real API does.
 
 use super::api::{
     ApiKey, CreateSandbox, CreatedSandbox, CreatedSnapshot, Resources, SandboxInfo, SandboxPage,
@@ -99,7 +99,7 @@ struct FakeConfig {
 pub(crate) struct FakeSandbox {
     pub(crate) id: String,
     pub(crate) name: Option<String>,
-    /// `running` or `terminated`; the model never leaves a sandbox pending.
+    /// `running`, `suspended` or `terminated`; transitions settle immediately.
     pub(crate) status: String,
     pub(crate) image: Option<String>,
     pub(crate) snapshot_id: Option<String>,
@@ -161,10 +161,10 @@ impl FakeModel {
         SandboxInfo {
             id: sandbox.id.clone(),
             name: sandbox.name.clone(),
-            status: if sandbox.status == "running" {
-                SandboxStatus::Running
-            } else {
-                SandboxStatus::Terminated
+            status: match sandbox.status.as_str() {
+                "running" => SandboxStatus::Running,
+                "suspended" => SandboxStatus::Suspended,
+                _ => SandboxStatus::Terminated,
             },
             created_at: None,
             image: sandbox.image.clone(),
@@ -181,6 +181,21 @@ impl FakeModel {
         TensorlakeError::NotFound {
             message: "not found".into(),
         }
+    }
+
+    /// Preserve the same machine across suspend/resume. A terminated sandbox
+    /// cannot be revived; repeated requests for the current state succeed.
+    pub(crate) fn set_suspended(
+        &mut self,
+        sandbox: &str,
+        suspended: bool,
+    ) -> Result<(), TensorlakeError> {
+        let index = self.find(sandbox).ok_or_else(Self::not_found)?;
+        if self.sandboxes[index].status == "terminated" {
+            return Err(Self::not_found());
+        }
+        self.sandboxes[index].status = if suspended { "suspended" } else { "running" }.into();
+        Ok(())
     }
 
     /// The live sandboxes, as a listing shows them.
@@ -271,6 +286,7 @@ impl FakeModel {
 
     /// Plant a settled snapshot of `sandbox_id` (a suspend snapshot, say),
     /// for tests that seed leftovers.
+    #[cfg(test)]
     pub(crate) fn plant_snapshot(&mut self, sandbox_id: &str) -> String {
         let id = self.next_id("fakesnap");
         self.snapshots.push(FakeSnapshot {
@@ -485,15 +501,6 @@ impl E2eTensorlake {
         let _ = file.write_all(format!("{event}\n").as_bytes()).await;
         let _ = file.flush().await;
     }
-
-    /// The reply for an operation this fake does not implement yet.
-    async fn unimplemented<T>(&self, operation: &str, key: &ApiKey) -> Result<T, TensorlakeError> {
-        self.admit(operation, key).await?;
-        Err(TensorlakeError::Status {
-            status: 501,
-            message: format!("the e2e Tensorlake fake does not implement {operation}"),
-        })
-    }
 }
 
 #[async_trait]
@@ -530,12 +537,16 @@ impl TensorlakeApi for E2eTensorlake {
         self.change_model(|model| model.create(request)).await
     }
 
-    async fn suspend_sandbox(&self, key: &ApiKey, _sandbox: &str) -> Result<(), TensorlakeError> {
-        self.unimplemented("suspend_sandbox", key).await
+    async fn suspend_sandbox(&self, key: &ApiKey, sandbox: &str) -> Result<(), TensorlakeError> {
+        self.admit("suspend_sandbox", key).await?;
+        self.change_model(|model| model.set_suspended(sandbox, true))
+            .await
     }
 
-    async fn resume_sandbox(&self, key: &ApiKey, _sandbox: &str) -> Result<(), TensorlakeError> {
-        self.unimplemented("resume_sandbox", key).await
+    async fn resume_sandbox(&self, key: &ApiKey, sandbox: &str) -> Result<(), TensorlakeError> {
+        self.admit("resume_sandbox", key).await?;
+        self.change_model(|model| model.set_suspended(sandbox, false))
+            .await
     }
 
     async fn terminate_sandbox(&self, key: &ApiKey, sandbox: &str) -> Result<(), TensorlakeError> {

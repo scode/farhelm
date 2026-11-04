@@ -2143,7 +2143,8 @@ fn send_save(
 ///
 /// The preference seed behind `PreferencesGate` must give up in seconds
 /// rather than leave a blank page (see [`PREFERENCE_SEED_TIMEOUT`]); recursive
-/// trash deletion earns a longer wait ([`TRASH_DELETE_TIMEOUT`]). Other calls go through
+/// trash deletion earns a longer wait ([`TRASH_DELETE_TIMEOUT`]). Tensorlake
+/// lifecycle operations earn 150 seconds for the helm's bounded work. Other calls go through
 /// [`send`] or [`send_read`]; a deadline chosen per call site is a deadline
 /// someone eventually forgets.
 fn send_within(
@@ -5437,6 +5438,67 @@ pub(crate) async fn retry_host(base: &str, host: HostId) -> Result<(), String> {
         return Err(refusal_text("POST", &url, resp).await);
     }
     Ok(())
+}
+
+/// Suspend a Tensorlake host; the helm owns the operation through completion.
+pub(crate) async fn suspend_host(base: &str, host: HostId) -> Result<(), String> {
+    host_lifecycle(base, host, "suspend").await
+}
+
+/// Resume a Tensorlake sandbox. Success means running, not yet connected.
+pub(crate) async fn resume_host(base: &str, host: HostId) -> Result<(), String> {
+    host_lifecycle(base, host, "resume").await
+}
+
+/// Use the ordinary refusal wording for lifecycle operations, including busy
+/// hosts and missing account credentials.
+async fn host_lifecycle(base: &str, host: HostId, verb: &str) -> Result<(), String> {
+    let url = format!("{base}/api/hosts/{host}/{verb}");
+    // Resume can spend 120 seconds restoring a memory snapshot, plus the
+    // connection teardown. Keep the UI's deadline outside the helm's budget.
+    let response = send_within(client().post(&url), std::time::Duration::from_secs(150)).await?;
+    if !response.status().is_success() {
+        return Err(refusal_text("POST", &url, response).await);
+    }
+    Ok(())
+}
+
+/// Wait for the connection established after an explicit Resume. Return the
+/// fresh registry snapshot so a launch binds its new connection token, never
+/// the token invalidated by suspension. Reads and polling are bounded.
+pub(crate) async fn resume_host_connected(base: &str, host: HostId) -> Result<Vec<Host>, String> {
+    resume_host(base, host).await?;
+    let mut ready = Box::pin(async {
+        loop {
+            let hosts = fetch_hosts(base).await?;
+            let current = hosts
+                .iter()
+                .find(|row| row.id == host)
+                .ok_or("The host was removed while resuming")?;
+            if crate::hosts::is_connected(&current.state) {
+                return Ok(hosts);
+            }
+            if matches!(
+                current.state,
+                crate::HostPhase::Suspended {
+                    resume_failed: Some(_),
+                    ..
+                }
+            ) {
+                return Err("Tensorlake could not resume this host; check its details".into());
+            }
+            crate::reader::sleep_ms(1000).await;
+        }
+    });
+    let mut deadline = Box::pin(crate::reader::sleep_ms(60_000));
+    std::future::poll_fn(move |cx| {
+        if let std::task::Poll::Ready(answer) = ready.as_mut().poll(cx) {
+            return std::task::Poll::Ready(answer);
+        }
+        deadline.as_mut().poll(cx).map(|()| Err(
+            "The host resumed but did not connect within 60 seconds; try again when it connects".into()
+        ))
+    }).await
 }
 
 /// Send the feedback dialog's submission to the maintainer, through the helm

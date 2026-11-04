@@ -1740,7 +1740,7 @@ impl SupervisorClient {
         R: AsyncRead + Unpin + Send + 'static,
         W: AsyncWrite + Unpin + Send + 'static,
     {
-        Self::start_with_seams(r, w, writer_stall, upload_stall, None).await
+        Self::start_with_seams(r, w, writer_stall, upload_stall, None, None).await
     }
 
     /// Like [`Self::start`], but able to answer the supervisor's agent
@@ -1763,12 +1763,31 @@ impl SupervisorClient {
         R: AsyncRead + Unpin + Send + 'static,
         W: AsyncWrite + Unpin + Send + 'static,
     {
+        Self::start_for_host_with_heartbeat(r, w, handler, host, false).await
+    }
+
+    /// Tensorlake connections enable `heartbeat`: the writer emits an empty
+    /// channel-zero data frame every 30 seconds, independently of requests or
+    /// cache work. This existing no-op frame is tolerated by older peers too;
+    /// it becomes a liveness contract only when the remote helper opts in.
+    pub(crate) async fn start_for_host_with_heartbeat<R, W>(
+        r: R,
+        w: W,
+        handler: crate::agent_requests::AgentRequestSlot,
+        host: crate::store::HostId,
+        heartbeat: bool,
+    ) -> anyhow::Result<Arc<SupervisorClient>>
+    where
+        R: AsyncRead + Unpin + Send + 'static,
+        W: AsyncWrite + Unpin + Send + 'static,
+    {
         Self::start_with_seams(
             r,
             w,
             WRITER_STALL_TIMEOUT,
             UPLOAD_ACK_STALL_TIMEOUT,
             Some((handler, host)),
+            heartbeat.then_some(Duration::from_secs(30)),
         )
         .await
     }
@@ -1788,6 +1807,7 @@ impl SupervisorClient {
             crate::agent_requests::AgentRequestSlot,
             crate::store::HostId,
         )>,
+        heartbeat: Option<Duration>,
     ) -> anyhow::Result<Arc<SupervisorClient>>
     where
         R: AsyncRead + Unpin + Send + 'static,
@@ -1866,9 +1886,25 @@ impl SupervisorClient {
         let writer_done = connection_done.clone();
         let mut writer_cancel = connection_done.subscribe();
         tokio::spawn(async move {
+            // Keep the timer in the writer rather than enqueueing from a
+            // refresh task. Cache/database stalls cannot stop it, and a full
+            // outbound queue cannot hide a due heartbeat behind bulk work.
+            let mut heartbeat = heartbeat.map(|period| {
+                let mut timer =
+                    tokio::time::interval_at(tokio::time::Instant::now() + period, period);
+                timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                timer
+            });
             loop {
                 let item = tokio::select! {
+                    biased;
                     _ = writer_cancel.changed() => break,
+                    _ = async {
+                        match heartbeat.as_mut() {
+                            Some(timer) => { timer.tick().await; }
+                            None => std::future::pending::<()>().await,
+                        }
+                    } => Some(Frame::data(0, Vec::new()).into()),
                     item = writer_rx.recv() => item,
                 };
                 // Held across the write, not just up to it: an upload's

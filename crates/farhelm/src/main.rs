@@ -1342,6 +1342,10 @@ enum InternalCmd {
     Stdio {
         #[arg(long)]
         state_dir: Option<PathBuf>,
+        /// End an open but silent connection after this many seconds. The
+        /// caller must send heartbeats independently of application work.
+        #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+        stdin_idle_limit_secs: Option<u64>,
     },
     /// Run a terminal host (the `terminal-host` crate's entry point): the
     /// child spec on stdin, `--socket` on the command line, nothing else.
@@ -1838,7 +1842,10 @@ fn main() -> anyhow::Result<()> {
             // before user rc files; neither command needs an async runtime.
             InternalCmd::BuildSpare { spec } => farhelm_supervisor::build_spare(&spec),
             InternalCmd::BuildSpareGuard { spec } => farhelm_supervisor::guard_spare_build(&spec),
-            InternalCmd::Stdio { state_dir } => {
+            InternalCmd::Stdio {
+                state_dir,
+                stdin_idle_limit_secs,
+            } => {
                 // No tracing init — belt and braces, not necessity:
                 // tracing goes to stderr by construction (init_tracing),
                 // but this process's stdout IS the protocol channel, so
@@ -1850,7 +1857,10 @@ fn main() -> anyhow::Result<()> {
                     Some(dir) => dir,
                     None => farhelm_supervisor::default_state_dir()?,
                 };
-                runtime()?.block_on(stdio_proxy(&dir))
+                runtime()?.block_on(stdio_proxy(
+                    &dir,
+                    stdin_idle_limit_secs.map(std::time::Duration::from_secs),
+                ))
             }
             InternalCmd::ContainerPrepare { ticket, generation } => {
                 farhelm_supervisor::container::prepare(&ticket, generation)
@@ -2668,6 +2678,12 @@ async fn run_checkout_config(command: CheckoutConfigCmd) -> anyhow::Result<Strin
 /// reach the helm. The two pumps are selected only until stdin finishes:
 /// clean EOF keeps the downstream pump alive, while an upstream error
 /// terminates the otherwise read-only proxy.
+/// An opted-in caller's silence also ends the proxy after `stdin_idle_limit`:
+/// a gateway may retain its TCP peer after a sleeping helm stops sending,
+/// so EOF alone is not a reliable liveness signal. Legacy callers have no
+/// deadline. The Tensorlake transport opts in only after a capability check,
+/// and its connection writer sends independent heartbeats every 30 seconds.
+/// Refresh/cache/database work is not a liveness signal and may take longer.
 ///
 /// Failure to make the initial local socket connection exits 75 only for
 /// not-found/refused. Provisioning treats that status as positive absence;
@@ -2675,9 +2691,12 @@ async fn run_checkout_config(command: CheckoutConfigCmd) -> anyhow::Result<Strin
 /// A successful socket connection emits one stderr marker before either pump
 /// starts. It reports transport progress without adding bytes to the framed
 /// stdout stream or claiming that the supervisor has answered the hello.
-async fn stdio_proxy(state_dir: &std::path::Path) -> anyhow::Result<()> {
+async fn stdio_proxy(
+    state_dir: &std::path::Path,
+    stdin_idle_limit: Option<std::time::Duration>,
+) -> anyhow::Result<()> {
     use anyhow::Context;
-    use tokio::io::AsyncWriteExt;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     let stream = farhelm_supervisor::service::connect(state_dir)
         .await
@@ -2700,11 +2719,29 @@ async fn stdio_proxy(state_dir: &std::path::Path) -> anyhow::Result<()> {
         });
     eprintln!("{}", farhelm_proto::io::SUPERVISOR_CONNECTED_MARKER);
     let (mut sock_r, mut sock_w) = tokio::io::split(stream);
+    // The watchdog lives outside the pump: a blocked supervisor write must
+    // not suspend the silence deadline. None means stdin reached clean EOF,
+    // which keeps the existing half-close-and-drain contract.
+    let (activity, mut input_activity) =
+        tokio::sync::watch::channel(Some(tokio::time::Instant::now()));
     let mut upstream = tokio::spawn(async move {
         let mut stdin = tokio::io::stdin();
-        tokio::io::copy(&mut stdin, &mut sock_w)
-            .await
-            .context("copying stdin to supervisor")?;
+        let mut bytes = [0; 16 * 1024];
+        loop {
+            let count = stdin
+                .read(&mut bytes)
+                .await
+                .context("reading stdin from helm")?;
+            if count == 0 {
+                activity.send_replace(None);
+                break;
+            }
+            activity.send_replace(Some(tokio::time::Instant::now()));
+            sock_w
+                .write_all(&bytes[..count])
+                .await
+                .context("copying stdin to supervisor")?;
+        }
         sock_w
             .shutdown()
             .await
@@ -2716,6 +2753,28 @@ async fn stdio_proxy(state_dir: &std::path::Path) -> anyhow::Result<()> {
         stdout.flush().await
     };
     tokio::pin!(downstream);
+    let idle = async {
+        let Some(limit) = stdin_idle_limit else {
+            return std::future::pending::<anyhow::Result<()>>().await;
+        };
+        loop {
+            let Some(last) = *input_activity.borrow_and_update() else {
+                return std::future::pending::<anyhow::Result<()>>().await;
+            };
+            tokio::select! {
+                biased;
+                changed = input_activity.changed() => {
+                    if changed.is_err() {
+                        return std::future::pending::<anyhow::Result<()>>().await;
+                    }
+                }
+                () = tokio::time::sleep_until(last + limit) => {
+                    anyhow::bail!("no input from the helm within the idle limit; assuming the connection is gone");
+                }
+            }
+        }
+    };
+    tokio::pin!(idle);
 
     // A clean stdin EOF only half-closes the upstream and keeps waiting
     // for in-flight replies. An upstream failure is different: no more
@@ -2723,6 +2782,7 @@ async fn stdio_proxy(state_dir: &std::path::Path) -> anyhow::Result<()> {
     // leaving a read-only proxy parked on downstream output—would hide
     // the broken transport.
     let result = tokio::select! {
+        result = &mut idle => result,
         downstream_result = &mut downstream => downstream_result.map_err(anyhow::Error::from),
         upstream_result = &mut upstream => match upstream_result {
             Ok(Ok(())) => downstream.await.map_err(anyhow::Error::from),
@@ -2773,6 +2833,35 @@ fn verified_release_sums(
 
 #[cfg(test)]
 mod tests {
+    /// New helpers cannot impose liveness on old helms. Absence of the
+    /// opt-in argument must decode as no deadline, including future changes
+    /// to clap defaults that a short process observation could not detect.
+    #[test]
+    fn stdio_idle_deadline_is_opt_in_and_advertised() {
+        use clap::{CommandFactory, Parser};
+        let cli = super::Cli::try_parse_from(["farhelm", "internal", "stdio"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            super::Cmd::Internal {
+                command: super::InternalCmd::Stdio {
+                    stdin_idle_limit_secs: None,
+                    ..
+                }
+            }
+        ));
+        let mut command = super::Cli::command();
+        let help = command
+            .find_subcommand_mut("internal")
+            .unwrap()
+            .find_subcommand_mut("stdio")
+            .unwrap()
+            .render_long_help()
+            .to_string();
+        assert!(
+            help.contains("--stdin-idle-limit-secs"),
+            "the transport's capability probe must find the opt-in flag"
+        );
+    }
     /// Devbuild pushes the tmux this check vouches for onto remote hosts, so
     /// it must accept only a `SHA256SUMS` signed for the named release.
     /// Specified: with the updater's signed fixture release and its throwaway

@@ -860,9 +860,11 @@ async fn the_fake_answers_from_its_control_files() {
             message: "down".into()
         }
     );
+    // Configured discovery rows are not mutable model sandboxes. Suspend
+    // is implemented now, but this ID was never created through the fake.
     assert!(matches!(
         fake.suspend_sandbox(&key(), "sb-1").await,
-        Err(TensorlakeError::Status { status: 501, .. })
+        Err(TensorlakeError::NotFound { .. })
     ));
     let events = std::fs::read_to_string(root.join("events.jsonl")).unwrap();
     assert!(!events.contains(KEY));

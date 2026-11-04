@@ -900,6 +900,13 @@ pub enum HostKind {
 /// a comparison defaults to.
 #[warn(clippy::wildcard_enum_match_arm)]
 impl HostKind {
+    /// Only a Tensorlake sandbox has a machine lifecycle owned by Farhelm.
+    pub(crate) fn suspends(self) -> bool {
+        match self {
+            Self::Tensorlake => true,
+            Self::Local | Self::Ssh | Self::Unrecognized => false,
+        }
+    }
     /// Whether the user may edit the row's destination. The local row has
     /// none, a sandbox's is its sandbox's and cannot change, and an
     /// unrecognized kind gets no verbs this build cannot vouch for.
