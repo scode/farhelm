@@ -41,7 +41,9 @@ it keeps the host, directory, and name.
 
 With no session open, the host menu starts on the machine you are using, listed as **Local (this machine)**. A host that
 is not connected right now shows its state next to its name, such as "Unreachable, retrying", and you cannot launch on
-it until it is back. [Add a remote host](/docs/get-started/add-a-remote-host/) covers adding hosts.
+it until it is back. A **Suspended** [Tensorlake host](/docs/using/tensorlake-sandboxes/) is the exception: launching
+resumes it first. For a fresh GitHub checkout, review the refreshed checkout preview and click **Launch** again after
+resume. [Add a remote host](/docs/get-started/add-a-remote-host/) covers adding hosts.
 
 The directory field starts at the directory of your last agent launch on that host, or at the host's home directory if
 you have not launched an agent there yet; a launch into a new managed checkout does not count. With a session open on
@@ -112,7 +114,9 @@ To reuse a message for new sessions, save it in a [launch template](/docs/using/
 
 ## Confirm a YOLO launch
 
-Before a YOLO launch, Farhelm asks you to confirm. Every host asks until you tell it not to.
+Before a YOLO launch, Farhelm asks you to confirm unless that host has **Start YOLO sessions without asking** on.
+New [Tensorlake hosts](/docs/using/tensorlake-sandboxes/#add-a-sandbox-host) start with this on; other hosts ask until
+you tell them not to. This setting skips the confirmation, not the launcher's permission choice.
 
 <Screenshot
   name="start-a-session/yolo-confirmation"
@@ -122,7 +126,7 @@ Before a YOLO launch, Farhelm asks you to confirm. Every host asks until you tel
 If you chose **YOLO** and the agent also offers **Guarded**, **Start guarded session instead** starts it with the agent's
 own safety checks. This choice is available in the session launcher and **Restart with**.
 
-It is not only the **YOLO** choice that asks. **Custom** permission flags ask too, because Farhelm does not check what
+On a host that asks, it is not only the **YOLO** choice that asks. **Custom** permission flags ask too, because Farhelm does not check what
 they do. Farhelm offers Pi and OpenCode only in YOLO mode, so every launch of
 either asks. Goose runs in YOLO mode unless you pick one of its approval modes, so its launches ask too, and
 so does a custom command you say runs in YOLO mode. Farhelm goes by that answer alone and never reads the command to
@@ -241,6 +245,9 @@ session's terminal. The agent starts once that finishes. Both commands use the h
 Git asks for, such as a password, shows up in the terminal for you to answer. A private repository without a credential
 helper can ask twice. If either command fails, the session's status shows error, the terminal says what went wrong,
 and any partial clone stays where it is.
+
+On a [Tensorlake sandbox](/docs/using/tensorlake-sandboxes/#managed-checkouts), set up Git credentials on the host once
+for private repositories; public repositories need none. Farhelm does not yet supply `GH_TOKEN` there.
 
 The cache makes repeated managed checkouts faster and takes roughly the disk space of one extra copy of each repository
 on each host. It lives under Farhelm's state directory on that host, in `repo-cache/<owner>/<name>.git`, outside your

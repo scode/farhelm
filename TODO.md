@@ -341,6 +341,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Jittery/jiggling characters when switching between sessions.** Switching between sessions makes characters jitter or
   jiggle: something is being re-drawn or laid out for no reason. Find what triggers the needless re-draw/re-layout on
   session switch.
+- **Per-host checkout directory.** Settings → Checkouts has one global **Checkout folder** for every host, but one
+  directory rarely suits every machine: an absolute path from one machine may not exist or be writable on another, and
+  hosts can differ in where projects belong. Let the user set the checkout directory per host in the UI, with the global
+  value as the default. Today the only per-host override is `farhelm helm checkout-config set-root --host <id>`, which
+  takes a numeric host ID that nothing shows the user.
 
 - **Always show a host list for hosts needing attention.** While hosts are installing or updating it is hard to find
   where to look; today you must click the separate host-list icon. Restore an always-present host list at the top,
@@ -378,6 +383,50 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   connection ends on its own, leaving the recipe's listeners open on the sandbox and possibly keeping the sandbox from
   idle-suspending. Make the tunnels die with the helm on macOS too, for example with a small watcher that notices the
   helm's exit (kqueue `NOTE_EXIT`) and ends them.
+
+- **Show progress while a launch resumes a suspended host.** Launch on a suspended Tensorlake host resumes it first: a
+  lifecycle request with a 150-second client budget, then up to 60 seconds waiting for the new connection. Nothing shows
+  progress during that time; the launch-progress status ("Launching on …") deliberately starts only when the session
+  create is sent, so it cannot be reused as is without claiming a launch that has not happened. Add a separately worded
+  "Resuming host" preparation status (in the quick-launch surface too, where it can be reached), with its own failure
+  wording, which must not promise the session-create retry guarantees.
+
+- **One click for a fresh checkout on a suspended host.** Launching a fresh GitHub checkout on a suspended Tensorlake
+  host resumes the host, then stops and asks the user to review the refreshed checkout preview and press Launch again.
+  The preview made over the connection from before the suspension must not authorize work on the new connection, which
+  is why the second press exists; existing-folder and template launches resume and launch in one press. Find a way to
+  make the fresh-checkout case one press without letting a stale preview authorize the create (for example, launch
+  automatically when the refreshed preview matches what the user reviewed, and stop only when it differs).
+
+- **Live resize of Tensorlake hosts.** A host is created at its recipe's size, and a recipe's size change affects only
+  hosts created afterwards. Tensorlake can resize a running sandbox in place (CAS image format only): it takes one to
+  two seconds and keeps processes running; CPUs go up and down, but memory never shrinks below what the sandbox booted
+  with, so a sandbox meant to flex has to boot small. Let the user resize a Tensorlake host (or apply its recipe's
+  current size) without recreating it. Phase 1 left this out deliberately.
+
+- **Phase 2: a sandbox per session.** A session launch names a recipe instead of a host; Farhelm creates a sandbox for
+  that session from the recipe's prepared snapshot, runs the session there, and deletes the sandbox with the session
+  (one sandbox per session, mapped 1:1). Phase 1 (Tensorlake hosts from named recipes, prepared snapshots and Rebuild
+  snapshot, suspend/resume, delete with snapshots, recipe tunnels, the list of sandboxes not on this helm) is the base;
+  Rebuild snapshot was put into phase 1 because phase 2 needs exactly that path. Design records:
+  `lore/2026-11-03-tensorlake-sandbox-hosts-design.md` ("Phase 2, as far as it was thought through", plus the measured
+  platform facts) and `lore/2026-09-29-per-session-sandboxes-as-the-remote-host-goal.md`. What phase 2 needs that phase
+  1 does not, as far as it was thought through:
+  - Fast spawn. Streamed CAS snapshots start in about two seconds regardless of size (a clone runs about 2 s after
+    create, a lingering user unit about 5 s later), so phase 2 depends on Tensorlake's CAS ssh gateway staying fixed (it
+    broke and was fixed on 2026-11-03).
+  - Per-repository snapshots on top of a recipe's prepared snapshot, refreshed with an incremental `git fetch` at spawn,
+    and a refresh story for those snapshots. Fresh sandboxes have no Git credentials, so private repositories need
+    credentials injected per sandbox; the GH_TOKEN entry above is a prerequisite, not a nicety.
+  - Session-owned host rows that the hosts panel hides, with the session's lifecycle driving the sandbox's (create,
+    suspend, delete), and cleanup that cannot leave billed sandboxes or snapshots behind when a helm dies mid-spawn.
+  - Either the supervisor baked into the prepared snapshot with its identity reset per clone (clones also share
+    `/etc/machine-id` unless it is emptied before the checkpoint), or a per-spawn install fast enough not to matter.
+  - Answers to the trust questions in the 2026-09-29 entry: an unsupervised agent in a sandbox must not gain more reach
+    into the user's other hosts than it would have anywhere else.
+  - Possibly: live resize (boot small, grow on demand), shared scratch volumes, and forking a warm sandbox from a memory
+    checkpoint or live copy (restores running processes with the same boot ID, which is also a trap: a forked supervisor
+    keeps its identity).
 
 ### Trivial
 
