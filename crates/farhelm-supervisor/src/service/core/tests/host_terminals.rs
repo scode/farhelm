@@ -1804,6 +1804,12 @@ async fn an_orderly_stop_admits_largest_tails_first_with_one_slot() {
             TestHostSpec {
                 options: Some(crate::hosts::HostTerminalOptions {
                     encode_gate: Some(gate.clone()),
+                    // The ordering proof needs every tiny tail encoded;
+                    // automatic checkpoints keep their ordinary threshold.
+                    checkpoints: crate::hosts::CheckpointPolicy {
+                        stop_min_bytes: 0,
+                        ..Default::default()
+                    },
                     ..test_host_options(None)
                 }),
                 ..TestHostSpec::default()
@@ -1900,6 +1906,12 @@ fn an_orderly_stop_ends_its_encodes_before_its_runtime_drops() {
             TestHostSpec {
                 options: Some(crate::hosts::HostTerminalOptions {
                     encode_gate: Some(gate.clone()),
+                    // Force the stop to reach the cancellation gate even
+                    // though the fixture writes only a few bytes.
+                    checkpoints: crate::hosts::CheckpointPolicy {
+                        stop_min_bytes: 0,
+                        ..Default::default()
+                    },
                     ..test_host_options(None)
                 }),
                 ..TestHostSpec::default()
@@ -2939,6 +2951,7 @@ fn a_runtime_dropped_with_its_tokio_runtime_cancels_its_encode() {
                     checkpoints: crate::hosts::CheckpointPolicy {
                         min_bytes: 1,
                         max_bytes: 1,
+                        stop_min_bytes: 0,
                     },
                     ..test_host_options(None)
                 }),
@@ -4050,6 +4063,12 @@ async fn a_failed_host_restart_after_a_stop_began_restores_a_placeholder() {
     let (sup, id, old, test_host, _state) = host_session_with(
         crate::hosts::HostTerminalOptions {
             encode_gate: Some(encodes.clone()),
+            // This test deliberately leaves a stop checkpoint encoding
+            // for the failed Restart to cancel; a skip would remove that premise.
+            checkpoints: crate::hosts::CheckpointPolicy {
+                stop_min_bytes: 0,
+                ..Default::default()
+            },
             ..test_host_options(None)
         },
         Some(window),
@@ -4360,4 +4379,105 @@ impl Drop for EndsChildOnDrop {
     fn drop(&mut self) {
         end_child(&self.0);
     }
+}
+/// A short tail takes no stop slot and its runtime closes while a host at
+/// the threshold still occupies the only slot. Leaving the old snapshot
+/// and tail deliberately counts as success, rather than a timed-out save.
+/// The held large encode makes this boundary observable before final close.
+#[farhelm_testtrace::test]
+async fn an_orderly_stop_skips_small_tails_before_waiting_for_a_slot() {
+    use crate::hosts::terminal::EncodeGate;
+
+    /// Keep an assertion failure from holding a blocking encoder until its
+    /// independent safety timeout.
+    struct ReleaseEncode(EncodeGate);
+    impl Drop for ReleaseEncode {
+        fn drop(&mut self) {
+            self.0.open();
+        }
+    }
+
+    let state = StateDir::new();
+    let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        .await
+        .expect("supervisor");
+    let small_gate = EncodeGate::closed();
+    let large_gate = EncodeGate::closed();
+    let _release = (
+        ReleaseEncode(large_gate.clone()),
+        ReleaseEncode(small_gate.clone()),
+    );
+    let mut hosts = Vec::new();
+    let mut peers = Vec::new();
+    for (id, tail, gate) in [
+        ("small", 127, small_gate.clone()),
+        ("threshold", 128, large_gate.clone()),
+    ] {
+        let mut options = test_host_options(None);
+        options.checkpoints.stop_min_bytes = 128;
+        options.encode_gate = Some(gate);
+        assert!(
+            (tail as u64)
+                < options
+                    .checkpoints
+                    .min_bytes
+                    .min(options.checkpoints.max_bytes),
+            "no automatic checkpoint is due"
+        );
+        let (host, peer) = adopt_test_host_with(
+            TestHostSpec {
+                options: Some(options),
+                ..TestHostSpec::default()
+            },
+            crate::hosts::Adoption::Fresh,
+        )
+        .await;
+        peer.output(&vec![b'x'; tail]);
+        wait_for(&host, "the fully processed tail", |host| {
+            host.status().position.offset == tail as u64
+        })
+        .await;
+        assert_eq!(host.status().checkpoint, None);
+        sup.sessions.lock().await.insert(
+            id.to_string(),
+            Arc::new(entry_with(
+                Some(Terminal::Host(host.clone())),
+                LastOutcome::Running,
+            )),
+        );
+        hosts.push(host);
+        peers.push(peer);
+    }
+    let inspect = async {
+        let gate = large_gate.clone();
+        assert!(
+            tokio::task::spawn_blocking(move || gate.wait_entered(WAIT))
+                .await
+                .expect("wait for the threshold encode")
+        );
+        let mut status = hosts[0].subscribe();
+        tokio::time::timeout(WAIT, async { while status.changed().await.is_ok() {} })
+            .await
+            .expect("the skipped runtime closes before the held checkpoint finishes");
+        assert!(!small_gate.passed(), "the short tail was never encoded");
+        assert_eq!(
+            hosts[0].status().checkpoint,
+            None,
+            "the previous snapshot is kept"
+        );
+        assert!(
+            hosts[1].status().checkpoint.is_none(),
+            "the threshold encode is still held"
+        );
+        large_gate.open();
+    };
+    let (current, ()) = tokio::join!(sup.checkpoint_hosts_for_exit_with_slots(WAIT, 1), inspect);
+    assert!(current, "a deliberate skip is a successful stop");
+    assert!(
+        hosts[1].status().checkpoint.is_some(),
+        "the threshold tail was saved"
+    );
+    assert!(!small_gate.passed());
+    assert!(!large_gate.expired());
+    drop(peers);
 }

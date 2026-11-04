@@ -80,33 +80,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   benchmark; add one with the change so the speed-up is measured rather than assumed. Plan:
   `plans/queue/faster-snapshot-encoder.md`.
 
-- **An orderly supervisor stop encodes a checkpoint of every busy terminal at once.** At an orderly stop (an update, the
-  desktop app replacing its supervisor, a SIGTERM, SIGINT or SIGHUP), `Supervisor::stop_in_order` runs
-  `checkpoint_hosts_for_exit` (`crates/farhelm-supervisor/src/service/core/host_handover.rs`, module docs "Stopping")
-  beside the closing of tmux's output clients, both within 10 s (`HOST_CHECKPOINT_BUDGET`, equal to
-  `SHUTDOWN_OUTPUT_BUDGET`, in `crates/farhelm-supervisor/src/service/core.rs`). Every terminal host runtime with any
-  output since its last snapshot is asked for a checkpoint, however little that output is, and each checkpoint encodes
-  the whole terminal, not the new output: up to about 2 s of a core at full scrollback in true color, over 10 s for one
-  colored like an image (the entry about typing pausing during checkpoints). With many sessions that is a burst of
-  whole-terminal encodes, often while the machine is already busy with an update. #2897 bounded it: at most as many
-  encodes at once as `std::thread::available_parallelism` reports (a semaphore of that size), all under the one
-  deadline, and closing a runtime cancels its encode between rows (`HostTerminal::abort`,
-  `farhelm_terminal_emulator::Cancel`), so the stop and the process's exit stay within the budget. What is left: for up
-  to 10 s every core can be busy encoding; and a terminal whose checkpoint did not finish or never got a core keeps its
-  previous snapshot and all the output since, which the next supervisor replays (a slower recovery, the same terminal),
-  where which terminals get a core first follows the session map's order, not how much replay a checkpoint would save.
-  The largest lever needs the maintainer: skipping the stop checkpoint of a terminal whose output since its snapshot is
-  small (it replays in milliseconds) removes most of the burst, but the terminal-host work required a snapshot on every
-  orderly stop, and SPEC_impl.md ("Across supervisor restarts") states that every host with output since its snapshot is
-  checkpointed however little that output is. Changes that need no such decision: a faster encoder (the entry above),
-  checkpointing the terminals with the most output since their snapshot first, and fewer slots than cores so a stop does
-  not take the whole machine. Keep the stop bounded by its deadline, keep cancelling encodes as runtimes close (an
-  encode runs on tokio's blocking pool, which the exiting process waits for while it still holds the state directory's
-  claim), and keep the `stopping` fence that stops re-adoption, creates and Restarts from publishing a connected runtime
-  after the gather. No test measures the burst; to see it, stop a supervisor holding many full terminals (12,000 lines
-  of true-color history each) and watch CPU and the "left a terminal host its previous snapshot at exit" log lines.
-  Plan: `plans/queue/stop-checkpoint-burst.md`.
-
 - **Overhaul the grid stream's encoding and the grid client's history storage.** Grid terminals (terminals in a terminal
   host) get their screen and history from the supervisor as JSON messages, and the page keeps every history line
   decoded, as one JavaScript object per run of styled text plus a style object per distinct color pair. Measured in

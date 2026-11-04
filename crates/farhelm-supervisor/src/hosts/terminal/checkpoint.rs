@@ -27,6 +27,11 @@
 //! mid-sequence and went silent, or one sequence longer than the cap), no
 //! checkpoint is taken and the host keeps the previous snapshot and the
 //! tail after it, which may then gap.
+//!
+//! An orderly stop uses a separate threshold: a short tail is left for
+//! recovery to replay instead of encoding the whole terminal again. The
+//! supervisor checks before admitting a host to its encode slots, and the
+//! runtime checks again because an automatic encode may finish meanwhile.
 
 use terminal_host::protocol::{Position, SnapshotRejection};
 
@@ -47,7 +52,8 @@ const SNAPSHOTS_PER_CHECKPOINT: u64 = 4;
 /// The bounds on how much output makes a checkpoint due: between
 /// `min_bytes` and `max_bytes`, four times the latest snapshot's size
 /// ([`Self::for_journal_cap`] gives the production bounds; tests set both
-/// to one small value).
+/// to one small value). `stop_min_bytes` independently decides whether an
+/// orderly stop saves a new snapshot or leaves a short tail for recovery.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CheckpointPolicy {
     /// The floor ([`CHECKPOINT_MIN_BYTES`]).
@@ -55,6 +61,11 @@ pub struct CheckpointPolicy {
     /// The ceiling: a quarter of the host's journal cap. Wins over the
     /// floor when the cap is below four times it.
     pub max_bytes: u64,
+    /// The least tail an orderly stop saves with a new snapshot. Smaller
+    /// tails are left for recovery to replay; zero asks for every change.
+    /// Separate from `min_bytes` so a forced stop checkpoint need not make
+    /// automatic checkpoints run for every few bytes as well.
+    pub stop_min_bytes: u64,
 }
 
 impl CheckpointPolicy {
@@ -63,7 +74,21 @@ impl CheckpointPolicy {
         Self {
             min_bytes: CHECKPOINT_MIN_BYTES,
             max_bytes: journal_cap / 4,
+            stop_min_bytes: CHECKPOINT_MIN_BYTES.min(journal_cap / 4),
         }
+    }
+
+    /// The processed output a stop should checkpoint, or `None` when a
+    /// short replay is cheaper than encoding the whole terminal again.
+    /// Resize records carry no output bytes, and an initial seed at (0, 0)
+    /// counts as no saved output. Both stop admission and the runtime use
+    /// this rule: an automatic checkpoint can shorten the tail while the
+    /// stop is waiting for a slot.
+    pub(super) fn exit_tail(&self, position: Position, accepted: Option<Position>) -> Option<u64> {
+        let tail = position
+            .offset
+            .saturating_sub(accepted.map_or(0, |at| at.offset));
+        (tail >= self.stop_min_bytes).then_some(tail)
     }
 
     /// The output since the previous attempt that makes a checkpoint due,
@@ -76,7 +101,8 @@ impl CheckpointPolicy {
     }
 }
 
-/// The policy for a host with [`DEFAULT_JOURNAL_CAP`]: 1 MiB to 8 MiB.
+/// With [`DEFAULT_JOURNAL_CAP`], automatic checkpoints need 1 MiB to 8 MiB
+/// of output and an orderly stop saves tails of at least 1 MiB.
 impl Default for CheckpointPolicy {
     fn default() -> Self {
         Self::for_journal_cap(DEFAULT_JOURNAL_CAP)
@@ -92,6 +118,10 @@ pub enum CheckpointOutcome {
     /// The host already holds a snapshot this runtime took at this
     /// position, which is where the terminal is: nothing new to take.
     Current(Position),
+    /// The processed output since the latest known snapshot was small
+    /// enough to replay cheaply. Deliberately leaving that tail is a
+    /// successful stop, not a checkpoint that failed to finish.
+    Skipped { tail: u64 },
     /// No new snapshot: the host keeps its previous one, if any, and the
     /// tail after it.
     Kept(NotTaken),
@@ -208,6 +238,12 @@ impl Checkpoints {
     pub(super) fn accepted(&self) -> Option<Position> {
         self.accepted
     }
+
+    /// Apply the stop threshold to the newest accepted snapshot, which
+    /// may be newer than the supervisor saw before waiting for a slot.
+    pub(super) fn exit_tail(&self, position: Position) -> Option<u64> {
+        self.policy.exit_tail(position, self.accepted)
+    }
 }
 
 #[cfg(test)]
@@ -219,6 +255,39 @@ mod tests {
     }
 
     const MIB: u64 = 1024 * 1024;
+
+    /// Stop admission and runtime requests use the same boundary, counting
+    /// only output after the latest accepted snapshot. A newer automatic
+    /// snapshot can make a queued stop checkpoint unnecessary, and resizes
+    /// alone must not buy another encode.
+    #[test]
+    fn the_stop_threshold_leaves_small_tails_for_recovery() {
+        let policy = CheckpointPolicy::default();
+        assert_eq!(policy.exit_tail(at(MIB - 1), None), None);
+        assert_eq!(policy.exit_tail(at(MIB), None), Some(MIB));
+        assert_eq!(policy.exit_tail(at(2 * MIB), Some(at(MIB))), Some(MIB));
+        assert_eq!(policy.exit_tail(at(2 * MIB), Some(at(2 * MIB - 1))), None);
+        assert_eq!(
+            policy.exit_tail(
+                Position {
+                    offset: 0,
+                    resizes: 10
+                },
+                None
+            ),
+            None
+        );
+        let forced = CheckpointPolicy {
+            stop_min_bytes: 0,
+            ..policy
+        };
+        assert_eq!(forced.exit_tail(at(1), None), Some(1));
+        assert_eq!(forced.exit_tail(at(0), None), Some(0));
+        assert_eq!(
+            CheckpointPolicy::for_journal_cap(64 * 1024).stop_min_bytes,
+            16 * 1024
+        );
+    }
 
     /// The output that makes a checkpoint due is four times the latest
     /// snapshot's size, within the floor and the ceiling, and the ceiling

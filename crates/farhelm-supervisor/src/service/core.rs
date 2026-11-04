@@ -18549,7 +18549,9 @@ pub const SHUTDOWN_OUTPUT_BUDGET: Duration = Duration::from_secs(10);
 /// not finish in it keeps its previous snapshot and the output since, which
 /// the next supervisor replays. Encodes use at most half the machine's
 /// cores (at least one), largest output tails first; SPEC_impl.md,
-/// "Recovery and checkpoints", gives their measured cost.
+/// "Recovery and checkpoints", gives their measured cost. Tails below
+/// the stop policy's threshold are closed without an encode and replayed
+/// at recovery, a successful stop rather than a missed checkpoint.
 pub const HOST_CHECKPOINT_BUDGET: Duration = SHUTDOWN_OUTPUT_BUDGET;
 
 /// How long an orderly stop's final close of its host terminals
@@ -18731,7 +18733,7 @@ impl Supervisor {
         if !checkpointed {
             tracing::info!(
                 budget = ?HOST_CHECKPOINT_BUDGET,
-                "some terminal hosts kept an earlier snapshot; the next supervisor replays more \
+                "some requested terminal checkpoints did not finish; the next supervisor replays more \
                  of their output"
             );
         }

@@ -270,6 +270,21 @@ impl Drop for Stopped {
 
 // ---- Tests ----------------------------------------------------------------------
 
+/// Keep a real stop snapshot in the tiny recovery fixtures that specify
+/// one. The automatic threshold stays unchanged, so a cancellation gate
+/// is still reached by the stop rather than by an automatic encode.
+fn checkpointing_host_seams() -> SupervisorSeams {
+    SupervisorSeams {
+        faults: FaultHooks {
+            host_terminal_options: Some(Arc::new(|options| {
+                options.checkpoints.stop_min_bytes = 0;
+            })),
+            ..FaultHooks::default()
+        },
+        ..host_seams()
+    }
+}
+
 /// After an orderly stop and a restart, a host agent's session is still
 /// running in the same host, with the same screen, and the new supervisor
 /// drives it.
@@ -298,7 +313,7 @@ impl Drop for Stopped {
 #[farhelm_testtrace::test]
 async fn an_orderly_restart_keeps_a_host_agent_running_with_its_screen() {
     let stack = Stack::new().await;
-    let (sup, client) = stack.supervisor(host_seams()).await;
+    let (sup, client) = stack.supervisor(checkpointing_host_seams()).await;
     let session = stack
         .create(&client, &fixture_cmd("fake-agent --script basic"))
         .await;
@@ -407,7 +422,7 @@ async fn a_crash_recovers_a_host_terminal_from_its_snapshot_and_tail() {
         "/bin/sh {}",
         shell_words::quote(agent.to_str().expect("a UTF-8 path"))
     );
-    let (sup, client) = stack.supervisor(host_seams()).await;
+    let (sup, client) = stack.supervisor(checkpointing_host_seams()).await;
     let session = stack.create(&client, &command).await;
     let host = agent_host(&sup, &session.id).await;
     wait_for_screen(&host, "IN-THE-SNAPSHOT").await;
@@ -781,6 +796,7 @@ async fn a_stop_that_ran_out_of_time_leaves_the_previous_snapshot_and_tail() {
             faults: FaultHooks {
                 host_terminal_options: Some(Arc::new(move |options| {
                     options.encode_gate = Some(held.clone());
+                    options.checkpoints.stop_min_bytes = 0;
                 })),
                 ..FaultHooks::default()
             },
@@ -964,6 +980,7 @@ fn a_create_published_after_the_stop_began_is_closed_not_installed() {
                         options.checkpoints = farhelm_supervisor::hosts::CheckpointPolicy {
                             min_bytes: 1,
                             max_bytes: 1,
+                            stop_min_bytes: 0,
                         };
                     })),
                     ..FaultHooks::default()

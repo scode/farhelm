@@ -2,5 +2,5 @@
 kind: changed
 ---
 
-Stopping a supervisor, including during an update, leaves more CPU time for the rest of the machine while saving
-terminal history. Terminals with the most output to replay are saved first.
+Updates and supervisor restarts spend less CPU time saving terminal history. Terminals with the most output to replay
+are saved first, while small amounts of recent output are replayed when the supervisor starts again.
