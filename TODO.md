@@ -342,6 +342,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   jiggle: something is being re-drawn or laid out for no reason. Find what triggers the needless re-draw/re-layout on
   session switch.
 
+- **TensorLake recipe Save button hidden until scrolling.** When adding a TensorLake recipe, the Save button is not
+  visible until the view scrolls down to it; it must be reachable without hunting. Details TBD.
+
 ### Trivial
 
 ## Doc todo
