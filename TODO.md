@@ -24,13 +24,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- **Input-method typing in grid terminals.** Terminals that run in a terminal host are drawn by the grid terminal
-  client, which does not show an input method's composition at the cursor or place the candidate window there: composed
-  text reaches the program once committed, but the composing itself happens out of sight. Doing it the way xterm.js does
-  means porting its composition helper (a preview element and an input element kept at the cursor on every render, plus
-  Chrome and Korean input that arrives outside composition events), which failed the complexity gate of the
-  terminal-host work. Verifying it needs real input methods, not only synthetic composition events.
-
 - **The desktop smoke's appearance leg on grid terminals.** The optional appearance leg of the Linux desktop smoke
   (`DESKTOP_SMOKE_APPEARANCE=1 scripts/desktop-smoke.sh`) checks each light/dark case's terminal too: its background
   color, that typing reaches the agent, and that a 512-line burst arrives whole and in order on the same attachment.
@@ -348,7 +341,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 ### Trivial
 
 - **Launcher keywords for guarded/YOLO modes are dead.** Typing "yolo" or "guarded" in the launcher used to select those
-  permission modes; it no longer does. Restore that selection.
+  permission modes; it no longer does. Restore that selection. Plan: `plans/queue/launcher-permission-keywords.md`.
 
 ## Doc todo
 
@@ -511,6 +504,13 @@ problem a refactor targets (making drifted copies consistent, say) is allowed in
 are not.
 
 ## Maybe later
+
+- **Input-method typing in grid terminals.** Terminals that run in a terminal host are drawn by the grid terminal
+  client, which does not show an input method's composition at the cursor or place the candidate window there: composed
+  text reaches the program once committed, but the composing itself happens out of sight. Doing it the way xterm.js does
+  means porting its composition helper (a preview element and an input element kept at the cursor on every render, plus
+  Chrome and Korean input that arrives outside composition events), which failed the complexity gate of the
+  terminal-host work. Verifying it needs real input methods, not only synthetic composition events.
 
 - **Let an agent delete its own session.** `farhelm agent delete` refuses a session's own id (plan
   `agent-delete-and-prompt`), because the request holds a lock keyed by the asking session that the delete would wait
