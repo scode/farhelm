@@ -2966,6 +2966,9 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN visit_history;
                  -- Schema 68 added automatic host updates, also absent from v26.
                  ALTER TABLE preferences DROP COLUMN auto_update_remote_hosts;
+                 -- Schema 69 added the announcement queue and the creating build.
+                 DROP TABLE announcements;
+                 DROP TABLE helm_creation_build;
                  ALTER TABLE hosts DROP COLUMN icon;
                  ALTER TABLE hosts DROP COLUMN color;
                  ALTER TABLE hosts DROP COLUMN commands_without_asking;

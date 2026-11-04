@@ -334,7 +334,7 @@ pub struct FolderHistoryEntry {
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 68;
+const SCHEMA_VERSION: i64 = 69;
 
 /// Shared visits are bounded independently of fleet size. Stale references
 /// remain ordinary history entries until later visits push them out.
@@ -1991,6 +1991,8 @@ pub struct HelmStore {
 /// `a_migrated_database_matches_a_freshly_created_one` pinning that the two
 /// paths agree, exactly as the supervisor store's own
 /// `migrated_and_fresh_schemas_agree` does.
+/// `creation_build` is recorded only in that fresh path; passing the running
+/// build to a migration must never turn it into an installation baseline.
 ///
 /// Version history:
 /// - 1: PLAN_M6.md item 3 — `hosts` (the registry: the reserved local row
@@ -2197,7 +2199,10 @@ pub struct HelmStore {
 /// - 66: shared recent visit history, without inventing legacy visits.
 /// - 67: default-on prepared checkout policy for future managed creates.
 /// - 68: nullable automatic remote-host updates, off until explicitly authorized.
-fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
+/// - 69: durable announcement queue/history and the build that created a new
+///   database. Upgraded databases have no creation baseline; migration must not
+///   mistake the upgrade's build for their original installation.
+fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
         .context("beginning schema transaction")?;
@@ -2503,12 +2508,19 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
               {SESSION_NOTIFICATION_MARKS_PAIRED_SCHEMA}
               {NTFY_ALERTS_SCHEMA}
               {REGISTRY_NAMESPACE_SCHEMA}
+              {announcement_schema}
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 68;",
+              PRAGMA user_version = 69;",
+            announcement_schema = crate::announcements::SCHEMA,
         ))
         .context("creating schema")?;
+        tx.execute(
+            "INSERT INTO helm_creation_build (singleton, build) VALUES (1, ?1)",
+            [creation_build],
+        )
+        .context("recording the helm database's creation build")?;
         version = SCHEMA_VERSION;
     }
     if version == 1 {
@@ -4037,6 +4049,25 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
             .context("migrating helm.db to schema version 68")?;
         version = 68;
     }
+    if version == 68 {
+        // A legacy helm predates this fact. Leaving the singleton absent lets
+        // producers distinguish an upgrade from a fresh install on this build.
+        // Version-only fixtures already hold both current tables. Fresh schema
+        // creation still uses strict DDL so a foreign preexisting table fails
+        // the whole transaction instead of being accepted as our schema.
+        let present: bool = tx.query_row(
+            "SELECT count(*) != 0 FROM sqlite_master WHERE type = 'table' AND name = 'announcements'",
+            [],
+            |row| row.get(0),
+        )?;
+        if !present {
+            tx.execute_batch(crate::announcements::SCHEMA)
+                .context("adding the announcement queue and creation-build table")?;
+        }
+        tx.execute_batch("PRAGMA user_version = 69;")
+            .context("migrating helm.db to schema version 69")?;
+        version = 69;
+    }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
         // release the write lock cleanly rather than leaving it to an
@@ -4527,7 +4558,7 @@ impl HelmStore {
             conn.pragma_update(None, "foreign_keys", true)
                 .context("enabling sqlite foreign key enforcement")?;
             let schema_version = if may_migrate {
-                apply_schema(&mut conn)?;
+                apply_schema(&mut conn, env!("CARGO_PKG_VERSION"))?;
                 ensure_local_row(&conn)?;
                 SCHEMA_VERSION
             } else {
@@ -12032,7 +12063,7 @@ mod tests {
             store.preferences().await.unwrap().auto_update_remote_hosts,
             Some(true)
         );
-        assert_eq!(store.schema_version, 68);
+        assert_eq!(store.schema_version, SCHEMA_VERSION);
         store
             .update_preferences(PreferencePatch {
                 auto_update_remote_hosts: Some(None),
@@ -12043,13 +12074,13 @@ mod tests {
         let preferences = store.preferences().await.unwrap();
         assert_eq!(preferences.auto_update_remote_hosts, None);
         assert_eq!(preferences.compact, Some(true));
-        // An older helm's schema guard sees 68, rather than opening a database
-        // in which it could silently ignore an active remote-mutation policy.
+        // A pre-68 helm's schema guard sees the current, newer schema, rather
+        // than silently ignoring an active remote-mutation policy.
         let conn = Connection::open(&path).unwrap();
         assert_eq!(
             conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
                 .unwrap(),
-            68
+            SCHEMA_VERSION
         );
     }
 
@@ -14039,6 +14070,81 @@ mod tests {
         assert_eq!(
             leftover, 0,
             "no cached row keeps a top-level resume_template"
+        );
+    }
+
+    /// Fresh databases record the build that created their schema, atomically
+    /// with creation. Reopening on another build must never advance that fact:
+    /// release producers use it to distinguish an upgrade from a new install.
+    #[farhelm_testtrace::test]
+    async fn announcement_creation_build_is_recorded_only_on_fresh_creation() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("helm.db");
+        {
+            let mut conn = Connection::open(&path).unwrap();
+            apply_schema(&mut conn, "0.36.0-rc.3").unwrap();
+            let build: String = conn
+                .query_row(
+                    "SELECT build FROM helm_creation_build WHERE singleton = 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(build, "0.36.0-rc.3");
+            apply_schema(&mut conn, "0.37.0").unwrap();
+        }
+        let reopened = HelmStore::open(&path).await.unwrap();
+        assert_eq!(
+            reopened.creation_build().await.unwrap().as_deref(),
+            Some("0.36.0-rc.3")
+        );
+        assert_eq!(
+            reopened.announcements().await.unwrap(),
+            crate::announcements::AnnouncementQueue::default()
+        );
+    }
+
+    /// A real schema-68 database has no creation fact to recover. Migration
+    /// leaves it unknown instead of suppressing upgrade announcements by using
+    /// the migration's build, and it preserves existing shared preferences.
+    #[farhelm_testtrace::test]
+    async fn announcement_schema_upgrade_keeps_a_legacy_baseline_unknown() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("helm.db");
+        let store = HelmStore::open(&path).await.unwrap();
+        store
+            .update_preferences(PreferencePatch {
+                compact: Some(Some(true)),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        drop(store);
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch("DROP TABLE announcements; DROP TABLE helm_creation_build; PRAGMA user_version = 68;").unwrap();
+            let absent: i64 = conn.query_row("SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name IN ('announcements', 'helm_creation_build')", [], |row| row.get(0)).unwrap();
+            assert_eq!(
+                absent, 0,
+                "fixture premise: the preceding schema lacks both new tables"
+            );
+        }
+        let upgraded = HelmStore::open(&path).await.unwrap();
+        assert_eq!(upgraded.creation_build().await.unwrap(), None);
+        assert_eq!(upgraded.preferences().await.unwrap().compact, Some(true));
+        assert_eq!(
+            upgraded.announcements().await.unwrap(),
+            crate::announcements::AnnouncementQueue::default()
+        );
+        drop(upgraded);
+        assert_eq!(
+            HelmStore::open(&path)
+                .await
+                .unwrap()
+                .creation_build()
+                .await
+                .unwrap(),
+            None
         );
     }
 

@@ -278,6 +278,25 @@ Helm schema 68 adds nullable `preferences.auto_update_remote_hosts`, constrained
 authorize nothing; only true enables automatic remote-host updates. Migration leaves it unset and preserves other
 preferences. The normal newer-schema guard refuses older helms, and the value survives reopening the store.
 
+Helm schema 69 adds a durable announcement queue and the database's creation build. Fresh creation records the build
+inside the schema transaction; migration leaves that row absent, so an older database does not acquire a false
+fresh-install baseline. Older helms refuse the new schema. Each announcement stores its stable unique id, title,
+plain-text body, optional display-ready detail and labelled link, insertion sequence, and nullable shown timestamp.
+Enqueue is atomic and idempotent by id, including after dismissal: original content is never replaced. Pending rows sort
+by insertion sequence; shown history sorts by shown time descending, then sequence descending for a batch.
+
+Device-authenticated `GET /api/announcements` reads pending and history from one database snapshot.
+`POST /api/announcements/shown` takes an explicit `ids` list and atomically timestamps only those pending rows; unknown
+or already shown ids do nothing. The client can therefore dismiss an older window without draining newer unseen content,
+and a failed write leaves the whole batch pending.
+
+The compiled `release_announcements.json` table is the queue's first producer and ships empty. Before serving clients,
+the helm enqueues entries newer than its creation build and no newer than its running build, using full semver
+precedence, including prereleases and ignoring build metadata. An absent or `0.0.0-unreleased` creation build is older
+than every entry; a running `0.0.0-unreleased` build enqueues none. Only the producer interprets versions or supplies
+release-notes destinations: stable entries link to their version's notes, and prereleases omit the link because curated
+notes need not exist. Queue storage, routes and consumers carry display-ready content and know nothing about releases.
+
 The GUI's HTTP funnel orders reads and actions after this client's earlier configuration saves: quick-launch and
 number-key bindings, template save/delete, checkout folder, post-clone command, and ntfy settings. A save registers
 synchronously before its task is polled. Template name-validation reads capture their place before registering the save

@@ -206,6 +206,12 @@ mod precondition;
 /// selection) the helm remembers for every client at once.
 mod preferences;
 
+/// The helm's durable announcement queue and shared shown history.
+mod announcements;
+/// The compiled release table is the queue's first producer; release policy
+/// belongs here rather than in its storage, routes or clients.
+mod release_announcements;
+
 /// The rules both session caches share: the reply merge, creation order,
 /// cap eviction, and the session id bound.
 pub mod session_cache;
@@ -791,6 +797,11 @@ fn api_router(state: Arc<AppState>) -> Router {
         .route(
             "/api/preferences",
             get(preferences::get_preferences).put(preferences::put_preferences),
+        )
+        .route("/api/announcements", get(announcements::get))
+        .route(
+            "/api/announcements/shown",
+            axum::routing::post(announcements::shown),
         )
         // Separate explicit saves expose only global checkout configuration.
         // Per-host overrides never enter these authenticated browser replies.
@@ -2253,6 +2264,9 @@ async fn serve_with_ready(
         }
     });
     let store = store::HelmStore::open(&state_dir.join("helm.db")).await?;
+    // The only producer runs before readiness and serving, so every initial
+    // client read sees the complete queue without needing an event-feed path.
+    release_announcements::enqueue_builtin(&store).await?;
     if let Some(path) = args.ensure_hosts.as_deref() {
         ensure::ingest(&store, path).await?;
     }
