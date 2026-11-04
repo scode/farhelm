@@ -2332,93 +2332,95 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   keeps the session and is never signalled, since nothing but the socket's name ties that process to the session.
 - **Across supervisor restarts** (`service/core/host_handover.rs`) a host terminal keeps running, and its session keeps
   its state. An orderly stop asks every host terminal's runtime for a checkpoint under one ten-second deadline that runs
-  beside the output clients' ten seconds, at most as many encodes at once as the machine has cores, and closes each
-  runtime's connection once its checkpoint is settled or the deadline passes (every host terminal in the map is closed,
-  those already ended included, since one may still be settling an encode). Closing a runtime cancels any encode it
-  still runs: the encoder looks at its cancel between rows and gives up within about a millisecond, keeping nothing, and
-  the stop waits until every encode has ended. That is what keeps the stop, and so the process's exit and the release of
-  its state directory's claim, within the deadline: an encode runs on tokio's blocking pool, which the supervisor's
-  runtime waits for as it drops. From the moment the stop gathers its host terminals nothing publishes a host runtime: a
-  create whose host is ready only then stops its runtime and publishes a placeholder, its row and launch record kept for
-  the next supervisor, and a re-adoption stops the runtime it made. After the pending-hold wait the stop closes every
-  host terminal then in the map again, waiting up to a second for their encodes, and a runtime cancels its encodes
-  whenever it ends, also when the process's tokio runtime drops its task (it does so before waiting for the blocking
-  pool), so a stop that could not take the session map's lock in time still exits within one encode's look at its
-  cancel. A host whose checkpoint did not finish, never got a core, or could not be taken (a sequence left open, a
-  runtime still replaying) keeps its previous snapshot and all the output after it, which the next supervisor replays: a
-  slower recovery, the same terminal. Every host with output since its snapshot is checkpointed however little that
-  output is, and each encode is of the whole terminal (up to about two seconds of a core at full scrollback in true
-  color). Closing the connection right after the checkpoint limits the output the stopping supervisor counts as
-  delivered without acting on it to what the host had already written to the connection, which the next supervisor
-  replays without side effects (the delivery ambiguity above); output after the close is unseen, and its queries are
-  answered. A crash or a kill leaves each host its latest checkpoint and the tail after it, the same way. A starting
-  supervisor reloads its sessions only once it holds its state directory and has opened, and checked, its database, so a
-  build that cannot read the database refuses before contacting any host. Host rows never go through tmux's pane lookup,
-  since their `pane` holds a socket name: reload scans the socket directory (discovery, above) and matches each host row
-  to a host by its tag (session and launch generation), else by the socket the row names (its `pane`, or for a launch
-  never confirmed, the launch record of its own generation, never an earlier one's). A host at the row's `pane` whose
-  tag names the same session's agent at an earlier generation is the row's own: only a confirmation writes `pane`, a
-  Restart empties it, and one that failed definitively puts back the `pane` of the host that stays the session's
-  terminal. A host found is adopted as recovered (its snapshot restored, the tail replayed under the replay policy) and
-  taken as a found pane is: an unconfirmed launch found by its tag is confirmed with its socket's name. A host that may
-  run and cannot be used (no answer, another protocol version, busy, a tag this build cannot read, a tag naming another
-  launch, a socket directory that cannot be scanned, a launch record that cannot be read) is left as it is and never
-  treated as gone: the session holds a handle that answers as unavailable, never no terminal, which records nothing
-  durable (not even a launch sentinel, also in later observations), lists the session as unknown and makes the verbs
-  refuse. A host row's host is absent only when no live host carries its tag and nothing serves the socket the row names
-  (names are drawn fresh per launch) or its file is missing, or when the launch never reached a host (unconfirmed, with
-  no launch record); the session is then reconciled as a vanished pane's. A host whose child exited while no supervisor
-  was attached reads as running until its runtime has replayed the exit record, after which the ticker records the exit,
-  with any never-started classification; reload confirms such a session's launch, but leaves a durable stop request as
-  it is, so that the exit is recorded as stopped by the user, and clears it only for a child the host reports alive. The
-  scan takes over the hosts it reaches, so a supervisor without its state directory's claim scans nothing (its host rows
-  are unavailable to it); `serve`'s second reload keeps the terminals the constructor's made, skips their sockets and
-  those found gone (socket names are never reused), and runs under a lock re-adoption takes too; hosts no row claims are
-  left as they were, except the superseded agent hosts of restarts ("Restarting a host agent" above). Every session's
-  tab hosts are found again beside this, whatever its agent runs in: each tab record of a session the store holds names
-  a socket, and a live host there whose tag names that session and tab is adopted as recovered into the session's cell;
-  a host there that may run and cannot be used, a tag naming anything else, or a record that cannot be read leaves a
-  placeholder that lists the tab and refuses its close (its session's Delete ends it), and a socket the scan found
-  nothing at leaves no tab only once the record is settled as a retried create settles its own (the first stage waited
-  for, then ended with the verified signal; the socket looked at again while a forked second stage may still bind it),
-  since a start its supervisor did not finish has its spec and may still bring the host up, during the scan or after it:
-  a host that comes up is adopted, and a start that cannot be settled leaves a placeholder. Settling costs nothing much
-  for a first stage long gone and a missing socket file, the client's three-second refusal window for a socket file a
-  killed host left, and at worst, for a first stage that never finishes, about twenty seconds (its five-second wait, the
-  verified signal's graces, a forked second stage's five-second wait); every record is settled at once, so a reload pays
-  the slowest. `serve`'s second reload keeps the constructor's tab runtimes, and its scan for agent hosts skips their
-  sockets. Tab placeholders whose reason may pass and tab runtimes that become unavailable are retried while the
-  supervisor runs, by the same re-adoption task as agent terminals. Tab records of sessions the store no longer holds
-  are left to the startup reclaim of orphaned hosts, and so is the record of a tab dropped as gone. The orderly stop
-  checkpoints and closes the tab runtimes with the agents'. The spare-checkout claims at startup read a host row's
-  terminal, and for a host row with no terminal, whether a socket file is still at the path the row (or its launch
-  record) names and was not found gone by the reload: a claim is released only then. **Re-adoption**: a running
-  supervisor retries an agent or tab host that startup could not adopt, or whose runtime became unavailable later, for a
-  reason that can pass (no answer in time, busy, closed connections, a child that could not be pinned, a socket
-  directory that could not be scanned, an encode task lost with its emulator). Retries start after a second and double
-  to a minute, each next try scheduled before the try. The attempt count is kept for that session and launch (or session
-  and tab id) even after success. A tab's count survives an agent Restart, whose temporary removal of the session entry
-  keeps the tab cell aside. Every episode of a connection that kept ending waits at least the runtime's full minute
-  reconnect window before its first try, so re-adoption does not resume a takeover fight at once. Healthy launches keep
-  their counts but contribute no wake time. The ticker forwards a passing unavailability notice to the retry task,
-  without waiting for its ordinary tick. A Restart's republication also wakes retries that may have parked while the
-  session was off-map. A try takes the session's lifecycle claim without waiting (a busy session is tried later), checks
-  that the entry still holds that very handle for the same launch generation and that no orderly stop has begun, looks
-  only at the one socket the handle names (its tag must name the session's launch, or, as at startup, an earlier one of
-  its agent's), and swaps the outcome in under the session map after checking again, keeping the entry's run and session
-  cells; a launch or stop request is then confirmed as reload would for a child the host reports alive. A runtime it
-  made but does not install is stopped, leaving the host as it was. An orderly stop sets a flag under the session map as
-  it gathers the host terminals it closes, after which no try installs a runtime. A handle whose reason will not pass on
-  its own (another protocol version, snapshot format or tag, a launch record that cannot be read) is not retried. A
-  failed try leaves a placeholder with its new reason, so a refusal that will not pass stops the retries. An
-  unconditional Delete that aborts an unavailable runtime without finishing may leave it eligible for re-adoption;
-  Delete's retry then acts through the replacement runtime. A tab retry checks the same session cell still holds that
-  tab id and exact handle, and that no close has failed; a failed close belongs to the reap. A tab runtime that ran
-  keeps its creation stamp and scope through retry outcomes, while a startup placeholder learns both from the recovered
-  host's tag. Failed tab retries keep the earlier runtime's adopted process through every placeholder. A tab found gone
-  gets a gone handle carrying that process, so the normal reap confirms that process ended and removes the launch record
-  before forgetting the tab. A startup tab whose interrupted start could not be settled and left an `Unidentified`
-  placeholder remains final, as before.
+  beside the output clients' ten seconds. Its own encodes use at most half the machine's cores (at least one), with
+  slots admitted in order of output tail bytes, largest first, so those that finish save the most replay while leaving
+  room for the update or desktop app. Automatic encodes already running or started by a runtime still waiting for a slot
+  are not counted against those slots. The stop closes each runtime's connection once its checkpoint is settled or the
+  deadline passes (every host terminal in the map is closed, those already ended included, since one may still be
+  settling an encode). Closing a runtime cancels any encode it still runs: the encoder looks at its cancel between rows
+  and gives up within about a millisecond, keeping nothing, and the stop waits until every encode has ended. That is
+  what keeps the stop, and so the process's exit and the release of its state directory's claim, within the deadline: an
+  encode runs on tokio's blocking pool, which the supervisor's runtime waits for as it drops. From the moment the stop
+  gathers its host terminals nothing publishes a host runtime: a create whose host is ready only then stops its runtime
+  and publishes a placeholder, its row and launch record kept for the next supervisor, and a re-adoption stops the
+  runtime it made. After the pending-hold wait the stop closes every host terminal then in the map again, waiting up to
+  a second for their encodes, and a runtime cancels its encodes whenever it ends, also when the process's tokio runtime
+  drops its task (it does so before waiting for the blocking pool), so a stop that could not take the session map's lock
+  in time still exits within one encode's look at its cancel. A host whose checkpoint did not finish, never got a core,
+  or could not be taken (a sequence left open, a runtime still replaying) keeps its previous snapshot and all the output
+  after it, which the next supervisor replays: a slower recovery, the same terminal. Every host with output since its
+  snapshot is checkpointed however little that output is, and each encode is of the whole terminal ("Recovery and
+  checkpoints" gives the measured cost). Closing the connection right after the checkpoint limits the output the
+  stopping supervisor counts as delivered without acting on it to what the host had already written to the connection,
+  which the next supervisor replays without side effects (the delivery ambiguity above); output after the close is
+  unseen, and its queries are answered. A crash or a kill leaves each host its latest checkpoint and the tail after it,
+  the same way. A starting supervisor reloads its sessions only once it holds its state directory and has opened, and
+  checked, its database, so a build that cannot read the database refuses before contacting any host. Host rows never go
+  through tmux's pane lookup, since their `pane` holds a socket name: reload scans the socket directory (discovery,
+  above) and matches each host row to a host by its tag (session and launch generation), else by the socket the row
+  names (its `pane`, or for a launch never confirmed, the launch record of its own generation, never an earlier one's).
+  A host at the row's `pane` whose tag names the same session's agent at an earlier generation is the row's own: only a
+  confirmation writes `pane`, a Restart empties it, and one that failed definitively puts back the `pane` of the host
+  that stays the session's terminal. A host found is adopted as recovered (its snapshot restored, the tail replayed
+  under the replay policy) and taken as a found pane is: an unconfirmed launch found by its tag is confirmed with its
+  socket's name. A host that may run and cannot be used (no answer, another protocol version, busy, a tag this build
+  cannot read, a tag naming another launch, a socket directory that cannot be scanned, a launch record that cannot be
+  read) is left as it is and never treated as gone: the session holds a handle that answers as unavailable, never no
+  terminal, which records nothing durable (not even a launch sentinel, also in later observations), lists the session as
+  unknown and makes the verbs refuse. A host row's host is absent only when no live host carries its tag and nothing
+  serves the socket the row names (names are drawn fresh per launch) or its file is missing, or when the launch never
+  reached a host (unconfirmed, with no launch record); the session is then reconciled as a vanished pane's. A host whose
+  child exited while no supervisor was attached reads as running until its runtime has replayed the exit record, after
+  which the ticker records the exit, with any never-started classification; reload confirms such a session's launch, but
+  leaves a durable stop request as it is, so that the exit is recorded as stopped by the user, and clears it only for a
+  child the host reports alive. The scan takes over the hosts it reaches, so a supervisor without its state directory's
+  claim scans nothing (its host rows are unavailable to it); `serve`'s second reload keeps the terminals the
+  constructor's made, skips their sockets and those found gone (socket names are never reused), and runs under a lock
+  re-adoption takes too; hosts no row claims are left as they were, except the superseded agent hosts of restarts
+  ("Restarting a host agent" above). Every session's tab hosts are found again beside this, whatever its agent runs in:
+  each tab record of a session the store holds names a socket, and a live host there whose tag names that session and
+  tab is adopted as recovered into the session's cell; a host there that may run and cannot be used, a tag naming
+  anything else, or a record that cannot be read leaves a placeholder that lists the tab and refuses its close (its
+  session's Delete ends it), and a socket the scan found nothing at leaves no tab only once the record is settled as a
+  retried create settles its own (the first stage waited for, then ended with the verified signal; the socket looked at
+  again while a forked second stage may still bind it), since a start its supervisor did not finish has its spec and may
+  still bring the host up, during the scan or after it: a host that comes up is adopted, and a start that cannot be
+  settled leaves a placeholder. Settling costs nothing much for a first stage long gone and a missing socket file, the
+  client's three-second refusal window for a socket file a killed host left, and at worst, for a first stage that never
+  finishes, about twenty seconds (its five-second wait, the verified signal's graces, a forked second stage's
+  five-second wait); every record is settled at once, so a reload pays the slowest. `serve`'s second reload keeps the
+  constructor's tab runtimes, and its scan for agent hosts skips their sockets. Tab placeholders whose reason may pass
+  and tab runtimes that become unavailable are retried while the supervisor runs, by the same re-adoption task as agent
+  terminals. Tab records of sessions the store no longer holds are left to the startup reclaim of orphaned hosts, and so
+  is the record of a tab dropped as gone. The orderly stop checkpoints and closes the tab runtimes with the agents'. The
+  spare-checkout claims at startup read a host row's terminal, and for a host row with no terminal, whether a socket
+  file is still at the path the row (or its launch record) names and was not found gone by the reload: a claim is
+  released only then. **Re-adoption**: a running supervisor retries an agent or tab host that startup could not adopt,
+  or whose runtime became unavailable later, for a reason that can pass (no answer in time, busy, closed connections, a
+  child that could not be pinned, a socket directory that could not be scanned, an encode task lost with its emulator).
+  Retries start after a second and double to a minute, each next try scheduled before the try. The attempt count is kept
+  for that session and launch (or session and tab id) even after success. A tab's count survives an agent Restart, whose
+  temporary removal of the session entry keeps the tab cell aside. Every episode of a connection that kept ending waits
+  at least the runtime's full minute reconnect window before its first try, so re-adoption does not resume a takeover
+  fight at once. Healthy launches keep their counts but contribute no wake time. The ticker forwards a passing
+  unavailability notice to the retry task, without waiting for its ordinary tick. A Restart's republication also wakes
+  retries that may have parked while the session was off-map. A try takes the session's lifecycle claim without waiting
+  (a busy session is tried later), checks that the entry still holds that very handle for the same launch generation and
+  that no orderly stop has begun, looks only at the one socket the handle names (its tag must name the session's launch,
+  or, as at startup, an earlier one of its agent's), and swaps the outcome in under the session map after checking
+  again, keeping the entry's run and session cells; a launch or stop request is then confirmed as reload would for a
+  child the host reports alive. A runtime it made but does not install is stopped, leaving the host as it was. An
+  orderly stop sets a flag under the session map as it gathers the host terminals it closes, after which no try installs
+  a runtime. A handle whose reason will not pass on its own (another protocol version, snapshot format or tag, a launch
+  record that cannot be read) is not retried. A failed try leaves a placeholder with its new reason, so a refusal that
+  will not pass stops the retries. An unconditional Delete that aborts an unavailable runtime without finishing may
+  leave it eligible for re-adoption; Delete's retry then acts through the replacement runtime. A tab retry checks the
+  same session cell still holds that tab id and exact handle, and that no close has failed; a failed close belongs to
+  the reap. A tab runtime that ran keeps its creation stamp and scope through retry outcomes, while a startup
+  placeholder learns both from the recovered host's tag. Failed tab retries keep the earlier runtime's adopted process
+  through every placeholder. A tab found gone gets a gone handle carrying that process, so the normal reap confirms that
+  process ended and removes the launch record before forgetting the tab. A startup tab whose interrupted start could not
+  be settled and left an `Unidentified` placeholder remains final, as before.
 - **The startup reclaim of orphaned hosts** (`service/core/host_reclaim.rs`), the start-up cleanup the maintainer
   approved ("Cleanup on quit"). Delete ends every host a session records before it removes the session's records and
   row, every host start writes its record first, and a tab's close ends its host before it removes the record, so a live

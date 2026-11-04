@@ -18547,8 +18547,9 @@ pub const SHUTDOWN_OUTPUT_BUDGET: Duration = Duration::from_secs(10);
 /// so a stop is no longer than it was before terminal hosts, and every wait
 /// sized against that budget still covers it. A host whose checkpoint does
 /// not finish in it keeps its previous snapshot and the output since, which
-/// the next supervisor replays. A full terminal's encode takes up to about
-/// two seconds of a core, so this leaves room for several at once.
+/// the next supervisor replays. Encodes use at most half the machine's
+/// cores (at least one), largest output tails first; SPEC_impl.md,
+/// "Recovery and checkpoints", gives their measured cost.
 pub const HOST_CHECKPOINT_BUDGET: Duration = SHUTDOWN_OUTPUT_BUDGET;
 
 /// How long an orderly stop's final close of its host terminals
