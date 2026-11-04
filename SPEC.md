@@ -297,12 +297,35 @@ are stored unencrypted in the helm's state, like the ntfy token, and are never r
 saved, keeps it when the field is left blank and the endpoint's server is unchanged, and clears it on request or when
 the server changes, saying so before saving. Edits to size and packages affect only hosts created afterwards (packages
 after the next snapshot build); tunnels are read when a host connects. The list shows each recipe's name, size, package
-count or reused image or snapshot, and tunnel count. Snapshot builds, and with them build status and **Rebuild
-snapshot**, come with the build feature; until then a package recipe's status reads that its snapshot is not built yet.
-The editor replaces the list in place; leaving it with unsaved changes, whether by its own Back or Cancel or by closing
-Settings with Escape or a close control, asks whether to save, discard or keep editing, and saving or discarding then
-completes the close. Delete asks for confirmation. A list refresh that fails keeps the rows shown, says they may be out
-of date, and offers **Retry loading**.
+count or reused image or snapshot, and tunnel count. The editor replaces the list in place; leaving it with unsaved
+changes, whether by its own Back or Cancel or by closing Settings with Escape or a close control, asks whether to save,
+discard or keep editing, and saving or discarding then completes the close. Delete asks for confirmation. A list refresh
+that fails keeps the rows shown, says they may be out of date, and offers **Retry loading**.
+
+A package recipe's hosts start from a snapshot Farhelm builds; the UI calls it a snapshot, never a template, which means
+launch templates. Saving a recipe never builds one, because a build bills: the list offers **Build snapshot** while a
+recipe has none, **Rebuild snapshot** once it has one, and **Retry** after a build failed or was cut short by the helm
+stopping, all three needing a saved API key and Farhelm's registered SSH key. One build per recipe runs at a time; a
+second click joins it, and different recipes build at once. A build creates a builder sandbox named
+`farhelm-build-<helm tag>-<recipe>` from `tensorlake/ubuntu-systemd` at the recipe's size, which bills while it runs;
+refuses to go on unless systemd is the sandbox's init and passwordless sudo works; installs the recipe's packages with
+apt, then Claude Code and Codex with their official installers, each downloaded completely over HTTPS before it runs,
+and links both onto every default `PATH`; empties `/etc/machine-id` so each host gets its own; takes a filesystem
+snapshot and waits until Tensorlake reports it completed; records it; then terminates the builder and deletes the
+builder's other snapshots. While a build runs, the recipe's row names its step ("step 5 of 9"); afterwards it says when
+the snapshot was built and the agents' versions, or that the build failed, at which step and why, with **Retry**. The
+row warns when the recipe's packages changed since the build, and when its disk is now smaller than the snapshot's,
+which a host cannot start from. A rebuild replaces the snapshot only once the new one is recorded and then deletes the
+old one; hosts already started from it keep running. A failed build leaves the previous snapshot in use and deletes its
+builder and the builder's snapshots. Every builder and snapshot is recorded before anything else happens, so whatever a
+failed deletion or a helm stopping mid-build leaves is deleted by the next build or by deleting the recipe, and the row
+says when something still awaits deletion; nothing cleans up at helm start. Deleting a recipe cancels its running build
+and deletes its builder and snapshots first; if Tensorlake refuses any of that, or a build sandbox Farhelm asked for in
+the last 15 minutes may still appear, the recipe stays, with the reason, so a retry finishes the job. Switching a recipe
+from packages to an existing image or snapshot deletes its built snapshot. A recipe that reuses an image or snapshot
+builds nothing and is used as is; its row still shows a build that was running or cut short when it was switched, and
+anything that awaits deletion. A recipe cannot reuse a snapshot Farhelm built for a recipe, its own included, because
+Farhelm deletes those when their recipe moves on; that save is refused.
 
 Cursor is an agent type launched as `cursor-agent`, and YOLO adds `--force`; Farhelm launches Cursor by that name, never
 as the generic `agent`, which other tools also use. Its model is optional, with `auto`, `composer-2.5` and literal
@@ -3525,8 +3548,11 @@ are configured, the helm also posts waiting alerts and explicit test alerts to t
 optional access token (see Status). This connection sends session titles and host display names; it follows no
 redirects. Settings allow HTTP for a private server, which sends those values and any token without TLS protection. When
 a Tensorlake API key is saved, the helm calls Tensorlake's REST API at `https://api.tensorlake.ai` with it as a bearer
-token, for the Tensorlake actions the user takes (Settings' **Test** lists the account's sandboxes). These requests
-follow no redirects and are not retried, and the key appears in no reply, error message or log.
+token, for the Tensorlake actions the user takes (Settings' **Test** lists the account's sandboxes; a snapshot build
+creates, snapshots and deletes sandboxes and snapshots). These requests follow no redirects and are not retried, and the
+key appears in no reply, error message or log. A snapshot build also reaches its builder sandbox with `ssh` through
+Tensorlake's gateway, with Farhelm's own key alone, and records the gateway's host key on first use in a known_hosts
+file in the helm's state directory, never in the user's own.
 
 - **Client to helm**: a standalone helm serves its web UI over plain HTTP bound to loopback only, with a required token.
   The helm refuses to bind non-loopback addresses in v1; TLS serving is post-v1. Reaching the UI from another machine

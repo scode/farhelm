@@ -5693,17 +5693,17 @@ The REST client is a `TensorlakeApi` trait with one implementation per caller: r
 `https://api.tensorlake.ai` in production, the same client pointed at a loopback stub in unit tests, an offline
 implementation for test-built helms, and the browser suite's fake. Every call takes the key explicitly; `ApiKey` has no
 `Debug` or `Display`. The trait carries the calls the follow-up host PRs use (list, get, create with an image or
-snapshot source, suspend, resume, terminate, snapshot, get, list and delete snapshots); only listing has a caller so
-far. Requests follow no redirects and are not retried; a call has a 30-second bound and a create ten minutes. A create
-that times out may still be waiting for capacity on Tensorlake's side and start later, so a timeout does not mean "not
-created": callers reconcile by the sandbox name they chose. The create request always states `auto_resume`, because
-Tensorlake's default lets proxied traffic, a gateway ssh connection included, wake a suspended sandbox; with it off such
-traffic gets a prompt 409 instead, which keeps resuming the user's decision. Path arguments are single percent-encoded
-segments. Replies decode leniently: unknown fields are ignored, most fields are optional, and an unknown status decodes
-as `Unknown` (so an unknown snapshot status cannot tell "still working" from a new kind of failure, and pollers bound
-their wait). Failures are classified as auth (401, 403), not found (404), conflict (409), refused (400, 422), other
-status, transport and undecodable reply. Server messages are kept for display, bounded, whitespace-collapsed, stripped
-of presentation-unsafe characters, and have the key replaced should a server echo it.
+snapshot source, suspend, resume, terminate, snapshot, get, list and delete snapshots); everything but suspend and
+resume has a caller. Requests follow no redirects and are not retried; a call has a 30-second bound and a create ten
+minutes. A create that times out may still be waiting for capacity on Tensorlake's side and start later, so a timeout
+does not mean "not created": callers reconcile by the sandbox name they chose. The create request always states
+`auto_resume`, because Tensorlake's default lets proxied traffic, a gateway ssh connection included, wake a suspended
+sandbox; with it off such traffic gets a prompt 409 instead, which keeps resuming the user's decision. Path arguments
+are single percent-encoded segments. Replies decode leniently: unknown fields are ignored, most fields are optional, and
+an unknown status decodes as `Unknown` (so an unknown snapshot status cannot tell "still working" from a new kind of
+failure, and pollers bound their wait). Failures are classified as auth (401, 403), not found (404), conflict (409),
+refused (400, 422), other status, transport and undecodable reply. Server messages are kept for display, bounded,
+whitespace-collapsed, stripped of presentation-unsafe characters, and have the key replaced should a server echo it.
 
 The helm tag is the first eight bytes of SHA-256 over a fixed domain prefix and the registry namespace, written as four
 base-36 digits; a unit test pins its value for a fixed namespace, because changing the derivation would rename every
@@ -5722,19 +5722,27 @@ says so.
 The browser suite's fake is enabled like the provisioning backend's: `FARHELM_E2E_TENSORLAKE_DIR`, read once at helm
 startup in non-test builds, must name a directory that canonicalizes inside the helm's state directory and holds the
 `farhelm-e2e-tensorlake-v1` marker; startup warns. Specs write `config.json` (the key it accepts, the account's
-sandboxes, failures to inject per operation) and read `events.jsonl`, one line per call recording only whether the key
-matched. Operations the specs do not exercise yet answer 501.
+sandboxes, failures to inject per operation, how many polls a snapshot takes, and the fake shell's behavior: hold every
+command, fail a build step with given stderr, answer one with given stdout) and read `events.jsonl`, one line per call
+recording only whether the key matched, plus one per shell command naming its sandbox and step. The fake keeps the
+sandboxes and snapshots the helm created in `state.json` (`FakeModel`, the same model the helm's unit tests drive in
+memory: unique live names, 404 for unknown IDs, a snapshot that completes after its polls), so a spec can assert what is
+left billing. The same fake stands in for the snapshot build's ssh shell and refuses a sandbox its model does not have
+running. Suspend and resume answer 501.
 
 ## Tensorlake recipes
 
 Protected `/api/tensorlake/recipes` routes store recipes in the schema-71 `tensorlake_recipes` table, one row per name,
 with the user's definition in `spec_json` and the helm's snapshot-build bookkeeping in `state_json`. The two are
-separate columns because they have separate writers: a save replaces only `spec_json`, and the build feature will write
-only `state_json`, so a recipe edit racing a build cannot drop a recorded snapshot or builder ID, each of which is the
-only record of a billed Tensorlake resource. Until builds exist nothing writes `state_json`, and it stays `{}`. This is
-why recipes are not launch templates' last-write-wins "PUT creates or replaces": `POST` creates and answers 409 for an
-existing name, `PUT /{name}` updates and answers 404 for a missing one, and no route renames. `DELETE /{name}` checks
-host use inside its own transaction; until Tensorlake hosts exist that check always finds none.
+separate columns because they have separate writers: a save replaces only `spec_json`, and builds write only
+`state_json`, so a recipe edit racing a build cannot drop a recorded snapshot or builder ID, each of which is the only
+record of a billed Tensorlake resource. The one save that touches the state is a switch away from packages, which moves
+the built snapshot to the retired list in the same immediate transaction. This is why recipes are not launch templates'
+last-write-wins "PUT creates or replaces": `POST` creates and answers 409 for an existing name, `PUT /{name}` updates
+and answers 404 for a missing one, and no route renames. `DELETE /{name}` checks host use inside its own transaction;
+until Tensorlake hosts exist that check always finds none. The store also refuses the delete while `state_json` records
+a snapshot, a builder, a retired snapshot or a build start, so no path forgets a billed resource; the route cleans those
+up first (see below).
 
 The wire types and validation live in `farhelm_proto::tensorlake::recipes`, shared with the UI, which runs the same
 checks before sending. The name grammar is narrower than a template's because the name is embedded verbatim in the
@@ -5749,6 +5757,78 @@ an endpoint drops its token. A request body that does not decode is refused with
 diagnostic can quote submitted text, and stored rows that do not decode fail the listing without quoting their content.
 Successful writes bump the invalidation feed, and the Settings list re-reads on each notice. Write bodies are capped at
 64 KiB.
+
+## Tensorlake snapshot builds
+
+`crates/farhelm-helm/src/tensorlake/build.rs` builds a package recipe's snapshot;
+`POST /api/tensorlake/recipes/{name}/build` starts a build or joins the running one and answers 202 with the recipe's
+view (400 for a reuse recipe, a missing API key or a missing ssh key; 409 while the recipe is being deleted).
+`RecipeBuilds` is an in-memory registry per helm: at most one build per recipe, each a task the registry owns rather
+than the request, publishing its step through a `watch` channel that the recipes GET reads and bumping the feed at every
+step. The GET reports `snapshot`, `build` (idle, building with its step, failed with step and message, or interrupted)
+and `cleanup_pending`. Interrupted is derived: `build_started_at` persisted with no live task, since nothing reconciles
+at helm start.
+
+`state_json` (`RecipeState`) is the record of everything the build bills for. `build_started_at` is written first.
+`pending_create_at` is written before the create request goes out and cleared in the same write that records the
+builder's ID, which happens right after create returns: once terminated, a sandbox no longer answers to its name, and
+its snapshots are attributable only by its source ID. The create and that write are not cancellable, so a delete waits
+for them. A create answer that is not a refusal (a transport failure, a reply that does not decode, a server error)
+leaves the outcome open: the builder is looked up by name and adopted if found, and otherwise the pending record stays,
+counts as awaiting cleanup and blocks the store from deleting the row. Reconciliation, shared by the next build's
+cleaning step and the recipe's deletion, first sweeps a recorded builder, then looks up the builder's name and records
+any sandbox found there before terminating it; a lookup that finds nothing settles a pending create only 15 minutes
+after it was sent (the client's ten-minute create bound plus margin; Tensorlake makes a sandbox durable, and so findable
+by name, before it waits for capacity), and until then the delete is refused with "try again in a few minutes". The new
+snapshot's ID is written in the same write that moves the old one to `retired_snapshots`, and a builder ID or retired
+snapshot is removed only once Tensorlake confirms the deletion or answers 404. The steps are: cleaning (reconcile, retry
+retired deletions, wait up to two minutes for the name to be free), creating (`tensorlake/ubuntu-systemd`, the one
+constant naming the base image; the recipe's CPUs, memory and disk; a 900-second idle timeout, so a builder a crashed
+helm left suspends and stops billing for compute; `auto_resume` off), starting (poll every 2 s for up to 15 minutes;
+terminated fails with Tensorlake's reason), connecting, packages, Claude Code, Codex, snapshotting (`filesystem`, polled
+until `completed`, not merely `local_ready`, for up to 30 minutes; `failed` fails the build) and finishing. Sweeping a
+builder terminates it, lists every snapshot and deletes those whose `sandbox_id` is the builder's, except any snapshot a
+recipe records as current; a failure leaves the builder recorded. After a failed step the builder, if its ID is
+recorded, is swept, bounded to two minutes; a builder whose ID could not be recorded is left running under the pending
+create, for the next build or the delete to find by name and record before terminating it. The failure is recorded with
+its step, and the previous snapshot is untouched. A recipe that stopped being a package recipe while its build ran gets
+the new snapshot retired at once. Deleting a recipe marks it as being deleted (no build may start), cancels a running
+build and waits for its task, reconciles, deletes the snapshot and retired snapshots, and only then deletes the row.
+Cancellation is cooperative: only waits on Tensorlake, the sandbox and poll sleeps are cancelled, never the create or a
+state write, so everything a cancelled build created is recorded before the delete reads the state. A recipe cannot
+reuse, as its image or snapshot source, a snapshot Farhelm built (any recipe's current or retired one): Farhelm deletes
+those when their recipe moves on, so the save is refused naming the owning recipe. Not covered: a snapshot a builder
+took that no recipe records yet (the helm stopped between taking it and recording it) can be named as a reuse source,
+and the next sweep of that builder then deletes it; finding its ID takes listing the account's snapshots by hand. The
+list shows a running or interrupted build and pending cleanup for every recipe, whatever its source is now; only the
+build actions need a package recipe.
+
+The build's scripts (`build_script.rs`) run as the sandbox user under `sh -c`, through the narrow `SandboxShell` trait.
+Its production implementation runs `ssh` with `ssh_oneshot_args` (the connection overrides, `BatchMode=yes`,
+`ControlMaster=no`, `ControlPath=none`): a builder's name is reused, so a `ControlPersist` master to an earlier builder
+would carry commands to a terminated sandbox, where a new channel hangs. The Tensorlake ssh options
+(`tensorlake/ssh.rs`, shared with Tensorlake hosts) are Farhelm's key with `IdentitiesOnly=yes`; `UserKnownHostsFile` in
+`<state>/tensorlake/known_hosts` with `GlobalKnownHostsFile=/dev/null`, `HostKeyAlias=sandbox.tensorlake.ai` (every
+sandbox name presents the gateway's one host key) and `StrictHostKeyChecking=accept-new`; and `ServerAliveInterval=30`
+with `ServerAliveCountMax=3`, inside the gateway's measured 300 to 400 second silent-drop window; and `LogLevel=ERROR`,
+which drops the gateway's login banner from every command's stderr. Paths are encoded for ssh_config with every `%`
+doubled. The child runs in its own process group and is captured through provisioning's bounded `capture_child`, which
+fails past 64 KiB of output, so every script logs to `/var/tmp/farhelm-build-<step>.log` on the sandbox and sends back
+only the log's last 8 KiB on failure; the helm keeps the last 12 lines, at most 2000 characters, stripped of
+presentation-unsafe characters. Exit 255 with OpenSSH's `Permission denied (publickey` is a refused key and fails at
+once with the registration hint; any other 255 is unreachable, retried for up to 60 seconds while connecting, since sshd
+can lag the sandbox's running state. The readiness script refuses a PID 1 other than systemd, polls
+`systemctl is-system-running` every 2 seconds for up to 180 until it says (right after boot it answers nothing, even
+with `--wait`) `running` or `degraded`, and requires `sudo -n`. The package script runs `dpkg --configure -a`,
+`apt-get update` and `apt-get install ca-certificates curl <packages>` through
+`sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a` with `DPkg::Lock::Timeout=600` and `confdef`/`confold`,
+each package shell-quoted. Each agent script downloads its installer with `curl --proto '=https' --tlsv1.2 -fsSL` into a
+file and runs that file (`bash` for `https://claude.ai/install.sh`, `CODEX_NON_INTERACTIVE=1 sh` for
+`https://chatgpt.com/codex/install.sh`), finds the command with `~/.local/bin` first on `PATH`, symlinks it into
+`/usr/local/bin` (on the default `PATH` of non-login ssh commands and the systemd user manager alike, and following the
+agent's updater when it re-points its own entry), and prints the bare command's `--version`, which the build records.
+The preparation script runs `apt-get clean`, truncates `/etc/machine-id` to empty (so each clone generates its own ID at
+boot) and removes the build logs. Logind and linger preparation is not part of the build; each host gets it at setup.
 
 ## Feedback forwarding
 

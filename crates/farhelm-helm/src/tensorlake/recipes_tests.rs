@@ -1,8 +1,8 @@
 //! Storage and route proofs for Tensorlake recipes.
 //!
 //! Storage tests use a fresh `HelmStore` in a temporary directory and reach
-//! the table directly only to plant or read `state_json`, which nothing in
-//! this change writes. Route tests drive the real protected router through
+//! the table directly only to plant or read `state_json`, the build engine's
+//! column (its own proofs are in `build_tests.rs`). Route tests drive the real protected router through
 //! the REST harness (offline host actors, no network), with secret-looking
 //! marker strings so a leak anywhere in a reply is a plain substring match.
 
@@ -117,11 +117,12 @@ async fn create_refuses_an_existing_name_and_invalid_input() {
     assert_eq!(store.tensorlake_recipes().await.unwrap().len(), 1);
 }
 
-/// Spec: an update writes only `spec_json` (and `updated_at`); the row's
-/// `state_json` and `created_at` survive byte for byte. An update or delete
+/// Spec: an update that keeps the recipe a package recipe writes only
+/// `spec_json` (and `updated_at`); the row's `state_json` and `created_at`
+/// survive byte for byte. An update or delete
 /// of a missing name is refused as missing and creates nothing.
 ///
-/// Why: `state_json` will hold the only record of billed Tensorlake
+/// Why: `state_json` holds the only record of billed Tensorlake
 /// resources (a snapshot ID, a builder ID). A user's save racing a build must
 /// never drop it, which is why the two live in separate columns with separate
 /// writers; this pins the user-save side of that split.
@@ -129,7 +130,7 @@ async fn create_refuses_an_existing_name_and_invalid_input() {
 async fn updates_write_the_spec_and_never_the_build_state() {
     let (_dir, store) = store().await;
     super::tests_support::create(&store, "rust-dev").await;
-    // What a build will record; planted directly because nothing here writes it.
+    // What a build records, planted directly.
     let state = r#"{"snapshot":{"id":"snap123"},"builder_sandbox_id":"sbx456"}"#;
     {
         let state = state.to_string();
@@ -147,10 +148,10 @@ async fn updates_write_the_spec_and_never_the_build_state() {
     }
     let (spec_before, state_before, created_before) = raw_row(&store, "rust-dev").await;
     assert_eq!(state_before, state, "premise: the build state is planted");
+    // Still a package recipe: a switch to an image is the one save that
+    // retires the snapshot (pinned in `build_tests.rs`).
     let mut edited = save();
-    edited.source = RecipeSource::Image {
-        image: "team-base".into(),
-    };
+    edited.size.disk_gb = 77;
     store
         .update_tensorlake_recipe("rust-dev".into(), edited)
         .await
@@ -158,7 +159,7 @@ async fn updates_write_the_spec_and_never_the_build_state() {
         .unwrap_or_else(|_| panic!("update succeeds"));
     let (spec_after, state_after, created_after) = raw_row(&store, "rust-dev").await;
     assert_ne!(spec_after, spec_before, "the spec changed");
-    assert!(spec_after.contains("team-base"));
+    assert!(spec_after.contains("77"));
     assert_eq!(state_after, state, "the build state is untouched");
     assert_eq!(created_after, created_before);
 
@@ -178,6 +179,26 @@ async fn updates_write_the_spec_and_never_the_build_state() {
         Err(Refusal::Missing)
     );
     assert_eq!(store.tensorlake_recipes().await.unwrap().len(), 1);
+    // The planted state records billed resources, so the store keeps the row
+    // until they are gone (pinned in `build_tests.rs`).
+    assert_eq!(
+        store
+            .delete_tensorlake_recipe("rust-dev".into())
+            .await
+            .unwrap(),
+        Err(Refusal::Billed)
+    );
+    store
+        .conn()
+        .call("clear state", |conn| {
+            conn.execute(
+                "UPDATE tensorlake_recipes SET state_json = '{}' WHERE name = 'rust-dev'",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
     assert_eq!(
         store
             .delete_tensorlake_recipe("rust-dev".into())

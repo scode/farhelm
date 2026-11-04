@@ -1,10 +1,17 @@
-/** Tensorlake recipes in Settings: the list, the in-place editor, and the
- * helm's recipe API behind them. Nothing here talks to Tensorlake (recipes
- * are local records until a sandbox is created), so the real helm is used
- * throughout and the API is read directly to check what was stored. Recipe
- * names carry an `e2e-` prefix and every test removes what it created. */
+/** Tensorlake recipes in Settings: the list, the in-place editor, snapshot
+ * builds, and the helm's recipe API behind them. Recipes themselves are local
+ * records, so those tests use the real helm and read the API directly to
+ * check what was stored. Snapshot builds call Tensorlake and run commands in
+ * a sandbox; start-stack.sh gives every helm the E2E-only Tensorlake fake
+ * (FARHELM_E2E_TENSORLAKE_DIR), whose config.json the build test owns (hold
+ * or fail a build step) and whose state.json and events.jsonl say what the
+ * helm created, ran and deleted. Recipe names carry an `e2e-` prefix and
+ * every test removes what it created. */
 import { expect, test } from "./helpers/evidence";
 import type { APIRequestContext, Locator, Page } from "@playwright/test";
+import { readFile, rename, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { currentStackSlot } from "../stack-slots";
 import { openSettings } from "./helpers/settings";
 
 /** A token that must never appear in a reply or on the page once saved. */
@@ -71,7 +78,7 @@ test("a managed recipe is created, edited and deleted without exposing its token
     // Saving returns to the list, which shows the stored recipe.
     const row = list.getByRole("listitem").filter({ hasText: name });
     await expect(row).toContainText("2 CPU · 4 GB · 20 GB · 3 packages · 1 tunnel");
-    await expect(row).toContainText("Snapshot not built yet");
+    await expect(row).toContainText("No snapshot yet");
     const listed = await request.get("/api/tensorlake/recipes");
     const body = await listed.text();
     expect(body).not.toContain(TOKEN);
@@ -83,6 +90,9 @@ test("a managed recipe is created, edited and deleted without exposing its token
       claude: { base_url: "http://127.0.0.1:8080", token_set: true },
       codex: null,
       tunnels: [{ sandbox_port: 8080, host: "127.0.0.1", port: 8080 }],
+      snapshot: null,
+      build: { state: "idle" },
+      cleanup_pending: false,
     });
     expect(await page.content()).not.toContain(TOKEN);
 
@@ -263,7 +273,9 @@ test("a failed recipe refresh says so and Retry loading recovers", async ({ page
   expect((await recipes(request)).map((r) => r.name), "fixture premise: no leftover recipe").not.toContain(name);
   try {
     const list = await openRecipes(page);
-    await expect(list.getByRole("status")).toHaveCount(0);
+    // Recipe rows carry their own snapshot status; the list-level ones are
+    // the loading line and the refresh error.
+    await expect(list.getByText("Loading recipes…", { exact: true })).toHaveCount(0);
     await expect(list.getByRole("alert")).toHaveCount(0);
     // Fail every browser read from now on; the API fixture below is not routed.
     let failing = true;
@@ -294,5 +306,164 @@ test("a failed recipe refresh says so and Retry loading recovers", async ({ page
   } finally {
     await page.unroute("**/api/tensorlake/recipes");
     await removeRecipes(request, [name]);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Snapshot builds, against the Tensorlake fake
+// ---------------------------------------------------------------------------
+
+type FakeShell = { hold?: boolean; fail?: Record<string, string> };
+type FakeModel = {
+  sandboxes: { id: string; name: string; status: string; image: string | null; auto_resume: boolean }[];
+  snapshots: { id: string; sandbox_id: string; status: string }[];
+};
+
+/** The fake's control directory, read once Playwright has started the stack. */
+async function fakeRoot(): Promise<string> {
+  const raw = await readFile(currentStackSlot().stackInfoPath, "utf8");
+  return (JSON.parse(raw) as { tensorlake_fake: string }).tensorlake_fake;
+}
+
+/** Atomically publish how the fake's shell behaves. */
+async function configureShell(shell: FakeShell): Promise<void> {
+  const root = await fakeRoot();
+  const next = path.join(root, `config.${process.pid}.next`);
+  await writeFile(next, `${JSON.stringify({ shell })}\n`, { mode: 0o600 });
+  await rename(next, path.join(root, "config.json"));
+}
+
+/** Empty the fake's model and event log. */
+async function resetFake(): Promise<void> {
+  const root = await fakeRoot();
+  await writeFile(path.join(root, "state.json"), "{}\n", { mode: 0o600 });
+  await writeFile(path.join(root, "events.jsonl"), "", { mode: 0o600 });
+}
+
+/** What the fake holds: every sandbox and snapshot the helm created. */
+async function fakeModel(): Promise<FakeModel> {
+  const raw = await readFile(path.join(await fakeRoot(), "state.json"), "utf8");
+  const model = JSON.parse(raw) as Partial<FakeModel>;
+  return { sandboxes: model.sandboxes ?? [], snapshots: model.snapshots ?? [] };
+}
+
+/** The shell steps the fake ran, in order. */
+async function shellSteps(): Promise<string[]> {
+  const raw = await readFile(path.join(await fakeRoot(), "events.jsonl"), "utf8");
+  return raw
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as { op: string; label?: string })
+    .filter((event) => event.op === "shell")
+    .map((event) => event.label ?? "");
+}
+
+/** The recipe's view as the helm lists it. */
+async function recipe(request: APIRequestContext, name: string): Promise<any> {
+  const found = (await recipes(request)).find((r) => r.name === name);
+  expect(found, `recipe ${name} is listed`).toBeTruthy();
+  return found;
+}
+
+/** Spec: with a key saved, a managed recipe without a snapshot offers Build
+ * snapshot; while a build runs the row says which step it is on ("step n of
+ * 9") and offers no action; once it ends the row says when it was built and
+ * with which agents, the fake shows the builder terminated, only the recorded
+ * snapshot left, and the steps run in order (ready, packages, claude, codex,
+ * prepare). Rebuild records a new snapshot and deletes the old one. A failing
+ * step shows its message with Retry and keeps the built snapshot; Retry
+ * builds. Deleting the recipe deletes its snapshot.
+ *
+ * Why: this is the user's whole loop with snapshots, and the fake's state is
+ * the evidence that nothing the helm created is left billing; a regression
+ * in the cleanup would otherwise be invisible until a Tensorlake bill. */
+test("a recipe's snapshot builds, rebuilds, recovers from a failed step and goes with the recipe", async ({ page, request }) => {
+  const name = "e2e-build";
+  const original = await (await request.get("/api/tensorlake")).json();
+  expect(original.api_key_set, "fixture premise: no key it would have to restore").toBe(false);
+  await page.goto("/");
+  expect((await recipes(request)).map((r) => r.name), "fixture premise: no leftover recipe").not.toContain(name);
+  await resetFake();
+  await configureShell({ hold: true });
+  try {
+    let response = await request.put("/api/tensorlake", { data: { api_key: "e2e-build-key" } });
+    expect(response.ok(), await response.text()).toBe(true);
+    response = await request.post("/api/tensorlake/ssh-key");
+    expect(response.ok(), await response.text()).toBe(true);
+    response = await request.post("/api/tensorlake/recipes", {
+      data: {
+        name,
+        recipe: { size: { cpus: 2, memory_gb: 4, disk_gb: 20 }, source: { kind: "packages", packages: ["jq"] }, claude: null, codex: null, tunnels: [] },
+      },
+    });
+    expect(response.ok(), await response.text()).toBe(true);
+    const premise = await fakeModel();
+    expect([premise.sandboxes.length, premise.snapshots.length], "fixture premise: the fake holds nothing").toEqual([0, 0]);
+
+    const list = await openRecipes(page);
+    const row = list.getByRole("listitem").filter({ hasText: name });
+    await expect(row).toContainText("No snapshot yet");
+    await row.getByRole("button", { name: `Build snapshot for ${name}`, exact: true }).click();
+    await expect(row).toContainText("Building snapshot: connecting to the build sandbox (step 4 of 9)");
+    await expect(row.getByRole("button", { name: /snapshot for|Retry/ })).toHaveCount(0);
+
+    await configureShell({});
+    await expect(row).toContainText("Snapshot built");
+    await expect(row).toContainText("1.0.0 (Claude Code) · codex-cli 0.1.0");
+    // "Snapshot built" shows once the snapshot is recorded, which is before
+    // the builder is deleted; the build is over only once it is idle again.
+    await expect(row.getByRole("button", { name: `Rebuild snapshot for ${name}`, exact: true })).toBeEnabled();
+    await expect.poll(async () => {
+      const view = await recipe(request, name);
+      return [view.build.state, view.cleanup_pending];
+    }).toEqual(["idle", false]);
+    const first = (await recipe(request, name)).snapshot.id as string;
+    let model = await fakeModel();
+    expect(model.sandboxes.map((s) => [s.status, s.image, s.auto_resume])).toEqual([["terminated", "tensorlake/ubuntu-systemd", false]]);
+    expect(model.sandboxes[0].name).toMatch(/^farhelm-build-[a-z0-9]{4}-e2e-build$/);
+    expect(model.snapshots.map((s) => s.id)).toEqual([first]);
+    expect(await shellSteps()).toEqual(["ready", "packages", "claude", "codex", "prepare"]);
+
+    // Rebuild: a new snapshot, the old one deleted.
+    await row.getByRole("button", { name: `Rebuild snapshot for ${name}`, exact: true }).click();
+    await expect.poll(async () => (await recipe(request, name)).snapshot?.id).not.toBe(first);
+    await expect.poll(async () => (await recipe(request, name)).build.state).toBe("idle");
+    await expect(row.getByRole("button", { name: `Rebuild snapshot for ${name}`, exact: true })).toBeEnabled();
+    const second = (await recipe(request, name)).snapshot.id as string;
+    model = await fakeModel();
+    expect(model.snapshots.map((s) => s.id)).toEqual([second]);
+    expect(model.sandboxes.map((s) => s.status)).toEqual(["terminated", "terminated"]);
+
+    // A failing step: its message and Retry, with the built snapshot kept.
+    await configureShell({ fail: { packages: "E: Unable to locate package nope" } });
+    await row.getByRole("button", { name: `Rebuild snapshot for ${name}`, exact: true }).click();
+    await expect(row).toContainText("Snapshot build failed while installing packages: E: Unable to locate package nope");
+    await expect(row).toContainText("Snapshot built");
+    expect((await recipe(request, name)).snapshot.id).toBe(second);
+    model = await fakeModel();
+    expect(model.snapshots.map((s) => s.id), "the failed build left no snapshot").toEqual([second]);
+    expect(model.sandboxes.every((s) => s.status === "terminated"), "the failed builder was terminated").toBe(true);
+    await configureShell({});
+    await row.getByRole("button", { name: `Retry for ${name}`, exact: true }).click();
+    await expect.poll(async () => (await recipe(request, name)).snapshot?.id).not.toBe(second);
+    await expect.poll(async () => (await recipe(request, name)).build.state).toBe("idle");
+    await expect(row).not.toContainText("failed");
+
+    // Deleting the recipe deletes its snapshot, after saying so.
+    await row.getByRole("button", { name: `Edit ${name}`, exact: true }).click();
+    const editor = page.getByRole("region", { name: `Recipe: ${name}`, exact: true });
+    await editor.getByRole("button", { name: "Delete", exact: true }).click();
+    await expect(editor.getByText(`Delete recipe ${name} and its snapshot on Tensorlake? This can't be undone.`, { exact: true })).toBeVisible();
+    await editor.getByRole("button", { name: "Delete", exact: true }).click();
+    await expect(list.getByRole("listitem").filter({ hasText: name })).toHaveCount(0);
+    model = await fakeModel();
+    expect(model.snapshots).toEqual([]);
+    expect(model.sandboxes.every((s) => s.status === "terminated")).toBe(true);
+  } finally {
+    await configureShell({});
+    await removeRecipes(request, [name]);
+    const cleared = await request.put("/api/tensorlake", { data: { clear_api_key: true } });
+    expect(cleared.ok(), await cleared.text()).toBe(true);
+    await resetFake();
   }
 });

@@ -858,7 +858,7 @@ async fn the_fake_answers_from_its_control_files() {
         }
     );
     assert!(matches!(
-        fake.terminate_sandbox(&key(), "sb-1").await,
+        fake.suspend_sandbox(&key(), "sb-1").await,
         Err(TensorlakeError::Status { status: 501, .. })
     ));
     let events = std::fs::read_to_string(root.join("events.jsonl")).unwrap();
@@ -874,7 +874,7 @@ async fn the_fake_answers_from_its_control_files() {
             serde_json::json!({ "op": "list_sandboxes", "key_accepted": true }),
             serde_json::json!({ "op": "list_sandboxes", "key_accepted": false }),
             serde_json::json!({ "op": "list_sandboxes", "key_accepted": true }),
-            serde_json::json!({ "op": "terminate_sandbox", "key_accepted": true }),
+            serde_json::json!({ "op": "suspend_sandbox", "key_accepted": true }),
         ]
     );
 }

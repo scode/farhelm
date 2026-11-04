@@ -7,7 +7,8 @@
 //! `farhelm_proto::tensorlake::recipes`. This module stores recipes in the
 //! `tensorlake_recipes` table and serves them:
 //!
-//! - `GET /api/tensorlake/recipes` lists every recipe, without secrets.
+//! - `GET /api/tensorlake/recipes` lists every recipe, without secrets, with
+//!   its snapshot and build status (`build.rs` owns those).
 //! - `POST /api/tensorlake/recipes` creates one; an existing name is a 409,
 //!   never an overwrite, because "New recipe" in the editor must not replace a
 //!   recipe someone else created meanwhile.
@@ -15,13 +16,17 @@
 //!   definition; a missing name is a 404 (a PUT never creates). The URL is the
 //!   name's only authority, so names cannot change.
 //! - `DELETE /api/tensorlake/recipes/{name}` removes one, refused while a host
-//!   uses it.
+//!   uses it, after deleting what Tensorlake bills for it.
+//! - `POST /api/tensorlake/recipes/{name}/build` starts or joins a snapshot
+//!   build (Build, Rebuild and Retry).
 //!
 //! This is deliberately not launch templates' last-write-wins "PUT creates or
 //! replaces": names are immutable and create versus update are distinct
 //! operations, and the row carries helm-owned build state beside the user's
-//! spec (see `TENSORLAKE_RECIPES_SCHEMA` in `store.rs`). Every write here
-//! touches only `spec_json`; nothing in this change writes `state_json`.
+//! spec (see `TENSORLAKE_RECIPES_SCHEMA` in `store.rs`). A save writes only
+//! `spec_json`, with one exception: switching a recipe away from packages
+//! retires its built snapshot in the same transaction. Everything else in
+//! `state_json` is the build engine's.
 //!
 //! Endpoint tokens are stored unencrypted with the rest of the spec, like the
 //! ntfy token, and never returned: the read shape says only whether one is
@@ -29,8 +34,9 @@
 //! decode gets a fixed refusal instead of serde's diagnostic, which can quote
 //! the submitted text, and no stored-type here implements `Debug`.
 //!
-//! Nothing here calls Tensorlake. Snapshot builds (and the cleanup a delete
-//! must then do first) arrive with the build feature.
+//! Saving never builds: a build bills, so only the explicit build route starts
+//! one. The routes call Tensorlake only for a delete's cleanup and a retired
+//! snapshot's deletion, both through the build engine.
 
 use std::sync::Arc;
 
@@ -42,12 +48,13 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use farhelm_proto::tensorlake::recipes::{
-    CreateRecipe, EndpointSave, EndpointView, RecipeSave, RecipeSize, RecipeSource, RecipeView,
-    RecipesView, Tunnel, check_recipe, check_recipe_name,
+    BuildView, CreateRecipe, EndpointSave, EndpointView, RecipeSave, RecipeSize, RecipeSource,
+    RecipeView, RecipesView, Tunnel, check_recipe, check_recipe_name,
 };
 use rusqlite::{Connection, OptionalExtension as _};
 use serde::{Deserialize, Serialize};
 
+use super::build::{CleanupRefusal, RecipeState, StartRefusal, decode_state};
 use crate::{AppState, store::HelmStore};
 
 /// The request body cap for recipe writes. 500 typical package names, a few
@@ -126,6 +133,9 @@ impl StoredRecipe {
             claude: endpoint(&self.claude),
             codex: endpoint(&self.codex),
             tunnels: self.tunnels.clone(),
+            snapshot: None,
+            build: BuildView::Idle,
+            cleanup_pending: false,
         }
     }
 }
@@ -175,6 +185,9 @@ pub(crate) enum Refusal {
     Invalid(String),
     /// Delete: this many hosts use the recipe.
     InUse(u32),
+    /// Delete: the recipe's build state still records a builder or snapshot
+    /// that has not been deleted on Tensorlake.
+    Billed,
 }
 
 /// How many hosts use the recipe named `name`, read inside the delete's own
@@ -191,10 +204,73 @@ fn hosts_using_recipe(_conn: &Connection, _name: &str) -> anyhow::Result<u32> {
     Ok(0)
 }
 
+/// Refuse a reuse source that is a snapshot Farhelm built for a recipe
+/// (current or retired), inside the caller's transaction.
+///
+/// Farhelm deletes those snapshots on its own: when their recipe is
+/// rebuilt, deleted or switched to another source. A recipe reusing one
+/// would be left pointing at nothing, and saving a recipe that reuses its
+/// own snapshot would retire, and so delete, its new source in the same
+/// save. Until snapshots can have several owners, reusing one is refused.
+fn refuse_owned_snapshot(
+    conn: &Connection,
+    source: &RecipeSource,
+) -> anyhow::Result<Option<Refusal>> {
+    let RecipeSource::Snapshot { snapshot_id } = source else {
+        return Ok(None);
+    };
+    let mut stmt = conn
+        .prepare("SELECT name, state_json FROM tensorlake_recipes ORDER BY name")
+        .context("preparing the Tensorlake build state read")?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .context("reading Tensorlake build state")?
+        .collect::<Result<Vec<_>, _>>()
+        .context("reading Tensorlake build state")?;
+    for (owner, json) in rows {
+        let state = decode_state(&owner, &json)?;
+        let current = state
+            .snapshot
+            .as_ref()
+            .is_some_and(|built| &built.id == snapshot_id);
+        if current || state.retired_snapshots.contains(snapshot_id) {
+            return Ok(Some(Refusal::Invalid(format!(
+                "snapshot {snapshot_id} is the one Farhelm built for recipe {owner}, and Farhelm deletes it when that recipe is rebuilt, changed to another source or deleted; use recipe {owner} for these hosts, or a snapshot of your own"
+            ))));
+        }
+    }
+    Ok(None)
+}
+
+/// Move the recipe's current snapshot, if it has one, to its retired list,
+/// inside the caller's transaction. Writes `state_json` only.
+fn retire_snapshot(conn: &Connection, name: &str) -> anyhow::Result<()> {
+    let json: String = conn
+        .query_row(
+            "SELECT state_json FROM tensorlake_recipes WHERE name = ?1",
+            [name],
+            |row| row.get(0),
+        )
+        .context("reading Tensorlake build state")?;
+    let mut state = decode_state(name, &json)?;
+    let Some(snapshot) = state.snapshot.take() else {
+        return Ok(());
+    };
+    state.retired_snapshots.push(snapshot.id);
+    conn.execute(
+        "UPDATE tensorlake_recipes SET state_json = ?2 WHERE name = ?1",
+        rusqlite::params![name, serde_json::to_string(&state)?],
+    )
+    .context("storing Tensorlake build state")?;
+    Ok(())
+}
+
 /// Seconds since the epoch for `created_at`/`updated_at`. Informational only
 /// (nothing orders by them); a clock before the epoch records 0 rather than
 /// failing the write, as launch templates do.
-fn now_secs() -> i64 {
+pub(super) fn now_secs() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.as_secs() as i64)
@@ -202,19 +278,22 @@ fn now_secs() -> i64 {
 
 /// Decode a stored spec without letting serde's message through: on a
 /// hand-edited row it can quote a value, and that value can be a token.
-fn decode_spec(name: &str, json: &str) -> anyhow::Result<StoredRecipe> {
+pub(super) fn decode_spec(name: &str, json: &str) -> anyhow::Result<StoredRecipe> {
     serde_json::from_str(json).map_err(|_| {
         anyhow::anyhow!("Tensorlake recipe {name:?} has a definition this build cannot read")
     })
 }
 
 impl HelmStore {
-    /// Every stored recipe, ordered by name.
+    /// Every stored recipe's definition, ordered by name, for tests that
+    /// check what a save stored; the routes read definitions and build state
+    /// together through `tensorlake_recipe_rows`.
     ///
     /// A row that does not decode is an error, not skipped: names are unique
     /// and immutable, so a recipe missing from the list would keep its name
     /// taken with no way to see why. Rows are written only through
     /// [`StoredRecipe::saved`], so this takes a hand edit or a downgrade.
+    #[cfg(test)]
     pub(crate) async fn tensorlake_recipes(&self) -> anyhow::Result<Vec<(String, StoredRecipe)>> {
         self.conn()
             .call("Tensorlake recipe read task panicked", |conn| {
@@ -257,6 +336,9 @@ impl HelmStore {
         let now = now_secs();
         self.conn()
             .call("Tensorlake recipe create task panicked", move |conn| {
+                if let Some(refusal) = refuse_owned_snapshot(conn, &spec.source)? {
+                    return Ok(Err(refusal));
+                }
                 let inserted = conn
                     .execute(
                         "INSERT INTO tensorlake_recipes (name, spec_json, created_at, updated_at)
@@ -307,12 +389,23 @@ impl HelmStore {
                     Ok(spec) => spec,
                     Err(reason) => return Ok(Err(Refusal::Invalid(reason))),
                 };
+                if let Some(refusal) = refuse_owned_snapshot(&tx, &spec.source)? {
+                    return Ok(Err(refusal));
+                }
                 let json = serde_json::to_string(&spec).context("encoding a Tensorlake recipe")?;
                 tx.execute(
                     "UPDATE tensorlake_recipes SET spec_json = ?2, updated_at = ?3 WHERE name = ?1",
                     rusqlite::params![name, json, now],
                 )
                 .context("storing a Tensorlake recipe")?;
+                // A recipe that stops installing packages stops using its
+                // built snapshot. It is retired in the same transaction, so
+                // no moment exists where the spec says "reuse" and the state
+                // still records a snapshot as current; the route deletes it
+                // after the commit.
+                if !matches!(spec.source, RecipeSource::Packages { .. }) {
+                    retire_snapshot(&tx, &name)?;
+                }
                 tx.commit()
                     .context("committing the Tensorlake recipe update")?;
                 Ok(Ok(spec))
@@ -320,8 +413,23 @@ impl HelmStore {
             .await
     }
 
+    /// How many hosts use the recipe `name`; see [`hosts_using_recipe`].
+    pub(crate) async fn tensorlake_recipe_users(&self, name: String) -> anyhow::Result<u32> {
+        self.conn()
+            .call("Tensorlake recipe read task panicked", move |conn| {
+                hosts_using_recipe(conn, &name)
+            })
+            .await
+    }
+
     /// Delete the recipe `name`, refused while a host uses it
-    /// ([`hosts_using_recipe`]) and when it does not exist.
+    /// ([`hosts_using_recipe`]), while its build state still records
+    /// something Tensorlake may bill for, and when it does not exist.
+    ///
+    /// The billing refusal makes "no path forgets a billed resource" a
+    /// property of the store, not of the route: the row is the only record
+    /// of a builder or snapshot ID, so the route must have deleted them (and
+    /// cleared their records) before this can succeed.
     pub(crate) async fn delete_tensorlake_recipe(
         &self,
         name: String,
@@ -334,6 +442,19 @@ impl HelmStore {
                 let users = hosts_using_recipe(&tx, &name)?;
                 if users > 0 {
                     return Ok(Err(Refusal::InUse(users)));
+                }
+                let state: Option<String> = tx
+                    .query_row(
+                        "SELECT state_json FROM tensorlake_recipes WHERE name = ?1",
+                        [&name],
+                        |row| row.get(0),
+                    )
+                    .optional()
+                    .context("reading Tensorlake build state")?;
+                if let Some(state) = state
+                    && decode_state(&name, &state)?.needs_cleanup()
+                {
+                    return Ok(Err(Refusal::Billed));
                 }
                 let deleted = tx
                     .execute("DELETE FROM tensorlake_recipes WHERE name = ?1", [&name])
@@ -373,6 +494,13 @@ fn refusal_response(name: &str, refusal: Refusal) -> Response {
             },
         )
             .into_response(),
+        Refusal::Billed => (
+            StatusCode::CONFLICT,
+            format!(
+                "recipe {name} still has a snapshot or build sandbox on Tensorlake; try deleting it again"
+            ),
+        )
+            .into_response(),
     }
 }
 
@@ -394,12 +522,38 @@ fn malformed_body() -> Response {
     (StatusCode::BAD_REQUEST, "invalid recipe").into_response()
 }
 
-/// `GET /api/tensorlake/recipes`: every recipe, by name, without secrets.
-/// Local only; never calls Tensorlake.
+/// A recipe's full view: its definition plus its build fields.
+fn full_view(state: &AppState, name: &str, spec: &StoredRecipe, build: &RecipeState) -> RecipeView {
+    let (snapshot, build, cleanup_pending) = state.tensorlake.builds().view(name, build);
+    RecipeView {
+        snapshot,
+        build,
+        cleanup_pending,
+        ..spec.view(name)
+    }
+}
+
+/// The current full view of recipe `name`, answered as JSON, or the refusal
+/// for a recipe that is gone.
+async fn view_response(state: &AppState, name: &str, status: StatusCode) -> Response {
+    match state.store.tensorlake_recipe_row(name).await {
+        Ok(Some((spec, build))) => {
+            (status, Json(full_view(state, name, &spec, &build))).into_response()
+        }
+        Ok(None) => refusal_response(name, Refusal::Missing),
+        Err(error) => storage_failure("read the Tensorlake recipe", error),
+    }
+}
+
+/// `GET /api/tensorlake/recipes`: every recipe, by name, without secrets,
+/// with its snapshot and build status. Local only; never calls Tensorlake.
 pub(crate) async fn list_recipes(State(state): State<Arc<AppState>>) -> Response {
-    match state.store.tensorlake_recipes().await {
+    match state.store.tensorlake_recipe_rows().await {
         Ok(rows) => Json(RecipesView {
-            recipes: rows.iter().map(|(name, spec)| spec.view(name)).collect(),
+            recipes: rows
+                .iter()
+                .map(|(name, spec, build)| full_view(&state, name, spec, build))
+                .collect(),
         })
         .into_response(),
         Err(error) => storage_failure("read Tensorlake recipes", error),
@@ -409,6 +563,8 @@ pub(crate) async fn list_recipes(State(state): State<Arc<AppState>>) -> Response
 /// `POST /api/tensorlake/recipes`: create a recipe. 409 when the name is
 /// taken, 400 when it or the definition is invalid. Answers with the stored
 /// recipe's view and bumps the invalidation feed so other clients re-read.
+/// Saving never starts a snapshot build: a build bills, and only the
+/// explicit Build action may start one.
 pub(crate) async fn create_recipe(
     State(state): State<Arc<AppState>>,
     body: Result<Json<CreateRecipe>, JsonRejection>,
@@ -432,6 +588,13 @@ pub(crate) async fn create_recipe(
 
 /// `PUT /api/tensorlake/recipes/{name}`: replace an existing recipe's
 /// definition. 404 when no recipe has the name; a PUT never creates.
+///
+/// A save that switches the recipe from installing packages to reusing an
+/// image or snapshot retires its built snapshot (in the store's
+/// transaction); the snapshot is then deleted in the background, best
+/// effort, because keeping it for a switch back would bill storage the user
+/// cannot see. A deletion that fails stays recorded and is retried when the
+/// recipe is deleted.
 pub(crate) async fn update_recipe(
     State(state): State<Arc<AppState>>,
     Path(name): Path<String>,
@@ -445,28 +608,148 @@ pub(crate) async fn update_recipe(
         .update_tensorlake_recipe(name.clone(), save)
         .await
     {
-        Ok(Ok(spec)) => {
+        Ok(Ok(_)) => {
             state.manager.events().bump();
-            Json(spec.view(&name)).into_response()
+            delete_retired_in_background(&state, &name).await;
+            view_response(&state, &name, StatusCode::OK).await
         }
         Ok(Err(refusal)) => refusal_response(&name, refusal),
         Err(error) => storage_failure("save the Tensorlake recipe", error),
     }
 }
 
-/// `DELETE /api/tensorlake/recipes/{name}`: remove a recipe. 404 when it does
-/// not exist, 409 while a host uses it.
+/// Start deleting the recipe's retired snapshots, if it has any and a key is
+/// saved, without holding up the reply. A build running for the recipe
+/// retries them itself, so nothing starts then.
+async fn delete_retired_in_background(state: &Arc<AppState>, name: &str) {
+    let builds = Arc::clone(state.tensorlake.builds());
+    if builds.is_building(name) {
+        return;
+    }
+    let has_retired = matches!(
+        state.store.tensorlake_recipe_row(name).await,
+        Ok(Some((_, build))) if !build.retired_snapshots.is_empty()
+    );
+    let key = state
+        .store
+        .tensorlake_config()
+        .await
+        .ok()
+        .and_then(|config| config.api_key());
+    let (true, Some(key)) = (has_retired, key) else {
+        return;
+    };
+    let events = Arc::clone(state.manager.events());
+    let name = name.to_string();
+    tokio::spawn(async move {
+        if let Err(error) = builds.delete_retired(&name, &key).await {
+            tracing::warn!(recipe = %name, "could not delete a retired Tensorlake snapshot: {error}");
+        }
+        events.bump();
+    });
+}
+
+/// `DELETE /api/tensorlake/recipes/{name}`: remove a recipe and everything
+/// Tensorlake bills for it. 404 when it does not exist, 409 while a host
+/// uses it.
+///
+/// A recipe with a snapshot, a recorded builder or retired snapshots, or an
+/// interrupted build, is cleaned up first: a running build is cancelled,
+/// the builder is terminated and its snapshots deleted, and the recipe's
+/// snapshots are deleted. Any Tensorlake failure refuses the delete with
+/// its reason and keeps the row (with whatever is left recorded), so a retry
+/// finishes the job; no path forgets a billed resource. A recipe with
+/// nothing billed is deleted without calling Tensorlake.
 pub(crate) async fn delete_recipe(
     State(state): State<Arc<AppState>>,
     Path(name): Path<String>,
 ) -> Response {
-    match state.store.delete_tensorlake_recipe(name.clone()).await {
-        Ok(Ok(())) => {
+    // Refuse a recipe in use before deleting anything on Tensorlake: hosts
+    // started from its snapshot keep working without it, but the user asked
+    // for nothing to change while the refusal stands.
+    match state.store.tensorlake_recipe_users(name.clone()).await {
+        Ok(0) => {}
+        Ok(users) => return refusal_response(&name, Refusal::InUse(users)),
+        Err(error) => return storage_failure("delete the Tensorlake recipe", error),
+    }
+    let builds = Arc::clone(state.tensorlake.builds());
+    let guard = match builds.clean_for_delete(&name).await {
+        Ok(guard) => guard,
+        Err(refusal) => {
             state.manager.events().bump();
-            Json(serde_json::json!({})).into_response()
+            return cleanup_refusal_response(&name, refusal);
         }
+    };
+    let deleted = state.store.delete_tensorlake_recipe(name.clone()).await;
+    drop(guard);
+    state.manager.events().bump();
+    match deleted {
+        Ok(Ok(())) => Json(serde_json::json!({})).into_response(),
         Ok(Err(refusal)) => refusal_response(&name, refusal),
         Err(error) => storage_failure("delete the Tensorlake recipe", error),
+    }
+}
+
+/// The HTTP answer for a delete whose Tensorlake cleanup did not finish.
+fn cleanup_refusal_response(name: &str, refusal: CleanupRefusal) -> Response {
+    match refusal {
+        CleanupRefusal::Missing => refusal_response(name, Refusal::Missing),
+        CleanupRefusal::Deleting => (
+            StatusCode::CONFLICT,
+            format!("recipe {name} is already being deleted"),
+        )
+            .into_response(),
+        CleanupRefusal::NoApiKey => (
+            StatusCode::BAD_REQUEST,
+            format!(
+                "recipe {name} has a snapshot on Tensorlake; save a Tensorlake API key in Settings so Farhelm can delete it"
+            ),
+        )
+            .into_response(),
+        CleanupRefusal::Tensorlake(reason) => (
+            StatusCode::BAD_GATEWAY,
+            format!("Farhelm could not delete recipe {name}'s snapshot or build sandbox: {reason}"),
+        )
+            .into_response(),
+        CleanupRefusal::Storage(error) => storage_failure("delete the Tensorlake recipe", error),
+    }
+}
+
+/// `POST /api/tensorlake/recipes/{name}/build`: start building the recipe's
+/// snapshot, or join the build already running. Build, Rebuild and Retry
+/// all land here. Answers 202 with the recipe's view, which shows the build
+/// running; progress then arrives through the feed and this list's GET.
+pub(crate) async fn build_recipe(
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+) -> Response {
+    let builds = Arc::clone(state.tensorlake.builds());
+    match builds
+        .start_or_join(&name, Arc::clone(state.manager.events()))
+        .await
+    {
+        Ok(()) => {
+            state.manager.events().bump();
+            view_response(&state, &name, StatusCode::ACCEPTED).await
+        }
+        Err(StartRefusal::Missing) => refusal_response(&name, Refusal::Missing),
+        Err(StartRefusal::NotManaged) => (
+            StatusCode::BAD_REQUEST,
+            "this recipe uses an existing image or snapshot; Farhelm builds nothing for it",
+        )
+            .into_response(),
+        Err(StartRefusal::NoApiKey) => (
+            StatusCode::BAD_REQUEST,
+            "save a Tensorlake API key in Settings first",
+        )
+            .into_response(),
+        Err(StartRefusal::NoSshKey(reason)) => (StatusCode::BAD_REQUEST, reason).into_response(),
+        Err(StartRefusal::Deleting) => (
+            StatusCode::CONFLICT,
+            format!("recipe {name} is being deleted"),
+        )
+            .into_response(),
+        Err(StartRefusal::Storage(error)) => storage_failure("start the snapshot build", error),
     }
 }
 

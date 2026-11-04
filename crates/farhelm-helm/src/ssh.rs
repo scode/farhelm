@@ -260,6 +260,48 @@ pub(crate) fn ssh_base_args(
     Ok(args)
 }
 
+/// The argv prefix for a one-shot ssh command that never shares a
+/// connection: the same overrides and `BatchMode` as [`ssh_base_args`], then
+/// `ControlMaster=no` and `ControlPath=none`, then the caller's
+/// `extra_options` as further `-o` pairs, then `--` and the destination.
+///
+/// For destinations whose name can come back attached to a different
+/// machine, which a shared master would get wrong: Tensorlake's snapshot
+/// builder has a fixed name per recipe, so a `ControlPersist` master still
+/// open to the previous builder would carry a new command to a terminated
+/// sandbox, where a new channel hangs instead of failing. Both options are
+/// needed for the reason [`ssh_base_args`]' unshared branch gives.
+///
+/// `extra_options` are `Keyword=value` strings the caller built, with any
+/// path in them already encoded by [`ssh_config_path_option`]. They come
+/// after the overrides, and ssh takes the first value it sees for a keyword,
+/// so they cannot undo an override; the terminator rule is the same as
+/// [`ssh_base_args`]'.
+pub(crate) fn ssh_oneshot_args(dest: &str, extra_options: &[String]) -> Vec<String> {
+    let extra: Vec<&str> = extra_options.iter().map(String::as_str).collect();
+    let mut options = vec!["BatchMode=yes", "ControlMaster=no", "ControlPath=none"];
+    options.extend(extra);
+    let mut args = options_with_overrides(&options);
+    args.extend(["--".to_string(), dest.to_string()]);
+    args
+}
+
+/// `Keyword="path"` for an ssh `-o` option whose value is a local path
+/// (`IdentityFile`, `UserKnownHostsFile`), encoded for ssh_config's value
+/// parser: quotes and backslashes escaped, and every `%` doubled, because
+/// those keywords expand percent tokens and a path is never meant to hold
+/// one. Unlike [`ssh_control_path_option`], no trailing token survives.
+///
+/// `raw` must already be UTF-8 text; the caller owns that check, as
+/// [`ssh_base_args`] does for the control path.
+pub(crate) fn ssh_config_path_option(keyword: &str, raw: &str) -> String {
+    let escaped = raw
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('%', "%%");
+    format!("{keyword}=\"{escaped}\"")
+}
+
 /// The ssh argv for reaching a remote supervisor, as a pure function so
 /// the quoting seam is unit-testable — the ssh path as a whole cannot run
 /// in CI, and this argv is where its subtlest bug class lives.
@@ -977,6 +1019,54 @@ mod tests {
         assert!(
             rendered.contains(&non_utf8.to_string_lossy().into_owned()),
             "error should name the offending path so the user can see which one: {rendered}"
+        );
+    }
+
+    /// Spec: a one-shot argv carries every connection override, then
+    /// `BatchMode=yes`, `ControlMaster=no` and `ControlPath=none`, then the
+    /// caller's options in order, then `--` and the destination last; an
+    /// option-shaped destination stays after the terminator.
+    ///
+    /// Why: the Tensorlake snapshot builder runs over this argv. A builder's
+    /// name is fixed per recipe, so a shared master to the previous builder
+    /// would carry commands to a terminated sandbox; and the terminator's
+    /// placement is the same security boundary as `ssh_base_args`'.
+    #[farhelm_testtrace::test]
+    fn oneshot_args_never_share_and_keep_the_terminator_before_the_destination() {
+        let extra = vec!["IdentitiesOnly=yes".to_string(), "Port=22".to_string()];
+        let dest = "-oProxyCommand=evil";
+        let argv = super::ssh_oneshot_args(dest, &extra);
+        assert_eq!(&argv[argv.len() - 2..], ["--", dest]);
+        let options: Vec<&str> = argv[..argv.len() - 2]
+            .chunks(2)
+            .map(|pair| {
+                assert_eq!(pair[0], "-o", "{argv:?}");
+                pair[1].as_str()
+            })
+            .collect();
+        let mut expected: Vec<&str> = super::CONNECTION_OVERRIDES.to_vec();
+        expected.extend([
+            "BatchMode=yes",
+            "ControlMaster=no",
+            "ControlPath=none",
+            "IdentitiesOnly=yes",
+            "Port=22",
+        ]);
+        assert_eq!(options, expected);
+    }
+
+    /// Spec: a path option is `Keyword="..."` with backslashes and quotes
+    /// escaped and every `%` doubled, a trailing `%C` included.
+    ///
+    /// Why: `IdentityFile` and `UserKnownHostsFile` expand percent tokens, so
+    /// an undoubled `%` in a state directory's path would make ssh read a
+    /// different file than the one Farhelm wrote; unescaped quotes would end
+    /// the value early.
+    #[farhelm_testtrace::test]
+    fn path_options_escape_quotes_backslashes_and_every_percent() {
+        assert_eq!(
+            super::ssh_config_path_option("IdentityFile", r#"/a b/"q"\x/%d/%C"#),
+            r#"IdentityFile="/a b/\"q\"\\x/%%d/%%C""#
         );
     }
 }

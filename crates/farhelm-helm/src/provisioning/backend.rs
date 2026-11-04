@@ -265,8 +265,8 @@ pub(super) enum ActionOutcome {
 /// A backend failure preserves the host's stderr separately so the REST
 /// progress record can escape it before retention.
 #[derive(Debug)]
-pub(super) struct BackendFailure {
-    pub(super) context: String,
+pub(crate) struct BackendFailure {
+    pub(crate) context: String,
     stderr: String,
 }
 
@@ -286,7 +286,7 @@ impl BackendFailure {
         }
     }
 
-    pub(super) fn rendered(&self) -> String {
+    pub(crate) fn rendered(&self) -> String {
         if self.stderr.is_empty() {
             self.context.clone()
         } else {
@@ -455,7 +455,7 @@ pub(super) struct SystemBackend {
 
 /// Process-creation seam that tests use to exercise production classifiers
 /// without invoking a real SSH endpoint.
-pub(super) trait CommandLauncher: Send + Sync {
+pub(crate) trait CommandLauncher: Send + Sync {
     fn spawn(
         &self,
         command: &mut tokio::process::Command,
@@ -463,7 +463,7 @@ pub(super) trait CommandLauncher: Send + Sync {
 }
 
 /// Ordinary launcher: all lifecycle and stream policy stays with the caller.
-pub(super) struct SystemLauncher;
+pub(crate) struct SystemLauncher;
 
 impl CommandLauncher for SystemLauncher {
     fn spawn(
@@ -476,7 +476,7 @@ impl CommandLauncher for SystemLauncher {
 
 /// Put a command and any helpers it spawns in a disposable process group.
 /// A shell timeout must stop the actual mutator, not only its waiting shell.
-pub(super) fn isolate_process_group(command: &mut tokio::process::Command) {
+pub(crate) fn isolate_process_group(command: &mut tokio::process::Command) {
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -1392,11 +1392,11 @@ pub(super) fn orphan_cleanup_script(parent: &Path, prefix: &str) -> anyhow::Resu
 
 /// Bounded captured result of one local or remote host shell.
 #[derive(Debug)]
-pub(super) struct CommandResult {
-    pub(super) code: Option<i32>,
-    signal: Option<i32>,
-    stdout: Vec<u8>,
-    pub(super) stderr: String,
+pub(crate) struct CommandResult {
+    pub(crate) code: Option<i32>,
+    pub(crate) signal: Option<i32>,
+    pub(crate) stdout: Vec<u8>,
+    pub(crate) stderr: String,
 }
 
 impl CommandResult {
@@ -1683,7 +1683,7 @@ where
 /// helper still holding a pipe when it expires is not killed.
 /// The caller must isolate the command with [`isolate_process_group`] before
 /// spawning so descendants cannot outlive a timed-out shell.
-pub(super) async fn capture_child(
+pub(crate) async fn capture_child(
     mut child: tokio::process::Child,
     timeout: Duration,
     context: &str,

@@ -27,6 +27,9 @@ fn saved_view() -> RecipeView {
             host: "127.0.0.1".into(),
             port: 8080,
         }],
+        snapshot: None,
+        build: farhelm_proto::tensorlake::recipes::BuildView::Idle,
+        cleanup_pending: false,
     }
 }
 

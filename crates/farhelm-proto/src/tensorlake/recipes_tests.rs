@@ -361,7 +361,66 @@ fn wire_shapes_are_tagged_and_saves_are_strict() {
     let view = serde_json::json!({
         "name": "a", "size": {"cpus": 1, "memory_gb": 1, "disk_gb": 1},
         "source": {"kind": "image", "image": "x", "later": 1}, "claude": null, "codex": null,
-        "tunnels": [{"sandbox_port": 1, "host": "h", "port": 2, "later": 1}], "snapshot": {"id": "later"}
+        "tunnels": [{"sandbox_port": 1, "host": "h", "port": 2, "later": 1}],
+        "snapshot": {"id": "s1", "built_at": 1, "base_image": "b", "disk_gb": 1, "packages": [],
+            "claude_version": null, "codex_version": null, "later": 1},
+        "build": {"state": "building", "step": "codex", "started_at": 1, "later": 1},
+        "cleanup_pending": false, "added_later": {"id": "later"}
     });
-    assert!(serde_json::from_value::<RecipeView>(view).is_ok());
+    let view = serde_json::from_value::<RecipeView>(view).expect("unknown fields are tolerated");
+    assert_eq!(
+        view.snapshot.map(|snapshot| snapshot.id).as_deref(),
+        Some("s1")
+    );
+    assert_eq!(
+        view.build,
+        BuildView::Building {
+            step: BuildStep::Codex,
+            started_at: 1
+        }
+    );
+    let older = serde_json::json!({
+        "name": "a", "size": {"cpus": 1, "memory_gb": 1, "disk_gb": 1},
+        "source": {"kind": "image", "image": "x"}, "claude": null, "codex": null, "tunnels": []
+    });
+    let older = serde_json::from_value::<RecipeView>(older).expect("build fields may be absent");
+    assert_eq!(
+        (older.snapshot, older.build, older.cleanup_pending),
+        (None, BuildView::Idle, false),
+        "a reply without build fields reads as nothing built and nothing running"
+    );
+}
+
+/// Spec: build status is tagged by `state` in snake case, steps are numbered
+/// 1 to 9 in build order, and every step has a label.
+///
+/// Why: the list shows "step n of 9" from these numbers and builds its
+/// sentences from the labels; a renumbered or unlabeled step would show a
+/// wrong or empty progress line.
+#[test]
+fn build_status_is_tagged_and_steps_are_numbered_in_order() {
+    assert_eq!(
+        serde_json::to_value(BuildView::Building {
+            step: BuildStep::ClaudeCode,
+            started_at: 7
+        })
+        .unwrap(),
+        serde_json::json!({"state": "building", "step": "claude_code", "started_at": 7})
+    );
+    let steps = [
+        BuildStep::Cleaning,
+        BuildStep::Creating,
+        BuildStep::Starting,
+        BuildStep::Connecting,
+        BuildStep::Packages,
+        BuildStep::ClaudeCode,
+        BuildStep::Codex,
+        BuildStep::Snapshotting,
+        BuildStep::Finishing,
+    ];
+    assert_eq!(steps.len(), usize::from(BuildStep::COUNT));
+    for (index, step) in steps.iter().enumerate() {
+        assert_eq!(usize::from(step.number()), index + 1, "{step:?}");
+        assert!(!step.label().is_empty(), "{step:?}");
+    }
 }

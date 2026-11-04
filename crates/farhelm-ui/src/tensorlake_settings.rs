@@ -272,7 +272,7 @@ pub(crate) fn TensorlakeSettings() -> Element {
         }
         // Recipes sit between the account and the creation choice. A
         // follow-up PR adds the list of sandboxes not on this helm after them.
-        crate::tensorlake::recipes::RecipeList {}
+        crate::tensorlake::recipes::RecipeList { api_key_set: key_set }
         section { class: "host-settings-section tensorlake-settings", aria_label: "Creating sandboxes",
             h4 { class: "host-settings-section-title", "Creating sandboxes" }
             div { class: "setting-group",

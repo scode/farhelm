@@ -1153,6 +1153,9 @@ pub(crate) struct FleetBuilder {
     /// The Tensorlake API behind the helm, when a test points it at a stub
     /// server; `None` keeps every fixture helm's Tensorlake offline.
     tensorlake_api: Option<Arc<dyn crate::tensorlake::api::TensorlakeApi>>,
+    /// The shell behind the helm's snapshot builds, when a test scripts it;
+    /// `None` keeps it offline.
+    tensorlake_shell: Option<Arc<dyn crate::tensorlake::shell::SandboxShell>>,
 }
 
 impl FleetBuilder {
@@ -1169,6 +1172,15 @@ impl FleetBuilder {
         api: Arc<dyn crate::tensorlake::api::TensorlakeApi>,
     ) -> Self {
         self.tensorlake_api = Some(api);
+        self
+    }
+    /// Put `shell` behind the helm's snapshot builds in place of the offline
+    /// default.
+    pub(crate) fn tensorlake_shell(
+        mut self,
+        shell: Arc<dyn crate::tensorlake::shell::SandboxShell>,
+    ) -> Self {
+        self.tensorlake_shell = Some(shell);
         self
     }
     /// A fresh helm.db with only its reserved local row, and a local host
@@ -1210,6 +1222,7 @@ impl FleetBuilder {
             feedback: None,
             approval_wait: None,
             tensorlake_api: None,
+            tensorlake_shell: None,
         }
     }
 
@@ -1379,6 +1392,9 @@ impl FleetBuilder {
         };
         if let Some(api) = self.tensorlake_api {
             state.tensorlake = state.tensorlake.with_api(api);
+        }
+        if let Some(shell) = self.tensorlake_shell {
+            state.tensorlake = state.tensorlake.with_shell(shell);
         }
         let state = Arc::new(state);
         let device_secret = state
