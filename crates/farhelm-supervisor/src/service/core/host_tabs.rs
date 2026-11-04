@@ -90,8 +90,14 @@
 //! removes a record once its host is gone; so is the record of a tab dropped
 //! here as gone, which that reclaim removes, with any socket file its killed
 //! host left, once its host is still gone.
-//! A placeholder tab is not retried while the supervisor runs; the next
-//! start tries it again.
+//! While the supervisor runs, a placeholder or a runtime that became
+//! unavailable is tried again when its reason may pass (`host_handover`,
+//! "Adopting again"). The retry looks only at its socket, keeps the tab's
+//! id, and preserves a known creation stamp and scope across outcomes. A
+//! startup placeholder learns those from a readable tag. A host found gone
+//! stays as a finished tab for the ordinary reap, which confirms its adopted
+//! process ended and removes the record; a tab whose close already failed
+//! belongs to that reap alone and is never re-adopted.
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
@@ -131,14 +137,17 @@ pub(crate) struct HostTab {
     /// The tab's id (`TabInfo::id`), as its tag carries it.
     pub(crate) tab_id: String,
     /// The tag's creation stamp, which orders the session's host tabs.
-    /// `u64::MAX` for a placeholder whose tag could not be read, which then
-    /// lists last.
+    /// `u64::MAX` for a startup placeholder whose tag could not be read,
+    /// which then lists last. Once learned, kept across re-adoptions even
+    /// when a later retry cannot read the host.
     pub(crate) created_ns: u64,
     /// Whether the tab's program runs in the tab's own systemd scope, which
-    /// closing it must then stop. Only the tag records it.
+    /// closing it must then stop. Learned from the tag and kept across
+    /// re-adoptions; unknown (`false`) for an unread startup placeholder.
     pub(crate) scoped: bool,
     /// The runtime that drives the tab's host, or a placeholder for a host a
-    /// restarted supervisor could not use (`HostTerminal::unavailable`).
+    /// restarted supervisor could not use (`HostTerminal::unavailable`),
+    /// or a gone-reading handle waiting for the reap to close the tab.
     pub(crate) host: HostTerminal,
     /// Whether a close of this tab could not confirm its host ended. Such a
     /// close has stopped the runtime (`Supervisor::end_launch_host` aborts
@@ -198,11 +207,11 @@ impl HostTab {
         self.finished()
     }
 
-    /// A tab whose host cannot be used: a placeholder for `socket`
-    /// (`HostTerminal::unavailable`), listed last (`created_ns` is not
-    /// known, or not trusted) with its scope unknown, which matters to
-    /// nothing, since its close refuses and Delete settles it from its
-    /// record.
+    /// A startup tab whose host cannot be used: its creation stamp and
+    /// scope are not known, so it lists last. Re-adoption can later learn
+    /// them from the tag; a failed retry of a known tab keeps its old
+    /// metadata instead of reverting to these defaults. Its close refuses
+    /// while unavailable, and Delete settles it from its record.
     fn placeholder(
         tab_id: &str,
         socket: &Path,
@@ -218,6 +227,29 @@ impl HostTab {
             failed_ends: 0,
             retry_at: None,
         }
+    }
+
+    /// Carry known tab facts across a retry without reclassifying a
+    /// successfully adopted runtime. Only a failed placeholder inherits
+    /// the old pinned process; a new runtime owns its newly adopted peer,
+    /// even if its task already made it unavailable before installation.
+    pub(super) fn after_retry(mut self, old: &HostTab) -> HostTab {
+        // Liveness can advance as soon as adoption spawns the runtime.
+        // Construction provenance, rather than current liveness alone,
+        // decides whether this is an adoption failure.
+        if self.host.is_placeholder()
+            && let Liveness::Unavailable { reason, peer } = self.host.liveness()
+        {
+            self.host = old.host.unavailable_again(reason, peer);
+        }
+        // A startup placeholder learns these facts from its first usable
+        // tag. Later outcomes must neither reorder a known tab nor lose
+        // the scope that its eventual close must stop.
+        if old.created_ns != u64::MAX {
+            self.created_ns = old.created_ns;
+            self.scoped = old.scoped;
+        }
+        self
     }
 
     /// The scope answer `Supervisor::reap_tab_tree` takes, from the tag.
@@ -1085,6 +1117,153 @@ impl Supervisor {
     }
 }
 
+// ---- Adopting again --------------------------------------------------------------
+
+impl Supervisor {
+    /// Retry one unavailable tab under its session's lifecycle claim, taken
+    /// without waiting. The tab must still hold `old` in the same cell when
+    /// the result is installed; an agent Restart may change the entry and
+    /// generation while keeping that cell, because the tab belongs to the
+    /// session. A successful runtime adoption ends this retry episode.
+    pub(super) async fn readopt_tab_one(&self, id: &str, tab_id: &str, old: &HostTerminal) -> bool {
+        let Some(_claim) = self.lifecycle_locks.try_claim(id) else {
+            debug!(session = %id, tab = %tab_id,
+                "a session's lifecycle is busy; retrying its tab host later");
+            return false;
+        };
+        let current = {
+            let sessions = self.sessions.lock().await;
+            sessions
+                .get(id)
+                .filter(|_| !self.hosts_stopping())
+                .and_then(|entry| {
+                    find_host_tab(&entry.session.host_tabs, tab_id)
+                        .filter(|tab| tab.host == *old && !tab.end_failed)
+                        .map(|tab| (Arc::clone(&entry.session.host_tabs), tab))
+                })
+        };
+        let Some((cell, tab)) = current else {
+            return false;
+        };
+        let replacement = self.probe_readopted_tab(id, &tab).await;
+        let recovered = replacement.host != *old && !replacement.host.is_placeholder();
+        self.install_readopted_tab(id, &cell, old, replacement)
+            .await
+            && recovered
+    }
+
+    /// What is at this tab's one socket now, without touching any other
+    /// host. A readable matching tag is adopted as recovered; a failure
+    /// leaves a placeholder with its new reason. A gone host leaves a
+    /// finished handle for the reap rather than discarding the tab and
+    /// leaking its record or any process its old runtime adopted.
+    ///
+    /// The caller holds the session's lifecycle claim throughout the probe
+    /// and install. That socket was drawn for this tab's start, so a scan
+    /// restricted to it cannot take over another runtime here or race a
+    /// new start at the same socket.
+    pub(super) async fn probe_readopted_tab(&self, id: &str, old: &HostTab) -> HostTab {
+        let socket = old.host.socket();
+        let Some(name) = socket.file_name().map(OsString::from) else {
+            return old.clone();
+        };
+        let options = Self::host_reload_options(&self.seams, &self.host_liveness);
+        let scan = ScanOptions {
+            deadlines: options.deadlines,
+            skip: HashSet::new(),
+            only: Some(HashSet::from([name.clone()])),
+        };
+        let placeholder = |reason, peer| HostTab::placeholder(&old.tab_id, socket, reason, peer);
+        let gone = || HostTab {
+            host: HostTerminal::gone(socket, old.host.adopted_process()),
+            ..old.clone()
+        };
+        let replacement = match HostRegistry::scan(&self.state_dir, &scan).await {
+            Err(error) => placeholder(Unavailability::NotScanned(error.to_string()), None),
+            Ok(mut registry) => {
+                if registry.gone().iter().any(|host| host.name == name) {
+                    self.gone_hosts
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .insert(name.clone());
+                }
+                match registry.by_name(&name) {
+                    Some(NamedHost::Live(host)) if names_tab(&host.tag, id, &old.tab_id) => {
+                        let host = registry
+                            .take(&name)
+                            .expect("the matching tab host was scanned");
+                        adopt_tab(id, &old.tab_id, socket, host, options)
+                            .await
+                            .unwrap_or_else(gone)
+                    }
+                    Some(NamedHost::Live(host)) => placeholder(
+                        Unavailability::Unidentified(format!(
+                            "the host at its socket is tagged for another terminal ({:?})",
+                            host.tag
+                        )),
+                        host.peer(),
+                    ),
+                    Some(NamedHost::Unavailable(host)) => {
+                        placeholder(unavailability(&host.why), host.peer)
+                    }
+                    Some(NamedHost::Gone(_)) => gone(),
+                    None => match tokio::fs::symlink_metadata(socket).await {
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => gone(),
+                        Ok(_) | Err(_) => placeholder(
+                            Unavailability::NotScanned("the scan did not reach its socket".into()),
+                            None,
+                        ),
+                    },
+                }
+            }
+        };
+        replacement.after_retry(old)
+    }
+
+    /// Install a tab retry only while its exact cell, tab id and old handle
+    /// remain current and no orderly stop has begun. A close that already
+    /// failed owns the tab through the reap instead. The session map is
+    /// held for this check and swap, matching the orderly stop's fence;
+    /// host_adoption also prevents a reload from replacing this map.
+    /// A runtime made for a result that loses the fence is aborted, leaving
+    /// its host running for whoever now owns the tab.
+    pub(super) async fn install_readopted_tab(
+        &self,
+        id: &str,
+        cell: &HostTabs,
+        old: &HostTerminal,
+        replacement: HostTab,
+    ) -> bool {
+        let installed = {
+            let _adoption = self.host_adoption.lock().await;
+            let sessions = self.sessions.lock().await;
+            let current = sessions.get(id).filter(|entry| {
+                !self.hosts_stopping() && Arc::ptr_eq(&entry.session.host_tabs, cell)
+            });
+            current.is_some_and(|entry| {
+                let mut tabs = entry
+                    .session
+                    .host_tabs
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
+                let Some(tab) = tabs.iter_mut().find(|tab| {
+                    tab.tab_id == replacement.tab_id && tab.host == *old && !tab.end_failed
+                }) else {
+                    return false;
+                };
+                *tab = replacement.clone();
+                true
+            })
+        };
+        if installed {
+            self.hint_sessions_changed();
+        } else {
+            replacement.host.abort();
+        }
+        installed
+    }
+}
+
 // ---- After a restart -------------------------------------------------------------
 
 /// What [`adopt_tab_hosts`] works with: `HostDiscovery`'s settings, and the
@@ -1276,13 +1455,22 @@ pub(super) async fn adopt_tab_hosts(
     let mut resolving: JoinSet<(Pending, Option<HostTab>)> = JoinSet::new();
     for record in pending {
         match registry.by_name(&record.name) {
-            Some(NamedHost::Live(host)) if names_tab(&host.tag, &record) => {
+            Some(NamedHost::Live(host))
+                if names_tab(&host.tag, &record.session_id, &record.tab_id) =>
+            {
                 let Some(host) = registry.take(&record.name) else {
                     continue;
                 };
                 let options = options.clone();
                 resolving.spawn(async move {
-                    let tab = adopt_tab(&record, host, options).await;
+                    let tab = adopt_tab(
+                        &record.session_id,
+                        &record.tab_id,
+                        &record.socket,
+                        host,
+                        options,
+                    )
+                    .await;
                     (record, tab)
                 });
             }
@@ -1337,17 +1525,21 @@ pub(super) async fn adopt_tab_hosts(
     found
 }
 
-/// Whether `tag` names the tab `record` is for.
-fn names_tab(tag: &HostTag, record: &Pending) -> bool {
-    tag.session_id == record.session_id
-        && matches!(&tag.role, HostRole::Tab { tab_id, .. } if *tab_id == record.tab_id)
+/// Whether `tag` names this session and tab, shared by startup discovery
+/// and a retry at the tab's recorded socket.
+fn names_tab(tag: &HostTag, session_id: &str, wanted_tab: &str) -> bool {
+    tag.session_id == session_id
+        && matches!(&tag.role, HostRole::Tab { tab_id, .. } if tab_id.as_str() == wanted_tab)
 }
 
-/// Adopt the live host the scan or a settle found for `record`'s tab, as
+/// Adopt the live host the scan or a settle found for this tab at `socket`, as
 /// recovered: its runtime, a placeholder when it cannot be used, or `None`
-/// when it ended first.
+/// when it ended first. Identity was checked by [`names_tab`] before this
+/// call, so the tab's creation stamp and scope come from its tag.
 async fn adopt_tab(
-    record: &Pending,
+    session_id: &str,
+    tab_id: &str,
+    socket: &Path,
     host: LiveHost,
     options: HostTerminalOptions,
 ) -> Option<HostTab> {
@@ -1357,24 +1549,24 @@ async fn adopt_tab(
     };
     let host = match HostTerminal::adopt_found(host, Adoption::Recovered, options).await {
         Ok(host) => {
-            info!(session = %record.session_id, tab = %record.tab_id,
-                socket = %record.socket.display(),
+            info!(session = %session_id, tab = %tab_id,
+                socket = %socket.display(),
                 "found a terminal tab's host again and adopted it");
             host
         }
         Err(AdoptError::Gone(why)) => {
-            info!(session = %record.session_id, tab = %record.tab_id, %why,
+            info!(session = %session_id, tab = %tab_id, %why,
                 "a terminal tab's host ended before it could be adopted");
             return None;
         }
         Err(AdoptError::Unavailable { reason, peer }) => {
-            warn!(session = %record.session_id, tab = %record.tab_id, %reason,
+            warn!(session = %session_id, tab = %tab_id, %reason,
                 "could not adopt a terminal tab's host; leaving it as it is");
-            HostTerminal::unavailable(&record.socket, reason, peer)
+            HostTerminal::unavailable(socket, reason, peer)
         }
     };
     Some(HostTab {
-        tab_id: record.tab_id.clone(),
+        tab_id: tab_id.to_string(),
         created_ns,
         scoped,
         host,
@@ -1413,7 +1605,7 @@ async fn settle_tab(
     match settle_launch_record_with(&record.record, &record.socket, faults).await {
         Ok(AtRecordedSocket::Gone) => None,
         Ok(AtRecordedSocket::Answered { connection, info }) => match HostTag::decode(&info.tag) {
-            Ok(tag) if names_tab(&tag, record) => {
+            Ok(tag) if names_tab(&tag, &record.session_id, &record.tab_id) => {
                 let host = LiveHost {
                     name: record.name.clone(),
                     socket: record.socket.clone(),
@@ -1421,7 +1613,14 @@ async fn settle_tab(
                     info,
                     connection: *connection,
                 };
-                adopt_tab(record, host, options).await
+                adopt_tab(
+                    &record.session_id,
+                    &record.tab_id,
+                    &record.socket,
+                    host,
+                    options,
+                )
+                .await
             }
             Ok(tag) => placeholder(
                 Unavailability::Unidentified(format!(
@@ -1538,8 +1737,10 @@ pub(super) fn tab_runtimes<'a>(
 mod tests {
     //! The tab strip's order and filter over a session's host tabs, and what
     //! the reap picks, with stand-in hosts in the test process
-    //! (`hosts::terminal::test_host`) and placeholders. Opening, closing,
-    //! the reap itself and adoption need real hosts and are tested in
+    //! (`hosts::terminal::test_host`) and placeholders. Re-adoption's
+    //! schedule, cell fences and record cleanup are pinned against those
+    //! stand-ins in `core::tests::host_terminals`; actual host opening,
+    //! closing and process cleanup run in
     //! `crates/farhelm/tests/e2e/host_tabs.rs`.
 
     use super::*;

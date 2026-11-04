@@ -394,8 +394,10 @@ that its required systemd or SSH substrate ran.
   discovery or the host runtime's adoption or encodes change. The `readoption_` tests also cover recovery after a
   runtime ran: timeout recovery on the ticker's liveness wake, every unstable episode's full reconnect window, retry
   counts kept across success with no healthy-key spin, final refusal reasons, the stop fence, and an exited runtime
-  replayed without recording its exit twice. The encoder's cancel itself is in the terminal emulator selection below
-  (`an_encode_stops_once_its_cancel_fires_and_is_unchanged_until_then`).
+  replayed without recording its exit twice; tabs recovering in place with their ordering and scope, startup
+  placeholders learning their tags, retry counts kept through an agent Restart, failed closes left to the reap, gone
+  tabs closed with their records removed and adopted process kept, and cell/stop fences. The encoder's cancel itself is
+  in the terminal emulator selection below (`an_encode_stops_once_its_cancel_fires_and_is_unchanged_until_then`).
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'terminal tabs in terminal hosts' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(launch_file_names_round_trip_through_the_parser) | test(sweep_launch_dir_keeps_every_host_record) | test(/core::host_tabs::tests::/) | test(/tmux::control_codec::tests::/) | test(closing_a_tab_whose_runtime_reads_gone_confirms_its_process_first) | test(/^host_tabs::/)'`
   — terminal tabs in terminal hosts under the supervisor's switch (`--new-terminals host`)
   (`crates/farhelm-supervisor/src/service/core/host_tabs.rs`). The unit tests pin a tab host's launch record name

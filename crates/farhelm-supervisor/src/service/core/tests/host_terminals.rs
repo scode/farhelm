@@ -2351,6 +2351,460 @@ async fn readoption_of_a_midlife_runtime_cannot_install_after_a_stop() {
     end_discoverable(test_host);
 }
 
+// ---- Recovering terminal tabs --------------------------------------------------------
+
+/// A tab with a discoverable host and a durable launch record. The
+/// constructor's initial retry pass has parked while the tab is healthy,
+/// so later manual passes cannot race a startup retry of the same handle.
+async fn readoption_tab_fixture(state: &StateDir) -> (Arc<Supervisor>, TestHost) {
+    use super::super::host_tabs::HostTab;
+    let passes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let sup = Supervisor::new_with_seams(
+        state.path(),
+        dummy_exe(),
+        SupervisorTimeouts::default(),
+        SupervisorSeams {
+            readoption_passes: Some(Arc::clone(&passes)),
+            ..SupervisorSeams::default()
+        },
+    )
+    .await
+    .expect("supervisor");
+    let socket = socket_in_state(state);
+    let tag = crate::hosts::HostTag {
+        session_id: "s1".into(),
+        created_ns: 42,
+        role: crate::hosts::HostRole::Tab {
+            tab_id: "t1".into(),
+            scoped: true,
+        },
+    }
+    .encode()
+    .expect("tab tag");
+    let (host, test_host) = adopt_test_host_at(&socket, tag, None).await;
+    let mut row = host_row("s1", &socket);
+    row.pane.clear(); // No agent host: this fixture isolates tab attribution.
+    sup.store.insert_session(row, None).await.expect("row");
+    let entry = Arc::new(entry_with(None, LastOutcome::Running));
+    entry.session.host_tabs.lock().unwrap().push(HostTab {
+        tab_id: "t1".into(),
+        created_ns: 42,
+        scoped: true,
+        host,
+        end_failed: false,
+        failed_ends: 0,
+        retry_at: None,
+    });
+    sup.sessions.lock().await.insert("s1".into(), entry);
+    let starter = ProcessIdentity::read(test_host.child_pid()).expect("owned child's identity");
+    let record = super::super::host_launch::LaunchHostRecord {
+        socket: crate::hosts::HostName::parse(socket.file_name().unwrap().to_str().unwrap())
+            .expect("host name"),
+        starter: crate::hosts::HostProcess {
+            pid: starter.pid,
+            start: starter.start,
+        },
+    };
+    let path = crate::launch::tab_host_record_path(state.path(), "s1", "t1");
+    std::fs::create_dir_all(path.parent().unwrap()).expect("launch directory");
+    std::fs::write(path, record.encode()).expect("tab record");
+    let deadline = tokio::time::Instant::now() + WAIT;
+    while passes.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "initial retry pass never completed"
+        );
+        // sleep-ok: the pass counter establishes retry-task readiness before the test changes the tab.
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    assert!(runs(test_host.child_pid()), "premise: the tab's child runs");
+    (sup, test_host)
+}
+
+/// Read the tab from its current session cell rather than a stale entry:
+/// successful recovery must replace the cell's handle, not only make a
+/// usable runtime elsewhere.
+async fn readoption_tab(sup: &Supervisor) -> super::super::host_tabs::HostTab {
+    let entry = sup
+        .sessions
+        .lock()
+        .await
+        .get("s1")
+        .expect("session")
+        .clone();
+    super::super::host_tabs::find_host_tab(&entry.session.host_tabs, "t1").expect("tab")
+}
+
+/// A tab runtime recovers in place, keeping its identity, order, scope and
+/// retry history. Restarting the agent must not reset that tab's backoff:
+/// tabs belong to the session, rather than its agent's launch generation.
+#[farhelm_testtrace::test]
+async fn readoption_recovers_a_tab_without_resetting_its_metadata_or_count() {
+    let state = StateDir::new();
+    let (sup, test_host) = readoption_tab_fixture(&state).await;
+    let old = readoption_tab(&sup).await;
+    readoption_make_unstable(&old.host, &test_host).await;
+    let mut schedule = super::super::host_handover::ReadoptSchedule::default();
+    let now = tokio::time::Instant::now();
+    assert!(
+        sup.readopt_pass(&mut schedule).await.unwrap()
+            >= now + crate::hosts::terminal::RECONNECT_WINDOW
+    );
+    schedule.make_tab_due("s1", "t1");
+    sup.readopt_pass(&mut schedule).await;
+    let recovered = readoption_tab(&sup).await;
+    assert_ne!(recovered.host, old.host);
+    assert!(matches!(
+        recovered.host.liveness(),
+        Liveness::Running { child: Some(_) }
+    ));
+    assert_eq!(
+        (
+            recovered.tab_id.as_str(),
+            recovered.created_ns,
+            recovered.scoped
+        ),
+        ("t1", 42, true)
+    );
+    assert_eq!(schedule.tab_attempts("s1", "t1"), Some(1));
+    assert_eq!(sup.readopt_pass(&mut schedule).await, None);
+
+    let current = sup.sessions.lock().await.get("s1").unwrap().clone();
+    // Agent Restart temporarily hides the session entry but keeps its tab
+    // cell in restarting_tabs. That phase must not erase the tab's history.
+    sup.restarting_tabs
+        .lock()
+        .unwrap()
+        .insert("s1".into(), Arc::clone(&current.session.host_tabs));
+    sup.sessions.lock().await.remove("s1");
+    assert_eq!(sup.readopt_pass(&mut schedule).await, None);
+    assert_eq!(schedule.tab_attempts("s1", "t1"), Some(1));
+    sup.sessions.lock().await.insert("s1".into(), current);
+    sup.restarting_tabs.lock().unwrap().remove("s1");
+    assert!(
+        runs(test_host.child_pid()),
+        "recovery left the same tab program running"
+    );
+    end_discoverable(test_host);
+}
+
+/// Startup placeholders learn ordering and scope from the recovered tag;
+/// an ordinary runtime's failed retry must instead keep the metadata it
+/// already knew. A permanent refusal stops the latter's retries.
+#[farhelm_testtrace::test]
+async fn readoption_learns_a_tab_placeholders_tag_and_keeps_known_metadata_on_failure() {
+    let state = StateDir::new();
+    let (sup, test_host) = readoption_tab_fixture(&state).await;
+    let old = readoption_tab(&sup).await;
+    old.host.abort();
+    wait_until_ended(&old.host).await;
+    let placeholder =
+        HostTerminal::unavailable(test_host.socket(), crate::hosts::Unavailability::Busy, None);
+    let entry = sup.sessions.lock().await.get("s1").unwrap().clone();
+    {
+        let mut tabs = entry.session.host_tabs.lock().unwrap();
+        tabs[0].host = placeholder.clone();
+        tabs[0].created_ns = u64::MAX;
+        tabs[0].scoped = false;
+    }
+    assert!(sup.readopt_tab_one("s1", "t1", &placeholder).await);
+    let recovered = readoption_tab(&sup).await;
+    assert_eq!((recovered.created_ns, recovered.scoped), (42, true));
+    readoption_make_unstable(&recovered.host, &test_host).await;
+    test_host.become_unreadable();
+    assert!(!sup.readopt_tab_one("s1", "t1", &recovered.host).await);
+    let failed = readoption_tab(&sup).await;
+    assert!(failed.host.is_placeholder());
+    assert!(!failed.host.liveness().may_readopt());
+    assert_eq!((failed.created_ns, failed.scoped), (42, true));
+    let connections = test_host.connections();
+    let mut schedule = super::super::host_handover::ReadoptSchedule::default();
+    assert_eq!(sup.readopt_pass(&mut schedule).await, None);
+    assert_eq!(test_host.connections(), connections);
+    end_discoverable(test_host);
+}
+
+/// A failed close belongs to the reap, even if its frozen status would
+/// otherwise qualify for recovery. Installing a new runtime would undo
+/// the close's deliberate abort and restart a fight with shutdown.
+#[farhelm_testtrace::test]
+async fn readoption_leaves_an_end_failed_tab_to_the_reap() {
+    let state = StateDir::new();
+    let (sup, test_host) = readoption_tab_fixture(&state).await;
+    let old = readoption_tab(&sup).await;
+    readoption_make_unstable(&old.host, &test_host).await;
+    let entry = sup.sessions.lock().await.get("s1").unwrap().clone();
+    entry.session.host_tabs.lock().unwrap()[0].end_failed = true;
+    let connections = test_host.connections();
+    let mut schedule = super::super::host_handover::ReadoptSchedule::default();
+    assert_eq!(sup.readopt_pass(&mut schedule).await, None);
+    assert!(!sup.readopt_tab_one("s1", "t1", &old.host).await);
+    assert_eq!(readoption_tab(&sup).await.host, old.host);
+    assert_eq!(test_host.connections(), connections);
+    end_discoverable(test_host);
+}
+
+/// A vanished placeholder becomes a finished tab that the normal close
+/// can remove with its record. Merely forgetting it during the retry
+/// would bypass that cleanup and leave the launch record behind.
+#[farhelm_testtrace::test]
+async fn readoption_of_a_gone_tab_leaves_its_record_for_the_reaps_close() {
+    let state = StateDir::new();
+    let (sup, test_host) = readoption_tab_fixture(&state).await;
+    let old = readoption_tab(&sup).await;
+    old.host.abort();
+    wait_until_ended(&old.host).await;
+    let placeholder =
+        HostTerminal::unavailable(test_host.socket(), crate::hosts::Unavailability::Busy, None);
+    let entry = sup.sessions.lock().await.get("s1").unwrap().clone();
+    {
+        let mut tabs = entry.session.host_tabs.lock().unwrap();
+        tabs[0].host = placeholder.clone();
+        tabs[0].created_ns = u64::MAX;
+        tabs[0].scoped = false;
+    }
+    end_discoverable(test_host);
+    let record = crate::launch::tab_host_record_path(state.path(), "s1", "t1");
+    assert!(
+        record.exists(),
+        "premise: the tab still has its launch record"
+    );
+    assert!(!sup.readopt_tab_one("s1", "t1", &placeholder).await);
+    let gone = readoption_tab(&sup).await;
+    assert_eq!(gone.host.liveness(), Liveness::Gone);
+    assert!(gone.reap_due());
+    assert!(
+        record.exists(),
+        "re-adoption leaves record removal to close"
+    );
+    let lifecycle = sup.lifecycle_locks.claim("s1").await;
+    sup.close_host_tab_claimed(lifecycle, &entry, "t1", gone.host, true)
+        .await
+        .expect("reap closes the gone tab");
+    assert!(entry.session.host_tabs.lock().unwrap().is_empty());
+    assert!(!record.exists(), "close removed the record");
+}
+
+/// Gone evidence from a retry must keep the process pinned by the old
+/// runtime: removing a socket alone cannot authorize forgetting a host
+/// whose process still exists. The stand-in's peer is this test process,
+/// so this test checks the identity without trying to end that peer.
+#[farhelm_testtrace::test]
+async fn readoption_of_a_gone_tab_keeps_its_adopted_process() {
+    let state = StateDir::new();
+    let (sup, test_host) = readoption_tab_fixture(&state).await;
+    let old = readoption_tab(&sup).await;
+    readoption_make_unstable(&old.host, &test_host).await;
+    let adopted = old
+        .host
+        .adopted_process()
+        .expect("premise: runtime pinned its host");
+    assert_eq!(adopted.pid, std::process::id());
+    end_discoverable(test_host);
+    assert!(!sup.readopt_tab_one("s1", "t1", &old.host).await);
+    let gone = readoption_tab(&sup).await;
+    assert_eq!(gone.host.liveness(), Liveness::Gone);
+    assert_eq!(gone.host.adopted_process(), Some(adopted));
+}
+
+/// A tab probe cannot resurrect a cell replaced by another session entry,
+/// or install after orderly stop. Both refusals must stop the runtime the
+/// probe made, while leaving the tab's host and program alive.
+#[farhelm_testtrace::test]
+async fn readoption_of_a_tab_obeys_the_cell_and_stop_fences() {
+    let state = StateDir::new();
+    let (sup, test_host) = readoption_tab_fixture(&state).await;
+    let old = readoption_tab(&sup).await;
+    readoption_make_unstable(&old.host, &test_host).await;
+    let entry = sup.sessions.lock().await.get("s1").unwrap().clone();
+    let made = sup.probe_readopted_tab("s1", &old).await;
+    assert!(matches!(made.host.liveness(), Liveness::Running { .. }));
+    let made_host = made.host.clone();
+    let replacement = Arc::new(entry_with(None, LastOutcome::Running));
+    sup.sessions
+        .lock()
+        .await
+        .insert("s1".into(), Arc::clone(&replacement));
+    assert!(
+        !sup.install_readopted_tab("s1", &entry.session.host_tabs, &old.host, made)
+            .await
+    );
+    assert!(replacement.session.host_tabs.lock().unwrap().is_empty());
+    wait_until_ended(&made_host).await;
+    sup.sessions
+        .lock()
+        .await
+        .insert("s1".into(), Arc::clone(&entry));
+    let made = sup.probe_readopted_tab("s1", &old).await;
+    let made_host = made.host.clone();
+    sup.checkpoint_hosts_for_exit(Duration::from_secs(2)).await;
+    assert!(
+        !sup.install_readopted_tab("s1", &entry.session.host_tabs, &old.host, made)
+            .await
+    );
+    assert_eq!(readoption_tab(&sup).await.host, old.host);
+    wait_until_ended(&made_host).await;
+    assert!(
+        runs(test_host.child_pid()),
+        "fence refusals leave the tab's child alone"
+    );
+    end_discoverable(test_host);
+}
+
+/// Restart republication must wake a retry task that already observed the
+/// session off-map. No new liveness event follows publication, and the
+/// task has no due retry while it cannot act on that session's tabs.
+#[farhelm_testtrace::test]
+async fn readoption_republication_wakes_a_tab_after_the_restart_window() {
+    let state = StateDir::new();
+    let (sup, test_host) = readoption_tab_fixture(&state).await;
+    let old = readoption_tab(&sup).await;
+    old.host.abort();
+    wait_until_ended(&old.host).await;
+    let placeholder =
+        HostTerminal::unavailable(test_host.socket(), crate::hosts::Unavailability::Busy, None);
+    let entry = sup.sessions.lock().await.get("s1").unwrap().clone();
+    entry.session.host_tabs.lock().unwrap()[0].host = placeholder.clone();
+    {
+        let mut sessions = sup.sessions.lock().await;
+        sup.restarting_tabs
+            .lock()
+            .unwrap()
+            .insert("s1".into(), Arc::clone(&entry.session.host_tabs));
+        sessions.remove("s1");
+    }
+    let passes = sup
+        .seams
+        .readoption_passes
+        .as_ref()
+        .expect("fixture pass counter");
+    let before = passes.load(std::sync::atomic::Ordering::SeqCst);
+    sup.readoption_wake.notify_one();
+    let deadline = tokio::time::Instant::now() + WAIT;
+    while passes.load(std::sync::atomic::Ordering::SeqCst) == before {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "retry task never observed the off-map window"
+        );
+        // sleep-ok: verifies the background retry pass finished while the session was hidden.
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    assert!(
+        !sup.sessions.lock().await.contains_key("s1"),
+        "premise: pass completed with the session hidden"
+    );
+    {
+        let mut sessions = sup.sessions.lock().await;
+        sessions.insert("s1".into(), entry.clone());
+        sup.restarting_tabs.lock().unwrap().remove("s1");
+        // Both successful and failed Restart publications use this fence
+        // while holding the map. Its wake is the only event after the
+        // retry task was shown to have parked above.
+        sup.fence_republished_tabs(&entry.session.host_tabs);
+    }
+    let deadline = tokio::time::Instant::now() + WAIT;
+    loop {
+        let tab = readoption_tab(&sup).await;
+        if tab.host != placeholder
+            && matches!(tab.host.liveness(), Liveness::Running { child: Some(_) })
+        {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "no recovery after republication; status {:?}, child alive {}",
+            tab.host.status(),
+            runs(test_host.child_pid())
+        );
+        // sleep-ok: the session cell's replaced tab handle is the recovery oracle.
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(
+        runs(test_host.child_pid()),
+        "recovery preserved the tab program"
+    );
+    end_discoverable(test_host);
+}
+
+/// Failed retry placeholders must keep the previously adopted process
+/// until a later gone outcome's cleanup can confirm it ended. Otherwise
+/// a transient timeout followed by a missing socket can leak that host.
+#[farhelm_testtrace::test]
+async fn readoption_keeps_a_tabs_adopted_process_through_a_failed_retry_then_gone() {
+    let state = StateDir::new();
+    let (sup, test_host) = readoption_tab_fixture(&state).await;
+    let old = readoption_tab(&sup).await;
+    readoption_make_unstable(&old.host, &test_host).await;
+    let adopted = old
+        .host
+        .adopted_process()
+        .expect("premise: the running tab pinned its host");
+    test_host.set_answering(false);
+    assert!(!sup.readopt_tab_one("s1", "t1", &old.host).await);
+    let failed = readoption_tab(&sup).await;
+    assert!(
+        matches!(
+            failed.host.liveness(),
+            Liveness::Unavailable {
+                reason: crate::hosts::Unavailability::Connect(crate::hosts::Unavailable::Timeout),
+                ..
+            }
+        ),
+        "premise: a passing retry failure, got {:?}",
+        failed.host.liveness()
+    );
+    assert!(failed.host.is_placeholder());
+    assert_eq!(failed.host.adopted_process(), Some(adopted));
+    end_discoverable(test_host);
+    assert!(!sup.readopt_tab_one("s1", "t1", &failed.host).await);
+    let gone = readoption_tab(&sup).await;
+    assert_eq!(gone.host.liveness(), Liveness::Gone);
+    assert_eq!(gone.host.adopted_process(), Some(adopted));
+    // The peer is this test process, still alive: do not ask close to end
+    // it. Keeping its identity is what makes close refuse to forget it.
+    assert_eq!(adopted.pid, std::process::id());
+}
+
+/// Adoption can succeed and its runtime fail before the probe installs it.
+/// That result is still the new runtime, with its own pinned host process,
+/// rather than a failed-adoption placeholder inheriting the old peer.
+/// Exercising the post-probe policy directly makes this race deterministic.
+#[farhelm_testtrace::test]
+async fn readoption_keeps_a_new_runtime_that_became_unavailable_before_install() {
+    let state = StateDir::new();
+    let (sup, test_host) = readoption_tab_fixture(&state).await;
+    let adopted = readoption_tab(&sup).await;
+    let peer = adopted
+        .host
+        .adopted_process()
+        .expect("the new runtime pinned its host");
+    readoption_make_unstable(&adopted.host, &test_host).await;
+    let old = super::super::host_tabs::HostTab {
+        host: HostTerminal::unavailable(
+            test_host.socket(),
+            crate::hosts::Unavailability::Busy,
+            None,
+        ),
+        created_ns: u64::MAX,
+        scoped: false,
+        ..adopted.clone()
+    };
+    assert_eq!(
+        old.host.adopted_process(),
+        None,
+        "premise: old startup placeholder pinned no process"
+    );
+    let result = adopted.clone().after_retry(&old);
+    assert_eq!(
+        result.host, adopted.host,
+        "keep the exact successfully adopted runtime"
+    );
+    assert!(!result.host.is_placeholder());
+    assert_eq!(result.host.adopted_process(), Some(peer));
+    assert_eq!((result.created_ns, result.scoped), (42, true));
+    end_discoverable(test_host);
+}
+
 /// A host runtime that nothing stops explicitly still cancels its encode
 /// when the tokio runtime that owns it drops, so that drop finishes at once.
 ///

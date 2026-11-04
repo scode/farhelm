@@ -49,40 +49,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   other checks still run). Migrating it means reading the grid's model for the burst (as the browser suite's terminal
   helpers do), typing through the grid's input messages, and finding the grid's own background color and focus target.
 
-- **A terminal whose terminal host becomes unavailable stays unavailable until the supervisor restarts.** When a running
-  supervisor loses the use of a terminal host, the terminal stays unavailable for the rest of that supervisor's life
-  even after the cause has passed: the session lists with an unknown status, its terminal does not attach ("the terminal
-  host is unavailable: ..."), and its verbs refuse (a prompt is refused, a guarded Delete cannot tell and refuses),
-  while the host and its program keep running untouched. Only the supervisor's next start adopts the host again. A
-  runtime becomes unavailable mid-life in `crates/farhelm-supervisor/src/hosts/terminal.rs` when its connection ends and
-  the reconnect fails (a timed-out, closed or refused connect, `Unavailability::Connect`), when the connection ends
-  `RECONNECT_LIMIT` (3) times within `RECONNECT_WINDOW` (60 s) (`Unstable`), when a checkpoint's encode task is lost
-  with the emulator (`EmulatorLost`), or when a request fails (`Request`, `ChildUnpinned`); `Unavailability::may_pass`
-  already marks these reasons as able to pass. Retrying while the supervisor runs (`Supervisor::start_readoption`,
-  `readopt_pass` and `retried_placeholder` in `crates/farhelm-supervisor/src/service/core/host_handover.rs`, module docs
-  "Adopting again") looks only at startup placeholders (`HostTerminal::unavailable`, `is_placeholder`) held as a
-  session's agent terminal. It never looks at a runtime that ran, and never at tabs: a tab whose host startup could not
-  use becomes a placeholder (`HostTab::placeholder`, `crates/farhelm-supervisor/src/service/core/host_tabs.rs`, "After a
-  restart") that lists the tab and refuses its verbs until the next start, and a tab runtime that becomes unavailable
-  later stays so as well. Leaving mid-life retry out was a deliberate narrowing during the terminal-host work (a scope
-  reassessment rated it acceptable but not needed), and SPEC_impl.md says so in "Across supervisor restarts" (the
-  **Re-adoption** paragraph) and in the host connection paragraph ("Unavailable ends a runtime, not a host's chances");
-  a fix updates both. Likely fix: let re-adoption also take agent runtimes that ended `Liveness::Unavailable` for a
-  reason that `may_pass`, and tab placeholders and tab runtimes the same way, woken by the liveness notifier (an
-  unavailable runtime is announced on it) as well as by `readoption_wake`. Keep what the placeholder retry guarantees:
-  the session's lifecycle claim taken without waiting, the entry (or tab cell) still holding that very handle for the
-  same generation, a scan of only the one socket the handle names so that no other runtime's host is taken over (exactly
-  one runtime per host, the runtime module's "One owner"), the `stopping` fence checked under the session map before the
-  swap, and the backoff (1 s doubling to a minute, never reset). Decide what `Unstable` should get: the reconnect limit
-  exists so that a runtime does not fight whoever keeps taking the host over, and retrying it on the backoff brings that
-  fight back, only slower. Reproduce with the in-process test host
-  (`crates/farhelm-supervisor/src/hosts/terminal/test_host.rs`): call `drop_connection` three times within a minute on a
-  session's host and check that the session stays unknown while the host still serves; `become_unreadable` will not do,
-  since an unsupported protocol version is a reason that does not pass and is rightly never retried. The existing test
-  that reads an unreadable host as unknown is in `crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs`.
-  Not checked when this was written: whether Stop and Restart also refuse for such a runtime (only a prompt and a
-  guarded Delete were confirmed). Plan: `plans/queue/readopt-unavailable-hosts.md`.
-
 - **Typing into a grid terminal pauses while its checkpoint is encoded, longer than it needs to.** The supervisor
   checkpoints a terminal in a terminal host (encodes its emulator as a snapshot and hands it to the host) after enough
   output and at every orderly stop, and a Restart seeds the new host with the same encoder. While a checkpoint encodes,

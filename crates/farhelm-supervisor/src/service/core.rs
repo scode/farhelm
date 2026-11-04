@@ -4719,7 +4719,10 @@ pub(crate) struct SessionCells {
     /// tab needs no cell, since it is rediscovered from its window marker on
     /// every read; a host tab has no window, and this is where its runtime
     /// lives between the open that started it (or the reload that adopted
-    /// it) and the close or Delete that ends it. Read synchronously by
+    /// it) and the close or Delete that ends it. Re-adoption replaces an
+    /// unavailable handle in this same cell, keeping the tab's identity
+    /// across a healthy recovery and across the agent's generations.
+    /// Read synchronously by
     /// `status::entry_info` for the tab strip, which is why it is a leaf
     /// `std::sync::Mutex` held across no await, like `notifications`.
     pub(crate) host_tabs: HostTabs,
