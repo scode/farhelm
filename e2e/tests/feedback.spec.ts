@@ -18,6 +18,7 @@ import { resolveToken } from "./helpers/color";
 
 const DOCS_URL = "https://farhelm.io/docs/";
 const RELEASE_NOTES_URL = "https://farhelm.io/docs/release-notes/";
+const DISCORD_URL = "https://discord.gg/G3bukxTjXR";
 
 // The premise every test here rests on: no feedback request reaches the real
 // helm. Routes registered later by a test take precedence over this one.
@@ -153,7 +154,7 @@ async function interceptFeedback(page: Page, answer: (route: Route) => Promise<v
  * The help menu lives below the gear in the host rail and behaves like
  * the other sidebar menus. A pointer opens and closes it from its toggle.
  * From the keyboard, ArrowDown on the toggle opens it with focus on its
- * first item, arrow keys and Home/End reach all six items, and Escape closes it
+ * first item, arrow keys and Home/End reach all seven items, and Escape closes it
  * and gives focus back to the toggle (focus is asserted on the keyboard
  * path, as the row menus' own tests do, because a pointer open does not
  * move focus the same way in every engine). A pointer press outside closes
@@ -169,13 +170,14 @@ test("the help menu sits below the gear and follows the menu conventions", async
   expect(Math.abs(toggleBox!.x - gearBox!.x)).toBeLessThanOrEqual(1);
   await expect(toggle).toHaveAttribute("aria-expanded", "true");
   const items = menu.getByRole("menuitem");
-  await expect(items).toHaveCount(6);
+  await expect(items).toHaveCount(7);
   await expect(items.nth(0)).toContainText("Send feedback");
-  await expect(items.nth(1)).toContainText("Documentation");
-  await expect(items.nth(2)).toContainText("Keyboard shortcuts");
-  await expect(items.nth(3)).toContainText("Release notes");
-  await expect(items.nth(4)).toContainText("SSH needs 2FA?");
-  await expect(items.nth(5)).toContainText("Welcome");
+  await expect(items.nth(1)).toContainText("Chat on Discord");
+  await expect(items.nth(2)).toContainText("Documentation");
+  await expect(items.nth(3)).toContainText("Keyboard shortcuts");
+  await expect(items.nth(4)).toContainText("Release notes");
+  await expect(items.nth(5)).toContainText("SSH needs 2FA?");
+  await expect(items.nth(6)).toContainText("Welcome");
   await toggle.click();
   await expect(menu).toHaveCount(0);
 
@@ -194,10 +196,12 @@ test("the help menu sits below the gear and follows the menu conventions", async
   await expect(items.nth(4)).toBeFocused();
   await page.keyboard.press("ArrowDown");
   await expect(items.nth(5)).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(items.nth(6)).toBeFocused();
   await page.keyboard.press("Home");
   await expect(items.nth(0)).toBeFocused();
   await page.keyboard.press("End");
-  await expect(items.nth(5)).toBeFocused();
+  await expect(items.nth(6)).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(menu).toHaveCount(0);
   await expect(toggle).toBeFocused();
@@ -327,13 +331,13 @@ test("sidebar menu flyouts sit under no stacking context inside the sidebar", as
 });
 
 /**
- * Documentation and release notes open their pages through the shared link opener,
+ * Documentation, release notes and Discord open through the shared link opener,
  * the one that reaches the system browser from the desktop webview. The
  * opener is replaced with a recorder so the test checks the target and the
  * call without navigating anywhere.
  */
-for (const [label, url] of [["Documentation", DOCS_URL], ["Release notes", RELEASE_NOTES_URL]]) {
-  test(`${label} opens the docs site through the shared link opener`, async ({ page }) => {
+for (const [label, url] of [["Documentation", DOCS_URL], ["Release notes", RELEASE_NOTES_URL], ["Chat on Discord", DISCORD_URL]]) {
+  test(`${label} opens its page through the shared link opener`, async ({ page }) => {
     await page.goto("/");
     await expect(page.getByRole("button", { name: "Help", exact: true })).toBeVisible();
     // The opener is its own script asset, loaded asynchronously; replace it
@@ -355,6 +359,41 @@ for (const [label, url] of [["Documentation", DOCS_URL], ["Release notes", RELEA
     await expect(menu).toHaveCount(0);
   });
 }
+
+/**
+ * The dialog's public alternative uses the desktop-aware opener and leaves the
+ * private draft intact. It stays below the summary and before Close in DOM order,
+ * so adding it cannot interrupt the established Close -> Message Tab handoff.
+ */
+test("the feedback Discord link opens through the shared opener and keeps the draft", async ({ page }) => {
+  await page.goto("/");
+  const dialog = await openFeedbackDialog(page);
+  await expect(dialog.locator(".feedback-message")).toBeFocused();
+  await dialog.locator(".feedback-message").fill("Keep this private draft");
+  await page.waitForFunction(() => "farhelmTerminalLinks" in window);
+  await page.evaluate(() => {
+    const links = (window as unknown as { farhelmTerminalLinks: { openTerminalUrl: (uri: string) => void } })
+      .farhelmTerminalLinks;
+    (window as unknown as { openedLinks: string[] }).openedLinks = [];
+    links.openTerminalUrl = (uri: string) => {
+      (window as unknown as { openedLinks: string[] }).openedLinks.push(uri);
+    };
+  });
+  const link = dialog.getByRole("link", { name: "Chat on Discord", exact: true });
+  await expect(link).toHaveAttribute("href", DISCORD_URL);
+  await expect(dialog.locator(".feedback-summary")).toHaveText(
+    "Goes privately to Farhelm's maintainer, not a public trackerRather talk in the open? Chat on Discord",
+  );
+  const summary = dialog.locator(".feedback-summary > span").first();
+  const summaryBox = await summary.boundingBox();
+  const linkBox = await link.boundingBox();
+  expect(linkBox!.y).toBeGreaterThanOrEqual(summaryBox!.y + summaryBox!.height);
+  await link.click();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { openedLinks: string[] }).openedLinks))
+    .toEqual([DISCORD_URL]);
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator(".feedback-message")).toHaveValue("Keep this private draft");
+});
 
 /**
  * The submission the browser sends is exactly the message, the contact and

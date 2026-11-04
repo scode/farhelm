@@ -269,7 +269,24 @@ pub(crate) fn FeedbackDialog(
                 // the live send state, including already queued clicks.
                 crate::modal_dialog::DialogHeader {
                     title: rsx! { "Send feedback" },
-                    summary: rsx! { "Goes privately to Farhelm's maintainer, not a public tracker" },
+                    summary_class: "feedback-summary",
+                    // Keep the public alternative in the header: it precedes
+                    // Close in Tab order, leaving Close -> Message unchanged.
+                    summary: rsx! {
+                        span { "Goes privately to Farhelm's maintainer, not a public tracker" }
+                        span {
+                            "Rather talk in the open? "
+                            a {
+                                href: crate::app_bar::DISCORD_URL, target: "_blank", rel: "noopener",
+                                "data-tooltip": "Chat on Discord: talk with Farhelm's maintainer and other users in the open",
+                                onclick: move |event| {
+                                    event.prevent_default();
+                                    crate::app_bar::open_external_page(crate::app_bar::DISCORD_URL);
+                                },
+                                "Chat on Discord"
+                            }
+                        }
+                    },
                     tile: rsx! { crate::icons::ActionIcon { glyph: crate::icons::ActionGlyph::Feedback, size: 28, class: "feedback-glyph" } },
                     close: rsx! { button {
                         r#type: "button",

@@ -3326,13 +3326,14 @@ the agent creates it.
 ## Feedback
 
 The host rail's foot has a **?** button below the settings gear, in the desktop app and the web UI alike. It opens a
-small menu with six items, in order: **Send feedback**, **Documentation**, **Keyboard shortcuts**, **Release notes**,
-**SSH needs 2FA?** and **Welcome**. Documentation opens the docs site (`https://farhelm.io/docs/`) in the user's
-browser: a new tab from the web UI, the system browser from the desktop app. Keyboard shortcuts opens the dialog
-described in [Desktop window chrome](#desktop-window-chrome). Release notes opens the general release notes page
-(`https://farhelm.io/docs/release-notes/`) the same way, whether or not an update is waiting. The installed desktop
-app's menu has a seventh item, **Check for updates** (see [Installation and updates](#installation-and-updates)).
-Welcome shows the welcome card again.
+small menu with seven items, in order: **Send feedback**, **Chat on Discord**, **Documentation**, **Keyboard
+shortcuts**, **Release notes**, **SSH needs 2FA?** and **Welcome**. Chat on Discord opens the project's Discord invite
+(`https://discord.gg/G3bukxTjXR`) the same way as Documentation. Documentation opens the docs site
+(`https://farhelm.io/docs/`) in the user's browser: a new tab from the web UI, the system browser from the desktop app.
+Keyboard shortcuts opens the dialog described in [Desktop window chrome](#desktop-window-chrome). Release notes opens
+the general release notes page (`https://farhelm.io/docs/release-notes/`) the same way, whether or not an update is
+waiting. The installed desktop app's menu has an eighth item, **Check for updates** (see
+[Installation and updates](#installation-and-updates)). Welcome shows the welcome card again.
 
 **SSH needs 2FA?** shows the two shell commands for each registered SSH host: **Sessions connection** and **Setup and
 updates connection**, each with a copy button. Run them on the helm's machine, as its user (on this Mac in the Mac app);
@@ -3371,6 +3372,9 @@ until the user presses Send. Feedback goes only to the project's maintainer, not
 account; opening a public issue stays possible for anyone who prefers that. On success the dialog thanks the user and
 closes. On any failure (offline, the feedback service unreachable or refusing) it says sending failed, in plain words,
 and keeps the typed text so the user can retry or copy it. Nothing is queued or retried later.
+
+Under the header summary, the dialog offers "Rather talk in the open? Chat on Discord". Its **Chat on Discord** link
+opens the same invite through the same browser opener as the menu item, leaving the dialog and its draft open.
 
 While the contact field is not blank, the dialog shows **Re-use for future feedback**, checked by default, with hover
 text. A successful send remembers exactly the contact sent when checked; when unchecked, or when the user emptied a
