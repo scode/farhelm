@@ -32,6 +32,7 @@ use common::describe::describe;
 use common::t0;
 use farhelm_terminal_emulator::alacritty_terminal::grid::Dimensions;
 use farhelm_terminal_emulator::alacritty_terminal::index::{Column, Line};
+use farhelm_terminal_emulator::alacritty_terminal::term::TermMode;
 use farhelm_terminal_emulator::alacritty_terminal::term::cell::Flags;
 use farhelm_terminal_emulator::{Collected, Emulator, FeedMode, Size, Snapshot};
 
@@ -63,6 +64,9 @@ enum Take {
     Limited(usize),
     /// `Emulator::history_seed`.
     Seed,
+    /// A Restart seed under a small limit: its history must obey the same
+    /// trimming ladder as a snapshot, despite keeping no screen or title.
+    LimitedSeed(usize),
 }
 
 /// A scripted terminal state.
@@ -89,13 +93,26 @@ fn fixup_at_the_limits() -> String {
     )
 }
 
+/// Four distinct saved titles large enough to exercise the title-first
+/// size cut without making the fixtures large. The current title is short
+/// so that dropping the saved stack can leave room for history afterwards.
+fn saved_titles() -> String {
+    let mut output = String::new();
+    for number in 0..4 {
+        output.push_str(&format!("\x1b]2;{number}{}\x07\x1b[22t", "t".repeat(63)));
+    }
+    output.push_str("\x1b]2;current\x07");
+    output
+}
+
 /// The scripts, together covering the format's features: both screens,
 /// history and wrapped lines, wide and combining characters, hyperlinks,
 /// attributes and colors, palette changes, modes, scroll regions (clamped
 /// and empty ones too), tab stops, character sets, title and title stack,
 /// saved cursors on both screens, a cursor template with a link, fixups,
 /// pending wraps over each kind of last cell, the REP character (printed,
-/// zero-width, and as a fixup), the trimmed and dropped flags, and the seed.
+/// zero-width, and as a fixup), the title-first size cuts, the trimmed and
+/// dropped flags, and both whole and trimmed seeds.
 const SCRIPTS: &[Script] = &[
     Script {
         name: "history",
@@ -129,6 +146,25 @@ const SCRIPTS: &[Script] = &[
             // A wide character that does not fit at the end of a row: a
             // leading spacer there, the character on the next row.
             Feed("\x1b[6;16H中"),
+        ],
+        take: Take::Full,
+    },
+    Script {
+        name: "style-removals-and-reset-tie",
+        columns: 16,
+        lines: 3,
+        steps: &[
+            // The underline color keeps reset-and-reapply from replacing
+            // the individual removals, including bold and dim's shared 22.
+            Feed(concat!(
+                "\x1b[1;2;3;4;7;8;9;38;2;1;2;3;48;2;4;5;6;58;2;7;8;9mA",
+                "\x1b[22;2mB\x1b[23mC\x1b[24mD\x1b[27mE\x1b[28mF\x1b[29mG",
+                "\x1b[39mH\x1b[49mI\x1b[59mJ",
+            )),
+            // Removing italic and inverse leaves bold and underline:
+            // "23;27" and "0;1;4" are both five bytes. The encoder keeps
+            // changes on a tie, rather than resetting the whole pen.
+            Feed("\x1b[2;1H\x1b[0;1;3;4;7mA\x1b[23;27mB"),
         ],
         take: Take::Full,
     },
@@ -236,6 +272,30 @@ const SCRIPTS: &[Script] = &[
             "\x1b[34mblue line four\r\n\x1b[35mmagenta line five\r\n\x1b[36mcyan line six\r\n",
             "\x1b[37mwhite line seven\r\n\x1b[0mscreen",
         ))],
+        take: Take::Limited(200),
+    },
+    // Small limits make each rung of the size ladder visible in a compact
+    // golden. The feature test distinguishes losing only saved titles from
+    // exhausting the title stack before trimming any history.
+    Script {
+        name: "partly-dropped-title-stack",
+        columns: 12,
+        lines: 2,
+        steps: &[FeedMade(saved_titles), Feed("kept screen")],
+        take: Take::Limited(300),
+    },
+    Script {
+        name: "titles-dropped-before-history",
+        columns: 20,
+        lines: 3,
+        steps: &[
+            FeedMade(saved_titles),
+            Feed(concat!(
+                "\x1b[31mred line one\r\n\x1b[32mgreen line two\r\n\x1b[33myellow line three\r\n",
+                "\x1b[34mblue line four\r\n\x1b[35mmagenta line five\r\n\x1b[36mcyan line six\r\n",
+                "\x1b[37mwhite line seven\r\n\x1b[0mscreen",
+            )),
+        ],
         take: Take::Limited(200),
     },
     Script {
@@ -361,6 +421,20 @@ const SCRIPTS: &[Script] = &[
         ],
         take: Take::Seed,
     },
+    Script {
+        name: "trimmed-restart-seed",
+        columns: 20,
+        lines: 3,
+        steps: &[
+            Feed(concat!(
+                "\x1b[31mred line one\r\n\x1b[32mgreen line two\r\n\x1b[33myellow line three\r\n",
+                "\x1b[34mblue line four\r\n\x1b[35mmagenta line five\r\n\x1b[36mcyan line six\r\n",
+                "\x1b[37mwhite line seven\r\n\x1b[0mscreen",
+            )),
+            Feed("\x1b[?2004h\x1b]2;old title\x07\x1b[?1049hfull screen"),
+        ],
+        take: Take::LimitedSeed(180),
+    },
 ];
 
 /// Whether `needle` occurs in `haystack`.
@@ -414,6 +488,7 @@ fn run(script: &Script) -> (Emulator, Snapshot) {
         Take::Full => emulator.snapshot(16 * 1024 * 1024),
         Take::Limited(max) => emulator.snapshot(max),
         Take::Seed => Ok(emulator.history_seed(16 * 1024 * 1024)),
+        Take::LimitedSeed(max) => Ok(emulator.history_seed(max)),
     }
     .expect("scripts end at a clean boundary");
     (emulator, snapshot)
@@ -515,8 +590,8 @@ fn scripts_still_encode_to_their_golden_blobs() {
     }
 }
 
-/// Each script reaches the feature its name promises (the trimming flags,
-/// the seed's shape, pending wraps, the bottom-row wrap trick, untitled
+/// Each script reaches the feature its name promises (the title cuts and
+/// trimming flags, the seed's shape, pending wraps, the bottom-row wrap trick, untitled
 /// title stack entries, one and two columns, combining characters, emoji and
 /// tab cells, scroll regions, the REP character, a template's link), so
 /// that its fixture pins that feature.
@@ -528,7 +603,7 @@ fn scripts_still_encode_to_their_golden_blobs() {
 #[test]
 fn scripts_exercise_their_feature() {
     for script in SCRIPTS {
-        let (_, snapshot) = run(script);
+        let (live, snapshot) = run(script);
         let restored = Emulator::restore(&snapshot.blob, 1000).unwrap();
         match script.name {
             "trimmed-history" => {
@@ -537,9 +612,55 @@ fn scripts_exercise_their_feature() {
                 assert!(restored.emulator.history_trimmed());
             }
             "screens-dropped" => assert!(restored.screens_dropped),
+            "partly-dropped-title-stack" => {
+                let stack = live.term().title_stack();
+                assert_eq!(stack.len(), 4);
+                assert!(snapshot.dropped_titles > 0);
+                assert!(snapshot.dropped_titles < stack.len());
+                assert_eq!(
+                    restored.emulator.term().title_stack(),
+                    &stack[snapshot.dropped_titles..]
+                );
+                assert_eq!(snapshot.dropped_history_lines, 0);
+                assert!(!snapshot.dropped_screens);
+                assert_eq!(restored.emulator.title(), "current");
+                assert!(restored.emulator.screen_text().contains("kept screen"));
+            }
+            "titles-dropped-before-history" => {
+                let history = live.term().grid().history_size();
+                assert_eq!(live.term().title_stack().len(), 4);
+                assert_eq!(snapshot.dropped_titles, 4);
+                assert!(snapshot.dropped_history_lines > 0);
+                assert!(snapshot.dropped_history_lines < history);
+                assert!(!snapshot.dropped_screens);
+                assert!(restored.emulator.term().title_stack().is_empty());
+                assert_eq!(
+                    restored.emulator.term().grid().history_size(),
+                    history - snapshot.dropped_history_lines
+                );
+                assert!(restored.emulator.history_trimmed());
+                assert_eq!(restored.emulator.title(), "current");
+            }
             "restart-seed" => {
                 assert!(restored.emulator.term().grid().history_size() > 0);
                 assert_eq!(restored.emulator.screen_text().trim(), "");
+            }
+            "trimmed-restart-seed" => {
+                // The program ended on its alternate screen, but Restart
+                // carries the primary screen's history into a fresh terminal.
+                assert!(live.term().mode().contains(TermMode::ALT_SCREEN));
+                let history = live.term().inactive_grid().history_size();
+                assert!(snapshot.dropped_history_lines > 0);
+                assert!(snapshot.dropped_history_lines < history);
+                assert!(!snapshot.dropped_screens);
+                assert_eq!(
+                    restored.emulator.term().grid().history_size(),
+                    history - snapshot.dropped_history_lines
+                );
+                assert!(restored.emulator.history_trimmed());
+                assert_eq!(restored.emulator.screen_text().trim(), "");
+                assert_eq!(restored.emulator.title(), "");
+                assert!(!restored.emulator.modes().bracketed_paste);
             }
             "pending-wrap" | "pending-wrap-autowrap-on-then-off" => {
                 assert!(restored.emulator.term().grid().cursor.input_needs_wrap);
@@ -643,6 +764,43 @@ fn scripts_exercise_their_feature() {
                 );
                 assert_eq!(grid[Line(3)][Column(7)].c, '\t');
                 assert_eq!(grid[Line(3)][Column(2)].c, '😀');
+            }
+            "style-removals-and-reset-tie" => {
+                // These are choices made by the encoder, not merely input
+                // bytes the script happened to send. The golden must pin
+                // every removal and the strict reset-length tie-break.
+                for sequence in [
+                    &b"\x1b[22;2m"[..],
+                    &b"\x1b[23m"[..],
+                    &b"\x1b[24m"[..],
+                    &b"\x1b[27m"[..],
+                    &b"\x1b[28m"[..],
+                    &b"\x1b[29m"[..],
+                    &b"\x1b[39m"[..],
+                    &b"\x1b[49m"[..],
+                    &b"\x1b[59m"[..],
+                    &b"\x1b[23;27m"[..],
+                ] {
+                    assert!(
+                        contains(&snapshot.blob, sequence),
+                        "missing {:?}",
+                        sequence.escape_ascii()
+                    );
+                }
+                let grid = restored.emulator.term().grid();
+                assert_eq!(grid[Line(0)][Column(9)].c, 'J');
+                assert!(grid[Line(0)][Column(9)].flags.contains(Flags::DIM));
+                assert_eq!(grid[Line(1)][Column(1)].c, 'B');
+                assert!(
+                    grid[Line(1)][Column(1)]
+                        .flags
+                        .contains(Flags::BOLD | Flags::UNDERLINE)
+                );
+                assert!(
+                    !grid[Line(1)][Column(1)]
+                        .flags
+                        .intersects(Flags::ITALIC | Flags::INVERSE)
+                );
             }
             _ => assert_eq!(snapshot.dropped_history_lines, 0, "{}", script.name),
         }

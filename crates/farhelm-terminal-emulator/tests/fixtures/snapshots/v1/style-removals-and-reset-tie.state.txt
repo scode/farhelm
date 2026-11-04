@@ -1,0 +1,31 @@
+screens dropped false
+size 16x3
+mode TermMode(SHOW_CURSOR | LINE_WRAP | ALTERNATE_SCROLL | URGENCY_HINTS)
+scroll region 0..3
+tab stops 0 8
+active charset G0
+title None
+title stack []
+cursor style CursorStyle { shape: Block, blinking: false }
+REP character Some('B')
+clean true
+history trimmed no
+primary saved cursor 0,0 template ' ' fg Foreground bg Background charsets Ascii Ascii Ascii Ascii
+primary cursor 1,2 template ' ' fg Foreground bg Background flags Flags(BOLD | UNDERLINE) charsets Ascii Ascii Ascii Ascii
+primary history 0
+primary    0 |ABCDEFGHIJ      |
+primary    0,0: 'A' fg #010203 bg #040506 flags Flags(INVERSE | BOLD | ITALIC | UNDERLINE | DIM | HIDDEN | STRIKEOUT) underline #070809
+primary    0,1: 'B' fg #010203 bg #040506 flags Flags(INVERSE | ITALIC | UNDERLINE | DIM | HIDDEN | STRIKEOUT) underline #070809
+primary    0,2: 'C' fg #010203 bg #040506 flags Flags(INVERSE | UNDERLINE | DIM | HIDDEN | STRIKEOUT) underline #070809
+primary    0,3: 'D' fg #010203 bg #040506 flags Flags(INVERSE | DIM | HIDDEN | STRIKEOUT) underline #070809
+primary    0,4: 'E' fg #010203 bg #040506 flags Flags(DIM | HIDDEN | STRIKEOUT) underline #070809
+primary    0,5: 'F' fg #010203 bg #040506 flags Flags(DIM | STRIKEOUT) underline #070809
+primary    0,6: 'G' fg #010203 bg #040506 flags Flags(DIM) underline #070809
+primary    0,7: 'H' fg Foreground bg #040506 flags Flags(DIM) underline #070809
+primary    0,8: 'I' fg Foreground bg Background flags Flags(DIM) underline #070809
+primary    0,9: 'J' fg Foreground bg Background flags Flags(DIM)
+primary    1 |AB              |
+primary    1,0: 'A' fg Foreground bg Background flags Flags(INVERSE | BOLD | ITALIC | UNDERLINE)
+primary    1,1: 'B' fg Foreground bg Background flags Flags(BOLD | UNDERLINE)
+primary    2 |                |
+alternate saved cursor 0,0 template ' ' fg Foreground bg Background charsets Ascii Ascii Ascii Ascii
