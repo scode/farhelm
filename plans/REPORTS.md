@@ -54,3 +54,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`faster-snapshot-encoder`](reports/faster-snapshot-encoder.report.md) landed 2026-11-04 in #2948, #2951, #2953, #2960, #2964, #2968: Make terminal checkpoint encoding faster with byte-identical output, measured by a new benchmark
 - [`colored-harness-marks`](reports/colored-harness-marks.report.md) landed 2026-11-04 in #2961: Color the sidebar's harness marks where brand terms allow, official colors first
 - [`discord-link-in-app`](reports/discord-link-in-app.report.md) landed 2026-11-04 in #2963: Add "Chat on Discord" to the ? menu and the feedback dialog
+- [`grid-drop-and-drag-notice`](reports/grid-drop-and-drag-notice.report.md) landed 2026-11-04 in #2965, #2969: Grid terminals: accept dropped files and show the drag-copy notice, placed 3 rows off the pointer
