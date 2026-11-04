@@ -43,6 +43,8 @@
 //! no blank cell can absorb the print that sets it. Real agent sessions needed
 //! none; synthetic ones a few per snapshot.
 
+use std::fmt::{self, Write};
+
 use alacritty_terminal::Term;
 use alacritty_terminal::grid::{Cursor, Dimensions, Grid, Row};
 use alacritty_terminal::index::{Column, Line};
@@ -686,23 +688,24 @@ const FLAG_CODES: [(Flags, &str); 11] = [
 /// SGR parameters that take a template from `from` to `to` changing nothing
 /// else: attributes turned off (22 turns off bold and dim together, so the
 /// one that stays is set again), then on, then each color that differs, its
-/// default as 39, 49 or 59.
-fn pen_changes(from: &Pen, to: &Pen) -> Vec<String> {
-    let mut params = Vec::new();
+/// default as 39, 49 or 59. Reuses `params`'s allocation; parameter order and
+/// separators are part of the frozen version 1 stream.
+fn pen_changes(from: &Pen, to: &Pen, params: &mut String) {
+    params.clear();
     let removed = from.flags - to.flags;
     let mut added = to.flags - from.flags;
     let bold_dim = Flags::BOLD | Flags::DIM;
     if removed.intersects(bold_dim) {
-        params.push("22".to_owned());
+        push_param(params, "22");
         added |= to.flags & bold_dim;
     }
     if removed.contains(Flags::ITALIC) {
-        params.push("23".to_owned());
+        push_param(params, "23");
     }
     // One underline style replaces another, so only removing the last needs
     // its own parameter.
     if removed.intersects(Flags::ALL_UNDERLINES) && !to.flags.intersects(Flags::ALL_UNDERLINES) {
-        params.push("24".to_owned());
+        push_param(params, "24");
     }
     for (flag, code) in [
         (Flags::INVERSE, "27"),
@@ -710,76 +713,91 @@ fn pen_changes(from: &Pen, to: &Pen) -> Vec<String> {
         (Flags::STRIKEOUT, "29"),
     ] {
         if removed.contains(flag) {
-            params.push(code.to_owned());
+            push_param(params, code);
         }
     }
     for (flag, code) in FLAG_CODES {
         if added.contains(flag) {
-            params.push(code.to_owned());
+            push_param(params, code);
         }
     }
     if from.fg != to.fg {
         match to.fg {
-            Color::Named(NamedColor::Foreground) => params.push("39".to_owned()),
-            fg => push_color(&mut params, &fg, 30, 90, 38),
+            Color::Named(NamedColor::Foreground) => push_param(params, "39"),
+            fg => push_color(params, &fg, 30, 90, 38),
         }
     }
     if from.bg != to.bg {
         match to.bg {
-            Color::Named(NamedColor::Background) => params.push("49".to_owned()),
-            bg => push_color(&mut params, &bg, 40, 100, 48),
+            Color::Named(NamedColor::Background) => push_param(params, "49"),
+            bg => push_color(params, &bg, 40, 100, 48),
         }
     }
     if from.underline != to.underline {
         match &to.underline {
-            Some(underline) => push_color(&mut params, underline, 0, 0, 58),
-            None => params.push("59".to_owned()),
+            Some(underline) => push_color(params, underline, 0, 0, 58),
+            None => push_param(params, "59"),
         }
     }
-    params
 }
 
 /// The SGR sequence that takes a plain template to `template`'s style, or
 /// nothing when it is plain. For printing lines whose styles carry from one
 /// line into the next (`super::super::LineStyles::Carried`): the style a line
-/// ended with is set again after the reset that ends the line.
+/// ended with is set again after the reset that ends the line. The same
+/// parameter writer serves this owned string and the snapshot's reusable scratch.
 pub(crate) fn sgr_setting(template: &Cell) -> String {
-    let params = pen_changes(&Pen::plain(), &Pen::of(template));
-    if params.is_empty() {
-        String::new()
-    } else {
-        format!("\x1b[{}m", params.join(";"))
+    let mut sequence = String::new();
+    pen_changes(&Pen::plain(), &Pen::of(template), &mut sequence);
+    if !sequence.is_empty() {
+        sequence.insert_str(0, "\x1b[");
+        sequence.push('m');
     }
+    sequence
 }
 
 /// SGR parameters that reset the template and set all of `pen` (without an
-/// underline color: see [`Writer::set_pen`]).
-fn pen_reset(pen: &Pen) -> Vec<String> {
-    let mut params = vec!["0".to_owned()];
+/// underline color: see [`Writer::set_pen`]). Replaces the previous spelling
+/// in `params` without dropping its allocation, for comparison with changes.
+fn pen_reset(pen: &Pen, params: &mut String) {
+    params.clear();
+    push_param(params, "0");
     for (flag, code) in FLAG_CODES {
         if pen.flags.contains(flag) {
-            params.push(code.to_owned());
+            push_param(params, code);
         }
     }
-    push_color(&mut params, &pen.fg, 30, 90, 38);
-    push_color(&mut params, &pen.bg, 40, 100, 48);
-    params
+    push_color(params, &pen.fg, 30, 90, 38);
+    push_color(params, &pen.bg, 40, 100, 48);
+}
+
+/// Separate emitted parameter groups once, with no leading or trailing `;`.
+/// A group can contain its own separators (an extended color, for example);
+/// colors that emit nothing must not add an empty group.
+fn push_param(params: &mut String, value: impl fmt::Display) {
+    if !params.is_empty() {
+        params.push(';');
+    }
+    write!(params, "{value}").expect("writing to a String cannot fail");
 }
 
 /// Appends SGR parameters for `color`: `base + n` for the first eight ANSI
 /// colors, `bright + n - 8` for the next eight, `extended;5;n` or
 /// `extended;2;r;g;b` for the rest, nothing for the default.
-fn push_color(params: &mut Vec<String>, color: &Color, base: u8, bright: u8, extended: u8) {
+fn push_color(params: &mut String, color: &Color, base: u8, bright: u8, extended: u8) {
     match color {
         Color::Named(named) if (*named as usize) < 8 => {
-            params.push(format!("{}", base as usize + *named as usize))
+            push_param(params, base as usize + *named as usize)
         }
         Color::Named(named) if (*named as usize) < 16 => {
-            params.push(format!("{}", bright as usize + *named as usize - 8))
+            push_param(params, bright as usize + *named as usize - 8)
         }
         Color::Named(_) => {}
-        Color::Indexed(index) => params.push(format!("{extended};5;{index}")),
-        Color::Spec(rgb) => params.push(format!("{extended};2;{};{};{}", rgb.r, rgb.g, rgb.b)),
+        Color::Indexed(index) => push_param(params, format_args!("{extended};5;{index}")),
+        Color::Spec(rgb) => push_param(
+            params,
+            format_args!("{extended};2;{};{};{}", rgb.r, rgb.g, rgb.b),
+        ),
     }
 }
 
@@ -803,6 +821,12 @@ struct Writer {
     columns: usize,
     /// The restoring emulator's cursor template, as far as SGR sets it.
     pen: Pen,
+    /// Formatting scratch, reused for pen changes and cursor sequences.
+    /// These small strings retain capacity independently of the bulk payload
+    /// budget; taking one temporarily avoids aliasing it during `raw`.
+    params: String,
+    /// The competing reset spelling, compared by its actual encoded length.
+    reset: String,
     /// The restoring emulator's active hyperlink.
     link: Option<Hyperlink>,
     /// The cursor position (line, column), when known and with no wrap
@@ -835,6 +859,19 @@ impl Writer {
             Self::reserve(&mut self.out, needed, self.payload_budget);
             self.out.extend_from_slice(text.as_bytes());
         }
+    }
+
+    /// Format a cursor/erase sequence without a fresh string on every row.
+    /// Restore scratch ownership after passing the sequence through `raw`,
+    /// so formatting capacity survives even after payload retention ends.
+    fn raw_fmt(&mut self, args: fmt::Arguments<'_>) {
+        let mut sequence = std::mem::take(&mut self.params);
+        sequence.clear();
+        sequence
+            .write_fmt(args)
+            .expect("writing to a String cannot fail");
+        self.raw(&sequence);
+        self.params = sequence;
     }
 
     /// Decide retention before any append or reserve, releasing both large
@@ -894,13 +931,13 @@ impl Writer {
             {
                 match column - known_column {
                     1 => self.raw("\x1b[C"),
-                    n => self.raw(&format!("\x1b[{n}C")),
+                    n => self.raw_fmt(format_args!("\x1b[{n}C")),
                 }
             }
             Some((known_line, _)) if known_line == line => {
-                self.raw(&format!("\x1b[{}G", column + 1))
+                self.raw_fmt(format_args!("\x1b[{}G", column + 1))
             }
-            _ => self.raw(&format!("\x1b[{};{}H", line + 1, column + 1)),
+            _ => self.raw_fmt(format_args!("\x1b[{};{}H", line + 1, column + 1)),
         }
         self.known(line, column);
     }
@@ -925,24 +962,38 @@ impl Writer {
         if self.pen == *pen {
             return;
         }
-        let mut params = pen_changes(&self.pen, pen);
+        let mut params = std::mem::take(&mut self.params);
+        pen_changes(&self.pen, pen, &mut params);
         if pen.underline.is_none() {
-            let reset = pen_reset(pen);
-            if reset.join(";").len() < params.join(";").len() {
-                params = reset;
+            pen_reset(pen, &mut self.reset);
+            // A tie keeps the changes spelling, as version 1 always has.
+            if self.reset.len() < params.len() {
+                std::mem::swap(&mut params, &mut self.reset);
             }
         }
         // At most 28 parameters, under vte's limit of 32.
-        self.raw(&format!("\x1b[{}m", params.join(";")));
+        self.raw("\x1b[");
+        self.raw(&params);
+        self.raw("m");
+        self.params = params;
         self.pen = pen.clone();
     }
 
+    /// Change OSC 8 state without copying the link's strings into scratch.
+    /// Stable pieces and the existing capped id/URI pass through the same
+    /// byte-budget check, in version 1's original order.
     fn set_link(&mut self, link: Option<Hyperlink>) {
         if self.link == link {
             return;
         }
         match &link {
-            Some(link) => self.raw(&format!("\x1b]8;id={};{}\x1b\\", link.id(), link.uri())),
+            Some(link) => {
+                self.raw("\x1b]8;id=");
+                self.raw(link.id());
+                self.raw(";");
+                self.raw(link.uri());
+                self.raw("\x1b\\");
+            }
             None => self.raw("\x1b]8;;\x1b\\"),
         }
         self.link = link;
@@ -990,10 +1041,12 @@ impl Writer {
         }
     }
 
+    /// Erase with the same omitted count for one cell as version 1's stream.
+    /// Larger counts reuse the writer's numeric-formatting scratch.
     fn ech(&mut self, count: usize) {
         match count {
             1 => self.raw("\x1b[X"),
-            n => self.raw(&format!("\x1b[{n}X")),
+            n => self.raw_fmt(format_args!("\x1b[{n}X")),
         }
     }
 
@@ -1072,6 +1125,8 @@ impl Painter {
                 keeping: max_bytes >= overhead,
                 columns,
                 pen: Pen::plain(),
+                params: String::new(),
+                reset: String::new(),
                 link: None,
                 pos: Some((0, 0)),
                 column_trusted: true,
@@ -1348,8 +1403,11 @@ impl Painter {
         }
     }
 
+    /// Emit absolute CUP even when position tracking could choose a shortcut.
+    /// Pending-wrap restoration relies on this particular sequence.
     fn raw_cup(&mut self, line: i32, column: usize) {
-        self.w.raw(&format!("\x1b[{};{}H", line + 1, column + 1));
+        self.w
+            .raw_fmt(format_args!("\x1b[{};{}H", line + 1, column + 1));
     }
 
     /// Leave `c` as the REP character by printing it into blank, erasable
