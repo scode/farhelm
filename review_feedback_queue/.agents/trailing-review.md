@@ -41,15 +41,21 @@ triage, fixes, or execution of triage outcomes.
    agent scratch space; they are not the report files the queue's reviewer instructions forbid.
 3. Run the groups under `persistent-review`, including concurrent launches, immediate findings logs, delivery audits,
    same-session continuation and later-turn synthesis. Monitor them as described under "Monitoring reviewers" below.
-   Keep the skill's manifests, logs and completion evidence in the session's agent scratch space. Reviewers still return
-   the queue's required findings and candidate fields in their final replies; the persistent logs supplement those
-   replies. Reconcile the logs, including withdrawn findings, with the replies so candidates cannot disappear before the
-   queue's independent drop check. A drop that appears only in a reply's prose goes back to its reviewer to be recorded
-   in its log: in its existing synthesis or discovery turn, or, when its turns are over, in one continuation that asks
-   only for that and starts no new discovery. Apply the usual coverage, deduplication and filtering requirements. Then
-   build the check's register: every withdrawn finding, every finding with `proposed_drop` and every finding whose
-   latest event lowers its consequence gets an entry regardless of bucket (do not filter this register by bucket), along
-   with every drop you proposed while applying those requirements. Run the check as
+   Keep the skill's manifests, logs and completion evidence in the session's agent scratch space. Each reviewer's
+   findings log is the authoritative record of its findings, candidates and leads, including `proposed_drop`,
+   `possible_cover`, bucket and confidence. Tell reviewers that a continuation reply reports only what changed since
+   their previous reply, and that they do not write out the three-part record in
+   `review_feedback_queue/.agents/recording.md`, "Running an agent review that feeds this queue". After a reviewer's
+   last turn, you render that record once from its findings log with the skill's tooling. The delivery audit reports
+   supply the files and ranges read within the assigned scope; anything the reviewer itself reported as unread comes
+   from its log. Every lead still open at the end is resolved into a finding or a refuted candidate, or recorded as a
+   finding that keeps its uncertainty. Reconcile the logs, including withdrawn findings, with the replies so candidates
+   cannot disappear before the queue's independent drop check. A drop that appears only in a reply's prose goes back to
+   its reviewer to be recorded in its log: in its existing synthesis or discovery turn, or, when its turns are over, in
+   one continuation that asks only for that and starts no new discovery. Apply the usual coverage, deduplication and
+   filtering requirements. Then build the check's register: every withdrawn finding, every finding with `proposed_drop`
+   and every finding whose latest event lowers its consequence gets an entry regardless of bucket (do not filter this
+   register by bucket), along with every drop you proposed while applying those requirements. Run the check as
    `review_feedback_queue/.agents/recording.md`, "Independent drop check", describes, outside `persistent-review`.
    Record retained findings in feedback files and `INDEX.md`, preserving their reviewed commits and provenance. A
    trailing review is an automated review of committed code for the purposes of `FILTER.md`.
