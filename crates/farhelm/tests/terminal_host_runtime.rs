@@ -39,6 +39,19 @@ const WAIT: Duration = Duration::from_secs(10);
 
 // ---- Fixtures ------------------------------------------------------------------
 
+/// Force a snapshot of the small streams used to distinguish replay,
+/// checkpoint refusal and gap recovery. Skipping these snapshots would
+/// erase the state each fixture is meant to recover or reject.
+fn checkpointing_options() -> HostTerminalOptions {
+    HostTerminalOptions {
+        checkpoints: farhelm_supervisor::hosts::CheckpointPolicy {
+            stop_min_bytes: 0,
+            ..Default::default()
+        },
+        ..HostTerminalOptions::default()
+    }
+}
+
 fn farhelm() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_farhelm"))
 }
@@ -684,9 +697,7 @@ async fn the_replay_answers_only_what_no_supervisor_saw() {
         third = third.display(),
     )))
     .await;
-    let terminal = host
-        .adopt(Adoption::Fresh, HostTerminalOptions::default())
-        .await;
+    let terminal = host.adopt(Adoption::Fresh, checkpointing_options()).await;
     let child = terminal.status().child_pid;
     wait_until(&terminal, "the first answer", screen_has("one:1b5b3f")).await;
     let deadline = tokio::time::Instant::now() + WAIT;
@@ -777,9 +788,7 @@ async fn an_overflow_while_away_is_marked_and_redrawn() {
     ));
     child.journal_cap = MIN_JOURNAL_CAP;
     let host = Host::start(child).await;
-    let terminal = host
-        .adopt(Adoption::Fresh, HostTerminalOptions::default())
-        .await;
+    let terminal = host.adopt(Adoption::Fresh, checkpointing_options()).await;
     let child = terminal.status().child_pid;
     wait_until(&terminal, "before", screen_has("before")).await;
     let deadline = tokio::time::Instant::now() + WAIT;
@@ -830,9 +839,7 @@ async fn a_sequence_left_open_then_silence_ends_in_a_gap() {
     ));
     child.journal_cap = MIN_JOURNAL_CAP;
     let host = Host::start(child).await;
-    let terminal = host
-        .adopt(Adoption::Fresh, HostTerminalOptions::default())
-        .await;
+    let terminal = host.adopt(Adoption::Fresh, checkpointing_options()).await;
     let child = terminal.status().child_pid;
     wait_until(&terminal, "the open sequence", |terminal| {
         terminal.status().position.offset >= 8
@@ -883,9 +890,7 @@ async fn a_sequence_longer_than_the_cap_ends_in_a_gap() {
     ));
     child.journal_cap = MIN_JOURNAL_CAP;
     let host = Host::start(child).await;
-    let terminal = host
-        .adopt(Adoption::Fresh, HostTerminalOptions::default())
-        .await;
+    let terminal = host.adopt(Adoption::Fresh, checkpointing_options()).await;
     let child = terminal.status().child_pid;
     wait_until(&terminal, "start", screen_has("start")).await;
     let deadline = tokio::time::Instant::now() + WAIT;

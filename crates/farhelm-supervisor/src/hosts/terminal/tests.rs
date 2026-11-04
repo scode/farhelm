@@ -191,9 +191,15 @@ fn info(end: u64) -> Info {
 }
 
 /// Short connection deadlines, so that a reconnect to nothing is judged in
-/// about a second.
+/// about a second. Explicit checkpoint requests encode even tiny fixtures:
+/// tests of encoding, cancellation and rejection need a real snapshot,
+/// while tests of the stop threshold set their own nonzero policy.
 fn options() -> HostTerminalOptions {
     HostTerminalOptions {
+        checkpoints: CheckpointPolicy {
+            stop_min_bytes: 0,
+            ..CheckpointPolicy::default()
+        },
         deadlines: ClientDeadlines {
             connect: Duration::from_secs(1),
             refusal_window: Duration::from_secs(1),
@@ -785,6 +791,7 @@ fn checkpointing(after_bytes: u64, clock: &ManualClock) -> HostTerminalOptions {
         checkpoints: CheckpointPolicy {
             min_bytes: after_bytes,
             max_bytes: after_bytes,
+            stop_min_bytes: 0,
         },
         ..options()
     }
@@ -3003,4 +3010,137 @@ async fn notices_are_kept_for_nobody_and_end_with_the_runtime() {
     assert_eq!(within("the end of the notices", before.recv()).await, None);
     let mut after = terminal.subscribe_notices();
     assert_eq!(within("an ended subscription", after.recv()).await, None);
+}
+/// A stop request leaves a small tail for recovery and still checkpoints
+/// at the exact threshold. The request itself must apply the rule: the
+/// supervisor's earlier admission may predate an automatic checkpoint.
+///
+/// A status query following the skip is answered as the next client frame,
+/// so a snapshot cannot have been sent behind the successful skip. Once
+/// the tail reaches ten bytes the host accepts a checkpoint; one more byte
+/// then skips again, counted from that newly accepted position.
+#[farhelm_testtrace::test]
+async fn checkpoint_now_skips_small_tails_and_encodes_at_the_threshold() {
+    let clock = ManualClock::new();
+    let stand_in = StandIn::new();
+    let mut options = checkpointing(1 << 30, &clock);
+    options.checkpoints.stop_min_bytes = 10;
+    let (terminal, mut server, _) = adopt(&stand_in, Adoption::Fresh, &info(0), options).await;
+    server.output(0, b"short").await;
+    wait_until(&terminal, "the short tail", |terminal| {
+        terminal.status().position.offset == 5
+    })
+    .await;
+    assert_eq!(terminal.exit_checkpoint_tail(), None);
+    let deadline = || tokio::time::Instant::now() + WAIT;
+    assert_eq!(
+        terminal.checkpoint_now(deadline()).await,
+        Ok(CheckpointOutcome::Skipped { tail: 5 })
+    );
+    assert_eq!(terminal.status().checkpoint, None);
+    server.output(5, b"\x1b[5n").await;
+    assert_eq!(
+        server.next().await,
+        ClientMessage::Input(STATUS_ANSWER.to_vec())
+    );
+    server.output(9, b"x").await;
+    wait_until(&terminal, "the threshold tail", |terminal| {
+        terminal.status().position.offset == 10
+    })
+    .await;
+    assert_eq!(terminal.exit_checkpoint_tail(), Some(10));
+    let (outcome, (position, _)) = tokio::join!(
+        terminal.checkpoint_now(deadline()),
+        snapshot_request(&mut server, true)
+    );
+    assert_eq!(
+        position,
+        Position {
+            offset: 10,
+            resizes: 0
+        }
+    );
+    assert_eq!(outcome, Ok(CheckpointOutcome::Accepted(position)));
+    server.output(10, b"y").await;
+    wait_until(&terminal, "the new short tail", |terminal| {
+        terminal.status().position.offset == 11
+    })
+    .await;
+    assert_eq!(
+        terminal.checkpoint_now(deadline()).await,
+        Ok(CheckpointOutcome::Skipped { tail: 1 })
+    );
+    assert_eq!(terminal.status().checkpoint, Some(position));
+}
+/// A stop request queued behind an automatic encode rechecks the newly
+/// shortened tail instead of encoding the whole terminal twice. The stop's
+/// earlier view says a checkpoint is warranted; a split read leaves only
+/// the four-byte query after the automatic snapshot when the request runs.
+#[farhelm_testtrace::test]
+async fn checkpoint_now_rechecks_the_tail_after_an_automatic_encode() {
+    /// An assertion before the normal release must not hold a blocking
+    /// encoder until its independent safety timeout.
+    struct ReleaseEncode(EncodeGate);
+    impl Drop for ReleaseEncode {
+        fn drop(&mut self) {
+            self.0.open();
+        }
+    }
+
+    let clock = ManualClock::new();
+    let gate = EncodeGate::closed();
+    let _release = ReleaseEncode(gate.clone());
+    let mut options = checkpointing(10, &clock);
+    options.checkpoints.stop_min_bytes = 10;
+    options.encode_gate = Some(gate.clone());
+    let stand_in = StandIn::new();
+    let (terminal, mut server, _) = adopt(&stand_in, Adoption::Fresh, &info(0), options).await;
+    server.output(0, b"0123456789\x1b[5n").await;
+    let entered = gate.clone();
+    assert!(
+        tokio::task::spawn_blocking(move || entered.wait_entered(WAIT))
+            .await
+            .expect("wait for automatic encode")
+    );
+    wait_until(
+        &terminal,
+        "the encode position before the deferred query",
+        |terminal| terminal.status().position.offset == 10,
+    )
+    .await;
+    assert_eq!(terminal.status().checkpoint, None);
+    assert_eq!(
+        terminal.exit_checkpoint_tail(),
+        Some(10),
+        "a supervisor would queue this host"
+    );
+    let (reply, outcome) = oneshot::channel();
+    terminal
+        .inner
+        .control
+        .send(Control::Checkpoint {
+            deadline: tokio::time::Instant::now() + WAIT,
+            reply,
+        })
+        .await
+        .expect("queue the stop behind the held automatic encode");
+    gate.open();
+    let (outcome, (position, _)) = tokio::join!(
+        within("the stop outcome", outcome),
+        snapshot_request(&mut server, true)
+    );
+    assert_eq!(
+        position,
+        Position {
+            offset: 10,
+            resizes: 0
+        }
+    );
+    assert_eq!(
+        outcome.expect("the runtime answers"),
+        CheckpointOutcome::Skipped { tail: 4 }
+    );
+    assert_eq!(terminal.status().position.offset, 14);
+    assert_eq!(terminal.status().checkpoint, Some(position));
+    assert_eq!(terminal.exit_checkpoint_tail(), None);
 }

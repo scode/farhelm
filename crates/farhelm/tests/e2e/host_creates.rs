@@ -1931,6 +1931,7 @@ async fn ending_a_host_whose_runtime_is_encoding_falls_back_in_bounded_time() {
                     options.checkpoints = farhelm_supervisor::hosts::CheckpointPolicy {
                         min_bytes: 1,
                         max_bytes: 1,
+                        ..Default::default()
                     };
                 })),
                 ..FaultHooks::default()
@@ -2026,6 +2027,7 @@ async fn delete_ends_an_encoding_runtimes_host_by_its_process_after_a_rename() {
                     options.checkpoints = farhelm_supervisor::hosts::CheckpointPolicy {
                         min_bytes: 1,
                         max_bytes: 1,
+                        ..Default::default()
                     };
                 })),
                 ..FaultHooks::default()

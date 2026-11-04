@@ -1,5 +1,5 @@
 //! Keeping host terminals across a supervisor restart (the plan's PR 17):
-//! the stopping supervisor leaves each host a fresh snapshot
+//! the stopping supervisor saves hosts with enough output to repay an encode
 //! ([`Supervisor::checkpoint_hosts_for_exit`]), the starting one finds the
 //! host behind every host row the store holds and adopts it again
 //! ([`attribute_host_rows`], the inventory's top risk 2), and a running one
@@ -9,7 +9,7 @@
 //!
 //! ## Stopping
 //!
-//! An orderly stop asks every host terminal's runtime for a checkpoint under
+//! An orderly stop checkpoints host terminals with enough new output under
 //! one deadline, using at most half the machine's cores (at least one).
 //! Hosts with the largest output tails get a slot first, so checkpoints
 //! that finish save the most replay. It then closes each runtime's
@@ -37,11 +37,14 @@
 //! These slots cover the stop's own checkpoints, not automatic encodes
 //! already running or started by runtimes still waiting for a slot.
 //!
-//! Every host with output since its last snapshot gets a checkpoint, however
-//! little that output is (a host with none answers at once, with nothing
-//! encoded). The cost is the encode, which is of the whole terminal, not of
-//! the new output (SPEC_impl.md, "Recovery and checkpoints", gives the
-//! measured cost).
+//! A host with less than the policy's stop threshold of processed output
+//! since its latest known snapshot (normally 1 MiB) is closed immediately,
+//! without taking a slot. Recovery replays that short tail cheaply. The
+//! runtime checks again when it takes the request up: an automatic encode
+//! may have shortened the tail while the stop waited for a slot. A deliberate
+//! skip is a successful stop. The cost avoided is an encode of the whole
+//! terminal, not of the new output (SPEC_impl.md, "Recovery and checkpoints",
+//! gives the measured cost).
 //!
 //! Closing each connection right after its checkpoint limits the output the
 //! stopping supervisor counts as delivered without acting on it to what the
@@ -258,9 +261,8 @@ fn exit_checkpoint_slots(cores: usize) -> usize {
 }
 
 impl Supervisor {
-    /// Checkpoint every host terminal this supervisor drives, because the
-    /// process is about to exit, and close each one's connection, all by
-    /// `budget` (module docs, "Stopping").
+    /// Save substantial host-terminal tails and close every runtime within
+    /// `budget`, because this supervisor is exiting (module docs, "Stopping").
     ///
     /// Each runtime's checkpoint is asked for once it gets one of at most
     /// half as many slots as the machine has cores (at least one), largest
@@ -268,8 +270,10 @@ impl Supervisor {
     /// then stopped ([`HostTerminal::abort`]), which cancels any encode it
     /// still runs, and this waits until every such encode has ended, so
     /// none outlives the stop on the blocking pool. The hosts keep running.
-    /// Returns whether every runtime it asked left its host a snapshot of
-    /// where its terminal is ([`CheckpointOutcome::Accepted`] or `Current`).
+    /// Short tails take no slot and their runtimes close immediately. A
+    /// request can also skip after a newer automatic checkpoint shortens
+    /// its tail. Returns whether every wanted checkpoint completed: an
+    /// accepted or current snapshot, or a deliberate skip, is success.
     /// Runtimes that had already ended (an unavailable host, a gone one)
     /// hold no connection and run no encode, and are left out.
     ///
@@ -324,12 +328,19 @@ impl Supervisor {
         let mut hosts: Vec<(u64, HostTerminal)> =
             all.iter()
                 .filter(|host| still_driven(host))
-                .map(|host| {
-                    let status = host.status();
-                    let tail = status.position.offset.saturating_sub(
-                        status.checkpoint.map_or(0, |checkpoint| checkpoint.offset),
-                    );
-                    (tail, host.clone())
+                .filter_map(|host| {
+                    match host.exit_checkpoint_tail() {
+                        Some(tail) => Some((tail, host.clone())),
+                        None => {
+                            // A short tail is cheap to replay. Close now,
+                            // before waiting for other hosts' slots, so this
+                            // runtime neither reads more delivered output nor
+                            // starts an automatic encode during the wait.
+                            host.abort();
+                            debug!(socket = %host.socket().display(), "skipped a small terminal tail at exit");
+                            None
+                        }
+                    }
                 })
                 .collect();
         // Keep one observation per host: automatic checkpoints and output
@@ -392,6 +403,9 @@ impl Supervisor {
                         "left a terminal host its previous snapshot at exit; the next supervisor \
                          replays the output after it"
                     );
+                }
+                Ok(CheckpointOutcome::Skipped { tail }) => {
+                    debug!(socket, tail, "skipped a small terminal tail at exit");
                 }
                 Err(liveness) => {
                     all_current = false;

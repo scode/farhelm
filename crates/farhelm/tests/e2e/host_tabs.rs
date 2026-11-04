@@ -47,6 +47,22 @@ pub(crate) fn tab_seams(home: &Path) -> SupervisorSeams {
     }
 }
 
+/// [`tab_seams`] with every orderly stop checkpointing its hosts however
+/// little output they have since their last snapshot.
+///
+/// The shipped policy skips a stop's checkpoint for a tail under its
+/// minimum (the next supervisor replays the tail instead), so a tab that
+/// echoed one short line would get no snapshot at all; a test about
+/// recovering a tab from its stop-time snapshot needs this, as the agent
+/// restart tests do (`host_restarts.rs`, `checkpointing_host_seams`).
+fn checkpointing_tab_seams(home: &Path) -> SupervisorSeams {
+    let mut seams = tab_seams(home);
+    seams.faults.host_terminal_options = Some(Arc::new(|options| {
+        options.checkpoints.stop_min_bytes = 0;
+    }));
+    seams
+}
+
 /// [`tab_seams`] with the switch off: creates and tabs in tmux.
 fn tmux_tab_seams(home: &Path) -> SupervisorSeams {
     SupervisorSeams {
@@ -895,12 +911,14 @@ async fn an_exited_host_tab_is_reaped_on_its_hosts_exit() {
 /// supervisor on the same state directory lists the tab, holds a runtime for
 /// it at the same socket, whose screen once caught up shows the line, and a
 /// grid attach to the tab shows the line too; a line typed into it after the
-/// restart is echoed.
+/// restart is echoed. The stop checkpoints every tail
+/// ([`checkpointing_tab_seams`]), so the recovery starts from the stop's
+/// snapshot rather than replaying the short tail from the host's start.
 #[farhelm_testtrace::test]
 async fn a_restarted_supervisor_keeps_a_host_tab_attachable_with_its_screen() {
     let stack = Stack::new().await;
     let home = farhelm_teststate::tempdir().expect("home");
-    let (sup, client) = stack.supervisor(tab_seams(home.path())).await;
+    let (sup, client) = stack.supervisor(checkpointing_tab_seams(home.path())).await;
     let session = create(&client, stack.work.path()).await;
     let tab = client.open_tab(&session.id).await.expect("open a tab");
     let host = tab_host(&sup, &session.id, &tab.id).await;

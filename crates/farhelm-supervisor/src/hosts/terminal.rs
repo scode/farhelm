@@ -206,10 +206,12 @@
 //!   checked after each live read (at its split candidate and at its end),
 //!   after a synchronized update's deadline draws it, and when the replay
 //!   finishes; there is no time trigger, so a quiet terminal costs nothing.
-//!   [`HostTerminal::checkpoint_now`] takes one on demand for an orderly
-//!   stop, within a deadline, at the current position if the emulator is
-//!   clean there, or else leaves the host its last accepted snapshot and
-//!   the tail after it. [`HostStatus::checkpoint`] is the latest the host
+//!   [`HostTerminal::checkpoint_now`] asks for one on demand for an orderly
+//!   stop, within a deadline. A tail below the policy's stop threshold
+//!   (normally 1 MiB) is left for recovery to replay without an encode;
+//!   otherwise it snapshots at the current position if the emulator is
+//!   clean there, or leaves the host its last accepted snapshot and tail.
+//!   [`HostStatus::checkpoint`] is the latest the host
 //!   is known to hold.
 //!
 //!   Encoding takes long at full scrollback (in a release build, about
@@ -1221,6 +1223,9 @@ struct Inner {
     /// Woken whenever the emulator comes back from an encode.
     returned: Arc<tokio::sync::Notify>,
     status: watch::Receiver<HostStatus>,
+    /// The same immutable policy the runtime uses. The stop checks its
+    /// threshold without a request so a short tail takes no encode slot.
+    checkpoints: CheckpointPolicy,
     input: mpsc::Sender<InputRequest>,
     control: mpsc::Sender<Control>,
     size: watch::Sender<Option<Size>>,
@@ -1923,6 +1928,7 @@ impl HostTerminal {
                 emulator,
                 notices: weak_notices,
                 status: status_rx,
+                checkpoints: options.checkpoints,
                 input: input_tx,
                 control: control_tx,
                 size: size_tx,
@@ -2027,6 +2033,7 @@ impl HostTerminal {
                 notices: notices.downgrade(),
                 returned: Arc::new(tokio::sync::Notify::new()),
                 status,
+                checkpoints: CheckpointPolicy::default(),
                 input,
                 control,
                 size: size_tx,
@@ -2080,6 +2087,21 @@ impl HostTerminal {
     /// The terminal's state now.
     pub fn status(&self) -> HostStatus {
         self.inner.status.borrow().clone()
+    }
+
+    /// The processed output a stop should checkpoint, or `None` when the
+    /// tail is below this runtime's stop threshold and it may close now.
+    ///
+    /// This is an admission decision, not a promise to encode: an automatic
+    /// checkpoint can finish while the stop waits for a slot, so the runtime
+    /// applies the same policy again when it takes up the request. Output
+    /// journaled by the host but not processed here is in neither the tail
+    /// nor any checkpoint the stop could take.
+    pub(crate) fn exit_checkpoint_tail(&self) -> Option<u64> {
+        let status = self.inner.status.borrow();
+        self.inner
+            .checkpoints
+            .exit_tail(status.position, status.checkpoint)
     }
 
     /// The terminal's state, to wait on for changes.
@@ -2434,9 +2456,10 @@ impl HostTerminal {
     /// Snapshot the terminal for its host now, for an orderly stop, and
     /// wait for the host's answer, all by `deadline`.
     ///
-    /// It takes the snapshot where the terminal is if the emulator is clean
-    /// there; otherwise the host keeps its last accepted snapshot and the
-    /// tail after it, which a recovery then replays ([`CheckpointOutcome`]).
+    /// A tail below the policy's stop threshold is left for recovery to
+    /// replay, without an encode. Otherwise it takes the snapshot where the
+    /// terminal is if the emulator is clean there; when it is not, the host
+    /// keeps its last accepted snapshot and tail ([`CheckpointOutcome`]).
     /// It never waits for a clean boundary: a program can stay mid-sequence
     /// for good. The task takes the request up once it is done with what it
     /// is doing (an automatic checkpoint's encode included: the deadline
@@ -3629,6 +3652,14 @@ impl Runtime {
         }
         if self.checkpoints.accepted() == Some(self.position) {
             return (CheckpointOutcome::Current(self.position), None);
+        }
+        if self.checkpoints.exit_tail(self.position).is_none() {
+            let tail = self.position.offset.saturating_sub(
+                self.checkpoints
+                    .accepted()
+                    .map_or(0, |position| position.offset),
+            );
+            return (CheckpointOutcome::Skipped { tail }, None);
         }
         // `turn` settles every encode and sends every finished snapshot
         // before it takes a request up, so neither is pending here.

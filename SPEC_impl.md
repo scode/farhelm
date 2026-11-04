@@ -1970,12 +1970,14 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   on checkpoints (typical output about a fifth of that). The exposure accepted: a scrollback colored like an image
   receiving about 1 MiB/s cannot be checkpointed as fast as it fills the journal, and may gap while connected; the
   remedy is a faster encoder. An orderly stop asks for a checkpoint within a deadline that bounds the encode and the
-  host's answer: taken where the terminal is if it is clean there, else none, so that the host keeps its last accepted
-  snapshot and the tail after it, which a recovery replays; an encode the deadline cuts short is finished and sent as an
-  ordinary checkpoint, unless the runtime is stopped first, which cancels every encode it runs (the encoder gives up
-  between rows, keeping nothing). A host's **journal cap** is 32 MiB by default: checkpoints keep the tail below a
-  quarter of it, which leaves about four minutes of an agent's heaviest redraw traffic, and hours of a shell's, for a
-  supervisor's absence before the oldest of that output is trimmed into a **gap**. A gap never resets a healthy
+  host's answer. A processed output tail below the stop policy's threshold (normally 1 MiB) is left for recovery to
+  replay without an encode, including when an automatic checkpoint shortened it after the stop queued the request.
+  Otherwise a snapshot is taken where the terminal is if it is clean there, else none, so that the host keeps its last
+  accepted snapshot and the tail after it, which a recovery replays; an encode the deadline cuts short is finished and
+  sent as an ordinary checkpoint, unless the runtime is stopped first, which cancels every encode it runs (the encoder
+  gives up between rows, keeping nothing). A host's **journal cap** is 32 MiB by default: checkpoints keep the tail
+  below a quarter of it, which leaves about four minutes of an agent's heaviest redraw traffic, and hours of a shell's,
+  for a supervisor's absence before the oldest of that output is trimmed into a **gap**. A gap never resets a healthy
   emulator: the runtime carries on after it, marks the history trimmed for the viewer (for as long as that runtime runs:
   a snapshot cannot carry the mark), and, once any replay is over, asks the program to redraw by resizing the terminal
   one row smaller and back, since Linux sends no `SIGWINCH` for a resize to the size in force (checked on Linux 6.8; the
@@ -2331,35 +2333,39 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   naming the session (then it is counted, rooted and shut down like a recorded host of the session); anything else there
   keeps the session and is never signalled, since nothing but the socket's name ties that process to the session.
 - **Across supervisor restarts** (`service/core/host_handover.rs`) a host terminal keeps running, and its session keeps
-  its state. An orderly stop asks every host terminal's runtime for a checkpoint under one ten-second deadline that runs
-  beside the output clients' ten seconds. Its own encodes use at most half the machine's cores (at least one), with
-  slots admitted in order of output tail bytes, largest first, so those that finish save the most replay while leaving
-  room for the update or desktop app. Automatic encodes already running or started by a runtime still waiting for a slot
-  are not counted against those slots. The stop closes each runtime's connection once its checkpoint is settled or the
-  deadline passes (every host terminal in the map is closed, those already ended included, since one may still be
-  settling an encode). Closing a runtime cancels any encode it still runs: the encoder looks at its cancel between rows
-  and gives up within about a millisecond, keeping nothing, and the stop waits until every encode has ended. That is
-  what keeps the stop, and so the process's exit and the release of its state directory's claim, within the deadline: an
-  encode runs on tokio's blocking pool, which the supervisor's runtime waits for as it drops. From the moment the stop
-  gathers its host terminals nothing publishes a host runtime: a create whose host is ready only then stops its runtime
-  and publishes a placeholder, its row and launch record kept for the next supervisor, and a re-adoption stops the
-  runtime it made. After the pending-hold wait the stop closes every host terminal then in the map again, waiting up to
-  a second for their encodes, and a runtime cancels its encodes whenever it ends, also when the process's tokio runtime
-  drops its task (it does so before waiting for the blocking pool), so a stop that could not take the session map's lock
-  in time still exits within one encode's look at its cancel. A host whose checkpoint did not finish, never got a core,
-  or could not be taken (a sequence left open, a runtime still replaying) keeps its previous snapshot and all the output
-  after it, which the next supervisor replays: a slower recovery, the same terminal. Every host with output since its
-  snapshot is checkpointed however little that output is, and each encode is of the whole terminal ("Recovery and
-  checkpoints" gives the measured cost). Closing the connection right after the checkpoint limits the output the
-  stopping supervisor counts as delivered without acting on it to what the host had already written to the connection,
-  which the next supervisor replays without side effects (the delivery ambiguity above); output after the close is
-  unseen, and its queries are answered. A crash or a kill leaves each host its latest checkpoint and the tail after it,
-  the same way. A starting supervisor reloads its sessions only once it holds its state directory and has opened, and
-  checked, its database, so a build that cannot read the database refuses before contacting any host. Host rows never go
-  through tmux's pane lookup, since their `pane` holds a socket name: reload scans the socket directory (discovery,
-  above) and matches each host row to a host by its tag (session and launch generation), else by the socket the row
-  names (its `pane`, or for a launch never confirmed, the launch record of its own generation, never an earlier one's).
-  A host at the row's `pane` whose tag names the same session's agent at an earlier generation is the row's own: only a
+  its state. An orderly stop checkpoints hosts with at least 1 MiB of processed output since their latest known snapshot
+  under one ten-second deadline that runs beside the output clients' ten seconds. Its own encodes use at most half the
+  machine's cores (at least one), with slots admitted in order of output tail bytes, largest first, so those that finish
+  save the most replay while leaving room for the update or desktop app. Automatic encodes already running or started by
+  a runtime still waiting for a slot are not counted against those slots. Hosts below the threshold take no slot and
+  their runtimes close immediately; the runtime checks the same threshold again when it handles the request, since an
+  automatic checkpoint can finish after the gather. A deliberate skip is logged at debug and counts as success. The stop
+  closes each runtime's connection once its checkpoint is settled or the deadline passes (every host terminal in the map
+  is closed, those already ended included, since one may still be settling an encode). Closing a runtime cancels any
+  encode it still runs: the encoder looks at its cancel between rows and gives up within about a millisecond, keeping
+  nothing, and the stop waits until every encode has ended. That is what keeps the stop, and so the process's exit and
+  the release of its state directory's claim, within the deadline: an encode runs on tokio's blocking pool, which the
+  supervisor's runtime waits for as it drops. From the moment the stop gathers its host terminals nothing publishes a
+  host runtime: a create whose host is ready only then stops its runtime and publishes a placeholder, its row and launch
+  record kept for the next supervisor, and a re-adoption stops the runtime it made. After the pending-hold wait the stop
+  closes every host terminal then in the map again, waiting up to a second for their encodes, and a runtime cancels its
+  encodes whenever it ends, also when the process's tokio runtime drops its task (it does so before waiting for the
+  blocking pool), so a stop that could not take the session map's lock in time still exits within one encode's look at
+  its cancel. A host whose checkpoint was skipped, did not finish, never got a core, or could not be taken (a sequence
+  left open, a runtime still replaying) keeps its previous snapshot and all the output after it, which the next
+  supervisor replays: a slower recovery, the same terminal. The skip counts only processed output bytes, not resizes or
+  output journaled but not yet read. Its threshold is separate from the automatic checkpoint threshold and is clamped to
+  a quarter of the journal cap for a smaller-cap host. Each encode is of the whole terminal ("Recovery and checkpoints"
+  gives the measured cost). Closing the connection right after the checkpoint limits the output the stopping supervisor
+  counts as delivered without acting on it to what the host had already written to the connection, which the next
+  supervisor replays without side effects (the delivery ambiguity above); output after the close is unseen, and its
+  queries are answered. A crash or a kill leaves each host its latest checkpoint and the tail after it, the same way. A
+  starting supervisor reloads its sessions only once it holds its state directory and has opened, and checked, its
+  database, so a build that cannot read the database refuses before contacting any host. Host rows never go through
+  tmux's pane lookup, since their `pane` holds a socket name: reload scans the socket directory (discovery, above) and
+  matches each host row to a host by its tag (session and launch generation), else by the socket the row names (its
+  `pane`, or for a launch never confirmed, the launch record of its own generation, never an earlier one's). A host at
+  the row's `pane` whose tag names the same session's agent at an earlier generation is the row's own: only a
   confirmation writes `pane`, a Restart empties it, and one that failed definitively puts back the `pane` of the host
   that stays the session's terminal. A host found is adopted as recovered (its snapshot restored, the tail replayed
   under the replay policy) and taken as a found pane is: an unconfirmed launch found by its tag is confirmed with its
