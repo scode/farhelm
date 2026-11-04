@@ -57,6 +57,32 @@ paragraphs. Classes are `readiness`, `replay-live`, `fixture-premise`, `peer-lif
 Confidence is `established`, `hypothesis`, or `unknown`; `Cause:` is the last line. These fields apply only to new
 entries. Missing historical fields are missing evidence, not an implicit cause classification.
 
+## 2026-11-04 — checkout folder save cleanup stalls on WebKit (e2e/tests/settings.spec.ts)
+
+`an untouched checkout folder save writes nothing and edited paths are trimmed` completed its save and readback
+assertions, then exceeded 60 seconds while draining submitted saves in host-terminal run
+`81a954d9-bbe9-4556-a8bd-dd718350514c`. The exact WebKit case passed unchanged in 7.7 seconds in isolated run
+`d53c5dbf-8491-4eba-bf3d-3f3714cc0674`. Hypothesis: WebKit's request-finished observation stalls, as in the pending
+post-clone save flake below; the cause is not established. Open and excluded from future sweeps; no fix attempted.
+
+```text
+Test timeout of 60000ms exceeded.
+AggregateError: owned fixture cleanup failed
+Error: cleanup failed: submitted checkout saves
+```
+
+Evidence: clean commit `4f3fef2831e0ff89edcb66d9ab72924028e17c71`, shared x86_64 Linux, host-terminal browser suite on
+both engines with three workers, one stack each and zero retries. The same run also failed the quick-launch route
+cleanup case below. Load and memory pressure were not measured. The isolated pass used code-identical `851a1d13`, one
+selected WebKit test, zero retries and three harness stacks; lint compilation ran concurrently with that pass. Locale
+C.UTF-8; recorded tmux 3.7c executable SHA256 `d60bcc711383c8282d560926854f2cb8d2d15e9af72641e1396e32f27af9a802`. The
+recorder retained `FARHELM_E2E_SUITE_TERMINALS` and supplied `FARHELM_TEST_TRACE_DIR`; other ambient Farhelm variables
+were scrubbed. Private run evidence and copied traces expire with temporary-file cleanup.
+
+Class: peer-lifecycle
+
+Cause: hypothesis
+
 ## 2026-11-04 — quick-launch host route removed before fulfillment (e2e/tests/quick-launch.spec.ts)
 
 `a host-read fallback permits keyboard cancellation before recovery` failed in WebKit host-terminal run

@@ -396,6 +396,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Deflake
 
+- **Checkout folder save cleanup times out on WebKit.**
+  `an untouched checkout folder save writes nothing and edited paths are trimmed` in `e2e/tests/settings.spec.ts` passed
+  its body assertions but timed out draining submitted saves in host-terminal run
+  `81a954d9-bbe9-4556-a8bd-dd718350514c`. The exact WebKit case passed in 7.7 seconds in
+  `d53c5dbf-8491-4eba-bf3d-3f3714cc0674`. Hypothesis: the request-finished observation stalls, as in the pending
+  post-clone save flake; investigate without weakening the save assertions (FLAKES.md, 2026-11-04).
+
 - **Quick-launch host-read fixture loses an intercepted route during cleanup.**
   `a host-read fallback permits keyboard cancellation before recovery` in `e2e/tests/quick-launch.spec.ts` failed in
   WebKit host-terminal run `81a954d9-bbe9-4556-a8bd-dd718350514c` with `Route is already handled!`. Its trace shows
