@@ -484,6 +484,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   header, then patching the stream length (the header's last field), would bring that to about one blob plus fixups with
   byte-identical output. Left out of `faster-snapshot-encoder`, which is about speed; `tests/memory.rs` is the arbiter
   of the memory claim.
+- **Built-in questions tool.** A built-in questions tool in the style of the interactive artifacts: how an agent asks
+  the user a structured question (multiple choice, say), presented like those artifacts rather than as plain text.
 
 ## Doc todo
 
