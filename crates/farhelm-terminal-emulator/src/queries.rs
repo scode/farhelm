@@ -293,6 +293,12 @@ macro_rules! delegate {
 }
 
 impl Handler for QueryHandler<'_> {
+    /// Keep parser repetition policy with the terminal's layout policy.
+    /// Legacy snapshot replay temporarily disables both through `Term`.
+    fn input_updates_rep(&self, c: char) -> bool {
+        self.term.input_updates_rep(c)
+    }
+
     delegate! {
         fn set_title(&mut self, title: Option<String>);
         fn set_cursor_style(&mut self, style: Option<CursorStyle>);

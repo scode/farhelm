@@ -70,7 +70,13 @@
 //!    pieces of at most about 64 KiB (`replay::FEED_PIECE`) so that the
 //!    effects a piece queues before they are dropped stay small, and must
 //!    leave it at a clean boundary with exactly that much history. Then the
-//!    emulator gets the caller's full scrollback.
+//!    emulator gets the caller's full scrollback. Emoji and text variation
+//!    selectors only attach marks during this replay, as in the emulator
+//!    version 1 was written for; they must not change the painted widths.
+//!    The stream also keeps the original REP bookkeeping, where a printed
+//!    selector or combining mark becomes the character REP repeats.
+//!    The current width rule is restored before returning the emulator, so
+//!    output from the host's journal follows the same rule as live output.
 //! 4. The fixups. One outside the screen is malformed; one in history
 //!    beyond what the restore kept is skipped, since that history was
 //!    dropped by step 2. A cell no live output can make is malformed: more
@@ -395,6 +401,13 @@ pub(super) fn decode(body: &[u8], scrollback_lines: usize) -> Result<Restored, S
     replay::check(stream, columns, lines, history)?;
 
     let mut emulator = Emulator::new(Size { columns, lines }, kept_history);
+    // Version 1 paints narrow hearts with FE0F and wide watches with FE0E
+    // directly. Applying today's selector widths would silently change
+    // those saved cells before their neighbors are painted. The switch also
+    // preserves the stream's original REP bookkeeping. This applies only
+    // to the snapshot stream: ReplaySeen also feeds the host's journal,
+    // whose output must follow the same rules as uninterrupted output.
+    emulator.term.set_emoji_width(false);
     // The stream answers nothing and tells the user nothing; the title is
     // read from the emulator afterwards. It is fed in pieces that end where
     // the cursor template's extra may have changed, so that each new extra
@@ -494,6 +507,7 @@ pub(super) fn decode(body: &[u8], scrollback_lines: usize) -> Result<Restored, S
         u64::from(trimmed_for).min(scrollback)
     };
     emulator.mark_trimmed(remaining);
+    emulator.term.set_emoji_width(true);
     Ok(Restored {
         emulator,
         screens_dropped: flags & FLAG_SCREENS_DROPPED != 0,

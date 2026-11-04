@@ -1,5 +1,14 @@
 # Third-party notices
 
+## Unicode properties for emoji selectors
+
+The literal variation-base exceptions, formatting ranges and Hangul attachment properties in
+`vendor/alacritty_terminal/src/term/mod.rs` derive from Unicode 18.0's `emoji-variation-sequences.txt`,
+`auxiliary/GraphemeBreakProperty.txt` and `DerivedCoreProperties.txt`, as bundled by Ghostty's pinned uucode dependency
+`ea62149739404a73c202b48a33bf6dd2af4bd9b0`. Copyright © 1991–2026 Unicode, Inc. The
+[Unicode License V3](https://www.unicode.org/license.txt) copyright and permission notice is reproduced in
+[`vendor/UNICODE-LICENSE.txt`](vendor/UNICODE-LICENSE.txt). No Ghostty implementation is copied.
+
 ## Inter interface font
 
 The Inter regular, semibold and bold WOFF2 files in `crates/farhelm-ui/assets/fonts/` are unchanged copies of the

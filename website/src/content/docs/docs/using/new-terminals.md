@@ -67,9 +67,17 @@ Typing with an input method, as for Chinese, Japanese or Korean, does not work f
 commit reaches the agent, but the text you are composing, and the input method's list of candidates, do not appear at
 the terminal's cursor while you type.
 
-One display difference has no decided fix yet: an emoji drawn wide by a variation selector, as in ❤️, takes one column
-in a new terminal where tmux gave it two, so a program that counts two columns for it can leave the rest of that line
-one column off.
+Emoji presentation selectors, as in ❤️, now give eligible characters two columns in a new terminal, and text
+presentation selectors can make a wide character narrow. This follows Ghostty's defaults; tmux also widens characters
+that are not eligible and does not narrow them.
+
+Two edge cases still differ from Ghostty: with wrapping disabled, a printed space in the final column is treated as
+empty when choosing which character a selector affects; and a terminal only one column wide drops a wide character
+before wrapping. The
+[Ghostty reference for the first case](https://github.com/ghostty-org/ghostty/blob/c7f68a7f48c6a5b357689eb8c2328bc2dab5d8ed/src/terminal/Terminal.zig#L1939-L1967)
+and
+[the second case](https://github.com/ghostty-org/ghostty/blob/c7f68a7f48c6a5b357689eb8c2328bc2dab5d8ed/src/terminal/Terminal.zig#L2189-L2262)
+show the behavior Farhelm will revisit.
 
 ## tmux is still needed
 

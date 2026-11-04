@@ -23,6 +23,11 @@
 //! Scripts give every hyperlink an explicit `id`: alacritty numbers links
 //! without one from a counter shared by the whole test process, which would
 //! make the blobs depend on which tests ran first.
+//!
+//! Three scripts seed old REP states through a hand-built version 1 stream.
+//! Current live input no longer makes a combining mark the REP character;
+//! these fixtures must keep testing the old state, not redefine it or
+//! regenerate its bytes to follow the current input policy.
 
 mod common;
 
@@ -34,7 +39,7 @@ use farhelm_terminal_emulator::alacritty_terminal::grid::Dimensions;
 use farhelm_terminal_emulator::alacritty_terminal::index::{Column, Line};
 use farhelm_terminal_emulator::alacritty_terminal::term::TermMode;
 use farhelm_terminal_emulator::alacritty_terminal::term::cell::Flags;
-use farhelm_terminal_emulator::{Collected, Emulator, FeedMode, Size, Snapshot};
+use farhelm_terminal_emulator::{Collected, Emulator, FeedMode, Size, Snapshot, WidthTable};
 
 /// Where version 1's fixtures live.
 fn fixtures() -> PathBuf {
@@ -49,9 +54,15 @@ const WIDTH_TABLE: std::ops::Range<usize> = 19..30;
 /// One step of a script.
 enum Step {
     Feed(&'static str),
+    /// A complete, history-free old state, replayed under frozen v1 rules.
+    /// Used only where current live input cannot make the recorded REP state.
+    LegacyStream(&'static str),
+    /// The same legacy seed, constructed to reach the old format's size caps.
+    LegacyMade(fn() -> String),
     /// Bytes that are not UTF-8 on their own, fed as one read.
     FeedBytes(&'static [u8]),
-    /// Output too long to write out, made by a function.
+    /// Output too long to write out, made by a function and fed live. Unlike
+    /// [`Step::LegacyMade`], this goes through today's input handling.
     FeedMade(fn() -> String),
     Resize(u16, u16),
 }
@@ -78,7 +89,7 @@ struct Script {
     take: Take,
 }
 
-use Step::{Feed, FeedBytes, FeedMade, Resize};
+use Step::{Feed, FeedBytes, FeedMade, LegacyMade, LegacyStream, Resize};
 
 /// An orphaned wide character (its spacer erased alone, so it is a fixup)
 /// carrying version 1's most of everything a fixup cell carries: 16
@@ -86,7 +97,7 @@ use Step::{Feed, FeedBytes, FeedMade, Resize};
 /// URI.
 fn fixup_at_the_limits() -> String {
     format!(
-        "\x1b]8;id={};http://e/{}\x1b\\中{}\x1b]8;;\x1b\\\x1b[D\x1b[X",
+        "\x1b]8;id={};http://e/{}\x1b\\中{}\x1b]8;;\x1b\\\x1b[2G\x1b[X",
         "i".repeat(250),
         "u".repeat(2083 - 9),
         "\u{301}".repeat(16)
@@ -331,7 +342,7 @@ const SCRIPTS: &[Script] = &[
         lines: 2,
         // Every cell taken, so the REP character (a combining mark on the
         // first cell) has no blank cell to be printed into.
-        steps: &[Feed("xxxxxxxx\x1b[H\u{301}")],
+        steps: &[LegacyStream("xxxxxxxx\x1b[H\u{301}")],
         take: Take::Full,
     },
     Script {
@@ -340,7 +351,7 @@ const SCRIPTS: &[Script] = &[
         lines: 3,
         // A combining mark printed last, after the row the stream paints
         // last: the stream prints it into a blank cell and erases it.
-        steps: &[Feed("\x1b[2;1Hz\x1b[1;1He\u{301}\x1b[3;1H")],
+        steps: &[LegacyStream("\x1b[2;1Hz\x1b[1;1He\u{301}\x1b[3;1H")],
         take: Take::Full,
     },
     Script {
@@ -408,7 +419,7 @@ const SCRIPTS: &[Script] = &[
         name: "fixup-at-the-limits",
         columns: 20,
         lines: 3,
-        steps: &[FeedMade(fixup_at_the_limits)],
+        steps: &[LegacyMade(fixup_at_the_limits)],
         take: Take::Full,
     },
     Script {
@@ -444,8 +455,31 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
         .any(|window| window == needle)
 }
 
-/// Run a script and take its snapshot. Feeds are live, so the scripts must
-/// not depend on effects (they ask nothing).
+/// Reconstruct a legacy REP state independently of the encoder under test.
+///
+/// This spells out v1's header and empty fixup lists around the script's
+/// original bytes. It never reads the golden blob, so the later byte-for-byte
+/// encoder comparison still has an independent expected result. These
+/// scripts create no history or fixups and leave REP as their stream set it.
+fn legacy_stream(columns: u16, lines: u16, stream: &str) -> Emulator {
+    let mut blob = b"FHTS\x00\x01\x00".to_vec();
+    blob.extend_from_slice(&columns.to_be_bytes());
+    blob.extend_from_slice(&lines.to_be_bytes());
+    blob.extend_from_slice(&[0; 8]); // No history or trimmed count.
+    let widths = WidthTable::current();
+    let (major, minor, update) = widths.unicode_version;
+    blob.extend_from_slice(&[major, minor, update]);
+    blob.extend_from_slice(&widths.fingerprint.to_be_bytes());
+    blob.extend_from_slice(&(stream.len() as u32).to_be_bytes());
+    blob.extend_from_slice(stream.as_bytes());
+    blob.extend_from_slice(&[0; 9]); // No cell/cursor fixups; keep stream REP.
+    Emulator::restore(&blob, 1000)
+        .expect("the original script is a valid history-free v1 stream")
+        .emulator
+}
+
+/// Run a script and take its snapshot. Ordinary feeds are live and ask
+/// nothing; explicit legacy seeds retain states live input no longer makes.
 fn run(script: &Script) -> (Emulator, Snapshot) {
     let mut emulator = Emulator::new(
         Size {
@@ -456,6 +490,12 @@ fn run(script: &Script) -> (Emulator, Snapshot) {
     );
     for step in script.steps {
         match *step {
+            LegacyStream(stream) => {
+                emulator = legacy_stream(script.columns, script.lines, stream);
+            }
+            LegacyMade(make) => {
+                emulator = legacy_stream(script.columns, script.lines, &make());
+            }
             Feed(text) => {
                 emulator.feed(
                     text.as_bytes(),

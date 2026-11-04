@@ -6,11 +6,11 @@
 //! deletes inside wide characters, REP, insert mode, autowrap off, queries,
 //! OSC 52, synchronized updates (some never ended), and sequences cut short.
 //!
-//! This is the snapshot spike's generator, ported unchanged in what it
-//! produces: seed `n` with 400,000 bytes gives the spike's `fuzz-n`
-//! recording, over which its encoder passed every round trip. Keeping the
-//! generator rather than the recordings keeps 3 MB of binary out of the
-//! repository, and lets the tests pick sizes.
+//! Based on the snapshot spike's generator, extended with emoji and text
+//! variation sequences so selector-driven width changes and their wraps
+//! reach the same round-trip and feed-boundary checks. Keeping the generator
+//! rather than recordings keeps 3 MB of binary out of the repository, and
+//! lets the tests pick sizes.
 
 /// xorshift64*: small, and the same sequence on every platform.
 pub struct Rng(u64);
@@ -54,9 +54,25 @@ const WORDS: &[&str] = &[
 ];
 const WIDE: &[char] = &['中', '文', '字', '🎉', '한', 'ｱ', '😀'];
 const ZERO_WIDTH: &[char] = &['\u{301}', '\u{308}', '\u{200d}', '\u{fe0f}', '\u{20e3}'];
+/// Eligible bases in both width directions, including unchanged widths and
+/// a mark before the selector. Random placement also reaches row edges,
+/// insert mode and autowrap off without a separate position-aware generator.
+const VARIATION_SEQUENCES: &[&str] = &[
+    "\u{2764}\u{fe0f}",
+    "#\u{fe0f}",
+    "\u{231a}\u{fe0e}",
+    "\u{3030}\u{fe0e}",
+    "\u{231a}\u{fe0f}",
+    "#\u{fe0e}",
+    "\u{2764}\u{301}\u{fe0f}",
+    "\u{2764}\u{200b}\u{fe0f}",
+    "\u{2764}\u{1161}\u{fe0f}",
+    "\u{1100}\u{16d67}",
+];
 
 /// A run of printable text: words, wide and combining characters, box
-/// drawing, tabs, runs that fill to the margin.
+/// drawing, tabs, runs that fill to the margin, and eligible variation
+/// sequences whose widths differ from their bases' ordinary widths.
 fn text(r: &mut Rng, out: &mut Vec<u8>) {
     for _ in 0..r.range(1, 30) {
         let k = r.below(100);
@@ -66,6 +82,8 @@ fn text(r: &mut Rng, out: &mut Vec<u8>) {
             r.pick(WIDE).to_string()
         } else if k < 78 {
             format!("e{}", r.pick(ZERO_WIDTH))
+        } else if k < 81 {
+            r.pick(VARIATION_SEQUENCES).to_string()
         } else if k < 83 {
             "─│┌".to_owned()
         } else if k < 88 {

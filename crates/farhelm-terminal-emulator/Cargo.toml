@@ -22,7 +22,10 @@ dist = false
 # this crate relies on the patch's accessors and caps (vendor/README.md). Its
 # `serde` default feature is off because nothing here serializes alacritty's
 # types.
-alacritty_terminal = { version = "=0.26.0", default-features = false }
+# The opt-in hook keeps a grapheme continuation from replacing REP's base.
+# It requires the patched vte this workspace supplies; standalone vendor
+# tests leave it off and continue to build against upstream vte.
+alacritty_terminal = { version = "=0.26.0", default-features = false, features = ["farhelm-rep-policy"] }
 # Character widths for the snapshot encoder, which must agree with alacritty's
 # own about where each printed character lands. alacritty asks for `0.2` too,
 # so cargo resolves both to one copy; a snapshot records that copy's Unicode

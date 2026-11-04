@@ -1760,8 +1760,7 @@ large history in slices between frames so that the screen stays usable, and the 
 queue instead.
 
 Not built for grid terminals, a near-term entry in `TODO.md`: showing an input method's composition at the cursor
-(committed text is sent). An emoji widened by a variation selector is one column in the emulator where tmux gives it
-two, an open decision in `TODO.md`.
+(committed text is sent).
 
 ## Terminal host
 
@@ -2602,6 +2601,16 @@ was sent to output none was, and where it crosses a gap, though it carries on to
 parity with tmux 3.7c (screen text, cursor, title and answers over generated and recorded output, `emulator_parity` in
 the supervisor) is tested against the pinned tmux, with the known differences pinned on both sides.
 
+Emoji and text variation selectors follow Ghostty's default Unicode width rules: only eligible bases change width,
+selectors after a combining mark are ignored, and text presentation can narrow a wide character. This deliberately
+differs from tmux's widening of any character followed by U+FE0F and its lack of narrowing. Two exceptions keep the
+existing saved state sufficient: with autowrap off at the right edge, a plain space counts as empty when choosing the
+selector's target, where Ghostty distinguishes a printed space from an erased cell; and a one-column terminal keeps the
+existing drop of too-wide input before processing a pending wrap. Both are pinned against the source-derived behavior of
+Ghostty commit `c7f68a7f48c6a5b357689eb8c2328bc2dab5d8ed`
+([target selection, lines 1939–1967](https://github.com/ghostty-org/ghostty/blob/c7f68a7f48c6a5b357689eb8c2328bc2dab5d8ed/src/terminal/Terminal.zig#L1939-L1967),
+[one-column input, lines 2189–2262](https://github.com/ghostty-org/ghostty/blob/c7f68a7f48c6a5b357689eb8c2328bc2dab5d8ed/src/terminal/Terminal.zig#L2189-L2262)).
+
 ### Terminal snapshots
 
 The supervisor interprets a host terminal's output with its own emulator (`crates/farhelm-terminal-emulator/`,
@@ -2623,6 +2632,10 @@ records the character width table it was painted with: the Unicode version its c
 width it gives every character, which is what tells two tables apart (the crate has changed widths without changing the
 version). A reader with another table restores it anyway and asks the program to redraw, since refusing would make every
 running terminal unavailable after a dependency upgrade.
+
+Version 1 streams replay with the emoji variation-width rule and its changed REP policy off, preserving the layout and
+repetition state old streams described. Both return to the live rule before any host-journal output is replayed. Widened
+and narrowed cells use the existing cell fixups; the encoder's bytes and per-character width fingerprint stay unchanged.
 
 A blob is untrusted on the way back: a corrupt or forged one costs a typed error, never a panic, unbounded memory or
 unbounded work. Before anything is allocated, screens too large for the restore's cell bound are refused, and history

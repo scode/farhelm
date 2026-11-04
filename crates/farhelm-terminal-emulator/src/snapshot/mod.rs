@@ -88,6 +88,14 @@
 //! running terminal unavailable at the first supervisor update after the
 //! dependency changes.
 //!
+//! Emoji and text variation selectors are separate from this per-character
+//! table. Version 1's stream always replays with selector-driven width
+//! changes disabled, preserving the narrow or wide cells older encoders
+//! painted. Cells whose width a selector changed in a current terminal
+//! travel as cell fixups instead. The restored emulator uses the current
+//! selector rule again before any host-journal or live output is fed; a
+//! snapshot between a base and its selector needs no extra saved state.
+//!
 //! What such a restore loses is confined to the characters whose width
 //! changed. The stream positions the cell after every character that is not
 //! ASCII by its column (CHA), not by where the character left the cursor,

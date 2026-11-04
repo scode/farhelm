@@ -10,7 +10,7 @@ license = "Apache-2.0"
 publish = false
 
 [dependencies]
-alacritty_terminal = { path = "../alacritty_terminal" }
+alacritty_terminal = { path = "../alacritty_terminal", features = ["farhelm-rep-policy"] }
 
 # The swap Farhelm's workspace makes once a crate depends on these trees: every `vte` in the graph, including the one
 # `alacritty_terminal` depends on, becomes the vendored one.

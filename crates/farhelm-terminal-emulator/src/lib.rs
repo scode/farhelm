@@ -35,6 +35,15 @@
 //! storage, and by vte's own 2 MiB limit on a synchronized update;
 //! `tests/hostile.rs` checks them through this crate.
 //!
+//! Emoji and text variation selectors use Ghostty's default width rules,
+//! rather than tmux's widening of any character followed by VS16. A selector
+//! after an ineligible character or combining mark is ignored; a valid text
+//! selector can narrow a normally wide character. Two bounded exceptions
+//! remain: a plain space counts as empty when choosing the target at the
+//! right edge with autowrap off, and ordinary wide input on a one-column
+//! screen keeps Farhelm's existing drop behavior. See `vendor/README.md`
+//! for the pinned Ghostty source and the tests of both differences.
+//!
 //! # Memory budget
 //!
 //! One emulator at Farhelm's full scrollback (12,000 lines of history and 60
