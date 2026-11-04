@@ -522,6 +522,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   itself when spawning a session — the user was actively waiting, which is exactly when auto-triggering is supposed to
   be deferred. Investigate what ran gc during the spawn (likely a jj/git operation in the colocated checkout) and move
   it to a moment when the user is not waiting.
+- **Closing or starting terminals must not block other actions.** Closing a terminal or starting new ones should not
+  disable doing other things, like switching to other sessions.
 
 ## Doc todo
 
