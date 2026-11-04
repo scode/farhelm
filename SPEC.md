@@ -2408,9 +2408,7 @@ on the clipboard or in a drag; pasted text that merely looks like a path is stil
 — the client transfers the file to the session's host and inserts the resulting host-side path into the terminal input
 at the cursor, so the agent picks it up with no manual copying. Plain text passes through as ordinary terminal input.
 Dropped directories are rejected with a visible error in v1. Interception is unconditional for files and images — remote
-and local sessions alike, regardless of any native paste handling the agent would have had in a plain local terminal. A
-new terminal (see [Terminal experience](#terminal-experience)) does not take drops yet: it refuses one with a message
-saying to copy and paste instead, which does the same (TODO.md).
+and local sessions alike, regardless of any native paste handling the agent would have had in a plain local terminal.
 
 Files land in a per-session attachments directory under the supervisor's own data area, never in the working directory —
 dropping untracked files into a workspace would be exactly the kind of implicit mutation this system promises not to

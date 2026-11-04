@@ -61,11 +61,10 @@ above the terminal.
 ## What is the same, and what is not yet
 
 Old terminals keep working exactly as before for now. You use both kinds the same way: type to the agent, scroll back,
-select and copy, paste text, screenshots and files, and open links.
+select and copy, paste or drop text, screenshots and files, and open links.
 
 A few things do not work in a new terminal yet:
 
-- Dropping a file onto it. Farhelm says to paste the file instead, which does the same.
 - Typing with an input method, as for Chinese, Japanese or Korean. What you commit reaches the agent, but the text you
   are composing, and the input method's list of candidates, do not appear at the terminal's cursor while you type.
 - The hint after a drag that copied nothing. In an old terminal, when a program that uses the mouse keeps a plain drag

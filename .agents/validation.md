@@ -635,11 +635,11 @@ that its required systemd or SSH substrate ran.
   (`crates/farhelm-ui/assets/grid-*.js`) on a static page fed recorded grid streams (display, input, scrollback,
   selection and copy, links, paste, history applied in slices), its fit and its copy across a wide character's wrap held
   to xterm.js's, the fit in identical containers across text sizes and pixel ratios, and `terminal.js`'s plumbing for
-  grid streams against a fake socket (attach, paste interception, drop refusal, link opening, the hyperlink mismatch
-  warning, file-path hovers and downloads, tunnels, reconnect and takeover snapshots), in Chromium and WebKit. No stack
-  and no build: the page and the shipped assets are served through request routing. Needs `npm install` and the browsers
-  from the browser suite's setup below; a few minutes. Not in CI. Run it when the grid assets, `terminal.js`'s grid
-  handling or the fixtures under `crates/farhelm-ui/js-tests/fixtures/grid/` change.
+  grid streams against a fake socket (attach, paste and drop interception, link opening, the hyperlink mismatch warning,
+  file-path hovers and downloads, tunnels, reconnect and takeover snapshots), in Chromium and WebKit. No stack and no
+  build: the page and the shipped assets are served through request routing. Needs `npm install` and the browsers from
+  the browser suite's setup below; a few minutes. Not in CI. Run it when the grid assets, `terminal.js`'s grid handling
+  or the fixtures under `crates/farhelm-ui/js-tests/fixtures/grid/` change.
 - `cd e2e && npx playwright test --config host-terminals/playwright.config.ts` — the browser specs of terminals in
   terminal hosts (`e2e/host-terminals/`), against a real stack of their own: the config boots one `e2e/start-stack.sh`
   with `FARHELM_E2E_NEW_TERMINALS=host`, which starts the stack's local supervisor with `--new-terminals host`, so the

@@ -564,17 +564,21 @@ test("a paste into a grid terminal goes through today's attachment interception 
   expect(uploads).toEqual(["notes.txt"]);
 });
 
-test("a drop on a grid terminal never navigates the page and says drops are not supported yet", async ({ page }) => {
-  // Drag and drop into grid terminals is not built (the maintainer's call);
-  // the drop must still be prevented, so the page cannot navigate to a
-  // dropped file, and must not be lost silently or blamed on the connection.
+test("a drop on a grid terminal uploads the file and pastes its path without navigating", async ({ page }) => {
+  // The grid must use the attachment path too: merely preventing navigation
+  // would swallow the drop, and inserting the drag's text would skip upload.
   await mountTerminal(page, undefined, { attach: ATTACH_POLICY });
+  const uploads: string[] = [];
+  await page.route(`${ORIGIN}/api/**`, (route) => {
+    uploads.push(new URL(route.request().url()).searchParams.get("filename")!);
+    return route.fulfill({ contentType: "application/json", body: JSON.stringify({ path: "/state/attachments/dropped.txt" }) });
+  });
   await attachGrid(page);
   const before = page.url();
-  expect(await dispatchPayload(page, "#term .grid-terminal", "drop", "", [{ name: "dropped.txt", content: "x" }])).toBe(true);
-  await expect(page.locator("#status")).toHaveText("Dropping into this terminal is not supported yet; copy and paste instead");
+  expect(await dispatchPayload(page, "#term .grid-terminal", "drop", "/elsewhere/dropped.txt", [{ name: "dropped.txt", content: "x" }])).toBe(true);
+  await expect.poll(() => inputMessages(page)).toEqual([{ t: "paste", data: "/state/attachments/dropped.txt ", last: true }]);
+  expect(uploads).toEqual(["dropped.txt"]);
   expect(page.url()).toBe(before);
-  expect(await inputMessages(page)).toEqual([]);
 });
 
 test("a completed selection reaches the system clipboard through the page's queue", async ({ page }) => {

@@ -44,7 +44,7 @@ import { expect, test } from "./helpers/evidence";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { type Page, type APIRequestContext } from "@playwright/test";
 import fs from "node:fs";
-import { cleanupSession, waitForTermText, onHostTerminals, terminalFit, terminalKind } from "./helpers/term";
+import { cleanupSession, waitForTermText, terminalFit, terminalKind } from "./helpers/term";
 import { supervisorSessionId } from "./helpers/fleet";
 import {
   addTab,
@@ -145,12 +145,12 @@ interface DispatchResult {
  * carrying `entries` as file objects and `text` as `text/plain`, and
  * report what the handlers did with it.
  *
- * A paste is dispatched at xterm's hidden helper TEXTAREA rather than at
- * the mount element, and that is not incidental: xterm registers its own
+ * A paste targets the surface's input element: xterm's hidden helper
+ * TEXTAREA or the grid's input. The xterm target is deliberate: it registers its own
  * paste handler there, so dispatching anywhere above it would fail to prove
  * that capture-phase interception runs before the engine's own handler.
- * Farhelm now owns text pastes too, calling xterm's paste method after
- * sanitizing the contents rather than letting the event reach that handler.
+ * Farhelm owns text pastes too, sanitizing them before the terminal's own
+ * paste path frames them rather than letting the event reach that handler.
  *
  * A drop is preceded by a `dragover` at the same element, because that is
  * the order a real drag produces and because `drop` does not fire at all
@@ -274,15 +274,6 @@ async function dispatchPayload(
     { elementId, kind, entries, text },
   );
 }
-
-/**
- * The gesture that hands this file's upload tests their files: a drop, as
- * these tests were written, or on terminals in terminal hosts a paste,
- * which runs the same classification, upload, status line and insertion
- * (SPEC.md, "Attachments") while drag and drop into those terminals is not
- * built. The tests whose subject is the drop itself skip there instead.
- */
-const FILE_GESTURE: "paste" | "drop" = onHostTerminals() ? "paste" : "drop";
 
 /**
  * One island's buffer as LOGICAL lines: xterm's wrapped continuation rows
@@ -519,7 +510,7 @@ async function openAttachmentSession(
 // which is what "at the cursor" has to mean.
 //
 // Pressing Enter afterwards is not decoration: local echo alone would
-// prove the path reached xterm, and the fake agent's `echo:` line is what
+// prove the path reached the terminal, and the fake agent's `echo:` line is what
 // proves those same bytes went out over the WebSocket as terminal input,
 // which is the whole point of inserting a path.
 test("a file dropped on the agent terminal uploads and inserts its host path at the cursor", async ({
@@ -537,7 +528,7 @@ test("a file dropped on the agent terminal uploads and inserts its host path at 
 
     await page.locator("#terminal").click();
     await page.keyboard.type("PRE:");
-    await dispatchPayload(page, "terminal", FILE_GESTURE, {
+    await dispatchPayload(page, "terminal", "drop", {
       entries: [{ name, mime: "text/plain", content: body }],
       // The text is synthesized alongside the file deliberately: some
       // drag sources do offer a text/plain copy of the path, and the
@@ -602,7 +593,7 @@ test("a file dropped on a tab inserts its path in that tab, leaving the agent te
     const [uploaded, dispatched] = await Promise.all([
       page.waitForResponse((response) => response.request().method() === "POST"
         && new URL(response.url()).pathname === `/api/sessions/${encodeURIComponent(id!)}/attachments`),
-      dispatchPayload(page, island, FILE_GESTURE, {
+      dispatchPayload(page, island, "drop", {
         entries: [{ name: "from-tab.txt", mime: "text/plain", content: body }],
       }),
     ]);
@@ -742,10 +733,9 @@ test("pasted and dropped text cannot close bracketed paste early", async ({ page
     if (!grid) {
       expect(await page.evaluate(() => (window as any).__farhelmIslands.terminal.term.modes.bracketedPasteMode)).toBe(true);
     }
-    // Drops into a grid terminal are refused, not inserted (drag and drop
-    // into terminals in terminal hosts is not built yet), so only the paste
-    // leg applies there.
-    for (const kind of grid ? (["paste"] as const) : (["paste", "drop"] as const)) {
+    // Both gestures must sanitize embedded framing before the terminal's
+    // own paste path adds its bracketed-paste markers.
+    for (const kind of ["paste", "drop"] as const) {
       const prefix = `${kind}-${stamp}-before`;
       const dispatched = await dispatchPayload(page, "terminal", kind, { text: `${prefix}\x1b[201~after` });
       expect(dispatched.event.defaultPrevented).toBe(true);
@@ -768,12 +758,6 @@ test("a dropped directory is rejected visibly, uploading nothing and pasting not
   page,
   request,
 }) => {
-  // Drag and drop into terminals in terminal hosts is not built (the
-  // maintainer's call; a near-term TODO entry): a drop there is prevented
-  // and answered with a notice, which e2e/grid-client/grid-attach.spec.ts
-  // pins ("a drop on a grid terminal never navigates the page and says
-  // drops are not supported yet").
-  test.skip(onHostTerminals(), "the drag-entry API's directory rejection is a drop's; drops into terminals in terminal hosts are refused");
   test.setTimeout(120_000);
   const stamp = Date.now();
   const uploads = countUploads(page);
@@ -814,12 +798,6 @@ test("an item whose bytes cannot be read is rejected before anything is uploaded
   page,
   request,
 }) => {
-  // Drag and drop into terminals in terminal hosts is not built (the
-  // maintainer's call; a near-term TODO entry): a drop there is prevented
-  // and answered with a notice, which e2e/grid-client/grid-attach.spec.ts
-  // pins ("a drop on a grid terminal never navigates the page and says
-  // drops are not supported yet").
-  test.skip(onHostTerminals(), "a directory arriving as a dropped file is a drop's; drops into terminals in terminal hosts are refused");
   test.setTimeout(120_000);
   const stamp = Date.now();
   const uploads = countUploads(page);
@@ -887,7 +865,7 @@ for (const stamp of [
       const session = await openAttachmentSession(page, request, `attach-skew-${Date.now()}`);
       id = session.id;
 
-      await dispatchPayload(page, "terminal", FILE_GESTURE, {
+      await dispatchPayload(page, "terminal", "drop", {
         entries: [{ name: "note.txt", mime: "text/plain", content: "hello" }],
       });
 
@@ -920,7 +898,7 @@ test("an upload that fails surfaces the error and inserts no path", async ({ pag
     const session = await openAttachmentSession(page, request, `attach-fail-${stamp}`);
     id = session.id;
 
-    await dispatchPayload(page, "terminal", FILE_GESTURE, {
+    await dispatchPayload(page, "terminal", "drop", {
       entries: [{ name: "doomed.txt", mime: "text/plain", content: "never lands" }],
     });
 
@@ -971,7 +949,7 @@ test("typing stays live during an upload, and the path lands at the cursor posit
 
     await page.locator("#terminal").click();
     await page.keyboard.type("PRE:");
-    await dispatchPayload(page, "terminal", FILE_GESTURE, {
+    await dispatchPayload(page, "terminal", "drop", {
       entries: [{ name, mime: "text/plain", content: body }],
     });
 
@@ -1015,7 +993,7 @@ test("two dropped files insert both paths, each its own word", async ({ page, re
     const session = await openAttachmentSession(page, request, `attach-many-${stamp}`);
     id = session.id;
 
-    await dispatchPayload(page, "terminal", FILE_GESTURE, {
+    await dispatchPayload(page, "terminal", "drop", {
       entries: [
         { name: `first-${stamp}.txt`, mime: "text/plain", content: "first body" },
         { name: `second-${stamp}.txt`, mime: "text/plain", content: "second body" },
@@ -1263,7 +1241,7 @@ test("a path whose directories need quoting arrives at the shell as one word", a
     await runInShell(page, island, `sh -c 'echo READY-${stamp}'`, `READY-${stamp}`);
     await page.locator(`[id="${island}"]`).click();
     await page.keyboard.type(`sh -c 'echo ARG:"$1"' _ `);
-    await dispatchPayload(page, island, FILE_GESTURE, {
+    await dispatchPayload(page, island, "drop", {
       entries: [{ name: "shot.png", mime: "image/png", content: "x" }],
     });
     await waitForIslandMatch(page, island, /shot\.png/);
@@ -1288,12 +1266,6 @@ test("a payload dropped on a detached terminal is refused instead of uploaded", 
   page,
   request,
 }) => {
-  // Drag and drop into terminals in terminal hosts is not built (the
-  // maintainer's call; a near-term TODO entry): a drop there is prevented
-  // and answered with a notice, which e2e/grid-client/grid-attach.spec.ts
-  // pins ("a drop on a grid terminal never navigates the page and says
-  // drops are not supported yet").
-  test.skip(onHostTerminals(), "a drop's refusal on a detached terminal; drops into terminals in terminal hosts are always refused");
   test.setTimeout(120_000);
   const stamp = Date.now();
   const uploads = countUploads(page);
@@ -1384,12 +1356,6 @@ test("a file dropped where no live terminal takes it is refused, never opened by
   page,
   request,
 }) => {
-  // Drag and drop into terminals in terminal hosts is not built (the
-  // maintainer's call; a near-term TODO entry): a drop there is prevented
-  // and answered with a notice, which e2e/grid-client/grid-attach.spec.ts
-  // pins ("a drop on a grid terminal never navigates the page and says
-  // drops are not supported yet").
-  test.skip(onHostTerminals(), "a drop's handling outside a live terminal; a grid terminal's drop prevention is pinned in e2e/grid-client");
   test.setTimeout(120_000);
   let id: string | undefined;
   try {
@@ -1502,7 +1468,7 @@ test("an upload that outlives its socket reports the path it could not insert", 
     const session = await openAttachmentSession(page, request, `attach-outlives-${stamp}`);
     id = session.id;
 
-    await dispatchPayload(page, "terminal", FILE_GESTURE, {
+    await dispatchPayload(page, "terminal", "drop", {
       entries: [{ name: "late.png", mime: "image/png", content: "bytes" }],
     });
     await expect(page.locator('[data-terminal="agent"] .attach-busy')).toBeVisible();
@@ -1594,7 +1560,7 @@ test("uploads cut off by a reconnect are reported by the remounted terminal", as
     const session = await openAttachmentSession(page, request, `attach-cut-off-${stamp}`);
     id = session.id;
 
-    await dispatchPayload(page, "terminal", FILE_GESTURE, {
+    await dispatchPayload(page, "terminal", "drop", {
       entries: [
         { name, mime: "text/plain", content: "in flight" },
         { name: queuedName, mime: "text/plain", content: "waiting" },
@@ -1641,7 +1607,7 @@ test("an upload failure stays on screen across a reconnect", async ({ page, requ
     const session = await openAttachmentSession(page, request, `attach-fail-reconnect-${stamp}`);
     id = session.id;
 
-    await dispatchPayload(page, "terminal", FILE_GESTURE, {
+    await dispatchPayload(page, "terminal", "drop", {
       entries: [{ name: "doomed.txt", mime: "text/plain", content: "never lands" }],
     });
     const error = page.locator('[data-terminal="agent"] .attach-error');
@@ -1676,7 +1642,7 @@ test("the not-connected refusal clears when the terminal reconnects", async ({ p
     await page.waitForFunction(
       () => (window as any).__farhelmIslands["terminal"].ws.readyState !== WebSocket.OPEN,
     );
-    await dispatchPayload(page, "terminal", FILE_GESTURE, {
+    await dispatchPayload(page, "terminal", "drop", {
       entries: [{ name: "early.txt", mime: "text/plain", content: "too early" }],
     });
     const error = page.locator('[data-terminal="agent"] .attach-error');
@@ -1711,7 +1677,7 @@ test("error text carrying replacement tokens renders literally", async ({ page, 
     const session = await openAttachmentSession(page, request, `attach-tokens-${stamp}`);
     id = session.id;
 
-    await dispatchPayload(page, "terminal", FILE_GESTURE, {
+    await dispatchPayload(page, "terminal", "drop", {
       entries: [{ name: "{reason}.txt", mime: "text/plain", content: "x" }],
     });
 
@@ -1759,10 +1725,10 @@ test("the indicator names the upload still running, not the one that just finish
 
     // Two payloads rather than one drop of two files: uploads within one
     // payload are sequential by design, so overlapping them takes two.
-    await dispatchPayload(page, "terminal", FILE_GESTURE, {
+    await dispatchPayload(page, "terminal", "drop", {
       entries: [{ name: "slow.txt", mime: "text/plain", content: "1" }],
     });
-    await dispatchPayload(page, "terminal", FILE_GESTURE, {
+    await dispatchPayload(page, "terminal", "drop", {
       entries: [{ name: "quick.txt", mime: "text/plain", content: "2" }],
     });
 
@@ -1786,12 +1752,6 @@ test("the indicator names the upload still running, not the one that just finish
 // every terminal with it), but the failure the user has not read yet stays
 // where it was.
 test("an unsupported drop leaves an earlier failure on screen", async ({ page, request }) => {
-  // Drag and drop into terminals in terminal hosts is not built (the
-  // maintainer's call; a near-term TODO entry): a drop there is prevented
-  // and answered with a notice, which e2e/grid-client/grid-attach.spec.ts
-  // pins ("a drop on a grid terminal never navigates the page and says
-  // drops are not supported yet").
-  test.skip(onHostTerminals(), "an unsupported drop; drops into terminals in terminal hosts are refused");
   test.setTimeout(120_000);
   const stamp = Date.now();
   let id: string | undefined;
@@ -1827,7 +1787,7 @@ test("a zero-byte file publishes and inserts its path", async ({ page, request }
     const session = await openAttachmentSession(page, request, `attach-empty-${stamp}`);
     id = session.id;
 
-    await dispatchPayload(page, "terminal", FILE_GESTURE, {
+    await dispatchPayload(page, "terminal", "drop", {
       entries: [{ name: `empty-${stamp}.txt`, mime: "text/plain", content: "" }],
     });
 
@@ -1858,7 +1818,7 @@ test("a filename full of URL syntax reaches the helm percent-encoded", async ({ 
     const session = await openAttachmentSession(page, request, `attach-urlname-${stamp}`);
     id = session.id;
 
-    await dispatchPayload(page, "terminal", FILE_GESTURE, {
+    await dispatchPayload(page, "terminal", "drop", {
       entries: [{ name: hostile, mime: "text/plain", content: "encoded body" }],
     });
 
@@ -1900,7 +1860,7 @@ test("a dead request and a malformed reply both fail visibly", async ({ page, re
     const session = await openAttachmentSession(page, request, `attach-broken-${stamp}`);
     id = session.id;
 
-    await dispatchPayload(page, "terminal", FILE_GESTURE, {
+    await dispatchPayload(page, "terminal", "drop", {
       entries: [{ name: "dropped.txt", mime: "text/plain", content: "x" }],
     });
     const error = page.locator('[data-terminal="agent"] .attach-error');
@@ -1909,7 +1869,7 @@ test("a dead request and a malformed reply both fail visibly", async ({ page, re
     await expect(error).toContainText("no path was inserted");
 
     mode = "garbage";
-    await dispatchPayload(page, "terminal", FILE_GESTURE, {
+    await dispatchPayload(page, "terminal", "drop", {
       entries: [{ name: "shapeless.txt", mime: "text/plain", content: "x" }],
     });
     await expect(error).toContainText("shapeless.txt");
@@ -1944,7 +1904,7 @@ test("a failure on the first of two dropped files does not stop the second", asy
     const session = await openAttachmentSession(page, request, `attach-partial-${stamp}`);
     id = session.id;
 
-    await dispatchPayload(page, "terminal", FILE_GESTURE, {
+    await dispatchPayload(page, "terminal", "drop", {
       entries: [
         { name: `doomed-${stamp}.txt`, mime: "text/plain", content: "never" },
         { name: `survivor-${stamp}.txt`, mime: "text/plain", content: "landed anyway" },
@@ -1992,7 +1952,7 @@ test("leaving mid-upload and reopening leaves exactly one set of hooks", async (
     const session = await openAttachmentSession(page, request, `attach-remount-${stamp}`);
     id = session.id;
 
-    await dispatchPayload(page, "terminal", FILE_GESTURE, {
+    await dispatchPayload(page, "terminal", "drop", {
       entries: [{ name: `abandoned-${stamp}.txt`, mime: "text/plain", content: "x" }],
     });
     await expect(page.locator('[data-terminal="agent"] .attach-busy')).toBeVisible();
@@ -2004,7 +1964,7 @@ test("leaving mid-upload and reopening leaves exactly one set of hooks", async (
     await waitForTermText(page, "FAKE-AGENT READY");
 
     uploads.reset();
-    await dispatchPayload(page, "terminal", FILE_GESTURE, {
+    await dispatchPayload(page, "terminal", "drop", {
       entries: [{ name: `after-${stamp}.txt`, mime: "text/plain", content: "once" }],
     });
     const match = await waitForIslandMatch(
@@ -2049,7 +2009,7 @@ test("a filename and a server error carrying markup render as literal text", asy
     const session = await openAttachmentSession(page, request, `attach-xss-${stamp}`);
     id = session.id;
 
-    await dispatchPayload(page, "terminal", FILE_GESTURE, {
+    await dispatchPayload(page, "terminal", "drop", {
       entries: [{ name: markupName, mime: "text/plain", content: "x" }],
     });
 
@@ -2097,7 +2057,7 @@ test("a completed upload keeps focus where it was and inserts through bracketed 
     // Focus deliberately parked outside the terminal before the drop —
     // the persistent Hosts toggle, available with Sessions shown.
     await page.locator(".hosts-panel-toggle").focus();
-    await dispatchPayload(page, "terminal", FILE_GESTURE, {
+    await dispatchPayload(page, "terminal", "drop", {
       entries: [{ name: `focus-${stamp}.txt`, mime: "text/plain", content: "x" }],
     });
     await waitForIslandMatch(
@@ -2148,7 +2108,7 @@ test("the attachment indicator never resizes the terminal", async ({ page, reque
     };
     const before = await geometry();
 
-    await dispatchPayload(page, "terminal", FILE_GESTURE, {
+    await dispatchPayload(page, "terminal", "drop", {
       entries: [{ name: `geometry-${stamp}.txt`, mime: "text/plain", content: "x" }],
     });
     await expect(page.locator('[data-terminal="agent"] .attach-busy')).toBeVisible();
@@ -2187,7 +2147,7 @@ test("an attachment failure stays in the terminal that received it", async ({ pa
     await waitForIslandMounted(page, island);
     await selectTerminal(page, tabId);
 
-    await dispatchPayload(page, island, FILE_GESTURE, {
+    await dispatchPayload(page, island, "drop", {
       entries: [{ name: `tabbed-${stamp}.txt`, mime: "text/plain", content: "x" }],
     });
 
@@ -2208,12 +2168,6 @@ test("a text-only drop is prevented, inserted, and leaves the page where it was"
   page,
   request,
 }) => {
-  // Drag and drop into terminals in terminal hosts is not built (the
-  // maintainer's call; a near-term TODO entry): a drop there is prevented
-  // and answered with a notice, which e2e/grid-client/grid-attach.spec.ts
-  // pins ("a drop on a grid terminal never navigates the page and says
-  // drops are not supported yet").
-  test.skip(onHostTerminals(), "a text drop's insertion; drops into terminals in terminal hosts are refused (prevention pinned in e2e/grid-client)");
   test.setTimeout(120_000);
   const stamp = Date.now();
   const uploads = countUploads(page);
@@ -2301,7 +2255,7 @@ test("a payload with files but no items takes the same path", async ({ page, req
     const session = await openAttachmentSession(page, request, `attach-fileslist-${stamp}`);
     id = session.id;
 
-    await dispatchPayload(page, "terminal", FILE_GESTURE, {
+    await dispatchPayload(page, "terminal", "drop", {
       entries: [
         { name: `listed-${stamp}.txt`, mime: "text/plain", content: "from files", filesOnly: true },
       ],
