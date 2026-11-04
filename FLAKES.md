@@ -57,6 +57,29 @@ paragraphs. Classes are `readiness`, `replay-live`, `fixture-premise`, `peer-lif
 Confidence is `established`, `hypothesis`, or `unknown`; `Cause:` is the last line. These fields apply only to new
 entries. Missing historical fields are missing evidence, not an implicit cause classification.
 
+## 2026-11-04 — quick-launch host route removed before fulfillment (e2e/tests/quick-launch.spec.ts)
+
+`a host-read fallback permits keyboard cancellation before recovery` failed in WebKit host-terminal run
+`81a954d9-bbe9-4556-a8bd-dd718350514c`. The trace shows a host-list reply callback begin its build-stamp read, cleanup
+remove the interception while that read was in flight, and the callback then try to fulfill the released route. The same
+case passed on Chromium in that run and on WebKit in the earlier browser sweep `8cb83a8d-7220-4997-9c9c-23e8e1927ed4` at
+a different commit. Open and excluded from future sweeps.
+
+```text
+Error: route.fulfill: Route is already handled!
+```
+
+Evidence: clean commit `4f3fef2831e0ff89edcb66d9ab72924028e17c71`, shared x86_64 Linux, host-terminal browser suite on
+both engines with three workers, one stack each and zero retries. The failing case took 5.5 seconds; concurrent load was
+not measured. Locale C.UTF-8; recorded tmux 3.7c executable SHA256
+`d60bcc711383c8282d560926854f2cb8d2d15e9af72641e1396e32f27af9a802`. The recorder retained `FARHELM_E2E_SUITE_TERMINALS`
+and supplied `FARHELM_TEST_TRACE_DIR`; other ambient Farhelm variables were scrubbed. Private run evidence and trace
+expire with temporary-file cleanup.
+
+Class: peer-lifecycle
+
+Cause: established
+
 ## 2026-11-04 — host-terminal startup-session check recurs (e2e/global-setup.ts)
 
 The host-terminal suite's global setup found no startup session in run `6e4fb56e-d4bf-4833-bf75-57115b19170d` and
