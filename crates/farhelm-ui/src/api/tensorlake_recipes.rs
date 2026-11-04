@@ -7,7 +7,7 @@
 //! it; every refusal comes back as the helm's own text, which the editor shows
 //! as is. Saves carry replacement tokens only; nothing here ever receives one.
 
-use super::{client, encode_path_segment, read_failure, refusal_text, send_read, send_save};
+use super::{client, encode_path_segment, read_failure, refusal_text, send, send_read, send_save};
 use farhelm_proto::tensorlake::recipes::{CreateRecipe, RecipeSave, RecipeView, RecipesView};
 
 /// Every recipe on the helm, by name. A failure is the read's own error text,
@@ -88,4 +88,21 @@ pub(crate) fn delete_recipe(
         }
         Ok(())
     }
+}
+
+/// Start building the recipe `name`'s snapshot, or join the build already
+/// running; Build, Rebuild and Retry all send this. The helm answers as soon
+/// as the build is running; its progress then arrives through the
+/// invalidation feed and [`fetch_recipes`]. A refusal (no API key, no ssh
+/// key, a recipe that reuses an image) comes back as the helm's own text.
+pub(crate) async fn build_recipe(base: &str, name: &str) -> Result<(), String> {
+    let url = format!(
+        "{base}/api/tensorlake/recipes/{}/build",
+        encode_path_segment(name)
+    );
+    let response = send(client().post(&url)).await?;
+    if !response.status().is_success() {
+        return Err(refusal_text("POST", &url, response).await);
+    }
+    Ok(())
 }

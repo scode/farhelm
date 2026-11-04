@@ -91,6 +91,12 @@ impl SshKeyStore {
             .ok_or_else(|| "Farhelm generated its ssh key but could not find it afterwards".into())
     }
 
+    /// The helm's Tensorlake directory, which also holds Farhelm's
+    /// known_hosts file for the gateway.
+    pub(crate) fn tensorlake_dir(&self) -> &Path {
+        &self.tensorlake_dir
+    }
+
     fn key_dir(&self) -> PathBuf {
         self.tensorlake_dir.join(KEY_DIR)
     }

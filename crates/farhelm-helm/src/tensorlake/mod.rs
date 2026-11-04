@@ -14,38 +14,37 @@
 //! - The [`Tensorlake`] service and the `/api/tensorlake` routes below, which
 //!   follow the ntfy settings' write-only rule: no reply ever carries the key.
 //! - [`recipes`]: the named recipes Farhelm creates sandboxes from, and their
-//!   `/api/tensorlake/recipes` routes. Local records only; nothing there calls
-//!   Tensorlake yet.
+//!   `/api/tensorlake/recipes` routes.
+//! - [`build`]: snapshot builds of managed recipes, which run their scripts
+//!   ([`build_script`]) in a builder sandbox through [`shell`] over ssh with
+//!   Farhelm's Tensorlake ssh options ([`ssh`]).
 //!
-//! These are the first slices of Tensorlake hosts. Snapshot builds, the
-//! hosts themselves, suspend and resume, and tunnels arrive in follow-up PRs
-//! and build on this service, which is why the client already carries the
-//! calls they need.
+//! These are the first slices of Tensorlake hosts. The hosts themselves,
+//! suspend and resume, and tunnels arrive in follow-up PRs and build on this
+//! service, which is why the client already carries the calls they need.
 
-// The client carries the calls the follow-up PRs need (create, suspend,
-// snapshots, ...), and only the Test button's listing has a caller yet. The
-// unit tests exercise every call, so the lint fires only outside them; the
-// expectation is meant to fail, and come off, once the last call is used.
-// On `e2e` and `http` it fires through helpers only those unused calls reach
-// (the fake's `unimplemented`, the client's `empty` and create timeout), so it
-// is not wrong there even though both modules' listing is in use.
+// The client carries the calls the follow-up PRs need (suspend and resume),
+// which nothing calls yet. The unit tests exercise every call, so the lint
+// fires only outside them; the expectation is meant to fail, and come off,
+// once the last call is used. On `e2e` it fires through the helper only those
+// unused calls reach (the fake's `unimplemented`).
 #[cfg_attr(
     not(test),
     expect(dead_code, reason = "calls typed now for the follow-up Tensorlake PRs")
 )]
 pub(crate) mod api;
+pub(crate) mod build;
+mod build_script;
 mod config;
 #[cfg_attr(
     not(test),
     expect(dead_code, reason = "calls typed now for the follow-up Tensorlake PRs")
 )]
 mod e2e;
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "calls typed now for the follow-up Tensorlake PRs")
-)]
 mod http;
 pub(crate) mod recipes;
+pub(crate) mod shell;
+pub(crate) mod ssh;
 mod ssh_key;
 
 #[cfg(test)]
@@ -58,8 +57,10 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use build::{BuildTimings, RecipeBuilds};
 use config::{SaveError, helm_tag};
 use farhelm_proto::tensorlake::{SaveSettings, Settings, SshKeyStatus, TestResult};
+use shell::{OfflineShell, SandboxShell, SshSandboxShell};
 use ssh_key::SshKeyStore;
 use std::{path::Path, sync::Arc};
 
@@ -75,6 +76,39 @@ struct Inner {
     /// `None` for a helm built without a state directory (the test seam
     /// [`AppState::with_provisioning`]), which has nowhere to keep a key.
     ssh_keys: Option<Arc<SshKeyStore>>,
+    /// The commands builds run in sandboxes: ssh, or a fake. Kept here only
+    /// so the test seams can rebuild the registry around a new API.
+    #[cfg(test)]
+    shell: Arc<dyn SandboxShell>,
+    /// The snapshot builds, which share this service's API and key.
+    builds: Arc<RecipeBuilds>,
+}
+
+impl Inner {
+    /// Assemble the service, with a build registry over the same API,
+    /// shell and key.
+    fn new(
+        store: HelmStore,
+        api: Arc<dyn TensorlakeApi>,
+        shell: Arc<dyn SandboxShell>,
+        ssh_keys: Option<Arc<SshKeyStore>>,
+    ) -> Self {
+        let builds = Arc::new(RecipeBuilds::new(
+            store.clone(),
+            Arc::clone(&api),
+            Arc::clone(&shell),
+            ssh_keys.clone(),
+            BuildTimings::default(),
+        ));
+        Self {
+            store,
+            api,
+            ssh_keys,
+            #[cfg(test)]
+            shell,
+            builds,
+        }
+    }
 }
 
 impl Tensorlake {
@@ -86,39 +120,60 @@ impl Tensorlake {
     /// Test builds never read the environment and never reach Tensorlake:
     /// their API is offline unless a test injects one ([`Self::with_api`]).
     pub(crate) fn production(store: HelmStore, state_dir: &Path) -> anyhow::Result<Self> {
-        let api: Arc<dyn TensorlakeApi> = if cfg!(test) {
-            Arc::new(Offline::test())
+        let (api, shell): (Arc<dyn TensorlakeApi>, Arc<dyn SandboxShell>) = if cfg!(test) {
+            (Arc::new(Offline::test()), Arc::new(OfflineShell))
         } else {
-            production_api(state_dir)?
+            production_seams(state_dir)?
         };
         let tensorlake_dir = std::path::absolute(state_dir)?.join("tensorlake");
-        Ok(Self(Arc::new(Inner {
+        Ok(Self(Arc::new(Inner::new(
             store,
             api,
-            ssh_keys: Some(Arc::new(SshKeyStore::new(tensorlake_dir))),
-        })))
+            shell,
+            Some(Arc::new(SshKeyStore::new(tensorlake_dir))),
+        ))))
     }
 
     /// A service that can neither reach Tensorlake nor keep a key: what a
     /// helm assembled without a state directory holds until `AppState::new`
     /// replaces it with the production one.
     pub(crate) fn detached(store: HelmStore) -> Self {
-        Self(Arc::new(Inner {
+        Self(Arc::new(Inner::new(
             store,
-            api: Arc::new(Offline::test()),
-            ssh_keys: None,
-        }))
+            Arc::new(Offline::test()),
+            Arc::new(OfflineShell),
+            None,
+        )))
     }
 
     /// The same service with another API behind it, for tests that point
-    /// the client at a stub server or a scripted fake.
+    /// the client at a stub server or a scripted fake. Builds get the new
+    /// API too; running builds stay with the old service.
     #[cfg(test)]
     pub(crate) fn with_api(&self, api: Arc<dyn TensorlakeApi>) -> Self {
-        Self(Arc::new(Inner {
-            store: self.0.store.clone(),
+        Self(Arc::new(Inner::new(
+            self.0.store.clone(),
             api,
-            ssh_keys: self.0.ssh_keys.clone(),
-        }))
+            Arc::clone(&self.0.shell),
+            self.0.ssh_keys.clone(),
+        )))
+    }
+
+    /// The same service with another sandbox shell behind its builds, for
+    /// tests that script what a build's commands answer.
+    #[cfg(test)]
+    pub(crate) fn with_shell(&self, shell: Arc<dyn SandboxShell>) -> Self {
+        Self(Arc::new(Inner::new(
+            self.0.store.clone(),
+            Arc::clone(&self.0.api),
+            shell,
+            self.0.ssh_keys.clone(),
+        )))
+    }
+
+    /// The helm's snapshot builds.
+    pub(crate) fn builds(&self) -> &Arc<RecipeBuilds> {
+        &self.0.builds
     }
 
     /// The settings snapshot the routes return. Read-only: it reports
@@ -213,27 +268,32 @@ fn ready(key: ssh_key::SshKey, tag: &str) -> SshKeyStatus {
     }
 }
 
-/// The real client, or the browser suite's fake when the helm was started
-/// with its environment variable. Reading the environment here, once at
-/// startup, is the same opt-in the provisioning backend's fake uses.
-fn production_api(state_dir: &Path) -> anyhow::Result<Arc<dyn TensorlakeApi>> {
+/// The real client and ssh, or the browser suite's fake for both when the
+/// helm was started with its environment variable. Reading the environment
+/// here, once at startup, is the same opt-in the provisioning backend's fake
+/// uses. One fake serves both seams, because its shell checks the sandboxes
+/// its API created.
+fn production_seams(
+    state_dir: &Path,
+) -> anyhow::Result<(Arc<dyn TensorlakeApi>, Arc<dyn SandboxShell>)> {
     if let Some(root) = std::env::var_os(e2e::E2E_TENSORLAKE_ENV) {
         let root = std::path::PathBuf::from(root);
-        let fake = e2e::E2eTensorlake::new(root.clone(), state_dir)?;
+        let fake = Arc::new(e2e::E2eTensorlake::new(root.clone(), state_dir)?);
         eprintln!(
-            "WARNING: E2E-only Tensorlake fake enabled from {}; Tensorlake API calls are simulated",
+            "WARNING: E2E-only Tensorlake fake enabled from {}; Tensorlake API calls and sandbox commands are simulated",
             root.display()
         );
-        return Ok(Arc::new(fake));
+        return Ok((fake.clone(), fake));
     }
+    let shell = Arc::new(SshSandboxShell::new());
     match http::HttpTensorlake::production() {
-        Ok(client) => Ok(Arc::new(client)),
+        Ok(client) => Ok((Arc::new(client), shell)),
         // A machine whose TLS setup cannot build a client (no CA bundle,
         // say) still serves everything else; Tensorlake calls then fail
         // with a reason that names the likely fix.
         Err(error) => {
             tracing::warn!(%error, "the Tensorlake HTTP client could not be built");
-            Ok(Arc::new(Offline::no_client()))
+            Ok((Arc::new(Offline::no_client()), shell))
         }
     }
 }

@@ -27,6 +27,9 @@ mod service;
 mod uninstall_refusal;
 
 pub use backend::{LocalSupervisorDiscovery, discover_local_supervisor};
+// The bounded child capture and spawn seam, shared with the Tensorlake
+// snapshot builder's ssh runner rather than copied there.
+pub(crate) use backend::{CommandLauncher, SystemLauncher, capture_child, isolate_process_group};
 pub(crate) use http::{
     probe_host, provision_host, provisioning_state, uninstall_host, update_host,
 };

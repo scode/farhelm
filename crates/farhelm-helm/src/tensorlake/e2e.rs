@@ -1,5 +1,6 @@
-//! A filesystem-controlled stand-in for Tensorlake's API, used only by the
-//! browser end-to-end suite.
+//! A filesystem-controlled stand-in for Tensorlake, used only by the browser
+//! end-to-end suite: its API and the shell a snapshot build runs in a
+//! sandbox.
 //!
 //! The browser suite drives the ordinary debug binary, not a `cfg(test)`
 //! build, so this fake is selected at runtime, the same way the injected
@@ -7,32 +8,50 @@
 //! test-named environment variable read once at helm startup, naming a
 //! directory that must lie inside the helm's private state directory and
 //! carry a marker file. Startup prints a warning before serving. Everything
-//! above the [`TensorlakeApi`] seam (the routes, the stored key, the Test
-//! button's handling) stays the shipped code.
+//! above the [`TensorlakeApi`] and [`SandboxShell`] seams (the routes, the
+//! stored key, the build engine) stays the shipped code.
 //!
-//! The directory is the control plane. A spec writes `config.json` (read
-//! afresh on every call, so a spec can change behavior mid-run by replacing
-//! it atomically) and reads `events.jsonl`, one line per call. The config
-//! names the account's sandboxes, an optional key the fake accepts (any
-//! other key gets a 401, which is how a spec proves the helm sends the key
-//! it saved without the fake ever writing a key down), and failures to
-//! inject per operation. Operations this PR does not exercise answer 501;
-//! later PRs extend the config with what creating, suspending and removing
-//! sandboxes need.
+//! The directory is the control plane:
+//!
+//! - `config.json`, written by the spec and read afresh on every call (a spec
+//!   changes behavior mid-run by replacing it atomically): the account's
+//!   extra sandboxes, an optional key the fake accepts (any other gets a
+//!   401, which is how a spec proves the helm sends the key it saved without
+//!   the fake ever writing a key down), failures to inject per operation,
+//!   how many polls a snapshot takes, and the shell's behavior (hold every
+//!   command, fail a step with given stderr, answer a step with given
+//!   stdout).
+//! - `state.json`, written by the fake: the sandboxes and snapshots the helm
+//!   created, terminated and deleted, so a spec can assert what is left
+//!   billing. A spec may seed it before acting.
+//! - `events.jsonl`, appended by the fake: one line per call, API and shell.
+//!
+//! The model itself, [`FakeModel`], is plain data with Tensorlake's rules
+//! (name uniqueness, 404s, a snapshot that completes after some polls); the
+//! helm's unit tests drive the same model in memory. Suspend and resume are
+//! not modeled yet and answer 501.
 
 use super::api::{
-    ApiKey, CreateSandbox, CreatedSandbox, CreatedSnapshot, SandboxInfo, SandboxPage, SnapshotInfo,
-    SnapshotList, SnapshotType, TensorlakeApi, TensorlakeError,
+    ApiKey, CreateSandbox, CreatedSandbox, CreatedSnapshot, Resources, SandboxInfo, SandboxPage,
+    SandboxSource, SandboxStatus, SnapshotInfo, SnapshotList, SnapshotStatus, SnapshotType,
+    TensorlakeApi, TensorlakeError,
 };
+use super::shell::{SandboxShell, ShellFailure, ShellOutput};
+use super::ssh::TensorlakeSshAccess;
 use anyhow::{Context as _, bail};
 use async_trait::async_trait;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 
 pub(crate) const E2E_TENSORLAKE_ENV: &str = "FARHELM_E2E_TENSORLAKE_DIR";
 const E2E_TENSORLAKE_MARKER: &str = "farhelm-e2e-tensorlake-v1\n";
+
+/// How often a held shell command re-reads `config.json` to see whether the
+/// spec released it.
+const HOLD_POLL: Duration = Duration::from_millis(100);
 
 /// A failure to answer instead of an operation's normal reply.
 #[derive(Debug, Clone, Deserialize)]
@@ -43,6 +62,20 @@ struct InjectedFailure {
     message: String,
 }
 
+/// How the fake shell answers. Keys of `fail` and `stdout` are the build
+/// step labels (`ready`, `packages`, `claude`, `codex`, `prepare`).
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct ShellConfig {
+    /// While true, every command waits (up to its own timeout) before doing
+    /// anything else, so a spec can see a build mid-step.
+    hold: bool,
+    /// Step label to the stderr it fails with (exit status 1).
+    fail: HashMap<String, String>,
+    /// Step label to its stdout, replacing the default.
+    stdout: HashMap<String, String>,
+}
+
 /// The whole control file. Unknown fields are refused, so a spec that
 /// misspells a field fails loudly instead of testing the default.
 #[derive(Debug, Default, Deserialize)]
@@ -50,17 +83,277 @@ struct InjectedFailure {
 struct FakeConfig {
     /// When set, only this key is accepted; any other answers 401.
     accepted_key: Option<String>,
-    /// The account's live sandboxes, as `GET /sandboxes` lists them, in the
-    /// API's own shape.
+    /// Sandboxes the account has besides the ones the helm created, as
+    /// `GET /sandboxes` lists them, in the API's own shape.
     sandboxes: Vec<SandboxInfo>,
     /// Operation name (`list_sandboxes`, ...) to the failure it answers.
     fail: HashMap<String, InjectedFailure>,
+    /// How many `get_snapshot` calls a new snapshot answers before it is
+    /// completed. Default 1.
+    snapshot_polls: Option<u32>,
+    shell: ShellConfig,
+}
+
+/// One sandbox in the model.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+pub(crate) struct FakeSandbox {
+    pub(crate) id: String,
+    pub(crate) name: Option<String>,
+    /// `running` or `terminated`; the model never leaves a sandbox pending.
+    pub(crate) status: String,
+    pub(crate) image: Option<String>,
+    pub(crate) snapshot_id: Option<String>,
+    pub(crate) resources: Resources,
+    pub(crate) timeout_secs: u64,
+    pub(crate) auto_resume: bool,
+}
+
+/// One snapshot in the model.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+pub(crate) struct FakeSnapshot {
+    pub(crate) id: String,
+    pub(crate) sandbox_id: String,
+    /// `in_progress`, `completed` or `failed`.
+    pub(crate) status: String,
+    /// `get_snapshot` calls left before an in-progress snapshot settles.
+    pub(crate) polls_left: u32,
+}
+
+/// Tensorlake's sandboxes and snapshots as the fake knows them. Plain data
+/// plus the rules the build engine relies on; persisted as `state.json` by
+/// the e2e fake and held in memory by the unit tests.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[serde(default)]
+pub(crate) struct FakeModel {
+    pub(crate) sandboxes: Vec<FakeSandbox>,
+    pub(crate) snapshots: Vec<FakeSnapshot>,
+    /// Makes new snapshots settle as `failed` instead of `completed`.
+    pub(crate) snapshots_fail: bool,
+    /// The last ID number handed out.
+    pub(crate) counter: u64,
+}
+
+impl FakeModel {
+    /// A new ID shaped like Tensorlake's: 21 lowercase letters and digits.
+    fn next_id(&mut self, prefix: &str) -> String {
+        self.counter += 1;
+        format!(
+            "{prefix}{:0width$}",
+            self.counter,
+            width = 21 - prefix.len()
+        )
+    }
+
+    /// The sandbox an argument names, by ID or by name. A terminated sandbox
+    /// still answers to its ID, but no longer to its name: a name belongs to
+    /// the live sandbox holding it, and Farhelm must not count on finding a
+    /// terminated one by name (which is why builders' IDs are recorded).
+    fn find(&self, sandbox: &str) -> Option<usize> {
+        let by_id = self.sandboxes.iter().position(|s| s.id == sandbox);
+        by_id.or_else(|| {
+            self.sandboxes
+                .iter()
+                .rposition(|s| s.name.as_deref() == Some(sandbox) && s.status != "terminated")
+        })
+    }
+
+    fn info(sandbox: &FakeSandbox) -> SandboxInfo {
+        SandboxInfo {
+            id: sandbox.id.clone(),
+            name: sandbox.name.clone(),
+            status: if sandbox.status == "running" {
+                SandboxStatus::Running
+            } else {
+                SandboxStatus::Terminated
+            },
+            created_at: None,
+            image: sandbox.image.clone(),
+            resources: Some(sandbox.resources.clone()),
+            snapshot_id: None,
+            error_details: None,
+            termination_reason: None,
+            pending_reason: None,
+            auto_resume: Some(sandbox.auto_resume),
+        }
+    }
+
+    fn not_found() -> TensorlakeError {
+        TensorlakeError::NotFound {
+            message: "not found".into(),
+        }
+    }
+
+    /// The live sandboxes, as a listing shows them.
+    pub(crate) fn live_sandboxes(&self) -> Vec<SandboxInfo> {
+        self.sandboxes
+            .iter()
+            .filter(|s| s.status != "terminated")
+            .map(Self::info)
+            .collect()
+    }
+
+    pub(crate) fn get(&self, sandbox: &str) -> Result<SandboxInfo, TensorlakeError> {
+        self.find(sandbox)
+            .map(|index| Self::info(&self.sandboxes[index]))
+            .ok_or_else(Self::not_found)
+    }
+
+    /// Create a running sandbox; a live sandbox with the same name is a 409.
+    pub(crate) fn create(
+        &mut self,
+        request: &CreateSandbox,
+    ) -> Result<CreatedSandbox, TensorlakeError> {
+        if self
+            .sandboxes
+            .iter()
+            .any(|s| s.name.as_deref() == Some(&request.name) && s.status != "terminated")
+        {
+            return Err(TensorlakeError::Conflict {
+                message: format!("a sandbox named {} already exists", request.name),
+            });
+        }
+        let id = self.next_id("fakesbx");
+        let (image, snapshot_id) = match &request.source {
+            SandboxSource::Image(image) => (Some(image.clone()), None),
+            SandboxSource::Snapshot(snapshot) => {
+                if !self.snapshots.iter().any(|s| &s.id == snapshot) {
+                    return Err(Self::not_found());
+                }
+                (None, Some(snapshot.clone()))
+            }
+        };
+        self.sandboxes.push(FakeSandbox {
+            id: id.clone(),
+            name: Some(request.name.clone()),
+            status: "running".into(),
+            image,
+            snapshot_id,
+            resources: request.resources.clone(),
+            timeout_secs: request.timeout_secs,
+            auto_resume: request.auto_resume,
+        });
+        Ok(CreatedSandbox {
+            sandbox_id: id,
+            status: SandboxStatus::Running,
+        })
+    }
+
+    /// Terminate by ID or name; already terminated is success, unknown 404.
+    pub(crate) fn terminate(&mut self, sandbox: &str) -> Result<(), TensorlakeError> {
+        let index = self.find(sandbox).ok_or_else(Self::not_found)?;
+        self.sandboxes[index].status = "terminated".into();
+        Ok(())
+    }
+
+    /// Start a snapshot of a running sandbox; it settles after `polls`
+    /// `get_snapshot` calls.
+    pub(crate) fn snapshot(
+        &mut self,
+        sandbox: &str,
+        polls: u32,
+    ) -> Result<CreatedSnapshot, TensorlakeError> {
+        let index = self.find(sandbox).ok_or_else(Self::not_found)?;
+        if self.sandboxes[index].status != "running" {
+            return Err(TensorlakeError::Conflict {
+                message: "the sandbox is not running".into(),
+            });
+        }
+        let sandbox_id = self.sandboxes[index].id.clone();
+        let id = self.next_id("fakesnap");
+        self.snapshots.push(FakeSnapshot {
+            id: id.clone(),
+            sandbox_id,
+            status: "in_progress".into(),
+            polls_left: polls,
+        });
+        Ok(CreatedSnapshot { snapshot_id: id })
+    }
+
+    /// Plant a settled snapshot of `sandbox_id` (a suspend snapshot, say),
+    /// for tests that seed leftovers.
+    pub(crate) fn plant_snapshot(&mut self, sandbox_id: &str) -> String {
+        let id = self.next_id("fakesnap");
+        self.snapshots.push(FakeSnapshot {
+            id: id.clone(),
+            sandbox_id: sandbox_id.into(),
+            status: "completed".into(),
+            polls_left: 0,
+        });
+        id
+    }
+
+    fn snapshot_info(snapshot: &FakeSnapshot) -> SnapshotInfo {
+        SnapshotInfo {
+            id: snapshot.id.clone(),
+            sandbox_id: Some(snapshot.sandbox_id.clone()),
+            status: match snapshot.status.as_str() {
+                "completed" => SnapshotStatus::Completed,
+                "failed" => SnapshotStatus::Failed,
+                _ => SnapshotStatus::Unknown,
+            },
+            snapshot_type: Some(SnapshotType::Filesystem),
+            size_bytes: None,
+            created_at: None,
+        }
+    }
+
+    /// One poll of a snapshot, which counts down its settling.
+    pub(crate) fn poll_snapshot(&mut self, id: &str) -> Result<SnapshotInfo, TensorlakeError> {
+        let fail = self.snapshots_fail;
+        let snapshot = self
+            .snapshots
+            .iter_mut()
+            .find(|s| s.id == id)
+            .ok_or_else(Self::not_found)?;
+        if snapshot.status == "in_progress" {
+            if snapshot.polls_left == 0 {
+                snapshot.status = if fail { "failed" } else { "completed" }.into();
+            } else {
+                snapshot.polls_left -= 1;
+            }
+        }
+        Ok(Self::snapshot_info(snapshot))
+    }
+
+    pub(crate) fn list_snapshots(&self) -> SnapshotList {
+        SnapshotList {
+            snapshots: self.snapshots.iter().map(Self::snapshot_info).collect(),
+        }
+    }
+
+    pub(crate) fn delete_snapshot(&mut self, id: &str) -> Result<(), TensorlakeError> {
+        let before = self.snapshots.len();
+        self.snapshots.retain(|s| s.id != id);
+        if self.snapshots.len() == before {
+            return Err(Self::not_found());
+        }
+        Ok(())
+    }
+
+    /// Whether the sandbox named `sandbox` is live and running, which is
+    /// what an ssh connection needs.
+    pub(crate) fn is_running(&self, sandbox: &str) -> bool {
+        self.find(sandbox)
+            .is_some_and(|index| self.sandboxes[index].status == "running")
+    }
+}
+
+/// The stdout a step answers when the config names none: the agent steps
+/// answer a version line, as the real scripts do.
+pub(crate) fn default_stdout(label: &str) -> &'static str {
+    match label {
+        "claude" => "1.0.0 (Claude Code)\n",
+        "codex" => "codex-cli 0.1.0\n",
+        _ => "",
+    }
 }
 
 /// One explicit fake per helm, rooted in the control directory.
 pub(crate) struct E2eTensorlake {
     root: PathBuf,
     event_write: tokio::sync::Mutex<()>,
+    /// Serializes read-modify-write of `state.json`.
+    state_write: tokio::sync::Mutex<()>,
 }
 
 impl E2eTensorlake {
@@ -91,6 +384,7 @@ impl E2eTensorlake {
         Ok(Self {
             root,
             event_write: tokio::sync::Mutex::new(()),
+            state_write: tokio::sync::Mutex::new(()),
         })
     }
 
@@ -108,6 +402,43 @@ impl E2eTensorlake {
                 message: format!("the e2e Tensorlake fake could not read config.json: {error}"),
             }),
         }
+    }
+
+    /// Read `state.json`; missing is the empty model.
+    async fn read_model(&self) -> Result<FakeModel, TensorlakeError> {
+        match tokio::fs::read(self.root.join("state.json")).await {
+            Ok(bytes) => serde_json::from_slice(&bytes).map_err(|error| TensorlakeError::Status {
+                status: 500,
+                message: format!("the e2e Tensorlake fake's state.json is invalid: {error}"),
+            }),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(FakeModel::default()),
+            Err(error) => Err(TensorlakeError::Status {
+                status: 500,
+                message: format!("the e2e Tensorlake fake could not read state.json: {error}"),
+            }),
+        }
+    }
+
+    /// Apply `change` to the model and write it back atomically (a temporary
+    /// file renamed over `state.json`), so a spec never reads half a file.
+    async fn change_model<T>(
+        &self,
+        change: impl FnOnce(&mut FakeModel) -> Result<T, TensorlakeError>,
+    ) -> Result<T, TensorlakeError> {
+        let _guard = self.state_write.lock().await;
+        let mut model = self.read_model().await?;
+        let result = change(&mut model)?;
+        let write = async {
+            let next = self.root.join("state.json.next");
+            tokio::fs::write(&next, serde_json::to_vec_pretty(&model)?).await?;
+            tokio::fs::rename(&next, self.root.join("state.json")).await?;
+            anyhow::Ok(())
+        };
+        write.await.map_err(|error| TensorlakeError::Status {
+            status: 500,
+            message: format!("the e2e Tensorlake fake could not write state.json: {error}"),
+        })?;
+        Ok(result)
     }
 
     /// Record one call, then decide whether it gets past authentication and
@@ -173,8 +504,10 @@ impl TensorlakeApi for E2eTensorlake {
         _cursor: Option<&str>,
     ) -> Result<SandboxPage, TensorlakeError> {
         let config = self.admit("list_sandboxes", key).await?;
+        let mut sandboxes = config.sandboxes;
+        sandboxes.extend(self.read_model().await?.live_sandboxes());
         Ok(SandboxPage {
-            sandboxes: config.sandboxes,
+            sandboxes,
             next_cursor: None,
         })
     }
@@ -182,17 +515,19 @@ impl TensorlakeApi for E2eTensorlake {
     async fn get_sandbox(
         &self,
         key: &ApiKey,
-        _sandbox: &str,
+        sandbox: &str,
     ) -> Result<SandboxInfo, TensorlakeError> {
-        self.unimplemented("get_sandbox", key).await
+        self.admit("get_sandbox", key).await?;
+        self.read_model().await?.get(sandbox)
     }
 
     async fn create_sandbox(
         &self,
         key: &ApiKey,
-        _request: &CreateSandbox,
+        request: &CreateSandbox,
     ) -> Result<CreatedSandbox, TensorlakeError> {
-        self.unimplemented("create_sandbox", key).await
+        self.admit("create_sandbox", key).await?;
+        self.change_model(|model| model.create(request)).await
     }
 
     async fn suspend_sandbox(&self, key: &ApiKey, _sandbox: &str) -> Result<(), TensorlakeError> {
@@ -203,32 +538,96 @@ impl TensorlakeApi for E2eTensorlake {
         self.unimplemented("resume_sandbox", key).await
     }
 
-    async fn terminate_sandbox(&self, key: &ApiKey, _sandbox: &str) -> Result<(), TensorlakeError> {
-        self.unimplemented("terminate_sandbox", key).await
+    async fn terminate_sandbox(&self, key: &ApiKey, sandbox: &str) -> Result<(), TensorlakeError> {
+        self.admit("terminate_sandbox", key).await?;
+        self.change_model(|model| model.terminate(sandbox)).await
     }
 
     async fn create_snapshot(
         &self,
         key: &ApiKey,
-        _sandbox: &str,
+        sandbox: &str,
         _snapshot_type: SnapshotType,
     ) -> Result<CreatedSnapshot, TensorlakeError> {
-        self.unimplemented("create_snapshot", key).await
+        let config = self.admit("create_snapshot", key).await?;
+        let polls = config.snapshot_polls.unwrap_or(1);
+        self.change_model(|model| model.snapshot(sandbox, polls))
+            .await
     }
 
     async fn get_snapshot(
         &self,
         key: &ApiKey,
-        _snapshot: &str,
+        snapshot: &str,
     ) -> Result<SnapshotInfo, TensorlakeError> {
-        self.unimplemented("get_snapshot", key).await
+        self.admit("get_snapshot", key).await?;
+        self.change_model(|model| model.poll_snapshot(snapshot))
+            .await
     }
 
     async fn list_snapshots(&self, key: &ApiKey) -> Result<SnapshotList, TensorlakeError> {
-        self.unimplemented("list_snapshots", key).await
+        self.admit("list_snapshots", key).await?;
+        Ok(self.read_model().await?.list_snapshots())
     }
 
-    async fn delete_snapshot(&self, key: &ApiKey, _snapshot: &str) -> Result<(), TensorlakeError> {
-        self.unimplemented("delete_snapshot", key).await
+    async fn delete_snapshot(&self, key: &ApiKey, snapshot: &str) -> Result<(), TensorlakeError> {
+        self.admit("delete_snapshot", key).await?;
+        self.change_model(|model| model.delete_snapshot(snapshot))
+            .await
+    }
+}
+
+/// The fake shell: never runs ssh. It records the step, waits while the
+/// config holds commands, refuses a sandbox the model does not have running
+/// (which catches a build that connects before its sandbox runs), and then
+/// fails or answers as the config says.
+#[async_trait]
+impl SandboxShell for E2eTensorlake {
+    async fn run(
+        &self,
+        _access: &TensorlakeSshAccess,
+        sandbox: &str,
+        label: &str,
+        _script: &str,
+        timeout: Duration,
+    ) -> Result<ShellOutput, ShellFailure> {
+        let unavailable = |error: TensorlakeError| ShellFailure::Unavailable(error.to_string());
+        self.record(serde_json::json!({ "op": "shell", "sandbox": sandbox, "label": label }))
+            .await;
+        let deadline = tokio::time::Instant::now() + timeout;
+        let config = loop {
+            let config = self.config().await.map_err(unavailable)?;
+            if !config.shell.hold {
+                break config;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return Err(ShellFailure::TimedOut(timeout));
+            }
+            tokio::time::sleep(HOLD_POLL).await;
+        };
+        if !self
+            .read_model()
+            .await
+            .map_err(unavailable)?
+            .is_running(sandbox)
+        {
+            return Err(ShellFailure::Unreachable(format!(
+                "the e2e fake has no running sandbox named {sandbox}"
+            )));
+        }
+        if let Some(stderr) = config.shell.fail.get(label) {
+            return Err(ShellFailure::Exited {
+                code: 1,
+                stderr: stderr.clone(),
+            });
+        }
+        Ok(ShellOutput {
+            stdout: config
+                .shell
+                .stdout
+                .get(label)
+                .cloned()
+                .unwrap_or_else(|| default_stdout(label).to_string()),
+        })
     }
 }

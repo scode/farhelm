@@ -493,6 +493,16 @@ pub(crate) fn RecipeEditor(
         .as_ref()
         .map(|view| view.name.clone())
         .unwrap_or_default();
+    // A built snapshot is deleted with the recipe (the helm does it first),
+    // so the confirmation says so: it is the part a user cannot get back.
+    let delete_question = if existing
+        .as_ref()
+        .is_some_and(|view| view.snapshot.is_some())
+    {
+        format!("Delete recipe {shown_name} and its snapshot on Tensorlake? This can't be undone.")
+    } else {
+        format!("Delete recipe {shown_name}? This can't be undone.")
+    };
     let title = match &existing {
         None => "New recipe".to_string(),
         Some(view) => format!("Recipe: {}", view.name),
@@ -691,7 +701,7 @@ pub(crate) fn RecipeEditor(
                 }
             } else if let Some(shown) = delete_shown.clone() {
                 div { class: "templates-departure recipe-delete-confirm", role: "status",
-                    p { "Delete recipe {shown_name}? This can't be undone." }
+                    p { "{delete_question}" }
                     DialogActions {
                         button { r#type: "button", class: "btn btn-neutral", disabled: locked,
                             onclick: { let shown = shown.clone(); move |_| delete_prompt.cancel_for(&shown) },

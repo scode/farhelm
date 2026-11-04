@@ -74,7 +74,9 @@ use serde::Deserialize;
 mod save_order;
 /// The Tensorlake recipe calls (see the module's own docs).
 mod tensorlake_recipes;
-pub(crate) use tensorlake_recipes::{create_recipe, delete_recipe, fetch_recipes, update_recipe};
+pub(crate) use tensorlake_recipes::{
+    build_recipe, create_recipe, delete_recipe, fetch_recipes, update_recipe,
+};
 
 /// UI-owned configuration writes outlive authentication and modal remounts.
 static CONFIGURATION_SAVES: std::sync::LazyLock<save_order::Saves> =

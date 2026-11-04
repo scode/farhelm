@@ -3909,6 +3909,14 @@ a:any-link,
 .recipe-row-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
 .recipe-row-name { color: var(--fg-0); font-weight: 600; overflow-wrap: anywhere; }
 .recipe-row-summary, .recipe-row-status { color: var(--fg-1); font-size: 12px; overflow-wrap: anywhere; }
+/* A managed recipe's snapshot status: one line per fact, by tone. Build
+   failures carry the script's own error lines, so they keep line breaks. */
+.recipe-row-snapshot { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.recipe-row-snapshot .recipe-row-status { display: flex; align-items: baseline; gap: 6px; }
+.recipe-row-status-warning { color: var(--warn-bright); }
+.recipe-row-status-error { color: var(--danger); white-space: pre-wrap; }
+.recipe-row-status-muted { color: var(--fg-2); }
+.recipe-row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 4px; }
 .recipe-editor .checkout-root-label { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .recipe-editor .host-settings-help { margin-left: 0; }
 .recipe-editor textarea { font-family: var(--font-mono); line-height: 1.5; padding: 8px 12px; resize: vertical; }

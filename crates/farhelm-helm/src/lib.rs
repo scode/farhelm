@@ -890,6 +890,12 @@ fn api_router(state: Arc<AppState>) -> Router {
                     tensorlake::recipes::BODY_LIMIT,
                 )),
         )
+        // Build, Rebuild and Retry of a recipe's snapshot. Starts (or joins)
+        // a build that runs on its own task; the reply does not wait for it.
+        .route(
+            "/api/tensorlake/recipes/{name}/build",
+            axum::routing::post(tensorlake::recipes::build_recipe),
+        )
         // API paths are reserved before the public SPA fallback is installed.
         // Without this catch-all, an extensionless GET typo receives
         // index.html and looks successful until JSON decoding fails; other

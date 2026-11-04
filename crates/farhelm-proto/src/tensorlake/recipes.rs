@@ -20,9 +20,12 @@
 //! it. Types that can carry a token deliberately do not implement `Debug`, so
 //! a stray `{:?}` cannot print one.
 //!
-//! What this module does NOT cover: snapshot builds and their state (a later
-//! change adds those to the read shape), and whether Tensorlake accepts a size
-//! (the plan's limits are not readable through the API, so Tensorlake's own
+//! The read shape also reports a managed recipe's snapshot build: the built
+//! snapshot ([`SnapshotView`]) and whether a build runs or how the last one
+//! ended ([`BuildView`]). The helm owns that state; no save carries it.
+//!
+//! What this module does NOT cover: whether Tensorlake accepts a size (the
+//! plan's limits are not readable through the API, so Tensorlake's own
 //! refusal decides when a sandbox is created).
 
 use serde::{Deserialize, Serialize};
@@ -248,8 +251,9 @@ pub struct CreateRecipe {
 /// One recipe as the helm reports it, without secrets.
 ///
 /// Readers tolerate fields they do not know, so a client loaded before a helm
-/// upgrade keeps working when this shape grows (snapshot build state is the
-/// expected addition).
+/// upgrade keeps working when this shape grows. The build fields default
+/// when absent for the same reason in the other direction: a reply from a
+/// helm without snapshot builds reads as "nothing built, nothing running".
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct RecipeView {
     pub name: String,
@@ -258,6 +262,117 @@ pub struct RecipeView {
     pub claude: Option<EndpointView>,
     pub codex: Option<EndpointView>,
     pub tunnels: Vec<Tunnel>,
+    /// The snapshot Farhelm built for a managed recipe, which new hosts start
+    /// from. Always `None` for a recipe that reuses an image or snapshot.
+    #[serde(default)]
+    pub snapshot: Option<SnapshotView>,
+    /// Whether a snapshot build is running, or how the last one ended when
+    /// it did not succeed.
+    #[serde(default)]
+    pub build: BuildView,
+    /// A build sandbox or a superseded snapshot that Farhelm created for this
+    /// recipe still exists on Tensorlake because deleting it failed. It bills
+    /// until the next build or the recipe's deletion removes it.
+    #[serde(default)]
+    pub cleanup_pending: bool,
+}
+
+/// A built snapshot as the list shows it. Times are seconds since the epoch.
+///
+/// `packages` and `disk_gb` are what the snapshot was built with, so a client
+/// can tell when the recipe has moved on since: different packages mean the
+/// snapshot is stale, and a recipe disk smaller than `disk_gb` means hosts
+/// cannot start from it at all (a Tensorlake sandbox cannot be smaller than
+/// the snapshot it starts from).
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct SnapshotView {
+    pub id: String,
+    pub built_at: i64,
+    pub base_image: String,
+    pub disk_gb: u32,
+    pub packages: Vec<String>,
+    /// The `--version` lines the build read from the installed agents.
+    pub claude_version: Option<String>,
+    pub codex_version: Option<String>,
+}
+
+/// The steps of a snapshot build, in order. The UI shows the running one as
+/// "step n of [`BuildStep::COUNT`]".
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BuildStep {
+    /// Removing what an earlier build left behind.
+    Cleaning,
+    /// Asking Tensorlake for the build sandbox.
+    Creating,
+    /// Waiting for the build sandbox to run.
+    Starting,
+    /// Reaching the build sandbox over ssh and checking it boots systemd.
+    Connecting,
+    Packages,
+    ClaudeCode,
+    Codex,
+    /// Preparing the filesystem and taking the snapshot.
+    Snapshotting,
+    /// Recording the snapshot and deleting the build sandbox.
+    Finishing,
+}
+
+impl BuildStep {
+    /// How many steps a build has.
+    pub const COUNT: u8 = 9;
+
+    /// This step's position, from 1 to [`Self::COUNT`].
+    pub fn number(self) -> u8 {
+        match self {
+            BuildStep::Cleaning => 1,
+            BuildStep::Creating => 2,
+            BuildStep::Starting => 3,
+            BuildStep::Connecting => 4,
+            BuildStep::Packages => 5,
+            BuildStep::ClaudeCode => 6,
+            BuildStep::Codex => 7,
+            BuildStep::Snapshotting => 8,
+            BuildStep::Finishing => 9,
+        }
+    }
+
+    /// What the step is doing, as a lowercase phrase that completes
+    /// "Building snapshot: …" and "Snapshot build failed while …".
+    pub fn label(self) -> &'static str {
+        match self {
+            BuildStep::Cleaning => "cleaning up after the last build",
+            BuildStep::Creating => "creating the build sandbox",
+            BuildStep::Starting => "waiting for the build sandbox to start",
+            BuildStep::Connecting => "connecting to the build sandbox",
+            BuildStep::Packages => "installing packages",
+            BuildStep::ClaudeCode => "installing Claude Code",
+            BuildStep::Codex => "installing Codex",
+            BuildStep::Snapshotting => "taking the snapshot",
+            BuildStep::Finishing => "finishing up",
+        }
+    }
+}
+
+/// A recipe's snapshot build status. Times are seconds since the epoch.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum BuildView {
+    /// No build is running, and the last one (if any) succeeded.
+    #[default]
+    Idle,
+    /// A build is running and has reached `step`.
+    Building { step: BuildStep, started_at: i64 },
+    /// The last build failed at `step`; `message` says why, for display. The
+    /// recipe's earlier snapshot, if it has one, is untouched.
+    Failed {
+        step: BuildStep,
+        message: String,
+        at: i64,
+    },
+    /// A build started and never finished because the helm stopped while it
+    /// ran. What it left behind is removed by the next build.
+    Interrupted { started_at: i64 },
 }
 
 /// The body of `GET /api/tensorlake/recipes`, ordered by name.
