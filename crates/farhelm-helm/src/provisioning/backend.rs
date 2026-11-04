@@ -44,7 +44,7 @@ const TRANSFER_PROGRESS_POLL: Duration = Duration::from_secs(2);
 // 2 s: a ControlPersist check saw EOF about 0.5 s after exit, a thin margin
 // under load, and a helper that lingers briefly used to cost only a delay.
 // Ten seconds still ends an indefinite wait and frees the planning slot.
-const CAPTURE_PIPE_GRACE: Duration = Duration::from_secs(10);
+pub(super) const CAPTURE_PIPE_GRACE: Duration = Duration::from_secs(10);
 pub(super) const MAX_CHILD_STREAM_BYTES: usize = 64 * 1024;
 const POSITIVE_ABSENCE_EXIT: i32 = 75;
 pub(super) const REMOTE_PROBE_MARKER: &str = "farhelm-probe-command-started-v1";
@@ -1272,7 +1272,21 @@ impl SystemBackend {
             let flushed = stdin.shutdown().await;
             copied.and(flushed)
         });
-        let output = capture_transfer_child(child, source_bytes, TRANSFER_IDLE_TIMEOUT).await;
+        let output = capture_transfer_child(
+            child,
+            source_bytes,
+            TRANSFER_IDLE_TIMEOUT,
+            Some(feeder.abort_handle()),
+        )
+        .await;
+        // Unless the copy succeeded, the feeder may be blocked writing input
+        // nobody will read: the remote side stopped, but a process still holding
+        // the pipe (a shared connection's master, say) keeps the write from
+        // failing. Cancel it so joining it below cannot wait forever; the
+        // capture's own error, or the exit status, is what gets reported.
+        if !matches!(&output, Ok(result) if result.code == Some(0)) {
+            feeder.abort();
+        }
         let fed = feeder.await;
         let output = output?;
         if output.code != Some(0) {
@@ -1790,10 +1804,18 @@ where
 /// malformed output and local feeder activity do not. Closing stdout does not
 /// stop the deadline: ssh may still be draining buffered input or waiting for the
 /// remote command after the helm has written its final byte.
+///
+/// `input` is the task feeding the child's stdin, if one does. Every failure
+/// cancels it before killing the child, releasing the stdin it owns: over a
+/// shared ssh connection the master keeps the session's pipes open until the
+/// remote command ends, and a remote `cat` ends only at EOF on its input. The
+/// stream readers are then joined within [`CAPTURE_PIPE_GRACE`], like a normal
+/// exit's, so a pipe some other process still holds cannot hang the failure.
 pub(super) async fn capture_transfer_child(
     mut child: tokio::process::Child,
     source_bytes: u64,
     idle_timeout: Duration,
+    input: Option<tokio::task::AbortHandle>,
 ) -> Result<CommandResult, BackendFailure> {
     let context = "the payload transfer";
     let stdout = child.stdout.take().expect("captured transfer stdout");
@@ -1813,9 +1835,7 @@ pub(super) async fn capture_transfer_child(
             Ok(Some(status)) => break status,
             Ok(None) => {}
             Err(error) => {
-                terminate_child(&mut child).await;
-                let _ = stdout_task.await;
-                let _ = stderr_task.await;
+                stop_transfer(&mut child, stdout_task, stderr_task, input.as_ref()).await;
                 return Err(BackendFailure::new(
                     format!("waiting for {context}"),
                     error.to_string(),
@@ -1823,26 +1843,20 @@ pub(super) async fn capture_transfer_child(
             }
         }
         if deadline.is_some_and(|at| tokio::time::Instant::now() >= at) {
-            terminate_child(&mut child).await;
-            let _ = stdout_task.await;
-            let _ = stderr_task.await;
+            stop_transfer(&mut child, stdout_task, stderr_task, input.as_ref()).await;
             return Err(BackendFailure::new(format!("{context} stalled"), ""));
         }
         tokio::select! {
             result = child.wait() => match result {
                 Ok(status) => break status,
                 Err(error) => {
-                    terminate_child(&mut child).await;
-                    let _ = stdout_task.await;
-                    let _ = stderr_task.await;
+                    stop_transfer(&mut child, stdout_task, stderr_task, input.as_ref()).await;
                     return Err(BackendFailure::new(format!("waiting for {context}"), error.to_string()));
                 }
             },
             failure = signal_rx.recv() => {
                 let failure = failure.expect("stream drain signal sender disappeared");
-                terminate_child(&mut child).await;
-                let _ = stdout_task.await;
-                let _ = stderr_task.await;
+                stop_transfer(&mut child, stdout_task, stderr_task, input.as_ref()).await;
                 return Err(BackendFailure::new(
                     format!("reading {context} {} ({})", failure.stream, failure.detail),
                     String::from_utf8_lossy(&failure.prefix),
@@ -1855,9 +1869,7 @@ pub(super) async fn capture_transfer_child(
                     std::future::pending::<()>().await;
                 }
             } => {
-                terminate_child(&mut child).await;
-                let _ = stdout_task.await;
-                let _ = stderr_task.await;
+                stop_transfer(&mut child, stdout_task, stderr_task, input.as_ref()).await;
                 return Err(BackendFailure::new(format!("{context} stalled"), ""));
             },
             changed = sizes_rx.changed(), if sizes_open => {
@@ -1877,6 +1889,23 @@ pub(super) async fn capture_transfer_child(
         }
     };
     finish_child_output(status, stdout_task, stderr_task, &mut signal_rx, context).await
+}
+
+/// End a failed transfer: release its stdin first by cancelling the feeder,
+/// then kill the child's group and join its readers within the shared grace.
+/// The order matters over a shared ssh connection; see
+/// [`capture_transfer_child`].
+async fn stop_transfer(
+    child: &mut tokio::process::Child,
+    stdout_task: tokio::task::JoinHandle<Vec<u8>>,
+    stderr_task: tokio::task::JoinHandle<Vec<u8>>,
+    input: Option<&tokio::task::AbortHandle>,
+) {
+    if let Some(input) = input {
+        input.abort();
+    }
+    terminate_child(child).await;
+    let _ = join_orphaned_readers([stdout_task, stderr_task]).await;
 }
 
 /// Interpret the same bounded stream drains for fixed-deadline commands and
@@ -3428,6 +3457,95 @@ pub(super) fn parse_reach_output(output: &[u8]) -> Result<ReachOutcome, BackendF
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Stands in for an upload whose remote side has stopped while something
+    /// else still holds its pipes, as a shared ssh connection's master does:
+    /// the upload exits with status 7 at once, and a detached holder (its own
+    /// session, so outside the upload's process group) keeps stdin, stdout and
+    /// stderr open without reading. The holder publishes its pid atomically so
+    /// the test can end it.
+    #[cfg(target_os = "linux")]
+    struct HeldUploadLauncher {
+        holder_pid: PathBuf,
+    }
+
+    #[cfg(target_os = "linux")]
+    impl CommandLauncher for HeldUploadLauncher {
+        fn spawn(
+            &self,
+            command: &mut tokio::process::Command,
+        ) -> std::io::Result<tokio::process::Child> {
+            assert_eq!(command.as_std().get_program(), "ssh");
+            // A non-interactive shell gives a background job /dev/null as stdin
+            // unless it is redirected, and dash does not count `<&0` as one, so
+            // the upload's stdin reaches the holder through fd 3.
+            let script = format!(
+                "exec 3<&0; setsid sh -c 'echo $$ > \"$1.tmp\" && mv \"$1.tmp\" \"$1\"; exec sleep 60' holder {} <&3 & exit 7",
+                shell_words::quote(self.holder_pid.to_str().unwrap())
+            );
+            let mut child = tokio::process::Command::new("sh");
+            child
+                .args(["-c", &script])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .kill_on_drop(true);
+            isolate_process_group(&mut child);
+            child.spawn()
+        }
+    }
+
+    /// Why: when an upload's ssh process exits unsuccessfully while another
+    /// process (a shared connection's master) still holds its pipes, the feeder
+    /// stays blocked writing input nobody reads. Joining it unconditionally made
+    /// the upload, and so the whole install or update, hang instead of failing.
+    ///
+    /// Spec: with a payload larger than a pipe buffer, an upload that exits with
+    /// status 7 while a holder keeps its pipes open returns an error within the
+    /// reader grace plus a margin, rather than waiting on the feeder.
+    #[cfg(target_os = "linux")]
+    #[farhelm_testtrace::test]
+    async fn a_failed_upload_does_not_wait_on_a_blocked_feeder() {
+        let root = tempfile::tempdir().unwrap();
+        let holder_pid = root.path().join("holder.pid");
+        let source = root.path().join("payload");
+        // Well past any pipe buffer, so the feeder blocks once the holder stops
+        // nothing from reading.
+        tokio::fs::write(&source, vec![b'x'; 4 * 1024 * 1024])
+            .await
+            .unwrap();
+        let backend = SystemBackend {
+            control_dir: root.path().to_path_buf(),
+            linger: LingerBehavior::Simulated(Ok(())),
+            launcher: Arc::new(HeldUploadLauncher {
+                holder_pid: holder_pid.clone(),
+            }),
+            runtime_units: false,
+            fail_before_rename: false,
+        };
+        let result = tokio::time::timeout(
+            CAPTURE_PIPE_GRACE + Duration::from_secs(10),
+            backend.ssh_put("held.example", &source, &root.path().join("upload")),
+        )
+        .await;
+        // End the holder whatever happened; its pid file is complete once present.
+        if let Ok(text) = std::fs::read_to_string(&holder_pid)
+            && let Ok(pid) = text.trim().parse::<i32>()
+        {
+            // SAFETY: the holder is this test's own fixture process.
+            unsafe {
+                libc::kill(pid, libc::SIGKILL);
+            }
+        }
+        let failure = result
+            .expect("a failed upload must not wait on a feeder blocked by held pipes")
+            .expect_err("an upload that exits with status 7 fails");
+        assert!(
+            failure.context.contains("payload transfer")
+                || failure.context.contains("transferring"),
+            "{failure:?}"
+        );
+    }
 
     /// The helper's connection progress cannot authorize provisioning or
     /// supply a resolved executable path. Those facts still come only from

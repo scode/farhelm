@@ -6407,7 +6407,7 @@ mod tests {
         isolate_process_group(&mut command);
         let child = command.spawn().unwrap();
 
-        let result = capture_transfer_child(child, 10, Duration::from_secs(2))
+        let result = capture_transfer_child(child, 10, Duration::from_secs(2), None)
             .await
             .unwrap_or_else(|failure| panic!(
                 "verified remote growth must renew the idle deadline; {failure:?}; remote bytes: {:?}",
@@ -6644,7 +6644,7 @@ mod tests {
         stdin.write_all(b"data").await.unwrap();
         stdin.shutdown().await.unwrap();
         drop(stdin);
-        let failure = capture_transfer_child(child, 4, Duration::from_millis(200))
+        let failure = capture_transfer_child(child, 4, Duration::from_millis(200), None)
             .await
             .expect_err("the deadline must survive both feeder EOF and stdout EOF");
         assert!(failure.context.contains("stalled"), "{failure:?}");
@@ -6653,6 +6653,102 @@ mod tests {
             b"data",
             "the peer must have consumed all input before its stall"
         );
+    }
+
+    /// Why: over a shared ssh connection the master keeps a transfer session's
+    /// pipes open after the local ssh is killed, until the remote command
+    /// ends, and the remote `cat` ends only when its input closes. A stall
+    /// failure that joined its stream readers without a bound while the input
+    /// feeder still held stdin never returned, leaving an install or update
+    /// hung and its host blocked for other setup actions.
+    ///
+    /// Spec: a holder outside the transfer's process group (standing in for
+    /// the master) keeps stdout and stderr open until EOF on the transfer's
+    /// stdin, which a feeder task holds, and then writes a release marker. When
+    /// the transfer stalls, the failure returns well within the reader grace,
+    /// the feeder is cancelled, and the holder sees its input end. The marker,
+    /// not the holder's process state, is the oracle: the holder is reparented
+    /// when the transfer's group dies, and a zombie still answers `kill(pid, 0)`.
+    #[cfg(target_os = "linux")]
+    #[farhelm_testtrace::test]
+    async fn transfer_stall_releases_the_input_a_shared_session_waits_on() {
+        let root = tempfile::tempdir().unwrap();
+        let holder_pid = root.path().join("holder.pid");
+        let released = root.path().join("released");
+        // `setsid` takes the holder out of the transfer's process group, so the
+        // group kill cannot end it. A non-interactive shell gives a background
+        // job /dev/null as stdin unless it is redirected, and dash does not
+        // count `<&0` as a redirection, so the transfer's stdin reaches the
+        // holder through fd 3. The pid file is renamed into place, so it is
+        // never seen half written.
+        let script = format!(
+            "exec 3<&0; setsid sh -c 'echo $$ > \"$1.tmp\" && mv \"$1.tmp\" \"$1\"; cat >/dev/null; : > \"$2\"' \
+             holder {pid} {released} <&3 & exec 3<&-; printf '0\\n'; exec sleep 60",
+            pid = shell_words::quote(holder_pid.to_str().unwrap()),
+            released = shell_words::quote(released.to_str().unwrap())
+        );
+        let mut command = tokio::process::Command::new("sh");
+        command.args(["-c", &script]);
+        command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        isolate_process_group(&mut command);
+        let mut child = command.spawn().unwrap();
+        let stdin = child.stdin.take().unwrap();
+        // The feeder of a stalled upload: it owns stdin and never finishes.
+        let feeder = tokio::spawn(async move {
+            let _stdin = stdin;
+            std::future::pending::<()>().await
+        });
+        if !wait_for_fixture_file(&holder_pid, Duration::from_secs(5)).await {
+            terminate_child(&mut child).await;
+            panic!("the stand-in for the shared connection never started");
+        }
+        let holder: i32 = std::fs::read_to_string(&holder_pid)
+            .unwrap()
+            .trim()
+            .parse()
+            .expect("the renamed pid file is complete");
+        assert!(
+            !released.exists(),
+            "premise: the holder still waits on its input"
+        );
+        let started = tokio::time::Instant::now();
+        let failure = tokio::time::timeout(
+            CAPTURE_PIPE_GRACE + Duration::from_secs(10),
+            capture_transfer_child(
+                child,
+                10,
+                Duration::from_millis(300),
+                Some(feeder.abort_handle()),
+            ),
+        )
+        .await
+        .expect("a stalled transfer must fail even while another process holds its pipes")
+        .expect_err("no growth after the first report is a stall");
+        assert!(failure.context.contains("stalled"), "{failure:?}");
+        assert!(
+            tokio::time::timeout(Duration::from_secs(5), feeder)
+                .await
+                .expect("the failure must cancel the feeder that holds stdin")
+                .unwrap_err()
+                .is_cancelled()
+        );
+        // Releasing stdin is what lets the holder go; it must not need the
+        // reader grace to expire first.
+        assert!(
+            started.elapsed() < CAPTURE_PIPE_GRACE,
+            "the failure waited out the reader grace instead of releasing input"
+        );
+        if !wait_for_fixture_file(&released, Duration::from_secs(5)).await {
+            // SAFETY: the holder is this test's own fixture process.
+            unsafe {
+                libc::kill(holder, libc::SIGKILL);
+            }
+            panic!("the holder never saw the transfer's input end");
+        }
     }
 
     /// An unbounded stdout line must neither accumulate forever nor prevent
@@ -6745,7 +6841,7 @@ mod tests {
             terminate_child(&mut child).await;
             panic!("the descendant exited before the stall observation");
         }
-        let failure = capture_transfer_child(child, 10, Duration::from_millis(300))
+        let failure = capture_transfer_child(child, 10, Duration::from_millis(300), None)
             .await
             .expect_err("pipe noise cannot renew a stalled transfer");
         assert!(failure.context.contains("stalled"), "{failure:?}");
