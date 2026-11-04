@@ -13,8 +13,11 @@
 //! - [`ssh_key`]: Farhelm's own ssh key pair, generated when the user asks.
 //! - The [`Tensorlake`] service and the `/api/tensorlake` routes below, which
 //!   follow the ntfy settings' write-only rule: no reply ever carries the key.
+//! - [`recipes`]: the named recipes Farhelm creates sandboxes from, and their
+//!   `/api/tensorlake/recipes` routes. Local records only; nothing there calls
+//!   Tensorlake yet.
 //!
-//! This is the first slice of Tensorlake hosts. Recipes, snapshot builds, the
+//! These are the first slices of Tensorlake hosts. Snapshot builds, the
 //! hosts themselves, suspend and resume, and tunnels arrive in follow-up PRs
 //! and build on this service, which is why the client already carries the
 //! calls they need.
@@ -42,6 +45,7 @@ mod e2e;
     expect(dead_code, reason = "calls typed now for the follow-up Tensorlake PRs")
 )]
 mod http;
+pub(crate) mod recipes;
 mod ssh_key;
 
 #[cfg(test)]
