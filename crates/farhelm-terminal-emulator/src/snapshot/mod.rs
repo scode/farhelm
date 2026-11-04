@@ -436,18 +436,21 @@ impl Emulator {
         let with_titles =
             |skip_titles, mode| v1::encode(self, screens, skip_titles, trimmed_for, mode, cancel);
         let cancelled = |_: CancelledEncode| SnapshotStopped::Cancelled;
-        if let Some((blob, dropped_titles)) =
-            fit_titles(&titles, max_bytes, with_titles).map_err(cancelled)?
-        {
-            return Ok(Snapshot {
-                blob,
-                dropped_history_lines: min_skip,
-                dropped_screens: false,
-                dropped_titles,
-            });
-        }
+        let without_titles = match fit_titles(&titles, max_bytes, with_titles).map_err(cancelled)? {
+            TitleFit::Fits { blob, dropped } => {
+                return Ok(Snapshot {
+                    blob,
+                    dropped_history_lines: min_skip,
+                    dropped_screens: false,
+                    dropped_titles: dropped,
+                });
+            }
+            TitleFit::TooLarge(measured) => measured,
+        };
 
-        // Step 2: no titles, and the oldest history.
+        // Step 2: no titles, and the oldest history. The title step's last
+        // measurement already used this min_skip and trimmed mark, so the
+        // first history cut can use its costs without another full paint.
         let with_history = |skip, mode| {
             let content = v1::Content::Cells { skip_history: skip };
             v1::encode(
@@ -459,8 +462,14 @@ impl Emulator {
                 cancel,
             )
         };
-        if let Some(mut snapshot) =
-            fit_history(min_skip, history, max_bytes, with_history).map_err(cancelled)?
+        if let Some(mut snapshot) = fit_history(
+            min_skip,
+            history,
+            max_bytes,
+            Some(without_titles),
+            with_history,
+        )
+        .map_err(cancelled)?
         {
             snapshot.dropped_titles = all_titles;
             return Ok(snapshot);
@@ -475,8 +484,8 @@ impl Emulator {
         // below that it is returned even if it does not fit.
         let (blob, dropped_titles) =
             match fit_titles(&titles, max_bytes, without_screens).map_err(cancelled)? {
-                Some(fitted) => fitted,
-                None => {
+                TitleFit::Fits { blob, dropped } => (blob, dropped),
+                TitleFit::TooLarge(_) => {
                     let last_resort = without_screens(all_titles, v1::Mode::KEEP);
                     if last_resort.cancelled {
                         return Err(SnapshotStopped::Cancelled);
@@ -534,7 +543,7 @@ impl Emulator {
         // even then.
         let cancelled = |_: CancelledEncode| SnapshotStopped::Cancelled;
         if let Some(fitted) =
-            fit_history(min_skip, history, max_bytes, with_history).map_err(cancelled)?
+            fit_history(min_skip, history, max_bytes, None, with_history).map_err(cancelled)?
         {
             return Ok(fitted);
         }
@@ -788,17 +797,25 @@ pub fn history_seed_from_lines_until<'a>(
     })
 }
 
+/// The title cut either fits, or leaves a reusable measurement with every
+/// title removed. The next history step starts from exactly that state, so
+/// throwing this measurement away would paint the whole terminal twice.
+enum TitleFit {
+    Fits { blob: Vec<u8>, dropped: usize },
+    TooLarge(v1::Encoded),
+}
+
 /// Steps 1 and 3 of the size ladder: `encode(skip, mode)` encodes, or
 /// measures, with the `skip` oldest title stack entries left out, `costs`
 /// saying what each entry adds. The blob with the fewest titles dropped that
-/// fits `max_bytes`, and how many were; `None` if even dropping all of them
-/// does not fit. Measured first, like [`fit_history`], so that a screen too
-/// large to fit is never held whole.
+/// fits `max_bytes`, and how many were; otherwise the measurement with all
+/// titles removed. Measured first, like [`fit_history`], so that a screen
+/// too large to fit is never held whole.
 fn fit_titles(
     costs: &[usize],
     max_bytes: usize,
     encode: impl Fn(usize, v1::Mode) -> v1::Encoded,
-) -> Result<Option<(Vec<u8>, usize)>, CancelledEncode> {
+) -> Result<TitleFit, CancelledEncode> {
     let mut skip = 0;
     loop {
         let measurement = encode(skip, v1::Mode::Measure);
@@ -811,10 +828,13 @@ fn fit_titles(
             if encoded.cancelled {
                 return Err(CancelledEncode);
             }
-            return Ok(Some((encoded.blob, skip)));
+            return Ok(TitleFit::Fits {
+                blob: encoded.blob,
+                dropped: skip,
+            });
         }
         if skip >= costs.len() {
-            return Ok(None);
+            return Ok(TitleFit::TooLarge(measurement));
         }
         // Leave out the fewest further entries whose sequences add up to the
         // excess; each costs exactly what `title_costs` says, so one more
@@ -842,15 +862,22 @@ fn fit_titles(
 /// and only a snapshot known to fit is encoded for real: a hostile state can
 /// paint to hundreds of megabytes, which the supervisor must not hold even
 /// briefly.
+///
+/// `first` may supply the title step's final measurement only when its
+/// content, omitted titles and trimmed mark equal `with_history(min_skip)`.
+/// A seed has no preceding title step and passes `None`.
 fn fit_history(
     min_skip: usize,
     history: usize,
     max_bytes: usize,
+    mut first: Option<v1::Encoded>,
     with_history: impl Fn(usize, v1::Mode) -> v1::Encoded,
 ) -> Result<Option<Snapshot>, CancelledEncode> {
     let mut skip = min_skip.min(history);
     loop {
-        let measured = with_history(skip, v1::Mode::Measure);
+        let measured = first
+            .take()
+            .unwrap_or_else(|| with_history(skip, v1::Mode::Measure));
         if measured.cancelled {
             return Err(CancelledEncode);
         }
@@ -891,7 +918,8 @@ mod cancel_tests {
     use crate::effects::Collected;
     use std::sync::atomic::AtomicUsize;
 
-    /// An emulator with `lines` lines of colorful history in a 40x5 terminal.
+    /// Feed `lines` colorful lines into a 40x5 terminal; all but the visible
+    /// rows become history for the cancellation and size-ladder witnesses.
     fn with_history(lines: usize) -> Emulator {
         let mut emulator = Emulator::new(
             Size {
@@ -920,31 +948,38 @@ mod cancel_tests {
     /// Why: the encoder looks at its cancel every 64 rows, and only that
     /// keeps a supervisor's orderly stop from waiting out an encode of a
     /// full terminal (seconds); a cancel only seen before painting starts
-    /// would let one already under way run on. Spec: for 500 lines of
-    /// history, at the full limit and at a limit that makes the encoder
-    /// measure the history again, an encode whose cancel fires on look `k`,
-    /// for each `k` an uncancelled encode takes, yields
-    /// `SnapshotStopped::Cancelled` having looked exactly `k` times, so it
-    /// stopped there rather than painting on; at the limit that measures again, that
-    /// is more looks than one painting takes; a cancel that fires only after
-    /// all of them yields the same blob as `snapshot`.
+    /// would let one already under way run on. Spec: after feeding 500 lines,
+    /// at the full limit and at a limit that makes the encoder trim history,
+    /// cancellation at any check an uncancelled encode takes yields
+    /// `SnapshotStopped::Cancelled` with no further checks, so it stopped
+    /// there rather than painting on. A fitting snapshot takes two
+    /// full paints; trimming takes one full measurement, one measurement of
+    /// the retained rows and one paint keeping those rows. These exact counts
+    /// catch a duplicated full measurement independently of timing. A cancel
+    /// that fires only after all looks yields the same blob as `snapshot`.
     #[test]
     fn a_cancel_landing_at_any_look_stops_the_encode() {
         let emulator = with_history(500);
-        let rows_per_paint = (500 + 5usize).div_ceil(64);
+        let rows = emulator.primary_grid().total_lines();
+        let full_paint = rows.div_ceil(64);
         for limit in [16 * 1024 * 1024, 4096] {
             let count = Arc::new(AtomicUsize::new(0));
             let uncancelled = emulator
                 .snapshot_until(limit, &Cancel::after_looks(Arc::clone(&count), usize::MAX))
                 .expect("clean");
             let looks = count.load(Ordering::Relaxed);
-            assert!(looks >= rows_per_paint, "{limit}: {looks} looks");
-            if limit == 4096 {
+            let kept_paint = (rows - uncancelled.dropped_history_lines).div_ceil(64);
+            let expected = if limit == 4096 {
                 assert!(
-                    looks > 2 * rows_per_paint,
-                    "premise: the limit makes the encoder measure again ({looks} looks)"
+                    uncancelled.dropped_history_lines > 0,
+                    "premise: history is trimmed"
                 );
-            }
+                full_paint + 2 * kept_paint
+            } else {
+                assert_eq!(uncancelled.dropped_history_lines, 0);
+                2 * full_paint
+            };
+            assert_eq!(looks, expected, "{limit}: exact number of paints");
             assert_eq!(uncancelled.blob, emulator.snapshot(limit).unwrap().blob);
             for fire_after in 0..looks {
                 let count = Arc::new(AtomicUsize::new(0));
