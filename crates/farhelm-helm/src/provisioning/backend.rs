@@ -1491,7 +1491,7 @@ pub(super) struct DrainFailure {
 
 /// Probe stderr keeps a bounded diagnostic prefix while scanning every byte
 /// for the wrapper records that decide remote absence and resolved dialing.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub(super) struct ProbeStderr {
     pub(super) prefix: Vec<u8>,
     pub(super) command_started: bool,
@@ -1549,14 +1549,36 @@ impl ProbeStderr {
 
 /// Drain probe stderr to EOF even after its diagnostic budget is full.
 /// Marker recognition is line-framed and therefore independent of where a
-/// long SSH banner falls relative to the retained prefix.
+/// long SSH banner falls relative to the retained prefix. Production probes
+/// read through [`ProbeStderrReader`], which also keeps partial progress.
+#[cfg(test)]
 pub(super) async fn drain_probe_stderr<R>(
-    mut stream: R,
+    stream: R,
     signal: tokio::sync::mpsc::UnboundedSender<DrainFailure>,
 ) -> ProbeStderr
 where
     R: tokio::io::AsyncRead + Unpin,
 {
+    drain_probe_stderr_into(stream, signal, &std::sync::Mutex::default()).await
+}
+
+/// [`drain_probe_stderr`], also publishing everything recognized so far to
+/// `progress` after each read, so an owner that stops waiting before EOF
+/// still has the records that already arrived (see [`ProbeStderrReader`]).
+async fn drain_probe_stderr_into<R>(
+    mut stream: R,
+    signal: tokio::sync::mpsc::UnboundedSender<DrainFailure>,
+    progress: &std::sync::Mutex<ProbeStderr>,
+) -> ProbeStderr
+where
+    R: tokio::io::AsyncRead + Unpin,
+{
+    let publish = |result: &ProbeStderr| {
+        progress
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone_from(result);
+    };
     let mut result = ProbeStderr::default();
     let mut line = Vec::new();
     let mut line_overflow = false;
@@ -1587,6 +1609,7 @@ where
                         line_overflow = true;
                     }
                 }
+                publish(&result);
             }
             Err(error) => {
                 let _ = signal.send(DrainFailure {
@@ -1925,21 +1948,61 @@ pub(super) async fn terminate_child(child: &mut tokio::process::Child) {
     let _ = child.wait().await;
 }
 
+/// A probe's stderr reader together with what it has recognized so far.
+///
+/// The probe's records (the wrapper's marker and its resolved binary) arrive
+/// before the handshake, but stderr can stay open long after the probe is
+/// stopped: a shared ssh connection's master holds the session's stderr until
+/// the remote command ends, and an escaped helper can hold it indefinitely.
+/// Waiting for EOF is therefore bounded, and an expired bound must not throw
+/// away records that were read long before it. Losing them made every remote
+/// probe over a shared connection report "answered without reporting its
+/// resolved binary", which refused remote uninstall outright.
+struct ProbeStderrReader {
+    task: tokio::task::JoinHandle<ProbeStderr>,
+    progress: Arc<std::sync::Mutex<ProbeStderr>>,
+}
+
+impl ProbeStderrReader {
+    fn spawn<R>(stream: R, signal: tokio::sync::mpsc::UnboundedSender<DrainFailure>) -> Self
+    where
+        R: tokio::io::AsyncRead + Unpin + Send + 'static,
+    {
+        let progress = Arc::new(std::sync::Mutex::new(ProbeStderr::default()));
+        let shared = Arc::clone(&progress);
+        let task =
+            tokio::spawn(async move { drain_probe_stderr_into(stream, signal, &shared).await });
+        Self { task, progress }
+    }
+
+    /// Wait up to `bound` for stderr EOF. If it does not come, cancel the
+    /// reader (it must not outlive the probe) and return what it had read.
+    async fn finish(mut self, bound: Duration) -> ProbeStderr {
+        let drained = tokio::time::timeout(bound, &mut self.task).await;
+        // Aborting a joined task is harmless.
+        self.task.abort();
+        match drained {
+            Ok(Ok(complete)) => complete,
+            _ => self
+                .progress
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone(),
+        }
+    }
+}
+
 /// Terminate a protocol probe and retain its bounded stderr prefix.
 ///
 /// Probe stdout belongs to the framed handshake, so this is the common cleanup
-/// half for the independently drained diagnostic stream.
-/// An escaped helper may retain stderr after the child dies; a two-second
-/// bound keeps that reader from retaining a host planning slot forever.
-async fn stop_probe(
-    child: &mut tokio::process::Child,
-    mut stderr_task: tokio::task::JoinHandle<ProbeStderr>,
-) -> ProbeStderr {
+/// half for the independently drained diagnostic stream. The caller closes
+/// the probe's stdin first (by dropping the handshake writer): over a shared
+/// ssh connection, that is what ends the remote command and so lets the
+/// master release stderr. A two-second bound still keeps an escaped helper
+/// from retaining a host planning slot forever; see [`ProbeStderrReader`].
+async fn stop_probe(child: &mut tokio::process::Child, stderr: ProbeStderrReader) -> ProbeStderr {
     terminate_child(child).await;
-    let drained = tokio::time::timeout(Duration::from_secs(2), &mut stderr_task).await;
-    // Aborting a joined task is harmless; a timed-out reader must not outlive the probe.
-    stderr_task.abort();
-    drained.ok().and_then(Result::ok).unwrap_or_default()
+    stderr.finish(Duration::from_secs(2)).await
 }
 
 /// Only transport failures are eligible for positive-absence exit
@@ -1961,7 +2024,7 @@ impl ProvisioningBackend for SystemBackend {
         let stderr = child.stderr.take().expect("piped probe stderr");
         let (stderr_signal_tx, mut stderr_signal_rx) = tokio::sync::mpsc::unbounded_channel();
         let _stderr_signal_guard = stderr_signal_tx.clone();
-        let stderr_task = tokio::spawn(drain_probe_stderr(stderr, stderr_signal_tx));
+        let stderr_task = ProbeStderrReader::spawn(stderr, stderr_signal_tx);
         let stdout_bytes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let mut reader = FrameReader::new(CountingReader {
             inner: stdout,
@@ -1975,6 +2038,7 @@ impl ProvisioningBackend for SystemBackend {
             ) => result,
             failure = stderr_signal_rx.recv() => {
                 let failure = failure.expect("probe stderr signal sender disappeared");
+                drop(writer);
                 let stderr = stop_probe(&mut child, stderr_task).await;
                 return Err(BackendFailure::new(
                     format!("reading supervisor probe {} ({})", failure.stream, failure.detail),
@@ -1986,6 +2050,10 @@ impl ProvisioningBackend for SystemBackend {
                 ));
             }
         };
+        // Nothing is written after the hello. Closing stdin now ends the
+        // remote command, which is what lets a shared ssh connection's
+        // master release the probe's stderr (see `stop_probe`).
+        drop(writer);
         match handshake_result {
             Ok(Ok(ControlMsg::Hello {
                 build_version,
@@ -2161,15 +2229,7 @@ impl ProvisioningBackend for SystemBackend {
                 // task that nothing cancels: a helper that left the group (one
                 // that started its own session or process group) could
                 // otherwise hold stderr open, just as in `stop_probe`.
-                let mut stderr_task = stderr_task;
-                let stderr =
-                    match tokio::time::timeout(Duration::from_secs(2), &mut stderr_task).await {
-                        Ok(joined) => joined.unwrap_or_default(),
-                        Err(_) => {
-                            stderr_task.abort();
-                            ProbeStderr::default()
-                        }
-                    };
+                let stderr = stderr_task.finish(Duration::from_secs(2)).await;
                 if let Ok(failure) = stderr_signal_rx.try_recv() {
                     return Err(BackendFailure::new(
                         format!(
@@ -3414,9 +3474,9 @@ mod tests {
         let mut child = reaped_probe().await;
         let (mut producer, consumer) = tokio::io::duplex(64);
         let (signal, _failures) = tokio::sync::mpsc::unbounded_channel();
-        let stderr_task = tokio::spawn(drain_probe_stderr(consumer, signal));
+        let stderr_task = ProbeStderrReader::spawn(consumer, signal);
         assert!(
-            !stderr_task.is_finished(),
+            !stderr_task.task.is_finished(),
             "the producer still holds stderr open"
         );
         tokio::time::pause();
@@ -3449,8 +3509,52 @@ mod tests {
         producer.write_all(b"retained diagnostic").await.unwrap();
         producer.shutdown().await.unwrap();
         let (signal, _failures) = tokio::sync::mpsc::unbounded_channel();
-        let stderr_task = tokio::spawn(drain_probe_stderr(consumer, signal));
+        let stderr_task = ProbeStderrReader::spawn(consumer, signal);
         let drained = stop_probe(&mut child, stderr_task).await;
         assert_eq!(drained.prefix, b"retained diagnostic");
+    }
+
+    /// Why: a shared ssh connection's master holds the probe session's stderr
+    /// open after the probe's own ssh process is killed, so the bounded wait
+    /// for EOF always expires there. Discarding what was read by then made
+    /// every remote probe over a shared connection report "answered without
+    /// reporting its resolved binary", refusing remote uninstall on every
+    /// ordinary ssh host.
+    ///
+    /// Spec: when stderr stays open past the bound, `stop_probe` still returns
+    /// the wrapper records and the diagnostic prefix that arrived before it.
+    #[farhelm_testtrace::test]
+    async fn stop_probe_keeps_records_read_before_its_bound_expires() {
+        let mut child = reaped_probe().await;
+        let (mut producer, consumer) = tokio::io::duplex(1024);
+        let records = format!("{REMOTE_PROBE_MARKER}\n{REMOTE_RESOLVED_PREFIX}/fixture/farhelm\n");
+        producer.write_all(records.as_bytes()).await.unwrap();
+        let (signal, _failures) = tokio::sync::mpsc::unbounded_channel();
+        let stderr_task = ProbeStderrReader::spawn(consumer, signal);
+        // Premise: the reader has consumed both records while the producer,
+        // standing in for the master, still holds stderr open.
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while stderr_task
+                .progress
+                .lock()
+                .unwrap()
+                .resolved_farhelm
+                .is_none()
+            {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the reader recognizes the records written before the stop");
+        assert!(!stderr_task.task.is_finished(), "stderr is still open");
+        tokio::time::pause();
+        let drained = stop_probe(&mut child, stderr_task).await;
+        assert!(drained.command_started);
+        assert_eq!(
+            drained.resolved_farhelm.as_deref(),
+            Some(b"/fixture/farhelm".as_slice())
+        );
+        assert_eq!(drained.prefix, records.as_bytes());
+        drop(producer);
     }
 }
