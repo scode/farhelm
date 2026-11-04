@@ -439,51 +439,77 @@ section exists, its latest entry must also be satisfied. Then close the plan per
 "Executing one plan" (steps 11 and 12): deliver its report through the queue script, write a closing entry in its log,
 and stop the watchdog. Never edit `plans/` yourself.
 
-## Blocked
+## Decisions
 
-Blocked on 2026-11-04 (claim 782ee7).
+### 2026-11-04: answer to a blocked question
 
-### Emoji width: exact Ghostty matching needs more saved terminal state
+The question, as the executor put it:
 
-This plan fixes emoji sequences such as a heart followed by U+FE0F taking one column in a terminal host when a program
-expects two. The agreed target is Ghostty, including U+FE0E narrowing and edge cases, while preserving existing
-snapshots and adding no state between input characters.
+> Blocked on 2026-11-04 (claim 782ee7).
+>
+> ### Emoji width: exact Ghostty matching needs more saved terminal state
+>
+> This plan fixes emoji sequences such as a heart followed by U+FE0F taking one column in a terminal host when a program
+> expects two. The agreed target is Ghostty, including U+FE0E narrowing and edge cases, while preserving existing
+> snapshots and adding no state between input characters.
+>
+> U+FE0F requests emoji presentation; U+FE0E requests text presentation. Those requirements conflict at the right edge
+> with autowrap disabled. Ghostty distinguishes an empty cell from a space the program printed. Farhelm stores both
+> identically. On a five-column terminal, compare these histories:
+>
+> - Disable autowrap, print a space in column 5, erase that cell, then print a heart in column 4.
+> - Disable autowrap, print a space in column 5, then print a heart in column 4.
+>
+> Farhelm reaches the same cells, cursor and character remembered for repetition, and writes exactly the same 69-byte v1
+> snapshot for both. A following U+FE0F makes Ghostty widen the heart in the first history and leave it narrow in the
+> second. The distinction is absent from the snapshot, so a decoder change cannot recover it. This is confirmed by a
+> private Rust probe against the current emulator, recorder run `9bbde772-6194-4132-8264-b8da97ce8bfc`. Ghostty's result
+> is source-derived at commit `c7f68a7f48c6a5b357689eb8c2328bc2dab5d8ed`,
+> [Terminal.zig, lines 1939–1967](https://github.com/ghostty-org/ghostty/blob/c7f68a7f48c6a5b357689eb8c2328bc2dab5d8ed/src/terminal/Terminal.zig#L1939-L1967);
+> Ghostty itself was not built or run.
+>
+> There is also a conflict on a terminal only one column wide. With autowrap on, `x`, then a wide watch character, then
+> U+FE0E makes Ghostty wrap after `x` before discarding the too-wide watch. Farhelm drops the watch before processing
+> the pending wrap, so it stays on the original row. The selector itself is ignored by Ghostty at column 1. Matching
+> that final screen and cursor would require changing ordinary wide-character handling that the plan also says to
+> preserve. This follows
+> [Terminal.zig, lines 2189–2262](https://github.com/ghostty-org/ghostty/blob/c7f68a7f48c6a5b357689eb8c2328bc2dab5d8ed/src/terminal/Terminal.zig#L2189-L2262).
+>
+> May the plan retain these two explicit exceptions to Ghostty, or should its scope expand to match them?
+>
+> - **Keep the fix bounded:** treat a plain space as empty when choosing which cell receives the selector, retain
+>   today's one-column wide-character handling, and pin both disagreements with Ghostty. This keeps the existing
+>   snapshot format and delivers the ordinary emoji-width fix, but a selector can widen the heart when a printed space
+>   in the final column makes Ghostty leave it narrow, and the one-column cursor can stay on a different row.
+> - **Expand exact matching:** add persistent cell information and a new snapshot format beside unchanged v1, and change
+>   ordinary wide-character handling on one-column terminals. This is a larger terminal-state change. Existing v1
+>   snapshots still cannot reveal whether their spaces were printed or empty, so this option also needs a specified
+>   fallback for old terminals after restore.
+>
+> I recommend keeping the fix bounded with these explicit exceptions. It keeps restore behavior consistent with
+> uninterrupted output without expanding the snapshot format, and makes the remaining differences testable and
+> documented. This would narrow the agreed exact-Ghostty guarantee, so I have not implemented it. A fresh scope review
+> independently confirmed the conflicts. No product changes or draft PR exist for this plan; the source findings are
+> retained in its working log.
 
-U+FE0F requests emoji presentation; U+FE0E requests text presentation. Those requirements conflict at the right edge
-with autowrap disabled. Ghostty distinguishes an empty cell from a space the program printed. Farhelm stores both
-identically. On a five-column terminal, compare these histories:
+The maintainer's answer:
 
-- Disable autowrap, print a space in column 5, erase that cell, then print a heart in column 4.
-- Disable autowrap, print a space in column 5, then print a heart in column 4.
+The maintainer answered this block in conversation on 2026-11-04, after the landing monitor summarized it. Their words,
+verbatim:
 
-Farhelm reaches the same cells, cursor and character remembered for repetition, and writes exactly the same 69-byte v1
-snapshot for both. A following U+FE0F makes Ghostty widen the heart in the first history and leave it narrow in the
-second. The distinction is absent from the snapshot, so a decoder change cannot recover it. This is confirmed by a
-private Rust probe against the current emulator, recorder run `9bbde772-6194-4132-8264-b8da97ce8bfc`. Ghostty's result
-is source-derived at commit `c7f68a7f48c6a5b357689eb8c2328bc2dab5d8ed`,
-[Terminal.zig, lines 1939–1967](https://github.com/ghostty-org/ghostty/blob/c7f68a7f48c6a5b357689eb8c2328bc2dab5d8ed/src/terminal/Terminal.zig#L1939-L1967);
-Ghostty itself was not built or run.
+> Yeah, let's go ahead and do it the way Ghosty does it, but exclude those two exceptions. Record it as a near-term
+> to-do item to follow up on this discussion.
 
-There is also a conflict on a terminal only one column wide. With autowrap on, `x`, then a wide watch character, then
-U+FE0E makes Ghostty wrap after `x` before discarding the too-wide watch. Farhelm drops the watch before processing the
-pending wrap, so it stays on the original row. The selector itself is ignored by Ghostty at column 1. Matching that
-final screen and cursor would require changing ordinary wide-character handling that the plan also says to preserve.
-This follows
-[Terminal.zig, lines 2189–2262](https://github.com/ghostty-org/ghostty/blob/c7f68a7f48c6a5b357689eb8c2328bc2dab5d8ed/src/terminal/Terminal.zig#L2189-L2262).
+Agreed restatement:
 
-May the plan retain these two explicit exceptions to Ghostty, or should its scope expand to match them?
-
-- **Keep the fix bounded:** treat a plain space as empty when choosing which cell receives the selector, retain today's
-  one-column wide-character handling, and pin both disagreements with Ghostty. This keeps the existing snapshot format
-  and delivers the ordinary emoji-width fix, but a selector can widen the heart when a printed space in the final column
-  makes Ghostty leave it narrow, and the one-column cursor can stay on a different row.
-- **Expand exact matching:** add persistent cell information and a new snapshot format beside unchanged v1, and change
-  ordinary wide-character handling on one-column terminals. This is a larger terminal-state change. Existing v1
-  snapshots still cannot reveal whether their spaces were printed or empty, so this option also needs a specified
-  fallback for old terminals after restore.
-
-I recommend keeping the fix bounded with these explicit exceptions. It keeps restore behavior consistent with
-uninterrupted output without expanding the snapshot format, and makes the remaining differences testable and documented.
-This would narrow the agreed exact-Ghostty guarantee, so I have not implemented it. A fresh scope review independently
-confirmed the conflicts. No product changes or draft PR exist for this plan; the source findings are retained in its
-working log.
+- Keep the fix bounded, as the Blocked question recommends. Emoji and text variation selectors change a character's
+  width in new terminals the way Ghostty's default configuration does, in every case except the two the question names,
+  and the existing snapshot format stays as it is.
+- First exception, the last column with autowrap off: Farhelm cannot tell an empty cell from a space the program
+  printed, so treat a plain space as empty when choosing which cell receives the selector. A selector can then widen a
+  character where Ghostty, which saw a printed space, leaves it narrow.
+- Second exception, a terminal one column wide: keep today's wide-character handling, so the cursor can end on a
+  different row than Ghostty's after a too-wide character and a pending wrap.
+- Pin both differences from Ghostty in tests and document them where the plan documents the rule, citing the Ghostty
+  commit and source lines the question names. Exact matching (new saved cell state, a new snapshot format, changed
+  one-column handling) is out of scope for this plan; the maintainer recorded a near-term TODO entry to revisit it.
