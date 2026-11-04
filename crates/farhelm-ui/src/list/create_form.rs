@@ -4289,20 +4289,23 @@ pub(super) fn CreateSessionForm(
     let show_checkout_root_setup = checkout_mode && needs_checkout_root;
     // This local note also holds UI literals and request errors. Keep the scan
     // reply raw here; both placements below escape the final note as before.
-    let repository_note = match &repository_result {
-        Some(Ok(reply)) => reply
-            .scan_error
-            .as_ref()
-            .map(|text| text.raw().to_owned())
-            .or_else(|| {
-                reply.truncated.then(|| {
-                    "Repository search is incomplete; a valid owner/repo can still be selected"
-                        .into()
-                })
-            }),
-        Some(Err(message)) => Some(message.clone()),
-        None => None,
-    };
+    // Request and scan failures are warnings; an incomplete search's ordinary
+    // suggestion to enter owner/repo remains a hint.
+    let repository_note =
+        match &repository_result {
+            Some(Ok(reply)) => reply
+                .scan_error
+                .as_ref()
+                .map(|text| (text.raw().to_owned(), true))
+                .or_else(|| {
+                    reply.truncated.then(|| {
+                        ("Repository search is incomplete; a valid owner/repo can still be selected"
+                        .into(), false)
+                    })
+                }),
+            Some(Err(message)) => Some((message.clone(), true)),
+            None => None,
+        };
     // Search and the visible host selector must offer the same registry
     // snapshot; the helper owns no separate host cache or name resolution.
     let composer_hosts = hosts
@@ -6570,7 +6573,7 @@ pub(super) fn CreateSessionForm(
                             role: if search_result_groups.is_empty() { "status" } else { "listbox" },
                             class: "launch-composer-search-results",
                             if let Some(message) = search_message {
-                                div { class: "launch-composer-search-message", "{message}" }
+                                div { class: message.class(), "{message.text}" }
                             }
                             for (group_index, (group, results)) in search_result_groups.iter().cloned().enumerate() {
                                 div {
@@ -6836,8 +6839,8 @@ pub(super) fn CreateSessionForm(
             // Destination rows precede the launch-kind fields in both visual
             // and native Tab order. Switching tabs only swaps the latter.
             if search_owns_repositories && !show_checkout_root_setup {
-                if let Some(note) = &repository_note {
-                    div { class: "launch-composer-repository-note", role: "status", "{display_peer(&note)}" }
+                if let Some((note, warning)) = &repository_note {
+                    div { class: if *warning { "launch-composer-repository-note launch-composer-search-warning" } else { "launch-composer-repository-note" }, role: "status", "{display_peer(note)}" }
                 }
             }
             if search_scope == crate::launch_composer::SearchScope::Template {
@@ -7003,7 +7006,7 @@ pub(super) fn CreateSessionForm(
                                             evt.stop_propagation();
                                         },
                                         if repository_suggestions.is_empty() && let Some(message) = repository_message {
-                                            div { class: "launch-composer-search-message", "{message}" }
+                                            div { class: message.class(), "{message.text}" }
                                         }
                                         for (index, repo) in repository_suggestions.iter().enumerate() {
                                             button { r#type: "button", role: "option", id: "checkout-repository-{index}",
@@ -7019,8 +7022,8 @@ pub(super) fn CreateSessionForm(
                                         }
                                     }
                                 }
-                                if choosing_repository && !search_owns_repositories && !show_checkout_root_setup && let Some(note) = &repository_note {
-                                    div { class: "launch-composer-repository-note", role: "status", "{display_peer(note)}" }
+                                if choosing_repository && !search_owns_repositories && !show_checkout_root_setup && let Some((note, warning)) = &repository_note {
+                                    div { class: if *warning { "launch-composer-repository-note launch-composer-search-warning" } else { "launch-composer-repository-note" }, role: "status", "{display_peer(note)}" }
                                 }
                                 if let DestinationDraft::Github { repo } = destination_draft() {
                                     div { class: "launch-composer-checkout-preview", aria_live: "polite",

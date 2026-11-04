@@ -562,6 +562,19 @@ test("destination type keeps unselected repositories separate from the folder", 
   // A typed owner/repo suggestion exists before discovery answers. Observe
   // the fixture warning first so its disappearance actually tests selection.
   await expect(form.locator(".launch-composer-destination .launch-composer-repository-note")).toContainText("fixture scan unavailable");
+  // A failed scan is a rejection, even though the same note slot also
+  // presents ordinary instructions when discovery has not failed.
+  const scanFailure = form.locator(".launch-composer-destination .launch-composer-repository-note");
+  await expect(scanFailure).toHaveClass(/launch-composer-search-warning/);
+  const warningColor = await scanFailure.evaluate((node) => {
+    const probe = document.createElement("span");
+    probe.style.color = "var(--warn-bright)";
+    node.append(probe);
+    const color = getComputedStyle(probe).color;
+    probe.remove();
+    return color;
+  });
+  await expect(scanFailure).toHaveCSS("color", warningColor);
   await expect(form.getByRole("listbox", { name: "Repositories" }).getByRole("option", { name: "acme/bar", exact: true })).toHaveAttribute("aria-selected", "true");
   await expect(form.locator(".launch-composer-refusal")).toHaveCount(0);
   await expect(form.locator(".create-session-submit")).toBeDisabled();

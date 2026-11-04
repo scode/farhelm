@@ -6155,6 +6155,16 @@ a:any-link,
   color: var(--danger);
 }
 
+/* Launcher rejections use warning colors; red there is reserved for danger
+   such as an automatic permission escalation. Shared field editors also live
+   in Settings and Hosts, so keep their launcher treatment scoped here. */
+.create-session-form .create-session-error,
+.create-session-form .checkout-root-error,
+.create-session-form .yolo-confirmation-error,
+.create-session-form .launch-composer-error {
+  color: var(--warn-bright);
+}
+
 /* Keep the content-sized launcher within the viewport. Only its fields and
    bounded action notices scroll; the title and ordinary actions stay put. */
 .launch-composer-backdrop {
@@ -7132,6 +7142,10 @@ a:any-link,
   font-size: 13px;
 }
 
+.launch-composer-search-warning {
+  color: var(--warn-bright);
+}
+
 .launch-composer-search-group > button {
   min-height: 32px;
   border: 1.5px solid transparent;
@@ -7437,7 +7451,7 @@ a:any-link,
 }
 
 .save-template-error {
-  color: var(--danger);
+  color: var(--warn-bright);
 }
 
 /* "Replace with"'s warning about the source session, directly under the
@@ -7491,18 +7505,19 @@ a:any-link,
   margin: 8px 0;
 }
 
-/* A refused launch is a bordered alert with an icon, not a bare red line:
-   the maintainer missed the line under the launch row (2026-10-22). */
+/* A refused launch keeps its border and icon: the maintainer missed the bare
+   line under the launch row (2026-10-22). Yellow distinguishes a rejection
+   from the permission escalation banner's danger red. */
 .launch-composer-refusal-alert {
   display: flex;
   gap: 8px;
   align-items: flex-start;
   padding: 8px 10px;
-  border: 1px solid var(--danger);
+  border: 1px solid var(--warn-border);
   border-radius: var(--radius-md);
-  background: var(--danger-bg-dim);
+  background: var(--warn-bg-dim);
   font-size: 13px;
-  color: var(--danger);
+  color: var(--warn-bright);
 }
 
 .launch-composer-refusal-text {
@@ -7512,14 +7527,14 @@ a:any-link,
 
 /* The folder a refusal or the pre-launch check is about. */
 .launch-composer-folder-picker input[aria-invalid="true"] {
-  outline: 1px solid var(--danger);
+  outline: 1px solid var(--warn);
   outline-offset: -1px;
 }
 
 .launch-composer-folder-problem {
   padding-top: 4px;
   font-size: 12px;
-  color: var(--danger);
+  color: var(--warn-bright);
 }
 
 /* The contextual label now belongs to the quiet footer hint. Its full text

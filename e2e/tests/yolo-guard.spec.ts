@@ -544,6 +544,17 @@ test("don't ask again marks the host safe before launching, and a failed mark la
     await confirmation.locator(".yolo-confirm-stop-asking").click();
     await expect(confirmation.locator(".yolo-confirmation-error")).toContainText("Could not stop asking for");
     await expect(confirmation.locator(".yolo-confirmation-error")).toContainText("held by the test");
+    // Saving the answer failed; that request error is a yellow rejection
+    // inside the otherwise red warning about bypassing safety checks.
+    const warningColor = await confirmation.evaluate((node) => {
+      const probe = document.createElement("span");
+      probe.style.color = "var(--warn-bright)";
+      node.append(probe);
+      const color = getComputedStyle(probe).color;
+      probe.remove();
+      return color;
+    });
+    await expect(confirmation.locator(".yolo-confirmation-error")).toHaveCSS("color", warningColor);
     await expect(page.locator(".build-skew"), "a current-build refusal must preserve the normal page lifecycle").toHaveCount(0);
     expect(markPosts).toEqual([{ yolo_without_asking: true }]);
     expect(createPosts, "a failed mark sends no create").toHaveLength(1);

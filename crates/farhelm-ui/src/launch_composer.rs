@@ -961,6 +961,26 @@ pub(crate) fn finish_search_results(
     rows
 }
 
+/// An empty search explains either rejected input or how to continue typing.
+/// Keep this distinction beside the text so every renderer gives refusals the
+/// warning palette without making loading and ordinary hints look like errors.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SearchMessage {
+    pub text: &'static str,
+    pub warning: bool,
+}
+
+impl SearchMessage {
+    /// Main search and repository suggestions share the same warning treatment.
+    pub(crate) fn class(self) -> &'static str {
+        if self.warning {
+            "launch-composer-search-message launch-composer-search-warning"
+        } else {
+            "launch-composer-search-message"
+        }
+    }
+}
+
 /// Explain an empty result area while the query is being typed.
 ///
 /// Call only after combining and finalizing every source. Loading flags mean
@@ -972,30 +992,39 @@ pub(crate) fn empty_search_message(
     agent_without_harness: bool,
     models_loading: bool,
     templates_loading: bool,
-) -> Option<&'static str> {
+) -> Option<SearchMessage> {
     if query.is_empty() {
         return None;
     }
     let (scope, value) = scoped_query(query);
     if query_needs_harness(query, agent_without_harness) {
-        return Some("Choose a harness first");
+        return Some(SearchMessage {
+            text: "Choose a harness first",
+            warning: true,
+        });
     }
-    Some(match scope {
-        SearchScope::All => "Type a search or clear the search box to launch",
-        SearchScope::Name => "Type a session name after name:",
-        SearchScope::Host => "No host matches",
-        SearchScope::Harness => "No harness matches",
-        SearchScope::Model if models_loading => "Loading models…",
-        SearchScope::Model => "No model matches; enter a custom model ID in the model field",
-        SearchScope::Effort => "No effort matches",
-        SearchScope::Permissions => "No permissions match",
-        SearchScope::Folder => "No folder matches",
-        SearchScope::Recent => "No recent setup matches",
-        SearchScope::Github if value.is_empty() => "Type owner/repo to choose a repository",
-        SearchScope::Github => "No repository matches; enter owner/repo",
-        SearchScope::Template if templates_loading => "Loading templates…",
-        SearchScope::Template => "No template matches",
-    })
+    let (text, warning) = match scope {
+        SearchScope::All => ("Type a search or clear the search box to launch", false),
+        SearchScope::Name => ("Type a session name after name:", false),
+        SearchScope::Host => ("No host matches", true),
+        SearchScope::Harness => ("No harness matches", true),
+        SearchScope::Model if models_loading => ("Loading models…", false),
+        SearchScope::Model => (
+            "No model matches; enter a custom model ID in the model field",
+            true,
+        ),
+        SearchScope::Effort => ("No effort matches", true),
+        SearchScope::Permissions => ("No permissions match", true),
+        SearchScope::Folder => ("No folder matches", true),
+        SearchScope::Recent => ("No recent setup matches", true),
+        SearchScope::Github if value.is_empty() => {
+            ("Type owner/repo to choose a repository", false)
+        }
+        SearchScope::Github => ("No repository matches; enter owner/repo", true),
+        SearchScope::Template if templates_loading => ("Loading templates…", false),
+        SearchScope::Template => ("No template matches", true),
+    };
+    Some(SearchMessage { text, warning })
 }
 
 /// Search Enter chooses a visible row, reveals the area, or leaves its message.
@@ -1883,7 +1912,10 @@ mod tests {
             );
             assert_eq!(
                 empty_search_message(query, true, false, false),
-                Some("Choose a harness first")
+                Some(SearchMessage {
+                    text: "Choose a harness first",
+                    warning: true
+                })
             );
             if scoped_query(query).0 == SearchScope::All {
                 assert_eq!(
@@ -1894,41 +1926,57 @@ mod tests {
         }
     }
 
-    /// Every empty scoped result has a live explanation. Pending catalogs are
-    /// distinct from answered-empty catalogs so a failed read cannot load forever.
+    /// Rejected input must stand out from loading and ordinary typing hints.
+    /// Pin every message's classification as well as its words, including the
+    /// repository field's shared hints, so adding a branch cannot silently
+    /// present a refusal as ordinary help or a pending read as a failure.
     #[test]
     fn empty_search_messages_cover_labels_and_loading() {
         assert_eq!(empty_search_message("", false, false, false), None);
-        for (query, expected) in [
-            (" ", "Type a search or clear the search box to launch"),
-            ("name:", "Type a session name after name:"),
-            ("host:missing", "No host matches"),
-            ("harness:xyz", "No harness matches"),
-            ("folder:", "No folder matches"),
-            ("recent:missing", "No recent setup matches"),
-            ("effort:bogus", "No effort matches"),
-            ("perms:bogus", "No permissions match"),
+        for (query, expected, warning) in [
+            (
+                " ",
+                "Type a search or clear the search box to launch",
+                false,
+            ),
+            ("name:", "Type a session name after name:", false),
+            ("host:missing", "No host matches", true),
+            ("harness:xyz", "No harness matches", true),
+            ("folder:", "No folder matches", true),
+            ("recent:missing", "No recent setup matches", true),
+            ("effort:bogus", "No effort matches", true),
+            ("perms:bogus", "No permissions match", true),
             (
                 "model:custom",
                 "No model matches; enter a custom model ID in the model field",
+                true,
             ),
-            ("gh:", "Type owner/repo to choose a repository"),
-            ("gh:bad", "No repository matches; enter owner/repo"),
-            ("tl:bad", "No template matches"),
+            ("gh:", "Type owner/repo to choose a repository", false),
+            ("gh:bad", "No repository matches; enter owner/repo", true),
+            ("tl:bad", "No template matches", true),
         ] {
             assert_eq!(
                 empty_search_message(query, false, false, false),
-                Some(expected),
+                Some(SearchMessage {
+                    text: expected,
+                    warning
+                }),
                 "{query}"
             );
         }
         assert_eq!(
             empty_search_message("model:x", false, true, false),
-            Some("Loading models…")
+            Some(SearchMessage {
+                text: "Loading models…",
+                warning: false
+            })
         );
         assert_eq!(
             empty_search_message("tl:", false, false, true),
-            Some("Loading templates…")
+            Some(SearchMessage {
+                text: "Loading templates…",
+                warning: false
+            })
         );
     }
 
