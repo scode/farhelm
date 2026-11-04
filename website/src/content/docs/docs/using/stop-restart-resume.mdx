@@ -30,7 +30,8 @@ once [its hooks](/docs/agents/grok/#setup) are installed; **Restart** can take a
 available. If it never comes, replace is how you start the session over. [Supported agents](/docs/agents/) says which
 agents Farhelm can resume, and a command you run yourself needs an agent and a resume command declared for it; see
 [Custom commands](/docs/agents/custom-commands/). A [containerized session](/docs/agents/containerized-sessions/)
-never offers Restart; replace it instead.
+never offers Restart; replace it instead. On a host that makes [new terminals](/docs/using/new-terminals/), Restart
+also moves an agent that still runs in an old terminal into a new one.
 
 **Restart with…**, in the menu beside **Restart**, resumes the conversation the same way, with different settings. It opens the
 [session launcher](/docs/using/start-a-session/) filled in with this session's choices, where you can change the model,
