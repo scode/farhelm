@@ -65,7 +65,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   above, 2026-11-03); fix only the grid path. Likely fix: treat neighbouring runs with the same target and no id from
   the program as one link, for the underline and for the text the mismatch check reads, across wrapped rows too. A link
   to a different target stays separate, so a disguised link still warns. Test with the repro bytes in the grid-client
-  browser specs and the buffer's unit tests.
+  browser specs and the buffer's unit tests. Plan: `plans/queue/grid-repeated-link-warning.md`.
 
 - **A terminal whose terminal host becomes unavailable stays unavailable until the supervisor restarts.** When a running
   supervisor loses the use of a terminal host, the terminal stays unavailable for the rest of that supervisor's life
@@ -99,7 +99,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   since an unsupported protocol version is a reason that does not pass and is rightly never retried. The existing test
   that reads an unreadable host as unknown is in `crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs`.
   Not checked when this was written: whether Stop and Restart also refuse for such a runtime (only a prompt and a
-  guarded Delete were confirmed).
+  guarded Delete were confirmed). Plan: `plans/queue/readopt-unavailable-hosts.md`.
 
 - **Typing into a grid terminal pauses while its checkpoint is encoded, longer than it needs to.** The supervisor
   checkpoints a terminal in a terminal host (encodes its emulator as a snapshot and hands it to the host) after enough
@@ -129,7 +129,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `tests/fixtures/snapshots/v1/`); the supervisor never holds a stream past the limit, nor a `Vec` that grew by doubling
   past it (`Mode::Keep`'s docs); the encoder still looks at its `Cancel` between rows, which is what keeps an orderly
   stop bounded; and the size ladder's guarantees in the module docs ("Size") hold. The repository has no encoder
-  benchmark; add one with the change so the speed-up is measured rather than assumed.
+  benchmark; add one with the change so the speed-up is measured rather than assumed. Plan:
+  `plans/queue/faster-snapshot-encoder.md`.
 
 - **An orderly supervisor stop encodes a checkpoint of every busy terminal at once.** At an orderly stop (an update, the
   desktop app replacing its supervisor, a SIGTERM, SIGINT or SIGHUP), `Supervisor::stop_in_order` runs
@@ -156,6 +157,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   claim), and keep the `stopping` fence that stops re-adoption, creates and Restarts from publishing a connected runtime
   after the gather. No test measures the burst; to see it, stop a supervisor holding many full terminals (12,000 lines
   of true-color history each) and watch CPU and the "left a terminal host its previous snapshot at exit" log lines.
+  Plan: `plans/queue/stop-checkpoint-burst.md`.
 
 - **Without a tmux binary, listing sessions fails even when every session runs in a terminal host.** tmux is still a
   hard requirement (the supervisor checks its tmux against `TMUX_FLOOR` in `crates/farhelm-supervisor/src/tmux.rs`), so
@@ -192,7 +194,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   such a terminal. It did not come up in the recorded Claude Code and Codex sessions the emulator was checked against.
   Decide whether to match tmux (a change to the vendored `alacritty_terminal`); what xterm.js shows today for the same
   output was not checked. The difference is pinned in the supervisor's emulator parity tests
-  (`crates/farhelm-supervisor/src/emulator_parity/generated.rs`).
+  (`crates/farhelm-supervisor/src/emulator_parity/generated.rs`). Plan: `plans/queue/vs16-emoji-width.md`.
 
 - **Revisit keeping full durability for the host identity under WAL.** Decided on the maintainer's behalf on 2026-10-30
   when the sqlite-wal landing was blocked: SPEC.md's rule that lasting damage is never accepted, however unlikely the
@@ -446,9 +448,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   (`plans/queue/command-shell-meaning.md`) is the kind of change that would have used it.
 
 - **Replace harness icons with colored versions.** Replace the harness icons with colored versions so they are more
-  easily identified.
+  easily identified. Plan: `plans/queue/colored-harness-marks.md`.
 - **Add a Discord link to the feedback dialog and the ? menu.** The website header already links Discord (#2869);
-  surface the same link in the app, where users who just had a problem can find it.
+  surface the same link in the app, where users who just had a problem can find it. Plan:
+  `plans/queue/discord-link-in-app.md`.
 - **Support adding remote macOS hosts.** V1 provisioning targets Linux hosts with a usable systemd user manager
   (SPEC.md, Topology); a Mac can only be added today by running the supervisor binary by hand, and the remote
   provisioning and remote Update flows do not cover it. Make adding a macOS machine as a remote host a supported flow.
@@ -462,6 +465,25 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   it to a moment when the user is not waiting.
 - **Closing or starting terminals must not block other actions.** Closing a terminal or starting new ones should not
   disable doing other things, like switching to other sessions.
+
+- **Decide how terminal snapshots are supposed to work.** Every checkpoint of a terminal in a terminal host encodes the
+  whole terminal (screen, up to 12,000 lines of scrollback, modes) into one self-contained blob, even though most of the
+  scrollback has not changed since the previous snapshot. That repeated work is what makes typing pause during a
+  checkpoint and what makes the burst at an orderly supervisor stop expensive. The plans `faster-snapshot-encoder` and
+  `stop-checkpoint-burst` only make today's whole-terminal encode cheaper and rarer. The maintainer takes a position
+  first, in particular on whether snapshots should be maintained incrementally, and implementation follows. Two shapes
+  came up while planning those plans: incremental on the host (a base snapshot plus a chain of changes, which needs a
+  new snapshot format and a protocol change for hosts that outlive every release), or incremental in the supervisor
+  (cache the encoded bytes of history rows and re-encode only the screen and new rows, producing the same v1 blob as
+  today). The repository records no reason for the original choice of whole snapshots.
+
+- **Paint a terminal snapshot straight into its final blob.** The snapshot encoder in
+  `crates/farhelm-terminal-emulator/src/snapshot/` paints the escape-sequence stream into its own buffer and then copies
+  it, with the fixups, into the blob it returns (`container` in `snapshot/v1/mod.rs`), so a snapshot's peak memory is
+  about twice the blob, up to 32 MiB at the 16 MiB limit. Painting straight into the blob's buffer after a placeholder
+  header, then patching the stream length (the header's last field), would bring that to about one blob plus fixups with
+  byte-identical output. Left out of `faster-snapshot-encoder`, which is about speed; `tests/memory.rs` is the arbiter
+  of the memory claim.
 
 ## Doc todo
 
