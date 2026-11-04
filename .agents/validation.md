@@ -358,7 +358,7 @@ that its required systemd or SSH substrate ran.
   making host sessions. Needs the pinned tmux first on `PATH`. Linux only (the e2e suite), a few minutes; part of the
   workspace nextest run. Run it when Restart's target choice, the tmux history capture, the store's relaunch kind or the
   restart's host path changes.
-- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'host terminals across supervisor restarts' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(/a_prompt_waits_for_a_recovered_host_terminal_to_catch_up|spare_claims_read_a_host_rows_own_host|a_stop_request_survives_a_restart|an_unreadable_launch_record_leaves_its_session_unavailable|an_orderly_stop_ends_its_encodes_before_its_runtime_drops|a_readoption_that_loses_its_fence|readoption_backs_off_without_spinning|a_scan_restricted_to_some_names|delete_settles_the_record_of_a_startup_placeholders_socket/) | test(/^host_restarts::/)'`
+- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'host terminals across supervisor restarts' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(/a_prompt_waits_for_a_recovered_host_terminal_to_catch_up|spare_claims_read_a_host_rows_own_host|a_stop_request_survives_a_restart|an_unreadable_launch_record_leaves_its_session_unavailable|an_orderly_stop_ends_its_encodes_before_its_runtime_drops|a_readoption_that_loses_its_fence|readoption_|a_scan_restricted_to_some_names|delete_settles_the_record_of_a_startup_placeholders_socket/) | test(/^host_restarts::/)'`
   — a restarted supervisor keeping its host terminals (`crates/farhelm-supervisor/src/service/core/host_handover.rs`):
   the orderly stop's checkpoints, reload finding each host row's host again, and re-adoption of hosts that were
   unavailable. The unit tests (in `service::core::tests::host_terminals`, against stand-in hosts, some bound in the
@@ -391,8 +391,11 @@ that its required systemd or SSH substrate ran.
   (unavailable, listed unknown, nothing recorded, Stop refused for the unavailable host, the host and its agent still
   running) and adopted by the same supervisor once continued. Needs the pinned tmux first on `PATH`. Linux only (the e2e
   suite), a minute or so; part of the workspace nextest run. Run it when reload, the orderly stop, re-adoption,
-  discovery or the host runtime's adoption or encodes change. The encoder's cancel itself is in the terminal emulator
-  selection below (`an_encode_stops_once_its_cancel_fires_and_is_unchanged_until_then`).
+  discovery or the host runtime's adoption or encodes change. The `readoption_` tests also cover recovery after a
+  runtime ran: timeout recovery on the ticker's liveness wake, every unstable episode's full reconnect window, retry
+  counts kept across success with no healthy-key spin, final refusal reasons, the stop fence, and an exited runtime
+  replayed without recording its exit twice. The encoder's cancel itself is in the terminal emulator selection below
+  (`an_encode_stops_once_its_cancel_fires_and_is_unchanged_until_then`).
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'terminal tabs in terminal hosts' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(launch_file_names_round_trip_through_the_parser) | test(sweep_launch_dir_keeps_every_host_record) | test(/core::host_tabs::tests::/) | test(/tmux::control_codec::tests::/) | test(closing_a_tab_whose_runtime_reads_gone_confirms_its_process_first) | test(/^host_tabs::/)'`
   — terminal tabs in terminal hosts under the supervisor's switch (`--new-terminals host`)
   (`crates/farhelm-supervisor/src/service/core/host_tabs.rs`). The unit tests pin a tab host's launch record name

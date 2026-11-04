@@ -1353,22 +1353,19 @@ pub(crate) const ATTACH_NEEDS_GRID_CLIENT: &str =
 /// `Unavailable`, and its message says what can help, which differs by
 /// case:
 ///
-/// - A startup placeholder (no runtime ever ran) for a reason that may
-///   pass is retried by re-adoption (`super::core::host_handover`), which
-///   replaces it with a runtime: an attach then works. A stream of the
-///   placeholder itself would show a blank screen that is not the
-///   program's. An attach never follows the replacement on its own: the
-///   placeholder never had an attachment, so the viewer attaches again.
-/// - A placeholder for a reason that will not pass, and a runtime that ran
-///   and became unavailable, stay so until the supervisor restarts, whose
-///   reload adopts the host afresh: no attach works before then. (A runtime
-///   that ran still holds the program's last screen; it is refused all the
-///   same, rather than shown and then failed.)
+/// - A reason that may pass is retried by re-adoption
+///   (`super::core::host_handover`), whether startup could not adopt the
+///   host or a runtime became unavailable later. Once replaced, the viewer
+///   can attach again; an attachment never follows a handle's replacement
+///   on its own.
+/// - A reason that will not pass stays refused until the supervisor
+///   restarts, whose reload adopts the host afresh. A runtime that ran
+///   still holds the program's last screen, but is refused rather than
+///   shown and then failed; a placeholder would show no program screen.
 fn host_attach_refusal(host: &crate::hosts::HostTerminal) -> Option<String> {
-    match host.status().liveness {
-        crate::hosts::Liveness::Unavailable { reason, .. }
-            if host.is_placeholder() && reason.may_pass() =>
-        {
+    let liveness = host.status().liveness;
+    match &liveness {
+        crate::hosts::Liveness::Unavailable { reason, .. } if liveness.may_readopt() => {
             Some(format!(
                 "this terminal's host could not be adopted yet ({reason}); the supervisor keeps \
                  trying, and an attach can work once it has"

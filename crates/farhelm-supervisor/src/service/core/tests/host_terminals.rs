@@ -3,7 +3,10 @@
 //! (`hosts::terminal::test_host`): status and exit recording, the
 //! never-started excerpt, an unreadable host, the ticker's wake on a host
 //! exit, the hook anchor, the hold wait, prompt delivery, and Stop of a
-//! child whose host has not yet reported its exit.
+//! child whose host has not yet reported its exit. Re-adoption tests keep
+//! retry timing separate from the action: they assert the real due time,
+//! then force only the test-owned schedule due, so the reconnect window
+//! needs no minute-long test sleep.
 //!
 //! The stand-in's child is a `sleep` the stand-in owns, so a verb that
 //! kills from the terminal's root reaches only that. The full lifecycle
@@ -2002,6 +2005,349 @@ async fn readoption_backs_off_without_spinning() {
     assert_eq!(sup.readopt_pass(&mut schedule).await, Some(second));
     assert_eq!(schedule.attempts("s1", 0), Some(1), "no spin");
     assert_eq!(s1_terminal(&sup).await, Some(Terminal::Host(placeholder)));
+    end_discoverable(test_host);
+}
+
+// ---- Recovery after a runtime ran ----------------------------------------------------
+
+/// Install an adopted agent at a socket the one-socket retry can discover.
+/// An ordinary temporary socket would look absent to that scan and would
+/// let a test pass through the wrong recovery path.
+async fn readoption_runtime(sup: &Supervisor, state: &StateDir) -> (HostTerminal, TestHost) {
+    let socket = socket_in_state(state);
+    let (host, test_host) =
+        adopt_test_host_at(&socket, agent_tag("s1"), Some(sup.host_liveness.clone())).await;
+    sup.store
+        .insert_session(host_row("s1", &socket), None)
+        .await
+        .expect("row");
+    sup.sessions.lock().await.insert(
+        "s1".into(),
+        Arc::new(entry_with(
+            Some(Terminal::Host(host.clone())),
+            LastOutcome::Running,
+        )),
+    );
+    assert!(matches!(
+        host.liveness(),
+        Liveness::Running { child: Some(_) }
+    ));
+    assert!(
+        runs(test_host.child_pid()),
+        "premise: the host's child runs"
+    );
+    (host, test_host)
+}
+
+/// End four distinct connections, waiting for each reconnect to finish.
+/// Dropping twice before a reconnect lands would test fewer failures than
+/// the reconnect limit requires; an accepted socket alone is not ready.
+async fn readoption_make_unstable(host: &HostTerminal, test_host: &TestHost) {
+    for reconnect in 1..=3 {
+        test_host.drop_connection();
+        let deadline = tokio::time::Instant::now() + WAIT;
+        while host.reconnects() < reconnect {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "reconnect {reconnect} never landed: {:?}; connections {}",
+                host.status(),
+                test_host.connections()
+            );
+            // sleep-ok: the reconnect counter has no notification; poll until the new connection resumed.
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }
+    test_host.drop_connection();
+    wait_for(host, "the reconnect limit", |host| {
+        matches!(
+            host.liveness(),
+            Liveness::Unavailable {
+                reason: crate::hosts::Unavailability::Unstable,
+                ..
+            }
+        )
+    })
+    .await;
+    assert!(
+        runs(test_host.child_pid()),
+        "premise: unavailability did not kill the child"
+    );
+    assert!(
+        !host.is_placeholder(),
+        "premise: this runtime ran before it failed"
+    );
+}
+
+/// A recovered runtime replaces the failed handle without resetting retry
+/// history. Every later unstable episode still waits a full reconnect
+/// window, even when the successful runtime failed before another pass.
+/// This pins both the anti-fight policy and the absence of a healthy-key spin.
+#[farhelm_testtrace::test]
+async fn readoption_keeps_attempts_and_waits_out_each_unstable_episode() {
+    let state = StateDir::new();
+    let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        .await
+        .expect("supervisor");
+    let (old, test_host) = readoption_runtime(&sup, &state).await;
+    readoption_make_unstable(&old, &test_host).await;
+    let mut schedule = super::super::host_handover::ReadoptSchedule::default();
+    let began = tokio::time::Instant::now();
+    let due = sup.readopt_pass(&mut schedule).await.expect("scheduled");
+    assert!(due >= began + crate::hosts::terminal::RECONNECT_WINDOW);
+    assert_eq!(schedule.attempts("s1", 0), Some(0));
+    schedule.make_due("s1", 0);
+    sup.readopt_pass(&mut schedule).await;
+    let Some(Terminal::Host(recovered)) = s1_terminal(&sup).await else {
+        panic!("recovered host")
+    };
+    assert_ne!(recovered, old);
+    assert!(matches!(
+        recovered.liveness(),
+        Liveness::Running { child: Some(_) }
+    ));
+    assert_eq!(schedule.attempts("s1", 0), Some(1));
+    assert!(
+        runs(test_host.child_pid()),
+        "re-adoption left the child running"
+    );
+
+    // No intervening healthy pass: the successful try itself must finish
+    // the old episode, or this second loss would reuse its short due time.
+    readoption_make_unstable(&recovered, &test_host).await;
+    let began = tokio::time::Instant::now();
+    let due = sup.readopt_pass(&mut schedule).await.expect("new episode");
+    assert!(due >= began + crate::hosts::terminal::RECONNECT_WINDOW);
+    assert_eq!(schedule.attempts("s1", 0), Some(1));
+    schedule.make_due("s1", 0);
+    sup.readopt_pass(&mut schedule).await;
+    assert_eq!(schedule.attempts("s1", 0), Some(2));
+    assert_eq!(
+        sup.readopt_pass(&mut schedule).await,
+        None,
+        "healthy keys never keep the task spinning"
+    );
+    assert_eq!(
+        schedule.attempts("s1", 0),
+        Some(2),
+        "success keeps the count"
+    );
+    end_discoverable(test_host);
+}
+
+/// A timeout after an established connection wakes recovery through the
+/// ticker's liveness branch, without a reload or the ordinary tick. The
+/// same child remains usable through a real grid attachment afterwards.
+#[farhelm_testtrace::test]
+async fn readoption_recovers_a_midlife_timeout_on_the_liveness_wake() {
+    let state = StateDir::new();
+    let passes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let sup = Supervisor::new_with_seams(
+        state.path(),
+        dummy_exe(),
+        SupervisorTimeouts::default(),
+        SupervisorSeams {
+            ticker_interval: Duration::from_secs(600),
+            readoption_passes: Some(Arc::clone(&passes)),
+            ..SupervisorSeams::default()
+        },
+    )
+    .await
+    .expect("supervisor");
+    let (old, test_host) = readoption_runtime(&sup, &state).await;
+    // The constructor's pass must have finished before the failure: an
+    // overdue initial pass could otherwise masquerade as the notifier wake.
+    let deadline = tokio::time::Instant::now() + WAIT;
+    while passes.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "initial readoption pass never parked; host {:?}",
+            old.status()
+        );
+        // sleep-ok: the test-only pass counter is the retry task's parked-readiness oracle.
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    assert!(matches!(
+        old.liveness(),
+        Liveness::Running { child: Some(_) }
+    ));
+    let _ticker = start_ticker(&sup);
+    test_host.set_answering(false);
+    test_host.drop_connection();
+    wait_for(&old, "a timed-out reconnect", |host| {
+        matches!(
+            host.liveness(),
+            Liveness::Unavailable {
+                reason: crate::hosts::Unavailability::Connect(crate::hosts::Unavailable::Timeout),
+                ..
+            }
+        )
+    })
+    .await;
+    assert!(
+        runs(test_host.child_pid()),
+        "premise: the child still runs at the timeout"
+    );
+    assert!(
+        test_host.connections() >= 2,
+        "premise: the reconnect reached the silent host"
+    );
+    test_host.set_answering(true);
+    let deadline = tokio::time::Instant::now() + WAIT;
+    let recovered = loop {
+        if let Some(Terminal::Host(host)) = s1_terminal(&sup).await
+            && host != old
+            && matches!(host.liveness(), Liveness::Running { child: Some(_) })
+        {
+            break host;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "no recovery before the tick; old {:?}, child alive {}, connections {}",
+            old.status(),
+            runs(test_host.child_pid()),
+            test_host.connections()
+        );
+        // sleep-ok: polls the session's handle replacement, for which there is no test subscription.
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    };
+    let entry = sup.sessions.lock().await.get("s1").unwrap().clone();
+    assert!(
+        session_status(&entry, &HashMap::new(), &Default::default())
+            .0
+            .is_live()
+    );
+    let mut viewer = GridPeer::connect(&sup).await;
+    assert!(matches!(
+        viewer.attach(1, 1, "recovered-viewer", true).await,
+        ControlMsg::Attached { .. }
+    ));
+    viewer
+        .until("the recovered catch-up", |peer| peer.replayed.contains(&1))
+        .await;
+    viewer
+        .writer
+        .write_frame(&Frame::data(
+            1,
+            br#"{"t":"text","data":"recovered input"}"#.to_vec(),
+        ))
+        .await
+        .expect("input");
+    assert!(
+        test_host.received_becomes(b"recovered input", WAIT).await,
+        "recovered attachment delivers input"
+    );
+    assert!(recovered.status().caught_up);
+    drop(viewer);
+    end_discoverable(test_host);
+}
+
+/// An unsupported host stays final even though ordinary connection losses
+/// now recover. A retry pass must neither connect nor replace its handle.
+#[farhelm_testtrace::test]
+async fn readoption_leaves_a_nonpassing_midlife_reason_alone() {
+    let state = StateDir::new();
+    let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        .await
+        .expect("supervisor");
+    let (old, test_host) = readoption_runtime(&sup, &state).await;
+    test_host.become_unreadable();
+    wait_for(&old, "the permanent refusal", |host| {
+        matches!(
+            host.liveness(),
+            Liveness::Unavailable {
+                reason: crate::hosts::Unavailability::Connect(
+                    crate::hosts::Unavailable::UnsupportedVersion(_)
+                ),
+                ..
+            }
+        )
+    })
+    .await;
+    let connections = test_host.connections();
+    let mut schedule = super::super::host_handover::ReadoptSchedule::default();
+    assert_eq!(sup.readopt_pass(&mut schedule).await, None);
+    assert_eq!(s1_terminal(&sup).await, Some(Terminal::Host(old)));
+    assert_eq!(test_host.connections(), connections);
+    assert!(
+        runs(test_host.child_pid()),
+        "the final refusal left the child alone"
+    );
+    end_discoverable(test_host);
+}
+
+/// A retry of a runtime that already reported exit rebuilds its final
+/// evidence without recording another exit. Lost connections must not turn
+/// an exited session back into a live one or duplicate its transition.
+#[farhelm_testtrace::test]
+async fn readoption_replays_an_exited_runtime_without_recording_twice() {
+    let state = StateDir::new();
+    let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        .await
+        .expect("supervisor");
+    let (old, test_host) = readoption_runtime(&sup, &state).await;
+    test_host.exit(7);
+    wait_for(&old, "the first exit", |host| {
+        matches!(host.liveness(), Liveness::Exited { .. })
+    })
+    .await;
+    sup.reconcile_for_test().await;
+    let recorded = sup.store.session("s1").await.unwrap().unwrap().outcome;
+    assert!(matches!(
+        recorded,
+        LastOutcome::Exited {
+            exit_code: Some(7),
+            ..
+        }
+    ));
+    readoption_make_unstable(&old, &test_host).await;
+    assert!(sup.readopt_one("s1", 0, &old).await);
+    let Some(Terminal::Host(recovered)) = s1_terminal(&sup).await else {
+        panic!("recovered host")
+    };
+    // The stand-in streams its durable exit record on this cue, as a real
+    // host's Read would. Info alone withdraws the root, never records exit.
+    test_host.exit(7);
+    wait_for(&recovered, "the replayed exit", |host| {
+        matches!(host.liveness(), Liveness::Exited { .. })
+    })
+    .await;
+    let entry = sup.sessions.lock().await.get("s1").unwrap().clone();
+    let observed =
+        crate::service::status::observe_entry(&sup, &entry, &HashMap::new(), &Default::default())
+            .await
+            .expect("observe");
+    assert_eq!(observed.transition, None);
+    assert_eq!(
+        sup.store.session("s1").await.unwrap().unwrap().outcome,
+        recorded
+    );
+    end_discoverable(test_host);
+}
+
+/// A runtime that failed after startup obeys the same final stop fence as
+/// a placeholder. A retry that already adopted a replacement must abort it
+/// if orderly shutdown gathered the old handle before installation.
+#[farhelm_testtrace::test]
+async fn readoption_of_a_midlife_runtime_cannot_install_after_a_stop() {
+    let state = StateDir::new();
+    let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        .await
+        .expect("supervisor");
+    let (old, test_host) = readoption_runtime(&sup, &state).await;
+    readoption_make_unstable(&old, &test_host).await;
+    let outcome = sup.probe_placeholder("s1", 0, &old).await;
+    let RowHost::Adopted(adopted) = &outcome else {
+        panic!("premise: the retry adopted a runtime")
+    };
+    let adopted = adopted.clone();
+    sup.checkpoint_hosts_for_exit(Duration::from_secs(2)).await;
+    assert!(!sup.install_readopted("s1", 0, &old, outcome).await);
+    assert_eq!(s1_terminal(&sup).await, Some(Terminal::Host(old)));
+    wait_until_ended(&adopted).await;
+    assert!(
+        runs(test_host.child_pid()),
+        "refusing an install never stops the host's child"
+    );
     end_discoverable(test_host);
 }
 

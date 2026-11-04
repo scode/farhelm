@@ -272,11 +272,11 @@
 //!   know); others can pass (a connect that timed out on a loaded machine,
 //!   a host that was briefly stopped, a child that could not be pinned, a
 //!   connection that kept ending; [`Unavailability::may_pass`]). In the
-//!   supervisor, only a host startup could not adopt is tried again, with a
-//!   new runtime, while its reason may pass (`service::core::host_handover`,
-//!   "Adopting again"); a runtime that ends unavailable after it ran stays
-//!   so until the next start of the supervisor, whose reload adopts the
-//!   host afresh.
+//!   supervisor, an agent's host is tried again with a new runtime while
+//!   its reason may pass, whether startup could not adopt it or its runtime
+//!   became unavailable later (`service::core::host_handover`, "Adopting
+//!   again"). The retry does not resume this ended runtime: it adopts the
+//!   host afresh, under the recovered-output policy.
 //!
 //! What a viewer's grid stream (`service::grid_stream`) builds on:
 //! [`HostTerminal::subscribe_notices`], [`HostTerminal::try_read`],
@@ -487,6 +487,14 @@ pub enum Liveness {
 }
 
 impl Liveness {
+    /// Whether another adoption may recover this terminal without changing
+    /// anything outside the supervisor. This applies to startup
+    /// placeholders and runtimes that ended after running alike; it does
+    /// not permit an ended runtime itself to reconnect.
+    pub fn may_readopt(&self) -> bool {
+        matches!(self, Self::Unavailable { reason, .. } if reason.may_pass())
+    }
+
     /// How far along the one-way order this is. A runtime only ever moves to
     /// a higher rank: a root once withdrawn never comes back, an exit is
     /// never undone, and an ended runtime stays ended.
@@ -570,8 +578,9 @@ pub enum Unavailability {
 
 impl Unavailability {
     /// Whether this can pass on its own, so that adopting the host again is
-    /// worth trying (a supervisor retries the hosts startup could not adopt
-    /// for such a reason; `service::core::host_handover`, "Adopting again"):
+    /// worth trying (a supervisor retries an agent's host for such a reason,
+    /// at startup or after its runtime ran; `service::core::host_handover`,
+    /// "Adopting again"):
     /// a host that did not answer in time, closed or stopped taking
     /// connections, stayed busy, failed a request, had a child that could
     /// not be pinned, kept dropping its connection, lost its emulator with
@@ -2015,9 +2024,10 @@ impl HostTerminal {
     }
 
     /// Whether this handle is a placeholder [`Self::unavailable`] made for a
-    /// host the supervisor could not adopt, rather than a runtime that ran:
-    /// what re-adoption retries (`service::core::host_handover`, "Adopting
-    /// again"), and nothing else.
+    /// host the supervisor could not adopt, rather than a runtime that ran.
+    /// This describes how the handle was made, not whether re-adoption
+    /// retries it: a runtime that ran may also become unavailable for a
+    /// reason that passes ([`Liveness::may_readopt`]).
     pub fn is_placeholder(&self) -> bool {
         self.inner.placeholder
     }

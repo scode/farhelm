@@ -12,7 +12,9 @@
 //! may have discarded at EOF. A terminal host has no hook: its runtime
 //! announces its program's exit on the supervisor's liveness notifier
 //! (`crate::hosts::LivenessNotifier`), and the task wakes on that the same
-//! way. The periodic snapshot remains the fallback for a missed hook or an
+//! way. Passing unavailability changes also wake the re-adoption task, so
+//! recovering an agent's host need not wait for a periodic tick. The
+//! periodic snapshot remains the fallback for a missed hook or an
 //! attachment registered after the earlier observation.
 //!
 //! # Timer-owned reconciliation
@@ -1046,11 +1048,19 @@ pub(crate) fn start_ticker(sup: &Arc<Supervisor>) -> TickerHandle {
                     );
                     pane_died = pane_death_wait(tmux.clone(), Some(interval));
                 }
-                Wake::HostChanged(Some(_)) => {
+                Wake::HostChanged(Some(change)) => {
                     // Every change already queued is covered by this one
-                    // pass, which reads each terminal's state as it is now.
+                    // reap, which reads each terminal's state as it is
+                    // now. Inspect every drained change too: a passing
+                    // unavailability may follow an exit in the same batch.
+                    let mut readopt = change.liveness.may_readopt();
                     if let Some(changes) = host_changes.as_mut() {
-                        while changes.try_recv().is_ok() {}
+                        while let Ok(change) = changes.try_recv() {
+                            readopt |= change.liveness.may_readopt();
+                        }
+                    }
+                    if readopt {
+                        sup.readoption_wake.notify_one();
                     }
                     reap_pass(&sup, &mut stop_rx).await;
                 }
@@ -1085,7 +1095,8 @@ enum Wake {
     PaneDied(anyhow::Result<()>),
     /// A host terminal's runtime announced a change of its liveness (its
     /// program exited, or its host ended or became unreadable); `None` when
-    /// the notifier's channel closed.
+    /// the notifier's channel closed. Passing unavailability wakes
+    /// re-adoption as well as the reap.
     HostChanged(Option<crate::hosts::LivenessChange>),
 }
 

@@ -168,21 +168,25 @@
 //!
 //! ## Adopting again
 //!
-//! A host startup could not adopt for a reason that can pass (it did not
-//! answer in time on a loaded machine, was briefly stopped, stayed busy, or
-//! the socket directory could not be scanned) is retried while the
-//! supervisor runs, by a task started with it ([`Supervisor::start_readoption`]):
-//! one placeholder at a time, after 1 s and then doubling to a minute, the
-//! next due time set before each attempt and never reset, so a host that
-//! keeps failing is asked less and less often and the task never spins. An
-//! attempt
+//! An agent's host that is unavailable for a reason that can pass is retried
+//! while the supervisor runs, whether startup could not adopt it or its
+//! runtime became unavailable later. The task started with the supervisor
+//! ([`Supervisor::start_readoption`]) retries one at a time, after 1 s and
+//! then doubling to a minute. The attempt count survives a successful
+//! adoption for that session and launch, so repeated failures never return
+//! to the fastest retries. Each episode in which a runtime gave up after
+//! repeated reconnects (`Unstable`) waits at least the whole reconnect
+//! window before its first try: re-adoption must not immediately renew a
+//! fight with whoever keeps taking the host over. The next due time is set
+//! before every attempt, and healthy launches' kept counts schedule no wake.
+//! An attempt
 //!
 //! 1. takes the session's lifecycle claim without waiting (a busy session,
 //!    a Stop, Restart or Delete in progress, is retried later), and holds it
 //!    to the end, so nothing else acts on the session's host meanwhile;
-//! 2. checks that the session's entry still holds that very placeholder for
+//! 2. checks that the session's entry still holds that very handle for
 //!    the same launch generation, and that no orderly stop has begun;
-//! 3. looks at the one socket the placeholder names, and nothing else: a
+//! 3. looks at the one socket the handle names, and nothing else: a
 //!    scan restricted to that name, which a launch drew for itself, so no
 //!    host another runtime of this supervisor holds or is starting can be
 //!    taken over; a host whose tag names the session's launch (or, as at
@@ -195,11 +199,13 @@
 //!    entry's run and session cells; a runtime it made that is not
 //!    installed is stopped, leaving its host as it was.
 //!
-//! Only placeholders are retried. A runtime that becomes unavailable after
-//! it ran stays unavailable until the supervisor's next start, whose reload
-//! adopts the host afresh; so does a placeholder whose reason will not pass
-//! on its own (a protocol, snapshot format or tag of a newer release, a
-//! launch record that cannot be read).
+//! The ticker forwards passing unavailability changes to this task's wake,
+//! so a runtime that becomes unavailable is scheduled without waiting for a
+//! periodic tick. A reason that will not pass on its own (a protocol,
+//! snapshot format or tag of a newer release, a launch record that cannot be
+//! read) is never retried. A failed unconditional Delete may have aborted a
+//! runtime whose last liveness was unavailable; it can be adopted again by
+//! the same rule, and the Delete's retry ends it through the new runtime.
 //!
 //! An orderly stop sets [`Supervisor::stopping`] under the session map as
 //! it gathers the host terminals to close, so no retry installs a runtime
@@ -216,6 +222,7 @@ use tracing::{debug, info, warn};
 
 use super::Supervisor;
 use super::host_launch::{read_launch_record, remove_ended_socket_file};
+use crate::hosts::terminal::RECONNECT_WINDOW;
 use crate::hosts::{
     AdoptError, Adoption, CheckpointOutcome, HostRegistry, HostRole, HostTag, HostTerminal,
     HostTerminalOptions, LiveHost, Liveness, NamedHost, NotTaken, ScanOptions, Unavailability,
@@ -1217,34 +1224,61 @@ pub(super) fn unavailability(why: &WhyUnavailable) -> Unavailability {
 
 // ---- Adopting again ------------------------------------------------------------------
 
-/// The first retry of a placeholder, after the reload that made it.
+/// The first retry of an unavailable host, unless a longer backoff is owed.
 const READOPT_FIRST: Duration = Duration::from_secs(1);
 
-/// The longest wait between two retries of one placeholder.
+/// The longest wait between two retries of one unavailable host.
 const READOPT_MAX: Duration = Duration::from_secs(60);
 
-/// When each startup placeholder is retried next, by session and launch
-/// generation: the re-adoption task's own state. A retry's attempts are
-/// never reset, so a host that keeps failing is asked less and less often.
-#[derive(Default)]
-pub(super) struct ReadoptSchedule {
-    due: HashMap<(String, i64), Retry>,
+/// The launch whose retries share one backoff, even across healthy runs.
+/// A new generation starts its own count; a replacement runtime for the
+/// same launch does not.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum ReadoptKey {
+    Agent { id: String, generation: i64 },
 }
 
-/// One placeholder's retries so far, and when the next is due.
+/// Retry history kept for each session and launch while it still exists.
+/// Healthy launches keep their attempt count, but only an active episode
+/// has a due time the task waits for. This keeps a past due time from making
+/// the task spin after a successful adoption.
+#[derive(Default)]
+pub(super) struct ReadoptSchedule {
+    due: HashMap<ReadoptKey, Retry>,
+}
+
+/// One launch's retry count, plus the current unavailability episode.
 struct Retry {
     attempts: u32,
     due: tokio::time::Instant,
+    active: bool,
 }
 
 impl ReadoptSchedule {
-    /// How many retries of `id`'s placeholder for `generation` were made,
+    /// How many retries of `id`'s host for `generation` were made,
     /// or attempted while the session was busy: for tests of the backoff.
     #[cfg(test)]
     pub(super) fn attempts(&self, id: &str, generation: i64) -> Option<u32> {
         self.due
-            .get(&(id.to_string(), generation))
+            .get(&ReadoptKey::Agent {
+                id: id.to_string(),
+                generation,
+            })
             .map(|retry| retry.attempts)
+    }
+
+    /// Make an already scheduled launch due without waiting out its real
+    /// backoff. Tests first assert the due time, then use this to exercise
+    /// the retry itself without sleeping through the reconnect window.
+    #[cfg(test)]
+    pub(super) fn make_due(&mut self, id: &str, generation: i64) {
+        self.due
+            .get_mut(&ReadoptKey::Agent {
+                id: id.to_string(),
+                generation,
+            })
+            .expect("the launch was scheduled")
+            .due = tokio::time::Instant::now();
     }
 }
 
@@ -1256,27 +1290,17 @@ fn readopt_delay(attempts: u32) -> Duration {
         .min(READOPT_MAX)
 }
 
-/// A placeholder re-adoption retries: one startup made, for a reason that
-/// may pass.
-fn retried_placeholder(host: &HostTerminal) -> bool {
-    host.is_placeholder()
-        && match host.liveness() {
-            Liveness::Unavailable { reason, .. } => reason.may_pass(),
-            Liveness::Running { .. } | Liveness::Exited { .. } | Liveness::Gone => false,
-        }
-}
-
 impl Supervisor {
-    /// Start the task that retries startup placeholders (module docs,
+    /// Start the task that retries unavailable agent hosts (module docs,
     /// "Adopting again"), for a supervisor that holds its state directory.
     /// It holds the supervisor weakly, ends with it, and returns once the
     /// supervisor is stopping.
     ///
     /// It wakes when a retry is due, and when [`Self::readoption_wake`] is
-    /// notified (`serve`'s reload left placeholders; a stop began). With
-    /// nothing scheduled it waits for a wake: placeholders are made only by
-    /// the reloads, and a runtime that becomes unavailable later is not
-    /// retried.
+    /// notified (`serve`'s reload left placeholders, the ticker saw a
+    /// passing unavailability change, or a stop began). With no active
+    /// episode it waits for a wake, even while it keeps healthy launches'
+    /// retry histories.
     pub(super) fn start_readoption(self: &Arc<Self>) {
         let weak = Arc::downgrade(self);
         let wake = Arc::clone(&self.readoption_wake);
@@ -1299,6 +1323,10 @@ impl Supervisor {
                     break;
                 }
                 next = sup.readopt_pass(&mut schedule).await;
+                #[cfg(test)]
+                if let Some(passes) = &sup.seams.readoption_passes {
+                    passes.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                }
             }
         });
     }
@@ -1308,10 +1336,10 @@ impl Supervisor {
         self.stopping.load(std::sync::atomic::Ordering::SeqCst)
     }
 
-    /// One pass of re-adoption: schedule each startup placeholder not yet
-    /// scheduled (first retry [`READOPT_FIRST`] from now), retry the ones
-    /// that are due one at a time, and say when the next is due (`None`
-    /// with nothing scheduled, or once stopping).
+    /// Schedule and retry unavailable agent hosts, keeping each launch's
+    /// backoff across successful adoptions. Every new episode starts from
+    /// that kept backoff, or at least [`RECONNECT_WINDOW`] when its runtime
+    /// gave up as unstable. Healthy launches contribute no next due time.
     ///
     /// Each retry's next due time is set before the retry is made, so no
     /// outcome, a busy session or a failure included, can leave one due at
@@ -1323,64 +1351,113 @@ impl Supervisor {
         if self.hosts_stopping() {
             return None;
         }
-        let now = tokio::time::Instant::now();
-        let placeholders: Vec<(String, i64, HostTerminal)> = self
-            .sessions
-            .lock()
-            .await
+        let sessions = self.sessions.lock().await;
+        let current: HashSet<ReadoptKey> = sessions
+            .iter()
+            .map(|(id, entry)| ReadoptKey::Agent {
+                id: id.clone(),
+                generation: entry.generation,
+            })
+            .collect();
+        let unavailable: Vec<(String, i64, HostTerminal)> = sessions
             .iter()
             .filter_map(|(id, entry)| match &entry.terminal {
-                Some(Terminal::Host(host)) if retried_placeholder(host) => {
+                Some(Terminal::Host(host)) if host.liveness().may_readopt() => {
                     Some((id.clone(), entry.generation, host.clone()))
                 }
                 Some(Terminal::Host(_) | Terminal::Tmux(_)) | None => None,
             })
             .collect();
-        let current: HashSet<(String, i64)> = placeholders
+        drop(sessions);
+        // Start an episode's wait after observing its unavailable handle.
+        // Time spent waiting for the session map must not consume any of
+        // an unstable runtime's reconnect window.
+        let now = tokio::time::Instant::now();
+        let active: HashSet<ReadoptKey> = unavailable
             .iter()
-            .map(|(id, generation, _)| (id.clone(), *generation))
+            .map(|(id, generation, _)| ReadoptKey::Agent {
+                id: id.clone(),
+                generation: *generation,
+            })
             .collect();
-        schedule.due.retain(|key, _| current.contains(key));
-        for (id, generation, old) in placeholders {
+        schedule.due.retain(|key, retry| {
+            if !active.contains(key) {
+                retry.active = false;
+            }
+            current.contains(key)
+        });
+        for (id, generation, old) in unavailable {
             let retry = schedule
                 .due
-                .entry((id.clone(), generation))
+                .entry(ReadoptKey::Agent {
+                    id: id.clone(),
+                    generation,
+                })
                 .or_insert_with(|| Retry {
                     attempts: 0,
                     due: now + READOPT_FIRST,
+                    active: false,
                 });
+            if !retry.active {
+                let delay = if matches!(
+                    old.liveness(),
+                    Liveness::Unavailable {
+                        reason: Unavailability::Unstable,
+                        ..
+                    }
+                ) {
+                    readopt_delay(retry.attempts).max(RECONNECT_WINDOW)
+                } else {
+                    readopt_delay(retry.attempts)
+                };
+                retry.due = now + delay;
+                retry.active = true;
+            }
             if retry.due > now {
                 continue;
             }
-            retry.attempts += 1;
+            retry.attempts = retry.attempts.saturating_add(1);
             retry.due = tokio::time::Instant::now() + readopt_delay(retry.attempts);
-            self.readopt_one(&id, generation, &old).await;
+            // Clear the episode at the successful swap, even if the new
+            // runtime fails before the next pass sees it healthy. In
+            // particular, each new unstable runtime must wait its window.
+            if self.readopt_one(&id, generation, &old).await {
+                retry.active = false;
+            }
             if self.hosts_stopping() {
                 return None;
             }
         }
-        schedule.due.values().map(|retry| retry.due).min()
+        schedule
+            .due
+            .values()
+            .filter(|retry| retry.active)
+            .map(|retry| retry.due)
+            .min()
     }
 
-    /// Retry one placeholder (module docs, "Adopting again"): under the
+    /// Retry one unavailable agent host (module docs, "Adopting again"): under the
     /// session's lifecycle claim, taken without waiting (a busy session is
     /// retried after the backoff), and only while the entry still holds
-    /// `old` for `generation`. Says whether the outcome was installed.
-    async fn readopt_one(&self, id: &str, generation: i64, old: &HostTerminal) -> bool {
+    /// `old` for `generation`. Says whether an adopted runtime was
+    /// installed, ending this retry episode; an installed placeholder or
+    /// absent outcome does not count as a recovery.
+    pub(super) async fn readopt_one(&self, id: &str, generation: i64, old: &HostTerminal) -> bool {
         let Some(_claim) = self.lifecycle_locks.try_claim(id) else {
             debug!(session = %id, "a session's lifecycle is busy; retrying its terminal host later");
             return false;
         };
-        if !self.holds_placeholder(id, generation, old).await {
+        if !self.holds_retried(id, generation, old).await {
             return false;
         }
         let outcome = self.probe_placeholder(id, generation, old).await;
-        self.install_readopted(id, generation, old, outcome).await
+        let recovered = matches!(&outcome, RowHost::Adopted(_));
+        self.install_readopted(id, generation, old, outcome).await && recovered
     }
 
     /// Whether session `id`'s entry still holds `old` for `generation`, and
     /// no stop has begun.
-    async fn holds_placeholder(&self, id: &str, generation: i64, old: &HostTerminal) -> bool {
+    async fn holds_retried(&self, id: &str, generation: i64, old: &HostTerminal) -> bool {
         let sessions = self.sessions.lock().await;
         !self.hosts_stopping()
             && sessions.get(id).is_some_and(|entry| {
@@ -1389,7 +1466,7 @@ impl Supervisor {
             })
     }
 
-    /// What is at the one socket placeholder `old` names now, for session
+    /// What is at the one socket unavailable handle `old` names now, for session
     /// `id`'s launch `generation`: its host adopted as recovered when its
     /// tag names that launch or an earlier one of the session's agent, as
     /// at startup; a fresh placeholder when it
@@ -1429,7 +1506,7 @@ impl Supervisor {
                 .insert(name.clone());
         }
         let hosts_dir = absolute_hosts_dir(&self.state_dir);
-        // A placeholder's socket is the one its row names (its `pane`, or
+        // An unavailable handle's socket is the one its row names (its `pane`, or
         // its generation's launch record), so a host there tagged for the
         // session's agent at an earlier generation is the row's own, as at
         // startup (module docs, "What identifies a row's host").
