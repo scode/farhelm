@@ -70,8 +70,9 @@ session list; leave it empty and Farhelm picks a name.
 
 Not every agent has every choice, and some offer other permission modes; [Permission modes](/docs/agents/#permission-modes)
 explains each, including **Custom** for supplying your own permission flags. Switching to another agent
-clears any choice it cannot take, and the launcher tells you when it does. If that leaves a riskier permission mode
-than you had, a red banner says so and offers **Undo**. [Supported agents](/docs/agents/) lists what
+clears any choice it cannot take, and the launcher tells you when it does. You can choose **Guarded** or **YOLO** before
+choosing an agent. If choosing an agent replaces a permission you chose with a riskier mode, a red banner says so and
+offers **Undo**, including on your first agent choice. [Supported agents](/docs/agents/) lists what
 each agent offers. To answer directory-trust questions automatically for directories Farhelm manages, use the
 [agent trust settings](/docs/using/start-a-session/#trust-in-managed-checkouts). To run something that is not one
 of these agents, switch the launcher to its **Command**
@@ -187,7 +188,9 @@ checkout](#start-from-a-managed-checkout), `tl:` applies one of your [launch
 templates](/docs/using/launch-templates/), saved sets of launcher choices,
 and `perms:` picks a [permission mode](/docs/agents/#permission-modes),
 including **Agent's own setting** where available. You can also type
-`guarded` or `yolo` without a prefix. `effort:default` returns to your agent's default
+`guarded` or `yolo` without a prefix, even before choosing an agent; `perms:guarded` and `perms:yolo` work then too.
+Other permission modes and effort choices need an agent first. Rejections and errors appear in yellow, while ordinary
+typing hints keep the normal text color. `effort:default` returns to your agent's default
 reasoning effort. The rest only narrow a
 search to one kind of thing: `host:`, `harness:`, `model:`, `effort:`, `folder:`, and `recent:`. `host:local` picks the
 machine you are using.

@@ -156,6 +156,15 @@ pub(crate) const fn permission_tooltip(permission: LaunchPermission) -> &'static
     }
 }
 
+/// Guarded can be chosen before an agent, but its mechanism cannot be named yet.
+/// Search and the button share that explanation so neither assumes a harness
+/// merely because the permission is available.
+pub(crate) fn guarded_permission_help(harness: Option<LaunchHarness>) -> String {
+    harness
+        .map(|harness| permission_help(harness, Some(LaunchPermission::Guarded)))
+        .unwrap_or_else(|| "Guarded: choose an agent to see its automatic safety mode".to_string())
+}
+
 /// Explain the selected mode without promising control over vendor behavior.
 ///
 /// Rows pass the stored permission, while the launcher passes its request
@@ -1108,12 +1117,15 @@ pub(crate) fn name_host_search_results(
 /// successful destinations for the selected host. A path-shaped query also
 /// exposes explicit use and browse actions, but does not invoke either. A
 /// selected harness narrows catalog and custom-history models; absent a
-/// harness, model ownership remains discoverable and effort or permission
-/// words are absent.
+/// harness, model ownership remains discoverable and effort words are absent.
+/// The Agent tab may offer Guarded and YOLO before a harness; callers must
+/// distinguish it from Command mode, whose dormant agent draft grants no
+/// permission actions.
 /// A recognized leading label limits the result kinds to its scope, while
 /// unlabelled input retains the combined search surface for compatibility.
 /// The form appends name and host actions from its own live host snapshot.
 pub(crate) fn search_results(
+    agent_without_harness: bool,
     history: &LaunchHistory,
     catalog: &[LaunchCatalogModel],
     query: &str,
@@ -1203,9 +1215,7 @@ pub(crate) fn search_results(
         }
     }
 
-    if matches!(scope, SearchScope::All | SearchScope::Permissions)
-        && let Some(harness) = harness
-    {
+    if matches!(scope, SearchScope::All | SearchScope::Permissions) {
         let choices = [
             ComposerPermission::Yolo,
             ComposerPermission::Guarded,
@@ -1217,18 +1227,32 @@ pub(crate) fn search_results(
         ];
         for choice in choices {
             let word = choice.search_word();
-            let supported = match choice {
-                ComposerPermission::Yolo => {
-                    normalized_permissions(harness, Some(LaunchPermission::Yolo)).is_some()
+            let supported = if let Some(harness) = harness {
+                match choice {
+                    ComposerPermission::Yolo => {
+                        normalized_permissions(harness, Some(LaunchPermission::Yolo)).is_some()
+                    }
+                    ComposerPermission::Guarded => {
+                        harness.offers_permission(LaunchPermission::Guarded)
+                    }
+                    ComposerPermission::OwnSetting => harness.omitted_permission().is_none(),
+                    ComposerPermission::Custom => {
+                        harness.offers_permission(LaunchPermission::Custom)
+                    }
+                    ComposerPermission::Approve => {
+                        harness.offers_permission(LaunchPermission::Approve)
+                    }
+                    ComposerPermission::SmartApprove => {
+                        harness.offers_permission(LaunchPermission::SmartApprove)
+                    }
+                    ComposerPermission::Chat => harness.offers_permission(LaunchPermission::Chat),
                 }
-                ComposerPermission::Guarded => harness.offers_permission(LaunchPermission::Guarded),
-                ComposerPermission::OwnSetting => harness.omitted_permission().is_none(),
-                ComposerPermission::Custom => harness.offers_permission(LaunchPermission::Custom),
-                ComposerPermission::Approve => harness.offers_permission(LaunchPermission::Approve),
-                ComposerPermission::SmartApprove => {
-                    harness.offers_permission(LaunchPermission::SmartApprove)
-                }
-                ComposerPermission::Chat => harness.offers_permission(LaunchPermission::Chat),
+            } else {
+                agent_without_harness
+                    && matches!(
+                        choice,
+                        ComposerPermission::Yolo | ComposerPermission::Guarded
+                    )
             };
             if supported
                 && (query.is_empty()
@@ -2070,8 +2094,15 @@ mod tests {
             assert_eq!(scoped_query(query), (SearchScope::All, query));
             for &harness in LaunchHarness::ALL {
                 assert!(
-                    search_results(&LaunchHistory::default(), &[], query, Some(harness), None)
-                        .is_empty()
+                    search_results(
+                        false,
+                        &LaunchHistory::default(),
+                        &[],
+                        query,
+                        Some(harness),
+                        None
+                    )
+                    .is_empty()
                 );
             }
         }
@@ -2083,7 +2114,14 @@ mod tests {
     fn permission_search_actions_follow_harness_capabilities() {
         let history = LaunchHistory::default();
         assert_eq!(
-            search_results(&history, &[], "perms:", Some(LaunchHarness::Codex), None),
+            search_results(
+                false,
+                &history,
+                &[],
+                "perms:",
+                Some(LaunchHarness::Codex),
+                None
+            ),
             vec![
                 ComposerSearchResult::Permissions(ComposerPermission::Yolo),
                 ComposerSearchResult::Permissions(ComposerPermission::Guarded),
@@ -2091,21 +2129,49 @@ mod tests {
             ]
         );
         assert_eq!(
-            search_results(&history, &[], "perms:y", Some(LaunchHarness::Codex), None),
+            search_results(
+                false,
+                &history,
+                &[],
+                "perms:y",
+                Some(LaunchHarness::Codex),
+                None
+            ),
             vec![ComposerSearchResult::Permissions(ComposerPermission::Yolo)]
         );
         assert_eq!(
-            search_results(&history, &[], "perms:g", Some(LaunchHarness::Codex), None),
+            search_results(
+                false,
+                &history,
+                &[],
+                "perms:g",
+                Some(LaunchHarness::Codex),
+                None
+            ),
             vec![ComposerSearchResult::Permissions(
                 ComposerPermission::Guarded
             )]
         );
         assert_eq!(
-            search_results(&history, &[], "perms:", Some(LaunchHarness::Pi), None),
+            search_results(
+                false,
+                &history,
+                &[],
+                "perms:",
+                Some(LaunchHarness::Pi),
+                None
+            ),
             vec![ComposerSearchResult::Permissions(ComposerPermission::Yolo)]
         );
         assert_eq!(
-            search_results(&history, &[], "perms:", Some(LaunchHarness::Goose), None),
+            search_results(
+                false,
+                &history,
+                &[],
+                "perms:",
+                Some(LaunchHarness::Goose),
+                None
+            ),
             vec![
                 ComposerSearchResult::Permissions(ComposerPermission::Yolo),
                 ComposerSearchResult::Permissions(ComposerPermission::Approve),
@@ -2114,7 +2180,14 @@ mod tests {
             ]
         );
         assert_eq!(
-            search_results(&history, &[], "perms:", Some(LaunchHarness::Omp), None),
+            search_results(
+                false,
+                &history,
+                &[],
+                "perms:",
+                Some(LaunchHarness::Omp),
+                None
+            ),
             vec![
                 ComposerSearchResult::Permissions(ComposerPermission::Yolo),
                 ComposerSearchResult::Permissions(ComposerPermission::Guarded),
@@ -2124,6 +2197,7 @@ mod tests {
         );
         assert_eq!(
             search_results(
+                false,
                 &history,
                 &[],
                 "perms:smart",
@@ -2135,6 +2209,7 @@ mod tests {
             )]
         );
         let smart = grouped_search_results(search_results(
+            false,
             &history,
             &[],
             "perms:smart approve",
@@ -2150,7 +2225,7 @@ mod tests {
             Some(ComposerSearchGroup::Permissions)
         );
         for &harness in LaunchHarness::ALL {
-            let actual = search_results(&history, &[], "perms:", Some(harness), None);
+            let actual = search_results(false, &history, &[], "perms:", Some(harness), None);
             for (choice, mode) in [
                 (ComposerPermission::Approve, LaunchPermission::Approve),
                 (
@@ -2168,6 +2243,7 @@ mod tests {
         }
         assert!(
             search_results(
+                false,
                 &history,
                 &[],
                 "perms:default",
@@ -2176,7 +2252,63 @@ mod tests {
             )
             .is_empty()
         );
-        assert!(search_results(&history, &[], "perms:yolo", None, None).is_empty());
+        assert!(search_results(false, &history, &[], "perms:yolo", None, None).is_empty());
+    }
+
+    /// The Agent tab can choose the same two permissions its buttons offer
+    /// before a harness. Command mode must not mutate a dormant agent draft,
+    /// and vendor-specific modes and effort still require an agent's vocabulary.
+    #[test]
+    fn permissions_before_a_harness_belong_only_to_the_agent_tab() {
+        let history = LaunchHistory::default();
+        for (query, permission) in [
+            ("yolo", ComposerPermission::Yolo),
+            ("guarded", ComposerPermission::Guarded),
+            ("perms:yolo", ComposerPermission::Yolo),
+            ("perms:guarded", ComposerPermission::Guarded),
+        ] {
+            let agent = search_results(true, &history, &[], query, None, None);
+            assert_eq!(
+                agent,
+                vec![ComposerSearchResult::Permissions(permission)],
+                "{query}"
+            );
+            let command = search_results(false, &history, &[], query, None, None);
+            assert!(
+                !command
+                    .iter()
+                    .any(|row| matches!(row, ComposerSearchResult::Permissions(_))),
+                "{query}"
+            );
+        }
+        for query in [
+            "custom",
+            "own",
+            "approve",
+            "smart approve",
+            "chat",
+            "perms:custom",
+            "perms:own",
+            "perms:approve",
+            "perms:smart",
+            "perms:chat",
+            "high",
+            "effort:high",
+        ] {
+            let rows = search_results(true, &history, &[], query, None, None);
+            assert!(
+                !rows.iter().any(|row| matches!(
+                    row,
+                    ComposerSearchResult::Permissions(_) | ComposerSearchResult::Effort(_)
+                )),
+                "{query}"
+            );
+            assert!(query_needs_harness(query, true), "{query}");
+        }
+        assert_eq!(
+            guarded_permission_help(None),
+            "Guarded: choose an agent to see its automatic safety mode"
+        );
     }
 
     /// Bare YOLO and Guarded follow the same substring and exact-word rules.
@@ -2184,17 +2316,38 @@ mod tests {
     #[test]
     fn bare_yolo_and_guarded_offer_permissions_and_preselect_exactly() {
         let history = LaunchHistory::default();
-        let yolo = search_results(&history, &[], "yolo", Some(LaunchHarness::Codex), None);
+        let yolo = search_results(
+            false,
+            &history,
+            &[],
+            "yolo",
+            Some(LaunchHarness::Codex),
+            None,
+        );
         assert!(yolo.contains(&ComposerSearchResult::Permissions(ComposerPermission::Yolo)));
         assert!(
-            !search_results(&history, &[], "default", Some(LaunchHarness::Codex), None)
-                .iter()
-                .any(|result| matches!(result, ComposerSearchResult::Permissions(_)))
+            !search_results(
+                false,
+                &history,
+                &[],
+                "default",
+                Some(LaunchHarness::Codex),
+                None
+            )
+            .iter()
+            .any(|result| matches!(result, ComposerSearchResult::Permissions(_)))
         );
         let groups = grouped_search_results(yolo);
         assert_eq!(default_search_index(&groups, "yolo"), 0);
         for query in ["guarded", "ar"] {
-            let results = search_results(&history, &[], query, Some(LaunchHarness::Codex), None);
+            let results = search_results(
+                false,
+                &history,
+                &[],
+                query,
+                Some(LaunchHarness::Codex),
+                None,
+            );
             assert!(results.contains(&ComposerSearchResult::Permissions(
                 ComposerPermission::Guarded
             )));
@@ -2206,7 +2359,7 @@ mod tests {
             }
         }
         assert!(
-            !search_results(&history, &[], "guarded", None, None)
+            !search_results(false, &history, &[], "guarded", None, None)
                 .iter()
                 .any(|result| matches!(result, ComposerSearchResult::Permissions(_)))
         );
@@ -2217,7 +2370,7 @@ mod tests {
             LaunchHarness::Cursor,
         ] {
             assert!(
-                !search_results(&history, &[], "guarded", Some(harness), None).contains(
+                !search_results(false, &history, &[], "guarded", Some(harness), None).contains(
                     &ComposerSearchResult::Permissions(ComposerPermission::Guarded)
                 )
             );
@@ -2230,7 +2383,7 @@ mod tests {
             ("chat", LaunchHarness::Goose),
         ] {
             assert!(
-                !search_results(&history, &[], query, Some(harness), None)
+                !search_results(false, &history, &[], query, Some(harness), None)
                     .iter()
                     .any(|result| matches!(result, ComposerSearchResult::Permissions(_))),
                 "{query} must require the perms: scope even where {harness:?} offers it"
@@ -3354,6 +3507,7 @@ mod tests {
             }
             assert!(
                 search_results(
+                    false,
                     &LaunchHistory::default(),
                     &[],
                     "perms:default",
@@ -3717,6 +3871,7 @@ mod tests {
 
         assert!(
             search_results(
+                false,
                 &history,
                 &catalog,
                 "MED",
@@ -3727,6 +3882,7 @@ mod tests {
         );
         assert!(
             !search_results(
+                false,
                 &history,
                 &catalog,
                 "low",
@@ -3737,12 +3893,13 @@ mod tests {
             .any(|result| matches!(result, ComposerSearchResult::Effort(_)))
         );
         assert!(
-            !search_results(&history, &catalog, "medium", None, None)
+            !search_results(false, &history, &catalog, "medium", None, None)
                 .iter()
                 .any(|result| matches!(result, ComposerSearchResult::Effort(_)))
         );
         assert!(
             !search_results(
+                false,
                 &history,
                 &catalog,
                 "low",
@@ -3758,6 +3915,7 @@ mod tests {
         // empty list. OpenCode's union is empty, so it still offers nothing.
         assert!(
             search_results(
+                false,
                 &history,
                 &catalog,
                 "med",
@@ -3768,6 +3926,7 @@ mod tests {
         );
         assert!(
             !search_results(
+                false,
                 &history,
                 &catalog,
                 "low",
@@ -3791,6 +3950,7 @@ mod tests {
             efforts: vec![LaunchEffort::Medium],
         }];
         let choices = search_results(
+            false,
             &history,
             &catalog,
             "effort:",
@@ -3801,6 +3961,7 @@ mod tests {
         assert!(choices.contains(&ComposerSearchResult::Effort(Some(LaunchEffort::Medium))));
 
         let exact = grouped_search_results(search_results(
+            false,
             &history,
             &catalog,
             "effort:default",
@@ -3811,6 +3972,7 @@ mod tests {
         assert_eq!(exact[0].1, vec![ComposerSearchResult::Effort(None)]);
         assert_eq!(
             search_results(
+                false,
                 &history,
                 &[],
                 "effort:def",
@@ -3821,6 +3983,7 @@ mod tests {
         );
         assert_eq!(
             search_results(
+                false,
                 &history,
                 &[],
                 "effort:default",
@@ -3831,6 +3994,7 @@ mod tests {
         );
         assert!(
             !search_results(
+                false,
                 &history,
                 &catalog,
                 "default",
@@ -3840,13 +4004,14 @@ mod tests {
             .contains(&ComposerSearchResult::Effort(None))
         );
         assert!(
-            !search_results(&history, &[], "effort:default", None, None)
+            !search_results(false, &history, &[], "effort:default", None, None)
                 .contains(&ComposerSearchResult::Effort(None))
         );
 
         for &harness in LaunchHarness::ALL {
-            let offered = search_results(&history, &[], "effort:default", Some(harness), None)
-                .contains(&ComposerSearchResult::Effort(None));
+            let offered =
+                search_results(false, &history, &[], "effort:default", Some(harness), None)
+                    .contains(&ComposerSearchResult::Effort(None));
             assert_eq!(offered, harness.offers_effort(), "{harness:?}");
         }
     }
@@ -3893,6 +4058,7 @@ mod tests {
         ];
 
         let claude_results = search_results(
+            false,
             &history,
             &catalog,
             "catalog",
@@ -3907,6 +4073,7 @@ mod tests {
             }]
         );
         let selected_private = search_results(
+            false,
             &history,
             &catalog,
             "private",
@@ -3921,7 +4088,7 @@ mod tests {
             id: "codex-private".into(),
             harness: LaunchHarness::Codex,
         }));
-        let all_results = search_results(&history, &catalog, "private", None, None);
+        let all_results = search_results(false, &history, &catalog, "private", None, None);
         assert!(all_results.contains(&ComposerSearchResult::Model {
             id: "claude-private".into(),
             harness: LaunchHarness::Claude,
@@ -4020,11 +4187,11 @@ mod tests {
         );
         for (index, query) in ["\u{202e}", "<U+202E>"].into_iter().enumerate() {
             assert_eq!(
-                search_results(&history, &[], &format!("folder:{query}"), None, None),
+                search_results(false, &history, &[], &format!("folder:{query}"), None, None),
                 vec![ComposerSearchResult::Folder(paths[index].into())]
             );
             assert_eq!(
-                search_results(&history, &[], &format!("recent:{query}"), None, None),
+                search_results(false, &history, &[], &format!("recent:{query}"), None, None),
                 vec![ComposerSearchResult::Recent(
                     history.launches[index].clone()
                 )]
@@ -4068,7 +4235,7 @@ mod tests {
         }];
 
         assert_eq!(
-            search_results(&history, &catalog, "clau", None, None),
+            search_results(false, &history, &catalog, "clau", None, None),
             vec![
                 ComposerSearchResult::Harness(LaunchHarness::Claude),
                 ComposerSearchResult::Model {
@@ -4079,7 +4246,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            search_results(&history, &catalog, "helm", None, None),
+            search_results(false, &history, &catalog, "helm", None, None),
             vec![
                 ComposerSearchResult::Folder("~/work/helm".into()),
                 ComposerSearchResult::Recent(history.launches[0].clone()),
@@ -4130,8 +4297,8 @@ mod tests {
     fn search_never_treats_its_text_as_a_command() {
         let history = LaunchHistory::default();
 
-        assert!(search_results(&history, &[], "command", None, None).is_empty());
-        assert!(search_results(&history, &[], "run-this", None, None).is_empty());
+        assert!(search_results(false, &history, &[], "command", None, None).is_empty());
+        assert!(search_results(false, &history, &[], "run-this", None, None).is_empty());
     }
 
     /// A symlink spelling and its resolved spelling are one destination.
@@ -4188,7 +4355,7 @@ mod tests {
             1
         );
         assert_eq!(
-            search_results(&history, &[], "project", None, None)
+            search_results(false, &history, &[], "project", None, None)
                 .into_iter()
                 .filter(|result| matches!(result, ComposerSearchResult::Recent(_)))
                 .count(),
@@ -4274,7 +4441,7 @@ mod tests {
             .into_iter()
             .map(|entry| (entry.cwd.clone(), entry.selection.clone()))
             .collect::<Vec<_>>();
-        let searched = search_results(&history, &[], "work", None, None)
+        let searched = search_results(false, &history, &[], "work", None, None)
             .into_iter()
             .filter_map(|result| match result {
                 ComposerSearchResult::Recent(entry) => Some((entry.cwd, entry.selection)),
@@ -4321,8 +4488,14 @@ mod tests {
             }],
         };
 
-        let groups =
-            grouped_search_results(search_results(&history, &[], "~/work/helm", None, None));
+        let groups = grouped_search_results(search_results(
+            false,
+            &history,
+            &[],
+            "~/work/helm",
+            None,
+            None,
+        ));
         assert_eq!(
             groups,
             vec![
@@ -4362,7 +4535,7 @@ mod tests {
             }],
         };
         assert!(
-            search_results(&history, &[], "candidate", None, None).contains(
+            search_results(false, &history, &[], "candidate", None, None).contains(
                 &ComposerSearchResult::Model {
                     id: "release/candidate.42".into(),
                     harness: LaunchHarness::Codex,
@@ -4425,15 +4598,15 @@ mod tests {
             efforts: vec![LaunchEffort::Medium],
         }];
 
-        let harnesses = search_results(&history, &catalog, "harness:", None, None);
+        let harnesses = search_results(false, &history, &catalog, "harness:", None, None);
         assert_eq!(harnesses.len(), 9);
         assert!(
             harnesses
                 .iter()
                 .all(|result| matches!(result, ComposerSearchResult::Harness(_)))
         );
-        assert!(search_results(&history, &catalog, "harness:other", None, None).is_empty());
-        let models = search_results(&history, &catalog, "model:", None, None);
+        assert!(search_results(false, &history, &catalog, "harness:other", None, None).is_empty());
+        let models = search_results(false, &history, &catalog, "model:", None, None);
         assert_eq!(models.len(), 1);
         assert!(models.contains(&ComposerSearchResult::Model {
             id: "claude-v2".into(),
@@ -4445,6 +4618,7 @@ mod tests {
                 .all(|result| matches!(result, ComposerSearchResult::Model { .. }))
         );
         let efforts = search_results(
+            false,
             &history,
             &catalog,
             "effort:",
@@ -4459,7 +4633,7 @@ mod tests {
                 .iter()
                 .all(|result| matches!(result, ComposerSearchResult::Effort(_)))
         );
-        let folders = search_results(&history, &catalog, "folder:", None, None);
+        let folders = search_results(false, &history, &catalog, "folder:", None, None);
         assert_eq!(folders.len(), 1);
         assert!(folders.contains(&ComposerSearchResult::Folder("/tmp/gh:owner/repo".into())));
         assert!(folders.iter().all(|result| matches!(
@@ -4468,7 +4642,7 @@ mod tests {
                 | ComposerSearchResult::BrowsePath(_)
                 | ComposerSearchResult::Folder(_)
         )));
-        let recents = search_results(&history, &catalog, "recent:", None, None);
+        let recents = search_results(false, &history, &catalog, "recent:", None, None);
         assert_eq!(recents.len(), 1);
         assert!(recents.contains(&ComposerSearchResult::Recent(history.launches[0].clone())));
         assert!(
@@ -4476,7 +4650,9 @@ mod tests {
                 .iter()
                 .all(|result| matches!(result, ComposerSearchResult::Recent(_)))
         );
-        assert!(search_results(&history, &catalog, "gh:gh:owner/repo", None, None).is_empty());
+        assert!(
+            search_results(false, &history, &catalog, "gh:gh:owner/repo", None, None).is_empty()
+        );
     }
 
     /// Folder scope excludes complete setup rows, while unlabelled search
@@ -4503,7 +4679,7 @@ mod tests {
                 creation_seq: Some(1),
             }],
         };
-        let scoped = search_results(&history, &[], "folder:project", None, None);
+        let scoped = search_results(false, &history, &[], "folder:project", None, None);
         assert_eq!(
             scoped,
             vec![ComposerSearchResult::Folder("/work/project".into())]
@@ -4514,7 +4690,7 @@ mod tests {
                 .all(|result| matches!(result, ComposerSearchResult::Folder(_)))
         );
         assert!(
-            search_results(&history, &[], "project", None, None)
+            search_results(false, &history, &[], "project", None, None)
                 .iter()
                 .any(|result| matches!(result, ComposerSearchResult::Recent(_)))
         );
@@ -4526,7 +4702,7 @@ mod tests {
     #[test]
     fn scoped_and_unscoped_search_offer_omp() {
         for query in ["omp", "harness:omp", "harness:"] {
-            let results = search_results(&LaunchHistory::default(), &[], query, None, None);
+            let results = search_results(false, &LaunchHistory::default(), &[], query, None, None);
             assert!(
                 results.contains(&ComposerSearchResult::Harness(LaunchHarness::Omp)),
                 "OMP must remain discoverable through {query:?}"
@@ -4551,6 +4727,7 @@ mod tests {
             },
         ];
         let model_groups = grouped_search_results(search_results(
+            false,
             &LaunchHistory::default(),
             &catalog,
             "model:provider/model:v2",
@@ -4574,6 +4751,7 @@ mod tests {
         }];
         assert!(
             search_results(
+                false,
                 &LaunchHistory::default(),
                 &unknown_colon,
                 "vendor:model:v2",
@@ -4665,7 +4843,14 @@ mod tests {
         assert_eq!(owner, None);
 
         for query in ["grok", "harness:grok", "harness:"] {
-            let results = search_results(&LaunchHistory::default(), &catalog, query, None, None);
+            let results = search_results(
+                false,
+                &LaunchHistory::default(),
+                &catalog,
+                query,
+                None,
+                None,
+            );
             assert!(
                 results.contains(&ComposerSearchResult::Harness(LaunchHarness::Grok)),
                 "Grok must remain discoverable through {query:?}"

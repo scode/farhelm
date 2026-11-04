@@ -1993,6 +1993,8 @@ impl LaunchDraftState {
     }
 
     /// Capture the actual switch boundary once, with no executable recovery.
+    /// Before the first harness, only an explicit permission is a commitment
+    /// the switch can escalate; passive memory and a displayed default are not.
     fn capture_permission_switch(
         self,
         draft: &LaunchDraft,
@@ -2000,9 +2002,13 @@ impl LaunchDraftState {
     ) -> PermissionSwitchBefore {
         PermissionSwitchBefore {
             harness: draft.harness(),
-            permission: draft
-                .harness()
-                .and_then(|h| h.request_permission(draft.permissions())),
+            permission: match draft.harness() {
+                Some(harness) => harness.request_permission(draft.permissions()),
+                None => draft
+                    .permissions_explicit()
+                    .then(|| draft.permissions())
+                    .flatten(),
+            },
             tab: draft.tab(),
             undo: std::rc::Rc::new(PermissionUndo {
                 draft: draft.clone(),

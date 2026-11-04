@@ -49,6 +49,100 @@ test.beforeEach(async ({ page }) => {
   }));
 });
 
+/** A permission chosen before an agent is a real choice, unlike the
+ * launcher's displayed default. Search must accept both spellings without
+ * launching or needing a harness for its tooltip.
+ */
+for (const query of ["yolo", "perms:yolo"]) {
+  test(`${query} selects YOLO before choosing a harness`, async ({ page, request }) => {
+    const previous = await readPreferences(request);
+    try {
+      await patchPreferences(request, { remembered_permissions: null });
+      await page.goto("/");
+      await page.locator(".new-session-button").click();
+      const form = page.locator(".create-session-form");
+      const search = form.locator('.launch-composer-search input[role="combobox"]');
+      await expect(form.locator('.launch-composer-harness-choice button[aria-pressed="true"]')).toHaveCount(0);
+      await search.fill(query);
+      const choice = form.getByRole("option", { name: "Permissions: YOLO", exact: true, selected: true });
+      await expect(choice).toBeVisible();
+      await search.press("Enter");
+      await expect(form.getByRole("group", { name: "Permission mode", exact: true }).getByRole("button", { name: "YOLO", exact: true }))
+        .toHaveAttribute("aria-pressed", "true");
+      await expect(search).toHaveValue("");
+      await expect(search).toBeFocused();
+      await expect(form.locator('.launch-composer-harness-choice button[aria-pressed="true"]')).toHaveCount(0);
+      await expect(form.locator(".permission-escalation-banner")).toHaveCount(0);
+    } finally {
+      await patchPreferences(request, { remembered_permissions: previous.remembered_permissions });
+    }
+  });
+}
+
+/** The first agent can discard an explicitly chosen Guarded mode just as a
+ * later agent switch can. Every input route must produce the same banner and
+ * Undo must restore the no-agent draft with its explicit permission intact.
+ */
+for (const source of ["button", "guarded", "perms:guarded"]) {
+  test(`first harness escalation warns after Guarded chosen by ${source}`, async ({ page, request }) => {
+    const previous = await readPreferences(request);
+    try {
+      await patchPreferences(request, { remembered_permissions: null });
+      await page.goto("/");
+      await page.locator(".new-session-button").click();
+      const form = page.locator(".create-session-form");
+      const permissions = form.getByRole("group", { name: "Permission mode", exact: true });
+      const search = form.locator('.launch-composer-search input[role="combobox"]');
+      if (source === "button") {
+        await permissions.getByRole("button", { name: "Guarded", exact: true }).click();
+      } else {
+        await search.fill(source);
+        const choice = form.getByRole("option", { name: "Permissions: Guarded", exact: true, selected: true });
+        await expect(choice).toBeVisible();
+        await expect(choice).toHaveAttribute("data-tooltip", "Guarded: choose an agent to see its automatic safety mode");
+        await search.press("Enter");
+      }
+      await expect(permissions.getByRole("button", { name: "Guarded", exact: true })).toHaveAttribute("aria-pressed", "true");
+      await chooseAgent(form, "OpenCode");
+      const banner = form.locator(".permission-escalation-banner");
+      await expect(banner).toContainText("Permission changed: Guarded → YOLO, because OpenCode does not support Guarded.");
+      await expect(permissions.getByRole("button", { name: "YOLO", exact: true })).toHaveAttribute("aria-pressed", "true");
+      await banner.getByRole("button", { name: "Undo", exact: true }).click();
+      await expect(banner).toHaveCount(0);
+      await expect(form.locator('.launch-composer-harness-choice button[aria-pressed="true"]')).toHaveCount(0);
+      await expect(permissions.getByRole("button", { name: "Guarded", exact: true })).toHaveAttribute("aria-pressed", "true");
+      // A second switch proves Undo restored provenance, not merely the label.
+      await chooseAgent(form, "OpenCode");
+      await expect(banner).toContainText("Permission changed: Guarded → YOLO");
+    } finally {
+      await patchPreferences(request, { remembered_permissions: previous.remembered_permissions });
+    }
+  });
+}
+
+/** A default-looking Guarded control and remembered Guarded are both passive:
+ * choosing the first agent must warn only when a person made an explicit choice.
+ */
+for (const remembered of [null, "guarded"] as const) {
+  test(`first harness does not escalate passive ${remembered ?? "default"} permission`, async ({ page, request }) => {
+    const previous = await readPreferences(request);
+    try {
+      await patchPreferences(request, { remembered_permissions: remembered });
+      await page.goto("/");
+      await page.locator(".new-session-button").click();
+      const form = page.locator(".create-session-form");
+      await expect(form.getByRole("group", { name: "Permission mode", exact: true }).getByRole("button", { name: "Guarded", exact: true }))
+        .toHaveAttribute("aria-pressed", "true");
+      await chooseAgent(form, "OpenCode");
+      await expect(form.getByRole("group", { name: "Permission mode", exact: true }).getByRole("button", { name: "YOLO", exact: true }))
+        .toHaveAttribute("aria-pressed", "true");
+      await expect(form.locator(".permission-escalation-banner")).toHaveCount(0);
+    } finally {
+      await patchPreferences(request, { remembered_permissions: previous.remembered_permissions });
+    }
+  });
+}
+
 /** The original defect is Guarded becoming YOLO despite OMP offering Guarded.
  * With memory cleared, both the initial default and that explicit switch must
  * remain Guarded. Undo of a real escalation restores the complete old draft.

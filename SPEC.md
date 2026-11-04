@@ -695,45 +695,49 @@ agent choice is independent of that destination:
   seconds, paused while hovered or focused, and is announced to screen readers. The permission control gets a thick red
   outline that fades after about two and a half seconds. Reduced motion replaces slide and fade with a static outline
   while the banner is shown. Chat and approve are safest, then smart approve and Guarded, then YOLO, custom flags and
-  the agent's own setting; only a move to a later group triggers the banner. Choosing the first agent or choosing a
-  permission directly never triggers it. An invalid combination cannot launch. New normally preselects no harness or
-  model. The permissions mode remembers the last successful agent launch, helm-wide across every client, except that a
-  harness's default or forced YOLO clears that memory instead of preselecting YOLO for another harness. Explicit YOLO on
-  a harness with a non-YOLO default is remembered. The last wrapper prefix from a successful user agent launch is
-  remembered per agent type, helm-wide; a launch without one clears that agent's remembered prefix. Switching agent
-  types loads the new type's remembered prefix. Agent-origin launches and command launches do not change this memory.
-  Workspace trust for Codex, Muse and Pi comes from separate off-by-default Settings switches for managed checkouts
-  (below). There is no per-launch trust choice, and the old remembered trust value is neither read nor written. Those
-  switches add per-launch trust arguments without writing vendor trust state; the separate opt-in for Claude managed
-  checkouts below is the one exception. Without an override, the harness retains its own trust behavior; Codex, Muse,
-  Claude, and Cursor may still ask for directory trust (Cursor even with `--force`). Farhelm does not send answers to
-  their terminal prompts. "Reset choices" returns permissions and the wrapper prefix to their remembered values, and a
-  recent setup's saved choices override them when used. A recent setup's historical trust value is ignored. The
-  launch-composer search matches harnesses, launch templates (`tl:name`), models scoped by the chosen harness, effort
-  words offered by that harness and model plus `effort:default`, bare `yolo` and `guarded` plus the `perms:` choices for
-  those modes, custom, own setting and supported approval modes, host and name actions, folders and recent setups.
-  Permission actions are offered only when the selected harness can represent them; own setting is offered only on
-  Cursor. `name:foo` applies the entire value as the session name. `host:foo` filters host choices, and `host:local`
-  selects the helm-local host even if it has an alias. The default local host label in the GUI is
-  `Local (this machine)`. Accepting a result applies it and clears the box while keeping focus there, except custom
-  moves focus to its flags editor. Enter on an empty box launches only a complete, valid selection through the ordinary
-  Launch path; an incomplete attempt says why beside Launch, as does a refused Launch press, and the greyed-out button's
-  hover names what is missing. Enter when the launcher itself has focus uses that same Launch path and refusal. Request
-  refusals appear there too, within the initial dialog viewport. Unmatched unlabelled text offers one visible **Set
-  session name** row; accepting it sets the name and clears the box without launching. Scoped queries with no results
-  show a live reason in the results area: a missing name, no matching choice, a pending model or template list, or the
-  owner/repo form a repository needs. Unknown model ids belong in the model field. On the agent tab, an unmatched effort
-  or permission word, or an `effort:` or `perms:` query, asks for a harness first when none is chosen. Spaces alone ask
-  for a search or an empty box and never launch. Escape or a click outside search closes its rows or message without
-  clearing the query. Enter on a nonempty query with the area closed first reopens it; a separate Enter picks the
-  visible highlighted row, or leaves the explanation in place when there is none. Enter on a choice button (launch-kind
-  tab, harness, effort, or permissions) applies that choice and then launches through the ordinary Launch path, or shows
-  its refusal beside Launch; custom instead selects the mode and focuses its required flags editor. Enter on the closed
-  host picker, agent-type or effort dropdown, YOLO radios, or Resume checkbox launches with the values shown, without
-  changing them; those native controls retain their Space and arrow behavior. Action buttons keep their normal press.
-  The search box, model field, YOLO confirmation, and save-as-template panel keep their own Enter rules. In the editable
-  folder field, Enter chooses an arrow-highlighted dropdown entry without launching; with no highlighted entry it
-  launches as before. A held Enter never launches.
+  the agent's own setting; only a move to a later group triggers the banner. Choosing a permission directly never
+  triggers it. Choosing the first agent triggers it only when a permission was explicitly chosen before that agent; a
+  displayed default or a remembered permission alone does not. An invalid combination cannot launch. New normally
+  preselects no harness or model. The permissions mode remembers the last successful agent launch, helm-wide across
+  every client, except that a harness's default or forced YOLO clears that memory instead of preselecting YOLO for
+  another harness. Explicit YOLO on a harness with a non-YOLO default is remembered. The last wrapper prefix from a
+  successful user agent launch is remembered per agent type, helm-wide; a launch without one clears that agent's
+  remembered prefix. Switching agent types loads the new type's remembered prefix. Agent-origin launches and command
+  launches do not change this memory. Workspace trust for Codex, Muse and Pi comes from separate off-by-default Settings
+  switches for managed checkouts (below). There is no per-launch trust choice, and the old remembered trust value is
+  neither read nor written. Those switches add per-launch trust arguments without writing vendor trust state; the
+  separate opt-in for Claude managed checkouts below is the one exception. Without an override, the harness retains its
+  own trust behavior; Codex, Muse, Claude, and Cursor may still ask for directory trust (Cursor even with `--force`).
+  Farhelm does not send answers to their terminal prompts. "Reset choices" returns permissions and the wrapper prefix to
+  their remembered values, and a recent setup's saved choices override them when used. A recent setup's historical trust
+  value is ignored. The launch-composer search matches harnesses, launch templates (`tl:name`), models scoped by the
+  chosen harness, effort words offered by that harness and model plus `effort:default`, bare `yolo` and `guarded` plus
+  the `perms:` choices for those modes, custom, own setting and supported approval modes, host and name actions, folders
+  and recent setups. On the Agent tab, Guarded and YOLO can also be chosen before a harness, by their bare words or
+  `perms:` choices. Other permission actions are offered only when the selected harness can represent them; own setting
+  is offered only on Cursor. The Command tab offers no permission actions. `name:foo` applies the entire value as the
+  session name. `host:foo` filters host choices, and `host:local` selects the helm-local host even if it has an alias.
+  The default local host label in the GUI is `Local (this machine)`. Accepting a result applies it and clears the box
+  while keeping focus there, except custom moves focus to its flags editor. Enter on an empty box launches only a
+  complete, valid selection through the ordinary Launch path; an incomplete attempt says why beside Launch, as does a
+  refused Launch press, and the greyed-out button's hover names what is missing. Enter when the launcher itself has
+  focus uses that same Launch path and refusal. Request refusals appear there too, within the initial dialog viewport.
+  Unmatched unlabelled text offers one visible **Set session name** row; accepting it sets the name and clears the box
+  without launching. Scoped queries with no results show a live reason in the results area: a missing name, no matching
+  choice, a pending model or template list, or the owner/repo form a repository needs. Unknown model ids belong in the
+  model field. On the agent tab, an unmatched effort or permission word, or an `effort:` or `perms:` query with no
+  offered row, asks for a harness first when none is chosen. Input refusals and request errors in the launcher use
+  yellow warning colors; loading messages and typing hints keep the ordinary text color, while permission danger stays
+  red. Spaces alone ask for a search or an empty box and never launch. Escape or a click outside search closes its rows
+  or message without clearing the query. Enter on a nonempty query with the area closed first reopens it; a separate
+  Enter picks the visible highlighted row, or leaves the explanation in place when there is none. Enter on a choice
+  button (launch-kind tab, harness, effort, or permissions) applies that choice and then launches through the ordinary
+  Launch path, or shows its refusal beside Launch; custom instead selects the mode and focuses its required flags
+  editor. Enter on the closed host picker, agent-type or effort dropdown, YOLO radios, or Resume checkbox launches with
+  the values shown, without changing them; those native controls retain their Space and arrow behavior. Action buttons
+  keep their normal press. The search box, model field, YOLO confirmation, and save-as-template panel keep their own
+  Enter rules. In the editable folder field, Enter chooses an arrow-highlighted dropdown entry without launching; with
+  no highlighted entry it launches as before. A held Enter never launches.
 - Containerized launches: the Agent tab shows an experimental **Containerized** switch directly after the wrapper
   prefix. It is available only for a managed checkout; a plain folder destination shows the reason. An unchanged managed
   directory copied from a session remains eligible on that same confirmed host. Turning it on reveals **Image**, a
