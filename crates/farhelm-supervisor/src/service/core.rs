@@ -26913,10 +26913,12 @@ exit 0
 
         /// Answer a `list-panes` sweep with one live pane for the
         /// publication-gap path, which recovers the pane from tmux.
+        /// The zero before the session name is the fact query's tab-marker
+        /// presence flag; omitting it makes discovery reject the whole row.
         fn write_panes_list(&self, tmux_name: &str) {
             std::fs::write(
                 self.scratch.path().join("panes_answer"),
-                format!("%0 @0 0 0 s {tmux_name}\n"),
+                format!("%0 @0 0 0 s 0 {tmux_name}\n"),
             )
             .expect("panes answer");
         }
