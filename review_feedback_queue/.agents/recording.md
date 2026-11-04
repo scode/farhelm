@@ -64,25 +64,35 @@ Tell each reviewer:
   prompt or dialog is open, the current list, a precondition recomputed at send time) instead of using what the render
   the user acted on showed. `SPEC_impl.md`, "GUI: Dioxus" (the paragraph "Answers bind to what was drawn"), states the
   rule and the mechanism every prompt answers through. Reviews kept finding such handlers one at a time.
+- Before judging any behavior, find the `SPEC.md` and `SPEC_impl.md` sections that govern your scope, read them in full,
+  and check every candidate against them. Behavior the spec explicitly accepts is not a bug.
+- Do not search the queue, `FILTER.md`, `BUGS.md`, `TODO.md`, the plans or `TRIAGE_OUTCOMES.md` for coverage. A
+  candidate you believe one of those covers is still reported as a finding, with what you know of the cover in
+  `possible_cover`; matching against them happens once, when the findings are recorded. Set `proposed_drop`, with its
+  basis, only when you think a finding should not be queued; the commissioner decides.
 - End the reply with three parts:
   - the findings, each with the template's fields plus a suggested bucket, a confidence (confirmed, or likely with the
     unverified premise named), `proposed_drop` and `possible_cover`;
-  - every candidate considered and not reported, with the reason (refuted, with file and line; or covered, naming the
-    exact spec section, `Planned` item, `BUGS.md` entry, queue file, ledger heading or filter) and whether it could be
-    in the `highest` bucket;
+  - every candidate considered and set aside, with the reason (refuted by the code under review, with file and line; or
+    explicitly accepted by the spec, naming the exact `SPEC.md` or `SPEC_impl.md` section) and whether it could be in
+    the `highest` bucket. A candidate acceptable only because of some other cover is not set aside; report it as a
+    finding;
   - the exact files and line ranges read, and what in scope went unread.
 
-  A covered candidate that could be in the `highest` bucket is reported as a finding with `proposed_drop` filled in, not
-  only listed, so the check in the NOTE under `review_feedback_queue/.agents/recording.md`, "Before recording a
-  finding", can see it.
+  A spec-accepted candidate that could be in the `highest` bucket is reported as a finding with `proposed_drop` citing
+  the section, not only listed, so the independent drop check sees it.
 
 Then, when collecting the replies:
 
+- Check each finding for coverage and filters as `review_feedback_queue/.agents/recording.md`, "Before recording a
+  finding", describes, starting from its `possible_cover`. Reviewers check only the spec, so this is where the other
+  coverage sources are searched, and findings already in the queue are expected here.
 - Send every proposed drop of a finding that could be in the `highest` bucket to the independent drop check
-  (`review_feedback_queue/.agents/recording.md`, "Independent drop check"), including drops that appear only in the list
-  of unreported candidates or in passing prose. In the audited run most reviewers mentioned such drops only in passing.
-  Finding those drops is your job as commissioner, done when building the check's register; the check itself only judges
-  them. "Too rare" or "by design" with no spec, TODO, `BUGS.md`, queue, ledger or filter citation is not coverage.
+  (`review_feedback_queue/.agents/recording.md`, "Independent drop check"), including one only listed among the
+  candidates set aside instead of reported, and one that appears only in passing prose. In the audited run most
+  reviewers mentioned such drops only in passing. Finding those drops is your job as commissioner, done when building
+  the check's register; the check itself only judges them. "Too rare" or "by design" with no spec, TODO, `BUGS.md`,
+  queue, ledger or filter citation is not coverage.
 - Compare each reviewer's stated coverage with its scope, and tell the user which parts went unread rather than
   presenting a quiet area as clean.
 - When writing a finding into a feedback file, keep the reviewer's confidence, suggested bucket, possible cover and
@@ -112,11 +122,10 @@ proposed basis, the exact spec, TODO, `BUGS.md`, queue, ledger or filter text th
 the reviewed revisions.
 
 When the findings come from an agent review, check the register against the reviewers' output before consulting anyone:
-every finding with `proposed_drop`, every covered candidate that could be in the `highest` bucket, and every withdrawn
-or lowered finding has an entry. A drop that appears only in a reply's prose goes back to the reviewer that made it as a
-named question, so that its entry carries that reviewer's own basis and citation. When that reviewer can no longer be
-asked, record the finding. This completeness check stays with you; it is not handed to the agents that judge the
-register.
+every finding with `proposed_drop` or a drop you proposed while checking coverage, and every withdrawn or lowered
+finding has an entry. A drop that appears only in a reply's prose goes back to the reviewer that made it as a named
+question, so that its entry carries that reviewer's own basis and citation. When that reviewer can no longer be asked,
+record the finding. This completeness check stays with you; it is not handed to the agents that judge the register.
 
 ### The consultation
 

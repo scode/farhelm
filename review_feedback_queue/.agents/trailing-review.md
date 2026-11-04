@@ -36,10 +36,9 @@ triage, fixes, or execution of triage outcomes.
    the pinned revisions rather than an unrelated or dirty working tree. Give each reviewer the two full hashes, the
    complete commit list, its assigned scope, and the instructions in `review_feedback_queue/.agents/recording.md`,
    "Running an agent review that feeds this queue". Also tell each reviewer to record every proposed drop of a finding
-   in its findings log, whatever bucket it suggests, with the proposed basis and the exact spec, TODO, `BUGS.md`, queue,
-   ledger or filter text it relies on; a drop mentioned only in prose is not recorded. The skill's findings log and
-   progress files are required and stay in the agent scratch space; they are not the report files the queue's reviewer
-   instructions forbid.
+   in its findings log, whatever bucket it suggests, with the proposed basis and whatever text it cites; a drop
+   mentioned only in prose is not recorded. The skill's findings log and progress files are required and stay in the
+   agent scratch space; they are not the report files the queue's reviewer instructions forbid.
 3. Run the groups under `persistent-review`, including concurrent launches, immediate findings logs, delivery audits,
    same-session continuation and later-turn synthesis. Monitor them as described under "Monitoring reviewers" below.
    Keep the skill's manifests, logs and completion evidence in the session's agent scratch space. Reviewers still return
