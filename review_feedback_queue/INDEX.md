@@ -64,6 +64,56 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`wrapper-guide-stop-promises-tab-preservation.md`](wrapper-guide-stop-promises-tab-preservation.md) — The wrapper
   guide promises Stop leaves independent tabs running, but built-in container Stop terminates their work too.
 
+- [`gap-recovery-stale-input-modes-submit-pasted-command.md`](gap-recovery-stale-input-modes-submit-pasted-command.md) —
+  If recovery loses the output that enabled bracketed paste in Bash, a later pasted newline can submit a command without
+  a separate Enter. The conditional Bash 5.2 route is established; whether the accepted wrong-mode recovery limit also
+  accepts this consequence is ambiguous.
+
+- [`colliding-start-cleanup-ends-winning-terminal.md`](colliding-start-cleanup-ends-winning-terminal.md) — An
+  interrupted terminal start that collides with another terminal's socket name can close that other terminal and hang up
+  its work. The ordinary foreground Ctrl-C route remains outside any clearly matching accepted exception.
+
+- [`attachment-debug-trace-emits-remote-controls.md`](attachment-debug-trace-emits-remote-controls.md) — With attachment
+  debug tracing enabled, a remote tab identifier can put terminal control bytes into the operator's log display. This is
+  a conditional trust-boundary issue; no payload or runtime exploitation was attempted.
+
+- [`hidden-live-tmux-tabs-escape-delete-consent.md`](hidden-live-tmux-tabs-escape-delete-consent.md) — After the agent
+  moves to a terminal host and its host is lost, independent old terminal tabs can disappear from the live-work count.
+  Delete can then end those tabs without the required warning, although they may still hold work.
+
+- [`displaced-input-pump-can-submit-replacement-typing.md`](displaced-input-pump-can-submit-replacement-typing.md) —
+  After another attachment takes control, the old input pump can still enqueue an Enter. It can submit text the
+  replacement attachment is typing into a shell. The source supports the conditional ordering; no harmful command was
+  constructed.
+
+- [`async-process-verification-leaves-stale-signal-authority.md`](async-process-verification-leaves-stale-signal-authority.md)
+  — A process can exit and its number be reused after asynchronous identity verification but before Farhelm sends its
+  signal, allowing unrelated work to be signalled. The accepted adjacent synchronous window explicitly excludes this
+  scheduling gap.
+
+- [`registry-test-basename-lookup-can-kill-foreign-host.md`](registry-test-basename-lookup-can-kill-foreign-host.md) — A
+  registry test can identify a terminal host by its socket's basename and then kill it, even if that host belongs to a
+  different directory and holds unrelated work. The conditional wrong-selection route is established; an actual
+  collision was not observed.
+
+- [`resize-journal-exhaustion-does-not-trigger-checkpoint.md`](resize-journal-exhaustion-does-not-trigger-checkpoint.md)
+  — Enough applied size changes on a quiet terminal can consume its retained journal without making a new checkpoint
+  due. A later supervisor crash can then lose recoverable output. The required count is extreme; the conditional route
+  is established.
+
+- [`retained-delete-approval-can-kill-new-tab.md`](retained-delete-approval-can-kill-new-tab.md) — A Delete approved
+  when nothing was alive can later end a newly opened tab without asking about that work if its host becomes unreadable
+  between two status reads. The conditional approval and status sequence is established.
+
+- [`plain-url-hover-omits-neighbor-dependencies.md`](plain-url-hover-omits-neighbor-dependencies.md) — A program can
+  extend a hovered URL onto the next wrapped row while a click continues opening the old, shorter address, even after
+  repaint. The hostname-continuation route is source-confirmed and differs from the separate before-paint issue.
+
+- [`plain-url-click-can-bind-before-text-paints.md`](plain-url-click-can-bind-before-text-paints.md) — A click can
+  discover a URL in the new terminal model before that text has painted, opening a target the user has not yet seen.
+  Chromium event batching supplies the conditional source route; the displayed-target guarantee and general redraw
+  allowance leave coverage ambiguous.
+
 ## High priority: material UX degradation
 
 - [`older-development-archive-moves-replacement-folder.md`](older-development-archive-moves-replacement-folder.md) — An
@@ -113,6 +163,17 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   If the first conversation report arrives after the agent exits on tmux 3.8, Farhelm can permanently lose ordinary
   Restart for that session.
 
+- [`late-bound-agent-host-misses-adoption.md`](late-bound-agent-host-misses-adoption.md) — If an interrupted terminal
+  starts only after its replacement supervisor finishes both startup scans, the agent can keep running while Farhelm
+  cannot open its terminal. Another supervisor restart is needed to find it.
+
+- [`retired-runtime-retains-restart-seed-reply.md`](retired-runtime-retains-restart-seed-reply.md) — An input/paste
+  reserved before retirement can remain retained with no receipt; the same late-send lifetime on the runtime's control
+  channel can also leave an accepted Restart waiting for a history-seed reply after the runtime has ended.
+
+- [`extreme-history-numbering-hangs-selection.md`](extreme-history-numbering-hangs-selection.md) — Extreme peer-supplied
+  history numbering can hang the page when the user selects text in a later screen row.
+
 ## Other: correctness, diagnostics, cleanup, or convenience
 
 - [`removed-host-strands-tunnel-listeners.md`](removed-host-strands-tunnel-listeners.md) — Removing a host leaves its
@@ -138,7 +199,9 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   adverse scheduling is unmeasured.
 
 - [`classic-mouse-snapshot-copy-blocks-later-links.md`](classic-mouse-snapshot-copy-blocks-later-links.md) — Copying in
-  a classic mouse-report snapshot may leave web clicks inert; native behavior is unverified.
+  a classic mouse-report snapshot may leave web clicks inert; native behavior is unverified. Additional reviewed scope:
+  After copying a forced local selection from a frozen terminal snapshot whose program enabled mouse reporting, ordinary
+  file-link clicks can keep doing nothing until the selection is explicitly cleared.
 
 - [`delayed-refusal-reopens-cancelled-replace-question.md`](delayed-refusal-reopens-cancelled-replace-question.md) — A
   delayed refusal may reopen a cancelled Replace question; a further affirmative answer is still required.
@@ -832,7 +895,9 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   different header field can leave the earlier field's hidden-character warning visible briefly.
 
 - [`switcher-second-create-failure-leaks-first-session.md`](switcher-second-create-failure-leaks-first-session.md) — If
-  a second setup create fails, the switcher test can skip cleanup of the first session it already acquired.
+  a second setup create fails, the switcher test can skip cleanup of the first session it already acquired. Additional
+  reviewed scope: A failed second setup create can leave the migration test's first fake-agent session running until a
+  later shared-stack reset or teardown.
 
 - [`transfer-result-height-can-hide-destination.md`](transfer-result-height-can-hide-destination.md) — A long transfer
   result may hide the saved destination or refusal without an expansion or scroll control.
@@ -883,7 +948,8 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   The alias regression reloads the page before checking the row name, so it misses the promised live update behavior.
 
 - [`zoom-cleanup-failure-skips-second-session.md`](zoom-cleanup-failure-skips-second-session.md) — A cleanup refusal can
-  leave the zoom/remount test's remaining session running until wider teardown.
+  leave the zoom/remount test's remaining session running until wider teardown. Additional reviewed scope: Failure
+  cleaning one fake-agent test session prevents any cleanup attempt for the other.
 
 - [`terminal-size-readout-points-css-pixels-conflict.md`](terminal-size-readout-points-css-pixels-conflict.md) — The new
   terminal size readout is documented as points while its value reports CSS pixels.
@@ -966,7 +1032,9 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   shell helper can continue after a failed intermediate account/home assertion and still publish its ready marker.
 
 - [`checkout-fixture-inherits-git-repository-selector.md`](checkout-fixture-inherits-git-repository-selector.md) — An
-  inherited GIT_DIR can redirect a managed-checkout test's initialization into another fixture repository.
+  inherited GIT_DIR can redirect a managed-checkout test's initialization into another fixture repository. Additional
+  reviewed scope: Running the new unit-test fixture with an inherited absolute Git repository selector can initialize
+  and mutate a repository outside its temporary fixture.
 
 - [`update-reminder-before-initial-provisioning-read.md`](update-reminder-before-initial-provisioning-read.md) — An
   Update reminder can advertise availability before the first provisioning-state read has established whether that
@@ -1050,7 +1118,8 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   appearance, hovering the selected expanded host can make its name and destination unreadable.
 
 - [`signal-test-child-lacks-unwind-cleanup.md`](signal-test-child-lacks-unwind-cleanup.md) — Failed signal-log,
-  supervisor and terminal-host fixtures can leave owned processes running before cleanup ownership is armed.
+  supervisor and terminal-host fixtures can leave owned processes running before cleanup ownership is armed. Additional
+  reviewed scope: A failed regression setup can leave its stand-in shell running after the test exits.
 
 - [`replacement-cleanup-missing-pane-root-source-gap.md`](replacement-cleanup-missing-pane-root-source-gap.md) — Failed
   replacement cleanup without a pane root has a conditional orphaning concern, but a supported uncovered producer
@@ -1168,3 +1237,383 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`reflow-property-timeout-retains-workers.md`](reflow-property-timeout-retains-workers.md) — If an allocating
   regression returns, property-test shrinking can retain timed-out workers and start more; no current emulator defect or
   measured memory exhaustion is claimed.
+
+- [`runtime-recorder-guidance-conflict.md`](runtime-recorder-guidance-conflict.md) — Run-all-tests gives conflicting
+  directions about whether emulator stress and memory tests require the runtime-test recorder; taking the optional
+  direction can leave future failures without the normally required retained run record.
+
+- [`restart-unwind-omits-tree-sweep-failure.md`](restart-unwind-omits-tree-sweep-failure.md) — The authoritative
+  implementation specification incorrectly says a failed Restart restores the stopped old terminal whenever the
+  replacement host can be ended; failed cleanup of processes the replacement started is another ambiguous path, leaving
+  no displayed terminal.
+
+- [`migrated-session-tab-kind-contract-conflict.md`](migrated-session-tab-kind-contract-conflict.md) — The authoritative
+  implementation specification contradicts itself about preserving an existing session's old terminal tabs when its
+  agent moves into a terminal host.
+
+- [`stderr-readiness-lacks-live-holder-premise.md`](stderr-readiness-lacks-live-holder-premise.md) — The regression
+  intended to keep terminal opens from waiting on unrelated stderr holders can report success without its held-open-pipe
+  premise.
+
+- [`late-listener-blocks-start-test-cleanup.md`](late-listener-blocks-start-test-cleanup.md) — A delayed test listener
+  can turn the cleanup regression into a five-minute runner timeout instead of a bounded fixture failure.
+
+- [`staged-start-test-lacks-reader-drain-witness.md`](staged-start-test-lacks-reader-drain-witness.md) — The new
+  regression test can pass without protecting the boundary that prevents a terminal from starting before its owner is
+  recorded.
+
+- [`container-host-test-lacks-execution-location-witness.md`](container-host-test-lacks-execution-location-witness.md) —
+  The terminal-host container regression can pass when its fake agent runs outside the container, provided the separate
+  keeper still starts and stops. No production isolation failure is established.
+
+- [`mac-process-lookup-truncates-live-host-command.md`](mac-process-lookup-truncates-live-host-command.md) — On a Mac
+  with an oversized process listing, test cleanup can erase a stopped host's live socket and state directory, leaving
+  that host unreachable for future cleanup.
+
+- [`mac-process-lookup-transforms-socket-path.md`](mac-process-lookup-transforms-socket-path.md) — Mac test cleanup can
+  remove a stopped terminal host's live socket and directory under certain valid injected paths, leaving the host
+  unreachable for future cleanup.
+
+- [`blocking-test-cleanup-prevents-async-listener-release.md`](blocking-test-cleanup-prevents-async-listener-release.md)
+  — A normal successful supervisor unit test waits for the five-second host-cleanup deadline and retains its state
+  directory because directory teardown blocks the same executor needed to release its aborted stand-in listener.
+
+- [`readiness-test-does-not-establish-first-stage-exit.md`](readiness-test-does-not-establish-first-stage-exit.md) — The
+  regression can pass while a terminal-start helper remains alive, leaving its claimed lifecycle guarantee untested.
+
+- [`input-test-comments-overstate-termination-coverage.md`](input-test-comments-overstate-termination-coverage.md) — The
+  test comments claim stronger coverage and transport guarantees than the tests establish.
+
+- [`replay-order-comments-confuse-caller-scheduling.md`](replay-order-comments-confuse-caller-scheduling.md) — The
+  implementation notes misstate the acknowledgement/replay ordering that protects healthy terminal attachments from
+  false stalls.
+
+- [`stream-stall-test-lacks-blocked-send-witness.md`](stream-stall-test-lacks-blocked-send-witness.md) — The
+  byte-terminal regression can pass without testing teardown during a blocked browser send.
+
+- [`steady-block-cursor-contract-conflict.md`](steady-block-cursor-contract-conflict.md) — Grid terminals deliberately
+  blink a block cursor even when the program requests it steady, while the wire contract says blinking is the default
+  unless the program says otherwise.
+
+- [`unavailable-host-recipe-misses-fourth-disconnect.md`](unavailable-host-recipe-misses-fourth-disconnect.md) — The
+  maintained follow-up asks for three disconnects, but a healthy test host reconnects after all three. A test following
+  that recipe can fail before reaching the intended unavailable state.
+
+- [`explicit-hostname-title-normalized-as-unset.md`](explicit-hostname-title-normalized-as-unset.md) — Emulator parity
+  validation can fail on machines named codex or workspace even when tmux and the emulator show the same explicitly set
+  title.
+
+- [`malformed-pane-fixtures-mask-intended-validators.md`](malformed-pane-fixtures-mask-intended-validators.md) — The
+  malformed-pane regression can pass even if earlier validation regresses, reducing confidence in the pane-fact parser.
+
+- [`tmux-history-seed-loses-redefined-palette.md`](tmux-history-seed-loses-redefined-palette.md) — Restarting an old
+  tmux session into a terminal host changes retained scrollback colors when the old program redefined palette entries.
+
+- [`tmux-capture-capacity-exceeds-memory-estimate.md`](tmux-capture-capacity-exceeds-memory-estimate.md) — Restart
+  migration of dense styled history can retain a capture allocation near 128 MiB despite the documented roughly 64 MiB
+  capture peak, adding avoidable supervisor memory pressure while history is encoded.
+
+- [`repeated-resizes-clear-missing-history-notice.md`](repeated-resizes-clear-missing-history-notice.md) — After
+  restoring a checkpoint that omitted old scrollback, repeated taller/shorter resizes can remove the missing-output
+  notice without replacing the old history.
+
+- [`empty-history-clear-keeps-missing-history-notice.md`](empty-history-clear-keeps-missing-history-notice.md) — When a
+  recovered checkpoint contains no scrollback because it omitted all the old history, an explicit clear-scrollback
+  command does not dismiss the missing-output notice; the warning remains until enough new lines scroll or a full
+  terminal reset occurs.
+
+- [`uri-spare-capacity-missing-from-memory-budget.md`](uri-spare-capacity-missing-from-memory-budget.md) — Hyperlink
+  allocations can be larger than the terminal memory estimate counts, although the logical storage counter still obeys
+  its cap.
+
+- [`host-restart-history-painter-omits-palette.md`](host-restart-history-painter-omits-palette.md) — Restart into a
+  fresh terminal host changes retained scrollback colors when the previous program redefined terminal colors.
+
+- [`width-table-change-removes-restored-history.md`](width-table-change-removes-restored-history.md) — A changed
+  character-width table could displace restored history or fixups, but no supported writing-and-reading build pair with
+  the required width change was found. Permanent history loss is not clearly covered by the accepted restore-and-redraw
+  limit.
+
+- [`restored-capped-title-loses-boundary-whitespace.md`](restored-capped-title-loses-boundary-whitespace.md) — Recovery
+  can change a retained terminal title and its saved title-stack entries by removing trailing whitespace exposed by the
+  title-size cap.
+
+- [`snapshot-measurement-buffers-past-claimed-bound.md`](snapshot-measurement-buffers-past-claimed-bound.md) — Sizing a
+  checkpoint can retain a temporary stream beyond its claimed 16 MiB limit, even though final blob fitting remains
+  correct.
+
+- [`replay-work-model-omits-history-rotations.md`](replay-work-model-omits-history-rotations.md) — The checkpoint reader
+  undercounts repeated history-buffer rearrangement for unusually large library-requested scrollback. No excessive
+  latency at shipped settings or shipped producer for the extreme history count is established.
+
+- [`lossy-storage-precedes-cursor-template-validation.md`](lossy-storage-precedes-cursor-template-validation.md) — A
+  malformed terminal checkpoint can be accepted during recovery when its cursor template contains forbidden combining
+  characters and the attribute-storage budget is exhausted.
+
+- [`snapshot-comparison-ignores-link-grouping.md`](snapshot-comparison-ignores-link-grouping.md) — Snapshot regression
+  checks can pass after terminal hyperlink identities or boundaries change.
+
+- [`style-fixture-overwrites-strikeout-sample.md`](style-fixture-overwrites-strikeout-sample.md) — The compatibility
+  fixtures do not retain struck-through text, leaving that style outside their frozen-byte guard.
+
+- [`peak-memory-test-lacks-baseline-headroom.md`](peak-memory-test-lacks-baseline-headroom.md) — The memory tests may
+  hide an excessive checkpoint allocation below an earlier process memory peak. After source investigation, the physical
+  headroom needed for an actual false pass in these fixtures remains unestablished.
+
+- [`malformed-snapshot-fixtures-mask-intended-validators.md`](malformed-snapshot-fixtures-mask-intended-validators.md) —
+  Several terminal-snapshot corruption fixtures never exercise the validation they name, so they remain green after
+  those checks regress.
+
+- [`recording-loader-rejects-valid-json-field-spacing.md`](recording-loader-rejects-valid-json-field-spacing.md) — A
+  developer can provide a private terminal recording in the documented JSON-lines format and have the snapshot test
+  reject it before checking the recording.
+
+- [`host-lock-table-contradicts-startup-span.md`](host-lock-table-contradicts-startup-span.md) — Farhelm's maintenance
+  documentation states a lifecycle-lock constraint that startup deliberately violates, obscuring which recovery
+  operation may perform host I/O while holding the lock.
+
+- [`grid-input-omits-x10-only-mouse-reporting.md`](grid-input-omits-x10-only-mouse-reporting.md) — Programs that request
+  only classic X10 mouse tracking lose clicks in terminal-host terminals, unlike the live raw-stream browser terminal.
+
+- [`migration-note-dismissal-loses-terminal-focus.md`](migration-note-dismissal-loses-terminal-focus.md) — After closing
+  the old-terminal note from the keyboard, ordinary typing no longer reaches the already-revealed terminal until the
+  user refocuses it.
+
+- [`tab-kind-projection-repeats-quadratic-scans.md`](tab-kind-projection-repeats-quadratic-scans.md) — Opening or
+  refreshing a session with many shell tabs repeatedly scans the entire tab list just to obtain each tab's old/new
+  terminal label.
+
+- [`refused-input-test-can-credit-earlier-bytes.md`](refused-input-test-can-credit-earlier-bytes.md) — The terminal
+  input-backpressure regression's claim that rejected input never reaches the host is stronger than what it observes.
+
+- [`stale-reply-test-lacks-processing-witness.md`](stale-reply-test-lacks-processing-witness.md) — The regression for
+  cancelling a terminal-host Info request does not prove that a late reply cannot satisfy the next request.
+
+- [`shift-enter-test-lacks-reader-readiness.md`](shift-enter-test-lacks-reader-readiness.md) — This integration test can
+  report success without establishing the already-waiting reader its documentation requires.
+
+- [`hosts-directory-replacement-stop-uncertainty.md`](hosts-directory-replacement-stop-uncertainty.md) — A changed
+  directory could redirect terminal shutdown, but no supported history replacing it with another installation's matching
+  live socket was established. Independent review does not agree to drop that remaining uncertainty; deliberate
+  private-directory interference is separately accepted.
+
+- [`process-presence-fixture-leaves-sleep-descendant.md`](process-presence-fixture-leaves-sleep-descendant.md) — Running
+  the process-presence unit test can leave its sleeping helper behind even when the test passes.
+
+- [`host-browser-setup-precedes-startup-session-create.md`](host-browser-setup-precedes-startup-session-create.md) — A
+  healthy host-terminal browser-validation run can fail before its startup session exists.
+
+- [`repeated-typing-test-can-credit-old-echo.md`](repeated-typing-test-can-credit-old-echo.md) — Repeating the dedicated
+  host-terminal typing test can report success from an earlier test's screen without proving that this invocation
+  delivered its typing.
+
+- [`copied-sandbox-runner-relative-import-fails.md`](copied-sandbox-runner-relative-import-fails.md) — A maintainer
+  using the runner's existing alternate-repository option from a copied script can no longer start it, including its
+  cleanup-only sweep command, unless the copy also has a checkout-shaped e2e directory beside it.
+
+- [`desktop-smoke-misparses-space-bearing-run-path.md`](desktop-smoke-misparses-space-bearing-run-path.md) — Choosing a
+  short fresh DESKTOP_SMOKE_DIR containing a space makes the gate report that a healthy created session has no live
+  terminal.
+
+- [`reconnect-replay-keeps-obsolete-event-count-fence.md`](reconnect-replay-keeps-obsolete-event-count-fence.md) — After
+  a resize write interrupts replay and reconnects, Farhelm can keep refusing prompts as still restoring even after the
+  terminal has caught up. More output or replacement of that runtime can clear it.
+
+- [`checkpoint-rejection-test-asserts-before-processing.md`](checkpoint-rejection-test-asserts-before-processing.md) —
+  The checkpoint regression can pass if the supervisor wrongly records a rejected checkpoint as accepted.
+
+- [`paste-receipt-test-checks-before-ack-processing.md`](paste-receipt-test-checks-before-ack-processing.md) — The
+  regression does not prove that a long paste stays unconfirmed until all its pieces are acknowledged. It can miss a
+  receipt completing after the first piece. No current production receipt defect is established.
+
+- [`stop-wait-test-releases-exit-before-wait-witness.md`](stop-wait-test-releases-exit-before-wait-witness.md) — The
+  regression can miss Stop ceasing to wait for final terminal output, leaving a lost opportunity to return the complete
+  launch-failure explanation undetected.
+
+- [`foreign-host-refusal-test-cannot-observe-shutdown.md`](foreign-host-refusal-test-cannot-observe-shutdown.md) — The
+  regression meant to protect another session's terminal cannot detect a Shutdown sent before the expected refusal.
+
+- [`placeholder-grid-fixture-readoption-uncertainty.md`](placeholder-grid-fixture-readoption-uncertainty.md) — A
+  placeholder-attachment test lacks a handshake with the supervisor's initial retry scan. Source checks found no
+  barrier, but the complete execution causing a false failure remains unverified after investigation.
+
+- [`seed-cancellation-test-accepts-lost-emulator.md`](seed-cancellation-test-accepts-lost-emulator.md) — The regression
+  test for keeping an ended runtime's emulator readable also passes when read reports that the emulator was lost.
+
+- [`cancellation-test-releases-encoder-before-abort-witness.md`](cancellation-test-releases-encoder-before-abort-witness.md)
+  — The regression that promises to cancel a Restart caller during history encoding can instead let that caller finish
+  normally, without rejecting the failed cancellation premise.
+
+- [`child-hangup-masks-missing-stop-tree-sweep.md`](child-hangup-masks-missing-stop-tree-sweep.md) — The Stop regression
+  can credit the death of an unmarked descendant without distinguishing whether Stop swept that descendant or merely
+  killed its parent shell.
+
+- [`restart-test-counts-zombie-as-running-agent.md`](restart-test-counts-zombie-as-running-agent.md) — The Restart
+  regression can fail after correctly stopping the old agent because its observation mistakes an exited, unreaped
+  process for a running one.
+
+- [`idle-readoption-task-outlives-supervisor-drop.md`](idle-readoption-task-outlives-supervisor-drop.md) — Dropping an
+  idle in-process supervisor without running its orderly-stop method leaves its background retry task and notification
+  state allocated until the caller's Tokio runtime ends.
+
+- [`restart-screen-captured-before-prompt-settles.md`](restart-screen-captured-before-prompt-settles.md) — Correct
+  terminal recovery can fail the restart regression because its expected screen is captured before the fixture finishes
+  writing the post-echo prompt.
+
+- [`grid-shift-enter-loses-independent-altgraph.md`](grid-shift-enter-loses-independent-altgraph.md) — On a
+  keyboard/browser that reports AltGraph independently of Ctrl and Alt, holding AltGraph while pressing Shift+Enter can
+  insert Farhelm newline ESC CR instead of the ordinary Enter CR the existing terminal sends.
+
+- [`empty-history-queue-bypasses-bounds.md`](empty-history-queue-bypasses-bounds.md) — Empty deferred-history messages
+  escape the row cap and an accumulated backlog would bypass yielding. The structural gap is confirmed; material backlog
+  or resource exhaustion remains unverified after investigation, and ordinary senders were not found.
+
+- [`bold-brightening-ignores-redefined-palette.md`](bold-brightening-ignores-redefined-palette.md) — A program
+  redefining bright terminal colors still gets the original theme colors for bold text.
+
+- [`invalidated-selection-drag-keeps-old-anchors.md`](invalidated-selection-drag-keeps-old-anchors.md) — If history
+  resets, the terminal resizes, or the alternate screen switches while a local text drag is held, the next drag movement
+  can recreate a selection using the invalidated old line positions.
+
+- [`alternate-screen-wheel-keeps-stale-selection.md`](alternate-screen-wheel-keeps-stale-selection.md) — After selecting
+  text in a full-screen terminal program with mouse reporting off, wheel navigation leaves that local selection
+  highlighted.
+
+- [`exit-notice-hides-oldest-scrollback-row.md`](exit-notice-hides-oldest-scrollback-row.md) — Once an agent's program
+  exits, scrolling to the beginning of its retained output can still leave the oldest row clipped out of view.
+
+- [`secondary-button-erases-intercepted-primary-ownership.md`](secondary-button-erases-intercepted-primary-ownership.md)
+  — Holding a web-link click and pressing a second mouse button loses the primary click's interception, so its
+  subsequent drag/release reaches the terminal program and its original link no longer opens.
+
+- [`grid-drop-suppresses-refusal-explanation.md`](grid-drop-suppresses-refusal-explanation.md) — Dropping content onto a
+  grid terminal cancels the drop without displaying the promised instruction to copy and paste instead.
+
+- [`anonymous-hyperlink-restarts-cause-false-warning.md`](anonymous-hyperlink-restarts-cause-false-warning.md) — An
+  honest hyperlink emitted through consecutive anonymous OSC 8 starts with the same destination can show a false
+  destination-mismatch warning and underline only its tail.
+
+- [`changed-file-hover-test-clicks-before-stat-readiness.md`](changed-file-hover-test-clicks-before-stat-readiness.md) —
+  The file-link redraw regression can issue its only download click while the replacement file is still being checked,
+  then treat the correctly ignored click as a download regression.
+
+- [`grid-fixture-measures-before-bold-font-ready.md`](grid-fixture-measures-before-bold-font-ready.md) — The browser
+  layout check does not establish that the bundled bold font is ready before measuring bold output, so it can assess
+  fallback geometry instead of the intended terminal face.
+
+- [`triple-click-truncates-long-logical-line.md`](triple-click-truncates-long-logical-line.md) — Triple-clicking a
+  retained terminal logical line that extends more than 1000 wrapped rows from the click copies only part of that line.
+
+- [`nul-delimited-osc-identity-ambiguity.md`](nul-delimited-osc-identity-ambiguity.md) — Different hyperlink identities
+  can collide in the warning comparison's string key. Remote grid messages can supply those strings, but no route from
+  the collision to a wrong opening or required-disclosure bypass was established after investigation.
+
+- [`hovered-link-double-click-selects-one-word.md`](hovered-link-double-click-selects-one-word.md) — A stable hovered
+  hyperlink with multiword text copies only the clicked word on double-click in a grid terminal, whereas xterm selects
+  the entire hovered link range.
+
+- [`block-copy-omits-wide-continuation-column.md`](block-copy-omits-wide-continuation-column.md) — A rectangular
+  terminal copy omits the leading blank corresponding to a wide-character continuation cell on a row whose left
+  selection boundary cuts through that character, shifting that row's copied content left relative to other selected
+  rows.
+
+- [`wide-wrap-inference-drops-real-boundary-space.md`](wide-wrap-inference-drops-real-boundary-space.md) — A real space
+  printed at the right edge before a wide character can disappear when copied, and printed-URL detection can incorrectly
+  append the following wide text to the URL instead of stopping at that space.
+
+- [`combined-punctuation-word-selection-differs.md`](combined-punctuation-word-selection-differs.md) — Double-clicking
+  unlinked text beside punctuation carrying a combining mark can select a shorter word in a grid terminal than in an old
+  terminal.
+
+- [`wide-wrap-placeholder-loses-final-cell-style.md`](wide-wrap-placeholder-loses-final-cell-style.md) — A wide glyph
+  wrapping from the final column leaves a default-background hole where the terminal actually holds a styled blank; both
+  screen and history use the conversion.
+
+- [`initial-oversized-grid-cannot-attach.md`](initial-oversized-grid-cannot-attach.md) — A terminal fitted to over1000
+  cells can fail to open repeatedly because its initial dimensions exceed the grid stream's bound.
+
+- [`program-selected-cursor-color-never-reaches-viewer.md`](program-selected-cursor-color-never-reaches-viewer.md) — A
+  program that changes its text cursor color continues to show the theme's fixed cursor color, even though Farhelm's
+  emulator accepts the new color.
+
+- [`partial-wide-erasure-loses-second-cell-background.md`](partial-wide-erasure-loses-second-cell-background.md) — A
+  program erasing only the second column of a wide glyph with a different background can leave grid viewers painting the
+  old first-cell background over that erased column.
+
+- [`clipboard-notice-drain-lacks-per-turn-work-bound.md`](clipboard-notice-drain-lacks-per-turn-work-bound.md) — The
+  viewer drains concurrently arriving clipboard writes without a per-turn work or cancellation bound. The missing bound
+  is confirmed; material starvation or wider supervisor disruption remains unverified after investigation.
+
+- [`resize-measurement-discards-arrival-timestamps.md`](resize-measurement-discards-arrival-timestamps.md) — The manual
+  resize benchmark can report zero last-frame delivery time after it has transmitted its resize output.
+
+- [`oversized-paste-test-cancels-before-pump-can-run.md`](oversized-paste-test-cancels-before-pump-can-run.md) — The
+  test meant to prove that an oversized paste writes nothing can pass without ever allowing its input pump to attempt
+  delivery of earlier paste parts.
+
+- [`emulator-lock-test-accepts-expired-holder.md`](emulator-lock-test-accepts-expired-holder.md) — The test for
+  nonblocking terminal input can pass after its emulator lock has already expired, so it can miss a regression that
+  would wait for that lock.
+
+- [`tab-reap-deadline-excludes-listing-request.md`](tab-reap-deadline-excludes-listing-request.md) — The tab-exit
+  regression's advertised 15-second failure boundary does not cover the listing it awaits.
+
+- [`tab-retry-test-measures-observation-time.md`](tab-retry-test-measures-observation-time.md) — The retry regression
+  can accept cleanup observed after 900 ms without proving that the retry itself waited for the required delay.
+
+- [`last-output-fixture-readiness-precedes-trap.md`](last-output-fixture-readiness-precedes-trap.md) — The final-output
+  regression can reject correct output preservation because its agent has published readiness before installing the
+  exit-output trap.
+
+- [`held-start-test-lacks-prelaunch-fencing-witness.md`](held-start-test-lacks-prelaunch-fencing-witness.md) — The
+  regression can pass when the next agent launches before an earlier outstanding first stage is fenced, so it does not
+  protect the before-launch ordering its assertion claims.
+
+- [`host-preservation-test-can-select-starter-pid.md`](host-preservation-test-can-select-starter-pid.md) — The
+  reserved-session preservation regression can blame correct startup cleanup for a fixture launcher exiting normally,
+  because its readiness check can save that temporary launcher as the terminal-host process.
+
+- [`keeper-can-win-one-shot-interrupted-start-gate.md`](keeper-can-win-one-shot-interrupted-start-gate.md) — Two
+  startup-reclaim regression tests lack the ordering needed to hold their intended first launch; a keeper launch can
+  take the gate instead and fail setup before reclamation is tested.
+
+- [`restart-test-types-before-safe-prompt-barrier.md`](restart-test-types-before-safe-prompt-barrier.md) — The restart
+  tests can overwrite their startup marker with early test input and then report a healthy supervisor restart as having
+  lost terminal contents.
+
+- [`migration-switch-test-accepts-dead-old-agent.md`](migration-switch-test-accepts-dead-old-agent.md) — The update
+  regression can pass if the old running agent dies during supervisor stop/start, so it fails to test its stated
+  keep-working guarantee.
+
+- [`retry-capture-test-cannot-distinguish-smaller-read.md`](retry-capture-test-cannot-distinguish-smaller-read.md) — The
+  migration regression can pass if a timed-out history capture is retried at its original size, leaving the promised
+  smaller retry untested.
+
+- [`oversized-pane-fixture-pulls-history-onto-screen.md`](oversized-pane-fixture-pulls-history-onto-screen.md) — The
+  oversized-terminal regression claims to preserve existing scrollback but moves its entire short scrollback onto the
+  visible screen before Restart, so it misses the positive-scrollback case it says it exercises.
+
+- [`reaping-test-mistakes-missing-sink-for-complete-cleanup.md`](reaping-test-mistakes-missing-sink-for-complete-cleanup.md)
+  — The migration regression cannot detect incomplete old-output-client reaping through the predicate it calls its reap
+  check.
+
+- [`replacement-history-absence-asserted-before-delivery.md`](replacement-history-absence-asserted-before-delivery.md) —
+  The replacement regression checks that old history is absent before proving history delivery has finished. The
+  boundary gap is confirmed, but a concrete false-pass counterpart for this small fixture remains unverified after
+  investigation.
+
+- [`agent-text-helper-removes-wrap-boundary-spaces.md`](agent-text-helper-removes-wrap-boundary-spaces.md) — Browser
+  agent checks can fail to recognize text that is present when a space lands at a soft-wrap boundary.
+
+- [`brick-test-requires-hidden-terminal-kind-details.md`](brick-test-requires-hidden-terminal-kind-details.md) — A
+  healthy candidate that creates only tmux terminals cannot satisfy the brick test because the test requires a
+  terminal-kind detail that the product intentionally hides.
+
+- [`growing-final-output-omits-trimming-notice.md`](growing-final-output-omits-trimming-notice.md) — Final buffered
+  output can grow the old terminal's history between Restart's count and capture, making the replacement omit older
+  lines without the promised trimming notice. This does not allege loss beyond the accepted history capacity.
+
+- [`mixed-input-acknowledgements-misattribute-written-bytes.md`](mixed-input-acknowledgements-misattribute-written-bytes.md)
+  — After a transient Linux terminal-write allocation failure, input discarded by the terminal host can be reported as
+  written when a later input succeeds before their acknowledgements are sent. The conditional source route is
+  established; production prompts are disabled, and no user-work loss is claimed.

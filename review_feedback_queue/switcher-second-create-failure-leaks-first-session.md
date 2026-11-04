@@ -46,3 +46,44 @@ these already acquired sessions. Those scopes do not remove this cause. No highe
 Provenance: trailing-review run `1e4abedb-1946-4bfb-93a4-fd2f4e241acd`; `g060/f1`. These are original reviewer
 identities for this concern, not additional bugs. Full revisions, withdrawals and independent verdicts remain in the
 private review evidence. No fix or triage decision was executed.
+
+## Trailing review through ca9b0a19
+
+A failed second setup create can leave the migration test's first fake-agent session running until a later shared-stack
+reset or teardown.
+
+Suggested bucket: **extend**. Confidence: **source-confirmed defect or conditional mechanism**. confirmed conditional
+source path; no measured flake, survivor lifetime, downstream contamination or production user-work loss claimed. Fix:
+protect the first acquisition immediately, track the neighbor as optional inside that lifetime.
+
+Source locations: ca9b0a19856dc136f63ad2d14f1076027edce1eb:e2e/tests/terminal-migration.spec.ts:149-151.
+
+the old-session band test creates session, then awaits createSession for neighbor before entering try/finally. If
+neighbor creation rejects, cleanupSession for the first returned session is never reached. Source: p0707.diff lines
+142-145 (new-file lines 136-139); final cleanup at new-file lines 196-199 cannot run before try begins.
+
+terminal-migration.spec.ts:137-139 creates session and then awaits neighbor before try. helpers/fleet.ts:396-423 returns
+the created row without registering cleanup and throws on failed creates via ok at 331-334. Migration spec imports only
+evidence/fleet/term and installs no per-test session sweep; evidence.ts:31-65 observes only. Later terminal-family
+resetStack can reclaim leftovers (helpers/terminal-suite.ts:154-194), but this does not attempt cleanup on this failure
+path.
+
+a failed second setup create can leave the migration test's first fake-agent session running until a later shared-stack
+reset or teardown. At tip, migration test lines 149-151 still await neighbor creation before entering try;
+fleet.ts:396-423 returns an ID without registering caller cleanup, and its ok helper at 331-334 throws on unsuccessful
+responses. Test-local cleanup is therefore bypassed when the second create fails. Bucket: other.
+
+Possible coverage and caveats: none exact. Rechecked switcher-second-create-failure-leaks-first-session.md in full: its
+trigger/consequence match but scope is explicitly quick-switcher.spec.ts, not this new caller. Ledger
+busy-selection-test-loses-source-second-creation-fails.md:12515-12525 concerns sidebar.spec.ts;
+claude-trust-browser-fixtures-escape-cleanup.md:14073-14102 expressly confines the fix to claude-trust.spec.ts;
+listing-regression-fixtures-escape-cleanup.md:14683-14703 concerns listing-mutation-fence.spec.ts. Existing decisions
+support fixing ownership but do not remove this cause. Coverage searches of SPEC.md, SPEC_impl.md, empty TODO Planned,
+plans/queue, BUGS.md, queue INDEX and ledger found no migration-test coverage. FILTER rare-safe-failure does not cover
+retained running fixture resources.
+
+Provenance: private review run `37478d09-7e36-409b-8efa-b13d1f793dd5`; original identities `g193/f1`. Original
+append-only events, revisions, withdrawals and independent judgments are retained in that run's catalogs. Locations
+refer to the named reviewed revisions; the original revision context is ca9b0a19856dc136f63ad2d14f1076027edce1eb;
+introduced in assigned patch 4ed000fb454cebd9c22a88f358a93e15566b8c9e at e2e/tests/terminal-migration.spec.ts:137-139..
+This was a source-only review; runtime occurrence and frequency were not measured.
