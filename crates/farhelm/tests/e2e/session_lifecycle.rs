@@ -3816,12 +3816,13 @@ async fn restart_gap_lists_sessions_without_a_terminal_and_attach_fails() {
         .list_sessions()
         .await
         .expect("list after restart gap");
+    // The persisted row survives, but its create-time terminal descriptor
+    // must not survive the loss of the terminal it described.
+    let mut expected = with_status(session.clone(), SessionStatus::Exited { exit_code: None });
+    expected.agent_terminal = None;
     assert_eq!(
         listed.sessions,
-        vec![with_status(
-            session.clone(),
-            SessionStatus::Exited { exit_code: None }
-        )],
+        vec![expected],
         "a session must stay listed even once its tmux server is gone — vanishing is \
          exactly what this PR exists to prevent — and the restart-gap entry (no terminal \
          at all) must list as exited with no exit code to fabricate, PLAN_M2.md's \
@@ -4388,12 +4389,16 @@ async fn restart_gap_is_decided_per_session() {
         with_status(alive_session.clone(), survivor.status.clone()),
         "and the rest of its metadata must round-trip unchanged"
     );
+    // A surviving neighbour keeps its terminal descriptor; the dead row
+    // keeps only its metadata, never a claim that a terminal still exists.
+    let mut expected_dead = with_status(
+        dead_session.clone(),
+        SessionStatus::Exited { exit_code: None },
+    );
+    expected_dead.agent_terminal = None;
     assert_eq!(
         *find(&dead_session.id),
-        with_status(
-            dead_session.clone(),
-            SessionStatus::Exited { exit_code: None },
-        ),
+        expected_dead,
         "only the one whose tmux session actually died must list as exited"
     );
     assert_eq!(
