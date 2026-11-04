@@ -10,8 +10,10 @@
 //! ## Stopping
 //!
 //! An orderly stop asks every host terminal's runtime for a checkpoint under
-//! one deadline, at most as many at once as the machine has cores, and then
-//! closes each runtime's connection. A checkpoint is what keeps the next
+//! one deadline, using at most half the machine's cores (at least one).
+//! Hosts with the largest output tails get a slot first, so checkpoints
+//! that finish save the most replay. It then closes each runtime's
+//! connection. A checkpoint is what keeps the next
 //! supervisor's recovery short: the host drops the output before an
 //! accepted snapshot, and the next runtime restores the snapshot and replays
 //! only what follows. A checkpoint the deadline cuts short, one that never
@@ -28,15 +30,18 @@
 //! (`HostTerminal::abort`), the encoder gives up between rows
 //! (`farhelm_terminal_emulator::Cancel`, about a millisecond), and the stop
 //! waits for every encode to have ended before it returns. Capping the
-//! encodes at the core count is what lets some finish: started all at once,
+//! encodes is what lets some finish: started all at once,
 //! many full terminals on few cores would share the cores until the
-//! deadline and none would finish.
+//! deadline and none would finish. Leaving half the cores free also leaves
+//! room for the update or desktop app that is replacing this supervisor.
+//! These slots cover the stop's own checkpoints, not automatic encodes
+//! already running or started by runtimes still waiting for a slot.
 //!
 //! Every host with output since its last snapshot gets a checkpoint, however
 //! little that output is (a host with none answers at once, with nothing
 //! encoded). The cost is the encode, which is of the whole terminal, not of
-//! the new output: up to about two seconds of a core for a full scrollback
-//! in true color, more for one colored like an image.
+//! the new output (SPEC_impl.md, "Recovery and checkpoints", gives the
+//! measured cost).
 //!
 //! Closing each connection right after its checkpoint limits the output the
 //! stopping supervisor counts as delivered without acting on it to what the
@@ -246,13 +251,20 @@ use crate::store::{LastOutcome, SessionStore, StoredSession, TerminalKind, Trans
 /// pathological one, which the process's exit then waits for anyway.
 const ENCODE_END_GRACE: Duration = Duration::from_secs(1);
 
+/// Leave half the machine available to the operation replacing the
+/// supervisor, without preventing progress on a one-core machine.
+fn exit_checkpoint_slots(cores: usize) -> usize {
+    (cores / 2).max(1)
+}
+
 impl Supervisor {
     /// Checkpoint every host terminal this supervisor drives, because the
     /// process is about to exit, and close each one's connection, all by
     /// `budget` (module docs, "Stopping").
     ///
-    /// Each runtime's checkpoint is asked for once it gets one of as many
-    /// slots as the machine has cores, within the deadline; each runtime is
+    /// Each runtime's checkpoint is asked for once it gets one of at most
+    /// half as many slots as the machine has cores (at least one), largest
+    /// output tail first, within the deadline; each runtime is
     /// then stopped ([`HostTerminal::abort`]), which cancels any encode it
     /// still runs, and this waits until every such encode has ended, so
     /// none outlives the stop on the blocking pool. The hosts keep running.
@@ -265,6 +277,19 @@ impl Supervisor {
     /// keep answering from their last status (an exit, a child that runs)
     /// and refuse every request: this is for a supervisor that is exiting.
     pub(crate) async fn checkpoint_hosts_for_exit(&self, budget: Duration) -> bool {
+        let cores = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
+        self.checkpoint_hosts_for_exit_with_slots(budget, exit_checkpoint_slots(cores))
+            .await
+    }
+
+    /// Run the same stop with an explicit slot count, so tests can hold a
+    /// checkpoint in the only slot and observe which host is admitted next.
+    /// Production derives the count from the machine in the wrapper above.
+    pub(super) async fn checkpoint_hosts_for_exit_with_slots(
+        &self,
+        budget: Duration,
+        slot_count: usize,
+    ) -> bool {
         let deadline = tokio::time::Instant::now() + budget;
         // The map's lock is held only for map operations, but the deadline
         // bounds even a wait for it. `stopping` is set under the same lock:
@@ -296,11 +321,20 @@ impl Supervisor {
         // Only a runtime still driving its host is asked for a checkpoint;
         // every one is stopped below, since one that has just ended may
         // still be settling an encode of its own.
-        let hosts: Vec<HostTerminal> = all
-            .iter()
-            .filter(|host| still_driven(host))
-            .cloned()
-            .collect();
+        let mut hosts: Vec<(u64, HostTerminal)> =
+            all.iter()
+                .filter(|host| still_driven(host))
+                .map(|host| {
+                    let status = host.status();
+                    let tail = status.position.offset.saturating_sub(
+                        status.checkpoint.map_or(0, |checkpoint| checkpoint.offset),
+                    );
+                    (tail, host.clone())
+                })
+                .collect();
+        // Keep one observation per host: automatic checkpoints and output
+        // can move these positions while the ordered queue is draining.
+        hosts.sort_by_key(|(tail, _)| std::cmp::Reverse(*tail));
         if hosts.is_empty() {
             close_all(&all, deadline + ENCODE_END_GRACE).await;
             return true;
@@ -309,13 +343,15 @@ impl Supervisor {
             count = hosts.len(),
             "stopping: checkpointing terminal hosts before exit"
         );
-        let cores = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
-        let slots = Arc::new(tokio::sync::Semaphore::new(cores));
+        let slots = Arc::new(tokio::sync::Semaphore::new(slot_count.max(1)));
         let mut checkpoints = JoinSet::new();
-        for host in hosts.iter().cloned() {
-            let slots = Arc::clone(&slots);
+        for (_, host) in hosts {
+            // Admission happens in this one ordered loop. Acquiring inside
+            // each spawned task would let the executor's polling order
+            // decide who got a core first, undoing the sort.
+            let slot = tokio::time::timeout_at(deadline, Arc::clone(&slots).acquire_owned()).await;
             checkpoints.spawn(async move {
-                let outcome = match tokio::time::timeout_at(deadline, slots.acquire_owned()).await {
+                let outcome = match slot {
                     Ok(Ok(_slot)) => host.checkpoint_now(deadline).await,
                     // No core came free in time: the host keeps what it has.
                     Ok(Err(_)) | Err(_) => Ok(CheckpointOutcome::Kept(NotTaken::TimedOut)),
@@ -1701,6 +1737,16 @@ mod tests {
     use super::*;
     use crate::service::core::tests::host_terminals::host_row;
     use std::ffi::OsStr;
+
+    /// Shutdown leaves half the reported cores available while keeping one
+    /// checkpoint slot even on a one-core machine. Odd core counts round
+    /// down so the stop cannot consume more than the agreed half.
+    #[farhelm_testtrace::test]
+    fn exit_checkpoints_use_half_the_cores_with_at_least_one_slot() {
+        for (cores, slots) in [(1, 1), (2, 1), (3, 1), (4, 2), (7, 3), (8, 4)] {
+            assert_eq!(exit_checkpoint_slots(cores), slots, "{cores} cores");
+        }
+    }
 
     /// The tag of `session`'s agent at launch `generation`.
     fn agent_tag(session: &str, generation: i64) -> HostTag {

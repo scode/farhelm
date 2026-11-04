@@ -1762,6 +1762,113 @@ async fn an_unreadable_launch_record_leaves_its_session_unavailable() {
     end_discoverable(stranger);
 }
 
+/// Checkpoints at a stop are admitted by tail size, even when the session
+/// map offers them in exactly the opposite order, and a held encode keeps
+/// the only slot until it settles.
+///
+/// Why: sorting before spawning is insufficient when the spawned tasks
+/// race to acquire their permits. The map's actual order establishes a
+/// deliberately wrong admission order here; each terminal has a distinct
+/// tail and its own encode gate. The largest gate must be reached first,
+/// while smaller runtimes still process new output with their gates
+/// untouched. Opening it admits the next
+/// largest, and then the smallest, before the stop succeeds. No output is
+/// enough to trigger an automatic checkpoint, so every encode observed
+/// belongs to the stop.
+#[farhelm_testtrace::test]
+async fn an_orderly_stop_admits_largest_tails_first_with_one_slot() {
+    use crate::hosts::terminal::EncodeGate;
+
+    /// Release every gate during an assertion unwind too, so a failed
+    /// admission check does not leave blocking encoders held until their
+    /// independent safety timeout.
+    struct ReleaseEncodes(Vec<EncodeGate>);
+    impl Drop for ReleaseEncodes {
+        fn drop(&mut self) {
+            for gate in &self.0 {
+                gate.open();
+            }
+        }
+    }
+
+    let state = StateDir::new();
+    let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        .await
+        .expect("supervisor");
+    let mut fixtures = HashMap::new();
+    let mut release = ReleaseEncodes(Vec::new());
+    for id in ["s1", "s2", "s3"] {
+        let gate = EncodeGate::closed();
+        release.0.push(gate.clone());
+        let (host, test_host) = adopt_test_host_with(
+            TestHostSpec {
+                options: Some(crate::hosts::HostTerminalOptions {
+                    encode_gate: Some(gate.clone()),
+                    ..test_host_options(None)
+                }),
+                ..TestHostSpec::default()
+            },
+            crate::hosts::Adoption::Fresh,
+        )
+        .await;
+        sup.sessions.lock().await.insert(
+            id.to_string(),
+            Arc::new(entry_with(
+                Some(Terminal::Host(host.clone())),
+                LastOutcome::Running,
+            )),
+        );
+        fixtures.insert(id.to_string(), (host, test_host, gate));
+    }
+    // No map mutation follows: the gather will see this same order. Give
+    // its first entry the smallest tail and its last entry the largest.
+    let map_order: Vec<_> = sup.sessions.lock().await.keys().cloned().collect();
+    for (index, id) in map_order.iter().enumerate() {
+        let (host, test_host, gate) = &fixtures[id];
+        let output = vec![b'x'; (index + 1) * 128];
+        test_host.output(&output);
+        wait_for(host, "the complete tail before stopping", |host| {
+            host.status().position.offset == output.len() as u64
+        })
+        .await;
+        assert_eq!(host.status().checkpoint, None);
+        assert!(!gate.wait_entered(Duration::ZERO), "no automatic encode");
+    }
+
+    let inspect = async {
+        for (admitted, id) in map_order.iter().rev().enumerate() {
+            let gate = fixtures[id].2.clone();
+            assert!(
+                tokio::task::spawn_blocking(move || gate.wait_entered(WAIT))
+                    .await
+                    .expect("wait for the admitted encode"),
+                "the next-largest tail {id} reached its encode gate"
+            );
+            for queued in map_order.iter().take(map_order.len() - admitted - 1) {
+                let (host, test_host, gate) = &fixtures[queued];
+                let before = host.status().position.offset;
+                test_host.output(b"y");
+                wait_for(host, "a queued runtime still processing output", |host| {
+                    host.status().position.offset > before
+                })
+                .await;
+                assert!(
+                    !gate.wait_entered(Duration::ZERO),
+                    "smaller tail {queued} entered while {id} held the only slot"
+                );
+            }
+            fixtures[id].2.open();
+        }
+    };
+    let (current, ()) = tokio::join!(sup.checkpoint_hosts_for_exit_with_slots(WAIT, 1), inspect,);
+    assert!(current, "every ordered checkpoint was accepted");
+    for (_, (_, _, gate)) in fixtures {
+        assert!(gate.passed());
+        assert!(!gate.expired());
+        assert!(!gate.cancelled());
+    }
+}
+
 /// An orderly stop's checkpoints end within its budget even when an encode
 /// would run far longer, and leave no encode behind on the blocking pool,
 /// so the runtime that owns the supervisor drops at once and its state
