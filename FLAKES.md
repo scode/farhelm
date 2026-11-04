@@ -3521,3 +3521,73 @@ in #2981), which no test reads. Run UUIDs address retained temporary evidence, w
 Class: unknown
 
 Cause: hypothesis
+
+## 2026-11-04 — the launcher's YOLO question does not take its answer on WebKit (e2e/tests/helpers/term.ts)
+
+`fillCreateForm` answers a command launch's required "Runs in YOLO mode" question through `answerYolo`, which checks the
+group's "No" radio button. On WebKit, three tests failed at that step with Playwright's "Clicking the checkbox did not
+change its state", each in a different round of the plans landing monitor's sandbox runs:
+`create-intent-key-rebinds-on-host-change: a new target is a new intent` in `e2e/tests/terminal-multihost.spec.ts` (run
+`a865423e-2157-473d-bd78-5bafcce7811e`, 2026-11-04, tested commit `2cdad584`),
+`create-intent-key-rebinds-on-retarget: a moved host is a new intent` in the same file (host-terminal run
+`7033e514-e01f-435e-993c-57b6e4ba5126`, `68510f5e`), and
+`editing the working directory after a failed create mints a new intent key` in
+`e2e/tests/terminal-create-idempotency.spec.ts` (run `55c4bee4-892d-4118-968c-d37cca4c920f`, `bddbbc68`). Each passed
+three re-runs alone on the same build (`de7f9716-ee9c-48b5-8577-9b97467bd32f`, `993cab6d-f635-42e0-9dff-833ce9b554f3`,
+`81ce6bcb-838f-40b3-94c8-65c4f1b3d478`). The first two came before launcher-permission-keywords, which later changed the
+launcher's permission controls, so that plan did not cause it. The step is shared by every test that creates a command
+session through the form, so other tests can fail the same way. Hypothesis: on WebKit the click lands while the launcher
+re-renders the question (a re-render resets the group, or the click reaches a detached element), so the state Playwright
+reads back is unchanged. Open; the three tests are excluded from deflake sweeps; no fix attempted.
+
+```text
+Error: locator.check: Clicking the checkbox did not change its state
+  at answerYolo (e2e/tests/helpers/term.ts)
+  at fillCreateForm (e2e/tests/helpers/term.ts)
+```
+
+Evidence: Tensorlake sandboxes (4-vCPU x86_64 Linux virtual machines booting systemd, each running only its shard with
+three Playwright workers and one owned stack each; load average not measured), the recorder's generic mode
+(`python3 scripts/record-test-run.py --kind development --tmux required -- npx playwright test --project=<engine>-<spec> ... --retries=0 --reporter=line`),
+Node 24.16 with the Playwright and browser builds the tested tree pins. Recorded tmux 3.7c executable SHA256
+`1f51ad46eb731a90b75e74afc35719666405e8231fa73ab58ff35a5e9e6f92cd`, locale C.UTF-8, child `FARHELM_TEST_TRACE_DIR` (and
+`FARHELM_E2E_SUITE_TERMINALS` in the host-terminal run) after the recorder scrubbed ambient `FARHELM_*`. In rounds 171
+and 172 the tracked tree differed from the tested commit only in `scripts/tensorlake/run-shard.sh` (the sandbox self-ssh
+fix, since landed in #2981), which no test reads; in round 173 it was clean. Run UUIDs address retained temporary
+evidence, which expires with cleanup. Each failure failed fast at the click; the rest of its shard ran on.
+
+Class: unknown
+
+Cause: hypothesis
+
+## 2026-11-04 — a pending post-clone save's ordering times out on WebKit (e2e/tests/settings.spec.ts)
+
+`a pending post-clone save orders reopened settings before the next save` (WebKit) timed out at 60 seconds waiting,
+after an intercepted save request was already answered, for the browser to report that request finished
+(`reply.finished()`). It failed in the plans landing monitor's sandbox runs in round 172's host-terminal run
+(`d70c7024-ae4f-4172-87da-c21680228f62`, 2026-11-04, tested commit `68510f5e`), in round 173's full suite
+(`ecb2845b-15c7-4d2d-bef1-2db8b4b42936`, `bddbbc68`), and once in three re-runs of that build
+(`f4743ad3-5245-4951-bd1f-d78e374312dc`); round 172's three re-runs (`633348d2-d992-4047-9130-d75f76382776`) passed.
+Neither round's plans touched settings. It fails the way the post-clone carriage-return test does, which an open draft
+PR (#2549) records as a flake, and the way a template popover test did in round 170: WebKit sometimes never reports an
+intercepted, already-fulfilled request as finished. Hypothesis: that Playwright and WebKit behavior, not the product.
+Open; excluded from deflake sweeps; no fix attempted.
+
+```text
+Test timeout of 60000ms exceeded.
+> 1512 |     if (reply) await reply.finished();
+```
+
+Evidence: Tensorlake sandboxes (4-vCPU x86_64 Linux virtual machines booting systemd, each running only its shard with
+three Playwright workers and one owned stack each; load average not measured), the recorder's generic mode
+(`python3 scripts/record-test-run.py --kind development --tmux required -- npx playwright test --project=<engine>-<spec> ... --retries=0 --reporter=line`),
+Node 24.16 with the Playwright and browser builds the tested tree pins. Recorded tmux 3.7c executable SHA256
+`1f51ad46eb731a90b75e74afc35719666405e8231fa73ab58ff35a5e9e6f92cd`, locale C.UTF-8, child `FARHELM_TEST_TRACE_DIR` (and
+`FARHELM_E2E_SUITE_TERMINALS` in the host-terminal run) after the recorder scrubbed ambient `FARHELM_*`. In rounds 171
+and 172 the tracked tree differed from the tested commit only in `scripts/tensorlake/run-shard.sh` (the sandbox self-ssh
+fix, since landed in #2981), which no test reads; in round 173 it was clean. Run UUIDs address retained temporary
+evidence, which expires with cleanup.
+
+Class: unknown
+
+Cause: hypothesis

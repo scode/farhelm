@@ -20,3 +20,7 @@ playwright header.spec.ts native tunnel preview keeps ports and actions inside a
 playwright feedback.spec.ts the dialog refuses blank and over-long messages without sending  # feedback-disabled-send-color
 playwright trash-dialog.spec.ts trash header and global confirmation remain reachable at width 1000  # trash-dialog-pagedown
 playwright trash-dialog.spec.ts trash header and global confirmation remain reachable at width 360  # trash-dialog-pagedown
+playwright terminal-multihost.spec.ts create-intent-key-rebinds-on-host-change: a new target is a new intent  # launcher-yolo-question-webkit
+playwright terminal-multihost.spec.ts create-intent-key-rebinds-on-retarget: a moved host is a new intent  # launcher-yolo-question-webkit
+playwright terminal-create-idempotency.spec.ts editing the working directory after a failed create mints a new intent key  # launcher-yolo-question-webkit
+playwright settings.spec.ts a pending post-clone save orders reopened settings before the next save  # pending-post-clone-save-webkit
