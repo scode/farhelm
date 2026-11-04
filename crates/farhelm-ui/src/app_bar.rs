@@ -68,6 +68,7 @@ const WORDMARK_LIGHT_SVG: &str =
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum BarMenuItem {
     SendFeedback,
+    ChatOnDiscord,
     Documentation,
     KeyboardShortcuts,
     /// Always available help, even when no installed update waits for restart.
@@ -91,6 +92,7 @@ impl BarMenuItem {
         use crate::icons::ActionGlyph;
         match self {
             Self::SendFeedback => ActionGlyph::Feedback,
+            Self::ChatOnDiscord => ActionGlyph::External,
             Self::Documentation | Self::ReleaseNotes | Self::WhatsNew => ActionGlyph::Document,
             Self::SshHelp | Self::KeyboardShortcuts => ActionGlyph::Terminal,
             Self::Welcome => ActionGlyph::Info,
@@ -103,6 +105,7 @@ impl BarMenuItem {
     fn label(self) -> &'static str {
         match self {
             BarMenuItem::SendFeedback => "Send feedback",
+            BarMenuItem::ChatOnDiscord => "Chat on Discord",
             BarMenuItem::Documentation => "Documentation",
             BarMenuItem::KeyboardShortcuts => "Keyboard shortcuts",
             BarMenuItem::ReleaseNotes => "Release notes",
@@ -122,6 +125,9 @@ impl BarMenuItem {
         match self {
             BarMenuItem::SendFeedback => {
                 "Send feedback: a private message to Farhelm's maintainer, not a public issue"
+            }
+            BarMenuItem::ChatOnDiscord => {
+                "Chat on Discord: open Farhelm's Discord in your browser, to talk with the maintainer and other users in the open"
             }
             BarMenuItem::Documentation => {
                 "Documentation: open the Farhelm documentation at farhelm.io/docs in your browser"
@@ -154,6 +160,7 @@ impl BarMenuItem {
     fn description(self) -> &'static str {
         match self {
             BarMenuItem::SendFeedback => "Privately, to Farhelm's maintainer",
+            BarMenuItem::ChatOnDiscord => "Opens Farhelm's Discord in your browser",
             BarMenuItem::Documentation => "Opens farhelm.io/docs in your browser",
             BarMenuItem::KeyboardShortcuts => "Shows keys and your template bindings",
             BarMenuItem::ReleaseNotes => "Opens the release notes in your browser",
@@ -166,8 +173,9 @@ impl BarMenuItem {
     }
 }
 
-const BAR_MENU_ITEMS: [BarMenuItem; 9] = [
+const BAR_MENU_ITEMS: [BarMenuItem; 10] = [
     BarMenuItem::SendFeedback,
+    BarMenuItem::ChatOnDiscord,
     BarMenuItem::Documentation,
     BarMenuItem::KeyboardShortcuts,
     BarMenuItem::ReleaseNotes,
@@ -185,6 +193,7 @@ type BarMenuOrder = MenuOrder<BarMenuItem, { BAR_MENU_ITEMS.len() }>;
 fn help_menu_items(has_updater: bool) -> Vec<BarMenuItem> {
     let mut items = vec![
         BarMenuItem::SendFeedback,
+        BarMenuItem::ChatOnDiscord,
         BarMenuItem::Documentation,
         BarMenuItem::KeyboardShortcuts,
         BarMenuItem::ReleaseNotes,
@@ -203,6 +212,10 @@ const UPDATE_MENU_ITEMS: [BarMenuItem; 2] = [BarMenuItem::RestartToUpdate, BarMe
 /// The docs site the Documentation item opens.
 const DOCS_URL: &str = "https://farhelm.io/docs/";
 
+/// The Discord invite shared with the README and website header.
+/// Both app entry points use it so public conversation opens the same community.
+pub(crate) const DISCORD_URL: &str = "https://discord.gg/G3bukxTjXR";
+
 /// The release notes both Release notes and What's new open: every stable release with
 /// what changed in it, on the docs site (generated there from CHANGELOG.md,
 /// the same text the GitHub releases carry). The docs site rather than the
@@ -211,7 +224,7 @@ const DOCS_URL: &str = "https://farhelm.io/docs/";
 /// cannot.
 const RELEASE_NOTES_URL: &str = "https://farhelm.io/docs/release-notes/";
 
-/// Open one of Farhelm's own pages through the page's shared link opener
+/// Open a project help or community page through the page's shared link opener
 /// (`terminal-links.js`), which knows how to reach the system browser from
 /// the desktop webview and opens a new tab elsewhere. Callers pass a
 /// constant, so it needs none of the opener callers' validation.
@@ -956,6 +969,7 @@ pub(crate) fn AppBar(
                     feedback_open.set(true);
                 }
                 BarMenuItem::Documentation => open_external_page(DOCS_URL),
+                BarMenuItem::ChatOnDiscord => open_external_page(DISCORD_URL),
                 BarMenuItem::KeyboardShortcuts => {
                     if !*shortcuts_closing.peek() {
                         document::eval("window.__farhelmKeyboardShortcutsFocus = document.querySelector('.app-help-toggle');");
@@ -993,6 +1007,7 @@ pub(crate) fn AppBar(
                     BarMenuItem::WhatsNew => open_external_page(RELEASE_NOTES_URL),
                     // The help menu's items; never in this menu's list.
                     BarMenuItem::SendFeedback
+                    | BarMenuItem::ChatOnDiscord
                     | BarMenuItem::Documentation
                     | BarMenuItem::KeyboardShortcuts
                     | BarMenuItem::ReleaseNotes
@@ -1177,15 +1192,16 @@ mod tests {
         assert_eq!(displayed_version(Some(&skew)), "0.9.0-rc.1");
     }
 
-    /// Spec (Feedback): the `?` menu lists send feedback, documentation,
+    /// Spec (Feedback): the `?` menu lists send feedback, Discord, documentation,
     /// keyboard shortcuts, release notes, SSH help and welcome in that order.
-    /// Only a desktop app whose updater runs adds check for updates as the seventh item. The browser suite
+    /// Only a desktop app whose updater runs adds check for updates as the eighth item. The browser suite
     /// never has an updater, so this is the one place the desktop order is
     /// pinned.
     #[farhelm_testtrace::test]
-    fn the_help_menu_lists_release_notes_before_the_update_check() {
+    fn the_help_menu_keeps_discord_after_feedback_and_the_update_check_last() {
         let common = [
             BarMenuItem::SendFeedback,
+            BarMenuItem::ChatOnDiscord,
             BarMenuItem::Documentation,
             BarMenuItem::KeyboardShortcuts,
             BarMenuItem::ReleaseNotes,

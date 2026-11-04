@@ -334,9 +334,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   (`plans/queue/command-shell-meaning.md`) is the kind of change that would have used it. Plan:
   `plans/queue/in-app-announcements.md`.
 
-- **Add a Discord link to the feedback dialog and the ? menu.** The website header already links Discord (#2869);
-  surface the same link in the app, where users who just had a problem can find it. Plan:
-  `plans/queue/discord-link-in-app.md`.
 - **Support adding remote macOS hosts.** V1 provisioning targets Linux hosts with a usable systemd user manager
   (SPEC.md, Topology); a Mac can only be added today by running the supervisor binary by hand, and the remote
   provisioning and remote Update flows do not cover it. Make adding a macOS machine as a remote host a supported flow.

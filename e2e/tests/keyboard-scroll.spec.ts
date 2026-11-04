@@ -444,9 +444,12 @@ test("sending feedback gains a body stop and refusal restores editor entry", asy
     expect(await controls.count()).toBeGreaterThan(0);
     for (const control of await controls.all()) await expect(control).toBeDisabled();
     await expect(body).toHaveAccessibleName("Feedback");
-    // Header and footer answers are disabled too. The real focusable dialog
-    // supplies the origin; Tab must enter the body rather than repair body focus.
-    await expectKeyboardScroll(page, dialog, body);
+    // Send and close controls are disabled, but the public conversation link
+    // remains usable. It is the last native stop before the body, so Tab from
+    // it must enter the scroll region rather than repair body focus.
+    const discord = dialog.getByRole("link", { name: "Chat on Discord", exact: true });
+    await expect(discord).toBeVisible();
+    await expectKeyboardScroll(page, discord, body);
     for (const control of await controls.all()) await expect(control).toBeDisabled();
     expect(submissions).toHaveLength(1);
     gate.release();
