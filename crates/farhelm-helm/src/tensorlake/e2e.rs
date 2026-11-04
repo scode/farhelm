@@ -81,6 +81,9 @@ struct ShellConfig {
 #[derive(Debug, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct FakeConfig {
+    /// API operations parked until the control file releases them. Tests
+    /// use this boundary to close a browser with cleanup still in flight.
+    hold_operations: std::collections::HashSet<String>,
     /// When set, only this key is accepted; any other answers 401.
     accepted_key: Option<String>,
     /// Sandboxes the account has besides the ones the helm created, as
@@ -373,6 +376,27 @@ pub(crate) struct E2eTensorlake {
 }
 
 impl E2eTensorlake {
+    /// Simulate a long-lived tunnel with failure injection. The production
+    /// lease still owns cancellation and retry; no real SSH reaches a vendor.
+    pub(crate) async fn run_tunnels(
+        &self,
+        _sandbox: &str,
+        tx: &tokio::sync::watch::Sender<farhelm_proto::tensorlake::TunnelView>,
+        events: &crate::feed::FleetEvents,
+    ) -> Result<(), String> {
+        loop {
+            let config = self.config().await.map_err(|error| error.to_string())?;
+            if let Some(failure) = config.fail.get("tunnels") {
+                return Err(failure.message.clone());
+            }
+            if tx.borrow().state != farhelm_proto::tensorlake::TunnelState::Up {
+                tx.send_modify(|view| view.state = farhelm_proto::tensorlake::TunnelState::Up);
+                events.bump();
+            }
+            tokio::time::sleep(HOLD_POLL).await;
+        }
+    }
+
     /// Accept the directory only if it REALLY lies inside the helm's private
     /// state directory and carries the marker. Both paths are canonicalized
     /// first, for the reason `provisioning/e2e.rs` records: a lexical prefix
@@ -461,7 +485,7 @@ impl E2eTensorlake {
     /// injected failures. The event names the operation and whether the key
     /// matched, never the key.
     async fn admit(&self, operation: &str, key: &ApiKey) -> Result<FakeConfig, TensorlakeError> {
-        let config = self.config().await?;
+        let mut config = self.config().await?;
         let key_accepted = config
             .accepted_key
             .as_deref()
@@ -473,6 +497,10 @@ impl E2eTensorlake {
                 status: 401,
                 message: "the e2e Tensorlake fake does not accept this key".into(),
             });
+        }
+        while config.hold_operations.contains(operation) {
+            tokio::time::sleep(HOLD_POLL).await;
+            config = self.config().await?;
         }
         if let Some(failure) = config.fail.get(operation) {
             return Err(TensorlakeError::from_status(

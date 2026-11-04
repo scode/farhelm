@@ -15,6 +15,7 @@ import { readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { currentStackSlot } from "../stack-slots";
 import { openSettings, selectSettingsSection } from "./helpers/settings";
+import { observeFeedReaders, readFeedReaders, stubFeed } from "./helpers/fleet";
 
 type Settings = {
   api_key_set: boolean;
@@ -88,7 +89,9 @@ async function restore(request: APIRequestContext, original: Settings): Promise<
  * key; Test uses the saved key, so a key the account rejects reports the
  * rejection with what to check, and an accepted one reports how many
  * sandboxes it can see, also while the field holds unsaved text the account
- * would reject; reopening Settings shows that a key is saved without showing
+ * would reject. Failed discovery consumes unrelated notices without another
+ * read; a successful Test after external key replacement reloads it once.
+ * Reopening Settings shows that a key is saved without showing
  * it; Clear removes it and disables Test. The ssh key group creates the key on
  * request and then shows the registration command, which names this helm's
  * tag and carries the public key's text, and the section fits a phone-width
@@ -96,6 +99,35 @@ async function restore(request: APIRequestContext, original: Settings): Promise<
 test("Tensorlake settings save a write-only key, test the saved key and clear it", async ({ page, request }) => {
   const original = await saved(request);
   expect(original.api_key_set, "fixture premise: no key it would have to restore").toBe(false);
+  // Both surfaces legitimately list sandboxes. Serialize their HTTP reads
+  // only in this test so each Test response has an exact vendor-call slice;
+  // all requests still use the shipped routes and real fake API.
+  const testEvents: FakeEvent[][] = [];
+  const orphanEvents: FakeEvent[][] = [];
+  let orphanRequests = 0;
+  let reading = Promise.resolve();
+  await observeFeedReaders(page);
+  const feed = await stubFeed(page);
+  feed.notifyOnConnect(1);
+  // Pull the orphan consumer's own handled-notice and reload admission state
+  // synchronously. HTTP responses from other readers cannot establish either.
+  const orphanSnapshot = async () => {
+    const snapshot = (await readFeedReaders(page)).find(snapshot => snapshot.role === "tensorlake-orphans");
+    expect(snapshot, "mounted orphan consumer registered its observation").toBeDefined();
+    return snapshot!;
+  };
+  await page.route(/\/api\/tensorlake\/(test|orphans)$/, async (route) => {
+    const explicitTest = route.request().url().endsWith("/test");
+    if (!explicitTest) orphanRequests += 1;
+    const next = reading.then(async () => {
+      const before = (await fakeEvents()).length;
+      const response = await route.fetch();
+      (explicitTest ? testEvents : orphanEvents).push((await fakeEvents()).slice(before));
+      await route.fulfill({ response });
+    });
+    reading = next;
+    await next;
+  });
   try {
     await configureFake({
       accepted_key: GOOD_KEY,
@@ -110,6 +142,13 @@ test("Tensorlake settings save a write-only key, test the saved key and clear it
     const field = section.getByLabel("API key", { exact: true });
     const save = section.getByRole("button", { name: "Save", exact: true });
     const testKey = section.getByRole("button", { name: "Test", exact: true });
+    // A previous accepted message must not satisfy the next identical Test
+    // outcome before its POST has actually completed.
+    const testSavedKey = async () => {
+      const response = page.waitForResponse("**/api/tensorlake/test");
+      await testKey.click();
+      await response;
+    };
     const clear = section.getByRole("button", { name: "Clear", exact: true });
     await expect(field).toBeEditable();
     await expect(field).toHaveAttribute("placeholder", "No key saved");
@@ -118,7 +157,11 @@ test("Tensorlake settings save a write-only key, test the saved key and clear it
     await expect(clear).toBeDisabled();
     await expect(save).toBeDisabled();
     await expect(section).toContainText("It is not encrypted there");
+    await expect.poll(async () => (await orphanSnapshot()).acted_on).toBe("1");
 
+    // Saving the first key also loads the orphan list. Settle that separate
+    // vendor read before measuring Test; neither request proves the other.
+    const orphanLoad = page.waitForResponse("**/api/tensorlake/orphans");
     // A key the account rejects: saved, but Test reports the rejection.
     await field.fill(BAD_KEY);
     await save.click();
@@ -126,29 +169,71 @@ test("Tensorlake settings save a write-only key, test the saved key and clear it
     await expect(field).toHaveValue("");
     await expect(field).toHaveAttribute("placeholder", "Key saved; paste a new one to replace it");
     expect((await saved(request)).api_key_set).toBe(true);
-    await testKey.click();
+    expect((await orphanLoad).status()).toBe(502);
+    expect(orphanEvents[0]).toEqual([{ op: "list_sandboxes", key_accepted: false }]);
+    const orphans = dialog.getByRole("region", { name: "Sandboxes not on this helm", exact: true });
+    await expect(orphans.getByRole("alert")).toContainText("Tensorlake rejected the API key");
+    // Retire the initial discovery, then deliver exactly one controlled
+    // notice. The consumer's handled counter orders the silence assertion;
+    // its generation catches even a reload whose task has not sent HTTP yet.
+    await reading;
+    const beforeNotice = await orphanSnapshot();
+    expect(beforeNotice).toMatchObject({ notices: "1", acted_on: "1", failed: true });
+    const discoveryRequests = orphanRequests;
+    feed.notify(2);
+    await expect.poll(async () => (await orphanSnapshot()).acted_on).toBe("2");
+    expect(await orphanSnapshot()).toMatchObject({ notices: "2", generation: beforeNotice.generation, failed: true });
+    expect(orphanRequests).toBe(discoveryRequests);
+    await testSavedKey();
     const rejection = section.getByRole("alert");
     await expect(rejection).toContainText("Tensorlake rejected the API key (HTTP 401)");
     await expect(rejection).toContainText("Check that the key belongs to the Tensorlake project");
     await expect(rejection).not.toContainText(BAD_KEY);
-    expect(await fakeEvents()).toEqual([{ op: "list_sandboxes", key_accepted: false }]);
+    expect(testEvents).toEqual([[{ op: "list_sandboxes", key_accepted: false }]]);
+
+    // Another client replaces the saved key without changing this dialog's
+    // local revision. Successful Test must release the rejected discovery
+    // exactly once; neither the replacement nor failed Test does so alone.
+    const replaced = await request.put("/api/tensorlake", { data: { api_key: GOOD_KEY } });
+    expect(replaced.ok(), await replaced.text()).toBe(true);
+    expect(await orphanSnapshot()).toMatchObject({ generation: beforeNotice.generation, failed: true });
+    expect(orphanRequests).toBe(discoveryRequests);
+    const testedDiscovery = page.waitForResponse("**/api/tensorlake/orphans");
+    await testSavedKey();
+    expect((await testedDiscovery).ok()).toBe(true);
+    await expect(orphans.getByRole("alert")).toHaveCount(0);
+    expect(await orphanSnapshot()).toMatchObject({ generation: String(Number(beforeNotice.generation) + 1), failed: false });
+    expect(orphanRequests).toBe(discoveryRequests + 1);
+    expect(orphanEvents).toEqual([
+      [{ op: "list_sandboxes", key_accepted: false }],
+      [{ op: "list_sandboxes", key_accepted: true }],
+    ]);
 
     // The accepted key replaces it; surrounding spaces from a paste are trimmed.
+    const recoveredDiscovery = page.waitForResponse("**/api/tensorlake/orphans");
     await field.fill(`  ${GOOD_KEY}  `);
     await save.click();
     await expect(section.getByRole("status")).toHaveText("API key saved");
-    await testKey.click();
+    expect((await recoveredDiscovery).ok()).toBe(true);
+    await expect(orphans.getByRole("alert")).toHaveCount(0);
+    await testSavedKey();
     await expect(section.getByRole("status")).toHaveText("The key works. It can see 2 sandboxes.");
-    expect(await fakeEvents()).toEqual([
-      { op: "list_sandboxes", key_accepted: false },
-      { op: "list_sandboxes", key_accepted: true },
+    expect(testEvents).toEqual([
+      [{ op: "list_sandboxes", key_accepted: false }],
+      [{ op: "list_sandboxes", key_accepted: true }],
+      [{ op: "list_sandboxes", key_accepted: true }],
     ]);
     // Unsaved field text plays no part: with a rejected key typed but not
     // saved, Test still presents the saved, accepted one.
     await field.fill(BAD_KEY);
-    await testKey.click();
+    await testSavedKey();
     await expect(section.getByRole("status")).toHaveText("The key works. It can see 2 sandboxes.");
-    expect((await fakeEvents()).at(-1)).toEqual({ op: "list_sandboxes", key_accepted: true });
+    expect(testEvents).toEqual([
+      [{ op: "list_sandboxes", key_accepted: false }],
+      [{ op: "list_sandboxes", key_accepted: true }],
+      [{ op: "list_sandboxes", key_accepted: true }],
+      [{ op: "list_sandboxes", key_accepted: true }],
+    ]);
 
     // Reopening reads the snapshot again: saved, never shown.
     await dialog.getByRole("button", { name: "Close", exact: true }).click();
@@ -194,7 +279,10 @@ test("Tensorlake settings save a write-only key, test the saved key and clear it
     await expect(field).toHaveAttribute("placeholder", "No key saved");
     await expect(testKey).toBeDisabled();
     expect((await saved(request)).api_key_set).toBe(false);
+    await expect(dialog.getByRole("region", { name: "Sandboxes not on this helm", exact: true })).toHaveCount(0);
   } finally {
+    // Finish the observing handlers before restore resets their event log.
+    await page.unrouteAll({ behavior: "wait" });
     await restore(request, original);
   }
 });

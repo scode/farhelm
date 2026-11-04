@@ -78,6 +78,14 @@ impl SandboxStatusSource for Tensorlake {
     async fn check(&self, sandbox: &str) -> SandboxCheck {
         self.check_sandbox(sandbox).await
     }
+
+    async fn connected(
+        &self,
+        row: &HostRow,
+        events: std::sync::Arc<crate::feed::FleetEvents>,
+    ) -> Option<super::tunnels::TunnelLease> {
+        self.start_tunnels(row, events).await
+    }
 }
 
 impl Tensorlake {
@@ -227,7 +235,7 @@ impl Tensorlake {
 
 /// Poll until Tensorlake reports the sandbox terminated or no longer has it,
 /// within [`TERMINATION_WAIT`].
-async fn wait_until_terminated(
+pub(super) async fn wait_until_terminated(
     api: &dyn TensorlakeApi,
     key: &ApiKey,
     sandbox: &str,
@@ -257,7 +265,7 @@ async fn wait_until_terminated(
 
 /// One API call under [`REMOVAL_CALL_TIMEOUT`]; running out of time is a
 /// transport failure like any other unanswered call.
-async fn bounded<T>(
+pub(super) async fn bounded<T>(
     call: impl std::future::Future<Output = Result<T, TensorlakeError>>,
 ) -> Result<T, TensorlakeError> {
     tokio::time::timeout(REMOVAL_CALL_TIMEOUT, call)

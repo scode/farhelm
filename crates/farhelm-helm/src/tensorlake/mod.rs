@@ -26,8 +26,10 @@
 //!   the builder.
 //!
 //! Host creation is an outer provisioning plan in [`crate::provisioning`].
-//! [`lifecycle`] owns explicit Suspend/Resume; recipe tunnels build on this
-//! service separately.
+//! [`lifecycle`] owns explicit Suspend/Resume.
+//! [`tunnels`] ties recipe forwards to each connected actor's lifetime;
+//! [`orphans`] lists reserved-name sandboxes with no owner on this helm and
+//! deletes one only on an explicit request.
 
 pub(crate) mod api;
 pub(crate) mod build;
@@ -37,10 +39,12 @@ pub(crate) mod e2e;
 pub(crate) mod hosts;
 mod http;
 pub(crate) mod lifecycle;
+pub(crate) mod orphans;
 pub(crate) mod recipes;
 pub(crate) mod shell;
 pub(crate) mod ssh;
 mod ssh_key;
+pub(crate) mod tunnels;
 
 #[cfg(test)]
 mod tests;
@@ -77,6 +81,13 @@ struct Inner {
     shell: Arc<dyn SandboxShell>,
     /// The snapshot builds, which share this service's API and key.
     builds: Arc<RecipeBuilds>,
+    /// Forwards are read here and owned by the connected actors' leases.
+    tunnels: tunnels::Tunnels,
+    /// Same validated browser fake as the API, never a production fallback.
+    tunnel_fake: Option<Arc<e2e::E2eTensorlake>>,
+    /// Explicit orphan deletions outlive the requesting component. Only
+    /// successful snapshot cleanup removes their retry context.
+    orphan_cleanups: orphans::Cleanups,
 }
 
 impl Inner {
@@ -87,6 +98,7 @@ impl Inner {
         api: Arc<dyn TensorlakeApi>,
         shell: Arc<dyn SandboxShell>,
         ssh_keys: Option<Arc<SshKeyStore>>,
+        tunnel_fake: Option<Arc<e2e::E2eTensorlake>>,
     ) -> Self {
         let builds = Arc::new(RecipeBuilds::new(
             store.clone(),
@@ -102,6 +114,9 @@ impl Inner {
             #[cfg(test)]
             shell,
             builds,
+            tunnels: tunnels::Tunnels::default(),
+            tunnel_fake,
+            orphan_cleanups: orphans::Cleanups::default(),
         }
     }
 }
@@ -124,8 +139,8 @@ impl Tensorlake {
     /// Test builds never read the environment and never reach Tensorlake:
     /// their API is offline unless a test injects one ([`Self::with_api`]).
     pub(crate) fn production(store: HelmStore, state_dir: &Path) -> anyhow::Result<Self> {
-        let (api, shell): (Arc<dyn TensorlakeApi>, Arc<dyn SandboxShell>) = if cfg!(test) {
-            (Arc::new(Offline::test()), Arc::new(OfflineShell))
+        let (api, shell, fake): ProductionSeams = if cfg!(test) {
+            (Arc::new(Offline::test()), Arc::new(OfflineShell), None)
         } else {
             production_seams(state_dir)?
         };
@@ -135,6 +150,7 @@ impl Tensorlake {
             api,
             shell,
             Some(Arc::new(SshKeyStore::new(tensorlake_dir))),
+            fake,
         ))))
     }
 
@@ -146,6 +162,7 @@ impl Tensorlake {
             store,
             Arc::new(Offline::test()),
             Arc::new(OfflineShell),
+            None,
             None,
         )))
     }
@@ -160,6 +177,7 @@ impl Tensorlake {
             api,
             Arc::clone(&self.0.shell),
             self.0.ssh_keys.clone(),
+            None,
         )))
     }
 
@@ -172,12 +190,21 @@ impl Tensorlake {
             Arc::clone(&self.0.api),
             shell,
             self.0.ssh_keys.clone(),
+            None,
         )))
     }
 
     /// The helm's snapshot builds.
     pub(crate) fn builds(&self) -> &Arc<RecipeBuilds> {
         &self.0.builds
+    }
+
+    /// Live forwarding health, absent outside a connected phase.
+    pub(crate) fn tunnel_view(
+        &self,
+        host: crate::store::HostId,
+    ) -> Option<farhelm_proto::tensorlake::TunnelView> {
+        self.0.tunnels.view(host)
     }
 
     /// The settings snapshot the routes return. Read-only: it reports
@@ -285,14 +312,19 @@ fn ready(key: ssh_key::SshKey, tag: &str) -> SshKeyStatus {
     }
 }
 
-/// The real client and ssh, or the browser suite's fake for both when the
+/// Interfaces chosen together so the marked browser fake serves the API,
+/// shell commands and connected tunnels of the same sandbox model.
+type ProductionSeams = (
+    Arc<dyn TensorlakeApi>,
+    Arc<dyn SandboxShell>,
+    Option<Arc<e2e::E2eTensorlake>>,
+);
+
+/// The real client and ssh, or the browser suite's fake for all three when the
 /// helm was started with its environment variable. Reading the environment
 /// here, once at startup, is the same opt-in the provisioning backend's fake
-/// uses. One fake serves both seams, because its shell checks the sandboxes
-/// its API created.
-fn production_seams(
-    state_dir: &Path,
-) -> anyhow::Result<(Arc<dyn TensorlakeApi>, Arc<dyn SandboxShell>)> {
+/// uses. The shell and tunnel fake share the API's marked control directory.
+fn production_seams(state_dir: &Path) -> anyhow::Result<ProductionSeams> {
     if let Some(root) = std::env::var_os(e2e::E2E_TENSORLAKE_ENV) {
         let root = std::path::PathBuf::from(root);
         let fake = Arc::new(e2e::E2eTensorlake::new(root.clone(), state_dir)?);
@@ -300,17 +332,17 @@ fn production_seams(
             "WARNING: E2E-only Tensorlake fake enabled from {}; Tensorlake API calls and sandbox commands are simulated",
             root.display()
         );
-        return Ok((fake.clone(), fake));
+        return Ok((fake.clone(), fake.clone(), Some(fake)));
     }
     let shell = Arc::new(SshSandboxShell::new());
     match http::HttpTensorlake::production() {
-        Ok(client) => Ok((Arc::new(client), shell)),
+        Ok(client) => Ok((Arc::new(client), shell, None)),
         // A machine whose TLS setup cannot build a client (no CA bundle,
         // say) still serves everything else; Tensorlake calls then fail
         // with a reason that names the likely fix.
         Err(error) => {
             tracing::warn!(%error, "the Tensorlake HTTP client could not be built");
-            Ok((Arc::new(Offline::no_client()), shell))
+            Ok((Arc::new(Offline::no_client()), shell, None))
         }
     }
 }

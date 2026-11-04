@@ -98,3 +98,49 @@ pub struct TestResult {
     /// How many sandboxes (of any kind, not only Farhelm's) the key can see.
     pub sandboxes: u64,
 }
+
+/// Recipe forwards sharing one SSH connection and its health.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct TunnelView {
+    pub tunnels: Vec<recipes::Tunnel>,
+    pub state: TunnelState,
+}
+
+/// Live forwarding health, independent of the supervisor's connection.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "phase", rename_all = "snake_case")]
+pub enum TunnelState {
+    Up,
+    Failed {
+        reason: String,
+    },
+    Retrying {
+        reason: Option<String>,
+        delay_secs: u64,
+    },
+}
+
+/// A reserved-name sandbox no host or recipe on this helm owns. IDs keep
+/// deletion retries possible after termination releases the name.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct OrphanSandbox {
+    pub id: String,
+    pub name: String,
+    pub created_at: Option<i64>,
+    pub state: String,
+    pub from_another_helm: bool,
+    /// Explicit cleanup survives closing Settings, including after the
+    /// sandbox has terminated and disappeared from the vendor's listing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cleanup: Option<OrphanCleanup>,
+}
+
+/// Helm-owned, in-memory progress for an explicitly requested deletion.
+/// It is retained until the snapshot sweep succeeds; nothing retries it
+/// automatically and a helm restart discards it.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "phase", rename_all = "snake_case")]
+pub enum OrphanCleanup {
+    Running,
+    Failed { reason: String },
+}

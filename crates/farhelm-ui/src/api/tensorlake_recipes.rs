@@ -10,6 +10,38 @@
 use super::{client, encode_path_segment, read_failure, refusal_text, send, send_read, send_save};
 use farhelm_proto::tensorlake::recipes::{CreateRecipe, RecipeSave, RecipeView, RecipesView};
 
+/// Reserved-name sandboxes with no owner on this helm. Errors must stay
+/// visible because an empty list otherwise falsely promises no leftovers.
+pub(crate) async fn fetch_orphan_sandboxes(
+    base: &str,
+) -> Result<Vec<farhelm_proto::tensorlake::OrphanSandbox>, String> {
+    let url = format!("{base}/api/tensorlake/orphans");
+    let response = send_read(client().get(&url)).await?;
+    if !response.status().is_success() {
+        return Err(read_failure("GET", &url, response).await);
+    }
+    response
+        .json()
+        .await
+        .map_err(|_| "Could not read Tensorlake sandboxes".to_string())
+}
+
+/// Start the explicitly confirmed delete before its component can close.
+pub(crate) fn delete_orphan_sandbox(
+    base: &str,
+    id: &str,
+) -> impl Future<Output = Result<(), String>> + use<> {
+    let url = format!("{base}/api/tensorlake/orphans/{}", encode_path_segment(id));
+    let sending = send_save(client().delete(&url));
+    async move {
+        let response = sending.await?;
+        if !response.status().is_success() {
+            return Err(refusal_text("DELETE", &url, response).await);
+        }
+        Ok(())
+    }
+}
+
 /// Every recipe on the helm, by name. A failure is the read's own error text,
 /// so the list can offer a retry rather than show an empty catalog.
 pub(crate) async fn fetch_recipes(base: &str) -> Result<Vec<RecipeView>, String> {

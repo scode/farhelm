@@ -297,6 +297,7 @@ fn the_helm_host_list_fixture_decodes_every_phase_as_recognized() {
         Some(crate::TensorlakeHost {
             sandbox: "farhelm-host-k7q2-host11-m3x9".into(),
             recipe: "rust-dev".into(),
+            tunnels: None,
             size: Some(farhelm_proto::tensorlake::recipes::RecipeSize {
                 cpus: 2,
                 memory_gb: 4,

@@ -710,7 +710,11 @@ fn HostRailAvatar(
 ) -> Element {
     let id = host.id;
     let mut handle = use_signal(|| None::<Rc<MountedData>>);
-    let presentation = rail_presentation(&host.state, progress.as_ref(), update_available);
+    let mut presentation = rail_presentation(&host.state, progress.as_ref(), update_available);
+    if crate::tensorlake::tunnels::failed(&host) {
+        presentation.phase = "unreachable";
+        presentation.words.push_str("; tunnels failed, retrying");
+    }
     let name = gui_host_name(host.name.raw(), host.kind.is_this_machine());
     let short_name = host.short_name().escaped();
     let destination = host
@@ -4624,6 +4628,8 @@ fn HostRow(
                     // name, not the `⋯` toggle, absorbs width pressure.
                     class: if update_is_active {
                         "host-status {phase_class(&host.state)} updating"
+                    } else if crate::tensorlake::tunnels::failed(&host) {
+                        "host-status unreachable"
                     } else {
                         "host-status {phase_class(&host.state)}"
                     },
@@ -5185,6 +5191,9 @@ fn HostRow(
                 p { class: "host-tensorlake-detail",
                     "Sandbox: {display_peer(sandbox.sandbox.raw())} · Recipe: {display_peer(sandbox.recipe.raw())}"
                     if let Some(size) = sandbox.size { " · {size.cpus} CPUs · {size.memory_gb} GB memory" }
+                }
+                if let Some(view) = sandbox.tunnels.clone() {
+                    crate::tensorlake::tunnels::TunnelDetails { view }
                 }
             }
             if let Some(destination) = lines.destination {
@@ -8028,6 +8037,7 @@ mod tests {
             sandbox: "farhelm-host-k7q2-gpu-dev-m3x9".into(),
             recipe: "gpu-dev".into(),
             size: None,
+            tunnels: None,
         });
         let copy = settings_dialog::RemoveCopy::for_host(&sandbox);
         assert_eq!(copy.title, "Delete sandbox");

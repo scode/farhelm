@@ -75,7 +75,8 @@ mod save_order;
 /// The Tensorlake recipe calls (see the module's own docs).
 mod tensorlake_recipes;
 pub(crate) use tensorlake_recipes::{
-    build_recipe, create_recipe, delete_recipe, fetch_recipes, update_recipe,
+    build_recipe, create_recipe, delete_orphan_sandbox, delete_recipe, fetch_orphan_sandboxes,
+    fetch_recipes, update_recipe,
 };
 
 /// UI-owned configuration writes outlive authentication and modal remounts.

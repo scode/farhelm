@@ -21,6 +21,11 @@
 //! The recipe list sits between the ssh key and the switch. It is its own
 //! component (`crate::tensorlake::recipes::RecipeList`) with its own reads
 //! and saves; this section only places it.
+//! The orphan list also owns its reads. Acknowledged key saves advance its
+//! revision so discovery can recover from a rejected key without retrying
+//! on unrelated renders or fleet changes. A successful saved-key Test also
+//! resumes failed discovery once. Refresh and remount recover independently;
+//! another tab's key save does not advance these component-local revisions.
 
 use crate::{
     ApiBase,
@@ -82,6 +87,12 @@ pub(crate) fn TensorlakeSettings() -> Element {
     });
     let mut settings = use_signal(|| None::<Settings>);
     let mut key = use_signal(String::new);
+    // Discovery needs to notice key replacement as well as set/cleared.
+    // The counter carries no credential and changes only on acknowledged saves.
+    let mut key_revision = use_signal(|| 0_u64);
+    // Test can validate a key replaced elsewhere while this dialog stayed
+    // mounted. Only successful Tests release failed discovery.
+    let mut test_revision = use_signal(|| 0_u64);
     let mut busy = use_signal(|| false);
     let mut outcome = use_signal(|| None::<Result<String, String>>);
     let mut toggling = use_signal(|| false);
@@ -131,6 +142,7 @@ pub(crate) fn TensorlakeSettings() -> Element {
             match result {
                 Ok(saved) => {
                     settings.set(Some(saved));
+                    key_revision += 1;
                     key.set(String::new());
                     outcome.set(Some(Ok(success.into())));
                 }
@@ -184,6 +196,7 @@ pub(crate) fn TensorlakeSettings() -> Element {
                             let result = test_tensorlake_settings(&base).await;
                             if !mounted.get() { return; }
                             busy.set(false);
+                            if result.is_ok() { test_revision += 1; }
                             outcome.set(Some(result.map(test_message)));
                         });
                     }, "Test"
@@ -270,9 +283,9 @@ pub(crate) fn TensorlakeSettings() -> Element {
                 "Farhelm cannot check that the key is registered, because an API key cannot list SSH keys. An unregistered key shows up as an error the first time Farhelm sets up a sandbox."
             }
         }
-        // Recipes sit between the account and the creation choice. A
-        // follow-up PR adds the list of sandboxes not on this helm after them.
+        // Account, recipes and explicit cleanup share the saved API key.
         crate::tensorlake::recipes::RecipeList { api_key_set: key_set }
+        crate::tensorlake::orphans::OrphanList { api_key_set: key_set, key_revision: key_revision(), test_revision: test_revision() }
         section { class: "host-settings-section tensorlake-settings", aria_label: "Creating sandboxes",
             h4 { class: "host-settings-section-title", "Creating sandboxes" }
             div { class: "setting-group",

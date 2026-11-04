@@ -123,6 +123,10 @@ pub(crate) struct TensorlakeHostView {
     pub(crate) sandbox: String,
     pub(crate) recipe: String,
     pub(crate) size: Option<farhelm_proto::tensorlake::recipes::RecipeSize>,
+    /// The connected phase's forwards, absent without a lease. Their
+    /// failure never claims the supervisor itself is disconnected.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) tunnels: Option<farhelm_proto::tensorlake::TunnelView>,
 }
 
 impl From<&crate::store::TensorlakeBinding> for TensorlakeHostView {
@@ -131,6 +135,7 @@ impl From<&crate::store::TensorlakeBinding> for TensorlakeHostView {
             sandbox: binding.sandbox.clone(),
             recipe: binding.recipe.clone(),
             size: binding.resources,
+            tunnels: None,
         }
     }
 }
@@ -479,7 +484,13 @@ pub(crate) async fn host_views(state: &AppState) -> anyhow::Result<Vec<HostView>
                 },
                 tensorlake: registry
                     .and_then(|row| row.tensorlake.as_ref())
-                    .map(TensorlakeHostView::from),
+                    .map(|binding| {
+                        let mut view = TensorlakeHostView::from(binding);
+                        if snapshot.state.is_connected() {
+                            view.tunnels = state.tensorlake.tunnel_view(snapshot.id);
+                        }
+                        view
+                    }),
                 name: host_display_name(
                     snapshot.kind,
                     snapshot.destination.as_deref(),

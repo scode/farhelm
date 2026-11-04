@@ -84,7 +84,14 @@ fn steps(sandbox: &str, name: &str, recipe: &StoredRecipe, ready: bool) -> PlanS
     }
     descriptions.push((
         "set-up-farhelm",
-        "Install Farhelm's supervisor, as on any host".into(),
+        if recipe.tunnels.is_empty() {
+            "Install Farhelm's supervisor, as on any host".into()
+        } else {
+            // Forwarding belongs to the connection, rather than a one-shot
+            // install action. The confirmation still names that grant.
+            "Install Farhelm's supervisor and open the recipe's tunnels when the host connects"
+                .into()
+        },
     ));
     PlanSteps {
         lead: "Create a Tensorlake sandbox and set it up as a host".into(),

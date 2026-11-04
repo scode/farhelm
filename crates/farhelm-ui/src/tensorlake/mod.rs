@@ -4,5 +4,7 @@
 //! (`tensorlake_settings.rs`, which owns the account side) hosts the list, and
 //! the add-host dialog will host the editor for "New recipe…".
 
+pub(crate) mod orphans;
 pub(crate) mod recipe_editor;
 pub(crate) mod recipes;
+pub(crate) mod tunnels;

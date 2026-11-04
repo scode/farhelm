@@ -870,6 +870,11 @@ fn api_router(state: Arc<AppState>) -> Router {
             "/api/tensorlake/test",
             axum::routing::post(tensorlake::test),
         )
+        .route("/api/tensorlake/orphans", get(tensorlake::orphans::list))
+        .route(
+            "/api/tensorlake/orphans/{id}",
+            axum::routing::delete(tensorlake::orphans::delete),
+        )
         // Creating Farhelm's ssh key is its own explicit request, so merely
         // reading the settings never writes a credential.
         .route(
@@ -2154,7 +2159,7 @@ mod embedded_ui_tests {
     }
 }
 
-/// Run the helm until the process is killed: open helm.db, apply any
+/// Run the helm until SIGINT/SIGTERM or a fatal serving error: open helm.db, apply any
 /// `--ensure-hosts` floor, start a connection actor per registered host,
 /// open the private token-control endpoint, and serve the API and UI on
 /// loopback.
@@ -2181,9 +2186,8 @@ mod embedded_ui_tests {
 ///   successful browser request cannot race a separate `token rotate` into
 ///   the offline fallback and miss live WebSocket revocation.
 ///
-/// Returns only on a fatal error. There is no graceful-shutdown path, and
-/// none is needed: SPEC.md's whole durability promise is that killing the
-/// helm does nothing to any session.
+/// Signals end serving and drain connection actors, including their local
+/// tunnel processes. Sessions themselves continue on their supervisors.
 /// Owns and drains its runtime before releasing the state-directory claim,
 /// including during panic unwind. Call from outside a tokio runtime.
 pub fn run(args: HelmArgs) -> anyhow::Result<()> {
@@ -2302,6 +2306,16 @@ async fn serve_with_ready(
     mode: ServingMode,
     ownership: &mut Option<token_control::OwnershipLock>,
 ) -> anyhow::Result<()> {
+    // Install before actors can spawn SSH. Embedded owners retain their own
+    // process signal policy and stop the helm through the explicit receiver.
+    let standalone_signals = if mode == ServingMode::Standalone {
+        Some((
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?,
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?,
+        ))
+    } else {
+        None
+    };
     let state_dir = match args.state_dir.clone() {
         Some(dir) => dir,
         None => farhelm_supervisor::default_state_dir()?,
@@ -2428,14 +2442,17 @@ async fn serve_with_ready(
     if mode == ServingMode::Standalone {
         println!("farhelm helm: http://{addr}/");
     }
-    let embedded_shutdown = async move {
-        match shutdown {
-            Some(receiver) => {
+    let requested_shutdown = async move {
+        match (shutdown, standalone_signals) {
+            (Some(receiver), _) => {
                 // Sender cancellation means the desktop owner disappeared;
                 // it is the same lifetime boundary as an explicit signal.
                 let _ = receiver.await;
             }
-            None => std::future::pending::<()>().await,
+            (None, Some((mut interrupt, mut terminate))) => {
+                tokio::select! { _ = interrupt.recv() => {}, _ = terminate.recv() => {} }
+            }
+            (None, None) => std::future::pending::<()>().await,
         }
     };
     let serving = tokio::select! {
@@ -2444,11 +2461,11 @@ async fn serve_with_ready(
         () = checkout_config::watch_revision(
             state.store.clone(), Arc::clone(state.manager.events()), checkout_revision,
         ) => unreachable!("checkout configuration watcher runs until serving ends"),
-        () = embedded_shutdown => Ok(())
+        () = requested_shutdown => Ok(())
     };
     state._automatic_updates.stop();
     state.tunnels.shutdown().await;
-    state.manager.shutdown();
+    state.manager.shutdown_and_wait().await;
     serving
 }
 
