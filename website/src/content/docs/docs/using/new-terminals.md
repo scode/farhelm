@@ -6,25 +6,35 @@ sidebar:
 ---
 
 Farhelm has changed how it runs your sessions' terminals. Until now, every session's terminal, and every shell tab
-beside it, ran inside tmux on its host. New terminals run without tmux: each one runs in a small Farhelm process of its
-own on the host, which keeps it going while the host's [supervisor](/docs/how-it-works/the-pieces/) restarts or updates.
-A remote host makes new terminals once you [update it](/docs/using/manage-hosts/#update-a-host); until then Farhelm
-shows it as needing an update.
+beside it, ran inside a Farhelm managed tmux on its host. xterm.js was also used in the UI to render the terminal.
 
-Sessions you already have keep their old terminals and keep working as they always have for now, but a future Farhelm
-release will stop supporting old terminals. Nothing is moved for you, because moving a session's agent means starting it
-again. You move each session when it suits you.
+As of 0.34.0, all newly created terminals (new agent sessions, new shell tabs) run without tmux, and no xterm.js is
+involved either. Instead, each terminal is owned by a small Farhelm processes which does the bare minimum to maintain
+the terminal - including for short periods of time while other Farhelm processes are restarting, such as during
+upgrades.
+
+Sessions you already have running when you upgrade to 0.34.0 keep their old terminals and keep working as they always
+have for now - inside of tmux, and with xterm.js on the client.
+
+However, a future Farhelm release will stop supporting old terminals entirely. Starting with 0.34.0 you will be strongly
+nudged (with a loud bar at the top of terminals, that you can dismiss) to restart/replace terminals at your earliest
+convenience. This is intended to allow you to pick a good time to "migrate" your terminals over, while allowing Farhelm
+to drop tmux/xterm.js support within a tractable time frame.
 
 ## Why terminals are leaving tmux
 
-tmux was never something you were meant to deal with, but its quirks reached you anyway:
+tmux was intended to be as much of an implementation detail as possible, but it leaks through:
 
-- A new tmux version could break Farhelm. One release changed a detail Farhelm relied on, and on every host running it,
-  Restart, Replace, Stop and Delete failed for any session whose agent had exited.
+- Farhelm exercises tmux in ways normal users don't. We already triggered tmux crash bugs in early development which
+  lead to setting a minimum tmux version of farhelm, and supporting an embedded musl build of tmux. This meant
+  supporting both the embedded musl build and the native build. We already had one case of a newer tmux breaking
+  behavior in certain environments.
 - Every session on a host shared one tmux. Upgrading tmux, or a tmux crash, ended all of them at once, much like a
-  reboot.
-- Two programs kept their own copy of each terminal's screen and could disagree about how wide a character is, which
-  left the cursor in the wrong place after some emoji and symbols.
+  reboot. The new tmux replacement is meant to almost never need to be upgraded - but if and when it does, you'll be
+  able to do so on a per-terminal basis rather than globally for an entire host.
+- The old system involved terminal emulations occurring in two places (xterm.js and tmux). The new system has terminal
+  emulation happening in precisely one place - the client/UI has a much more basic character grid protocol native to
+  farhelm.
 
 A new terminal stands on its own: a problem with one does not take the others down, and it no longer depends on which
 tmux version a host has.
@@ -47,23 +57,6 @@ session:
 The bar under the terminal also says which kind each of the session's terminals is: old, new, or both. Hover over it to
 see each terminal listed, the agent first and then **Terminal 1**, **Terminal 2**, and so on, as the tabs are named
 above the terminal.
-
-## Move a session
-
-On a host that makes new terminals, everything Farhelm starts gets one: new sessions, restarts, clones, replacements and
-new shell tabs. So any of these moves the agent:
-
-- **Restart** starts the agent again in a new terminal and continues its conversation. It is the usual way, where the
-  session offers it; [Stop, restart, and resume](/docs/using/stop-restart-resume/) says when it does.
-- **Replace** starts a new session in this one's place, in a new terminal, with a fresh conversation unless you pick a
-  conversation to continue (with **Replace with…**). The old session, its shell tabs and its terminal history go.
-- **Clone** starts a new session beside this one, in a new terminal, and leaves this one alone, so you can move over
-  first and delete the old one later.
-
-Restarting the agent does not move its shell tabs: an old tab stays old until you close it. When convenient, close each
-old tab and click **+** to open a new one;
-[Work in a session](/docs/using/work-in-a-session/#open-a-shell-beside-the-agent) covers tabs. A session can have old
-and new terminals side by side meanwhile.
 
 ## What is the same, and what is not yet
 
