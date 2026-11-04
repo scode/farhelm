@@ -20944,7 +20944,7 @@
   test flips a tab from running to unreadable between the two reads and expects refusal. Size gate: about 100 lines of
   diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over it, block and
   bring it back. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/delete-unreadable-terminals.md`.
 
 ## container-policy-missing-from-approvals.md
 
@@ -20965,7 +20965,7 @@
   wrapper-prefix rows, with a card test. Size gate: about 100 lines of diff (code, tests and docs, not counting this
   ledger, the queue removal or a changelog fragment); over it, block and bring it back. Remove the feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-misc-nov4.md`.
 
 ## container-stop-approval-omits-tab-work.md
 
@@ -20983,7 +20983,7 @@
   findings from this Q1 group, each with enough of its assessment to act on later (this item: the Stop card, and the
   session menu's Stop text, should say a containerized Stop ends the whole container, tabs included). No code or spec
   change. Remove the feedback file and its index entry. The eight Q1 items share that one entry and one change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/podman-rigor-todo.md`.
 
 ## wrapper-guide-stop-promises-tab-preservation.md
 
@@ -20996,7 +20996,7 @@
   rigor TODO entry.
 - Completion criteria: the shared Podman rigor TODO entry lists this item (the wrapper guide's Stop sentence needs the
   container exception). No docs change now. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/podman-rigor-todo.md`.
 
 ## detached-container-client-hides-live-agent-and-tab-work.md
 
@@ -21011,7 +21011,7 @@
   rigor TODO entry.
 - Completion criteria: the shared Podman rigor TODO entry lists this item (turn off Podman's detach keys for the agent
   and tab connections). Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/podman-rigor-todo.md`.
 
 ## checkout-token-path-rereads-host-files.md
 
@@ -21026,7 +21026,7 @@
   rigor TODO entry.
 - Completion criteria: the shared Podman rigor TODO entry lists this item (refuse a token path inside the checkout and
   read the file without following links, regular files only). Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/podman-rigor-todo.md`.
 
 ## container-inherits-host-proxy-credentials.md
 
@@ -21041,7 +21041,7 @@
 - Completion criteria: the shared Podman rigor TODO entry lists this item (decide whether containers inherit host proxy
   settings; either way, make the spec's list of what the container receives and the code comment accurate). Remove the
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/podman-rigor-todo.md`.
 
 ## retained-container-startup-reaches-replacement-checkout.md
 
@@ -21055,7 +21055,7 @@
   rigor TODO entry.
 - Completion criteria: the shared Podman rigor TODO entry lists this item (decide whether the tab-path acceptance covers
   containerized tabs, and say so). Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/podman-rigor-todo.md`.
 
 ## pending-create-retry-deletes-initialized-container-files.md
 
@@ -21070,7 +21070,7 @@
   rigor TODO entry.
 - Completion criteria: the shared Podman rigor TODO entry lists this item (decide whether an existing container counts
   as launch evidence on a retried create, or accept the loss in the spec). Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/podman-rigor-todo.md`.
 
 ## checkpoint-image-inspection-restores-unowned-workload.md
 
@@ -21083,7 +21083,7 @@
   rigor TODO entry.
 - Completion criteria: the shared Podman rigor TODO entry lists this item (optionally refuse checkpoint images and a
   root supervisor). Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/podman-rigor-todo.md`.
 
 ## colliding-start-cleanup-ends-winning-terminal.md
 
@@ -21105,7 +21105,7 @@
   of diff, not counting this ledger, the queue removal or a changelog fragment, or it needs a design choice), do not fix
   it: instead add a FILTER.md entry accepting this specific case, as the decision says. Remove the feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/unlikely-races-nov4.md`.
 
 ## async-process-verification-leaves-stale-signal-authority.md
 
@@ -21122,7 +21122,7 @@
 - Completion criteria: add a FILTER.md filter for this specific case: a process number reused inside Farhelm's internal
   handoff between verifying a terminal host's identity and signalling it, during forced termination. Say it was accepted
   by the maintainer on 2026-11-04. No code or spec change. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/unlikely-races-nov4.md`.
 
 ## registry-test-basename-lookup-can-kill-foreign-host.md
 
@@ -21135,7 +21135,7 @@
 - Completion criteria: the test identifies its host by the exact socket path (or the peer process of a connection to its
   own socket) before signalling. If execution finds it is not straightforward, add a FILTER.md entry accepting this
   specific case instead. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/unlikely-races-nov4.md`.
 
 ## displaced-input-pump-can-submit-replacement-typing.md
 
@@ -21151,7 +21151,7 @@
   straightforward (over about 100 lines of diff, not counting this ledger, the queue removal or a changelog fragment, or
   it needs a design choice), add a FILTER.md entry accepting this specific case instead. Remove the feedback file and
   its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/unlikely-races-nov4.md`.
 
 ## resize-journal-exhaustion-does-not-trigger-checkpoint.md
 
@@ -21170,7 +21170,7 @@
   not due" test changes with it. If execution finds it is not straightforward (over about 100 lines of diff, not
   counting this ledger, the queue removal or a changelog fragment, or it needs a design choice), add a FILTER.md entry
   accepting this specific case instead and correct the spec sentences. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/unlikely-races-nov4.md`.
 
 ## normal-durability-restores-revoked-grants.md
 
@@ -21191,7 +21191,7 @@
   wrapping those writes in the existing helper (a redesign, a separate database, or over about 100 lines of diff not
   counting this ledger, the queue removal or a changelog fragment), block and bring it back. Remove the feedback file
   and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/durability-revocations.md`.
 
 ## power-loss-removes-valid-resume-binding.md
 
@@ -21205,7 +21205,7 @@
 - Completion criteria: SPEC.md "Durability and resume" says a conversation Farhelm learned in the last moments before an
   OS crash or power loss may be forgotten, like other recent state, so Restart may not resume it or may resume the
   previous one. No code change. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/durability-revocations.md`.
 
 ## failed-restart-restoration-loses-valid-resume.md
 
@@ -21218,7 +21218,7 @@
   filesystem, and its outcomes are accepted.
 - Completion criteria: SPEC.md "Healthy local filesystems" says a full disk is covered, including losing durable state
   such as a Resume offer when a write fails. No code change. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/durability-revocations.md`.
 
 ## rolled-back-host-number-transfers-retained-approval.md
 
@@ -21235,7 +21235,7 @@
   number), with a test that the same number under two entry IDs gives different keys. Size gate: about 100 lines of diff
   (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over it, block and bring
   it back. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/durability-revocations.md`.
 
 ## critical-mac-commits-omit-media-flush.md
 
@@ -21254,7 +21254,7 @@
   store's paragraph), says that on macOS they are durable only up to the drive's cache (no `F_FULLFSYNC`), and why: a
   borderline benefit, since most Macs running Farhelm have batteries. No code change. Remove the feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/durability-revocations.md`.
 
 ## plain-url-hover-omits-neighbor-dependencies.md
 
@@ -21271,7 +21271,7 @@
   test edits only the neighbouring row. Size gate: about 100 lines of diff (code, tests and docs, not counting this
   ledger, the queue removal or a changelog fragment); over it, block and bring it back. Remove the feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/printed-link-mismatch.md`.
 
 ## plain-url-click-can-bind-before-text-paints.md
 
@@ -21285,7 +21285,7 @@
   window before the screen updates ... may be carried out as delivered"), as read in the 2026-10-26 ruling that named
   guards hold and otherwise the target follows the click. The plain-URL sentence is not a named guard.
 - Completion criteria: no code or spec change. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/printed-link-mismatch.md`.
 
 ## stationary-hover-omits-canonical-ancestor-dependencies.md
 
@@ -21299,7 +21299,7 @@
 - Completion criteria: SPEC.md (the hyperlink mismatch warning in "Terminal experience") or SPEC_impl.md says the
   warning is judged when the hover starts and need not follow later redraws of other rows while the pointer rests; the
   destination display stays authoritative. No code change. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/printed-link-mismatch.md`.
 
 ## hidden-live-tmux-tabs-escape-delete-consent.md
 
@@ -21316,7 +21316,7 @@
   tmux tabs and no agent terminal. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger,
   the queue removal or a changelog fragment); over it, block and bring it back. Remove the feedback file and its index
   entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/delete-unreadable-terminals.md`.
 
 ## failed-tab-recovery-loses-delete-child-root.md
 
@@ -21334,7 +21334,7 @@
   live terminal. A unit test covers a failed retry followed by Delete. Size gate: about 100 lines of diff (code, tests
   and docs, not counting this ledger, the queue removal or a changelog fragment); over it, block and bring it back.
   Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/delete-unreadable-terminals.md`.
 
 ## selector-policy-drops-ordinary-formatting-input.md
 
@@ -21349,7 +21349,7 @@
 - Completion criteria: SPEC_impl.md (the emulator selector rules) and the user docs page on new terminals state that new
   terminals drop these invisible formatting characters, so copied text and history lack them. No code change. Remove the
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/terminal-text-drops.md`.
 
 ## emoji-continuation-drops-standalone-kirat-characters.md
 
@@ -21363,7 +21363,7 @@
   #2971, while a following selector still finds the emoji base; update the three tests that pin the drop, and the
   vendored patch file. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
   removal or a changelog fragment); over it, block and bring it back. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/terminal-text-drops.md`.
 
 ## gap-recovery-stale-input-modes-submit-pasted-command.md
 
@@ -21376,7 +21376,7 @@
 - Decision: on the 2026-11-04 page (Q7) the user picked "Accepted; name it".
 - Completion criteria: the gap bullet in SPEC.md "Terminal experience" adds that a multi-line paste into a shell may
   then run line by line instead of arriving as one block. No code change. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-misc-nov4.md`.
 
 ## attachment-debug-trace-emits-remote-controls.md
 
@@ -21392,7 +21392,7 @@
   matches. A unit test covers a tab name with control bytes. Size gate: about 100 lines of diff (code, tests and docs,
   not counting this ledger, the queue removal or a changelog fragment); over it, block and bring it back. Remove the
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-misc-nov4.md`.
 
 ## stored-wrapper-breaks-new-prompt-literalness.md
 
@@ -21408,4 +21408,4 @@
 - Decision: on the 2026-11-04 highest-bucket triage page (Q8) the user picked "Discard: only old templates", having said
   "I don't care about pre-change templates".
 - Completion criteria: remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-misc-nov4.md`.
