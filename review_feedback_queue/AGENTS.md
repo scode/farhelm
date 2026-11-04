@@ -136,10 +136,13 @@ agent review that feeds this queue", and tells the reviewer to read these in ful
 - `AGENTS.md`, in full, when the reviewer was not started at the checkout root (a delegate outside a checkout starts
   with nothing)
 - `review_feedback_queue/AGENTS.md`, "Priority buckets" (for the suggested bucket)
-- `review_feedback_queue/.agents/recording.md`, "What goes in a feedback file" (the template's fields) and "Before
-  recording a finding" (what counts as coverage)
-- `review_feedback_queue/FILTER.md`, when the review is an automated review of committed code
-- the coverage sources, for each candidate it reports as covered
+- `review_feedback_queue/.agents/recording.md`, "What goes in a feedback file" (the template's fields)
+- the `SPEC.md` and `SPEC_impl.md` sections that govern its assigned scope, found by searching both for the behavior
+  under review
+
+The reviewer does not read `review_feedback_queue/INDEX.md` or the queue files, `review_feedback_queue/FILTER.md`,
+`BUGS.md`, the `Planned` bucket of `TODO.md`, the plans in `plans/queue/` or `TRIAGE_OUTCOMES.md`; the commissioner
+matches findings against them when recording.
 
 Fence: the reviewer creates, modifies or deletes nothing in the checkout, returns findings in its final reply, and
 spawns no nested helper agents.
