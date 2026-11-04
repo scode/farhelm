@@ -857,6 +857,7 @@ impl Harness {
         state.downloads_dir = old_state.downloads_dir.clone();
         state.file_opener = old_state.file_opener.clone();
         state.feedback = old_state.feedback.clone();
+        state.tensorlake = old_state.tensorlake.clone();
         let state = Arc::new(state);
         let device_secret = state
             .auth
@@ -1149,6 +1150,9 @@ pub(crate) struct FleetBuilder {
     ntfy_client: Option<reqwest::Client>,
     /// How long agent requests wait for approval; `None` is production's.
     approval_wait: Option<std::time::Duration>,
+    /// The Tensorlake API behind the helm, when a test points it at a stub
+    /// server; `None` keeps every fixture helm's Tensorlake offline.
+    tensorlake_api: Option<Arc<dyn crate::tensorlake::api::TensorlakeApi>>,
 }
 
 impl FleetBuilder {
@@ -1156,6 +1160,15 @@ impl FleetBuilder {
     /// changing process configuration or allowing unrelated tests outbound access.
     pub(crate) fn ntfy_client(mut self, client: reqwest::Client) -> Self {
         self.ntfy_client = Some(client);
+        self
+    }
+    /// Put `api` behind the helm's Tensorlake service in place of the
+    /// offline default, without any process configuration.
+    pub(crate) fn tensorlake_api(
+        mut self,
+        api: Arc<dyn crate::tensorlake::api::TensorlakeApi>,
+    ) -> Self {
+        self.tensorlake_api = Some(api);
         self
     }
     /// A fresh helm.db with only its reserved local row, and a local host
@@ -1196,6 +1209,7 @@ impl FleetBuilder {
             link_opener: None,
             feedback: None,
             approval_wait: None,
+            tensorlake_api: None,
         }
     }
 
@@ -1335,7 +1349,7 @@ impl FleetBuilder {
             .await
         }
         .expect("start manager");
-        let state = Arc::new(AppState {
+        let mut state = AppState {
             // The only override any fixture makes, and it exists so the
             // feed's own bound can be exhausted through real sockets — see
             // `AppState::event_subscriber_cap`.
@@ -1362,7 +1376,11 @@ impl FleetBuilder {
                 crate::ServingMode::Standalone,
             )
             .expect("build harness app state")
-        });
+        };
+        if let Some(api) = self.tensorlake_api {
+            state.tensorlake = state.tensorlake.with_api(api);
+        }
+        let state = Arc::new(state);
         let device_secret = state
             .auth
             .mint_device()

@@ -1753,7 +1753,7 @@ async function keyboardFocusSwitch(page: Page, dialog: Locator, input: Locator) 
 async function settingsShots(page: Page, name: string, includePhone: boolean) {
   const window = [page.locator("body")];
   const settings = await openSettings(page);
-  await expect(settings.locator(".app-settings-navigation button")).toHaveCount(7);
+  await expect(settings.locator(".app-settings-navigation button")).toHaveCount(8);
   for (const part of [".host-settings-header", ".host-settings-footer", ".app-settings-close"]) {
     await insideViewport(page, settings.locator(part));
   }

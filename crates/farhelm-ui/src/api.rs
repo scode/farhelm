@@ -629,6 +629,77 @@ pub(crate) async fn test_ntfy_settings(base: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Load the helm's Tensorlake account snapshot; the saved API key never
+/// crosses this route, only whether one is saved. A read never creates the
+/// helm's Tensorlake ssh key ([`create_tensorlake_ssh_key`] does).
+pub(crate) async fn fetch_tensorlake_settings(
+    base: &str,
+) -> Result<farhelm_proto::tensorlake::Settings, String> {
+    let url = format!("{base}/api/tensorlake");
+    let response = send(client().get(&url)).await?;
+    if !response.status().is_success() {
+        return Err(refusal_text("GET", &url, response).await);
+    }
+    response
+        .json()
+        .await
+        .map_err(|_| "Could not read Tensorlake settings".to_string())
+}
+
+/// Save only the fields the calling control owns; the reply is the whole
+/// snapshot as stored. Declaring the future registers the save before the
+/// caller can spawn it, like the other explicit saves.
+pub(crate) fn save_tensorlake_settings(
+    base: &str,
+    settings: farhelm_proto::tensorlake::SaveSettings,
+) -> impl Future<Output = Result<farhelm_proto::tensorlake::Settings, String>> + use<> {
+    let url = format!("{base}/api/tensorlake");
+    let sending = send_save(client().put(&url).json(&settings));
+    async move {
+        let response = sending.await?;
+        if !response.status().is_success() {
+            return Err(refusal_text("PUT", &url, response).await);
+        }
+        response
+            .json()
+            .await
+            .map_err(|_| "Could not read saved Tensorlake settings".to_string())
+    }
+}
+
+/// Ask the helm to create Farhelm's Tensorlake ssh key (it keeps an existing
+/// one) and return the new snapshot. Reads never create the key; this is the
+/// one request that does.
+pub(crate) async fn create_tensorlake_ssh_key(
+    base: &str,
+) -> Result<farhelm_proto::tensorlake::Settings, String> {
+    let url = format!("{base}/api/tensorlake/ssh-key");
+    let response = send(client().post(&url)).await?;
+    if !response.status().is_success() {
+        return Err(refusal_text("POST", &url, response).await);
+    }
+    response
+        .json()
+        .await
+        .map_err(|_| "Could not read Tensorlake settings".to_string())
+}
+
+/// List sandboxes with the saved key, which proves the key works. Unsaved
+/// form text plays no part.
+pub(crate) async fn test_tensorlake_settings(
+    base: &str,
+) -> Result<farhelm_proto::tensorlake::TestResult, String> {
+    let url = format!("{base}/api/tensorlake/test");
+    let response = send(client().post(&url)).await?;
+    if !response.status().is_success() {
+        return Err(refusal_text("POST", &url, response).await);
+    }
+    response
+        .json()
+        .await
+        .map_err(|_| "Could not read the Tensorlake test result".to_string())
+}
+
 /// Seed an explicitly saved field with the global folder, still unexpanded.
 /// A host's effective folder is a separate concern: its CLI override may win.
 pub(crate) async fn fetch_checkout_root(base: &str) -> Result<Option<String>, String> {

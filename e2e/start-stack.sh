@@ -206,6 +206,12 @@ remote_replacement_pid="$remote_state/replacement-supervisor.pid"
 # and feed bumps. The marker is a second opt-in checked by the binary before
 # it accepts the environment variable below.
 provisioning_backend="$state/provisioning-backend"
+# The Tensorlake API fake follows the same pattern: a marked private
+# directory inside the helm's state, named by an E2E-only environment
+# variable. Specs write config.json (which key it accepts, which sandboxes
+# the account has, which calls fail) and read events.jsonl; the helm still
+# owns the stored key, the routes and the Test button's handling.
+tensorlake_fake="$state/tensorlake-fake"
 # Where this run publishes what it built, for the multi-host tests that
 # have to reach BEHIND the API — killing the "remote" supervisor to make a
 # host go unreachable, and re-registering it afterwards with the same
@@ -227,12 +233,14 @@ provisioning_backend="$state/provisioning-backend"
 # The defaults are for running this script by hand.
 stack_info="${FARHELM_E2E_STACK_INFO:-$repo/e2e/.stack-info.json}"
 auth_state="${FARHELM_E2E_AUTH_STATE:-$repo/e2e/.auth/storage-state.json}"
-mkdir -p "$work" "$remote_state" "$provisioning_backend" "$structured_bin" "$structured_home" \
-  "$(dirname "$stack_info")" || exit 1
+mkdir -p "$work" "$remote_state" "$provisioning_backend" "$tensorlake_fake" "$structured_bin" \
+  "$structured_home" "$(dirname "$stack_info")" || exit 1
 : >"$checkout_git_config" || exit 1
 printf '%s\n' 'farhelm-e2e-provisioning-v1' >"$provisioning_backend/ENABLED" || exit 1
 printf '%s\n' '{}' >"$provisioning_backend/config.json" || exit 1
 : >"$provisioning_backend/events.jsonl" || exit 1
+printf '%s\n' 'farhelm-e2e-tensorlake-v1' >"$tensorlake_fake/ENABLED" || exit 1
+: >"$tensorlake_fake/events.jsonl" || exit 1
 # One fake per structured harness a spec's composer search can select —
 # see the comment above `structured_bin`'s own assignment for why both are
 # needed rather than just the `codex` the original structured-clone tests
@@ -604,8 +612,9 @@ print(json.dumps({
     "remote_replacement_pidfile": sys.argv[10],
     "remote_supervisor_log": sys.argv[11],
     "remote_supervisor_rust_log": sys.argv[12],
+    "tensorlake_fake": sys.argv[13],
 }))
-' "$bin" "$remote_state" "$remote_sup_pid" "$state" "$provisioning_backend" "$remote_boot_id_file" "$checkout_git_config" "$structured_home" "$fixtures" "$remote_replacement_pid" "$remote_supervisor_log" "$remote_supervisor_rust_log" >"$stack_info" || exit 1
+' "$bin" "$remote_state" "$remote_sup_pid" "$state" "$provisioning_backend" "$remote_boot_id_file" "$checkout_git_config" "$structured_home" "$fixtures" "$remote_replacement_pid" "$remote_supervisor_log" "$remote_supervisor_rust_log" "$tensorlake_fake" >"$stack_info" || exit 1
 
 # Mint before the helm starts so its first protected request sees the same
 # durable token the harness CLI printed. It is captured only long enough to
@@ -616,7 +625,8 @@ token="$("$bin" helm token show --state-dir "$state")" || exit 1
 # The helm runs as a child, NOT via exec: bash does not run EXIT traps
 # across exec, so an exec'd helm would leave the supervisor and the
 # private tmux server orphaned after every run.
-FARHELM_E2E_PROVISIONING_BACKEND_DIR="$provisioning_backend" "$bin" helm run \
+FARHELM_E2E_PROVISIONING_BACKEND_DIR="$provisioning_backend" \
+  FARHELM_E2E_TENSORLAKE_DIR="$tensorlake_fake" "$bin" helm run \
   --state-dir "$state" \
   --port "$port" \
   --ui-dist "$dist" \

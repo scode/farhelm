@@ -3882,6 +3882,23 @@ a:any-link,
    dialogs; priority segments share the same draft and require explicit Save. */
 .ntfy-settings .checkout-root-label { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .ntfy-settings > .btn { justify-self: start; }
+/* Tensorlake's key field follows ntfy's explicit-save layout. Its registration
+   command and public key keep their exact text reachable at phone width:
+   they wrap anywhere rather than widen the dialog, and the Copy button stays
+   beside the command it copies. */
+.tensorlake-settings .checkout-root-label { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.tensorlake-settings > .btn { justify-self: start; }
+.tensorlake-command { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 6px; }
+.tensorlake-settings pre {
+  margin: 0;
+  font-size: 11px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 0.75rem;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
 .host-add-dialog,
 .host-uninstall-dialog {
   width: min(560px, 100%);

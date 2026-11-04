@@ -2926,9 +2926,10 @@ mod tests {
                 .unwrap();
             // Every table a later schema added goes, including schema 38's
             // `launch_templates`, schema 41's `session_notification_marks`,
-            // schema 47's `ntfy_alerts`, schema 52's `session_pins` and
-            // schema 54's `registry_namespace`. A new table that is missing
-            // here fails the DDL comparison below, not a migration.
+            // schema 47's `ntfy_alerts`, schema 52's `session_pins`, schema
+            // 54's `registry_namespace` and schema 70's `tensorlake_account`.
+            // A new table that is missing here fails the DDL comparison
+            // below, not a migration.
             // Every later preference column also goes, including nullable
             // additions: an unset value still changes the historical shape.
             // This includes the session-confirmation choice added in schema 48:
@@ -2942,6 +2943,7 @@ mod tests {
                  DROP TABLE ntfy_alerts;
                  DROP TABLE session_pins;
                  DROP TABLE registry_namespace;
+                 DROP TABLE tensorlake_account;
                  ALTER TABLE create_history_sessions DROP COLUMN github_repo;
                  ALTER TABLE session_cache ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
                  ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
