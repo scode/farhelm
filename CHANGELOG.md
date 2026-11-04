@@ -2,6 +2,39 @@
 
 Notable user-facing changes in each stable release of Farhelm. Release candidates and dev builds are not listed; their changes appear under the stable release that follows them. Entries are written for someone running Farhelm, not for someone reading its source, so internal mechanics are left out unless they change what you have to do. cargo-dist copies each release's section into its GitHub release; `releasing/AGENTS.md` describes the format and how a section is written.
 
+## v0.35.0 - 2026-11-04
+
+**DRAFT release notes - not yet finalized**
+
+### 🚀 Added
+
+- When a session launch, Restart or Replace is slow, Farhelm now shows which host it is waiting on and for how long, beside the button or, for a quick launch, at the bottom of the window. If the app stops waiting after a minute, it says that the operation may still finish. (#2970, #2974)
+- In the session launcher's search, you can now choose Guarded or YOLO before choosing an agent, as the permission buttons already allowed. If the agent you then choose replaces that choice with a riskier mode, the launcher shows its red warning with Undo. (#2989)
+- You can now drop files, images and text onto a new terminal, in a session's agent and in its terminal tabs, as with old terminals. (#2965)
+- New terminals now show the hint about holding Shift (Option on a Mac) when a program that uses the mouse keeps a drag from selecting text, as old terminals do. In both kinds of terminal, the hint now appears a few rows above where you let go, or below when there is no room above, so it stays off the text you dragged over. (#2969)
+- **Chat on Discord**, in the **Help** menu and in the feedback dialog, opens Farhelm's Discord, where you can talk with the maintainer and other users. (#2963)
+
+### 🔄 Changed
+
+- Agent marks in the session list now have distinct colors, so agents are easier to tell apart. Codex and Goose keep their grey marks because their owners' terms restrict color changes, and every mark on the selected row is white. (#2961)
+- Hovering a session in the list now shows its summary beside the list, level with that row, instead of over the sessions next to it. Very narrow windows still show it above or below the row. (#2972)
+- The session launcher now shows refusals and errors, such as "Choose a harness first", in yellow so they stand out from ordinary hints. Red still marks riskier permission changes and YOLO. (#2987)
+- New terminals hold up typing for less time while Farhelm saves their history, most of all after very colorful output, which is also less likely to leave a terminal showing "Some earlier output could not be recovered". (#2953, #2960, #2964)
+- Updating Farhelm or restarting a supervisor now takes less CPU away from the rest of the machine while it saves new terminals' history. (#2952, #2954)
+
+### 🔧 Fixes worth highlighting
+
+- A session's agent or terminal tab in a new terminal now recovers by itself after briefly losing contact with the process that runs it, instead of staying unavailable until the supervisor restarted. After repeated losses, Farhelm waits at least a minute before reconnecting. (#2950, #2956)
+- An emoji drawn wide by a variation selector, as in ❤️, now takes two columns in a new terminal, so the rest of its line is no longer one column off. (#2971)
+
+### 🩹 Misc fixes
+
+*Fixes that would normally be summed up as a single "various bug fixes" line. In the interest of transparency, the complete list is included.*
+
+- **Uninstall Farhelm** on a remote host no longer fails with "the remote probe answered without reporting its resolved binary" when Farhelm's ssh connection to that host is shared between commands, which is how Farhelm normally connects. Checking a remote host before updating it could fail the same way. (#3005)
+- Adding or updating a remote host no longer hangs if copying Farhelm to the host stalls; it now fails, leaving the host free for another attempt. (#3006)
+- In a new terminal, hovering a link that a program printed in several pieces now underlines the whole link and no longer warns falsely that "Link text does not match where it goes", also when the link wraps onto the next row. (#2949)
+
 ## v0.34.0 - 2026-11-03
 
 ### 💥 Breaking
