@@ -2141,28 +2141,29 @@ whatever the agent renders is what you see. There is no composer, no message abs
   that arrives while no supervisor reads it (a supervisor that crashed and is not started again soon; on the Mac nothing
   starts it again until the app is opened), the oldest of it is dropped, which leaves a **gap**; the program runs on
   unhindered. A gap can also happen while a supervisor runs, rarely: a single escape sequence longer than the bound, or
-  output the supervisor cannot checkpoint as fast as it arrives (a full scrollback colored cell by cell, arriving at
-  about a megabyte a second). The dropped output is everything since the latest checkpoint that no longer fits, so it
-  can include output a supervisor had already shown before it crashed. After a gap the terminal carries on from its
-  state before the lost output (after a supervisor restart, its latest checkpoint) with the output kept after it, the
-  supervisor asks the program to redraw by making its terminal one row smaller and back, and the terminal shows "Some
-  earlier output could not be recovered" above its scrollback until the supervisor next restarts. What a gap cannot
-  bring back: the lines the lost output put into the scrollback; the screen, until the program redraws it (agents and
-  other full-screen programs redraw when their terminal is resized; a shell at its prompt does not, so its screen can
-  show older contents with newer output drawn over them); any mode the lost output changed, such as the alternate
-  screen, mouse reporting, bracketed paste or application cursor keys, and the same for the other terminal settings it
-  made, such as the title, redefined colors, line-drawing characters, the scroll region and the cursor's style. A
-  program sets these again only when it chooses to, and many set their modes only when they start, so such a setting can
-  stay wrong until the program is restarted; meanwhile keys, pastes and mouse input can reach the program encoded for
-  the wrong mode. A query in the lost output that no supervisor had answered before the bytes were lost is never
-  answered (the program waits out its own timeout), and a clipboard write there is not carried out during the recovery;
-  either may already have happened, if a supervisor saw that output before it crashed. A gap never restarts a program or
-  throws away a working terminal. Separately, a checkpoint too large for the terminal host (16 MiB, far more than a full
-  scrollback of ordinary output takes) can leave out old title-stack entries, the oldest scrollback lines and, if that
-  is not enough, the screen's contents. The running terminal is not affected, but a recovery from that checkpoint
-  rebuilds the terminal without them: it shows the same notice when scrollback was left out, which then stays until the
-  program clears its scrollback or the scrollback has turned over, and asks the program to redraw when the screen was
-  left out.
+  output the supervisor cannot checkpoint as fast as it arrives, such as full scrollback colored cell by cell at high
+  sustained rates. At about 11 MiB/s on the measured hardware, encoding one such snapshot alone can fill the remaining
+  journal space; catching up and machine load can make a gap possible at lower rates. The dropped output is everything
+  since the latest checkpoint that no longer fits, so it can include output a supervisor had already shown before it
+  crashed. After a gap the terminal carries on from its state before the lost output (after a supervisor restart, its
+  latest checkpoint) with the output kept after it, the supervisor asks the program to redraw by making its terminal one
+  row smaller and back, and the terminal shows "Some earlier output could not be recovered" above its scrollback until
+  the supervisor next restarts. What a gap cannot bring back: the lines the lost output put into the scrollback; the
+  screen, until the program redraws it (agents and other full-screen programs redraw when their terminal is resized; a
+  shell at its prompt does not, so its screen can show older contents with newer output drawn over them); any mode the
+  lost output changed, such as the alternate screen, mouse reporting, bracketed paste or application cursor keys, and
+  the same for the other terminal settings it made, such as the title, redefined colors, line-drawing characters, the
+  scroll region and the cursor's style. A program sets these again only when it chooses to, and many set their modes
+  only when they start, so such a setting can stay wrong until the program is restarted; meanwhile keys, pastes and
+  mouse input can reach the program encoded for the wrong mode. A query in the lost output that no supervisor had
+  answered before the bytes were lost is never answered (the program waits out its own timeout), and a clipboard write
+  there is not carried out during the recovery; either may already have happened, if a supervisor saw that output before
+  it crashed. A gap never restarts a program or throws away a working terminal. Separately, a checkpoint too large for
+  the terminal host (16 MiB, far more than a full scrollback of ordinary output takes) can leave out old title-stack
+  entries, the oldest scrollback lines and, if that is not enough, the screen's contents. The running terminal is not
+  affected, but a recovery from that checkpoint rebuilds the terminal without them: it shows the same notice when
+  scrollback was left out, which then stays until the program clears its scrollback or the scrollback has turned over,
+  and asks the program to redraw when the screen was left out.
 - Opening a session attaches to it — and opening a CLIENT counts as opening a session. A freshly loaded client and a
   client whose open session disappears use the same choice: the first currently listed session in the helm's shared
   visit history, excluding the session just removed, else the newest-created listed session. While history is empty, the

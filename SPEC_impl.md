@@ -1955,38 +1955,44 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   finishes) and hands the snapshot to the host, which then drops the output before it; a rejected snapshot leaves the
   previous one. Nothing makes a checkpoint due by time: a quiet terminal's short tail replays in milliseconds, so it
   costs nothing. The host's `Info` does not report its cap, so a runtime assumes the default unless its creator passes
-  the policy for another. Encoding a snapshot at full scrollback takes long (in a release build about 0.3 s for typical
-  output, 1.6 to 1.9 s for 12,000 lines of 200 columns in true color, and over 10 s for a scrollback colored like an
-  image), and so does restoring one (0.25 to 0.46 s), so both run on tokio's blocking pool, never on an async worker.
-  For an encode the emulator moves out to the blocking task and back, and what status sampling reads (screen text,
-  title, modes, size, whether history was trimmed) comes from a view left in its place, without waiting; a reader of the
-  whole emulator waits for it to come back, without blocking. The runtime waits for an encode before it does anything
-  else, so input, resizes and requests wait as long. Letting input through meanwhile was decided against: the host stops
-  acting on a client's requests while more than 256 KiB of its output waits unread, so during a flood, where an encode
-  hurts, a Ctrl-C would not take effect sooner; reading the connection while the emulator is away would overflow the
-  client's bounded event queue, or need a backlog of megabytes that still runs out; and typed input's echo cannot be
-  drawn until the emulator is back. An encode task lost with the emulator (not an encoder panic, which hands it back)
-  ends the runtime, unavailable. At about 100 KiB/s of output, a full terminal in true color spends about 2% of a core
-  on checkpoints (typical output about a fifth of that). The exposure accepted: a scrollback colored like an image
-  receiving about 1 MiB/s cannot be checkpointed as fast as it fills the journal, and may gap while connected; the
-  remedy is a faster encoder. An orderly stop asks for a checkpoint within a deadline that bounds the encode and the
-  host's answer. A processed output tail below the stop policy's threshold (normally 1 MiB) is left for recovery to
-  replay without an encode, including when an automatic checkpoint shortened it after the stop queued the request.
-  Otherwise a snapshot is taken where the terminal is if it is clean there, else none, so that the host keeps its last
-  accepted snapshot and the tail after it, which a recovery replays; an encode the deadline cuts short is finished and
-  sent as an ordinary checkpoint, unless the runtime is stopped first, which cancels every encode it runs (the encoder
-  gives up between rows, keeping nothing). A host's **journal cap** is 32 MiB by default: checkpoints keep the tail
-  below a quarter of it, which leaves about four minutes of an agent's heaviest redraw traffic, and hours of a shell's,
-  for a supervisor's absence before the oldest of that output is trimmed into a **gap**. A gap never resets a healthy
-  emulator: the runtime carries on after it, marks the history trimmed for the viewer (for as long as that runtime runs:
-  a snapshot cannot carry the mark), and, once any replay is over, asks the program to redraw by resizing the terminal
-  one row smaller and back, since Linux sends no `SIGWINCH` for a resize to the size in force (checked on Linux 6.8; the
-  BSD tty code macOS uses compares the same way, read from its source, not tested). It asks the same after restoring a
-  snapshot that left out the screens or was drawn with another character width table. A redraw cannot bring back the
-  scrollback in the gap, or a mode or other terminal setting (title, palette, character set, scroll region, cursor
-  style) the lost output set until the program sets it again; nothing makes a program do that on `SIGWINCH`, and many
-  set their modes only at startup, so the setting can stay wrong until the program restarts. Unverified either way: no
-  test covers what real programs resend on a resize.
+  the policy for another. The release `encode_speed` benchmark in `crates/farhelm-terminal-emulator/tests/` measures
+  full scrollback at 200 columns, 60 screen rows and 12,000 history lines, with a 16 MiB snapshot limit. Before the
+  encoder optimization, median encode times were 0.269 s for typical output, 1.568 s for true color and 9.333 s for
+  image-like output with per-cell foreground and background colors; afterwards they are 0.126 s, 0.424 s and 2.235 s.
+  These are medians of five encodes per fixture on the same AMD EPYC Processor (with IBPB) KVM guest, with 18 reported
+  cores and 18 vCPUs. Shared-machine load varied; the final image-like range was 1.915 to 2.348 s. These wall times are
+  observations, not CPU costs or guaranteed input latencies. Encoding still takes long, and so does restoring a snapshot
+  (0.25 to 0.46 s), so both run on tokio's blocking pool, never on an async worker. For an encode the emulator moves out
+  to the blocking task and back, and what status sampling reads (screen text, title, modes, size, whether history was
+  trimmed) comes from a view left in its place, without waiting; a reader of the whole emulator waits for it to come
+  back, without blocking. The runtime waits for an encode before it does anything else, so input, resizes and requests
+  wait as long. Letting input through meanwhile was decided against: the host stops acting on a client's requests while
+  more than 256 KiB of its output waits unread, so during a flood, where an encode hurts, a Ctrl-C would not take effect
+  sooner; reading the connection while the emulator is away would overflow the client's bounded event queue, or need a
+  backlog of megabytes that still runs out; and typed input's echo cannot be drawn until the emulator is back. An encode
+  task lost with the emulator (not an encoder panic, which hands it back) ends the runtime, unavailable. At 100 KiB/s,
+  the 8 MiB checkpoint spacing of these full-scrollback fixtures fills in about 82 s; a quiet terminal spends nothing. A
+  connected terminal can still gap: with the default 32 MiB journal, the rough peak tail is
+  `8 MiB + output_rate * (encode + catch-up)`. The measured 2.235 s image-like encode alone gives about 10.235 MiB at 1
+  MiB/s, and fills the remaining 24 MiB at about 11 MiB/s. Catch-up was not measured, and catch-up time and
+  shared-machine load can make a gap possible at lower rates. The 1 MiB/s case is improved, not guaranteed gap-free. An
+  orderly stop asks for a checkpoint within a deadline that bounds the encode and the host's answer. A processed output
+  tail below the stop policy's threshold (normally 1 MiB) is left for recovery to replay without an encode, including
+  when an automatic checkpoint shortened it after the stop queued the request. Otherwise a snapshot is taken where the
+  terminal is if it is clean there, else none, so that the host keeps its last accepted snapshot and the tail after it,
+  which a recovery replays; an encode the deadline cuts short is finished and sent as an ordinary checkpoint, unless the
+  runtime is stopped first, which cancels every encode it runs (the encoder gives up between rows, keeping nothing). A
+  host's **journal cap** is 32 MiB by default: checkpoints keep the tail below a quarter of it, which leaves about four
+  minutes of an agent's heaviest redraw traffic, and hours of a shell's, for a supervisor's absence before the oldest of
+  that output is trimmed into a **gap**. A gap never resets a healthy emulator: the runtime carries on after it, marks
+  the history trimmed for the viewer (for as long as that runtime runs: a snapshot cannot carry the mark), and, once any
+  replay is over, asks the program to redraw by resizing the terminal one row smaller and back, since Linux sends no
+  `SIGWINCH` for a resize to the size in force (checked on Linux 6.8; the BSD tty code macOS uses compares the same way,
+  read from its source, not tested). It asks the same after restoring a snapshot that left out the screens or was drawn
+  with another character width table. A redraw cannot bring back the scrollback in the gap, or a mode or other terminal
+  setting (title, palette, character set, scroll region, cursor style) the lost output set until the program sets it
+  again; nothing makes a program do that on `SIGWINCH`, and many set their modes only at startup, so the setting can
+  stay wrong until the program restarts. Unverified either way: no test covers what real programs resend on a resize.
 - **The terminal switch points** (`service/terminals.rs`'s `Terminal`, one variant per kind, matched exhaustively
   wherever behavior differs) answer for a session whose agent runs in a host from its runtime, never from tmux. Status
   reads the same three classes of evidence for both kinds: a running child is live, a processed exit record is an exit
