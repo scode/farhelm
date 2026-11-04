@@ -18,8 +18,10 @@ role's reading list before your next action.
   and out of triage. It is not a feedback file and is not listed in `INDEX.md`. Its rules decide only what is worth a
   human's triage time; they are not product or coding rules, and nothing outside this directory's recording and triage
   work should apply them.
-- `TRAILING_REVIEW.md` records the last commit on `main` whose trailing review completed. It is review bookkeeping, not
-  a feedback file, and is not listed in `INDEX.md`.
+- `TRAILING_REVIEW.md` records the last commit on `main` whose trailing review completed, with the latest run's
+  completion record. It is review bookkeeping, not a feedback file, and is not listed in `INDEX.md`.
+- `TRAILING_REVIEW_HISTORY.md` keeps earlier trailing reviews' completion records. It is on no reading list, is not a
+  feedback file, and is not listed in `INDEX.md`.
 - `.agents/` holds the procedures the reading lists name. It is not feedback and is not listed in `INDEX.md`.
 
 ## Lifecycle

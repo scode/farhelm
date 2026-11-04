@@ -65,10 +65,15 @@ triage, fixes, or execution of triage outcomes.
    review to be complete. An incomplete persistent review, unread scope, or an unresolved recording step or independent
    drop check leaves the checkpoint unchanged; retain findings already produced and report the gap. Do not advance to
    commits that landed after the pinned tip, and do not overwrite a checkpoint another run has advanced without
-   reconciling its coverage and queue changes.
-5. Use `jjstack` to put the checkpoint update and any queue updates in one review-result commit and draft PR, including
-   when there are no retained findings. The checkpoint on `main` advances when that PR is merged; preparing the result
-   alone does not advance it there. Merging is a separate manual step for the maintainer. Do not merge automatically.
+   reconciling its coverage and queue changes. Besides its heading and preamble, `TRAILING_REVIEW.md` holds only the
+   `Last reviewed commit:` line, whose format step 1 relies on, and the latest run's completion record. Before writing
+   this run's record there, move the record already there to the top of
+   `review_feedback_queue/TRAILING_REVIEW_HISTORY.md`, below its NOTE. The history file is not read during a review.
+   When rebasing over another run's review result, reconcile the history file so that each record appears in it once.
+5. Use `jjstack` to put the checkpoint update, the move into the history file and any queue updates in one review-result
+   commit and draft PR, including when there are no retained findings. The checkpoint on `main` advances when that PR is
+   merged; preparing the result alone does not advance it there. Merging is a separate manual step for the maintainer.
+   Do not merge automatically.
 
 Report the exact range reviewed, any coverage gaps, the findings recorded or extended, and whether the checkpoint update
 is pending in a draft PR or has reached `main`. Include the compact completion record required by `persistent-review`,
