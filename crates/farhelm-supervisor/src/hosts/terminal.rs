@@ -214,11 +214,17 @@
 //!   [`HostStatus::checkpoint`] is the latest the host
 //!   is known to hold.
 //!
-//!   Encoding takes long at full scrollback (in a release build, about
-//!   0.3 s for typical output, 1.6 to 1.9 s for 12,000 lines of 200
-//!   columns in true color, a 12.6 MB blob, and over 10 s for a scrollback
-//!   colored like an image), so it never runs on an async worker, and
-//!   neither does a restore (0.25 to 0.46 s). For an encode the runtime
+//!   The release `encode_speed` benchmark in the terminal-emulator crate
+//!   measures 200 columns, 60 screen rows and 12,000 history lines at a
+//!   16 MiB limit. Before the encoder optimization, median times were
+//!   0.269 s for typical output, 1.568 s for true color and 9.333 s for
+//!   image-like per-cell foreground/background colors; afterwards they are
+//!   0.126 s, 0.424 s and 2.235 s. Each is the median of five encodes on
+//!   the same AMD EPYC Processor (with IBPB) KVM guest, with 18 reported
+//!   cores and 18 vCPUs. Shared load varied; the final image-like range was
+//!   1.915 to 2.348 s. These are wall times, not CPU costs or guaranteed
+//!   input latencies. Encoding still takes long, so it never runs on an
+//!   async worker, and neither does a restore (0.25 to 0.46 s). The runtime
 //!   moves the emulator out of its slot into a task on tokio's blocking
 //!   pool, leaving a view of what the views read (screen text, title,
 //!   modes, size, whether history was trimmed); the task hands the emulator
@@ -247,12 +253,14 @@
 //!   failed outside the encoder) took the emulator with it, and the runtime
 //!   ends, unavailable ([`Unavailability::EmulatorLost`]).
 //!
-//!   At about 100 KiB/s of output, a full terminal in true color spends
-//!   about 2% of a core on checkpoints (typical output about a fifth of
-//!   that); a quiet terminal spends nothing. A scrollback colored like an
-//!   image receiving about 1 MiB/s cannot be checkpointed as fast as it
-//!   fills the host's journal, and may gap while connected; the remedy is
-//!   a faster encoder, not more checkpoints.
+//!   At 100 KiB/s, these full-scrollback fixtures fill their 8 MiB output
+//!   spacing in about 82 s; a quiet terminal spends nothing. A connected
+//!   terminal can still gap: with the default 32 MiB journal, the rough
+//!   peak tail is `8 MiB + output_rate * (encode + catch-up)`. The measured
+//!   2.235 s image-like encode alone gives about 10.235 MiB at 1 MiB/s,
+//!   and fills the remaining 24 MiB at about 11 MiB/s. Catch-up was not
+//!   measured; catch-up time and shared load can make a gap possible below
+//!   that rate. The 1 MiB/s case is improved, not guaranteed gap-free.
 //! - **Gaps.** A gap (output the host trimmed before this runtime read it)
 //!   never resets the emulator: a healthy screen is worth more than the
 //!   bytes it missed. The runtime carries on after it, marks the history

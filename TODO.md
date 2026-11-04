@@ -49,37 +49,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   other checks still run). Migrating it means reading the grid's model for the burst (as the browser suite's terminal
   helpers do), typing through the grid's input messages, and finding the grid's own background color and focus target.
 
-- **Typing into a grid terminal pauses while its checkpoint is encoded, longer than it needs to.** The supervisor
-  checkpoints a terminal in a terminal host (encodes its emulator as a snapshot and hands it to the host) after enough
-  output and at every orderly stop, and a Restart seeds the new host with the same encoder. While a checkpoint encodes,
-  the terminal's runtime does nothing else, so keystrokes, resizes and requests wait: at full scrollback about 0.3 s for
-  typical output, 1.6 to 1.9 s in true color, and over 10 s for a scrollback colored cell by cell like an image
-  (SPEC_impl.md, "Recovery and checkpoints", release build). Such an image-like scrollback receiving about 1 MiB/s
-  cannot be checkpointed as fast as it fills the host's journal, so it may gap while connected ("Some earlier output
-  could not be recovered"); SPEC_impl.md names a faster encoder as the remedy, and the stop's checkpoints (the entry
-  about the burst of checkpoints at an orderly stop) get cheaper with it. Part of the cost is the size-limit logic in
-  `crates/farhelm-terminal-emulator/src/snapshot/mod.rs` (`Emulator::snapshot_until`, `fit_titles`, `fit_history`). So
-  that the supervisor never holds a stream larger than the 16 MiB limit, it first paints the whole state in
-  `Mode::Measure` (counting bytes and dropping them, `snapshot/v1/paint.rs`) and then paints it again in `Mode::Keep`
-  with buffers reserved to the measured size, so every checkpoint that fits paints the terminal twice. One that does not
-  fit and has no title stack is measured in full by step 1 (`fit_titles`) and again, identically, by step 2's first
-  measurement (`fit_history` at the same `min_skip`, with all of zero titles left out), then measured once more after
-  dropping the oldest lines, and then kept: a scratch benchmark during the terminal-host work (200x60, 12,000 lines of
-  history, single runs on a loaded machine, about 30% noise) painted about 188 MiB to produce a 16 MiB blob, where an
-  unlimited encode of the same 78.7 MiB state took 9.7 s. A measurement also runs to the end after it has passed
-  `max_bytes`, and the painter allocates on every pen change (`pen_changes` and `pen_reset` build a `Vec<String>`,
-  joined through `format!`). Candidates, to be profiled first: reuse step 1's measurement in step 2 when the two would
-  be identical; keep what is painted while measuring as long as it stays under the limit, so that a snapshot that fits
-  is painted once; stop measuring past the limit where nothing needs the total (the excess decides how many titles or
-  lines to drop, so check what the ladder still reads); and drop the per-pen-change allocations. Constraints: the
-  encoder keeps writing exactly the bytes it writes now (SPEC_impl.md, "Terminal snapshots": a shipped format never
-  changes, checked byte for byte by `crates/farhelm-terminal-emulator/tests/snapshot_golden.rs` against
-  `tests/fixtures/snapshots/v1/`); the supervisor never holds a stream past the limit, nor a `Vec` that grew by doubling
-  past it (`Mode::Keep`'s docs); the encoder still looks at its `Cancel` between rows, which is what keeps an orderly
-  stop bounded; and the size ladder's guarantees in the module docs ("Size") hold. The repository has no encoder
-  benchmark; add one with the change so the speed-up is measured rather than assumed. Plan:
-  `plans/queue/faster-snapshot-encoder.md`.
-
 - **Overhaul the grid stream's encoding and the grid client's history storage.** Grid terminals (terminals in a terminal
   host) get their screen and history from the supervisor as JSON messages, and the page keeps every history line
   decoded, as one JavaScript object per run of styled text plus a style object per distinct color pair. Measured in
