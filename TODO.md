@@ -34,11 +34,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Dropping files onto grid terminals.** xterm.js terminals accept dropped files and images through the attachment
   handling that pasting uses; grid terminals (terminals in a terminal host) refuse a drop with a message saying to copy
   and paste instead. Left out of the terminal-host work by decision. Turning it on is mostly passing `acceptDrops: true`
-  where the grid terminal installs the paste interception, plus tests on both browser engines.
+  where the grid terminal installs the paste interception, plus tests on both browser engines. Plan:
+  `plans/queue/grid-drop-and-drag-notice.md`.
 
 - **The drag-copy notice in grid terminals.** In xterm.js terminals, a plain drag over a program that uses the mouse
   copies nothing and shows a notice saying how to select instead (Shift-drag, or Option-drag on a Mac). Grid terminals
-  do not show it yet; left out of the terminal-host work by decision.
+  do not show it yet; left out of the terminal-host work by decision. Plan: `plans/queue/grid-drop-and-drag-notice.md`.
 
 - **The desktop smoke's appearance leg on grid terminals.** The optional appearance leg of the Linux desktop smoke
   (`DESKTOP_SMOKE_APPEARANCE=1 scripts/desktop-smoke.sh`) checks each light/dark case's terminal too: its background
@@ -158,27 +159,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   after the gather. No test measures the burst; to see it, stop a supervisor holding many full terminals (12,000 lines
   of true-color history each) and watch CPU and the "left a terminal host its previous snapshot at exit" log lines.
   Plan: `plans/queue/stop-checkpoint-burst.md`.
-
-- **Without a tmux binary, listing sessions fails even when every session runs in a terminal host.** tmux is still a
-  hard requirement (the supervisor checks its tmux against `TMUX_FLOOR` in `crates/farhelm-supervisor/src/tmux.rs`), so
-  this matters once tmux becomes optional for hosts whose sessions all run in terminal hosts; until then it shows only
-  if the tmux binary disappears under a running supervisor. `TmuxDriver::pane_states` (`pane_states_checked` in
-  `crates/farhelm-supervisor/src/tmux.rs`) reads tmux saying there is no server or no panes as an empty answer
-  (`is_definitively_empty`), so a host whose private tmux server is not running lists fine, but a failure that carries
-  no tmux stderr, such as a missing binary failing to spawn, is always an error. The session listing
-  (`crates/farhelm-supervisor/src/service/listing.rs`, `needs_tmux`) asks tmux whenever any listed session has an agent
-  terminal of either kind, because a session moved into a terminal host can still have tmux tabs (windows of the tmux
-  session its row names, `tmux_tab_home` in `crates/farhelm-supervisor/src/service/terminals.rs`) and a client takes a
-  successful reply's tab list as the truth; so one failed query fails the whole listing. The same goes for a single
-  session's tabs (`Supervisor::session_tabs`, `session_tabs_including_dead` and the tab count in
-  `still_alive_for_delete`, all in `crates/farhelm-supervisor/src/service/core.rs`) and for the startup reload, which
-  calls `pane_states` with `?` (`reload_sessions_with_hosts`, same file). A missing binary does not prove there are no
-  tmux tabs (a server started before the binary was removed keeps running), so the fix is one of the two options the
-  review that found this named: do not ask tmux when the install provably has none, or add a "tabs unknown" answer to
-  the protocol that clients do not take as an empty tab strip. Either way, keep the rule that "we could not ask" is
-  never "there are none" (the comments in `listing.rs` and the `session_tabs` docs). Reproduce in a supervisor test by
-  building the tmux driver with `TmuxDriver::new_with_program` pointed at a path with no binary, creating only
-  terminal-host sessions, and listing.
 
 - **Assess the grid terminal's history memory.** Grid terminals (terminals in a terminal host) keep their scrollback in
   the page as one JavaScript object per run of styled text, plus a style object per distinct color pair, where xterm.js
@@ -445,7 +425,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **An in-app signal for serious breaking changes.** Release notes alone are easy to miss. Give Farhelm a way to tell
   users inside the app about a serious breaking change in a release they just updated to, rather than relying on the
   release notes. Commands and wrappers starting to run through bash with full shell meaning
-  (`plans/queue/command-shell-meaning.md`) is the kind of change that would have used it.
+  (`plans/queue/command-shell-meaning.md`) is the kind of change that would have used it. Plan:
+  `plans/queue/in-app-announcements.md`.
 
 - **Replace harness icons with colored versions.** Replace the harness icons with colored versions so they are more
   easily identified. Plan: `plans/queue/colored-harness-marks.md`.
@@ -458,7 +439,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Better feedback when launching sessions.** When a remote host is slow, a launch can feel hung: it is not clear
   whether the session is succeeding, failing, still in flight, or stuck. Make the launch's state and progress visible so
-  a slow host reads as in flight rather than dead.
+  a slow host reads as in flight rather than dead. Plan: `plans/queue/launch-progress.md`.
 - **Don't let git auto-gc run while a session is spawning.** On 2026-11-02, git auto-triggered gc on the farhelm repo
   itself when spawning a session — the user was actively waiting, which is exactly when auto-triggering is supposed to
   be deferred. Investigate what ran gc during the spawn (likely a jj/git operation in the colocated checkout) and move
