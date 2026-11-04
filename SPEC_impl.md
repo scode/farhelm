@@ -5976,6 +5976,54 @@ exits the process with status 1 and closes the socket even while the gateway ret
 disables the watchdog, half-closes the socket and drains pending replies. Process tests pass a short budget directly to
 their child, without changing the test process's environment.
 
+## Tensorlake recipe tunnels and unowned sandboxes
+
+The connection actor acquires a `TunnelLease` from its Tensorlake status source around its connected phase. Leaving that
+phase, entering a hold, removing the row or aborting the actor drops the lease, which marks its runtime stopped, kills
+the isolated SSH process group synchronously, and aborts the retry task. Spawning and stopping share one mutex, so a
+retry cannot install a child after teardown. The actor also races lease acquisition against its nudge, so a hold cancels
+a recipe read still waiting on storage instead of allowing it to start forwards after masters have been closed. Tokio's
+kill-on-drop child handling reaps the direct process. Tunnel health is read through the Tensorlake host view and
+invalidates the fleet feed independently of supervisor health.
+
+Standalone SIGINT/SIGTERM enter the same serving teardown as an embedded owner's shutdown receiver. Teardown withdraws
+clients, cancels connection actors and joins their supervisors, which await the actors, before returning; connection
+leases therefore drop while the runtime still exists. Sessions continue on their supervisors. Linux additionally arms
+`PR_SET_PDEATHSIG=SIGKILL` in the tunnel child's `pre_exec`, with a parent-PID check for death before the signal is
+armed. Linux ties that signal to the spawning thread: each tunnel attempt forks from a dedicated thread held alive by
+the monitor until the attempt ends, rather than from a Tokio worker that can retire. Spawning still shares the lease's
+stop mutex and the child remains in its own process group. macOS has no parent-death signal; the embedded desktop helm
+relies on its orderly shutdown receiver and actor drain. An uncatchable kill of the desktop process can still leave its
+tunnel SSH alive until that SSH connection ends. No watcher process is added for that case.
+
+Each lease snapshots the recipe's tunnels once. One `ssh -N -R 127.0.0.1:<sandbox port>:<host>:<port>` connection
+carries all mappings, with Farhelm's shared Tensorlake key/known-hosts/keepalive option set, `ControlMaster=no`,
+`ControlPath=none` and `ExitOnForwardFailure=yes`. It has no remote command or session channel; the measured gateway
+keeps an exec session that carried forwarded traffic alive, and a channel-less connection does not prevent idle
+suspension. Unlike supervisor/provisioning connections, this dedicated connection uses `-F /dev/null`: inherited forward
+directives would grant listeners outside the recipe, and `ClearAllForwardings` would also clear the recipe's own
+forwards. It therefore needs direct gateway reachability rather than a user's SSH proxy configuration. Readiness is
+OpenSSH's all-forwards-confirmed diagnostic (both its older `forwarding_success` summary and newer wording), not process
+survival or authentication; stderr is drained with an 8 KiB tail, presentation text is sanitized and debug chatter
+omitted. A missing confirmation times out after 30 seconds. Failed connections retry after 1, 2, 4 seconds, capped at
+30, until the lease ends.
+
+Protected `/api/tensorlake/orphans` lists reserved-name sandboxes not named by a host row or a deterministic builder
+name of any saved recipe. `/api/tensorlake/orphans/{id}` DELETE rechecks both the prefix and local ownership, terminates
+the sandbox, waits for termination, and deletes snapshots by source sandbox ID using the existing bounded removal calls.
+The delete runs on a helm-owned task so closing Settings cannot cancel cleanup. The service retains in-flight and failed
+explicit cleanup operations in memory, including canonical sandbox ID, display facts and the failure reason; the list
+overlays those operations on vendor discovery because terminated sandboxes disappear from that discovery. Settings shows
+running cleanup and offers Retry cleanup after failure, including after closing/reopening Settings or losing the
+vendor's terminated sandbox record. A retry still rechecks local ownership. Only a successful snapshot sweep removes the
+operation; nothing retries automatically. A helm restart loses this in-memory operation state. No persistent ownership
+ledger or automatic reconciliation is added. Settings re-reads on invalidations and offers Refresh for changes outside
+this helm. A failed discovery pauses automatic reads until Refresh, a key save/clear in this dialog, a successful Test
+of the saved key, or remounting Settings; unrelated fleet changes must not keep resending a rejected key. Key
+replacement in this dialog triggers discovery even when a key was already saved. A successful Test resumes failed
+discovery with one reload. Another tab's key save is not observed automatically: this tab needs Refresh, Test or
+reopening Settings.
+
 ## Feedback forwarding
 
 SPEC.md's Feedback section is implemented as one protected UI route on the helm, `POST /api/feedback`, behind the same

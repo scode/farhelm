@@ -361,6 +361,14 @@ changes, whether by its own Back or Cancel or by closing Settings with Escape or
 discard or keep editing, and saving or discarding then completes the close. Delete asks for confirmation. A list refresh
 that fails keeps the rows shown, says they may be out of date, and offers **Retry loading**.
 
+Settings also lists **Sandboxes not on this helm**: sandbox names beginning with `farhelm-host-` or `farhelm-build-`
+that no host or recipe build on this helm owns. Each shows its creation time when available, its state, and **from
+another helm** when its name carries another helm's tag. **Delete** asks plainly before terminating it and deleting its
+snapshots. Unfinished cleanup remains in the list with its error and **Retry cleanup**, even after closing and reopening
+Settings; running cleanup shows **Cleaning up…**. This operation state lasts until cleanup succeeds or the helm
+restarts. The list is hidden when empty; Farhelm never cleans it automatically. The browser-test namespace
+`farhelm-sbx-` and sandboxes without Farhelm's reserved prefixes never appear.
+
 A package recipe's hosts start from a snapshot Farhelm builds; the UI calls it a snapshot, never a template, which means
 launch templates. Saving a recipe never builds one, because a build bills: the list offers **Build snapshot** while a
 recipe has none, **Rebuild snapshot** once it has one, and **Retry** after a build failed or was cut short by the helm
@@ -3688,6 +3696,13 @@ Further requirements:
   Farhelm's protocol, from the Mac to the session host's loopback only. Accepted: right after an upgrade, a helm started
   within a minute of the previous version stopping (the desktop app reopened, or a helm run by hand) can attach to a
   shared ssh connection the previous version left open, and port forwards that connection set up last until it closes.
+
+  Tensorlake recipe tunnels are an explicit exception for local ports: while a Tensorlake host is connected, a separate
+  SSH connection forwards only the configured sandbox loopback ports to the configured host and port as reached from the
+  helm's machine. Anything in the sandbox, agents included, can use them. They stop when the host disconnects, is
+  suspended or is removed, and retry with backoff while it stays connected. The host details show their status and each
+  mapping; a failure makes the host's dot amber and shows the reason. Recipe edits take effect on the next connection. A
+  tunnel alone does not prevent Tensorlake's idle suspension.
 - Agent credentials (e.g. Claude subscription auth) live on the host running the agent, in the agent's own standard
   configuration. The system must not extract, proxy, or repurpose agent OAuth credentials. Claude Code authenticates
   directly with a consumer subscription, unmodified.

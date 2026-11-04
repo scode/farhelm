@@ -372,6 +372,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **TensorLake add-host sandbox dialog lacks structure.** The dialog for adding a TensorLake sandbox host is just a
   block of text with no visual structure. Fix TBD.
 
+- **Tunnels outliving a killed desktop helm on macOS.** Each recipe tunnel is an `ssh -N -R` child of the helm. An
+  orderly quit stops them, and on Linux the kernel kills them when the helm dies (`PR_SET_PDEATHSIG`), but macOS has no
+  parent-death signal: after a force quit, SIGKILL or crash of the desktop app, the tunnel ssh keeps running until its
+  connection ends on its own, leaving the recipe's listeners open on the sandbox and possibly keeping the sandbox from
+  idle-suspending. Make the tunnels die with the helm on macOS too, for example with a small watcher that notices the
+  helm's exit (kqueue `NOTE_EXIT`) and ends them.
+
 ### Trivial
 
 - **Host click in the navigation rail gives no feedback.** Clicking a host in the navigation rail shows no sign of what

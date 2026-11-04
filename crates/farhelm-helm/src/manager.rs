@@ -1540,8 +1540,8 @@ impl ConnectionManager {
     /// is doing, and wait until it has parked, so no dial of it is still
     /// running when this returns. Returns whether the host had an actor.
     ///
-    /// For work that must not race the host's own connection: deleting a
-    /// Tensorlake host's sandbox now, suspending one later. Closing a
+    /// For work that must not race the host's own connection: deleting or
+    /// suspending a Tensorlake host's sandbox. Closing a
     /// sandbox's shared ssh connections only sticks once their owner cannot
     /// open new ones, which is why callers hold first and release the
     /// masters second. Publishing in the actor-map lock keeps snapshots
@@ -3006,9 +3006,9 @@ impl ConnectionManager {
 
     /// Stop every actor and drop every connection, permanently.
     ///
-    /// There is no drain and no graceful phase, deliberately: SPEC.md's
-    /// durability promise is that killing the helm does nothing to any
-    /// session, so there is nothing an orderly shutdown would protect.
+    /// This synchronous fallback requests cancellation; serving shutdown
+    /// uses [`Self::shutdown_and_wait`] to finish actor-owned resource
+    /// teardown before returning. Sessions themselves remain on their hosts.
     /// Published clients are withdrawn and retired too, so retained clones
     /// cannot keep their transports alive after actor cancellation.
     /// During panic unwinding, withdrawal and cancellation still happen,
@@ -3031,17 +3031,36 @@ impl ConnectionManager {
     /// The recovered guard is safe to use for what this does: the map's
     /// entries are handles, not a half-updated invariant.
     pub fn shutdown(&self) {
+        for task in self.withdraw_actors() {
+            task.abort();
+        }
+    }
+
+    /// Cancel and join every connection actor before releasing the helm's
+    /// serving lifetime. The supervisors await the actor tasks, so joining
+    /// them also proves connection-local leases have run their destructors.
+    pub(crate) async fn shutdown_and_wait(&self) {
+        for task in self.withdraw_actors() {
+            let _ = task.await;
+        }
+    }
+
+    /// Withdraw routing and cancel actors under the terminal registry gate.
+    /// Keep supervision alive for callers that need to await actor teardown.
+    fn withdraw_actors(&self) -> Vec<tokio::task::JoinHandle<()>> {
         let mut map = match self.actors.lock() {
             Ok(map) => map,
             Err(poisoned) => poisoned.into_inner(),
         };
         map.shut_down = true;
         let mut withdrawn = Vec::new();
+        let mut tasks = Vec::new();
         for (_, handle) in map.actors.drain() {
             handle
                 .status
                 .send_modify(|status| withdrawn.extend(status.client.take()));
-            handle.task.abort();
+            handle._abort_actor.0.abort();
+            tasks.push(handle.task);
         }
         drop(map);
         // Retirement may lock a poisoned client task list. Drop during an
@@ -3051,6 +3070,7 @@ impl ConnectionManager {
                 retire_withdrawn(Some(client));
             }
         }
+        tasks
     }
 }
 
@@ -3287,9 +3307,21 @@ pub(crate) enum SandboxCheck {
 /// attempt on a Tensorlake host and never while the host is connected, so a
 /// connected host costs no API traffic and a suspended one costs one call
 /// per re-probe.
+/// The same service acquires recipe forwards on entry to the connected
+/// phase; their lease drops before a hold can acknowledge parking.
 #[async_trait::async_trait]
 pub(crate) trait SandboxStatusSource: Send + Sync {
     async fn check(&self, sandbox: &str) -> SandboxCheck;
+
+    /// Acquire resources that must end with this connected phase. Scripted
+    /// status sources need none; production starts recipe forwards here.
+    async fn connected(
+        &self,
+        _row: &HostRow,
+        _events: Arc<FleetEvents>,
+    ) -> Option<crate::tensorlake::tunnels::TunnelLease> {
+        None
+    }
 }
 
 /// The status source of a manager started without one ([`ConnectionManager::start`]):
@@ -3665,6 +3697,18 @@ impl HostActor {
                     identity,
                     build_version,
                 } => {
+                    // Drop the forwards before acknowledging a suspend or
+                    // removal hold, including cancellation of this task.
+                    // Recipe loading can wait on storage. A hold must cancel
+                    // that acquisition too, or a late read could start SSH
+                    // after Suspend has already closed the shared masters.
+                    let _tunnels = tokio::select! {
+                        request = next_nudge(&mut nudge) => {
+                            active |= request.fresh_window;
+                            continue;
+                        }
+                        tunnels = self.sandboxes.connected(&row, Arc::clone(&self.events)) => tunnels,
+                    };
                     self.serve(
                         client,
                         identity,
@@ -11463,10 +11507,14 @@ mod tests {
         let status = fixture.manager.actors.lock().unwrap().actors[&host]
             .status
             .subscribe();
-        fixture.manager.shutdown();
+        fixture.manager.shutdown_and_wait().await;
         assert!(
             status.borrow().client.is_none(),
             "shutdown must withdraw publication"
+        );
+        assert!(
+            status.has_changed().is_err(),
+            "drain must release the actor and supervisor's status senders before returning"
         );
         let closed = tokio::time::timeout(
             Duration::from_secs(10),

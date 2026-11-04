@@ -838,6 +838,10 @@ pub struct TensorlakeHost {
     pub sandbox: peer::PeerText,
     pub recipe: peer::PeerText,
     pub size: Option<farhelm_proto::tensorlake::recipes::RecipeSize>,
+    /// Forwarding health is separate from the supervisor's availability;
+    /// older helms and hosts with no active recipe forwards omit it.
+    #[serde(default)]
+    pub tunnels: Option<farhelm_proto::tensorlake::TunnelView>,
 }
 
 impl Host {

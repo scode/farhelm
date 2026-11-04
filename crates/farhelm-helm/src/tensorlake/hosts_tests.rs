@@ -1,4 +1,4 @@
-//! Removal and the status check against a scripted Tensorlake.
+//! Removal, Suspend/Resume and the status check against a scripted Tensorlake.
 //!
 //! [`FakeApi`] keeps sandboxes and snapshots in memory and records every
 //! call, so a test can say both what Tensorlake ended up holding and in what
@@ -40,6 +40,13 @@ struct FakeState {
     terminate_gate: Option<Arc<Gate>>,
     /// Hold Suspend at its API boundary to inspect routing and admission.
     suspend_gate: Option<Arc<Gate>>,
+    /// A separate marked fake owns only tunnel execution; FakeApi still
+    /// supplies the lifecycle status. It holds no FakeApi, so
+    /// keeping this service here cannot form an ownership cycle.
+    tunnels: Option<super::super::Tensorlake>,
+    /// Park resource acquisition before it owns a lease, to prove a hold
+    /// cancels a late recipe read rather than starting forwards afterwards.
+    connected_gate: Option<Arc<Gate>>,
 }
 
 /// A pause point inside a fake call: the call notifies `entered`, then waits
@@ -50,8 +57,8 @@ struct Gate {
     release: tokio::sync::Notify,
 }
 
-/// An in-memory Tensorlake with just the calls removal and the status check
-/// make. Sandboxes are found by id or name, as the real API finds them.
+/// An in-memory Tensorlake for removal, lifecycle and status checks.
+/// Sandboxes are found by id or name, as the real API finds them.
 #[derive(Clone, Default)]
 struct FakeApi(Arc<Mutex<FakeState>>);
 
@@ -60,6 +67,23 @@ struct FakeApi(Arc<Mutex<FakeState>>);
 /// after a successful Suspend and hide the persistent-state contract.
 #[async_trait::async_trait]
 impl SandboxStatusSource for FakeApi {
+    async fn connected(
+        &self,
+        row: &HostRow,
+        events: Arc<crate::feed::FleetEvents>,
+    ) -> Option<super::super::tunnels::TunnelLease> {
+        let (service, gate) = {
+            let state = self.0.lock().unwrap();
+            (state.tunnels.clone(), state.connected_gate.clone())
+        };
+        let service = service?;
+        if let Some(gate) = gate {
+            gate.entered.notify_one();
+            gate.release.notified().await;
+        }
+        service.start_tunnels(row, events).await
+    }
+
     async fn check(&self, sandbox: &str) -> SandboxCheck {
         match self.get_sandbox(&ApiKey::new(KEY.into()), sandbox).await {
             Ok(info) => SandboxCheck::Status {
@@ -1501,6 +1525,182 @@ async fn lifecycle_suspend_holds_routing_and_excludes_removal() {
     gate.release.notify_one();
     let (status, body) = suspended.await.unwrap();
     assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+}
+
+/// Suspend and Delete must drop actual actor-owned tunnel leases before
+/// reaching their vendor calls. Resume acquires a new lease from the edited
+/// recipe. A stalled acquisition must be cancelled by a hold too: otherwise
+/// it can start forwards after the lifecycle operation has closed masters.
+/// The marked fake replaces SSH execution only; REST admission, manager
+/// parking, lease ownership and recipe loading are production paths.
+#[farhelm_testtrace::test]
+async fn lifecycle_holds_end_tunnels_and_resume_reads_the_recipe_again() {
+    use crate::tensorlake::e2e::E2eTensorlake;
+    use farhelm_proto::tensorlake::{
+        TunnelState,
+        recipes::{RecipeSave, RecipeSize, RecipeSource, Tunnel},
+    };
+    let api = FakeApi::default().with_sandbox(
+        "sbx-1",
+        "farhelm-host-k7q2-gpu-dev-m3x9",
+        SandboxStatus::Running,
+    );
+    let (harness, host) = sandbox_helm(&api, true).await;
+    harness.await_state(host, HostState::is_connected).await;
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("fake");
+    std::fs::create_dir(&root).unwrap();
+    std::fs::write(root.join("ENABLED"), "farhelm-e2e-tensorlake-v1\n").unwrap();
+    let fake = Arc::new(E2eTensorlake::new(root, dir.path()).unwrap());
+    let service = super::super::Tensorlake(Arc::new(super::super::Inner::new(
+        harness.store.clone(),
+        fake.clone(),
+        fake.clone(),
+        None,
+        Some(fake),
+    )));
+    let mut recipe = RecipeSave {
+        size: RecipeSize {
+            cpus: 2,
+            memory_gb: 4,
+            disk_gb: 20,
+        },
+        source: RecipeSource::Image {
+            image: "tensorlake/ubuntu-systemd".into(),
+        },
+        claude: None,
+        codex: None,
+        tunnels: vec![Tunnel {
+            sandbox_port: 8080,
+            host: "127.0.0.1".into(),
+            port: 8080,
+        }],
+    };
+    harness
+        .store
+        .create_tensorlake_recipe("gpu-dev".into(), recipe.clone())
+        .await
+        .unwrap()
+        .unwrap();
+    api.0.lock().unwrap().tunnels = Some(service.clone());
+    let before = harness.state.manager.status(host).unwrap().incarnation;
+    harness.state.manager.retry_now(host).await.unwrap();
+    harness.await_refreshed_after(host, before).await;
+    // Connected publication follows lease acquisition, so a receiver exists
+    // here. Up establishes the executing fake's readiness before teardown.
+    let mut first = service.0.tunnels.subscribe(host).unwrap();
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        first.wait_for(|view| view.state == TunnelState::Up),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let suspend_gate = Arc::new(Gate::default());
+    api.0.lock().unwrap().suspend_gate = Some(suspend_gate.clone());
+    let harness = Arc::new(harness);
+    let suspended = tokio::spawn({
+        let harness = harness.clone();
+        async move { lifecycle_host(&harness, host, "suspend").await }
+    });
+    tokio::time::timeout(Duration::from_secs(10), suspend_gate.entered.notified())
+        .await
+        .unwrap();
+    assert_eq!(
+        api.0.lock().unwrap().sandboxes[0].2,
+        SandboxStatus::Running,
+        "premise: Suspend has not mutated the vendor yet"
+    );
+    assert!(
+        service.tunnel_view(host).is_none(),
+        "lease must drop before Suspend reaches the API"
+    );
+    tokio::time::timeout(Duration::from_secs(10), first.changed())
+        .await
+        .unwrap()
+        .expect_err("the old tunnel worker must end");
+    recipe.tunnels[0].port = 9090;
+    harness
+        .store
+        .update_tensorlake_recipe("gpu-dev".into(), recipe)
+        .await
+        .unwrap()
+        .unwrap();
+    suspend_gate.release.notify_one();
+    let (status, body) = suspended.await.unwrap();
+    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+    assert!(service.tunnel_view(host).is_none());
+    let (status, body) = lifecycle_host(&harness, host, "resume").await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+    harness.await_state(host, HostState::is_connected).await;
+    let mut resumed = service.0.tunnels.subscribe(host).unwrap();
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        resumed.wait_for(|view| view.state == TunnelState::Up),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        resumed.borrow().tunnels[0].port,
+        9090,
+        "Resume reads the current recipe"
+    );
+
+    // Hold while the next connected phase is still waiting for its recipe.
+    // Releasing this gate afterwards must not resurrect the cancelled work.
+    let connected_gate = Arc::new(Gate::default());
+    api.0.lock().unwrap().connected_gate = Some(connected_gate.clone());
+    harness.state.manager.retry_now(host).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(10), connected_gate.entered.notified())
+        .await
+        .unwrap();
+    let suspended = tokio::spawn({
+        let harness = harness.clone();
+        async move { lifecycle_host(&harness, host, "suspend").await }
+    });
+    tokio::time::timeout(Duration::from_secs(10), suspend_gate.entered.notified())
+        .await
+        .expect("a hold must cancel resource acquisition before its API call");
+    connected_gate.release.notify_one();
+    api.0.lock().unwrap().connected_gate = None;
+    assert!(service.tunnel_view(host).is_none());
+    suspend_gate.release.notify_one();
+    let (status, body) = suspended.await.unwrap();
+    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+    let (status, body) = lifecycle_host(&harness, host, "resume").await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+    harness.await_state(host, HostState::is_connected).await;
+    let mut deleting = service.0.tunnels.subscribe(host).unwrap();
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        deleting.wait_for(|view| view.state == TunnelState::Up),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let terminate_gate = Arc::new(Gate::default());
+    api.0.lock().unwrap().terminate_gate = Some(terminate_gate.clone());
+    let deleted = tokio::spawn({
+        let harness = harness.clone();
+        async move { delete_host(&harness, host).await }
+    });
+    tokio::time::timeout(Duration::from_secs(10), terminate_gate.entered.notified())
+        .await
+        .unwrap();
+    assert_eq!(
+        api.0.lock().unwrap().sandboxes[0].2,
+        SandboxStatus::Running,
+        "premise: Delete has not terminated the vendor sandbox yet"
+    );
+    assert!(
+        service.tunnel_view(host).is_none(),
+        "lease must drop before Delete reaches the API"
+    );
+    terminate_gate.release.notify_one();
+    let (status, body) = deleted.await.unwrap();
+    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+    assert!(harness.state.manager.status(host).is_none());
 }
 
 /// Why: `DELETE /api/hosts/{id}` is the GUI's removal, and for a Tensorlake

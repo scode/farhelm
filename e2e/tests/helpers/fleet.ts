@@ -38,7 +38,7 @@ export function supervisorSessionId(fullId: string): string {
 type ReaderRegistry = { version: number; getters: Set<() => string>; error?: string };
 type ReaderState = { running: boolean; demand: string; task: boolean };
 type ReaderSnapshot = {
-  role: "list" | "session" | "sounds";
+  role: "list" | "session" | "sounds" | "tensorlake-orphans";
   readers: ReaderState[];
   acted_on: string;
   notices?: string;
@@ -52,6 +52,8 @@ type ReaderSnapshot = {
   stale?: boolean;
   host_absent?: boolean;
   baseline?: boolean;
+  generation?: string;
+  failed?: boolean;
 };
 
 /** Install before navigation; ordinary pages never register reader callbacks. */

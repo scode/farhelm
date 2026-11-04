@@ -120,7 +120,7 @@ struct SnapshotStatus {
 
 /// A UTC date and minute, `2026-11-03 14:02 UTC`. UTC and labelled, for the
 /// reason `activity::utc_stamp` gives.
-fn utc_minute(secs: i64) -> String {
+pub(super) fn utc_minute(secs: i64) -> String {
     let (year, month, day) = farhelm_proto::time::civil_from_days(secs.div_euclid(86_400));
     let time = secs.rem_euclid(86_400);
     format!(
