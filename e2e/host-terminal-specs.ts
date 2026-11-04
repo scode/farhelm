@@ -87,6 +87,7 @@ export const HOST_TERMINAL_SPECS: ReadonlySet<string> = new Set([
   "remembered-permissions.spec.ts",
   "replace.spec.ts",
   "restart-with.spec.ts",
+  "restart-replace-progress.spec.ts",
   "session-action-shortcuts.spec.ts",
   "session-confirmations.spec.ts",
   "session-view-claims.spec.ts",

@@ -1413,7 +1413,11 @@ submission and focus-return behavior.
   keep running in their own terminals, old ones included, until they are closed. Restart may carry changed launch
   settings (Restart with, below); the launch kind, agent type, host, and working directory remain fixed. If a harness
   rejects a changed model or other setting while resuming, that is an ordinary launch failure; restart again with
-  settings the harness accepts.
+  settings the harness accepts. After a Restart request has waited about two seconds, an adjacent status shows a
+  spinner, the host and elapsed seconds, updated about once a second until the reply arrives. If the GUI's 60-second
+  request deadline expires, it says the restart's outcome is unknown and may still finish, and tells the user to check
+  the session before restarting again. Restart has no retry identity and makes no promise that a second press is
+  harmless.
 - **Restart with** opens the session launcher in restart mode before resuming the session's own or a user-named
   conversation. It edits model, effort, permissions, wrapper prefix and conversation for an agent launch, or command,
   resume command and YOLO assertion for a command launch. Launch kind, agent type, host, folder or destination, session
@@ -1457,7 +1461,12 @@ submission and focus-return behavior.
   conversation: restart continues a session, replace starts one over under the same settings. If the create fails, the
   source is untouched. If the create succeeds and the removal that follows fails, the reply names both sessions; whether
   the source is still there depends on how the removal failed, and the user checks or removes it by hand. Replace is
-  offered wherever clone is offered.
+  offered wherever clone is offered. After about two seconds waiting for the reply, the sidebar, session header and
+  interrupted-session card share a spinner, the host and elapsed seconds, updated about once a second. The status
+  disappears on the reply. If the GUI's 60-second request deadline expires, it says the replacement may still finish and
+  to check the sidebar; retrying the same plain Replace without cancelling it or starting Replace on another source
+  reuses its retained identity rather than creating a second replacement. A definite refusal keeps its ordinary
+  explanation, including partial failure of the source's removal.
 - **Replace with** opens the same editable create form clone opens, pre-filled with the source's host, existing
   directory, title, and launch even when the source belongs to a GitHub checkout, so every field can be edited before
   launching — the key use is starting an equivalent session on a different harness or effort. Launching creates the new

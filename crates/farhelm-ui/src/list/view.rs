@@ -2567,6 +2567,7 @@ pub(crate) fn ListView(
     let replace_controller = ReplaceController::sidebar(
         use_context::<ReplaceIntent>().0,
         use_context::<ReplaceYoloQuestions>().0,
+        use_context::<crate::replace::ReplaceProgress>(),
         yolo_replace,
         yolo_replace_error,
     );
@@ -4705,6 +4706,7 @@ pub(crate) fn ListView(
                         for (session, row_deleting, row_activity) in displayed_rows.clone().unwrap_or_default() {
                             SessionRow {
                                 key: "{session.id.raw()}",
+                                replace_progress: replace_controller.progress(session.id.raw()),
                                 menu_registration: menu_registration.clone(),
                                 bell_registration: bell_registration.clone(),
                                 listing_ready,

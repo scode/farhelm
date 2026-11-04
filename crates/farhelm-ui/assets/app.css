@@ -6202,6 +6202,15 @@ a:any-link,
   flex: 0 0 auto;
   font-variant-numeric: tabular-nums;
 }
+/* Pending session actions use the existing notice space below the unwrapped
+   top row. Only a rendered status gets padding: a fast reply adds no height,
+   and a long host cannot displace lifecycle or tunnel controls at 650px. */
+.session-action-progress { min-width: 0; }
+.session-action-progress > .launch-progress {
+  display: flex;
+  box-sizing: border-box;
+  padding: 4px 12px;
+}
 
 .launch-composer-backdrop .create-session-form {
   display: flex;

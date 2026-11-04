@@ -1035,6 +1035,10 @@ pub(super) fn SessionRow(
     /// A boundary computed from the held display, not the served ordering.
     #[props(default)]
     pin_separator: bool,
+    /// The shared request snapshot, independent of menu or confirmation state.
+    /// A closed row menu must not hide a slow Replace already sent from it.
+    #[props(default)]
+    replace_progress: Option<crate::launch_progress::PendingLaunch>,
     on_rename_start: EventHandler<(String, String)>,
     on_menu_toggle: EventHandler<String>,
     /// The notification bell's click (SPEC.md, Status): the session id, its
@@ -2721,6 +2725,12 @@ pub(super) fn SessionRow(
                     // End of `.session-row-menu-flyout`.
                     }
                 }
+            }
+            if let Some(pending) = replace_progress {
+                // The selected session's header or interrupted card owns the
+                // announcement; its row repeats only the visual status. Row
+                // operations lock navigation, so that ownership stays stable.
+                crate::launch_progress::LaunchProgress { pending, announce: !selected }
             }
             // The helm's own refusal, and on a stale row it names the host's
             // state and can quote peer-supplied text — so it renders through
