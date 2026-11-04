@@ -1838,7 +1838,11 @@ change behavior between versions. A custom hover says the flags were the user's,
 counts the session as YOLO, and shows both the flags and the full stored command under Launched with. The launcher's
 permission choice has a separate ? button with that help, opening the docs section on permission modes.
 
-On a solid selected row, host and permission marks use the inverse foreground while retaining their shapes, hover
+Agent marks use distinct identity colors where their owners' terms allow: a published owner hue where one exists,
+otherwise a Farhelm choice, with shades suited to each theme. Codex, Goose and the ordinary Terminal mark stay grey.
+These colors say which agent it is, never its activity or permission mode.
+
+On a solid selected row, host, agent and permission marks use the inverse foreground while retaining their shapes, hover
 explanations and accessible meanings.
 
 Hovering a live status dot, agent mark, or permission mark explains that mark. A clickable dot also names its mark read

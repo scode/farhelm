@@ -74,7 +74,9 @@
 //! - **How the browser shows it.** `farhelm-ui/src/launch_composer.rs` holds
 //!   the per-harness vocabulary (labels, display orders checked against
 //!   `LaunchHarness::ALL` at compile time, help text); `list/row.rs` maps
-//!   harnesses to their marks in `icons.rs`. One exception keeps a direct
+//!   harnesses to their marks in `icons.rs`; `app.css` assigns those marks'
+//!   identity colors by `data-glyph`, with provenance in
+//!   `docs/harness-marks.md`. One exception keeps a direct
 //!   comparison: the new-session form's Cursor support notice
 //!   (`list/create_form.rs`). The browser's per-agent facts are keyed on the
 //!   agent KIND rather than the harness, so they also cover command and

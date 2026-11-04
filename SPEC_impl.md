@@ -397,6 +397,12 @@ and isolated peer text. The card gives the full title, host, managed checkout, d
 the open button's accessible name; marks keep their nearer hover targets and the complete ended-status detail stays on
 the row. The source and cloned tooltip remain outside the accessibility tree.
 
+Agent identity colors are independent of the permission mark: `app.css` binds `.harness-glyph[data-glyph]` to per-theme
+`--harness-*` tokens for Claude, Muse, Cursor, Pi, OMP, Grok and OpenCode. Codex, Goose and Terminal inherit the agent
+track's `--fg-1`. Each colored mark clears 3:1 against the sidebar and row hover surfaces; the more-specific
+selected-row glyph rule uses `--on-fill` for every mark. `docs/harness-marks.md` records color sources and terms,
+separately from geometry.
+
 Each live dot carries its status word on the dot itself, with the optional mark read / mark unread action following it.
 Permission marks use hand-drawn stroke silhouettes in the 12-unit viewBox: a slashed shield (`data-glyph="yolo"`) and a
 question mark (`unknown`) use `--warn`; a plain shield (`shielded`) uses `--ok`. The badge's permission is non-optional.

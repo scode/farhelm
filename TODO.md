@@ -334,8 +334,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   (`plans/queue/command-shell-meaning.md`) is the kind of change that would have used it. Plan:
   `plans/queue/in-app-announcements.md`.
 
-- **Replace harness icons with colored versions.** Replace the harness icons with colored versions so they are more
-  easily identified. Plan: `plans/queue/colored-harness-marks.md`.
 - **Add a Discord link to the feedback dialog and the ? menu.** The website header already links Discord (#2869);
   surface the same link in the app, where users who just had a problem can find it. Plan:
   `plans/queue/discord-link-in-app.md`.
