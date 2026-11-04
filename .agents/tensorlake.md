@@ -112,12 +112,11 @@ exists:
 ## What every shard does first
 
 When PID 1 is systemd (a clone), `run-shard.sh` waits for logind and runs `loginctl enable-linger`, so logind keeps the
-user manager running without a login session, in place of the first two steps below. It starts no `sshd` there, since
-`ssh.socket` already serves port 22; it still records localhost's host keys and checks self-ssh. Lingering matters:
-without it every ssh-to-localhost login starts a user manager that logind stops ten seconds after the session ends,
-taking every session scope in it along. The hand-built manager is fatal on a clone: the self-ssh login makes logind
-start the real `user@1000.service` in the cgroup the script took over, and when logind stops it, systemd kills every
-process in it, the test run included.
+user manager running without a login session, in place of the first two steps below. Lingering matters: without it every
+ssh-to-localhost login starts a user manager that logind stops ten seconds after the session ends, taking every session
+scope in it along. The hand-built manager is fatal on a clone: the self-ssh login makes logind start the real
+`user@1000.service` in the cgroup the script took over, and when logind stops it, systemd kills every process in it, the
+test run included.
 
 On either kind of sandbox, the shard fails before running any test, with `setup failed:` in `summary.txt`, when
 lingering cannot be enabled or the user manager is not `running` or `degraded`: the supervisor would otherwise run
@@ -134,7 +133,17 @@ cannot be relied on, and services must live inside the exec that runs the tests.
   delegated cgroup `user.slice/user-1000.slice/user@1000.service` with `+cpu +memory +pids` enabled in its parents and
   owned by `tl-user`, moves its own shell into it, starts a session bus, then `/usr/lib/systemd/systemd --user`, and
   waits for `systemctl --user is-system-running` to say `running` or `degraded`.
-- Starts `sshd` (it needs `/run/sshd`) and adds localhost's host keys to `known_hosts`.
+
+On either kind of sandbox, self-ssh then uses an `sshd` of the shard's own on port 2222, never port 22. On clones that
+boot systemd (observed November 2026), something other than the image's `sshd` already listens on port 22: `ssh.socket`
+fails to start, and what answers presents a host key of its own and refuses `tl-user`'s key ("Permission denied
+(publickey)"). The suite's second host is plain `ssh localhost` (`e2e/start-stack.sh`), which reads `~/.ssh/config`, so
+`run-shard.sh` starts the image's `sshd` with `-p 2222` unless something already listens there, adds a
+`Host localhost 127.0.0.1` block with `Port 2222` to `~/.ssh/config` once, drops earlier `known_hosts` entries for those
+names (a template's file can hold keys from an earlier boot, and ssh refuses on a stale entry rather than trying an
+appended one), and records the current keys with `ssh-keyscan -4 -p 2222` (without `-4`, `ssh-keyscan localhost` tries
+::1 alone). `summary.txt` says `self-ssh: ok` or `FAILED`; a failed one leaves every spec that uses the second host
+failing with "ssh fixture must be connected", so a run with it is not evidence.
 
 ## Tensorlake CLI traps
 

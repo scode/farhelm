@@ -102,11 +102,25 @@ if [ -n "$setup_error" ]; then
   exit 1
 fi
 # --- self-ssh
-# Under a booted systemd, ssh.socket already holds port 22 and no sshd shows until the first connection, so start sshd
-# only when neither answers.
+# The suite's second host is `ssh localhost` (e2e/start-stack.sh), so the OpenSSH client must reach an sshd that takes
+# tl-user's key. Port 22 cannot be relied on for that: on clones that boot systemd (observed November 2026) something
+# other than the image's sshd already listens on 0.0.0.0:22, so ssh.socket fails to start, and that listener presents
+# its own host key and refuses tl-user's key ("Permission denied (publickey)"). The shard therefore starts the image's
+# sshd on a port of its own and points the client's `localhost` and `127.0.0.1` at it through ~/.ssh/config, which
+# `ssh localhost` honors. Earlier entries for those names are dropped from known_hosts first: a template's file can hold
+# keys from an earlier boot, and ssh refuses on a stale entry rather than trying an appended one. The scan uses `-4`
+# because `ssh-keyscan localhost` would otherwise try ::1 alone.
+SELF_SSH_PORT=2222
 sudo -n mkdir -p /run/sshd
-systemctl is-active --quiet ssh.socket 2>/dev/null || pgrep -x sshd >/dev/null || sudo -n /usr/sbin/sshd
-ssh-keyscan -H localhost 127.0.0.1 >>/home/tl-user/.ssh/known_hosts 2>/dev/null
+ss -ltn "sport = :$SELF_SSH_PORT" | grep -q LISTEN || sudo -n /usr/sbin/sshd -p "$SELF_SSH_PORT"
+if ! grep -q '^# farhelm self-ssh$' /home/tl-user/.ssh/config 2>/dev/null; then
+  printf '# farhelm self-ssh\nHost localhost 127.0.0.1\n  Port %s\n\n' "$SELF_SSH_PORT" >>/home/tl-user/.ssh/config
+  chmod 600 /home/tl-user/.ssh/config
+fi
+for host in localhost 127.0.0.1 "[localhost]:$SELF_SSH_PORT" "[127.0.0.1]:$SELF_SSH_PORT"; do
+  ssh-keygen -q -f /home/tl-user/.ssh/known_hosts -R "$host" >/dev/null 2>&1
+done
+ssh-keyscan -4 -H -p "$SELF_SSH_PORT" localhost 127.0.0.1 >>/home/tl-user/.ssh/known_hosts 2>/dev/null
 ssh -o BatchMode=yes localhost true && echo "self-ssh: ok" >>"$OUT/summary.txt" || echo "self-ssh: FAILED" >>"$OUT/summary.txt"
 # --- the shard
 export PATH="$W/.ci-tmux:$PATH"
