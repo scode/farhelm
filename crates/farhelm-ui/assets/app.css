@@ -3329,6 +3329,18 @@ a:any-link,
 .welcome-item { padding: 8px 10px; border: 1px solid var(--border-dim); border-radius: var(--radius-sm); }
 .welcome-item strong { color: var(--fg-0); }
 
+/* Announcement content can grow with the pending batch. Keep the welcome's
+   pinned frame so its closing controls survive long prose and short windows. */
+.announcements-dialog { width: min(560px, 100%); font-size: 12px; line-height: 1.55; }
+.announcements-dialog > .dialog-header { padding: 10px 14px; }
+.announcements-dialog > .announcements-body { padding: 12px 14px; gap: 12px; color: var(--fg-dim); }
+.announcements-summary { margin: 0; }
+.announcement { padding: 8px 10px; border: 1px solid var(--border-dim); border-radius: var(--radius-sm); }
+.announcement h3 { margin: 0; color: var(--fg-0); font-size: 13px; }
+.announcement p { margin: 8px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.announcement .announcement-detail { color: var(--fg-2); font-size: 11px; }
+.announcements-dialog > .dialog-footer { padding: 8px 14px; }
+
 /* A flow row above the terminal, so Claude's question remains fully visible.
    Its appearance changes the available terminal height, which the existing
    resize observer fits without replacing the terminal island. */

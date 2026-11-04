@@ -1732,12 +1732,12 @@ browser never shows it. The two host confirmation choices apply to every host an
 with a natural place in the main UI stay there. No client keeps its own copy: every client reads the helm's preference
 once after authenticating and writes it on change, so a browser tab and the desktop app open in the same order and on
 the same session. Per-client persistence — browser storage, a desktop state file, anything that lets two clients
-remember different answers — is not wanted for these shared preferences, including welcome-card dismissal (appearance,
-sidebar width, host rail expansion, terminal text size and sound switches, by contrast, are deliberately per device; see
-Session list, Terminal experience and Status). A client that asks the helm for no particular order gets creation time.
-No mandatory hierarchy. Sessions may carry an optional parent reference usable by the API, but parentage does not nest
-the list and implies nothing about VCS state. Parent tracking is not comprehensive: `farhelm spawn --parent` can record
-it, while `farhelm agent create` and `clone` need not record the asking session.
+remember different answers — is not wanted for these shared preferences, including welcome-card and announcement
+dismissal (appearance, sidebar width, host rail expansion, terminal text size and sound switches, by contrast, are
+deliberately per device; see Session list, Terminal experience and Status). A client that asks the helm for no
+particular order gets creation time. No mandatory hierarchy. Sessions may carry an optional parent reference usable by
+the API, but parentage does not nest the list and implies nothing about VCS state. Parent tracking is not comprehensive:
+`farhelm spawn --parent` can record it, while `farhelm agent create` and `clone` need not record the asking session.
 
 The sidebar can be resized by dragging its right edge, between 296px and 656px, with 396px as the default. Its 56px host
 rail leaves the session column between 240px and 600px, with 340px as the default. Double-click the edge to reset it, or
@@ -3315,20 +3315,21 @@ the agent creates it.
   lost automatic mark costs nothing worse than a dot that is one open-and-close cycle behind, corrected by the next
   successful write; and marking a session's notifications read when their list closes (see Status), for the same reason:
   a lost mark costs a bell that stays loud until the list is next closed; marking the welcome card seen, because a
-  failed save only lets it appear on a later load; and a trust hint's Don't show again save after its session has left
-  the screen, because that session's adjacent error no longer has a place to appear. The manual "Mark unread"/"Mark
-  read" toggle and the notification list's clear button are not covered — a failed toggle or clear surfaces like any
-  other operation. Turning the session-confirmation opt-out off restores confirmations immediately in the current
-  client; if that save fails while Settings is still open, Settings shows an adjacent error saying confirmations may
-  still be off for this helm and to try again. Closing Settings before the save settles drops that error, so the failure
-  is then only logged. A newer switch choice clears the error and supersedes older save results. Quick-launch naming,
-  terminal-frame colors, terminal link-click behavior and trust-hint visibility instead put back the saved choice and
-  show an adjacent error when their newest save fails. For naming, frame colors and link clicks, closing Settings drops
-  only the alert: the shared choice still reverts, so mounted terminals and later actions cannot keep using a failed
-  save. Superseded results neither report nor revert a newer choice. A trust-hint choice copied by a reopened Settings
-  dialog or another mounted hint also stops being current when its save fails; reopening while that save is pending does
-  not keep the failed choice alive or inherit the closed dialog's alert. A failed corrective read leaves trust settings
-  unavailable rather than treating unknown trust as off.
+  failed save only lets it appear on a later load; the automatic announcement check and recording a dismissed batch,
+  because a failed read or save only postpones those announcements to a later load; and a trust hint's Don't show again
+  save after its session has left the screen, because that session's adjacent error no longer has a place to appear. The
+  manual "Mark unread"/"Mark read" toggle and the notification list's clear button are not covered — a failed toggle or
+  clear surfaces like any other operation. Turning the session-confirmation opt-out off restores confirmations
+  immediately in the current client; if that save fails while Settings is still open, Settings shows an adjacent error
+  saying confirmations may still be off for this helm and to try again. Closing Settings before the save settles drops
+  that error, so the failure is then only logged. A newer switch choice clears the error and supersedes older save
+  results. Quick-launch naming, terminal-frame colors, terminal link-click behavior and trust-hint visibility instead
+  put back the saved choice and show an adjacent error when their newest save fails. For naming, frame colors and link
+  clicks, closing Settings drops only the alert: the shared choice still reverts, so mounted terminals and later actions
+  cannot keep using a failed save. Superseded results neither report nor revert a newer choice. A trust-hint choice
+  copied by a reopened Settings dialog or another mounted hint also stops being current when its save fails; reopening
+  while that save is pending does not keep the failed choice alive or inherit the closed dialog's alert. A failed
+  corrective read leaves trust settings unavailable rather than treating unknown trust as off.
 - Connection state per host is always visible on its rail avatar, with name and phase on hover and to screen readers;
   reconnection uses bounded retries followed by periodic low-frequency re-probing, so a host that comes back overnight
   resurfaces by itself. Hosts swaps session content for the complete management surface. Each row and its rail avatar
@@ -3352,14 +3353,16 @@ the agent creates it.
 ## Feedback
 
 The host rail's foot has a **?** button below the settings gear, in the desktop app and the web UI alike. It opens a
-small menu with seven items, in order: **Send feedback**, **Chat on Discord**, **Documentation**, **Keyboard
+small menu with these items, in order: **Send feedback**, **Chat on Discord**, **Documentation**, **Keyboard
 shortcuts**, **Release notes**, **SSH needs 2FA?** and **Welcome**. Chat on Discord opens the project's Discord invite
 (`https://discord.gg/G3bukxTjXR`) the same way as Documentation. Documentation opens the docs site
 (`https://farhelm.io/docs/`) in the user's browser: a new tab from the web UI, the system browser from the desktop app.
 Keyboard shortcuts opens the dialog described in [Desktop window chrome](#desktop-window-chrome). Release notes opens
 the general release notes page (`https://farhelm.io/docs/release-notes/`) the same way, whether or not an update is
-waiting. The installed desktop app's menu has an eighth item, **Check for updates** (see
-[Installation and updates](#installation-and-updates)). Welcome shows the welcome card again.
+waiting. After this helm has shown an announcement, **Announcements** appears directly after **Release notes**, with the
+description **Shows previously shown announcements again**; it reopens the shown history described below. The installed
+desktop app's menu adds **Check for updates** last (see [Installation and updates](#installation-and-updates)). Welcome
+shows the welcome card again.
 
 **SSH needs 2FA?** shows the two shell commands for each registered SSH host: **Sessions connection** and **Setup and
 updates connection**, each with a copy button. Run them on the helm's machine, as its user (on this Mac in the Mac app);
@@ -3387,6 +3390,40 @@ opener as Documentation and leaves the card open. **Send feedback now** closes i
 sending anything. The footer says it is available again as **Welcome** in the **?** menu. Reopening does not reset or
 rewrite seen. Closing a reopened card returns focus to the help toggle; the first-open card has no originating control
 and restores ordinary initial page focus.
+
+### Announcements
+
+The helm keeps a durable queue of announcements and a history of what it has shown. Each announcement has a stable,
+never-reused id, title, plain-text body and optional display details or a labelled link. Enqueueing the same id again
+does nothing, even after dismissal, and never replaces the text this helm first received. The queue, dialog and history
+do not depend on where an announcement came from.
+
+Once per page load after sign-in and the initial preference decision, the client reads pending announcements and shown
+history. Initial Welcome, including its Send feedback now handoff, closes first. A failed preference read does not
+prevent this separate check. An empty queue opens nothing; a failed announcement read is logged silently and retried
+only on a later load. A batch ready behind another modal waits for it to close. The read-and-show operation can also be
+called by a later trigger; there is no live announcement event reader today.
+
+The dialog is titled **Announcements**, with **Updates and information from Farhelm.** underneath. Pending entries
+appear newest first, each with its title, body and supplied extras. Blank lines separate plain-text paragraphs; text is
+never interpreted as markup. Focus moves inside, global chords are inactive, and **Got it**, the × and Escape all close
+it. Dismissal records only the entries that dialog showed, moving them into the helm's shared history with a shown time.
+A failed write still closes the dialog and leaves them queued for a later load. Every browser and desktop client shares
+this state; another window's already open dialog may stay open.
+
+After at least one successful showing, **Announcements** stays in the **?** menu directly after **Release notes**. It
+opens the same dialog with all shown announcements, newest shown first, and reopening writes nothing. Closing this
+history view returns focus to Help; closing an automatic batch restores ordinary initial page focus.
+
+The first and only producer is a compiled-in release table, initially empty. It contains only announcements explicitly
+chosen by the maintainer during the release procedure, never everything under Breaking in the changelog. Before the helm
+serves clients, the producer enqueues entries newer than the version that first created this helm and no newer than its
+running build, in full semver precedence including RC and dev versions. Thus skipping releases includes their
+announcements, including intermediate release candidates. A fresh installation receives nothing from its own version or
+earlier. An older helm without a recorded creation version, or one created by a build from main, counts as older than
+every entry. A running build from main (`0.0.0-unreleased`) enqueues none. Stable entries include their release's notes
+link; prereleases omit it because curated notes need not exist yet. Only this producer interprets release versions or
+builds release-notes links.
 
 ### Sending feedback
 

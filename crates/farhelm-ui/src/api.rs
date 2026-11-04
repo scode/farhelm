@@ -529,6 +529,53 @@ pub(crate) async fn fetch_preferences(base: &str) -> Result<Preferences, String>
     resp.json::<Preferences>().await.map_err(|e| e.to_string())
 }
 
+/// Display-ready content from any producer of the helm's announcement queue.
+/// The client renders these fields without interpreting ids, detail or links.
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+pub(crate) struct Announcement {
+    pub(crate) id: String,
+    pub(crate) title: String,
+    pub(crate) body: String,
+    pub(crate) detail: Option<String>,
+    pub(crate) link: Option<AnnouncementLink>,
+}
+
+/// A trusted producer supplies the destination and the words used to open it.
+/// These use the app's help-link opener, without terminal-link interpretation.
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+pub(crate) struct AnnouncementLink {
+    pub(crate) label: String,
+    pub(crate) url: String,
+}
+
+/// Pending is oldest insertion first; history is already newest shown first.
+#[derive(Deserialize)]
+pub(crate) struct Announcements {
+    pub(crate) pending: Vec<Announcement>,
+    pub(crate) history: Vec<Announcement>,
+}
+
+/// Read pending and shown content together so the dialog and Help agree.
+pub(crate) async fn fetch_announcements(base: &str) -> Result<Announcements, String> {
+    let url = format!("{base}/api/announcements");
+    let response = send(client().get(&url)).await?;
+    if !response.status().is_success() {
+        return Err(read_failure("GET", &url, response).await);
+    }
+    response.json().await.map_err(|error| error.to_string())
+}
+
+/// Move exactly the dismissed batch into the helm's shared shown history.
+/// Callers close first and log failure; a later load may offer the batch again.
+pub(crate) async fn mark_announcements_shown(base: &str, ids: Vec<String>) -> Result<(), String> {
+    let url = format!("{base}/api/announcements/shown");
+    let response = send(client().post(&url).json(&serde_json::json!({ "ids": ids }))).await?;
+    if !response.status().is_success() {
+        return Err(read_failure("POST", &url, response).await);
+    }
+    Ok(())
+}
+
 /// Only the all-hosts folder crosses this route; host overrides and the
 /// separately saved command must not expand its reply shape.
 #[derive(Deserialize, serde::Serialize)]
