@@ -358,6 +358,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ### Trivial
 
+- **Host click in the navigation rail gives no feedback.** Clicking a host in the navigation rail shows no sign of what
+  it did, especially with an empty session list. Make "No sessions match this filter" name the active filter — showing
+  the host with icon and name when a host is filtered on — and show the host in the filter bar. Generally rethink the
+  filter experience.
+
 ## Doc todo
 
 - Tell users that a working-copy (checkout) root must be a location only they can write: Farhelm is not designed for
