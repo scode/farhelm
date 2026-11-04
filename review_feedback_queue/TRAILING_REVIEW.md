@@ -1,6 +1,6 @@
 # Trailing code review checkpoint
 
-Last reviewed commit: `a98147fb2eaaefb448473107529ada69114d7b03`
+Last reviewed commit: `ca9b0a19856dc136f63ad2d14f1076027edce1eb`
 
 This is the exclusive starting point for the next trailing code review of `main`. Advance it only after completing the
 procedure in `review_feedback_queue/.agents/trailing-review.md`, together with any resulting queue updates. A proposed
@@ -9,62 +9,76 @@ checkpoint reaches `main` only when its review-result PR is merged.
 This file holds only the checkpoint and the latest run's completion record. Earlier runs' records are in
 `review_feedback_queue/TRAILING_REVIEW_HISTORY.md`.
 
-## Review through a98147fb
+## Review through ca9b0a19
 
-Reviewed range: `d6645f771bee8ed03a66486ef8755834937d759d..a98147fb2eaaefb448473107529ada69114d7b03`, eighteen commits.
-The maintainer selected this prefix, about one third of the original range's gross added lines, and explicitly requested
-advancing to this endpoint. The initially fetched main was `adc23b138d8e4a5ffd58275a1b6e39449af7b73e`; commits after the
-selected endpoint are outside this review.
+Reviewed range: `a98147fb2eaaefb448473107529ada69114d7b03..ca9b0a19856dc136f63ad2d14f1076027edce1eb`, 41 commits. The
+exclusive base and inclusive main tip were fetched and pinned, with ancestry verified. All 851 individual commit/path
+patches, including intermediate and deleted text and all vendored changes, were reconstructed exactly from 882 immutable
+parts and assigned once across 203 bounded functional groups. Every mandatory group stayed below 2,000 lines and 64 KiB.
+Surrounding code and coverage sections were inspected selectively; no assigned patch text remains unread.
 
-The review is **complete** under the persistent-review protocol for that agreed scope. All 319 included individual
-commit/path patches, including deleted and intermediate text, were reconstructed exactly from immutable Git history and
-assigned once across 49 bounded functional groups. By explicit request, the upstream trees `vendor/alacritty_terminal/`
-and `vendor/vte/` were excluded: 49 commit/path patches received no review. Farhelm's patch files, paired patch tests
-and integration remained included. This intentional exclusion does not claim upstream coverage. Thirteen independent
-auditors checked potentially highest exclusions, including withdrawals and prose-only candidates. All 62 mandatory
-manifests have complete supported delivery audits, below 2,000 lines and 64 KiB per group. No required text remains
-unread; surrounding source and coverage sections were inspected selectively.
+The primary review is **complete** under persistent-review: all 203 original identities completed initial review,
+later-turn synthesis after verified delivery, and a separate credible final empty discovery search. There were 643
+completed primary turns and 237 discovery passes. Thirty distinct source-confirmed concerns emerged during discovery;
+new findings received further searches. Material additions to known cleanup and snapshot-link families retain their
+original identities and subsequent search evidence. New local IDs, aliases and source witnesses were not counted as new
+global defects.
 
-All 62 identities used Codex `gpt-6.1-sol`, high reasoning, with at most nineteen concurrent external reviewers. Each
-completed initial review, later-turn synthesis and a separate final empty discovery search on the same identity: 189
-completed actual turns and 65 discovery passes. New desktop-smoke cleanup and late-output test findings received further
-searches. The local state-path quoting exclusion candidate also received a second search and fresh independent audit.
-Every final empty pass has an inspected work summary and resolved lead dispositions. No recording or independent-review
-step remains unresolved.
+Another 105 fresh independent reviewers checked potentially highest exclusions, including withdrawals, misleading
+severity flags and prose-only candidates. The maintainer clarified during this run that these exclusion-gate reviewers
+do not require persistent-review; only the primary review does. The orchestrator had unnecessarily applied full cycles
+to them before that clarification. Their 324 completed turns remain evidence, but no saturation claim or additional gate
+cycle is required. The last optional search was deliberately stopped, with exit 143 and its already appended findings
+preserved; it receives no completed-turn credit. Its inspected initial and synthesis judgments remain valid. No required
+independent judgment is outstanding.
 
-There are **ten new items, all other**: contradictory legacy quickstart advice, an inherited-lock test's descriptor
-collision, Linux desktop ownership missing its boot domain, literal executable-suffix normalization, desktop-smoke
-ownership publication, and five terminal test-oracle or containment gaps. All ten have source-confirmed narrow defects
-or conditional mechanisms; zero distinct concerns are retained as unverified after investigation. Stronger consequences
-remain separately qualified: no actual identity collision, qualifying user-work loss, test-process survivor duration or
-memory exhaustion was observed. The Linux development-build argument is not applied to macOS. The allocating-worker
-finding concerns Farhelm's test harness, not a present upstream emulator defect.
+All reviewers used Codex `gpt-6.1-sol`, high reasoning, with at most nineteen concurrent external reviewers. The 308
+identities completed 967 actual turns. Supported delivery audits cover every required assignment, including the added
+neighbor-link context. Historical clipped reads receive no credit. One optional audit of five already delivered primary
+replies lacks only each final blank line; those tails remain uncredited and were not required assigned text. No manual
+transcript-payload fallback or hidden-reasoning inspection was used.
 
-One existing child-cleanup record gains supervisor and terminal-host fixture instances, preserving direct-child,
-process-group and separately hosted-child ownership differences. This is one source-confirmed extension after semantic
-consolidation. Another existing record is narrowed to SSH prerequisite admission: the reviewed manager-readiness repair
-already removes that portion. No product fix or triage outcome is executed. The earlier desktop survival-oracle concern
-was repaired after the selected tip by `58094288259b0c29f74ea25936d4fe006c72128f`, so it is not recorded open.
+There are **114 new items: eleven highest, three high and 100 other**. Of these, 108 have source-confirmed narrow
+defects or complete conditional mechanisms; six remain **unverified after investigation**. Those six concern width-table
+history restoration, physical headroom in snapshot-memory tests, incidental directory replacement during shutdown,
+placeholder-test re-adoption timing, hyperlink identity collisions, and the replacement-history test's effective false
+pass. Their records preserve actual checks, missing premises, unavailable evidence and what would settle them. A
+confirmed structural bound or accounting omission does not establish its separately qualified material availability
+consequence.
 
-Independent exclusions remain narrow: pinned local dependency selection, recorded short-window or same-run PID reuse,
-explicit detached-desktop marker and replacement policies, constructor-before-attachment ordering, retained cleanup
-ownership, and operator-configured local helm state-path trust. The aggregate-budget candidate has no shipped consumer
-at the selected tip; later terminal integration is outside this review and is not cleared. None of these conclusions is
-a blanket subsystem-safety verdict.
+The highest findings concern colliding interrupted starts, gap recovery changing Bash paste submission, remote control
+bytes in debug traces, hidden live tmux tabs, displaced input crossing takeover, asynchronous signal authority, a test
+selecting another directory's host, resize-only journal pressure, retained Delete consent, and two distinct printed-URL
+target mismatches. Each keeps its configuration, source, timing and acceptance qualifications. The high findings concern
+late host adoption, a retained Restart seed reply and extreme browser history numbering. No runtime damage, occurrence
+rate or deployed exploitability is claimed.
 
-Evidence remains private under run `4b58b499-b330-4a1c-841a-38eda725531a`. `completion.md` is the compact record;
-`completion.json` preserves assignments, session identities, actual turns, manifests, final audits, progress and reply
-pointers. `finding-events.json` and `dispositions.json` preserve all 64 reviewer-local finding identities and 173
-events, including revisions, withdrawals, independent verdicts and queue mappings. The 57 latest open and seven
-withdrawn identities include duplicates and audit verdicts, not 64 distinct bugs. Rejected clipped exploratory reads
-earn no credit. No manual transcript fallback or hidden-reasoning inspection was used. Monitoring relied on metadata,
-compact audits, findings, progress and final replies; no cybersecurity block or stuck reviewer occurred. Delivery proves
-neither attention nor understanding, correctness or exhaustiveness.
+Five existing records gain named callers or scope: child ownership before cleanup registration, second-create failure,
+sequential session cleanup, inherited Git repository selection, and frozen grid file links after copying. All five have
+source-confirmed narrow mechanisms. The grid file-link addition preserves the earlier discard's narrower classic web
+scope. No existing finding is fixed, removed or triaged. Together the new and extended records represent 119 retained
+concerns: 113 source-confirmed and six investigated uncertainties.
 
-Recording-time main is `b7227751f968e78005d8bccfffcf4323b21d24c5`, with the original checkpoint still saved there. Later
-source and coverage changes were checked selectively for repairs or acceptance, without expanding the reviewed range.
-This was source-only: no product/runtime suite, bug reproduction, browser/native experiment, vendor-agent turn or
-live-install action ran, and no historical runtime pass was reused. Private bookkeeping helpers received separate
-recorder-wrapped load checks. Repository validation covers changed Markdown, whitespace, queue/index consistency,
-required fields, exact assignments and instruction pointers. This result stays in a draft PR for separate manual
-merging; preparing it does not advance main.
+Independent exclusions remain narrow: exact accepted crash and proven older-release subsets, synchronous or same-run
+tooling PID limits, captured identities and row evidence, actual whole-paste queueing, exact recovery fallbacks, source
+refutations and existing queue/ledger coverage. Harness intent does not prove disposable shell work; output-task joins
+do not join input pumps; pending-link guards do not cover omitted hover dependencies. The mixed input-acknowledgement
+concern was later source-confirmed through Linux allocation failure and coalescing, replacing its earlier missing
+reopen-producer premise. Production agent prompts remain disabled, so its record does not promote the dormant prompt
+consequence to an established highest finding.
+
+Private evidence remains under run `37478d09-7e36-409b-8efa-b13d1f793dd5`. `completion.md` and `completion.json`
+preserve exact assignments, roles, model configuration, identities, actual turns, manifests, audits, replies and
+stopping states. `dispositions.json`, both finding catalogs, parent notes and the explicit confidence/novelty ledgers
+preserve all 1,010 reviewer-local identities and 1,989 append-only events. The 989 latest open and 21 withdrawn records
+include duplicates and audit verdicts, not 1,010 bugs. Delivery establishes neither attention, understanding,
+correctness nor exhaustiveness.
+
+Recording-time main is `fadc3be725c00657383494c7045443c5a6e7acba`, with the original checkpoint still saved there. Its
+queue, ledger, product specification, planned work and known bugs were unchanged; later relevant source and
+implementation specification changes were checked for repairs or acceptance without expanding the reviewed range. This
+was source-only: no product runtime suite, reproduction, browser/native experiment, vendor-agent turn or live-install
+action ran, and no historical runtime pass was reused. Private bookkeeping helpers received separate recorder-wrapped
+checks, with their same-session failure evidence retained. Repository checks cover changed Markdown, whitespace,
+queue/index consistency, required fields, exact assignments and instruction pointers. This result stays in one draft PR
+for separate manual merging; preparing it does not advance main.

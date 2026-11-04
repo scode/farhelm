@@ -54,3 +54,40 @@ initial eventual-shutdown-only withdrawal was insufficient.
 Provenance: trailing-review run `1e4abedb-1946-4bfb-93a4-fd2f4e241acd`; `g110/f2`, `g129/f1`. These are original
 reviewer identities for this concern, not additional bugs. Full revisions, withdrawals and independent verdicts remain
 in the private review evidence. No fix or triage decision was executed.
+
+## Trailing review through ca9b0a19
+
+Failure cleaning one fake-agent test session prevents any cleanup attempt for the other.
+
+Suggested bucket: **extend**. Confidence: **source-confirmed defect or conditional mechanism**. confirmed conditional
+source path; no measured frequency or survivor duration. Fix: attempt both owned cleanups independently and aggregate
+errors.
+
+Source locations: ca9b0a19856dc136f63ad2d14f1076027edce1eb:e2e/tests/terminal-migration.spec.ts:206-208.
+
+terminal-migration.spec.ts:191-193 awaits cleanupSession(neighbor) before cleanupSession(session), without an
+independent-attempt guard. helpers/fleet.ts:559-569 throws on transport failure or a non-404 refused response, so the
+source session is not attempted in that case.
+
+terminal-migration.spec.ts:191-193 awaits cleanupSession(neighbor) before cleanupSession(session), without an
+independent-attempt guard. helpers/fleet.ts:559-569 throws on transport failure or a non-404 refused response. Even when
+source cleanup would succeed, no request for it is made after neighbor cleanup rejects. Later resetStack
+(helpers/terminal-suite.ts:154-194) bounds retention, not this test's cleanup ownership.
+
+failure cleaning one fake-agent test session prevents any cleanup attempt for the other. The tip still awaits
+cleanupSession(neighbor) at 207 before cleanupSession(source) at 208. Tip fleet.ts:559-569 throws on transport failure
+or non-404 refused response, including a refused Stop whose Delete may already have succeeded. A source cleanup that
+could succeed is never attempted. Later stack reset bounds retention but does not execute this skipped caller step.
+Bucket: other.
+
+Possible coverage and caveats: none exact. Full queue zoom-cleanup-failure-skips-second-session.md targets
+terminal-tabs.spec.ts; sort-test-cleanup-stops-after-first-failure.md targets sort.spec.ts. Ledger trust and listing
+ownership sections at 14073-14102 and 14683-14703 prescribe fixes in those named files, not migration.spec.ts. Coverage
+searches of SPEC.md, SPEC_impl.md, empty TODO Planned, plans/queue, BUGS.md, queue INDEX and ledger found no exact
+coverage. FILTER safe-failure/status/dependency-hang rules do not cover this inter-session test resource retention.
+
+Provenance: private review run `37478d09-7e36-409b-8efa-b13d1f793dd5`; original identities `g193/f2`. Original
+append-only events, revisions, withdrawals and independent judgments are retained in that run's catalogs. Locations
+refer to the named reviewed revisions; the original revision context is ca9b0a19856dc136f63ad2d14f1076027edce1eb;
+introduced in assigned patch 4ed000fb454cebd9c22a88f358a93e15566b8c9e at e2e/tests/terminal-migration.spec.ts:191-193..
+This was a source-only review; runtime occurrence and frequency were not measured.

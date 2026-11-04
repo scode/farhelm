@@ -88,3 +88,46 @@ explicitly cover these directly acquired fixture resources.
 Provenance: trailing-review run `4b58b499-b330-4a1c-841a-38eda725531a`; `g020/f2`, `g021/f1`, `g032/f1`, `g035/f1`,
 `g038/f2`, with independent corroboration of the lifecycle instance by `g036/f2`. All used Codex gpt-6.1-sol, high
 reasoning. Their original event histories and the different cleanup ownership boundaries remain in private evidence.
+
+## Trailing review through ca9b0a19
+
+A failed regression setup can leave its stand-in shell running after the test exits.
+
+Suggested bucket: **extend**. Confidence: **source-confirmed defect or conditional mechanism**. confirmed conditional
+source defect.
+
+Source locations: crates/farhelm-supervisor/src/hosts/process.rs:616-646.
+
+tip process.rs:618-629 spawns a plain Child, readiness at 631-645 can panic, and cleanup ownership is only constructed
+at 646. Its kill-and-wait destructor at 685-689 cannot run for constructor failure. HANDLES_TERM and IGNORES_TERM at
+701-708 loop indefinitely; dropped stdin does not end those loops. Synthesis reconfirmed this exact gap at tip, with no
+runtime occurrence or outer-harness survivor duration claimed.
+
+Possible coverage and caveats: extend review_feedback_queue/signal-test-child-lacks-unwind-cleanup.md:50-90 with this
+additional helper; its existing fixtures are the same failure-before-owner class, not an acceptance. Parent groups
+g141/f3, g142/f1, g143/f2, g146/f1, g147/f1, g182/f1 and g186/f1 into that existing item. g115/f1 was read and is
+different: killing an owned shell without its sleep descendant on normal success, rather than this constructor failure
+before shell ownership. No new issue counted by that interface comparison. Coverage retained from initial exact-tip
+searches: SPEC and implementation spec do not accept this test ownership gap; TODO Planned:23-24 is empty; unlanded
+plans, BUGS, queue/index and ledger yielded no exact fix or discard for this helper. FILTER has no applicable
+persistent-fixture-leak exclusion. Same-run PID reuse accepts a different failure mechanism.
+
+Additional reviewed locations: g141/f3: crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs:3382-3389 at
+ca9b0a19856dc136f63ad2d14f1076027edce1eb; g142/f1: crates/farhelm/tests/e2e/host_terminals.rs:96-115,430-454,537-541 at
+ca9b0a19856dc136f63ad2d14f1076027edce1eb; g143/f2:
+32e20f84647951a8ea717b3c712a037c231d92dd:crates/farhelm/tests/e2e/host_terminals.rs:389-390; g146/f1:
+cf5188fd16a5cd4dec1e57fc257f0f08037f636d:crates/farhelm/tests/e2e/host_creates.rs:920-931,1026-1047;
+tip:993-1004,1099-1120; g147/f1:
+ca9b0a19856dc136f63ad2d14f1076027edce1eb:crates/farhelm/tests/e2e/host_creates.rs:1186-1202,1261-1311,1341-1378,1407-1473,1753-1771,1817-1864,2154-2197;
+g182/f1: ca9b0a19856dc136f63ad2d14f1076027edce1eb:crates/farhelm/tests/e2e/host_tabs.rs:1112-1126,1361-1404; g185/f2:
+32e20f84647951a8ea717b3c712a037c231d92dd:crates/farhelm/tests/e2e/host_relaunches.rs:693-735; tip
+ca9b0a19856dc136f63ad2d14f1076027edce1eb:same ranges; g186/f1:
+ca9b0a19856dc136f63ad2d14f1076027edce1eb:crates/farhelm/tests/e2e/host_relaunches.rs:1453-1479; g189/f2:
+crates/farhelm/tests/e2e/host_reclaim.rs:1053-1080,1137-1147.
+
+Provenance: private review run `37478d09-7e36-409b-8efa-b13d1f793dd5`; original identities `g108/f1`, `g141/f3`,
+`g142/f1`, `g143/f2`, `g146/f1`, `g147/f1`, `g182/f1`, `g185/f2`, `g186/f1`, `g189/f2`. Original append-only events,
+revisions, withdrawals and independent judgments are retained in that run's catalogs. Locations refer to the named
+reviewed revisions; the original revision context is ca9b0a19856dc136f63ad2d14f1076027edce1eb; introduced by
+1eef3d64e36cd31b56e5b7e815fa3cc183b55637:process.rs:420-450.. This was a source-only review; runtime occurrence and
+frequency were not measured.
