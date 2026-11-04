@@ -127,3 +127,34 @@ proptest! {
         assert_same_state(ours.term(), &bare)?;
     }
 }
+
+/// The opt-in parser hook must reach the same policy through the adapter and
+/// a real bare terminal. REP after a continuation makes a missing forwarding
+/// method observable in cells as well as in the parser's remembered base.
+#[test]
+fn variation_and_combining_rep_policy_is_forwarded() {
+    let cases = [
+        "❤\u{fe0f}\x1b[2b",
+        "⌚\u{fe0e}\x1b[2b",
+        "❤\u{301}\u{fe0f}\x1b[2b",
+        "x\u{fe0f}\x1b[2b",
+        "❤\u{200b}\u{fe0f}\x1b[2b",
+        "❤\u{1161}\u{fe0f}\x1b[2b",
+        "\u{1100}\u{16d67}\x1b[2b",
+    ];
+    for output in cases {
+        let mut ours = emulator(20, 5);
+        feed(&mut ours, output.as_bytes());
+        let config = Config {
+            scrolling_history: 1000,
+            kitty_keyboard: false,
+            osc52: Osc52::OnlyCopy,
+            ..Config::default()
+        };
+        let mut bare = Term::new(config, &Size, VoidListener);
+        let mut parser: Processor = Processor::new();
+        parser.advance(&mut bare, output.as_bytes());
+        assert_same_state(ours.term(), &bare).unwrap();
+        assert_eq!(ours.preceding_char(), parser.preceding_char(), "{output:?}");
+    }
+}

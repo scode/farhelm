@@ -74,8 +74,10 @@ const fn size(columns: u16, lines: u16) -> Size {
 
 /// Text that agents and shells print, beyond ASCII: what the status readers
 /// match on (box drawing, bullets, spinners, the prompt marks), wide CJK and
-/// emoji, and combining marks. Not an emoji made wide by a variation
-/// selector, which is a known difference (`KNOWN_DIFFERENCES`).
+/// emoji, and combining marks. Variation selectors stay in explicit cases:
+/// the emulator follows Ghostty's eligible-base and width rules, and their
+/// agreement with tmux depends on the base, cursor position and modes. This
+/// generator does not track the cursor well enough to choose agreeing places.
 const GLYPHS: &[&str] = &[
     "─",
     "│",
@@ -151,12 +153,14 @@ impl Stream {
     /// are now), CHT, DECRC without a DECSC on the same side of an alternate
     /// screen switch, a scroll region set in origin mode, insert mode (which
     /// differs across a wrap), autowrap off, a resize of anything but an empty
-    /// primary screen with the cursor at the top left, an emoji made wide by
-    /// VS16, and anything that acts on a pending wrap other than printing
+    /// primary screen with the cursor at the top left, variation selectors,
+    /// and anything that acts on a pending wrap other than printing
     /// (moving the cursor, a backspace, erasing characters). Each of those is
     /// sent here only in a form that avoids the pinned case, or not at all. A
     /// wide character that does not fit at the margin over text is in the mix;
-    /// the harness allows for it.
+    /// the harness allows for it. Selector width follows Ghostty rather than
+    /// tmux; even an eligible base that agrees mid-row can differ at the
+    /// margin, so selectors have explicit cases instead of generated placement.
     fn piece(&mut self, rng: &mut Rng) -> Piece {
         if let Some(size) = self.resize.take() {
             self.size = size;
@@ -423,6 +427,42 @@ fn scenarios() -> Vec<(&'static str, Size, Vec<Piece>)> {
                 out("e\u{301}x n\u{303}\u{301}\r\n"),
                 out("z ✅ 🚀"),
             ],
+        ),
+        (
+            "emoji selectors widen eligible bases mid-row and at the penultimate column",
+            small,
+            vec![
+                // A following glyph exposes the new width in the cursor and
+                // in placement, rather than only preserving the selector text.
+                out("a\u{2764}\u{fe0f}z"),
+                out("\x1b[2;19H\u{2764}\u{fe0f}"),
+                out("z"),
+                out("\r\n\u{231a}\u{fe0f}x #\u{fe0e}y"),
+            ],
+        ),
+        (
+            "widening in insert mode overwrites the next cell without inserting again",
+            small,
+            vec![
+                out("abcde\x1b[1;2H\x1b[4h\u{2764}"),
+                // Both terminals insert the base once; widening then consumes
+                // the shifted b instead of moving the suffix a second time.
+                out("\u{fe0f}"),
+                out("\x1b[4l"),
+            ],
+        ),
+        (
+            "selector widening keeps a pending wrap while autowrap is off",
+            small,
+            // A later enable must wrap x rather than overwrite the new tail.
+            vec![out("\x1b[?7l\x1b[1;19H\u{2764}\u{fe0f}\x1b[?7hx")],
+        ),
+        (
+            "standalone selectors and REP leave an empty screen untouched",
+            small,
+            // Keep REP in the same piece: a harness marker would itself
+            // clear tmux's remembered character before REP reaches it.
+            vec![out("\u{fe0f}\x1b[2b\u{fe0e}\x1b[2b")],
         ),
         (
             "wraps, including a wide character at the margin",
@@ -835,10 +875,15 @@ const fn known(
 /// None of these sequences changed the screen differently in the recorded
 /// Claude Code and Codex sessions (most never appear in them), and no frozen
 /// screen holds a tab or a variation selector, which is why they are
-/// recorded here rather than fixed. They are places where alacritty and tmux
-/// chose differently; which of the two xterm or xterm.js, which viewers see
-/// today, matches was not checked case by case. A difference at a pending
-/// wrap that only autowrap toggles, tabs or resizes of the alternate screen
+/// recorded here. Selector widths deliberately follow Ghostty's default
+/// Unicode behavior: only eligible immediate predecessors change width,
+/// FE0E can narrow, and selector attachment does not replace REP's printable
+/// base. The documented plain-space edge and one-column exceptions remain.
+/// tmux widens any narrow predecessor for FE0F, never narrows, and can
+/// repeat the selector itself. Those choices and edge placement are pinned
+/// below instead of treating tmux as the width oracle. The other differences
+/// are places where alacritty and tmux chose differently. A difference at a
+/// pending wrap that only autowrap toggles, tabs or resizes of the alternate screen
 /// reach is pinned here, not fixed in the vendored crate, unless it shows in
 /// the recordings or the frozen screens or changes what a status reader
 /// finds: the recorded agents never toggle autowrap or send a tab, and
@@ -870,11 +915,112 @@ const KNOWN_DIFFERENCES: &[KnownDifference] = &[
         ("b\nc\n\n\n", (0, 0)),
         ("a\nb\nc\n\n", (0, 0)),
     ),
+    // Ghostty's width decision uses the immediate stored predecessor, not
+    // just the cell's base. Rejected selectors are absent from capture text.
     known(
-        "an emoji made wide by VS16: two columns in tmux, one in the emulator",
-        "\u{2764}\u{fe0f}xxxxxxxxxxxxxxxxxxx",
-        ("\u{2764}\u{fe0f}xxxxxxxxxxxxxxxxxx\nx\n\n\n", (1, 1)),
-        ("\u{2764}\u{fe0f}xxxxxxxxxxxxxxxxxxx\n\n\n\n", (20, 0)),
+        "VS16 after a letter: tmux widens it, Ghostty ignores the selector",
+        "x\u{fe0f}y",
+        ("x\u{fe0f}y\n\n\n\n", (3, 0)),
+        ("xy\n\n\n\n", (2, 0)),
+    ),
+    known(
+        "VS16 after a combining mark: tmux widens the cell, Ghostty ignores the selector",
+        "\u{2764}\u{301}\u{fe0f}x",
+        ("\u{2764}\u{301}\u{fe0f}x\n\n\n\n", (3, 0)),
+        ("\u{2764}\u{301}x\n\n\n\n", (2, 0)),
+    ),
+    known(
+        "a second selector: tmux keeps it, Ghostty rejects the selector predecessor",
+        "\u{2764}\u{fe0f}\u{fe0e}x",
+        ("\u{2764}\u{fe0f}\u{fe0e}x\n\n\n\n", (3, 0)),
+        ("\u{2764}\u{fe0f}x\n\n\n\n", (3, 0)),
+    ),
+    known(
+        "VS16 after text presentation: tmux widens, Ghostty keeps the first selector's width",
+        "\u{2764}\u{fe0e}\u{fe0f}x",
+        ("\u{2764}\u{fe0e}\u{fe0f}x\n\n\n\n", (3, 0)),
+        ("\u{2764}\u{fe0e}x\n\n\n\n", (2, 0)),
+    ),
+    known(
+        "text presentation narrows an eligible wide base only in the emulator",
+        "\u{231a}\u{fe0e}x",
+        ("\u{231a}\u{fe0e}x\n\n\n\n", (3, 0)),
+        ("\u{231a}\u{fe0e}x\n\n\n\n", (2, 0)),
+    ),
+    known(
+        "text presentation at the penultimate column frees the last column instead of wrapping",
+        "\x1b[1;19H\u{231a}\u{fe0e}x",
+        ("                  \u{231a}\u{fe0e}\nx\n\n\n", (1, 1)),
+        ("                  \u{231a}\u{fe0e}x\n\n\n\n", (20, 0)),
+    ),
+    known(
+        "text presentation in insert mode leaves the inserted suffix in place",
+        "abcde\x1b[1;2H\x1b[4h\u{231a}\u{fe0e}",
+        ("a\u{231a}\u{fe0e}bcde\n\n\n\n", (3, 0)),
+        ("a\u{231a}\u{fe0e} bcde\n\n\n\n", (2, 0)),
+    ),
+    // tmux changes the width without moving an overflowing base to a new
+    // row. The next x makes that placement difference visible in both rows.
+    known(
+        "VS16 in the final column: Ghostty relocates the wide base to the next row",
+        "\x1b[1;20H\u{2764}\u{fe0f}x",
+        ("                   \u{2764}\u{fe0f}\nx\n\n\n", (1, 1)),
+        ("\n\u{2764}\u{fe0f}x\n\n\n", (3, 1)),
+    ),
+    // With wrap off tmux always looks left of its cursor. Ghostty can
+    // select the occupied edge itself, or the preceding base if it is empty.
+    known(
+        "VS16 at the final column with wrap off: tmux widens the preceding letter",
+        "\x1b[?7l\x1b[1;19Ha\u{2764}\u{fe0f}",
+        ("                  a\u{fe0f}\n\n\n\n", (20, 0)),
+        ("                  a\u{2764}\n\n\n\n", (19, 0)),
+    ),
+    known(
+        "VS16 before an occupied final column with wrap off: Ghostty selects the edge cell",
+        "\x1b[?7l\x1b[1;20Hx\x1b[1;19H\u{2764}\u{fe0f}",
+        ("                  \u{2764}\u{fe0f}\n\n\n\n", (20, 0)),
+        ("                  \u{2764}x\n\n\n\n", (19, 0)),
+    ),
+    known(
+        "widening over another wide head: Ghostty clears the old tail, tmux leaves padding",
+        "\u{2764}\u{6587}x\x1b[1;2H\u{fe0f}",
+        ("\u{2764}\u{fe0f}x\n\n\n\n", (2, 0)),
+        ("\u{2764}\u{fe0f} x\n\n\n\n", (2, 0)),
+    ),
+    KnownDifference {
+        name: "VS16 in one column: tmux widens beyond the row, Ghostty rejects attachment at column zero",
+        size: size(1, 4),
+        output: "\u{2764}\u{fe0f}",
+        resizes: &[],
+        then: "",
+        tmux: ("\u{2764}\u{fe0f}\n\n\n\n", (1, 0)),
+        emulator: ("\u{2764}\n\n\n\n", (1, 0)),
+    },
+    // REP must arrive before the rig's marker. tmux remembers the selector;
+    // Ghostty remembers the printable base, so the repeats have no selector.
+    known(
+        "REP after emoji presentation: tmux repeats VS16, Ghostty repeats the narrow base",
+        "\u{2764}\u{fe0f}\x1b[2b",
+        ("\u{2764}\u{fe0f}\u{fe0f}\u{fe0f}\n\n\n\n", (2, 0)),
+        ("\u{2764}\u{fe0f}\u{2764}\u{2764}\n\n\n\n", (4, 0)),
+    ),
+    known(
+        "REP after text presentation: tmux repeats VS15, Ghostty repeats the wide base",
+        "\u{231a}\u{fe0e}\x1b[2b",
+        ("\u{231a}\u{fe0e}\u{fe0e}\u{fe0e}\n\n\n\n", (2, 0)),
+        ("\u{231a}\u{fe0e}\u{231a}\u{231a}\n\n\n\n", (5, 0)),
+    ),
+    known(
+        "REP after a rejected selector: tmux repeats VS16, Ghostty keeps the printable base",
+        "x\u{fe0f}\x1b[2b",
+        ("x\u{fe0f}\u{fe0f}\u{fe0f}\n\n\n\n", (2, 0)),
+        ("xxx\n\n\n\n", (3, 0)),
+    ),
+    known(
+        "REP after a mark and rejected selector: Ghostty still repeats the printable base",
+        "\u{2764}\u{301}\u{fe0f}\x1b[2b",
+        ("\u{2764}\u{301}\u{fe0f}\u{fe0f}\u{fe0f}\n\n\n\n", (2, 0)),
+        ("\u{2764}\u{301}\u{2764}\u{2764}\n\n\n\n", (3, 0)),
     ),
     known(
         "a tab stop set inside a tab already written",

@@ -1,20 +1,21 @@
 diff --git a/vte/src/ansi.rs b/vte/src/ansi.rs
-index 592266e..ac29ec4 100644
+index 592266e..6b86ece 100644
 --- a/vte/src/ansi.rs
 +++ b/vte/src/ansi.rs
-@@ -3,6 +3,11 @@
+@@ -3,6 +3,12 @@
  // This module was originally part of the `alacritty_terminal` crate, which is
  // licensed under the Apache License, Version 2.0 and is part of the Alacritty
  // project (https://github.com/alacritty/alacritty).
 +//
 +// Modified for Farhelm: adds `Processor::is_ground()`, `preceding_char()` and
 +// `set_preceding_char()`, ends the active hyperlink when an OSC 8 is dropped
-+// for its length, and reports XTVERSION queries to the handler. See
++// for its length, reports XTVERSION queries to the handler, and lets the
++// handler keep REP's character across grapheme continuations. See
 +// vendor/README.md in the Farhelm repository.
  
  //! ANSI Terminal Stream Parsing.
  
-@@ -363,6 +368,33 @@ impl<T: Timeout> Processor<T> {
+@@ -363,6 +369,33 @@ impl<T: Timeout> Processor<T> {
          self.state.sync_state.buffer.len()
      }
  
@@ -48,7 +49,24 @@ index 592266e..ac29ec4 100644
      /// Process a new byte during a synchronized update.
      ///
      /// Returns the number of bytes processed.
-@@ -526,6 +558,12 @@ pub trait Handler {
+@@ -505,6 +538,16 @@ pub trait Handler {
+     /// A character to be displayed.
+     fn input(&mut self, _c: char) {}
+ 
++    /// Farhelm patch: whether this input replaces the character REP repeats.
++    ///
++    /// Asked before `input`, so a terminal can keep its printable base when
++    /// a grapheme continuation is attached or rejected. The default preserves
++    /// upstream bookkeeping; the terminal owns the policy and a legacy replay
++    /// can retain it without adding a second remembered character.
++    fn input_updates_rep(&self, _c: char) -> bool {
++        true
++    }
++
+     /// Set cursor to position.
+     fn goto(&mut self, _line: i32, _col: usize) {}
+ 
+@@ -526,6 +569,12 @@ pub trait Handler {
      /// Identify the terminal (should write back to the pty stream).
      fn identify_terminal(&mut self, _intermediate: Option<char>) {}
  
@@ -61,7 +79,21 @@ index 592266e..ac29ec4 100644
      /// Report device status.
      fn device_status(&mut self, _: usize) {}
  
-@@ -1325,6 +1363,18 @@ where
+@@ -1288,8 +1337,12 @@ where
+ {
+     #[inline]
+     fn print(&mut self, c: char) {
++        // Farhelm patch: attachment need not replace the existing REP base.
++        let updates_rep = self.handler.input_updates_rep(c);
+         self.handler.input(c);
+-        self.state.preceding_char = Some(c);
++        if updates_rep {
++            self.state.preceding_char = Some(c);
++        }
+     }
+ 
+     #[inline]
+@@ -1325,6 +1378,18 @@ where
          debug!("[unhandled unhook]");
      }
  
@@ -80,7 +112,7 @@ index 592266e..ac29ec4 100644
      #[inline]
      fn osc_dispatch(&mut self, params: &[&[u8]], bell_terminated: bool) {
          let terminator = if bell_terminated { "\x07" } else { "\x1b\\" };
-@@ -1708,6 +1758,8 @@ where
+@@ -1708,6 +1773,8 @@ where
                  let mode = next_param_or(0);
                  handler.report_private_mode(PrivateMode::new(mode));
              },
@@ -89,7 +121,7 @@ index 592266e..ac29ec4 100644
              ('q', [b' ']) => {
                  // DECSCUSR (CSI Ps SP q) -- Set Cursor Style.
                  let cursor_style_id = next_param_or(0);
-@@ -2437,6 +2489,78 @@ mod tests {
+@@ -2437,6 +2504,105 @@ mod tests {
          assert_eq!(handler.attr.take(), Some(Attr::Underline));
      }
  
@@ -163,6 +195,33 @@ index 592266e..ac29ec4 100644
 +            parser.advance(&mut handler, bytes);
 +            assert_eq!(handler.reports, reports, "after {:?}", String::from_utf8_lossy(bytes));
 +        }
++    }
++
++    /// Farhelm patch test: the handler may preserve REP's base while still
++    /// receiving every input character. Unrelated handlers keep the old
++    /// unconditional update, so this additive hook changes no default.
++    #[test]
++    fn rep_policy_preserves_the_existing_register_and_default() {
++        #[derive(Default)]
++        struct PreservingHandler(Vec<char>);
++        impl Handler for PreservingHandler {
++            fn input(&mut self, c: char) {
++                self.0.push(c);
++            }
++
++            fn input_updates_rep(&self, c: char) -> bool {
++                c != '\u{fe0f}'
++            }
++        }
++        let mut parser = Processor::<TestSyncHandler>::new();
++        let mut handler = PreservingHandler::default();
++        parser.advance(&mut handler, "a\u{fe0f}\x1b[2b".as_bytes());
++        assert_eq!(handler.0, ['a', '\u{fe0f}', 'a', 'a']);
++        assert_eq!(parser.preceding_char(), Some('a'));
++
++        let mut parser = Processor::<TestSyncHandler>::new();
++        parser.advance(&mut MockHandler::default(), "a\u{fe0f}".as_bytes());
++        assert_eq!(parser.preceding_char(), Some('\u{fe0f}'));
 +    }
 +
      #[test]

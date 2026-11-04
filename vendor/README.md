@@ -7,9 +7,9 @@ patch file together.
 The supervisor's terminal emulator (`crates/farhelm-terminal-emulator/`) runs on `alacritty_terminal` 0.26.0 and its
 parser `vte` 0.15.0. Both are used as published on crates.io except for a few small patches: accessors that snapshot and
 restore need, caps on what hostile program output can make them store, two history counters for the grid stream, one
-more query for the handler to answer, nine bug fixes, and one mode change that follows tmux over xterm (the UTF-8 and
-SGR mouse encodings as separate modes). The root `Cargo.toml` swaps these trees in for the crates.io versions with
-`[patch.crates-io]`.
+more query for the handler to answer, nine bug fixes, emoji variation widths following Ghostty, and one mode change that
+follows tmux over xterm (the UTF-8 and SGR mouse encodings as separate modes). The root `Cargo.toml` swaps these trees
+in for the crates.io versions with `[patch.crates-io]`.
 
 ## What is here
 
@@ -47,8 +47,8 @@ files to say so, so every patched file starts with a `Modified for Farhelm` comm
 
 ## The patches
 
-Here's what each one changes and why. None changes behavior except the caps, the bug fixes and the mouse-encoding
-change, and the XTVERSION hook changes it only for a handler that implements the new method.
+Here's what each one changes and why. The caps, bug fixes, emoji widths and mouse-encoding change affect terminal
+behavior; the XTVERSION and REP hooks change it only for a handler that implements the new methods.
 
 ### Snapshot accessors
 
@@ -161,7 +161,7 @@ Each status says whether the behavior was checked against upstream's current sou
 master at `aecf0f600fa840a415b55da5cf34fbeaec39ac32` (`alacritty_terminal` 0.26.1-dev; crates.io's newest is still
 0.26.0) and `alacritty/vte` master at `89c9c22f5b8fcc3feba0a9d9f50a020801e74acc` (0.15.0; since the release,
 `src/lib.rs` and `src/ansi.rs` changed only in comments, `docsrs` attributes and one `debug!` argument, `&buf` to
-`buf`). Of the five patched `alacritty_terminal` files, only `term/cell.rs` (the combining character cap, below),
+`buf`). Of the five patched `alacritty_terminal` Rust files, only `term/cell.rs` (the combining character cap, below),
 `term/mod.rs` and `grid/row.rs` (`Row::new`) differ at that commit from 0.26.0. The `term/mod.rs` change is an upstream
 fix to `push_keyboard_mode`, which in 0.26.0 removes the oldest entry of the title stack, not of the keyboard mode
 stack, when the keyboard mode stack is full: that panics when the title stack is empty, and otherwise drops a title and
@@ -189,7 +189,7 @@ records" after the records).
 - Why Farhelm needs it: a snapshot of the emulator is only continuable where this holds; elsewhere the snapshot plus the
   bytes after it would not rebuild the same state.
 - Upstream code: `vte/src/lib.rs`, `Parser`; `vte/src/ansi.rs`, `Processor`.
-- Patch hunks (vte): `lib.rs` `@@ -90,6 +119,18 @@` (`Parser::is_ground`); `ansi.rs` `@@ -363,6 +368,33 @@`, its
+- Patch hunks (vte): `lib.rs` `@@ -90,6 +119,18 @@` (`Parser::is_ground`); `ansi.rs` `@@ -363,6 +369,33 @@`, its
   `is_ground` (shared with the REP record, which owns the rest of the hunk); tests in `lib.rs` `@@ -1539,4 +1634,172 @@`
   (`is_ground_only_between_sequences`).
 - Tests: `tests::is_ground_only_between_sequences` (vte) covers `Parser::is_ground()`. `Processor::is_ground()` only
@@ -224,7 +224,7 @@ records" after the records).
   Codex session the terminal host prototype recorded (not in the repository) contain no REP (searched for `ESC [ Ps b`
   on 2026-11-03).
 - Upstream code: `vte/src/ansi.rs`, `Processor`.
-- Patch hunks (vte): `ansi.rs` `@@ -363,6 +368,33 @@`, its `preceding_char` and `set_preceding_char` (shared with the
+- Patch hunks (vte): `ansi.rs` `@@ -363,6 +369,33 @@`, its `preceding_char` and `set_preceding_char` (shared with the
   `is_ground` record).
 - Tests: none in the vendored trees. The emulator's snapshot tests exercise both accessors:
   `control_characters_as_the_rep_character_round_trip` and `a_hand_built_v1_blob_restores_as_its_layout_says`
@@ -234,6 +234,70 @@ records" after the records).
   (`tests/common/compare.rs`).
 - Upstream status: not yet reported. Upstreamable as is: additive. Checked against vte `89c9c22` on 2026-11-03: still
   missing.
+
+#### Emoji variation widths and the character REP repeats
+
+- Upstream today: `Term::input` appends FE0E and FE0F as zero-width marks without changing a cell's width. vte replaces
+  its REP character after every input character, including those marks. Both remain true at the upstream commits named
+  above.
+- Reproduction (5x3, columns from 1): `❤ FE0F x` leaves `x` in column 2 upstream, rather than column 3. `⌚ FE0E x`
+  leaves `x` in column 3 upstream, rather than column 2. At column 5, `❤ FE0F` leaves a narrow heart upstream; with the
+  rule enabled it leaves a leading spacer and wraps a wide heart onto the next row. On a 10-column screen,
+  `❤ FE0F CSI 2 b` repeats selectors upstream, rather than printing two bare hearts after the wide one. Vendored and
+  paired tests exercise these byte sequences; there is no Ghostty runtime observation.
+- Reference: Ghostty's default configuration selects Unicode grapheme widths (`Config.zig:490–515`, mapped in
+  `Termio.zig:255–280`). At commit `c7f68a7f48c6a5b357689eb8c2328bc2dab5d8ed`,
+  [`grapheme.zig:56–80`](https://github.com/ghostty-org/ghostty/blob/c7f68a7f48c6a5b357689eb8c2328bc2dab5d8ed/src/unicode/grapheme.zig#L56-L80)
+  accepts a selector only after a valid variation base. The immediate stored predecessor matters: a combining mark or an
+  already attached selector makes a following selector ineligible, and an ineligible selector is dropped.
+  [`Terminal.zig:1929–2126`](https://github.com/ghostty-org/ghostty/blob/c7f68a7f48c6a5b357689eb8c2328bc2dab5d8ed/src/terminal/Terminal.zig#L1929-L2126)
+  chooses the target, changes width before appending the mark, overwrites rather than inserts the new tail, and
+  relocates a wrapping base with the current pen. Its early return keeps REP's printable base (`:2117–2187`). These are
+  source-derived results. xterm-412 selector behavior was not checked for this record; the xterm.js path was out of
+  scope. tmux 3.7c's `screen_write_combine` in `screen-write.c` widens any narrow cell followed by FE0F, never narrows
+  for FE0E, and retains the selector as REP's character (`input.c`, `INPUT_CSI_REP`); the supervisor's known differences
+  pin those choices against a live tmux.
+- Fix: `Term::input_emoji_selector` chooses from the current grid and its stored suffix, with no new remembered input.
+  `unicode-width`'s sequence widths identify eligible bases, plus eight literal narrowing exceptions from Unicode 18.0's
+  variation-sequence data. Formatting inputs Ghostty discards never become selector predecessors, and incoming V/T
+  continuations attach only after the immediate Hangul or Prepend predecessor that permits them. The literal properties
+  come from the same pinned Unicode data; `THIRD_PARTY_NOTICES.md` and `UNICODE-LICENSE.txt` carry its notice. This is
+  not a general grapheme engine, and ordinary L and Prepend scalar widths stay alacritty's. No Ghostty implementation is
+  copied. Mid-row widening preserves the base's pen; wrapping uses the current pen, and marks go through bounded extra
+  storage. Layout changes even when that storage drops the selector. `set_emoji_width(false)` restores legacy attachment
+  and REP bookkeeping during v1 snapshot painting; callers enable it before replaying journal output. Existing cell
+  fixups represent changed widths, so the encoder, golden blobs and ordinary width fingerprint stay unchanged.
+- Accepted differences from Ghostty: at the right edge with autowrap off, a plain space counts as empty when choosing
+  the target. Farhelm's cells and v1 blobs cannot distinguish a printed space from an erased cell; Ghostty can
+  ([`:1939–1967`](https://github.com/ghostty-org/ghostty/blob/c7f68a7f48c6a5b357689eb8c2328bc2dab5d8ed/src/terminal/Terminal.zig#L1939-L1967)).
+  On a one-column screen, existing ordinary wide-input handling stays: drop before consuming a pending wrap, while
+  Ghostty consumes it before clearing the too-wide input
+  ([`:2189–2262`](https://github.com/ghostty-org/ghostty/blob/c7f68a7f48c6a5b357689eb8c2328bc2dab5d8ed/src/terminal/Terminal.zig#L2189-L2262)).
+  Both are explicit maintainer decisions, pinned in tests. Ordinary autowrap-off writes retain their existing rule;
+  selector widening into the final pair leaves a pending wrap even with autowrap off, as Ghostty does, so turning
+  wrapping on before the next print wraps instead of overwriting that pair.
+- Why Farhelm needs it: programs count eligible emoji sequences as two columns. Giving them one shifts the rest of a
+  row, and restoring an old snapshot with the new live rule would silently change its saved cells and REP state.
+- Upstream code: alacritty `term/mod.rs`, `Term::input` and the selector helper; its `Cargo.toml` opt-in
+  `farhelm-rep-policy` feature; vte `ansi.rs`, `Handler::input_updates_rep` and `Performer::print`. The hook defaults to
+  upstream behavior. The feature gates only Term's override, since standalone alacritty uses upstream vte, which lacks
+  the hook. Paired tests and Farhelm enable it; standalone default tests still compile unchanged, while standalone
+  `--all-features` requires patched vte. The inherent Term policy and width switch exist in either configuration.
+- Patch hunks: alacritty `Cargo.toml` `@@ -33,6 +35,9 @@` (feature); `term/mod.rs` `@@ -327,6 +396,14 @@` (field),
+  `@@ -441,15 +518,18 @@` (default), `@@ -953,6 +1033,236 @@` (switch, policy and helper, shared with restore accessors
+  and extra storage), `@@ -1056,10 +1398,131 @@` (eligibility, gated hook, input dispatch), and tests
+  `@@ -3299,4 +3832,1055 @@`; vte `ansi.rs` `@@ -505,6 +538,16 @@` (default hook), `@@ -1288,8 +1337,12 @@` (conditional
+  REP update) and tests `@@ -2437,6 +2504,105 @@`.
+- Tests: the `term::tests::emoji_selector*` / `emoji_selectors*` / `emoji_text_selector*` tests cover targets, widths,
+  cursor, wrap, eligibility, styles, hyperlinks, insert/overwrite cleanup, both exceptions, storage exhaustion and the
+  legacy switch. Paired `grapheme_continuations_keep_the_printable_rep_base` and
+  `legacy_width_switch_also_restores_the_legacy_rep_policy` cover the actual parser interaction. vte's
+  `rep_policy_preserves_the_existing_register_and_default` pins the additive default. Farhelm adds snapshot boundary and
+  old-style stream tests, genuine bare-Term delegation, generated round trips, live tmux differences and host-only
+  browser checks of replayed width and a narrowed glyph's one-cell box.
+- Upstream status: not yet reported. Checked against alacritty `aecf0f6` and vte `89c9c22`: still absent. This is a
+  choice of width policy, rather than a claim that upstream's current behavior violates its own contract. An upstream
+  change would need its own policy/default decision and a compatible parser integration.
 
 #### alacritty_terminal: the state a restore needs
 
@@ -256,8 +320,9 @@ records" after the records).
   emulator also uses `inactive_grid_mut()` outside snapshots, to implement modes 47 and 1047 on top of alacritty's
   screen switch (the Farhelm-side record below).
 - Upstream code: `alacritty_terminal/src/term/mod.rs`, `impl<T> Term<T>`.
-- Patch hunks (`alacritty_terminal`): `term/mod.rs` `@@ -953,6 +1027,73 @@`, all but its last accessor,
-  `extra_storage()`, which belongs to the extra storage record.
+- Patch hunks (`alacritty_terminal`): `term/mod.rs` `@@ -953,6 +1033,236 @@`, the accessors from `inactive_grid()`
+  through `keyboard_mode_stacks()`. `extra_storage()` belongs to its record, and the following selector methods to the
+  emoji-width record.
 - Tests: no vendored test is about the accessors, though two read them on the way: `term::tests::history_counters` reads
   `inactive_grid()` and `term::tests::title_length_is_capped` reads `title()` and `title_stack()`. The emulator's
   snapshot tests rest on all of them: the round trips in `farhelm-terminal-emulator`'s `tests/snapshot_roundtrip.rs` and
@@ -345,7 +410,7 @@ records" after the records).
   with the previous record), `@@ -548,14 +589,32 @@` (the `osc_overflow_dispatch` call in `osc_end`, shared),
   `@@ -588,6 +647,17 @@` (`osc_overflow_dispatch`), `@@ -791,6 +865,19 @@` (`Perform::osc_overflow`), tests in
   `@@ -850,6 +937,8 @@`, `@@ -865,6 +954,12 @@` (shared) and `@@ -1539,4 +1634,172 @@`; `ansi.rs`
-  `@@ -1325,6 +1363,18 @@` (`Performer::osc_overflow`) and the test in `@@ -2437,6 +2489,78 @@`.
+  `@@ -1325,6 +1378,18 @@` (`Performer::osc_overflow`) and the test in `@@ -2437,6 +2504,105 @@`.
 - Tests: `tests::osc_overflow_reports_only_complete_params` (vte); `tests::dropped_osc8_ends_hyperlink` (vte, `ansi`);
   `too_long_hyperlink_ends_active_link_at_either_layer` (`pair-tests`).
 - Upstream status: not yet reported. Upstreamable together with a configurable OSC limit: additive trait method with a
@@ -370,7 +435,7 @@ records" after the records).
 - Upstream code: `alacritty_terminal/src/term/cell.rs`, `Cell::push_zerowidth`.
 - Patch hunks (`alacritty_terminal`, `term/cell.rs`): `@@ -36,6 +43,18 @@` (`MAX_ZEROWIDTH_CHARS`, which the extra
   storage's `CELL_EXTRA_COST` is sized by) and `@@ -162,6 +360,10 @@` (`push_zerowidth`); the test in `term/mod.rs`
-  `@@ -3299,4 +3542,629 @@`.
+  `@@ -3299,4 +3832,1055 @@`.
 - Tests: `term::tests::zerowidth_characters_per_cell_are_capped` (vendored);
   `a_combining_character_flood_is_capped_per_cell` (`farhelm-terminal-emulator`, `tests/hostile.rs`).
 - Upstream status: fixed upstream, differently. Checked against alacritty `aecf0f6` on 2026-11-03: commit
@@ -397,8 +462,8 @@ records" after the records).
 - Upstream code: `alacritty_terminal/src/term/mod.rs`, `Term::set_hyperlink`.
 - Patch hunks (`alacritty_terminal`, `term/mod.rs`): `@@ -41,6 +53,63 @@`, its `MAX_HYPERLINK_URI_BYTES` and
   `MAX_HYPERLINK_ID_BYTES` (the hunk's other constants belong to the extra storage and title records);
-  `@@ -1873,7 +2076,26 @@`, its first statement, the `filter` (the reuse and extra storage records own the rest); the
-  test in `@@ -3299,4 +3542,629 @@`.
+  `@@ -1873,7 +2366,26 @@`, its first statement, the `filter` (the reuse and extra storage records own the rest); the
+  test in `@@ -3299,4 +3832,1055 @@`.
 - Tests: `term::tests::hyperlink_uri_and_id_lengths_are_capped` (vendored);
   `too_long_hyperlink_ends_active_link_at_either_layer` (`pair-tests`); `long_hyperlinks_are_not_stored`
   (`farhelm-terminal-emulator`, `tests/hostile.rs`).
@@ -428,8 +493,8 @@ records" after the records).
   return, `ExtraStorage::link` finds no room for the repeated link and `set_hyperlink` gets `None`, so a program that
   merely repeated its link would lose it.
 - Upstream code: `alacritty_terminal/src/term/mod.rs`, `Term::set_hyperlink`.
-- Patch hunks (`alacritty_terminal`, `term/mod.rs`): `@@ -1873,7 +2076,26 @@`, its `if let` that returns early (the
-  length caps and extra storage records own the rest); the test in `@@ -3299,4 +3542,629 @@`.
+- Patch hunks (`alacritty_terminal`, `term/mod.rs`): `@@ -1873,7 +2366,26 @@`, its `if let` that returns early (the
+  length caps and extra storage records own the rest); the test in `@@ -3299,4 +3832,1055 @@`.
 - Tests: `term::tests::repeated_hyperlink_is_shared` (vendored) pins the sharing, not this hunk: with the early return
   removed in a scratch copy, it and all 151 of the crate's library tests still pass (recorded run `1f62884b`, local,
   2026-11-03), because the extra storage's check gives the same sharing. Missing is a check that tells the two apart:
@@ -453,7 +518,7 @@ records" after the records).
   status detection reads the title, which must not be split inside a character.
 - Upstream code: `alacritty_terminal/src/term/mod.rs`, `Term::set_title`.
 - Patch hunks (`alacritty_terminal`, `term/mod.rs`): `@@ -41,6 +53,63 @@`, its `MAX_TITLE_BYTES`;
-  `@@ -2221,6 +2450,20 @@` (`set_title`); the test in `@@ -3299,4 +3542,629 @@`.
+  `@@ -2221,6 +2740,20 @@` (`set_title`); the test in `@@ -3299,4 +3832,1055 @@`.
 - Tests: `term::tests::title_length_is_capped` (vendored); `titles_are_capped` (`farhelm-terminal-emulator`,
   `tests/hostile.rs`).
 - Upstream status: not yet reported. The value is Farhelm policy. An upstream-friendly version could instead lower
@@ -474,7 +539,7 @@ records" after the records).
 - Why Farhelm needs it: the grid stream sends scrollback to viewers as appended ranges.
 - Upstream code: `alacritty_terminal/src/grid/mod.rs`, `Grid::scroll_up` and `Grid::clear_history`.
 - Patch hunks (`alacritty_terminal`): every hunk of `grid/mod.rs` (`@@ -135,6 +139,20 @@`, `@@ -147,9 +165,44 @@`,
-  `@@ -270,6 +323,11 @@`, `@@ -381,6 +439,9 @@`); the tests in `term/mod.rs` `@@ -3299,4 +3542,629 @@`.
+  `@@ -270,6 +323,11 @@`, `@@ -381,6 +439,9 @@`); the tests in `term/mod.rs` `@@ -3299,4 +3832,1055 @@`.
 - Tests: `term::tests::history_counters`, `term::tests::history_counters_clear_and_reset` (vendored).
 - Upstream status: not yet reported. Upstreamable as is: additive. Checked against alacritty `aecf0f6` on 2026-11-03:
   still missing.
@@ -494,8 +559,8 @@ records" after the records).
 - Why Farhelm needs it: one column is a valid terminal size (the terminal host accepts it), and the emulator stays the
   size of the host's pty rather than widening itself, so any program's output could panic the supervisor's task.
 - Upstream code: `alacritty_terminal/src/term/mod.rs`, `Term::input` (the `Handler` implementation).
-- Patch hunks (`alacritty_terminal`, `term/mod.rs`): `@@ -1080,7 +1253,17 @@`, its one-column check (its
-  `push_zerowidth` change is the extra storage record's); the test in `@@ -3299,4 +3542,629 @@`, shared with the reflow
+- Patch hunks (`alacritty_terminal`, `term/mod.rs`): `@@ -1080,7 +1543,17 @@`, its one-column check (its
+  `push_zerowidth` change is the extra storage record's); the test in `@@ -3299,4 +3832,1055 @@`, shared with the reflow
   record.
 - Tests: `term::tests::a_one_column_grid_drops_wide_characters` (vendored);
   `a_one_column_terminal_drops_wide_characters`, `a_zero_size_becomes_one_cell` and
@@ -517,7 +582,7 @@ records" after the records).
 - Why Farhelm needs it: a viewer can resize a terminal to one column while it shows wide text.
 - Upstream code: `alacritty_terminal/src/grid/resize.rs`, `Grid::shrink_columns`.
 - Patch hunks (`alacritty_terminal`): `grid/resize.rs` `@@ -286,6 +289,17 @@`; the test in `term/mod.rs`
-  `@@ -3299,4 +3542,629 @@`, shared with the previous record.
+  `@@ -3299,4 +3832,1055 @@`, shared with the previous record.
 - Tests: `term::tests::a_one_column_grid_drops_wide_characters` (vendored, its resize half, on a timed thread);
   `resizing_to_one_column_with_wide_characters` and `narrow_terminals_survive_any_output` (`tests/narrow.rs`, each
   bounded to 10 seconds).
@@ -586,8 +651,8 @@ records" after the records).
   terminal supports synchronized output (DECRQM 2026), and then draws without it (read from Claude Code 2.1.316's
   startup code). The emulator answers `Farhelm <version>` (`farhelm-terminal-emulator`, `src/queries.rs`).
 - Upstream code: `vte/src/ansi.rs`, `trait Handler` and `Performer::csi_dispatch`.
-- Patch hunks (vte, `ansi.rs`): `@@ -526,6 +558,12 @@` (`Handler::report_version`), `@@ -1708,6 +1758,8 @@` (the
-  `csi_dispatch` arm); the test in `@@ -2437,6 +2489,78 @@`.
+- Patch hunks (vte, `ansi.rs`): `@@ -526,6 +569,12 @@` (`Handler::report_version`), `@@ -1708,6 +1773,8 @@` (the
+  `csi_dispatch` arm); the test in `@@ -2437,6 +2504,105 @@`.
 - Tests: `ansi::tests::xtversion_reaches_the_handler` (vte); `identification_status_and_window_queries`
   (`farhelm-terminal-emulator`, `tests/queries.rs`); `emulator_parity::queries::recorded_agent_probes_get_tmux_answers`.
 - Upstream status: not yet reported. Upstreamable as an additive API; the method name is Farhelm's choice. Checked
@@ -604,7 +669,7 @@ records" after the records).
 - Fix: the condition is `cursor.line > 0`. An off-by-one; Farhelm needs it because it reads agents' screens from this
   grid and stale text would stay there.
 - Upstream code: `alacritty_terminal/src/term/mod.rs`, `Term::clear_screen`.
-- Patch hunks (`alacritty_terminal`, `term/mod.rs`): `@@ -1757,8 +1950,10 @@`; the test in `@@ -3299,4 +3542,629 @@`.
+- Patch hunks (`alacritty_terminal`, `term/mod.rs`): `@@ -1757,8 +2240,10 @@`; the test in `@@ -3299,4 +3832,1055 @@`.
 - Tests: `term::tests::erase_above_from_the_second_line_clears_the_first` (vendored);
   `emulator_parity::generated::hand_picked_screens_match_tmux`, scenario "erase operations".
 - Upstream status: not yet reported. Upstreamable as is. Checked against alacritty `aecf0f6` on 2026-11-03: still
@@ -673,9 +738,9 @@ records" after the records).
   `emulator_parity::queries::the_answer_table_matches_tmux`. What still differs from tmux at a pending wrap (a tab, a
   wider alternate screen, a wide character after the corner-cell idiom, writing after autowrap is turned off) is pinned
   in `emulator_parity::generated::known_differences_stay_as_documented`.
-- Patch hunks (`alacritty_terminal`, `term/mod.rs`): `@@ -1112,8 +1295,12 @@` (no flag for a wide character dropped with
-  autowrap off) and `@@ -1130,9 +1317,13 @@` (no flag for a last-column write with autowrap off); the test in
-  `@@ -3299,4 +3542,629 @@`.
+- Patch hunks (`alacritty_terminal`, `term/mod.rs`): `@@ -1112,8 +1585,12 @@` (no flag for a wide character dropped with
+  autowrap off) and `@@ -1130,9 +1607,13 @@` (no flag for a last-column write with autowrap off); the test in
+  `@@ -3299,4 +3832,1055 @@`.
 - Upstream status: not yet reported. Arguable upstream: it makes the flag mean what the crate documents, but xterm and
   xterm.js both keep a wrap pending through a last-column write with autowrap off (above), so upstream can point at
   either for its current behavior; the case for the change is tmux and the crate's own documentation. The hunk for the
@@ -695,12 +760,13 @@ records" after the records).
   cursor's line only `if (s->cx <= sx - 1)` (`screen_write_clearendofscreen`). xterm.js erases from its pending position
   `x == cols` and so keeps the character too. xterm erases it: it keeps the cursor on the last column and `ClearRight`
   (`util.c`) erases from `cur_col`, for `CSI J` and `CSI K` alike.
-- Fix: erasing below starts after the cursor's column when `input_needs_wrap` is set. With the wrap-flag fix above, the
-  flag is set only for a column written with autowrap on (or by a reflowing resize, which upstream code leaves as it
-  is), so a column written with autowrap off is erased, as tmux erases it.
+- Fix: erasing below starts after the cursor's column when `input_needs_wrap` is set. Ordinary input raises the flag
+  only with autowrap on, so an ordinary final-column write with autowrap off is erased, as tmux erases it. A reflowing
+  resize can also raise the flag, as upstream does. Selector widening into the final pair raises it even with autowrap
+  off, per the emoji-width record, and an erase then keeps that pair.
 - Why Farhelm needs it: the status readers were written against tmux's captures, and the erased character changes them.
 - Upstream code: `alacritty_terminal/src/term/mod.rs`, `Term::clear_screen`.
-- Patch hunks (`alacritty_terminal`, `term/mod.rs`): `@@ -1774,7 +1969,15 @@`; the test in `@@ -3299,4 +3542,629 @@`.
+- Patch hunks (`alacritty_terminal`, `term/mod.rs`): `@@ -1774,7 +2259,15 @@`; the test in `@@ -3299,4 +3832,1055 @@`.
 - Tests: `term::tests::erase_below_with_a_wrap_pending_keeps_the_last_column` (vendored: written with autowrap on, off,
   off then on, on then off, and on then a wide character dropped with autowrap off);
   `emulator_parity::generated::hand_picked_screens_match_tmux`, scenarios "erase operations" and "autowrap off at the
@@ -728,9 +794,9 @@ records" after the records).
   on the screen agents' status is read from and viewers see.
 - Upstream code: `alacritty_terminal/src/term/mod.rs`, `Term::move_up`, `move_down`, `move_up_and_cr`,
   `move_down_and_cr`.
-- Patch hunks (`alacritty_terminal`, `term/mod.rs`): `@@ -1017,6 +1160,36 @@` (`vertical_move`, which the CHA record
-  uses too), `@@ -1215,18 +1408,18 @@` (`move_up`, `move_down`), `@@ -1349,16 +1542,16 @@` (`move_down_and_cr`,
-  `move_up_and_cr`); the test in `@@ -3299,4 +3542,629 @@`.
+- Patch hunks (`alacritty_terminal`, `term/mod.rs`): `@@ -1017,6 +1329,36 @@` (`vertical_move`, which the CHA record
+  uses too), `@@ -1215,18 +1698,18 @@` (`move_up`, `move_down`), `@@ -1349,16 +1832,16 @@` (`move_down_and_cr`,
+  `move_up_and_cr`); the test in `@@ -3299,4 +3832,1055 @@`.
 - Tests: `term::tests::relative_vertical_moves_stop_at_the_scroll_margins` (vendored);
   `emulator_parity::generated::hand_picked_screens_match_tmux`, scenario "scroll regions";
   `emulator_parity::generated::generated_streams_match_tmux`.
@@ -750,8 +816,8 @@ records" after the records).
   such line the region's offset further down than tmux does, on the screen status detection reads and viewers see. No
   recorded agent session was checked for origin mode; the parity comparison with tmux pins this case.
 - Upstream code: `alacritty_terminal/src/term/mod.rs`, `Term::goto_col`.
-- Patch hunks (`alacritty_terminal`, `term/mod.rs`): `@@ -1180,7 +1371,9 @@`, which needs `vertical_move` from
-  `@@ -1017,6 +1160,36 @@` (the relative moves record); the test in `@@ -3299,4 +3542,629 @@`.
+- Patch hunks (`alacritty_terminal`, `term/mod.rs`): `@@ -1180,7 +1661,9 @@`, which needs `vertical_move` from
+  `@@ -1017,6 +1329,36 @@` (the relative moves record); the test in `@@ -3299,4 +3832,1055 @@`.
 - Tests: `term::tests::cha_in_origin_mode_keeps_the_line` (vendored);
   `emulator_parity::generated::hand_picked_screens_match_tmux`, scenario "scroll regions".
 - Upstream status: not yet reported. Upstreamable as is together with the relative moves fix; filed alone, it would
@@ -770,7 +836,7 @@ records" after the records).
   cursor was rather than at the top left, as tmux has it, on the screen status detection reads and viewers see. As for
   CHA, no recorded agent session was checked for origin mode; the parity comparison with tmux pins it.
 - Upstream code: `alacritty_terminal/src/term/mod.rs`, `Term::unset_private_mode`.
-- Patch hunks (`alacritty_terminal`, `term/mod.rs`): `@@ -2031,7 +2255,12 @@`; the test in `@@ -3299,4 +3542,629 @@`.
+- Patch hunks (`alacritty_terminal`, `term/mod.rs`): `@@ -2031,7 +2545,12 @@`; the test in `@@ -3299,4 +3832,1055 @@`.
 - Tests: `term::tests::resetting_origin_mode_homes_the_cursor` (vendored);
   `emulator_parity::generated::generated_streams_match_tmux`.
 - Upstream status: not yet reported. Upstreamable as is. Checked against alacritty `aecf0f6` on 2026-11-03: still
@@ -805,7 +871,7 @@ records" after the records).
   SGR from xterm.js and from tmux, and would have got UTF-8 coordinates from the emulator. DECRQM answers now match
   tmux's for both modes too.
 - Upstream code: `alacritty_terminal/src/term/mod.rs`, `Term::set_private_mode`.
-- Patch hunks (`alacritty_terminal`, `term/mod.rs`): `@@ -1968,15 +2194,13 @@`; the test in `@@ -3299,4 +3542,629 @@`.
+- Patch hunks (`alacritty_terminal`, `term/mod.rs`): `@@ -1968,15 +2484,13 @@`; the test in `@@ -3299,4 +3832,1055 @@`.
 - Tests: `term::tests::utf8_and_sgr_mouse_encodings_are_independent` (vendored: both orders, one sequence with both, and
   resetting either); `mouse_modes_replace_one_another_but_encodings_combine` (`farhelm-terminal-emulator`,
   `tests/modes.rs`); `both_mouse_encodings_set_round_trip` (`tests/snapshot.rs`); and the encoder's
@@ -865,11 +931,11 @@ records" after the records).
 - Patch hunks (`alacritty_terminal`): in `term/cell.rs`, `@@ -1,5 +1,12 @@` beyond the header (the `Hash`, `Hasher` and
   `AtomicUsize` imports), `@@ -72,6 +91,177 @@` (`ExtraStorage`, `StorageCharge`), `@@ -80,6 +270,10 @@` and
   `@@ -93,7 +287,7 @@` (`HyperlinkInner`'s charge), `@@ -126,6 +320,10 @@` (`CellExtra`'s charge); in `term/mod.rs`,
-  `@@ -17,7 +29,7 @@` (the import), `@@ -41,6 +53,63 @@`, its `MAX_EXTRA_STORAGE_BYTES`, `CELL_EXTRA_COST` and
-  `HYPERLINK_COST`, `@@ -327,6 +396,10 @@` and `@@ -441,6 +514,7 @@` (the field), `@@ -953,6 +1027,73 @@`, its last
-  accessor, `extra_storage()`, `@@ -998,7 +1139,9 @@` (`write_at_cursor`), `@@ -1080,7 +1253,17 @@`, its
-  `push_zerowidth` change, `@@ -1873,7 +2076,26 @@`, its last two statements, `@@ -1881,15 +2103,19 @@`
-  (`terminal_attribute`); the tests in `@@ -3299,4 +3542,629 @@`. `ExtraStorage`'s setters also return early when
+  `@@ -1,23 +1,35 @@` (the import), `@@ -41,6 +53,63 @@`, its `MAX_EXTRA_STORAGE_BYTES`, `CELL_EXTRA_COST` and
+  `HYPERLINK_COST`, `@@ -327,6 +396,14 @@` and `@@ -441,15 +518,18 @@` (the field), `@@ -953,6 +1033,236 @@`, its last
+  accessor, `extra_storage()`, `@@ -998,7 +1308,9 @@` (`write_at_cursor`), `@@ -1080,7 +1543,17 @@`, its
+  `push_zerowidth` change, `@@ -1873,7 +2366,26 @@`, its last two statements, `@@ -1881,15 +2393,19 @@`
+  (`terminal_attribute`); the tests in `@@ -3299,4 +3832,1055 @@`. `ExtraStorage`'s setters also return early when
   nothing changes, the same check as the next record's, at this layer.
 - Tests: `term::tests::hyperlinks_are_bounded_by_the_extra_storage`,
   `term::tests::combining_characters_and_underline_colors_are_bounded` and
@@ -937,7 +1003,7 @@ records" after the records).
   restored terminal differ from the original after the next clear (the snapshot round-trip test found it).
 - Upstream code: `alacritty_terminal/src/grid/row.rs`, `Row::grow`.
 - Patch hunks (`alacritty_terminal`): `grid/row.rs` `@@ -62,6 +65,14 @@`; the test in `term/mod.rs`
-  `@@ -3299,4 +3542,629 @@`.
+  `@@ -3299,4 +3832,1055 @@`.
 - Tests: `term::tests::clearing_after_a_resize_clears_every_cell` (vendored; fails without the fix).
 - Upstream status: not yet reported. Upstreamable as is. Checked against alacritty `aecf0f6` on 2026-11-03: still
   present (`Row::grow` unchanged; only `Row::new` changed in that file).
@@ -990,7 +1056,7 @@ behavior, which upstream gets as an issue, not a patch.
   them would otherwise draw over the shell's screen, which status detection reads and viewers see.
 - Upstream code: `alacritty_terminal/src/term/mod.rs`, `Term::swap_alt`, `Term::set_private_mode`,
   `Term::unset_private_mode`; `vte/src/ansi.rs`, `PrivateMode::new` (no names for 47 and 1047).
-- Patch hunks: none. It depends on the `inactive_grid_mut()` accessor (`term/mod.rs` `@@ -953,6 +1027,73 @@`).
+- Patch hunks: none. It depends on the `inactive_grid_mut()` accessor (`term/mod.rs` `@@ -953,6 +1033,236 @@`).
 - Tests (`farhelm-terminal-emulator`): `modes_47_and_1047_show_the_alternate_screen` (`tests/modes.rs`);
   `modes_47_and_1047_capture_like_tmux` (`tests/screen.rs`: the alternate screen captured, the cursor kept where the
   program left it, the saved cursor case above, a second entry clearing the screen, and the two mixes with 1049 pinned
@@ -1009,7 +1075,7 @@ behavior, which upstream gets as an issue, not a patch.
 Splitting the patch files into one upstream change per record means dividing these hunks; every other hunk belongs to
 one record (and every file's header hunk to all of that file's records).
 
-- vte `ansi.rs` `@@ -363,6 +368,33 @@`: `is_ground` (the parser state record) and `preceding_char`, `set_preceding_char`
+- vte `ansi.rs` `@@ -363,6 +369,33 @@`: `is_ground` (the parser state record) and `preceding_char`, `set_preceding_char`
   (the REP record).
 - vte `lib.rs` `@@ -64,6 +86,13 @@` and `@@ -548,14 +589,32 @@`: the OSC payload limit and the overflow report. The
   limit alone needs a flag where the field holds a count, and in `osc_end` a plain drop where the patch calls
@@ -1018,21 +1084,22 @@ one record (and every file's header hunk to all of that file's records).
   `OscOverflow` belong to the report.
 - `alacritty_terminal` `term/mod.rs` `@@ -41,6 +53,63 @@`: constants for the hyperlink length, extra storage and title
   records.
-- `term/mod.rs` `@@ -953,6 +1027,73 @@`: the restore accessors, and `extra_storage()` for the extra storage record.
-- `term/mod.rs` `@@ -1017,6 +1160,36 @@`: `vertical_move`, for the relative moves and CHA records.
-- `term/mod.rs` `@@ -1080,7 +1253,17 @@`: the extra storage's `push_zerowidth` call and the one-column wide character
+- `term/mod.rs` `@@ -953,6 +1033,236 @@`: the restore accessors, `extra_storage()` for the extra storage record, and the
+  following switch, REP policy and selector helper for the emoji-width record.
+- `term/mod.rs` `@@ -1017,6 +1329,36 @@`: `vertical_move`, for the relative moves and CHA records.
+- `term/mod.rs` `@@ -1080,7 +1543,17 @@`: the extra storage's `push_zerowidth` call and the one-column wide character
   check.
-- `term/mod.rs` `@@ -1873,7 +2076,26 @@` (`Term::set_hyperlink`): the length filter (hyperlink length), the early return
+- `term/mod.rs` `@@ -1873,7 +2366,26 @@` (`Term::set_hyperlink`): the length filter (hyperlink length), the early return
   (hyperlink reuse) and the last two statements (extra storage). Upstream's version of either of the first two keeps
   upstream's `self.grid.cursor.template.set_hyperlink(...)` as the last line.
-- The test hunks, one per crate file: vte `ansi.rs` `@@ -2437,6 +2489,78 @@` (the overflow report's and XTVERSION's
-  tests), vte `lib.rs` `@@ -1539,4 +1634,172 @@` (the parser state, split UTF-8, OSC limit and overflow report tests)
-  and `alacritty_terminal` `term/mod.rs` `@@ -3299,4 +3542,629 @@` (every other test, and `fed_term`, the helper they
-  all use). Each test belongs to one record, except `a_one_column_grid_drops_wide_characters`, shared by the two
-  one-column records. Some lean on another record's code: `erase_below_with_a_wrap_pending_keeps_the_last_column`
-  assumes the wrap-flag fix for its autowrap-off cases, `repeating_an_unchanged_attribute_copies_nothing` reads the
-  extra storage's count, and `title_length_is_capped` and `history_counters` read state through the restore accessors
-  (`title()`, `title_stack()`, `inactive_grid()`).
+- The test hunks, one per crate file: vte `ansi.rs` `@@ -2437,6 +2504,105 @@` (the overflow report's, XTVERSION's and
+  emoji-width REP-policy tests), vte `lib.rs` `@@ -1539,4 +1634,172 @@` (the parser state, split UTF-8, OSC limit and
+  overflow report tests) and `alacritty_terminal` `term/mod.rs` `@@ -3299,4 +3832,1055 @@` (every other test, and
+  `fed_term`, the helper they all use). Each test belongs to one record, except
+  `a_one_column_grid_drops_wide_characters`, shared by the two one-column records. Some lean on another record's code:
+  `erase_below_with_a_wrap_pending_keeps_the_last_column` assumes the wrap-flag fix for its autowrap-off cases,
+  `repeating_an_unchanged_attribute_copies_nothing` reads the extra storage's count, and `title_length_is_capped` and
+  `history_counters` read state through the restore accessors (`title()`, `title_stack()`, `inactive_grid()`).
 - `term/cell.rs`: the extra storage's setters make the same unchanged-value check as `Cell`'s setters (the record on
   leaving a cell's extra alone), at their own layer; each upstream change carries its own.
 

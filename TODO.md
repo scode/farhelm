@@ -55,14 +55,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   hand-written binary decoder in the browser, the place where bounds would be easy to get wrong). Commit a benchmark
   that measures memory, attach size and attach time before and after.
 
-- **Emoji made wide by a variation selector in grid terminals.** In tmux, an emoji followed by the emoji variation
-  selector (U+FE0F, as in "❤️") takes two columns; the emulator behind terminals in a terminal host gives it one, as
-  alacritty does. A program that counts it as two columns, as tmux does, finds the rest of that row one column off in
-  such a terminal. It did not come up in the recorded Claude Code and Codex sessions the emulator was checked against.
-  Decide whether to match tmux (a change to the vendored `alacritty_terminal`); what xterm.js shows today for the same
-  output was not checked. The difference is pinned in the supervisor's emulator parity tests
-  (`crates/farhelm-supervisor/src/emulator_parity/generated.rs`). Plan: `plans/queue/vs16-emoji-width.md`.
-
 - **Revisit exact Ghostty matching for emoji variation selectors.** Decided by the maintainer on 2026-11-04, answering
   the vs16-emoji-width plan's block: new terminals follow Ghostty's widths for U+FE0F and U+FE0E except in two cases,
   pinned in tests. At the last column with autowrap off, Farhelm cannot tell an empty cell from a space the program

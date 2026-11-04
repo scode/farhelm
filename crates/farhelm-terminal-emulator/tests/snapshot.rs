@@ -354,6 +354,334 @@ fn a_hand_built_v1_blob_restores_as_its_layout_says() {
     assert!(emulator.is_clean());
 }
 
+/// Version 1 streams keep the widths older supervisors painted, even when
+/// their selectors would change those widths in a new terminal. The next
+/// cell's CHA must not erase a heart that the decoder wrongly widened.
+///
+/// These blobs use the old painter's character/marks/CHA representation,
+/// independently of today's encoder. The restored REP character is part of
+/// the compatibility contract too: old vte remembered a selector itself.
+#[test]
+fn old_v1_variation_sequences_keep_their_saved_widths_and_rep_character() {
+    let cases = [
+        (
+            "\u{2764}\u{fe0f}\x1b[2Gx\x1b[3G",
+            '\u{2764}',
+            '\u{fe0f}',
+            false,
+            'x',
+            2,
+        ),
+        (
+            "\u{231a}\u{fe0e}\x1b[3G",
+            '\u{231a}',
+            '\u{fe0e}',
+            true,
+            '\u{fe0e}',
+            2,
+        ),
+    ];
+    for (stream, base, selector, wide, preceding, column) in cases {
+        let mut blob = V1::header(0, 8, 3, 0, 0, stream.as_bytes())
+            .u32(0)
+            .u32(0)
+            .u8(0)
+            .blob;
+        // Selector widths never entered the fingerprint. An old blob from
+        // the same character table must restore without asking for redraw.
+        let widths = WidthTable::current();
+        let (major, minor, update) = widths.unicode_version;
+        blob[19..22].copy_from_slice(&[major, minor, update]);
+        blob[22..30].copy_from_slice(&widths.fingerprint.to_be_bytes());
+        let restored = restore(&blob);
+        assert!(!restored.screens_dropped);
+        assert_eq!(restored.width_table_changed, None);
+        let mut emulator = restored.emulator;
+        let grid = emulator.term().grid();
+        let cell = &grid[Line(0)][Column(0)];
+        assert_eq!(cell.c, base);
+        assert_eq!(cell.zerowidth(), Some(&[selector][..]));
+        assert_eq!(cell.flags.contains(Flags::WIDE_CHAR), wide);
+        assert_eq!(grid[Line(0)][Column(1)].c, if wide { ' ' } else { 'x' });
+        assert_eq!(
+            grid[Line(0)][Column(1)]
+                .flags
+                .contains(Flags::WIDE_CHAR_SPACER),
+            wide
+        );
+        assert_eq!(grid.cursor.point.line, Line(0));
+        assert_eq!(grid.cursor.point.column, Column(column));
+        assert!(!grid.cursor.input_needs_wrap);
+        assert_eq!(emulator.preceding_char(), Some(preceding));
+        assert!(emulator.is_clean());
+
+        // A later snapshot of this old layout also has to preserve it,
+        // though the restored emulator now handles new output differently.
+        let again = restore(&emulator.snapshot(MAX).unwrap().blob).emulator;
+        assert!(diff(&emulator, &again).is_empty());
+        common::feed_in(
+            &mut emulator,
+            b"\x1b[b",
+            farhelm_terminal_emulator::FeedMode::ReplaySeen,
+        );
+        if wide {
+            // The saved suffix already ends in FE0E. Repeating that selector
+            // now rejects it as an ineligible predecessor, keeping the old
+            // width rather than applying a selector twice.
+            assert_eq!(emulator.term().grid()[Line(0)][Column(0)].c, base);
+            assert!(
+                emulator.term().grid()[Line(0)][Column(0)]
+                    .flags
+                    .contains(Flags::WIDE_CHAR)
+            );
+            assert!(
+                emulator.term().grid()[Line(0)][Column(1)]
+                    .flags
+                    .contains(Flags::WIDE_CHAR_SPACER)
+            );
+            assert_eq!(emulator.term().grid().cursor.point.column, Column(2));
+        } else {
+            assert_eq!(emulator.term().grid()[Line(0)][Column(2)].c, 'x');
+            assert_eq!(emulator.term().grid().cursor.point.column, Column(3));
+        }
+        assert_eq!(emulator.preceding_char(), Some(preceding));
+        common::feed_in(
+            &mut emulator,
+            "\x1b[2;1H\u{2764}\u{fe0f}".as_bytes(),
+            farhelm_terminal_emulator::FeedMode::ReplaySeen,
+        );
+        assert!(
+            emulator.term().grid()[Line(1)][Column(0)]
+                .flags
+                .contains(Flags::WIDE_CHAR),
+            "journal replay after an old snapshot uses current widths"
+        );
+        assert_eq!(emulator.term().grid().cursor.point.column, Column(2));
+        assert_eq!(emulator.preceding_char(), Some('\u{2764}'));
+    }
+}
+
+/// Selector-changed cells need fixups because version 1's stream keeps its
+/// original printing rules. Both width directions, a wrap, and the pen and
+/// combining marks survive, including the REP state used by later output.
+#[test]
+fn selector_changed_widths_round_trip_and_continue_under_current_rules() {
+    let cases = [
+        ("widen", "\u{2764}\u{fe0f}x", '\u{2764}', 0, 0, true),
+        ("narrow", "\u{231a}\u{fe0e}x", '\u{231a}', 0, 0, false),
+        ("wrap", "\x1b[8G\u{2764}\u{fe0f}", '\u{2764}', 1, 0, true),
+        (
+            "narrow pending wrap",
+            "\x1b[7G\u{231a}\u{fe0e}",
+            '\u{231a}',
+            0,
+            6,
+            false,
+        ),
+        (
+            "attributes and mark",
+            "\x1b[31m\u{2764}\u{301}\x1b[32m\u{fe0f}",
+            '\u{2764}',
+            0,
+            0,
+            false,
+        ),
+        (
+            "narrow exception base",
+            "\u{3030}\u{fe0e}",
+            '\u{3030}',
+            0,
+            0,
+            false,
+        ),
+    ];
+    for (name, output, base, line, column, wide) in cases {
+        let mut original = emulator(8, 3);
+        feed(&mut original, output.as_bytes());
+        let cell = &original.term().grid()[Line(line)][Column(column)];
+        assert_eq!(cell.c, base, "{name}: the fixture base");
+        assert_eq!(
+            cell.flags.contains(Flags::WIDE_CHAR),
+            wide,
+            "{name}: the fixture width"
+        );
+        let mut restored = restore(&original.snapshot(MAX).unwrap().blob).emulator;
+        let differences = diff(&original, &restored);
+        assert!(differences.is_empty(), "{name}: {:?}", differences.shown);
+        for continuation in ["\x1b[b", "\x1b[3;1H\u{231a}\u{fe0e}", "\u{2764}\u{fe0f}"] {
+            feed(&mut original, continuation.as_bytes());
+            common::feed_in(
+                &mut restored,
+                continuation.as_bytes(),
+                farhelm_terminal_emulator::FeedMode::ReplaySeen,
+            );
+            let differences = diff(&original, &restored);
+            assert!(differences.is_empty(), "{name}: {:?}", differences.shown);
+        }
+        assert!(
+            restored.term().grid()[Line(2)][Column(1)]
+                .flags
+                .contains(Flags::WIDE_CHAR)
+        );
+        assert_eq!(restored.term().grid().cursor.point.column, Column(3));
+    }
+}
+
+/// A base and its selector are separate clean snapshot boundaries. Restoring
+/// between them must not lose the grid context that decides the selector's
+/// effect, and ReplaySeen journal input must retain the current width rule.
+#[test]
+fn a_snapshot_between_base_and_selector_keeps_the_current_width_rule() {
+    let cases = [
+        ("\u{2764}", "\u{fe0f}", true, 0, 2),
+        ("\u{231a}", "\u{fe0e}", false, 0, 1),
+        ("\x1b[8G\u{2764}", "\u{fe0f}", true, 1, 2),
+        ("\u{2764}\u{301}", "\u{fe0f}", false, 0, 1),
+    ];
+    for (before, selector, wide, line, column) in cases {
+        let mut original = emulator(8, 3);
+        feed(&mut original, before.as_bytes());
+        assert!(original.is_clean(), "the base is a snapshot boundary");
+        let mut restored = restore(&original.snapshot(MAX).unwrap().blob).emulator;
+        assert!(diff(&original, &restored).is_empty(), "{before:?}");
+        feed(&mut original, selector.as_bytes());
+        common::feed_in(
+            &mut restored,
+            selector.as_bytes(),
+            farhelm_terminal_emulator::FeedMode::ReplaySeen,
+        );
+        let differences = diff(&original, &restored);
+        assert!(
+            differences.is_empty(),
+            "{before:?}: {:?}",
+            differences.shown
+        );
+        let grid = restored.term().grid();
+        assert_eq!(
+            grid[Line(line)][Column(0)].flags.contains(Flags::WIDE_CHAR),
+            wide
+        );
+        assert_eq!(grid.cursor.point.line, Line(line));
+        assert_eq!(grid.cursor.point.column, Column(column));
+    }
+}
+
+/// Discarded formatting input changes neither saved cells nor REP. A selector
+/// after a restore therefore sees the same base. Legacy blobs still retain
+/// their old suffixes, rather than having saved text silently reinterpreted.
+#[test]
+fn formatting_before_a_selector_is_stable_across_new_and_old_snapshots() {
+    for ignored in ['\u{200b}', '\u{3164}', '\u{ffa0}', '\u{1161}', '\u{16d67}'] {
+        let mut original = emulator(8, 3);
+        feed(&mut original, format!("❤{ignored}").as_bytes());
+        assert_eq!(original.term().grid()[Line(0)][Column(0)].zerowidth(), None);
+        assert_eq!(original.preceding_char(), Some('❤'));
+        let mut restored = restore(&original.snapshot(MAX).unwrap().blob).emulator;
+        for terminal in [&mut original, &mut restored] {
+            common::feed_in(
+                terminal,
+                "\u{fe0f}x".as_bytes(),
+                farhelm_terminal_emulator::FeedMode::ReplaySeen,
+            );
+            assert!(
+                terminal.term().grid()[Line(0)][Column(0)]
+                    .flags
+                    .contains(Flags::WIDE_CHAR)
+            );
+            assert_eq!(terminal.term().grid()[Line(0)][Column(2)].c, 'x');
+        }
+        assert!(diff(&original, &restored).is_empty());
+    }
+
+    let stream = "❤\u{200b}\u{fe0f}\x1b[2G";
+    let blob = V1::header(0, 8, 3, 0, 0, stream.as_bytes())
+        .u32(0)
+        .u32(0)
+        .u8(0)
+        .blob;
+    let old = restore(&blob).emulator;
+    let old_cell = &old.term().grid()[Line(0)][Column(0)];
+    assert_eq!(old_cell.zerowidth(), Some(&['\u{200b}', '\u{fe0f}'][..]));
+    assert!(!old_cell.flags.contains(Flags::WIDE_CHAR));
+    assert_eq!(old.preceding_char(), Some('\u{fe0f}'));
+    let again = restore(&old.snapshot(MAX).unwrap().blob).emulator;
+    assert!(diff(&old, &again).is_empty());
+}
+
+/// Accepted V/T continuations can include a scalar the width library calls
+/// printable. Existing v1 fixups must preserve it as a suffix, while legacy
+/// streams retain the older unconditional zero-width attachment policy.
+#[test]
+fn jamo_suffixes_use_existing_snapshot_state_and_fixups() {
+    for output in ["\u{1100}\u{1161}\u{11a8}", "\u{1100}\u{16d67}"] {
+        let mut original = emulator(8, 3);
+        feed(&mut original, output.as_bytes());
+        let cell = &original.term().grid()[Line(0)][Column(0)];
+        assert_eq!(cell.c, '\u{1100}');
+        assert!(cell.flags.contains(Flags::WIDE_CHAR));
+        assert_eq!(
+            cell.zerowidth(),
+            Some(&output.chars().skip(1).collect::<Vec<_>>()[..])
+        );
+        assert_eq!(original.term().grid().cursor.point.column, Column(2));
+        assert_eq!(original.preceding_char(), Some('\u{1100}'));
+        let mut restored = restore(&original.snapshot(MAX).unwrap().blob).emulator;
+        assert!(diff(&original, &restored).is_empty());
+        feed(&mut original, b"\x1b[b");
+        common::feed_in(
+            &mut restored,
+            b"\x1b[b",
+            farhelm_terminal_emulator::FeedMode::ReplaySeen,
+        );
+        assert!(diff(&original, &restored).is_empty());
+    }
+    let stream = "❤\u{1161}\x1b[2G";
+    let blob = V1::header(0, 8, 3, 0, 0, stream.as_bytes())
+        .u32(0)
+        .u32(0)
+        .u8(0)
+        .blob;
+    let old = restore(&blob).emulator;
+    assert_eq!(
+        old.term().grid()[Line(0)][Column(0)].zerowidth(),
+        Some(&['\u{1161}'][..])
+    );
+    assert_eq!(old.preceding_char(), Some('\u{1161}'));
+}
+
+/// Selector widening creates a pending wrap even with autowrap off. That
+/// state must survive a snapshot, because enabling wrapping before the next
+/// print otherwise erases the wide pair instead of moving to the next row.
+#[test]
+fn selector_widening_keeps_its_pending_wrap_across_restore() {
+    let mut original = emulator(5, 3);
+    feed(&mut original, "\x1b[?7l\x1b[1;4H❤\u{fe0f}".as_bytes());
+    assert!(original.term().grid().cursor.input_needs_wrap);
+    assert!(
+        original.term().grid()[Line(0)][Column(3)]
+            .flags
+            .contains(Flags::WIDE_CHAR)
+    );
+    let mut restored = restore(&original.snapshot(MAX).unwrap().blob).emulator;
+    assert!(diff(&original, &restored).is_empty());
+    for terminal in [&mut original, &mut restored] {
+        common::feed_in(
+            terminal,
+            b"\x1b[?7hx",
+            farhelm_terminal_emulator::FeedMode::ReplaySeen,
+        );
+        assert_eq!(terminal.term().grid()[Line(1)][Column(0)].c, 'x');
+        assert!(
+            terminal.term().grid()[Line(0)][Column(3)]
+                .flags
+                .contains(Flags::WIDE_CHAR)
+        );
+        assert_eq!(terminal.term().grid().cursor.point.line, Line(1));
+        assert_eq!(terminal.term().grid().cursor.point.column, Column(1));
+    }
+    assert!(diff(&original, &restored).is_empty());
+}
+
 /// Each way a version 1 blob can break its layout is refused as malformed.
 ///
 /// Why: the decoder must never guess at a value outside the format (a

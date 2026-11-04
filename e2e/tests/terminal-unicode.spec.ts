@@ -23,7 +23,7 @@ const CURSOR_PREFIX = "REPLAY-CURSOR:";
  * leaves tmux's cursor immediately after a VS16 emoji, where a one-cell width
  * disagreement becomes observable when the next request prints X.
  */
-const UNICODE_COMMAND = `sh -c 'stty -echo && printf "UNICODE-READY\\n" && while IFS= read -r input; do case "$input" in ready) printf "UNICODE-LIVE\\n" ;; replay) printf "\\033[2J\\033[H${REPLAY_ROW}\\r\\n${CURSOR_PREFIX}⚠️" ;; continue) printf "X\\r\\nREPLAY-LIVE\\r\\n" ;; esac; done'`;
+const UNICODE_COMMAND = `sh -c 'stty -echo && printf "UNICODE-READY\\n" && while IFS= read -r input; do case "$input" in ready) printf "UNICODE-LIVE\\n" ;; replay) printf "\\033[2J\\033[H${REPLAY_ROW}\\r\\n${CURSOR_PREFIX}⚠️" ;; narrow) printf "\\033[2J\\033[H⌚︎\\033[41mX\\033[0m" ;; continue) printf "X\\r\\nREPLAY-LIVE\\r\\n" ;; esac; done'`;
 
 /**
  * Create and reveal a quiet terminal, retaining cleanup ownership until the
@@ -217,6 +217,46 @@ test("a coloured neighbouring cell starts after the emoji's full two-cell box", 
 });
 
 /**
+ * A text selector can narrow a normally wide glyph. The supervisor supplies
+ * that cell's width; the browser must respect it even when the font's default
+ * glyph is wide, or the coloured next cell covers part of the glyph's box.
+ */
+test("a narrowed text-presentation glyph owns one grid cell", async ({ page, request }) => {
+  test.skip(!onHostTerminals(), "new terminal width policy; the old path retains tmux's rules");
+  const id = await openUnicodeTerminal(page, request);
+  try {
+    await sendCommand(page, id, "narrow");
+    await waitForTermText(page, "⌚︎X");
+    await expectRows(page, ["⌚︎X"]);
+    await expect.poll(() => page.evaluate(() => {
+      const row = document.querySelector("#terminal .grid-terminal-row");
+      const spans = Array.from(row?.children ?? []) as HTMLElement[];
+      const glyph = spans.find((span) => span.textContent === "⌚︎");
+      const next = spans.find((span) => span.textContent === "X");
+      if (!glyph || !next) return null;
+      const a = glyph.getBoundingClientRect();
+      const b = next.getBoundingClientRect();
+      const grid = (window as any).__farhelmIslands.terminal.grid;
+      return {
+        positive: b.width > 0,
+        equalWidth: Math.abs(a.width - b.width) < 1,
+        adjacent: Math.abs(b.left - a.right) < 1,
+        cursor: grid.snapshot().cursor.x,
+        coloured: !/^(transparent|rgba\(0, 0, 0, 0\))$/.test(getComputedStyle(next).backgroundColor),
+      };
+    }), { message: "the narrowed glyph and coloured neighbour need adjacent one-cell boxes" }).toEqual({
+      positive: true,
+      equalWidth: true,
+      adjacent: true,
+      cursor: 2,
+      coloured: true,
+    });
+  } finally {
+    await cleanupSession(request, id);
+  }
+});
+
+/**
  * Reconnect reconstructs rows from tmux rather than replaying the live byte
  * stream. A new socket, a marker-completed replay, and a subsequent command
  * reply establish that both tmux's VS16 widths and the restored cursor agree
@@ -255,16 +295,11 @@ test("tmux reconnect replay restores emoji rows and the cursor column", async ({
       const buffer = island.term.buffer.active;
       return { x: buffer.cursorX as number, y: buffer.cursorY as number };
     });
-    // A known difference, not a grid bug: the supervisor's emulator gives
-    // an emoji made wide by VS16 one column where tmux gives two (pinned in
-    // its tmux parity tests, emulator_parity/generated.rs; TODO.md, "Emoji
-    // made wide by a variation selector in grid terminals"). Until that is
-    // decided, a terminal host's cursor sits one cell earlier here, which
-    // this asserts so that deciding it shows up as a failure to update.
     if (grid) {
-      test.info().annotations.push({ type: "known difference", description: "VS16 emoji width: one column in the emulator, two in tmux (TODO.md)" });
-      expect(cursor, "the emulator gives the VS16 emoji one column (the pinned difference)").toMatchObject({
-        x: CURSOR_PREFIX.length + 1,
+      // The restored grid must keep the selector's two-cell layout, so live
+      // output below continues at the same column as uninterrupted output.
+      expect(cursor, "replayed VS16 emoji must leave the restored cursor two cells later").toMatchObject({
+        x: CURSOR_PREFIX.length + 2,
         y: 1,
       });
     } else {

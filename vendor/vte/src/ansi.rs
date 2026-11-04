@@ -6,7 +6,8 @@
 //
 // Modified for Farhelm: adds `Processor::is_ground()`, `preceding_char()` and
 // `set_preceding_char()`, ends the active hyperlink when an OSC 8 is dropped
-// for its length, and reports XTVERSION queries to the handler. See
+// for its length, reports XTVERSION queries to the handler, and lets the
+// handler keep REP's character across grapheme continuations. See
 // vendor/README.md in the Farhelm repository.
 
 //! ANSI Terminal Stream Parsing.
@@ -536,6 +537,16 @@ pub trait Handler {
 
     /// A character to be displayed.
     fn input(&mut self, _c: char) {}
+
+    /// Farhelm patch: whether this input replaces the character REP repeats.
+    ///
+    /// Asked before `input`, so a terminal can keep its printable base when
+    /// a grapheme continuation is attached or rejected. The default preserves
+    /// upstream bookkeeping; the terminal owns the policy and a legacy replay
+    /// can retain it without adding a second remembered character.
+    fn input_updates_rep(&self, _c: char) -> bool {
+        true
+    }
 
     /// Set cursor to position.
     fn goto(&mut self, _line: i32, _col: usize) {}
@@ -1326,8 +1337,12 @@ where
 {
     #[inline]
     fn print(&mut self, c: char) {
+        // Farhelm patch: attachment need not replace the existing REP base.
+        let updates_rep = self.handler.input_updates_rep(c);
         self.handler.input(c);
-        self.state.preceding_char = Some(c);
+        if updates_rep {
+            self.state.preceding_char = Some(c);
+        }
     }
 
     #[inline]
@@ -2559,6 +2574,33 @@ mod tests {
             parser.advance(&mut handler, bytes);
             assert_eq!(handler.reports, reports, "after {:?}", String::from_utf8_lossy(bytes));
         }
+    }
+
+    /// Farhelm patch test: the handler may preserve REP's base while still
+    /// receiving every input character. Unrelated handlers keep the old
+    /// unconditional update, so this additive hook changes no default.
+    #[test]
+    fn rep_policy_preserves_the_existing_register_and_default() {
+        #[derive(Default)]
+        struct PreservingHandler(Vec<char>);
+        impl Handler for PreservingHandler {
+            fn input(&mut self, c: char) {
+                self.0.push(c);
+            }
+
+            fn input_updates_rep(&self, c: char) -> bool {
+                c != '\u{fe0f}'
+            }
+        }
+        let mut parser = Processor::<TestSyncHandler>::new();
+        let mut handler = PreservingHandler::default();
+        parser.advance(&mut handler, "a\u{fe0f}\x1b[2b".as_bytes());
+        assert_eq!(handler.0, ['a', '\u{fe0f}', 'a', 'a']);
+        assert_eq!(parser.preceding_char(), Some('a'));
+
+        let mut parser = Processor::<TestSyncHandler>::new();
+        parser.advance(&mut MockHandler::default(), "a\u{fe0f}".as_bytes());
+        assert_eq!(parser.preceding_char(), Some('\u{fe0f}'));
     }
 
     #[test]
