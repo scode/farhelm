@@ -14,5 +14,7 @@ stable), and `scripts/install.sh` accepts `FARHELM_VERSION=vX.Y.Z-dev.N` the sam
 same two choices first, base and version, and ask when the request does not state them (a follow-up attempt after fixing
 forward already has both); the RC version default in `releasing/.agents/rc.md`, "Cutting an RC release", does not apply
 to dev releases. The `-dev.N` and `-rc.N` counters are independent, so `0.3.0-dev.2` and `0.3.0-rc.1` can both exist.
-The name is the whole difference: it tells whoever reads the tag list later that the build was a trial of work in
-progress, not a claim that this is what will ship as `X.Y.Z`.
+Dev releases are exempt from the RC announcement-selection step: ask no announcement question, attach no announcements
+to a dev version, and open no announcements PR. Carry the existing table in the selected base unchanged. Dev versions
+still participate in the app's release ordering. The name tells whoever reads the tag list later that the build was a
+trial of work in progress, not a claim that this is what will ship as `X.Y.Z`.
