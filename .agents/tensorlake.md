@@ -71,6 +71,10 @@ Observed on fresh sandboxes in October 2026; verify rather than assume, since Te
   transient systemd user scopes; without a user manager it runs them unscoped and scope-dependent tests return early,
   which the evidence rules do not accept as a pass (`.agents/validation.md`), so the shard runner makes sure a user
   manager runs (below).
+- Tensorlake's in-sandbox daemon runs its own `sshd` on port 22, for its ssh gateway, with a host key and an
+  `authorized_keys` file under `/run/tl/ssh/` (seen on clones in November 2026; it was not there when the template was
+  built in October). On a clone it takes the port before the image's `ssh.socket` can, which then stays failed. I have
+  not checked whether a fresh stock-image sandbox has it too; the shard runner handles either (below).
 - The glibc matches Ubuntu 24.04 development machines (2.39), so the locally built debug `farhelm` and
   `farhelm-fixtures`, and the pinned tmux in `.ci-tmux/`, run there unchanged. Pushing them saves a Rust toolchain and a
   half-hour build on every sandbox. If the development machine moves to a newer Ubuntu, this stops being true: build on
@@ -102,7 +106,9 @@ exists:
    `npx playwright install chromium webkit`. `install-deps` needs root and the caller's PATH to find npx.
 5. Give `tl-user` passwordless SSH to itself: an ed25519 key, the public key in `authorized_keys`, and `ssh-keygen -A`
    for host keys. The harness registers its second supervisor as an ssh-to-localhost host; without self-ssh the
-   multi-host specs skip. Also create the empty file `/var/lib/systemd/linger/tl-user` (what `loginctl enable-linger`
+   multi-host specs fail or skip, so a shard refuses to run without it. That key in `~/.ssh/authorized_keys` serves the
+   image's own `sshd`; where Tensorlake's `sshd` holds port 22, each shard authorizes the key there itself ("What every
+   shard does first"). Also create the empty file `/var/lib/systemd/linger/tl-user` (what `loginctl enable-linger`
    records), so that logind on a clone starts `tl-user`'s user manager at boot (`bootstrap.sh` does it right after apt).
 6. Run one small shard as a probe (a couple of quick specs on both engines) and check that `summary.txt` says the user
    manager is `running` and self-ssh is `ok`.
@@ -113,16 +119,33 @@ exists:
 
 When PID 1 is systemd (a clone), `run-shard.sh` waits for logind and runs `loginctl enable-linger`, so logind keeps the
 user manager running without a login session, in place of the first two steps below. It starts no `sshd` there, since
-`ssh.socket` already serves port 22; it still records localhost's host keys and checks self-ssh. Lingering matters:
-without it every ssh-to-localhost login starts a user manager that logind stops ten seconds after the session ends,
-taking every session scope in it along. The hand-built manager is fatal on a clone: the self-ssh login makes logind
-start the real `user@1000.service` in the cgroup the script took over, and when logind stops it, systemd kills every
-process in it, the test run included.
+port 22 is already served (by Tensorlake's `sshd` now, by `ssh.socket` before it); it still sets up and checks self-ssh
+as described below. Lingering matters: without it every ssh-to-localhost login starts a user manager that logind stops
+ten seconds after the session ends, taking every session scope in it along. The hand-built manager is fatal on a clone:
+the self-ssh login makes logind start the real `user@1000.service` in the cgroup the script took over, and when logind
+stops it, systemd kills every process in it, the test run included.
 
 On either kind of sandbox, the shard fails before running any test, with `setup failed:` in `summary.txt`, when
 lingering cannot be enabled or the user manager is not `running` or `degraded`: the supervisor would otherwise run
 sessions without scopes and the specs could still pass. `summary.txt` records PID 1, the lingering result and the
 manager's state.
+
+The shard also fails before any test when self-ssh to localhost does not work, and `summary.txt` says `self-ssh: FAILED`
+with ssh's last error line. This used to be only a summary line, and in November 2026 every shard ran for a while with
+self-ssh broken: the multi-host specs in `settings.spec.ts` failed on a fixture host stuck connecting, and specs that
+skip without a second host would have passed. Here's what the script does, on either kind of sandbox, whichever server
+answers on port 22:
+
+- Removes every `localhost` and `127.0.0.1` entry from `tl-user`'s `known_hosts`. The template's file holds the key of
+  the server that answered when it was built; replacing it leaves exactly the key this sandbox serves, and keeps
+  repeated shards on one sandbox from piling up entries.
+- Scans `127.0.0.1` itself and records the keys under both `localhost` and `127.0.0.1`. `ssh-keyscan localhost` tries
+  only the first address `localhost` resolves to, `::1`, where Tensorlake's `sshd` does not listen, and then records
+  nothing; `ssh localhost` falls back to `127.0.0.1` and checks its key under both names.
+- When `/run/tl/ssh/authorized_keys` exists, appends `tl-user`'s public key to it. Tensorlake's `sshd` reads only that
+  file, for every user, so the key bootstrap put in `~/.ssh/authorized_keys` is not enough. Whether the platform ever
+  rewrites the file while a sandbox runs is unknown; it did not during the runs observed.
+- Logs in with `ssh -o BatchMode=yes localhost true`, and records which server it reached as `self-ssh: ok (...)`.
 
 When PID 1 is Tensorlake's init (the template sandbox during its probe), an earlier exec's files stay, its processes
 cannot be relied on, and services must live inside the exec that runs the tests. `run-shard.sh` therefore, every time:
@@ -134,7 +157,7 @@ cannot be relied on, and services must live inside the exec that runs the tests.
   delegated cgroup `user.slice/user-1000.slice/user@1000.service` with `+cpu +memory +pids` enabled in its parents and
   owned by `tl-user`, moves its own shell into it, starts a session bus, then `/usr/lib/systemd/systemd --user`, and
   waits for `systemctl --user is-system-running` to say `running` or `degraded`.
-- Starts `sshd` (it needs `/run/sshd`) and adds localhost's host keys to `known_hosts`.
+- Starts `sshd` (it needs `/run/sshd`) unless an `sshd` already runs, then sets up self-ssh as above.
 
 ## Tensorlake CLI traps
 

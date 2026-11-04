@@ -8,8 +8,9 @@
 # systemd at all; that is the template sandbox during make-template's probe. bootstrap.sh's packages pull in
 # systemd-sysv, which installs /sbin/init, and clones of a template boot that, so on them PID 1 is a real systemd with
 # logind. Both cases are handled below, and a shard whose user manager is not up fails before any test runs. The script
-# also makes sure an SSH server answers on localhost (on a clone, ssh.socket already does) so the harness's second,
-# ssh-to-localhost host is reachable, as on a developer machine with passwordless self-ssh.
+# also makes self-ssh to localhost work, whichever SSH server answers there (see "self-ssh" below), so the harness's
+# second, ssh-to-localhost host is reachable, as on a developer machine with passwordless self-ssh; a shard where it
+# does not work fails before any test runs too.
 #
 # Usage: run-shard.sh <label> <playwright project>... [-- <extra playwright arguments>]
 # Projects are named as in playwright.config.ts (e.g. webkit-settings); extra arguments such as
@@ -102,12 +103,56 @@ if [ -n "$setup_error" ]; then
   exit 1
 fi
 # --- self-ssh
-# Under a booted systemd, ssh.socket already holds port 22 and no sshd shows until the first connection, so start sshd
-# only when neither answers.
+# The harness's second host is an ssh login to localhost, so a shard without self-ssh loses every multi-host spec's
+# coverage: those specs fail on a host stuck connecting, or skip. Whoever serves port 22, three things must hold:
+# known_hosts has its current host key, under both names ssh may check; tl-user's key is in the authorized_keys that
+# server reads; and a real login works. Anything less fails the shard before any test runs.
+#
+# On clones seen in November 2026, Tensorlake's in-sandbox daemon runs its own sshd on port 22, with a host key and an
+# authorized_keys file under /run/tl/ssh (for its ssh gateway). The image's ssh.socket then fails to bind and stays
+# failed, so that platform sshd is the one answering. Its host key differs from the one the template's known_hosts
+# recorded, and it never reads ~/.ssh/authorized_keys. Without the platform sshd (as when the October 2026 template was
+# built and probed), ssh.socket or an sshd started here answers, with the keys bootstrap.sh made.
+known_hosts=/home/tl-user/.ssh/known_hosts
+platform_ssh=/run/tl/ssh
+# Under a booted systemd, ssh.socket holds port 22 and no sshd shows until the first connection; the platform sshd
+# shows as a running sshd. Start one only when neither answers.
 sudo -n mkdir -p /run/sshd
 systemctl is-active --quiet ssh.socket 2>/dev/null || pgrep -x sshd >/dev/null || sudo -n /usr/sbin/sshd
-ssh-keyscan -H localhost 127.0.0.1 >>/home/tl-user/.ssh/known_hosts 2>/dev/null
-ssh -o BatchMode=yes localhost true && echo "self-ssh: ok" >>"$OUT/summary.txt" || echo "self-ssh: FAILED" >>"$OUT/summary.txt"
+# Replace whatever the template recorded for localhost with the key of the sshd that answers now, so the file holds
+# exactly what this sandbox serves and repeated shards on one sandbox do not pile up entries.
+ssh-keygen -R localhost -f "$known_hosts" >/dev/null 2>&1
+ssh-keygen -R 127.0.0.1 -f "$known_hosts" >/dev/null 2>&1
+# Scan 127.0.0.1 itself and write the keys under both names. `ssh-keyscan localhost` tries only the first address
+# localhost resolves to, which is ::1, where the platform sshd does not listen, and then records nothing; ssh itself
+# falls back to 127.0.0.1 and checks the key under both names.
+scanned=$(ssh-keyscan -T 10 127.0.0.1 2>/dev/null | grep -v '^#')
+if [ -n "$scanned" ]; then
+  printf '%s\n' "$scanned" | sed 's/^127\.0\.0\.1 /localhost,127.0.0.1 /' >>"$known_hosts"
+fi
+# The platform sshd reads only its own authorized_keys (and for every user, root included: this lets tl-user's key in
+# as anyone, which is acceptable on a throwaway clone). Whether the platform ever rewrites that file while a sandbox runs
+# is unknown; it was written at boot and left alone for the length of the runs observed.
+if sudo -n test -f "$platform_ssh/authorized_keys"; then
+  if ! sudo -n grep -qxF -f /home/tl-user/.ssh/id_ed25519.pub "$platform_ssh/authorized_keys"; then
+    # tl-user reads its own key; only tee needs root, to append to the platform's file.
+    # shellcheck disable=SC2024
+    sudo -n tee -a "$platform_ssh/authorized_keys" </home/tl-user/.ssh/id_ed25519.pub >/dev/null
+  fi
+  ssh_server="Tensorlake's sshd"
+else
+  ssh_server="the image's sshd"
+fi
+if ssh_error=$(ssh -o BatchMode=yes -o ConnectTimeout=10 localhost true 2>&1); then
+  echo "self-ssh: ok ($ssh_server)" >>"$OUT/summary.txt"
+else
+  {
+    echo "self-ssh: FAILED ($ssh_server): $(printf '%s' "$ssh_error" | tail -1)"
+    echo "setup failed: self-ssh to localhost does not work; no tests were run"
+  } >>"$OUT/summary.txt"
+  cat "$OUT/summary.txt"
+  exit 1
+fi
 # --- the shard
 export PATH="$W/.ci-tmux:$PATH"
 projects=()
