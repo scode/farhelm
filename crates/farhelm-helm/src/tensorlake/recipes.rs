@@ -269,10 +269,10 @@ fn retire_snapshot(conn: &Connection, name: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Seconds since the epoch for `created_at`/`updated_at`. Informational only
-/// (nothing orders by them); a clock before the epoch records 0 rather than
-/// failing the write, as launch templates do.
-pub(super) fn now_secs() -> i64 {
+/// Seconds since the epoch for recipe timestamps and durable create settle
+/// deadlines. A clock before the epoch records 0 rather than failing the
+/// write, as launch templates do.
+pub(crate) fn now_secs() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.as_secs() as i64)

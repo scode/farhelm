@@ -97,6 +97,8 @@ use crate::{ApiBase, ConnectionStage, Host, HostId, HostKind, HostPhase, Refresh
 
 pub(crate) mod attention;
 pub(crate) mod settings_dialog;
+#[path = "tensorlake/add_host.rs"]
+mod tensorlake_add;
 pub(crate) mod updates;
 
 use attention::HostAttention;
@@ -2709,7 +2711,7 @@ pub(crate) fn HostsPanel(
                 span { class: "host-rail-unavailable", role: "status", aria_label: "The host list could not be loaded", "data-tooltip": "The host list could not be loaded", "?" }
             }
             button { r#type: "button", class: "btn host-rail-add",
-                aria_label: "Add host", "data-tooltip": "Add host: connect a machine over SSH",
+                aria_label: "Add host", "data-tooltip": "Add host: connect a machine or create a Tensorlake sandbox",
                 disabled: busy, onclick: move |_| open_add.call(true),
                 span { class: "host-rail-icon", "aria-hidden": "true",
                     crate::icons::ActionIcon { glyph: crate::icons::ActionGlyph::Add }
@@ -2795,7 +2797,7 @@ pub(crate) fn HostsPanel(
                 button {
                     r#type: "button",
                     class: "btn btn-neutral add-host-button",
-                    "data-tooltip": "Add host: connect a machine over SSH",
+                    "data-tooltip": "Add host: connect a machine or create a Tensorlake sandbox",
                     // The icon keeps the same compact action anatomy as New.
                     aria_label: "Add host",
                     // Opening the add dialog waits out any live MUTATION,
@@ -5011,6 +5013,12 @@ fn HostRow(
             // contribution. Keep the three PeerLine containers independent:
             // their displayed text can exchange rows without moving a prefix.
             div { class: "host-row-details", hidden: !panel_visible,
+            if let Some(sandbox) = host.tensorlake.as_ref().filter(|_| details_open) {
+                p { class: "host-tensorlake-detail",
+                    "Sandbox: {display_peer(sandbox.sandbox.raw())} · Recipe: {display_peer(sandbox.recipe.raw())}"
+                    if let Some(size) = sandbox.size { " · {size.cpus} CPUs · {size.memory_gb} GB memory" }
+                }
+            }
             if let Some(destination) = lines.destination {
                 PeerLine { class: "host-destination-detail", parts: destination }
             }
@@ -5548,6 +5556,7 @@ fn AddHostForm(
     let mut ssh_help_open = use_signal(|| false);
     let mut error = use_signal(|| initial_error);
     let mut probing = use_signal(|| false);
+    let mut tensorlake = use_signal(|| false);
     // The setup question for the plan discovery returned: a `ConfirmSlot`
     // keyed by the offer itself, so a confirmation acts only by taking the
     // opening of the offer its handler was drawn for. Every way of closing
@@ -5658,6 +5667,15 @@ fn AddHostForm(
         }
     });
 
+    if tensorlake() && !from_agent_request {
+        return rsx! { tensorlake_add::TensorlakeAddDialog {
+            ops,
+            on_ssh: move |_| tensorlake.set(false),
+            on_added,
+            on_cancel,
+        } };
+    }
+
     rsx! {
         div { class: "host-settings-backdrop", role: "presentation",
             ModalDialog {
@@ -5741,6 +5759,7 @@ fn AddHostForm(
                     // a host a refusal instead of setting that host up again.
                     match probe_ssh_host(&base, &destination, "", "", Some(&alias_draft)).await {
                         Ok(ProbeResponse::Discovered) => on_added.call(None),
+                        Ok(ProbeResponse::TensorlakeProvisionable { .. }) => error.set(Some("The helm returned a Tensorlake plan for an SSH host".into())),
                         Ok(ProbeResponse::Provisionable {
                             probe_id,
                             confirmation,
@@ -5793,6 +5812,13 @@ fn AddHostForm(
                     on_dismiss: move |_| close.call(()),
                 }
                 div { class: "dialog-body host-settings-body",
+                if !from_agent_request {
+                    div { class: "segmented-control", role: "group", aria_label: "Host kind",
+                        button { r#type: "button", aria_pressed: "true", "SSH" }
+                        button { r#type: "button", aria_pressed: "false", disabled: busy,
+                            onclick: move |_| tensorlake.set(true), "Tensorlake sandbox" }
+                    }
+                }
                 if let Some(card) = &agent_request {
                     dl { class: "agent-add-requester",
                         dt { "From host" }

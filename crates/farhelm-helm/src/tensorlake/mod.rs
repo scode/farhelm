@@ -25,9 +25,9 @@
 //!   [`crate::store`]; its ssh connections use the same [`ssh`] options as
 //!   the builder.
 //!
-//! Adding a Tensorlake host, suspend and resume, and tunnels arrive in
-//! follow-up PRs and build on this service, which is why the client already
-//! carries the calls they need.
+//! Host creation is an outer provisioning plan in [`crate::provisioning`].
+//! Suspend/resume verbs and recipe tunnels build on this service in
+//! follow-up changes.
 
 // The client carries the calls the follow-up PRs need (suspend and resume),
 // which nothing calls yet. The unit tests exercise every call, so the lint
@@ -41,12 +41,12 @@
 pub(crate) mod api;
 pub(crate) mod build;
 mod build_script;
-mod config;
+pub(crate) mod config;
 #[cfg_attr(
     not(test),
     expect(dead_code, reason = "calls typed now for the follow-up Tensorlake PRs")
 )]
-mod e2e;
+pub(crate) mod e2e;
 pub(crate) mod hosts;
 mod http;
 pub(crate) mod recipes;
@@ -119,6 +119,15 @@ impl Inner {
 }
 
 impl Tensorlake {
+    /// The API used by host creation, shared with status checks and builds.
+    pub(crate) fn api(&self) -> &dyn TensorlakeApi {
+        self.0.api.as_ref()
+    }
+
+    /// Generate the helm's key during an explicit add probe, before billing.
+    pub(crate) async fn ensure_host_key(&self) -> Result<(), String> {
+        self.create_ssh_key().await
+    }
     /// The helm's service as `AppState::new` builds it: the real API, or
     /// the browser suite's fake when its environment variable names a
     /// marked directory inside the state directory, and the ssh key under
@@ -186,8 +195,8 @@ impl Tensorlake {
     /// The settings snapshot the routes return. Read-only: it reports
     /// Farhelm's ssh key as it is on disk and never creates one, so opening
     /// Settings (which mounts every section) leaves no credential behind for
-    /// someone who never uses Tensorlake. [`Self::create_ssh_key`] is the only
-    /// path that generates it.
+    /// someone who never uses Tensorlake. Generation happens on an explicit
+    /// Settings request or as part of an add probe.
     pub(crate) async fn settings(&self) -> anyhow::Result<Settings> {
         let config = self.0.store.tensorlake_config().await?;
         let tag = helm_tag(&self.0.store.registry_namespace().await?);

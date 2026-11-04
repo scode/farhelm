@@ -4,15 +4,15 @@
 //! the user's Tensorlake account, and only a user login can register one, not
 //! an API key. Farhelm therefore keeps a key pair of its own in the helm's
 //! state directory and shows the one-time `tl sbx ssh keys add` command that
-//! registers it. Later PRs pass the private key to ssh with
+//! registers it. Connections pass the private key to ssh with
 //! `IdentitiesOnly=yes` for Tensorlake hosts, which keeps the user's own keys
 //! out of it (the gateway refuses outright when the first key offered is not
 //! registered). This is the one place Farhelm stores an ssh credential of its
 //! own; SPEC.md's "Farhelm stores no SSH credentials of its own" carries the
 //! exception.
 //!
-//! The pair is generated only when the user asks for it (Settings →
-//! Tensorlake, Create SSH key), by running `ssh-keygen` with explicit
+//! The pair is generated only on an explicit action (Settings → Tensorlake,
+//! Create SSH key, or an add-host probe), by running `ssh-keygen` with explicit
 //! arguments and no shell. Reading the settings never generates it: Settings
 //! mounts every section when it opens, and a key created then would leave an
 //! unencrypted credential on every helm, Tensorlake user or not. It is generated into a

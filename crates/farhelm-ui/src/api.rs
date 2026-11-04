@@ -4182,6 +4182,17 @@ struct HostListing {
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(tag = "result", rename_all = "kebab-case")]
 pub(crate) enum ProbeResponse {
+    /// A billed sandbox creation plan. Its confirmation has a separate
+    /// preference from ordinary SSH setup.
+    TensorlakeProvisionable {
+        probe_id: String,
+        sandbox: PeerText,
+        destination: PeerText,
+        recipe: PeerText,
+        resources: farhelm_proto::tensorlake::recipes::RecipeSize,
+        confirmation: PeerText,
+        steps: Option<PlanSteps>,
+    },
     /// A supervisor answered and the helm registered it as-is.
     Discovered,
     /// No supervisor answered, and the retained plan may be consumed once.
@@ -4837,6 +4848,33 @@ pub(crate) async fn probe_local_host(base: &str) -> Result<ProbeResponse, String
             "The helm accepted the local probe, but its reply could not be read: {error}"
         )),
     })
+}
+
+/// Probe a new sandbox (name + recipe) or rerun setup on an existing row.
+/// No remote paths or new-entry marker belong to this target's contract.
+pub(crate) async fn probe_tensorlake_host(
+    base: &str,
+    name: &str,
+    recipe: &str,
+    host: Option<HostId>,
+) -> Result<ProbeResponse, String> {
+    let url = format!("{base}/api/hosts/probe");
+    let target = match host {
+        Some(host) => serde_json::json!({"kind":"tensorlake-host", "host":host}),
+        None => serde_json::json!({"kind":"tensorlake", "name":name, "recipe":recipe}),
+    };
+    let resp = send(
+        client()
+            .post(&url)
+            .json(&serde_json::json!({"target":target})),
+    )
+    .await?;
+    if !resp.status().is_success() {
+        return Err(refusal_text("POST", &url, resp).await);
+    }
+    resp.json::<ProbeResponse>()
+        .await
+        .map_err(|_| "The helm's Tensorlake plan could not be read; try again".into())
 }
 
 /// Consume one confirmed ADD plan.

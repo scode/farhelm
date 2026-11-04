@@ -224,6 +224,7 @@ pub(crate) fn SettingsDialog(
     on_close: EventHandler<()>,
     #[props(default)] focus_claude_trust: bool,
     #[props(default)] focus_workspace_trust: Option<crate::workspace_trust::TrustAgent>,
+    #[props(default)] focus_tensorlake: bool,
 ) -> Element {
     let base = use_context::<ApiBase>().0;
     let setup_base = base.clone();
@@ -289,7 +290,9 @@ pub(crate) fn SettingsDialog(
     };
     let opens_trust = trust_focus.is_some();
     let mut selected = use_signal(move || {
-        if opens_trust {
+        if focus_tensorlake {
+            "tensorlake"
+        } else if opens_trust {
             "agent-trust"
         } else {
             "sessions"

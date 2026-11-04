@@ -5731,6 +5731,65 @@ memory: unique live names, 404 for unknown IDs, a snapshot that completes after 
 left billing. The same fake stands in for the snapshot build's ssh shell and refuses a sandbox its model does not have
 running. Suspend and resume answer 501.
 
+## Adding Tensorlake hosts
+
+`POST /api/hosts/probe` accepts `tensorlake` (name and recipe) and `tensorlake-host` (an existing host id for rerun).
+These targets refuse remote path overrides and `new_entry`. A probe checks the saved key, recipe and alias locally,
+ensures Farhelm's SSH key exists, and freezes the recipe definition, size and generated sandbox name in a bounded,
+one-use outer plan. It makes no Tensorlake API call. `tensorlake-provisionable` returns the confirmation and the same
+step descriptions later used for progress. Confirming through the existing provision route writes the host row before
+starting billed work, then uses the ordinary host provisioning lock and fleet-wide run limit. A registry handoff failure
+rolls the new row back with `SandboxDeleted::never_created`; no create has been sent at that boundary.
+
+This is an explicit exception to provisioning's frozen-inner-plan rule. A sandbox does not exist at confirmation, so its
+home, architecture and install paths cannot yet be inspected. The confirmation authorizes creation and ordinary Farhelm
+setup on that sandbox; the run computes the inner plan after preparation and replaces its final placeholder with those
+concrete steps, without a second question. The existing executor runs those actions with a progress offset.
+
+Managed recipes call the snapshot builder's single-flight `ensure_snapshot`, which reports its watch progress and joins
+an existing build. A ready snapshot is reused (package edits still require explicit Rebuild). A build started by the add
+uses the confirmed definition. A snapshot whose recorded disk is larger than the confirmed host disk is refused. Reuse
+recipes skip the builder. Host creation looks up the pre-chosen name first and adopts an existing sandbox, including
+after a lost create response. It records the sandbox id before preparation and never replaces a recorded, deleted
+sandbox with a new one. Creates set `timeout_secs: 0`, `auto_resume: false` and `max_pending_secs: 900`.
+
+Schema 73 adds `hosts.tensorlake_pending_create_at` (unix seconds). Before sending create, the run records this
+outstanding request durably. An observed sandbox id settles it in the same write that saves the id; a definite API
+refusal clears it. After an ambiguous failure or restart, setup and deletion reconcile by the pre-chosen name. A 404
+settles absence only after the snapshot builder's shared 15-minute create settle window, and before then both refuse
+without replacing the outstanding request or forgetting its ownership row. Deletion saves an observed id before
+terminating, so snapshot cleanup remains retryable even once the name stops resolving.
+
+The run holds the host connection during preparation and while it records install coordinates. Preparation waits for
+SSH, fails promptly with the key-registration hint on public-key refusal, checks PID 1, starts logind with passwordless
+sudo and enables linger for the actual login user, then waits for a usable user manager. Every host's provisioning SSH
+scripts also supply `XDG_RUNTIME_DIR=/run/user/<uid>` when unset and that directory exists; local scripts are unchanged.
+Before a first install, an existing `supervisor.db` at the planned state directory refuses setup, so copied identities
+cannot silently become Duplicate. Reruns with recorded install paths retain their own state. This deliberately refuses
+any pre-existing supervisor database, including one whose identity has not yet been minted; there is no identity reset.
+Connection actors refuse to dial a Tensorlake row until both install coordinates are present. Initial setup records them
+only after that copied-state check, so the gate survives a restart; an initial failure keeps the explicit hold too.
+Ordinary SSH discovery and Update refuse such unfinished rows. The store also checks this inside the ordinary SSH
+convergence transaction, before writing coordinates or identity, so a probe or plan started before the sandbox row
+existed cannot adopt copied state later. The Tensorlake executor instead uses an explicit admission write after its
+copied-state check; that write records both coordinates together and imports no discovered identity.
+
+Agent settings are read with a 1 MiB bound, merged on the helm, and streamed through backend stdin into mode-0600 atomic
+installs. Claude's JSON must be an object with an object `env`; only `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN`
+change. `toml_edit` preserves Codex's comments and unrelated tables while selecting and updating
+`model_providers.farhelm`. Unset endpoints never touch files. Parse/read failures omit contents and parser details so
+tokens cannot enter progress. Only Add, including its rerun, writes endpoint settings; Update does not. The shared SSH
+uploader sets `umask 077` before creating its temporary, so even an existing mode-0755 agent directory cannot expose
+tokens during upload or after interruption. Its finishing command applies the requested final mode.
+
+The add dialog embeds the full recipe editor with deletion disabled and a `DialogCloseGuard` for Escape and Close. It
+uses Tensorlake's acknowledged `create_without_asking` setting, never the general setup preference, and refreshes the
+host list after an accepted or ambiguous submission. An inline Settings entry point opens its Tensorlake section. Rerun
+retains the Tensorlake plan kind, consults only that acknowledged setting, and offers no answer that writes the general
+SSH setup preference. The add dialog binds confirmation to a `ConfirmSlot` opening; accepted close retires it
+synchronously through the recipe close guard, before notifying its parent. Automatic submission consumes only the
+opening it just created, so a cancelled or replaced opening cannot authorize a later billed POST.
+
 ## Tensorlake recipes
 
 Protected `/api/tensorlake/recipes` routes store recipes in the schema-71 `tensorlake_recipes` table, one row per name,
@@ -5880,15 +5939,16 @@ acknowledgement starts empty because it belongs to the new task. Release after a
 the current entry, so replacing the actor cannot end the host's hold. Only then does removal close the host's shared
 masters, which the actor can no longer reopen, and terminate the sandbox (resolving its id by name when the row has none
 and saving that id before terminating, so a retry still finds the sandbox's snapshots after its name stops resolving; a
-missing sandbox counts as terminated). It then polls until Tensorlake reports it terminated (at most 30 seconds, so a
-snapshot a suspend was still writing exists before the sweep), lists the namespace's snapshots and deletes those whose
-`sandbox_id` is the sandbox's (a missing one counts as deleted), and only then forgets the row. Each API call is bounded
-at 20 seconds. Every step accepts that its work was done, so removing again after a failure finishes the job. The store
-enforces the order: `remove_host_row` forgets a Tensorlake row only when handed a `SandboxDeleted` proof for that row,
-which only the Tensorlake teardown constructs, and refuses otherwise; a retarget of such a row is refused the same way.
-The hold lasts until the actor stops with the row; a failed removal releases it with a fresh retry. Without an API key
-the removal is refused (409) rather than falling back to forgetting. The panel's uninstall is refused with a "delete the
-sandbox instead" remedy, and an agent's host remove is refused before any card.
+missing sandbox counts as terminated only once any outstanding create has settled). It then polls until Tensorlake
+reports it terminated (at most 30 seconds, so a snapshot a suspend was still writing exists before the sweep), lists the
+namespace's snapshots and deletes those whose `sandbox_id` is the sandbox's (a missing one counts as deleted), and only
+then forgets the row. Each API call is bounded at 20 seconds. Every step accepts that its work was done, so removing
+again after a failure finishes the job. The store enforces the order: `remove_host_row` forgets a Tensorlake row only
+when handed a `SandboxDeleted` proof for that row, which only the Tensorlake teardown constructs, and refuses otherwise;
+a retarget of such a row is refused the same way. The hold lasts until the actor stops with the row; a failed removal
+releases it with a fresh retry. Without an API key the removal is refused (409) rather than falling back to forgetting.
+The panel's uninstall is refused with a "delete the sandbox instead" remedy, and an agent's host remove is refused
+before any card.
 
 ## Feedback forwarding
 

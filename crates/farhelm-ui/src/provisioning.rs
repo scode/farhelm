@@ -993,6 +993,9 @@ fn update_owned(intent: Option<&UpdateIntent>, tracked: Option<&TrackedRun>) -> 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PendingPlan {
     operation: ProvisioningOperation,
+    /// This outer plan may create a billed sandbox even on Rerun. Its
+    /// confirmation uses only Tensorlake settings, never SSH preferences.
+    tensorlake_creation: bool,
     binding: HostBinding,
     /// The accepted request's source survives confirmation and submission.
     return_to_rail: bool,
@@ -1451,6 +1454,7 @@ pub(crate) fn SetupPlanConfirmation(
     name: String,
     host: Option<Host>,
     local: bool,
+    #[props(default)] tensorlake: bool,
     error: Option<Element>,
     busy: bool,
     on_confirm: EventHandler<bool>,
@@ -1460,7 +1464,7 @@ pub(crate) fn SetupPlanConfirmation(
     rsx! {
         settings_dialog::HostDialogHeader {
             host,
-            title: rsx! { "Set up host · " span { class: "peer-value", dir: "ltr", "{name}" } },
+            title: rsx! { if tensorlake { "Create Tensorlake sandbox · " } else { "Set up host · " } span { class: "peer-value", dir: "ltr", "{name}" } },
             summary: if local { "Farhelm is not running here yet" } else { "Farhelm is not running there yet" },
             dismiss_label: "Cancel host setup",
             dismiss_tooltip: "Cancel: change nothing on this host",
@@ -1470,12 +1474,16 @@ pub(crate) fn SetupPlanConfirmation(
             handle: settings_dialog::ADD_DIALOG, selector: ".host-settings-body", name: "Host setup plan",
             recovery: RecoveryFocus::new(".add-host-cancel", None, true, RecoveryDelay::OneFrame),
             PlanStepList { confirmation, body }
+            if tensorlake {
+                p { "This sandbox bills while running. " a { href: "https://www.tensorlake.ai/pricing", target: "_blank", rel: "noopener noreferrer", "Tensorlake pricing" } }
+                p { "On Usage Credits, Tensorlake suspends a sandbox after 24 hours without a connection. Farhelm never resumes it on its own." }
+            }
             if let Some(error) = error { {error} }
         }
         crate::modal_dialog::DialogFooter { class: "host-dialog-footer",
-            p { id: "host-setup-permanent-hint", class: "dialog-footer-hint host-dialog-permanent-hint",
+            if !tensorlake { p { id: "host-setup-permanent-hint", class: "dialog-footer-hint host-dialog-permanent-hint",
                 "Undo \"don't ask again\" with the gear at the foot of the navigation rail"
-            }
+            } }
             crate::modal_dialog::DialogActions { class: "add-host-confirm-actions",
             button {
                 r#type: "button",
@@ -1485,7 +1493,7 @@ pub(crate) fn SetupPlanConfirmation(
                 onclick: move |_| on_cancel.call(()),
                 "Cancel"
             }
-            button {
+            if !tensorlake { button {
                 r#type: "button",
                 class: "btn btn-primary btn-outline host-setup-permanent",
                 "data-tooltip": "Set up this host, and set up new hosts from now on without asking",
@@ -1494,7 +1502,7 @@ pub(crate) fn SetupPlanConfirmation(
                 onkeydown: crate::guard_confirmation_enter,
                 onclick: move |_| on_confirm.call(true),
                 "Set up, don't ask again"
-            }
+            } }
             button {
                 r#type: "button",
                 class: "btn btn-primary provisioning-confirm",
@@ -1503,7 +1511,7 @@ pub(crate) fn SetupPlanConfirmation(
                 autofocus: !busy,
                 onkeydown: crate::guard_confirmation_enter,
                 onclick: move |_| on_confirm.call(false),
-                "Set up"
+                if tensorlake { "Create sandbox" } else { "Set up" }
             }
             }
         }
@@ -1583,6 +1591,7 @@ async fn prepare(
         ProvisioningOperation::Update => {
             let planned = plan_host_update(base, host.id).await?;
             Ok(Preparation::Plan(Box::new(PendingPlan {
+                tensorlake_creation: false,
                 return_to_rail: false,
                 operation,
                 binding,
@@ -1595,6 +1604,7 @@ async fn prepare(
         ProvisioningOperation::Uninstall => {
             let planned = plan_host_uninstall(base, host.id).await?;
             Ok(Preparation::Plan(Box::new(PendingPlan {
+                tensorlake_creation: false,
                 return_to_rail: false,
                 operation,
                 binding,
@@ -1609,10 +1619,12 @@ async fn prepare(
         ProvisioningOperation::Add => {
             let probed = match host.kind {
                 HostKind::Local => probe_local_host(base).await?,
-                // Setting a sandbox up again is an ssh probe of its stored
-                // destination; the helm reaches it with Farhelm's own key
-                // because it knows the destination as a Tensorlake host's.
-                HostKind::Ssh | HostKind::Tensorlake => {
+                // Rerun can still perform the first billed create when the
+                // earlier run failed before reaching Tensorlake.
+                HostKind::Tensorlake => {
+                    crate::api::probe_tensorlake_host(base, "", "", Some(host.id)).await?
+                }
+                HostKind::Ssh => {
                     let destination = host
                         .destination
                         .as_ref()
@@ -1641,13 +1653,22 @@ async fn prepare(
                     );
                 }
             };
+            let tensorlake_creation =
+                matches!(probed, ProbeResponse::TensorlakeProvisionable { .. });
             Ok(match probed {
                 ProbeResponse::Discovered => Preparation::Discovered,
                 ProbeResponse::Provisionable {
                     probe_id,
                     confirmation,
                     steps,
+                }
+                | ProbeResponse::TensorlakeProvisionable {
+                    probe_id,
+                    confirmation,
+                    steps,
+                    ..
                 } => Preparation::Plan(Box::new(PendingPlan {
+                    tensorlake_creation,
                     return_to_rail: false,
                     operation,
                     binding,
@@ -3162,6 +3183,20 @@ pub(crate) fn ProvisioningPanel(
             }
             match prepared {
                 Ok(Preparation::Plan(mut plan)) => {
+                    // A failed settings read asks again. Only an acknowledged
+                    // Tensorlake preference authorizes skipping its billable
+                    // creation question; the SSH preference stays independent.
+                    let remembered_answer = if plan.tensorlake_creation {
+                        crate::api::fetch_tensorlake_settings(&base)
+                            .await
+                            .is_ok_and(|settings| settings.create_without_asking)
+                    } else {
+                        remembered_answer
+                    };
+                    if *current_binding.peek() != requested_binding {
+                        planning.set(None);
+                        return;
+                    }
                     plan.return_to_rail = return_to_rail;
                     if is_local_add {
                         local_auto_retry.set(true);
@@ -3898,7 +3933,7 @@ pub(crate) fn ProvisioningPanel(
         // refusal or transport ambiguity cannot prove the helm left this
         // one-use id unconsumed.
         release_plan_modal(host_id);
-        if skip_future {
+        if skip_future && !plan.tensorlake_creation {
             preferences.0.write().skip_host_setup_confirmation = Some(true);
             store_preference(
                 &preference_base,
@@ -4182,6 +4217,7 @@ pub(crate) fn ProvisioningPanel(
                                 name: crate::hosts::gui_host_name(host.name.raw(), host.kind == HostKind::Local),
                                 host: Some(host.clone()),
                                 local: host.kind == HostKind::Local,
+                                tensorlake: shown.key().tensorlake_creation,
                                 busy: page_busy,
                                 // The permanent answer is remembered inside
                                 // `confirm`, once it has taken this showing.
@@ -4377,6 +4413,7 @@ mod tests {
     /// request, runtime scope, page lock or mutable process environment.
     fn flow_plan(operation: ProvisioningOperation) -> PendingPlan {
         PendingPlan {
+            tensorlake_creation: false,
             return_to_rail: false,
             operation,
             binding: HostBinding {
@@ -5297,6 +5334,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn confirmed_submission_routing_separates_refusals_from_uncertainty() {
         let plan = |operation, kind| PendingPlan {
+            tensorlake_creation: false,
             return_to_rail: false,
             operation,
             binding: HostBinding {

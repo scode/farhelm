@@ -265,6 +265,59 @@ impl SandboxShell for ScriptedShell {
 
 const RECIPE: &str = "rust-dev";
 
+/// An add must join Settings' active build and use the resulting snapshot;
+/// asking for it again must reuse it without another billed builder. The
+/// first progress callback proves the add is waiting before release.
+#[farhelm_testtrace::test]
+async fn ensure_snapshot_joins_a_build_and_then_reuses_it() {
+    let f = fixture().await;
+    f.shell.hold.send_replace(true);
+    f.start().await;
+    f.shell.started(1).await;
+    let frozen = f
+        .store
+        .tensorlake_recipe_row(RECIPE)
+        .await
+        .unwrap()
+        .unwrap()
+        .0;
+    let builds = Arc::clone(&f.builds);
+    let events = Arc::clone(&f.events);
+    let definition = frozen.clone();
+    let (observed, mut observation) = watch::channel(false);
+    let waiting = tokio::spawn(async move {
+        builds
+            .ensure_snapshot(RECIPE, &definition, events, move |_| {
+                observed.send_replace(true);
+                std::future::ready(())
+            })
+            .await
+            .unwrap()
+    });
+    tokio::time::timeout(Duration::from_secs(5), observation.wait_for(|seen| *seen))
+        .await
+        .unwrap()
+        .unwrap();
+    f.shell.hold.send_replace(false);
+    let id = waiting.await.unwrap();
+    let reused = f
+        .builds
+        .ensure_snapshot(RECIPE, &frozen, Arc::clone(&f.events), |_| async {
+            panic!("a ready snapshot needs no build progress")
+        })
+        .await
+        .unwrap();
+    assert_eq!(id, reused);
+    assert_eq!(
+        f.api
+            .ops()
+            .iter()
+            .filter(|op| op.starts_with("create_sandbox "))
+            .count(),
+        1
+    );
+}
+
 struct Fixture {
     _dir: tempfile::TempDir,
     store: HelmStore,

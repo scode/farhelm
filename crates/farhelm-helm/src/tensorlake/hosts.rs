@@ -47,15 +47,20 @@ const TERMINATION_POLL: Duration = Duration::from_secs(1);
 /// [`crate::store::HelmStore::remove_host_row`] forgets a Tensorlake row
 /// only when handed one for that very row, so no code path can forget a
 /// sandbox host while its sandbox may still bill (D6). The field and the
-/// constructor are private to this module, whose teardown
-/// ([`Tensorlake::delete_sandbox`]) is therefore the only way to get one:
-/// that is a property the compiler checks, not a convention.
+/// teardown constructor are private to this module. The only other
+/// constructor, [`Self::never_created`], is reserved for registration
+/// rollback before any create request can have reached Tensorlake.
 #[derive(Debug)]
 pub(crate) struct SandboxDeleted {
     host: HostId,
 }
 
 impl SandboxDeleted {
+    /// Roll back a newly registered row before its first create request.
+    /// Callers must not use this once Tensorlake may have received a create.
+    pub(crate) fn never_created(host: HostId) -> Self {
+        Self { host }
+    }
     /// Attest that `host`'s sandbox and its snapshots are gone. Only after
     /// Tensorlake has said so.
     fn attest(host: HostId) -> Self {
@@ -108,8 +113,10 @@ impl Tensorlake {
     /// Idempotent, so a removal that failed or was interrupted partway is
     /// finished by the next one: a sandbox Tensorlake no longer has counts
     /// as terminated, a snapshot it no longer has as deleted, and a row that
-    /// never got a sandbox (its create never answered) needs nothing
-    /// deleted. Any other failure leaves the row in place and says why.
+    /// never sent a create needs nothing deleted. An unanswered create
+    /// retains the row until its name resolves or the builder's shared
+    /// settle window makes a missing lookup conclusive. Any other failure
+    /// leaves the row in place and says why.
     ///
     /// There is deliberately no way around a missing API key (D6): without
     /// one Farhelm cannot delete the sandbox, and forgetting the row anyway
@@ -163,6 +170,12 @@ impl Tensorlake {
                     }
                 }
                 Err(TensorlakeError::NotFound { .. }) => {
+                    if binding.pending_create_at.is_some_and(|sent| {
+                        super::recipes::now_secs() < sent + super::build::CREATE_SETTLE_SECS
+                    }) {
+                        return Err(refusal(ErrorKind::Unavailable,
+                            "a sandbox Farhelm asked Tensorlake for may still be starting; the host stays in the list. Try Delete sandbox again in a few minutes".into()));
+                    }
                     return Ok(SandboxDeleted::attest(row.id));
                 }
                 Err(error) => return Err(api_failure("look up", sandbox, error)),
@@ -199,7 +212,7 @@ impl Tensorlake {
     }
 
     /// The saved API key, or a sentence saying why there is none.
-    async fn api_key(&self) -> Result<ApiKey, String> {
+    pub(crate) async fn api_key(&self) -> Result<ApiKey, String> {
         let config = self
             .0
             .store
@@ -274,10 +287,9 @@ fn api_failure(doing: &str, sandbox: &str, error: TensorlakeError) -> anyhow::Er
     )
 }
 
-/// Planting Tensorlake host rows for tests elsewhere in the crate. Nothing
-/// in this change creates such a host from the UI or the API (the add flow
-/// is the next change), so tests start from rows written through the store's
-/// own registration.
+/// Planting Tensorlake host rows for tests elsewhere in the crate. None of
+/// these tests needs the add flow: they start from rows written through the
+/// store's own registration, independently of provisioning.
 #[cfg(test)]
 pub(crate) mod test_support {
     use crate::store::{HelmStore, HostId, NewHostEntry, NewTensorlakeHost};

@@ -214,6 +214,7 @@ async fn every_call_sends_the_documented_request() {
                 },
                 timeout_secs: 0,
                 auto_resume: false,
+                max_pending_secs: 900,
             },
         )
         .await
@@ -232,6 +233,7 @@ async fn every_call_sends_the_documented_request() {
                 },
                 timeout_secs: 0,
                 auto_resume: false,
+                max_pending_secs: 900,
             },
         )
         .await
@@ -283,6 +285,7 @@ async fn every_call_sends_the_documented_request() {
             "name": "farhelm-host-k7q2-dev-m3x9", "image": "tensorlake/ubuntu-systemd",
             "resources": { "cpus": 2.0, "memory_mb": 4096, "disk_mb": 20480 }, "timeout_secs": 0,
             "auto_resume": false,
+            "max_pending_secs": 900,
         })
     );
     assert_eq!(body(3)["snapshot_id"], "snap-0");

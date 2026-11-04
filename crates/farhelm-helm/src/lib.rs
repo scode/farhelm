@@ -2517,6 +2517,7 @@ fn error_kind(e: &anyhow::Error) -> ErrorKind {
             | store::HostStoreError::AlreadyAdded(_)
             | store::HostStoreError::LocalHostImmutable
             | store::HostStoreError::DestinationManaged
+            | store::HostStoreError::TensorlakeSetupRequired(_)
             | store::HostStoreError::SandboxNotDeleted(_)
             | store::HostStoreError::IdentityMismatch { .. }
             | store::HostStoreError::IdentityClaimed { .. }

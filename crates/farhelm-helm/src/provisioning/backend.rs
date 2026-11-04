@@ -300,6 +300,43 @@ impl BackendFailure {
 /// production implementation with only linger faked.
 #[async_trait]
 pub(super) trait ProvisioningBackend: Send + Sync {
+    /// Prepare a newly created sandbox's user manager and return its home.
+    /// Unsupported backends fail explicitly rather than skipping preparation.
+    async fn prepare_tensorlake_sandbox(
+        &self,
+        _target: &ProvisioningTarget,
+    ) -> Result<PathBuf, BackendFailure> {
+        Err(BackendFailure::new(
+            "this backend cannot prepare Tensorlake sandboxes",
+            "",
+        ))
+    }
+
+    /// Read at most 1 MiB, distinguishing an absent file from an unreadable
+    /// one. Implementations must never quote the contents in their errors.
+    async fn read_small_file(
+        &self,
+        _target: &ProvisioningTarget,
+        _path: &Path,
+    ) -> Result<Option<Vec<u8>>, BackendFailure> {
+        Err(BackendFailure::new(
+            "this backend cannot read agent settings",
+            "",
+        ))
+    }
+
+    /// Refuse a copied supervisor state before starting it under another
+    /// host. Reruns of the same host may keep its own state.
+    async fn refuse_copied_supervisor(
+        &self,
+        _target: &ProvisioningTarget,
+        _state_dir: &Path,
+    ) -> Result<(), BackendFailure> {
+        Err(BackendFailure::new(
+            "this backend cannot check copied supervisor state",
+            "",
+        ))
+    }
     async fn probe(&self, target: &ProbeTarget) -> Result<ProbeObservation, BackendFailure>;
     async fn inspect(&self, target: &ProbeTarget) -> Result<ReachOutcome, BackendFailure>;
     async fn ensure_directories(
@@ -633,7 +670,7 @@ impl SystemBackend {
         // script cannot absorb words from a destination or path.
         command.arg(format!(
             "sh -c {}",
-            crate::ssh::shell_quote(&remote_command)
+            crate::ssh::shell_quote(&format!("{REMOTE_RUNTIME_PREFIX}{remote_command}"))
         ));
         Ok(command)
     }
@@ -1399,6 +1436,13 @@ impl SystemBackend {
     }
 }
 
+/// Tensorlake's gateway does not run PAM. Ordinary ssh hosts benefit from
+/// the same fallback; an existing runtime setting is always authoritative.
+pub(super) const REMOTE_RUNTIME_PREFIX: &str = "if [ -z \"${XDG_RUNTIME_DIR-}\" ] && [ -d \"/run/user/$(id -u)\" ]; then XDG_RUNTIME_DIR=\"/run/user/$(id -u)\"; export XDG_RUNTIME_DIR; fi; ";
+
+#[path = "tensorlake_backend.rs"]
+mod tensorlake_backend;
+
 /// Render the bounded remote sweep used for one destination directory.
 pub(super) fn orphan_cleanup_script(parent: &Path, prefix: &str) -> anyhow::Result<String> {
     let parent = shell_path(parent)?;
@@ -1752,6 +1796,9 @@ pub(crate) async fn capture_child(
 /// rather than waiting for the polling interval before a later command can run.
 /// The final report covers bytes received after the last periodic sample. The
 /// caller still checks the file's digest; size reports prove progress, not content.
+/// The temporary is private from its first redirection, including in existing
+/// shared directories: this path also carries agent tokens. The finishing
+/// command applies the requested final mode for binaries and unit files.
 pub(super) fn upload_script(remote: &Path) -> Result<String, BackendFailure> {
     let path = shell_path(remote)?;
     let interval = TRANSFER_PROGRESS_POLL.as_secs();
@@ -1760,7 +1807,7 @@ pub(super) fn upload_script(remote: &Path) -> Result<String, BackendFailure> {
          (while :; do report_size; sleep {interval} >/dev/null 2>&1; done) & \
          reporter=$!; \
          trap 'kill \"$reporter\" 2>/dev/null; wait \"$reporter\" 2>/dev/null' 0; \
-         cat > {path}; result=$?; report_size; exit \"$result\""
+         umask 077; cat > {path}; result=$?; report_size; exit \"$result\""
     ))
 }
 
@@ -2061,6 +2108,28 @@ fn handshake_io_failure(error: &std::io::Error) -> bool {
 
 #[async_trait]
 impl ProvisioningBackend for SystemBackend {
+    async fn prepare_tensorlake_sandbox(
+        &self,
+        target: &ProvisioningTarget,
+    ) -> Result<PathBuf, BackendFailure> {
+        self.prepare_sandbox(target).await
+    }
+
+    async fn read_small_file(
+        &self,
+        target: &ProvisioningTarget,
+        path: &Path,
+    ) -> Result<Option<Vec<u8>>, BackendFailure> {
+        self.read_agent_file(target, path).await
+    }
+
+    async fn refuse_copied_supervisor(
+        &self,
+        target: &ProvisioningTarget,
+        state_dir: &Path,
+    ) -> Result<(), BackendFailure> {
+        self.check_copied_state(target, state_dir).await
+    }
     async fn probe(&self, target: &ProbeTarget) -> Result<ProbeObservation, BackendFailure> {
         let (mut child, remote) = self.spawn_probe(target).await?;
         // The probe's process group, kept for the path below where the child

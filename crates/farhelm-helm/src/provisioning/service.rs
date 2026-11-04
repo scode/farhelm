@@ -2,6 +2,8 @@
 
 #[path = "automatic.rs"]
 mod automatic;
+#[path = "tensorlake_add.rs"]
+mod tensorlake_add;
 pub(crate) use automatic::AutomaticUpdates;
 
 use super::backend::{
@@ -59,6 +61,7 @@ const MAX_CONCURRENT_PROGRESS_READS: usize = 8;
 #[derive(Default)]
 pub(super) struct ProvisioningMemory {
     pub(super) plans: HashMap<String, PendingPlan>,
+    tensorlake_plans: HashMap<String, tensorlake_add::TensorlakeAddPlan>,
     plan_order: VecDeque<String>,
     pub(super) runs: HashMap<HostId, ProvisioningView>,
     pub(super) busy: std::collections::HashSet<HostId>,
@@ -442,6 +445,11 @@ impl ProvisioningService {
         access: crate::ssh::SshAccessKind,
     ) -> anyhow::Result<(ProbeTarget, ProbeRegistration)> {
         match &request.target {
+            ProbeDestination::Tensorlake { .. } | ProbeDestination::TensorlakeHost { .. } => {
+                Err(anyhow::Error::new(ProvisioningRequestError::InvalidProbe(
+                    "use the Tensorlake add flow for this target".into(),
+                )))
+            }
             ProbeDestination::Local => {
                 if request.remote_farhelm.is_some()
                     || request.remote_state_dir.is_some()
@@ -596,8 +604,22 @@ impl ProvisioningService {
                 .await?
                 .into_iter()
                 .find(|row| row.destination.as_deref() == Some(destination.as_str())),
-            ProbeDestination::Local => None,
+            ProbeDestination::Local
+            | ProbeDestination::Tensorlake { .. }
+            | ProbeDestination::TensorlakeHost { .. } => None,
         };
+        // The ordinary SSH discovery path can adopt an answering supervisor
+        // and persist its coordinates. An unfinished sandbox must instead
+        // pass the Tensorlake run's copied-state check before that durable
+        // dial gate can open, even when a caller names its SSH destination.
+        if stored.as_ref().is_some_and(|row| {
+            row.tensorlake.is_some()
+                && (row.remote_farhelm.is_none() || row.remote_state_dir.is_none())
+        }) {
+            return Err(anyhow::Error::new(ProvisioningRequestError::Refused(
+                "initial Tensorlake setup must use the sandbox's setup action; run setup again from its host row".into(),
+            )));
+        }
         // What the person entered is held to the full rule, in the registry's
         // own words, before anything is probed: probing `~/...` reported
         // "not installed" for a host where Farhelm is installed and offered
@@ -991,6 +1013,18 @@ impl ProvisioningService {
         self: &Arc<Self>,
         request: ProvisionRequest,
     ) -> anyhow::Result<RunAccepted> {
+        let tensorlake = {
+            let mut memory = self.memory.lock().await;
+            let plan = memory.tensorlake_plans.remove(&request.probe_id);
+            if plan.is_some() {
+                memory.plan_order.retain(|id| id != &request.probe_id);
+            }
+            plan
+        };
+        if let Some(plan) = tensorlake {
+            let service = Arc::clone(self);
+            return crate::run_owned(async move { service.start_tensorlake_add(plan).await }).await;
+        }
         let pending = self.consume_plan(&request.probe_id).await?;
         let service = Arc::clone(self);
         tokio::spawn(async move {
@@ -1145,6 +1179,15 @@ impl ProvisioningService {
             .await
             .expect("the provisioning planning semaphore is never closed");
         let row = self.host_row(host).await?;
+        // Update can discover and adopt install coordinates too. It cannot
+        // replace the initial sandbox run's copied-state admission check.
+        if row.tensorlake.is_some()
+            && (row.remote_farhelm.is_none() || row.remote_state_dir.is_none())
+        {
+            return Err(anyhow::Error::new(ProvisioningRequestError::Refused(
+                "initial Tensorlake setup must finish before Update; run setup again from its host row".into(),
+            )));
+        }
         if let Some(reason) = self.suspended_refusal(host) {
             return Err(anyhow::Error::new(ProvisioningRequestError::Refused(
                 reason.to_string(),
@@ -1776,6 +1819,7 @@ impl ProvisioningService {
         while memory.plan_order.len() >= MAX_PENDING_PLANS {
             if let Some(expired) = memory.plan_order.pop_front() {
                 memory.plans.remove(&expired);
+                memory.tensorlake_plans.remove(&expired);
             }
         }
         memory.plan_order.push_back(probe_id.clone());
@@ -1929,6 +1973,9 @@ impl ProvisioningService {
             })
             .map(|(id, _)| id.clone())
             .collect();
+        memory
+            .tensorlake_plans
+            .retain(|_, plan| plan.host != Some(host));
         memory.plans.retain(|id, _| !removed.contains(id));
         memory.plan_order.retain(|id| !removed.contains(id));
         task
@@ -2329,15 +2376,29 @@ impl ProvisioningService {
     /// Consume the plan in order, retaining every completed outcome and
     /// stopping at the first failure without rollback.
     async fn execute(&self, host: HostId, plan: ProvisioningPlan) {
+        self.execute_actions(host, plan, 0).await;
+    }
+
+    /// Tensorlake setup discovers the inner plan after creation and splices
+    /// its actions after the outer steps. Keep action execution and failure
+    /// handling identical to ordinary SSH setup by carrying only an offset.
+    async fn execute_actions(&self, host: HostId, plan: ProvisioningPlan, offset: usize) {
         let prepared = match self.prepare_payloads(&plan).await {
             Ok(prepared) => prepared,
             Err((index, error)) => {
-                self.fail_action(host, plan.operation, index, &plan.actions[index], error)
-                    .await;
+                self.fail_action(
+                    host,
+                    plan.operation,
+                    offset + index,
+                    &plan.actions[index],
+                    error,
+                )
+                .await;
                 return;
             }
         };
         for (index, action) in plan.actions.iter().enumerate() {
+            let index = offset + index;
             self.set_step(host, index, StepStatus::Running, None).await;
             let outcome = self.execute_action(host, &plan, action, &prepared).await;
             let (status, message) = match outcome {
