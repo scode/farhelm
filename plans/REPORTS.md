@@ -56,3 +56,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`discord-link-in-app`](reports/discord-link-in-app.report.md) landed 2026-11-04 in #2963: Add "Chat on Discord" to the ? menu and the feedback dialog
 - [`grid-drop-and-drag-notice`](reports/grid-drop-and-drag-notice.report.md) landed 2026-11-04 in #2965, #2969: Grid terminals: accept dropped files and show the drag-copy notice, placed 3 rows off the pointer
 - [`vs16-emoji-width`](reports/vs16-emoji-width.report.md) landed 2026-11-04 in #2971: Grid terminals: size emoji variation sequences (U+FE0F, U+FE0E) the way Ghostty does
+- [`launch-progress`](reports/launch-progress.report.md) landed 2026-11-04 in #2970, #2974: Show a live "Launching on host… 14 s" status while a launch, Restart or Replace waits
