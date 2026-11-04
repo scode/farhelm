@@ -8,28 +8,35 @@ changelog curation reading lists include it. Step numbers in this file refer to 
 > NOTE: In an unattended run (plan executor, landing monitor, delegate), an instruction here to ask, confirm with, or
 > propose to the maintainer follows `AGENTS.md`, "Unattended runs".
 
-A stable release is cut from main. The changelog section lands on main FIRST, as its own PR; the release branch is cut
-after it merges, so the bump commit keeps its three-file shape and main is the only place the notes ever live. The
-section lands as a draft, and the procedure does not wait for the maintainer to approve its wording: the tag builds, and
-the release can be signed and brick tested, while they review it. The approved text then replaces the draft on main and
-on the GitHub release (step 3). The maintainer asked for this on 2026-10-13. Nothing that ships reads the notes (the
-app's What's new item opens the docs website, which builds from main), so what the wait bought was that the GitHub
-release and the tag's own copy of `CHANGELOG.md` never held a draft. The draft notice covers the release page (and the
-notification GitHub sends repository watchers) until finalization; the tag's copy keeps the draft for good, which
-nothing reads. Main holds the draft too until finalization, so a docs website deployed in that window shows it on the
-Release notes page, which is where the app's What's new item lands. When asked to deploy the website while the notes are
-still a draft, say so before deploying.
+A stable release is cut from main. The changelog section and any selected announcement additions or changes land on main
+FIRST, in the changelog PR; the release branch is cut after it merges, so the bump commit keeps its three-file shape and
+main is the only place the notes ever live. The section lands as a draft, and the procedure does not wait for the
+maintainer to approve its wording: the tag builds, and the release can be signed and brick tested, while they review it.
+The approved text then replaces the draft on main and on the GitHub release (step 3). The maintainer asked for this on
+2026-10-13. Nothing that ships reads the notes (the app's What's new item opens the docs website, which builds from
+main), so what the wait bought was that the GitHub release and the tag's own copy of `CHANGELOG.md` never held a draft.
+The draft notice covers the release page (and the notification GitHub sends repository watchers) until finalization; the
+tag's copy keeps the draft for good, which nothing reads. Main holds the draft too until finalization, so a docs website
+deployed in that window shows it on the Release notes page, which is where the app's What's new item lands. When asked
+to deploy the website while the notes are still a draft, say so before deploying.
 
-The version is settled when the stable release is requested, and from then on nothing waits for the maintainer until the
-tag's build is running. A request that names a version settles it. So does a request that follows a release candidate:
-when the most recent published release, prereleases included and ordered by publication time (the same lookup as
-`releasing/.agents/rc.md`, "Cutting an RC release"), is `X.Y.Z-rc.N` or `X.Y.Z-dev.N` and `vX.Y.Z` does not exist yet,
-the version is `X.Y.Z`. Announce it and carry on. Only when neither applies, or the version's tag already exists, ask
-which version to cut, and ask it in the same reply that acknowledges the request, before any other work; never stop
-later for it. The base is not a question: it is always the changelog PR's merge commit (step 5). The maintainer asked
-for this on 2026-10-16, after the v0.29.0 attempt stopped with every pre-tag check passing to confirm a version that
-rc.3 had already settled. The tag's build gate is the slowest part of a release and the one that turns up the failures
-to fix forward, so it starts the moment the pre-tag checks pass.
+The version and announcements are settled when the stable release is requested, and from then on nothing waits for the
+maintainer until the tag's build is running. A request that names a version settles the version. So does a request that
+follows a release candidate: when the most recent published release, prereleases included and ordered by publication
+time (the same lookup as `releasing/.agents/rc.md`, "Cutting an RC release"), is `X.Y.Z-rc.N` or `X.Y.Z-dev.N` and
+`vX.Y.Z` does not exist yet, the version is `X.Y.Z`. Announce it without asking about the version again. Only when
+neither applies, or the version's tag already exists, ask which version to cut, and ask it in the same reply that
+acknowledges the request, before any other work; never stop later for it. The base is not a question: it is always the
+changelog PR's merge commit (step 5). The maintainer asked for this on 2026-10-16, after the v0.29.0 attempt stopped
+with every pre-tag check passing to confirm a version that rc.3 had already settled. The tag's build gate is the slowest
+part of a release and the one that turns up the failures to fix forward, so it starts the moment the pre-tag checks
+pass.
+
+In that same request-settling reply, show main's selected announcements for `X.Y.Z` and its prereleases and ask whether
+to add or change any, per `releasing/AGENTS.md`, "In-app announcements". Ask even when the version is already settled by
+an RC or the request, and when there was no earlier RC; "no" is enough. This is separate from the release-note wording
+review that runs alongside the tag build. Wait for the announcement answer before step 1, and carry any additions or
+changes in step 4's changelog PR. Stable re-cuts carry over the settled list without asking again.
 
 1. Fetch tags, then run `python3 releasing/check-changelog.py fragments`. Every required commit since the last stable
    release is included unless the user explicitly excludes it, and `MISSING` ones get an entry written now from the
@@ -123,9 +130,12 @@ to fix forward, so it starts the moment the pre-tag checks pass.
 
    If the maintainer approves before the changelog PR in step 4 merges, that PR carries the approved section without the
    notice instead, and there is nothing to finalize.
-4. Make the changelog PR: the drafted `## vX.Y.Z - <today>` section at the top of `CHANGELOG.md`, with the draft notice
-   on the first line under the heading followed by the scratch file's categories, every fragment under
-   `releasing/changelog.d/` deleted (including `kind: none` ones; they were for this sweep), `dprint fmt`, and
+4. Make the changelog PR, including any announcement table additions or changes settled in the request reply per
+   `releasing/AGENTS.md`, "In-app announcements". Attach new entries to `X.Y.Z`; keep entries from earlier candidates on
+   their exact original versions and ids. Run that section's recorded table validation before merging a table edit. The
+   PR also carries the drafted `## vX.Y.Z - <today>` section at the top of `CHANGELOG.md`, with the draft notice on the
+   first line under the heading followed by the scratch file's categories, every fragment under `releasing/changelog.d/`
+   deleted (including `kind: none` ones; they were for this sweep), `dprint fmt`, and
    `python3 releasing/check-changelog.py format` passing. If `<today>` differs from the date in the scratch file's
    heading, update the scratch file's heading to match what this PR lands, and regenerate the page with it, so that the
    finalization copy keeps the heading the release is named after. Merge it before going on.
@@ -225,14 +235,16 @@ the next patch version. The abandoned release branch is left as it is, like the 
 ## Re-cutting a stable release
 
 A stable re-cut cannot reuse the old release branch: its notes have to cover what now rides along. Re-run step 1's sweep
-and protocol check against the new base, then make another changelog PR as in step 4. It renames the `## vX.Y.Z` section
-when the version changed (a stable `announce` fails unless the newest section names the tag exactly), adds entries for
-the fix and for every required commit that landed since, and deletes the fragments. Entries the maintainer already
-approved stay word for word. The new ones are not held for the maintainer's approval: draft them from the fragments (or,
-for a `MISSING` commit, from the commit and its PR) following `releasing/EDITORIAL_GUIDANCE.md`, sort them into
-categories as step 2 does, and add the fixed remote-hosts entry if the protocol version changed in the new commits.
-Leave out `kind: none` fragments and `STALE` ones rather than stopping to ask about them. The maintainer chose this on
-2026-10-11, over stopping for wording review and over cutting from the old base with only the fix cherry-picked.
+and protocol check against the new base, then make another changelog PR as in step 4. Carry the settled announcement
+table over without asking again, retaining each entry's version and id even when the re-cut gets a new patch version; do
+not copy an earlier announcement into a new entry. The PR renames the `## vX.Y.Z` section when the version changed (a
+stable `announce` fails unless the newest section names the tag exactly), adds entries for the fix and for every
+required commit that landed since, and deletes the fragments. Entries the maintainer already approved stay word for
+word. The new ones are not held for the maintainer's approval: draft them from the fragments (or, for a `MISSING`
+commit, from the commit and its PR) following `releasing/EDITORIAL_GUIDANCE.md`, sort them into categories as step 2
+does, and add the fixed remote-hosts entry if the protocol version changed in the new commits. Leave out `kind: none`
+fragments and `STALE` ones rather than stopping to ask about them. The maintainer chose this on 2026-10-11, over
+stopping for wording review and over cutting from the old base with only the fix cherry-picked.
 
 The re-cut's section is therefore a draft again, whether or not the previous attempt's notes were finalized: it opens
 with the draft notice in `CHANGELOG.md`, and its review and finalization follow steps 2 and 3. The scratch file and the

@@ -25,9 +25,12 @@ triggers the release workflow.
 
 No release tag is pushed before its base and its version are settled with the maintainer per the procedure for its kind,
 a tag name is never reused, and a tag is never deleted. Each procedure settles both when the release is requested, by
-its defaults or by asking right then, before any other work. After that, nothing before the tag's build waits for the
-maintainer: the build gate takes the longest and finds the failures to fix forward, so it starts as soon as the pre-tag
-checks pass.
+its defaults or by asking right then, before any other work. An RC or stable request also settles its in-app
+announcements in that same reply, as described in `releasing/AGENTS.md`, "In-app announcements"; even a request that
+states the base and version needs that answer. Dev releases are exempt, and fix-forward attempts and stable re-cuts
+carry the settled announcements over without asking again. After those request-time decisions, nothing before the tag's
+build waits for the maintainer: the build gate takes the longest and finds the failures to fix forward, so it starts as
+soon as the pre-tag checks pass.
 
 The workflow builds the release, validates it, and publishes its archives on a GitHub release. It signs nothing: CI
 never sees a signing key. A release reaches users only once the maintainer has signed its `SHA256SUMS` (the six payloads
@@ -64,12 +67,57 @@ These are the only merges a release request authorizes. Each is spelled out, wit
 
 - The stable release's changelog PR, and its finalization PR: `releasing/.agents/stable.md`, "Cutting a stable release",
   steps 3 and 4.
+- An RC's small announcements PR, before the tag, when the maintainer selected additions or changes:
+  `releasing/.agents/rc.md`, "Cutting an RC release". It changes the announcement table on main, never the version.
 - A stable re-cut's changelog PR: `releasing/.agents/stable.md`, "Re-cutting a stable release".
 - A fix forward's PR, marked ready and merged when the fix is straightforward and unambiguous:
   `releasing/.agents/fixing-forward.md`, "Fixing forward".
 
 Nothing else merges for a release's sake. The release screenshot PR stays a draft until the maintainer asks for it to
-land, an RC or dev bump PR is closed without merging, and a stable release commit never reaches main.
+land, an RC or dev bump PR is closed without merging, and a stable release commit never reaches main. The temporary
+announcements PR beneath a stack-based RC's bump is closed without merging too; the announcement text has already landed
+through the separate PR on main.
+
+## In-app announcements
+
+Only announcements the maintainer explicitly selects go into a release. Never select them from the changelog's Breaking
+category or from fragments. The table is `crates/farhelm-helm/src/release_announcements.json`, initially `[]`; each
+entry has `version`, `id`, `title` and `body`. It is built into the helm, so selected text must be in the release's
+source before the tag, rather than added during release-note finalization.
+
+In the reply that settles or announces the first RC's version and base, ask: "Which in-app announcements should be
+included in this release candidate? None is fine." Ask even for a fully specified request such as "cut an rc with this
+stack", before any other work. At every later RC and at the stable request, read main's current table and show the
+entries for the whole target version cycle (`X.Y.Z` and its prereleases), with their exact versions, ids, titles and
+bodies, or say that the list is empty. Ask: "Do you want to add or change any in-app announcements for this release? No
+is enough." A stable request with no earlier RC asks the same question in its request-settling reply. This is the
+cycle's selected list, never a prediction of what a particular helm will show. Wait for the answer before starting the
+release work; the base, version and announcement questions belong together, not at separate later stops.
+
+When offering to change an announcement, explain that an entry that already shipped keeps its id, and helms that already
+enqueued it keep the old text. Rewording is not a way to show an announcement a second time. Reproduce the maintainer's
+title and body exactly; ask about ambiguous wording or a validation problem rather than silently polishing it. Bodies
+are plain text, with blank lines separating paragraphs.
+
+Attach a new entry to the exact release being cut, without a leading `v`: `X.Y.Z-rc.N` at an RC, `X.Y.Z` at stable. Mint
+its never-reused id as `<version>-<short-slug>`. Retain earlier entries and their original versions and ids. At an RC,
+additions or changes land on main in a small PR before the tag; stable additions or changes ride in step 4's changelog
+PR. No selected changes means no table edit or announcements PR on main; a stack-based RC may still need the temporary
+table-carrying PR described in `releasing/.agents/rc.md`, "Cutting an RC release". Dev releases attach no announcements
+and ask no announcement question. Fix-forward attempts and stable re-cuts carry the table over without new questions or
+new copies of its entries, even when the next attempt's version changes.
+
+Before merging a table edit, run the table validation with the pinned nextest setup from `docs/test-run-evidence.md`:
+
+```
+python3 scripts/record-test-run.py --runner nextest --kind release --selection 'release announcement table' --concurrency '4 nextest slots; one selected test; retries 0' --tmux none -- cargo nextest run -p farhelm-helm --lib -E 'test(release_announcement_table_is_valid)'
+```
+
+It checks unique ids, valid versions and non-empty text. Keep the procedure's existing changelog checks too. Use the
+`chore` type for the small RC announcements PR; selecting announcement text needs no separate changelog fragment. The
+underlying product changes still follow the ordinary fragment rules. Run `python3 releasing/check-changelog.py format`
+before merging that PR so announcement work cannot carry a malformed fragment into the tag build. Mark it ready and
+merge it under the release request's authorization after these checks pass. Never include a version bump in it.
 
 ## Reading lists
 

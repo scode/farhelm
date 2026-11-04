@@ -10,9 +10,10 @@ nothing ever removes the old ones. A checkout used for releases grew past 100 GB
 copies of the version-parity test binary with their incremental caches, plus the reproductions of gate failures run
 between attempts. A release attempt therefore starts and ends with `cargo clean` in the checkout it is cut from:
 
-- Right before the version-parity tests, the attempt's first build. This also clears what an earlier attempt left
-  behind, including one whose session ended before its own cleanup. It costs little: the version bump rebuilds every
-  workspace crate regardless, so only the dependencies are rebuilt that would otherwise have been reused.
+- Right before the version-parity tests, the attempt's first build with the bumped version. Announcement-table
+  validation runs before its PR merges, while the version is still unreleased. This cleanup also clears what an earlier
+  attempt left behind, including one whose session ended before its own cleanup. It costs little: the version bump
+  rebuilds every workspace crate regardless, so only the dependencies are rebuilt that would otherwise have been reused.
 - When the attempt is over: the release is published and verified, or the attempt is abandoned. Not while a gate failure
   is still being reproduced in that checkout, since the reproduction wants its warm build.
 

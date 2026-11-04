@@ -310,12 +310,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
     ("no resumable conversation yet"), and whether to offer optional nesting protection (only admit a report when a
     process with a named executable sits between the pane and the reporter).
 
-- **An in-app signal for serious breaking changes.** Release notes alone are easy to miss. Give Farhelm a way to tell
-  users inside the app about a serious breaking change in a release they just updated to, rather than relying on the
-  release notes. Commands and wrappers starting to run through bash with full shell meaning
-  (`plans/queue/command-shell-meaning.md`) is the kind of change that would have used it. Plan:
-  `plans/queue/in-app-announcements.md`.
-
 - **Support adding remote macOS hosts.** V1 provisioning targets Linux hosts with a usable systemd user manager
   (SPEC.md, Topology); a Mac can only be added today by running the supervisor binary by hand, and the remote
   provisioning and remote Update flows do not cover it. Make adding a macOS machine as a remote host a supported flow.

@@ -31,5 +31,13 @@ The next attempt's base is therefore settled (latest main), and so is its versio
   or `dev.N+1`, and a stable release cuts the next patch version. The stale tag stays (tags are never deleted).
 - A failure before any tag was pushed spends nothing, and the next attempt keeps the version.
 
+The announcement selection is settled too. Carry the table forward without asking again, for an RC fix-forward attempt
+or a stable re-cut as well as a pre-tag retry. Keep existing entries' exact versions, ids and text even when the next
+attempt gets a new version; do not duplicate them under the retry's version. They already ride on main from the RC
+announcements PR or stable changelog PR, and later releases carry them with it. If a pre-tag failure preceded that
+merge, finish carrying the selected edits in that PR before tagging. A table validation failure is a pre-tag failure
+like the other checks above; resolve it without silently changing the maintainer's wording. Dev releases remain exempt
+from announcement selection.
+
 Every attempt gets its own risk report (`releasing/.agents/risk-report.md`, "The release risk report"). For a stable
 re-cut it still reaches the maintainer before the tag is pushed, but the agent does not wait for a reply to it.
