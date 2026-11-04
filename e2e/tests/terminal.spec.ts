@@ -4058,6 +4058,9 @@ test("compact rows retain distinct ended and harness glyphs within two character
       const permissionRole = await row.getAttribute("data-session-selected") === "true" ? "--on-fill" : ordinaryRole;
       const expectedColor = await resolveToken(page, permissionRole);
       await expect(row.locator(".permission-glyph")).toHaveCSS("color", expectedColor);
+      const ordinaryHarnessRole = ["codex", "goose", "terminal"].includes(item.harness) ? "--fg-1" : `--harness-${item.harness}`;
+      const harnessRole = await row.getAttribute("data-session-selected") === "true" ? "--on-fill" : ordinaryHarnessRole;
+      await expect(row.locator(".harness-glyph")).toHaveCSS("color", await resolveToken(page, harnessRole));
       if (["stopped", "exited", "interrupted", "error"].includes(item.id)) {
         await expect(row.locator(`.ended-status-glyph[data-glyph="${item.id}"]`)).toBeVisible();
         await expect(row.locator(".status-dot")).toHaveCount(0);
@@ -4071,6 +4074,61 @@ test("compact rows retain distinct ended and harness glyphs within two character
     await patchPreferences(request, { compact: preferences.compact ?? null });
   }
 });
+
+for (const palette of ["dark", "light"] as const) {
+  /**
+   * Every agent identity has its ordinary color, while actual navigation
+   * inverts each selected mark. Clicking every row distinguishes the cascade
+   * from an unexercised selected branch or a class added by the test itself.
+   * The mocked listing keeps all ten shapes visible without vendor programs;
+   * no assertion depends on the synthetic sessions' terminal attachments.
+   */
+  test(`agent marks keep identity colors and invert on selection in ${palette}`, async ({ page, request }, testInfo) => {
+    const preferences = await readPreferences(request);
+    const marks = ["claude", "codex", "muse", "cursor", "goose", "pi", "omp", "grok", "opencode", "terminal"];
+    const cases = marks.map((glyph) => ({
+      id: `0f8c2b1e-6d0e-4c51-9a8e-1e2f3a4b5c6d:mark-${glyph}`,
+      title: `mark-${glyph}`,
+      cwd: "/srv/example",
+      invocation: glyph,
+      status: { state: "idle" },
+      launch: glyph === "terminal"
+        ? { kind: "legacy", invocation: "shell", agent_kind: "generic", resume_template: null }
+        : agentLaunchRow({ harness: glyph === "opencode" ? "open_code" : glyph, model: null, effort: null, permissions: null }),
+    }));
+    await page.emulateMedia({ colorScheme: palette });
+    await page.setViewportSize({ width: 1200, height: 1000 });
+    await patchPreferences(request, { compact: false });
+    await pinAutoSelect(page, cases[cases.length - 1].id);
+    await page.route(SESSION_LISTING, (route) => fulfillAsHelm(route, {
+      status: 200, contentType: "application/json",
+      body: JSON.stringify({ sessions: cases, total: cases.length, matching: cases.length, truncated: false }),
+    }));
+    try {
+      await page.goto("/");
+      await expect(page.locator("html")).toHaveAttribute("data-appearance", palette);
+      await expect(page.locator(".session-row")).toHaveCount(cases.length);
+      for (const [index, glyph] of marks.entries()) {
+        const row = page.locator(`[data-session-id="${cases[index].id}"]`);
+        const mark = row.locator(`.harness-glyph[data-glyph="${glyph}"]`);
+        await expect(mark).toBeVisible();
+        await expect(row).toHaveAttribute("data-session-selected", "false");
+        const role = ["codex", "goose", "terminal"].includes(glyph) ? "--fg-1" : `--harness-${glyph}`;
+        await expect(mark).toHaveCSS("color", await resolveToken(page, role));
+        await row.locator(".session-row-open").click();
+        await expect(row).toHaveAttribute("data-session-selected", "true");
+        await expect(mark).toHaveCSS("color", await resolveToken(page, "--on-fill"));
+        // Select a neutral mark for the capture so all seven identity hues
+        // remain visible beside a genuinely selected inverse mark.
+        if (glyph === "codex") {
+          await testInfo.attach(`agent-marks-${palette}.png`, { body: await page.screenshot(), contentType: "image/png" });
+        }
+      }
+    } finally {
+      await patchPreferences(request, { compact: preferences.compact ?? null });
+    }
+  });
+}
 
 // Review-swarm fix batch item 21's other half: the SAME injection idiom
 // `delete confirmation safely displays a title containing executable

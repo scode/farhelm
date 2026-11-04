@@ -485,8 +485,8 @@ pub(crate) enum QualifierGlyph {
 /// the sidebar evokes "spark" without copying the mark.
 const CLAUDE_STARBURST: &str = "M14.20 12.00L12.00 1.00L9.80 12.00ZM13.56 13.56L19.78 4.22L10.44 10.44ZM12.00 14.20L23.00 12.00L12.00 9.80ZM10.44 13.56L19.78 19.78L13.56 10.44ZM9.80 12.00L12.00 23.00L14.20 12.00ZM10.44 10.44L4.22 19.78L13.56 13.56ZM12.00 9.80L1.00 12.00L12.00 14.20ZM13.56 10.44L4.22 4.22L10.44 13.56Z";
 
-/// OpenAI's monochrome "blossom", the mark Codex ships under everywhere
-/// (there is no Codex-specific logo). Bytes of the `d` attribute of
+/// OpenAI's monochrome "blossom", used here to identify Codex. Bytes of the
+/// `d` attribute of
 /// `OpenAI-black-monoblossom.svg` from OpenAI's official brand download,
 /// unaltered; OpenAI's brand terms permit referential use but forbid
 /// modification, which is why the 2.5 KB path lives in its own file
@@ -495,7 +495,8 @@ const OPENAI_BLOSSOM: &str = include_str!("icons/openai-blossom.svgpath");
 
 /// Cursor's official 2D cube (`CUBE_2D_LIGHT.svg` from cursor.com/brand),
 /// unaltered. Cursor's own site renders this same geometry in
-/// `currentColor`, so a monochrome rendering matches the owner's use.
+/// `currentColor`; Farhelm supplies an identity hue rather than claiming
+/// the owner's neutral variants have an official chromatic color.
 const CURSOR_CUBE: &str = "M457.43,125.94L244.42,2.96c-6.84-3.95-15.28-3.95-22.12,0L9.3,125.94c-5.75,3.32-9.3,9.46-9.3,16.11v247.99c0,6.65,3.55,12.79,9.3,16.11l213.01,122.98c6.84,3.95,15.28,3.95,22.12,0l213.01-122.98c5.75-3.32,9.3-9.46,9.3-16.11v-247.99c0-6.65-3.55-12.79-9.3-16.11h-.01ZM444.05,151.99l-205.63,356.16c-1.39,2.4-5.06,1.42-5.06-1.36v-233.21c0-4.66-2.49-8.97-6.53-11.31L24.87,145.67c-2.4-1.39-1.42-5.06,1.36-5.06h411.26c5.84,0,9.49,6.33,6.57,11.39h-.01Z";
 
 /// Goose's official glyph, the 24-unit path from the project's own
@@ -517,9 +518,9 @@ const PI_BADGE: &str =
 /// Greek omega that was Farhelm's own invention.
 const OMP_PI: &str = "M14 16h36v8H40v32h-8V24h-6v22h-8V24h-4z";
 
-/// Farhelm's own Grok mark: a block "G" drawn as one path. xAI does not
-/// publish a self-serve brand kit for this use, so the sidebar names the
-/// harness without copying or approximating xAI's mark.
+/// Farhelm's own Grok mark: a block "G" drawn as one path. The current
+/// official kit requires its logos unaltered; this original drawing names
+/// the harness independently of xAI's artwork.
 const GROK_GLYPH: &str = "M21 4H8C4.686 4 2 6.686 2 10V14C2 17.314 4.686 20 8 20H21V11H12V15H16V16H8C6.895 16 6 15.105 6 14V10C6 8.895 6.895 8 8 8H21Z";
 
 /// OpenCode's favicon cut: one ring drawn with the even-odd rule. The
@@ -529,10 +530,11 @@ const GROK_GLYPH: &str = "M21 4H8C4.686 4 2 6.686 2 10V14C2 17.314 4.686 20 8 20
 const OPENCODE_RING: &str = "M384 416H128V96H384V416ZM320 160H192V352H320V160Z";
 
 /// Muse Code's mark is borrowed from an unofficial community VS Code
-/// extension (MIT), because Meta publishes no Muse Code mark at all and
+/// extension (MIT), because no Muse Code mark was found in the checked sources and
 /// Meta's own corporate marks require brand approval for any use. It is a
 /// stroked "M" whose four terminals carry round dots; the source icon's
-/// blue and its sparkle are dropped. Stroked rather than filled, so the
+/// blue is replaced by a Farhelm hue and its sparkle is omitted. Stroked rather
+/// than filled, so the
 /// stroke widths are the source's own and scale with the group transform.
 const MUSE_STEM: &str = "M4 20V5l6 9 6-9v15";
 const MUSE_DOTS: &str = "M4 20h0M16 20h0M4 5h0M16 5h0";
@@ -542,6 +544,9 @@ const MUSE_DOTS: &str = "M4 20h0M16 20h0M4 5h0M16 5h0";
 /// Which harnesses carry an official mark, which carry one Farhelm drew, and
 /// why, is documented per constant above and in `docs/harness-marks.md`; the
 /// attributions for the vendored geometry are in `THIRD_PARTY_NOTICES.md`.
+/// `app.css` assigns permitted identity colors by `data-glyph`, with every
+/// selected mark using the inverse foreground. Geometry stays independent
+/// of theme and color policy.
 /// Everything stays inline so the web and desktop bundles cannot drift and
 /// so no client downloads branding at runtime.
 #[component]

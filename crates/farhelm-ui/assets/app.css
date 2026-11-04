@@ -137,6 +137,16 @@
   --host-icon-sand: #cdbb99;
   --host-icon-copper: #d7a180;
   --host-icon-red: #e69c9c;
+  /* Agent identity, never permission or activity. Owner hues are used where
+     published; the rest are Farhelm choices. Provenance and color-use terms
+     live in docs/harness-marks.md. These clear 3:1 on sidebar and row hover. */
+  --harness-claude: #d97757;
+  --harness-muse: #456bff;
+  --harness-cursor: #2fbfaf;
+  --harness-pi: #4d9abf;
+  --harness-omp: #9b4dff;
+  --harness-grok: #d8b839;
+  --harness-opencode: #83b94b;
   /* Surfaces. THREE levels are in use, and which level a thing sits on
      is a decision recorded here rather than something each rule picks
      for itself: ground for content, one step up for the chrome around
@@ -207,9 +217,9 @@
 
   /* The one accent. Blue
      because the greys are already blue-cast, so it reads as the same
-     family turned up rather than as a foreign hue, and because every
-     other hue in this sheet is spoken for by a state (green ok, amber
-     warn, red danger). --info shares its periwinkle family but has a
+     family turned up rather than as a foreign hue. Host and agent hues
+     identify their subjects; green ok, amber warn and red danger carry
+     state. --info shares the accent's periwinkle family but has a
      different role: unseen output on an ordinary row. The accent is a
      fill, edge, or single glyph — never a run of prose. The
      one place the accent carries words is the short delete-wait label
@@ -376,6 +386,14 @@
   --host-icon-sand: #75603b;
   --host-icon-copper: #8b5233;
   --host-icon-red: #a14646;
+  /* Darker shades keep the same identities readable on light chrome. */
+  --harness-claude: #d25e39;
+  --harness-muse: #456bff;
+  --harness-cursor: #249084;
+  --harness-pi: #3e89ad;
+  --harness-omp: #9b4dff;
+  --harness-grok: #987f1e;
+  --harness-opencode: #638d37;
   --bg-0: #f4f6fa;
   --well: #f1f3f8;
   --terminal-bg: #282c34;
@@ -4611,6 +4629,17 @@ a:any-link,
   white-space: nowrap;
   min-width: 0;
 }
+
+/* Codex, Goose and Terminal inherit the agent track's neutral foreground.
+   Keep identity rules less specific than the selected-row rule so every
+   selected mark takes --on-fill, including marks with their own hue. */
+.harness-glyph[data-glyph="claude"] { color: var(--harness-claude); }
+.harness-glyph[data-glyph="muse"] { color: var(--harness-muse); }
+.harness-glyph[data-glyph="cursor"] { color: var(--harness-cursor); }
+.harness-glyph[data-glyph="pi"] { color: var(--harness-pi); }
+.harness-glyph[data-glyph="omp"] { color: var(--harness-omp); }
+.harness-glyph[data-glyph="grok"] { color: var(--harness-grok); }
+.harness-glyph[data-glyph="opencode"] { color: var(--harness-opencode); }
 
 .permission-glyph[data-glyph="yolo"],
 .permission-glyph[data-glyph="unknown"] {

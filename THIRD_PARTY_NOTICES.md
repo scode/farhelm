@@ -10,8 +10,9 @@ complete notice is in `crates/farhelm-ui/assets/fonts/OFL-Inter.txt` and ships i
 ## Harness marks
 
 The session sidebar's harness marks in `crates/farhelm-ui/src/icons.rs` vendor geometry from the sources below. Each is
-used unaltered apart from a uniform scale into the shared 12-unit box; `docs/harness-marks.md` records why each mark was
-chosen and what the owner's terms allow. Marks not listed here (Claude, Terminal) are Farhelm's own drawings.
+used with unaltered geometry apart from a uniform scale into the shared 12-unit box; `docs/harness-marks.md` records why
+each mark was chosen, its color treatment and what the owner's terms allow. Marks not listed here (Claude, Grok,
+Terminal) are Farhelm's own drawings.
 
 ## OpenCode sidebar mark
 
@@ -61,7 +62,8 @@ same file served at `https://omp.sh/favicon.svg`. The source is licensed under t
 
 ## Muse sidebar mark
 
-The Muse mark uses the stroked "M" and terminal-dot paths (without the colour or the sparkle) from
+The Muse mark uses the stroked "M" and terminal-dot paths (with a Farhelm hue replacing the source blue, and without the
+sparkle) from
 [`resources/muse-logo.svg`](https://github.com/corona10/muse-code-vscode/blob/6846fc377227ef7667c5eb211019e64338d5762f/resources/muse-logo.svg)
 at commit `6846fc377227ef7667c5eb211019e64338d5762f` of
 [`corona10/muse-code-vscode`](https://github.com/corona10/muse-code-vscode), an unofficial community extension that is
@@ -95,9 +97,9 @@ here only to identify the goose agent, under the LF Projects trademark usage gui
 ## Cursor sidebar mark
 
 The Cursor mark is the 2D cube from `CUBE_2D_LIGHT.svg` in the brand asset download at
-[`https://cursor.com/brand`](https://cursor.com/brand), used unaltered apart from scale and rendered in the current text
-colour as cursor.com itself renders it. Cursor and the cube logo are trademarks of Anysphere, Inc., used here only to
-identify the Cursor agent; no endorsement is implied.
+[`https://cursor.com/brand`](https://cursor.com/brand), with its geometry unaltered apart from scale. The source offers
+neutral variants; Farhelm assigns its own identity hue through CSS. Cursor and the cube logo are trademarks of
+Anysphere, Inc., used here only to identify the Cursor agent; no endorsement is implied.
 
 ## Codex sidebar mark
 
@@ -110,8 +112,10 @@ here only to identify the Codex agent; no endorsement is implied.
 ## Pi sidebar mark
 
 The Pi mark is the badge from the pi.dev press kit ([`https://pi.dev/press-kit`](https://pi.dev/press-kit)), served at
-`https://pi.dev/favicon.svg`, used unaltered apart from scale. The pi project is MIT-licensed (Copyright (c) 2025 Mario
-Zechner) and publishes its marks for reuse; no endorsement is implied.
+`https://pi.dev/favicon.svg`, with its geometry unaltered apart from scale. Farhelm uses the blue from the press kit's
+three-color primary logo, with a darker light-theme shade; it does not reproduce that logo's full color arrangement. The
+pi project is MIT-licensed (Copyright (c) 2025 Mario Zechner) and publishes its marks for reuse; no endorsement is
+implied.
 
 ## Terminal emulator crates
 

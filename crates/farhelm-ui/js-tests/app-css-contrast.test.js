@@ -110,7 +110,11 @@ function contrastRatio(hexA, hexB) {
 // Steel deliberately uses a separate inverse vocabulary for selected objects.
 const NEUTRAL_SURFACES = ["--bg-0", "--bg-1", "--bg-2", "--control-hover-bg", "--chip-bg", "--well"];
 const SELECTED_SURFACES = ["--accent-fill", "--accent-fill-hover"];
+// These glyphs carry identity on sidebar chrome only. Broader neutral
+// surfaces are not use sites; selected rows have their own inverse role.
+const COLORED_HARNESSES = ["claude", "muse", "cursor", "pi", "omp", "grok", "opencode"];
 const REQUIRED_BINDINGS = [
+  ...COLORED_HARNESSES.flatMap((name) => ["--bg-1", "--bg-2"].map((bg) => [`--harness-${name}`, bg, 3])),
   ...NEUTRAL_SURFACES.map((bg) => ["--link", bg, 4.5]),
   ...["--warn-bg", "--warn-bg-dim", "--warn-fill-hover"].flatMap((bg) =>
     ["--warn", "--warn-bright"].map((fg) => [fg, bg, 4.5])
@@ -250,6 +254,8 @@ const HIGHLIGHTED_COMMANDS = ["session-row-menu-item", "host-row-menu-item"].map
   `.${name}:focus:not([aria-disabled="true"])`
 );
 const SHIPPED_ROLE_BINDINGS = [
+  [".session-agent", "color", "var(--fg-1)"],
+  ...COLORED_HARNESSES.map((name) => [`.harness-glyph[data-glyph="${name}"]`, "color", `var(--harness-${name})`]),
   [".status-badge.running", "color", "var(--ok)"],
   [".status-badge.waiting", "color", "var(--danger)"],
   [".status-badge.idle", "color", "var(--fg-1)"],
@@ -308,6 +314,13 @@ const SHIPPED_ROLE_BINDINGS = [
  * that the actual selected DOM receives these declarations after the cascade. */
 function checkShippedRoles(css) {
   const errors = [];
+  // Terms and the selected treatment require these three to stay neutral;
+  // defining accessible colored tokens for the other marks cannot cover it.
+  for (const name of ["codex", "goose", "terminal"]) {
+    if (declarationsForSelector(css, `.harness-glyph[data-glyph="${name}"]`).has("color")) {
+      errors.push(`${name}: harness mark must inherit the neutral foreground`);
+    }
+  }
   for (const [selector, property, expected] of SHIPPED_ROLE_BINDINGS) {
     const actual = declarationsForSelector(css, selector).get(property);
     if (actual !== expected) errors.push(`${selector}: ${property} is ${actual}, expected ${expected}`);
