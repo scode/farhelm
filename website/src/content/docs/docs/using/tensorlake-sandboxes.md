@@ -111,11 +111,13 @@ recipe.
 
 Open **Add host** and choose **Tensorlake sandbox**. Enter a **Name**, which is how Farhelm shows the host, and choose a
 **Recipe**. **New recipe…** opens the same editor inside this dialog, with **Cancel** and **Save** in its footer. Choose
-**Save** to save the recipe and return to the host form.
+**Save** to save the recipe and return to the host form. The selected recipe's summary shows its size, software and
+tunnels. Farhelm generates the sandbox's name; **Name** is the name you see on the host and its sessions.
 
-Choose **Continue**, review the size, sandbox name and setup steps, then **Create sandbox**. The confirmation explains
-that the sandbox bills while running. **Create Tensorlake sandboxes without asking** in Settings → **Tensorlake** skips
-this question; it starts off. **Set up new hosts without asking** under Hosts does not skip it.
+Choose **Continue**, review the size and numbered setup steps, then **Create sandbox**. **Back** lets you change the
+name or recipe before creating anything. The confirmation groups billing, the pricing link and the 24-hour idle limit
+together. **Create Tensorlake sandboxes without asking** in Settings → **Tensorlake** skips this question; it starts
+off. **Set up new hosts without asking** under Hosts does not skip it.
 
 The host appears in **Hosts** as soon as setup starts, with progress for the snapshot build if needed, sandbox creation
 and Farhelm setup. If setup fails, its details show why; **Re-run** continues setup on the same sandbox. Use

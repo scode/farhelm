@@ -1,6 +1,8 @@
 /** Tensorlake Add host through the real probe/provision routes. The API and
  * host execution are fakes; registration, one-use confirmation, steps, recipe
- * storage and sandbox deletion are the shipped implementations. */
+ * storage and sandbox deletion are the shipped implementations. Presentation
+ * captures intercept planning and refuse provisioning so inspecting a dialog
+ * never creates a host that could dial the real Tensorlake gateway. */
 import { expect, test } from "./helpers/evidence";
 import { readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -12,6 +14,9 @@ import {
   patchPreferences,
 } from "./helpers/fleet";
 import type { APIRequestContext, Locator } from "@playwright/test";
+import { cleanupOwnedSteps } from "./helpers/cleanup";
+import { drainedRoute } from "./helpers/drained-route";
+import { requireHelmBuild } from "./helpers/helm-build";
 
 /** Atomic controls keep a running step from ever observing half a file. */
 async function controls(
@@ -329,6 +334,424 @@ for (const palette of ["dark", "light"] as const) {
   );
 }
 
+/** Saved recipe facts must remain legible through the form and shared plan.
+ * Captures use intercepted, build-stamped plans and a refusing provision route:
+ * Back, Copy, Cancel and Escape can then prove their no-create contract without
+ * registering a sandbox host or making a gateway connection for a screenshot. */
+for (const palette of ["dark", "light"] as const) {
+  test(
+    `Tensorlake Add host structures its form and creation plan in ${palette}`,
+    async ({ page, request }, info) => {
+      const recipe = `e2e-plan-recipe-${palette}`;
+      const hostName = `e2e-plan-${palette}`;
+      const accountResponse = await request.get("/api/tensorlake");
+      expect(accountResponse.ok(), await accountResponse.text()).toBe(true);
+      const original = await accountResponse.json();
+      expect(
+        original.api_key_set,
+        "fixture must not replace a key it cannot restore",
+      ).toBe(false);
+      const listedResponse = await request.get("/api/tensorlake/recipes");
+      expect(listedResponse.ok(), await listedResponse.text()).toBe(true);
+      expect(
+        (await listedResponse.json()).recipes.some((row: any) =>
+          row.name === recipe
+        ),
+        "fixture owns its recipe name",
+      ).toBe(false);
+      const fleetResponse = await request.get("/api/hosts");
+      expect(fleetResponse.ok(), await fleetResponse.text()).toBe(true);
+      const build = requireHelmBuild(
+        fleetResponse,
+        "Tensorlake creation-plan captures",
+      );
+      const beforeHosts = (await fleetResponse.json()).hosts.map((row: any) =>
+        row.id
+      ).sort();
+      const definition = {
+        size: { cpus: 4, memory_gb: 16, disk_gb: 50 },
+        source: { kind: "packages", packages: ["git", "ripgrep"] },
+        claude: null,
+        codex: null,
+        tunnels: [{ sandbox_port: 8080, host: "127.0.0.1", port: 9090 }],
+      };
+      const probes: { name: string; recipe: string }[] = [];
+      const plans: { confirmation: string; names: string[] }[] = [];
+      let submissions = 0;
+      let stopProbe = async () => {};
+      let stopProvision = async () => {};
+      let bodyFailed = false;
+      try {
+        const configured = await request.put("/api/tensorlake", {
+          data: { api_key: "test-key", create_without_asking: false },
+        });
+        expect(configured.ok(), await configured.text()).toBe(true);
+        const created = await request.post("/api/tensorlake/recipes", {
+          data: { name: recipe, recipe: definition },
+        });
+        expect(created.ok(), await created.text()).toBe(true);
+        const stored = await request.get("/api/tensorlake/recipes");
+        expect(stored.ok(), await stored.text()).toBe(true);
+        expect(
+          (await stored.json()).recipes.find((row: any) => row.name === recipe),
+          "summary measurements use the actual saved recipe",
+        ).toMatchObject({ name: recipe, ...definition });
+
+        stopProvision = await drainedRoute(
+          page,
+          "**/api/hosts/provision",
+          async (route) => {
+            expect(route.request().method()).toBe("POST");
+            submissions++;
+            await route.fulfill({
+              status: 409,
+              headers: { "x-farhelm-build": build },
+              body: "capture plans authorize no host creation",
+            });
+          },
+        );
+        stopProbe = await drainedRoute(
+          page,
+          "**/api/hosts/probe",
+          async (route) => {
+            expect(route.request().method()).toBe("POST");
+            const target = route.request().postDataJSON().target;
+            expect(target).toMatchObject({ kind: "tensorlake", recipe });
+            probes.push({ name: target.name, recipe: target.recipe });
+            const round = probes.length;
+            const sandbox = `farhelm-host-test-${palette}-${round}`;
+            const names = [
+              `Build the snapshot for recipe ${recipe} (packages, Claude Code and Codex; takes a few minutes)`,
+              `Create sandbox ${sandbox} with 4 CPUs, 16 GB memory and 50 GB disk`,
+              "Start the sandbox's login manager and keep the user manager running",
+              "Install Farhelm's supervisor and open the recipe's tunnels when the host connects",
+            ];
+            const confirmation =
+              `Create Tensorlake sandbox ${sandbox}\nSize: 4 CPUs,  16 GB memory, 50 GB disk\n${
+                names.join("\n")
+              }\n`;
+            plans.push({ confirmation, names });
+            await route.fulfill({
+              headers: { "x-farhelm-build": build },
+              json: {
+                result: "tensorlake-provisionable",
+                probe_id: `capture-${palette}-${round}`,
+                sandbox,
+                destination: "capture@fixture.invalid",
+                recipe,
+                resources: definition.size,
+                confirmation,
+                steps: {
+                  lead: "Create a Tensorlake sandbox and set it up as a host",
+                  kept: null,
+                  steps: names.map((name, index) => ({
+                    id: `step-${index}`,
+                    name,
+                    paths: [],
+                    explanation: null,
+                  })),
+                },
+              },
+            });
+          },
+        );
+        await page.emulateMedia({ colorScheme: palette });
+        await page.setViewportSize({ width: 1280, height: 800 });
+        await page.goto("/");
+        await expect(page.locator("html")).toHaveAttribute(
+          "data-appearance",
+          palette,
+        );
+        await openHostsPanel(page);
+        const dialog = page.getByRole("dialog", {
+          name: "Add host",
+          exact: true,
+        });
+        /** Reopen through the real kind selector; each dismissal must release
+         * the previous offer rather than leaving hidden confirmation authority. */
+        const openForm = async () => {
+          await page.getByRole("button", { name: "Add host", exact: true })
+            .last().click();
+          await dialog.getByRole("button", {
+            name: "Tensorlake sandbox",
+            exact: true,
+          }).click();
+          await expect(
+            dialog.getByRole("combobox", { name: "Recipe", exact: true }),
+          ).toBeEnabled();
+        };
+        await openForm();
+        const name = dialog.getByRole("textbox", { name: "Name", exact: true });
+        const select = dialog.getByRole("combobox", {
+          name: "Recipe",
+          exact: true,
+        });
+        await expect(name).toHaveAccessibleDescription(
+          "Shown in the rail and on session rows. The sandbox is named farhelm-host-…",
+        );
+        await expect(select).toHaveAccessibleDescription(
+          "What the sandbox runs. New recipe… opens the editor here.",
+        );
+        await expect(dialog.locator(".add-tensorlake-recipe-summary"))
+          .toHaveCount(0);
+        await name.fill(hostName);
+        await select.selectOption(recipe);
+        const summary = dialog.locator(".add-tensorlake-recipe-summary");
+        await expect(summary).toHaveText(
+          "4 CPU · 16 GB · 50 GB · 2 packages · 1 tunnel",
+        );
+        await page.evaluate(() => document.fonts.ready);
+        const nameStyle = await name.evaluate((element) => {
+          const style = getComputedStyle(element);
+          return {
+            height: element.getBoundingClientRect().height,
+            border: style.border,
+            background: style.backgroundColor,
+            fontFamily: style.fontFamily,
+            fontSize: style.fontSize,
+          };
+        });
+        const selectStyle = await select.evaluate((element) => {
+          const style = getComputedStyle(element);
+          return {
+            height: element.getBoundingClientRect().height,
+            border: style.border,
+            background: style.backgroundColor,
+            fontFamily: style.fontFamily,
+            fontSize: style.fontSize,
+          };
+        });
+        expect(
+          selectStyle,
+          "Recipe is styled as the adjacent native Name input",
+        ).toEqual(nameStyle);
+        const nameBox = (await name.boundingBox())!;
+        const selectBox = (await select.boundingBox())!;
+        const summaryBox = (await summary.boundingBox())!;
+        expect(Math.abs(selectBox.x - nameBox.x)).toBeLessThan(1);
+        expect(Math.abs(selectBox.width - nameBox.width)).toBeLessThan(1);
+        expect(summaryBox.x).toBeGreaterThanOrEqual(selectBox.x);
+        expect(summaryBox.x + summaryBox.width).toBeLessThanOrEqual(
+          selectBox.x + selectBox.width,
+        );
+        const footer = dialog.locator(":scope > .dialog-footer");
+        await expect(footer.getByRole("button")).toHaveText([
+          "Cancel",
+          "Continue",
+        ]);
+        for (const answer of await footer.getByRole("button").all()) {
+          await expectInlineAnswerVisible(answer);
+        }
+        await info.attach(`tensorlake-add-form-${palette}`, {
+          body: await dialog.screenshot(),
+          contentType: "image/png",
+        });
+
+        await footer.getByRole("button", { name: "Continue", exact: true })
+          .click();
+        await expect.poll(() => probes).toEqual([{ name: hostName, recipe }]);
+        const header = dialog.locator(":scope > .dialog-header");
+        const body = dialog.locator(":scope > .host-settings-body");
+        await expect(header.getByRole("heading", { level: 2 })).toHaveText(
+          `Create Tensorlake sandbox · ${hostName}`,
+        );
+        await expect(header.locator(".host-settings-summary")).toHaveText(
+          "4 CPUs · 16 GB memory · 50 GB disk",
+        );
+        await expect(header).toHaveCount(1);
+        await expect(body).toHaveCount(1);
+        await expect(footer).toHaveCount(1);
+        await expect(footer.getByRole("button")).toHaveText([
+          "Cancel",
+          "Back",
+          "Create sandbox",
+        ]);
+        await expect(
+          footer.getByRole("button", { name: "Create sandbox", exact: true }),
+        ).toBeFocused();
+        for (const answer of await footer.getByRole("button").all()) {
+          await expectInlineAnswerVisible(answer);
+        }
+        const steps = body.locator("ol.provisioning-plan-steps");
+        await expect(steps.getByRole("listitem")).toHaveCount(4);
+        await expect(steps.locator(".provisioning-plan-number")).toHaveText([
+          "1",
+          "2",
+          "3",
+          "4",
+        ]);
+        await expect(steps.locator(".provisioning-plan-step-name")).toHaveText(
+          plans[0].names,
+        );
+        for (const step of await steps.getByRole("listitem").all()) {
+          const boxes = await step.evaluate((element) => {
+            const number = element.querySelector(".provisioning-plan-number")!
+              .getBoundingClientRect();
+            const detail = element.querySelector(".provisioning-plan-detail")!
+              .getBoundingClientRect();
+            const body = element.closest(".host-settings-body")!
+              .getBoundingClientRect();
+            return {
+              numberRight: number.right,
+              detailLeft: detail.left,
+              detailRight: detail.right,
+              bodyRight: body.right,
+            };
+          });
+          expect(
+            boxes.detailLeft,
+            "each ordered step has a separate numbered rail",
+          ).toBeGreaterThan(boxes.numberRight);
+          expect(boxes.detailRight).toBeLessThanOrEqual(boxes.bodyRight);
+        }
+        const billing = body.locator(".tensorlake-billing");
+        await expect(billing).toHaveCount(1);
+        await expect(billing).toContainText(
+          "This sandbox bills while running.",
+        );
+        await expect(billing).toContainText(
+          "On Usage Credits, Tensorlake suspends a sandbox after 24 hours without a connection.",
+        );
+        await expect(billing).toContainText(
+          "Farhelm never resumes it on its own.",
+        );
+        const pricing = billing.getByRole("link", {
+          name: "Tensorlake pricing",
+          exact: true,
+        });
+        await expect(pricing).toHaveAttribute(
+          "href",
+          "https://www.tensorlake.ai/pricing",
+        );
+        await expect(pricing).toHaveAttribute("target", "_blank");
+        await expect(pricing).toHaveAttribute("rel", "noopener noreferrer");
+        const paint = await billing.evaluate((element) => {
+          const style = getComputedStyle(element);
+          // Normalize token hex and computed rgb spellings without adding a
+          // color-probe node that could disturb the layout being measured.
+          const context = document.createElement("canvas").getContext("2d")!;
+          const color = (value: string) => {
+            context.fillStyle = value;
+            return context.fillStyle;
+          };
+          const border = color(style.borderLeftColor);
+          return {
+            background: style.backgroundColor,
+            borderWidth: parseFloat(style.borderLeftWidth),
+            warningBorder: ["--warn", "--warn-border"].some((token) =>
+              color(style.getPropertyValue(token).trim()) === border
+            ),
+          };
+        });
+        expect(paint.background).not.toBe("rgba(0, 0, 0, 0)");
+        expect(paint.borderWidth).toBeGreaterThanOrEqual(2);
+        expect(
+          paint.warningBorder,
+          "billing uses the current palette's warning border",
+        ).toBe(true);
+        await expect(
+          body.getByRole("button", { name: "Copy plan", exact: true }),
+        ).toHaveCount(1);
+        await expect(
+          footer.getByRole("button", { name: "Copy plan", exact: true }),
+        ).toHaveCount(0);
+        await info.attach(`tensorlake-add-confirmation-${palette}`, {
+          body: await dialog.screenshot(),
+          contentType: "image/png",
+        });
+        // The displayed step list cannot reconstruct the raw plan's repeated
+        // spaces and final newline. Copy must preserve both exactly.
+        await page.evaluate(() => {
+          (window as any).__tensorlakePlanCopies = [];
+          (window as any).__farhelmNativeClipboardWrite = (value: string) => {
+            (window as any).__tensorlakePlanCopies.push(value);
+          };
+        });
+        await body.getByRole("button", { name: "Copy plan", exact: true })
+          .click();
+        await expect.poll(() =>
+          page.evaluate(() => (window as any).__tensorlakePlanCopies)
+        ).toEqual([plans[0].confirmation]);
+        expect(
+          submissions,
+          "reading or copying the plan supplies no creation authority",
+        ).toBe(0);
+
+        await footer.getByRole("button", { name: "Back", exact: true }).click();
+        await expect(name).toBeFocused();
+        await expect(name).toHaveValue(hostName);
+        await expect(select).toHaveValue(recipe);
+        await expect(summary).toHaveText(
+          "4 CPU · 16 GB · 50 GB · 2 packages · 1 tunnel",
+        );
+        expect(submissions, "Back submits no creation request").toBe(0);
+        await name.fill(`${hostName}-revised`);
+        await footer.getByRole("button", { name: "Continue", exact: true })
+          .click();
+        await expect.poll(() => probes).toEqual([{ name: hostName, recipe }, {
+          name: `${hostName}-revised`,
+          recipe,
+        }]);
+        await expect(header.getByRole("heading", { level: 2 })).toHaveText(
+          `Create Tensorlake sandbox · ${hostName}-revised`,
+        );
+        await expect(steps.locator(".provisioning-plan-step-name")).toHaveText(
+          plans[1].names,
+        );
+        expect(
+          plans[1].names[1],
+          "Back followed by Continue displays the fresh plan",
+        ).not.toBe(plans[0].names[1]);
+        await footer.getByRole("button", { name: "Cancel", exact: true })
+          .click();
+        await expect(dialog).toHaveCount(0);
+        await openForm();
+        await name.fill(hostName);
+        await select.selectOption(recipe);
+        await footer.getByRole("button", { name: "Continue", exact: true })
+          .click();
+        await expect.poll(() => probes.length).toBe(3);
+        await expect(
+          footer.getByRole("button", { name: "Create sandbox", exact: true }),
+        ).toBeFocused();
+        await page.keyboard.press("Escape");
+        await expect(dialog).toHaveCount(0);
+        expect(submissions, "Back, Cancel and Escape create no sandbox").toBe(
+          0,
+        );
+        expect((await hosts(request)).map((row) => row.id).sort()).toEqual(
+          beforeHosts,
+        );
+      } catch (error) {
+        bodyFailed = true;
+        throw error;
+      } finally {
+        await cleanupOwnedSteps(bodyFailed, [
+          ["probe route", stopProbe],
+          ["provision refusal route", stopProvision],
+          ["capture recipe", async () => {
+            const response = await request.delete(
+              `/api/tensorlake/recipes/${recipe}`,
+            );
+            expect([200, 404], await response.text()).toContain(
+              response.status(),
+            );
+          }],
+          ["Tensorlake account", async () => {
+            const response = await request.put("/api/tensorlake", {
+              data: {
+                clear_api_key: true,
+                create_without_asking: original.create_without_asking,
+              },
+            });
+            expect(response.ok(), await response.text()).toBe(true);
+          }],
+        ]);
+      }
+    },
+  );
+}
+
 /** Spec: SSH's skip preference cannot authorize billed creation. The managed
  * recipe builds, progress grows into ordinary setup steps, and deleting the
  * host terminates its sandbox. Why: a dialog-only assertion would miss billed
@@ -375,7 +798,11 @@ test("adding a Tensorlake host confirms billing and keeps setup progress", async
       .selectOption(recipe);
     await dialog.getByRole("button", { name: "Continue", exact: true }).click();
     await expect(
-      dialog.getByText("Create Tensorlake sandbox?", { exact: true }),
+      dialog.getByRole("heading", {
+        name: `Create Tensorlake sandbox · ${name}`,
+        level: 2,
+        exact: true,
+      }),
     ).toBeVisible();
     await expect(
       dialog.getByText("This sandbox bills while running.", { exact: false }),
@@ -733,11 +1160,33 @@ for (const skipTensorlake of [false, true]) {
         exact: true,
       });
       if (!skipTensorlake) {
+        const planBody = confirmation.locator(":scope > .host-settings-body");
+        const billing = planBody.locator(".tensorlake-billing");
+        await expect(billing).toBeVisible();
+        await expect(billing).toContainText(
+          "This sandbox bills while running.",
+        );
+        await expect(billing).toContainText(
+          "On Usage Credits, Tensorlake suspends a sandbox after 24 hours without a connection.",
+        );
         await expect(
-          confirmation.getByText("This sandbox bills while running.", {
-            exact: false,
+          billing.getByRole("link", {
+            name: "Tensorlake pricing",
+            exact: true,
           }),
-        ).toBeVisible();
+        ).toHaveAttribute("href", "https://www.tensorlake.ai/pricing");
+        await expect(
+          confirmation.getByRole("button", { name: "Back", exact: true }),
+        ).toHaveCount(0);
+        await expect(
+          planBody.getByRole("button", { name: "Copy plan", exact: true }),
+        ).toHaveCount(1);
+        await expect(
+          confirmation.locator(":scope > .dialog-footer").getByRole("button", {
+            name: "Copy plan",
+            exact: true,
+          }),
+        ).toHaveCount(0);
         await expect(
           confirmation.getByRole("button", {
             name: "Set up, don't ask again",

@@ -1,5 +1,6 @@
 ---
 kind: added
+pr: 3049, 3050
 ---
 
 Tensorlake support is experimental: it is early, rough in places, and may change between releases, and the Tensorlake

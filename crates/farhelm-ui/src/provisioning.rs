@@ -1434,9 +1434,9 @@ fn PlanConfirmation(
     }
 }
 
-/// Render the three answers for an initial or rerun host setup offer.
+/// Render the helm's setup plan with its caller-owned answers.
 ///
-/// Both callers place these header, body and footer siblings directly in the
+/// Callers place these header, body and footer siblings directly in the
 /// host dialog frame; a very short window scrolls the whole card instead of
 /// pinning chrome that cannot fit. The helm supplies the plan;
 /// this component owns presentation, never its actions or authorization. The
@@ -1444,7 +1444,13 @@ fn PlanConfirmation(
 /// Text-only plans need a named entry stop in WebKit. Structured plans already
 /// provide entry through Copy Plan; the shared scroll boundary distinguishes them.
 ///
-/// `busy` disables only the two answers that would submit. Cancel stays
+/// A summary override describes a newly created sandbox's size rather than
+/// claiming that an existing host is missing Farhelm. Optional Back returns
+/// to the caller's form; it never consumes a plan or changes setup policy here.
+/// Tensorlake omits the permanent SSH answer and shares its billing callout
+/// between an initial add and a rerun.
+///
+/// `busy` disables submitting answers and Back. Cancel stays
 /// live: this renders inside a modal, and a modal must never hold the user
 /// behind somebody else's pending request.
 #[component]
@@ -1455,17 +1461,26 @@ pub(crate) fn SetupPlanConfirmation(
     host: Option<Host>,
     local: bool,
     #[props(default)] tensorlake: bool,
+    summary_override: Option<String>,
+    on_back: Option<EventHandler<()>>,
     error: Option<Element>,
     busy: bool,
     on_confirm: EventHandler<bool>,
     on_cancel: EventHandler<()>,
 ) -> Element {
     let body = PlanBody::new(&confirmation, steps.as_ref());
+    let summary = summary_override.unwrap_or_else(|| {
+        String::from(if local {
+            "Farhelm is not running here yet"
+        } else {
+            "Farhelm is not running there yet"
+        })
+    });
     rsx! {
         settings_dialog::HostDialogHeader {
             host,
             title: rsx! { if tensorlake { "Create Tensorlake sandbox · " } else { "Set up host · " } span { class: "peer-value", dir: "ltr", "{name}" } },
-            summary: if local { "Farhelm is not running here yet" } else { "Farhelm is not running there yet" },
+            summary,
             dismiss_label: "Cancel host setup",
             dismiss_tooltip: "Cancel: change nothing on this host",
             on_dismiss: on_cancel,
@@ -1475,8 +1490,11 @@ pub(crate) fn SetupPlanConfirmation(
             recovery: RecoveryFocus::new(".add-host-cancel", None, true, RecoveryDelay::OneFrame),
             PlanStepList { confirmation, body }
             if tensorlake {
-                p { "This sandbox bills while running. " a { href: "https://www.tensorlake.ai/pricing", target: "_blank", rel: "noopener noreferrer", "Tensorlake pricing" } }
-                p { "On Usage Credits, Tensorlake suspends a sandbox after 24 hours without a connection. Farhelm never resumes it on its own." }
+                p { class: "tensorlake-billing",
+                    "This sandbox bills while running. "
+                    a { href: "https://www.tensorlake.ai/pricing", target: "_blank", rel: "noopener noreferrer", "Tensorlake pricing" }
+                    " On Usage Credits, Tensorlake suspends a sandbox after 24 hours without a connection. Farhelm never resumes it on its own."
+                }
             }
             if let Some(error) = error { {error} }
         }
@@ -1493,6 +1511,14 @@ pub(crate) fn SetupPlanConfirmation(
                 onclick: move |_| on_cancel.call(()),
                 "Cancel"
             }
+            if let Some(on_back) = on_back { button {
+                r#type: "button",
+                class: "btn btn-neutral add-host-back",
+                "data-tooltip": "Go back to the host's name and recipe without creating a sandbox",
+                disabled: busy,
+                onclick: move |_| on_back.call(()),
+                "Back"
+            } }
             if !tensorlake { button {
                 r#type: "button",
                 class: "btn btn-primary btn-outline host-setup-permanent",
@@ -1506,7 +1532,7 @@ pub(crate) fn SetupPlanConfirmation(
             button {
                 r#type: "button",
                 class: "btn btn-primary provisioning-confirm",
-                "data-tooltip": "Set up: set up this host as the plan above describes",
+                "data-tooltip": if tensorlake { "Create sandbox: carry out the plan shown above" } else { "Set up: set up this host as the plan above describes" },
                 disabled: busy,
                 autofocus: !busy,
                 onkeydown: crate::guard_confirmation_enter,
