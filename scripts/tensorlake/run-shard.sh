@@ -121,7 +121,19 @@ for host in localhost 127.0.0.1 "[localhost]:$SELF_SSH_PORT" "[127.0.0.1]:$SELF_
   ssh-keygen -q -f /home/tl-user/.ssh/known_hosts -R "$host" >/dev/null 2>&1
 done
 ssh-keyscan -4 -H -p "$SELF_SSH_PORT" localhost 127.0.0.1 >>/home/tl-user/.ssh/known_hosts 2>/dev/null
-ssh -o BatchMode=yes localhost true && echo "self-ssh: ok" >>"$OUT/summary.txt" || echo "self-ssh: FAILED" >>"$OUT/summary.txt"
+# A shard without self-ssh would still run, but every spec that needs the second host fails on a host that never
+# connects, and specs that skip without one pass while covering less than the run claims. Like a missing user manager
+# above, that is not the substrate this run reports, so stop before any test instead.
+if ssh_error=$(ssh -o BatchMode=yes -o ConnectTimeout=10 localhost true 2>&1); then
+  echo "self-ssh: ok" >>"$OUT/summary.txt"
+else
+  {
+    echo "self-ssh: FAILED: $(printf '%s' "$ssh_error" | tail -1)"
+    echo "setup failed: self-ssh to localhost does not work; no tests were run"
+  } >>"$OUT/summary.txt"
+  cat "$OUT/summary.txt"
+  exit 1
+fi
 # --- the shard
 export PATH="$W/.ci-tmux:$PATH"
 projects=()

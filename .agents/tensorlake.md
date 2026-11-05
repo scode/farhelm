@@ -120,8 +120,8 @@ test run included.
 
 On either kind of sandbox, the shard fails before running any test, with `setup failed:` in `summary.txt`, when
 lingering cannot be enabled or the user manager is not `running` or `degraded`: the supervisor would otherwise run
-sessions without scopes and the specs could still pass. `summary.txt` records PID 1, the lingering result and the
-manager's state.
+sessions without scopes and the specs could still pass. It fails the same way when self-ssh to localhost does not work
+(below). `summary.txt` records PID 1, the lingering result and the manager's state.
 
 When PID 1 is Tensorlake's init (the template sandbox during its probe), an earlier exec's files stay, its processes
 cannot be relied on, and services must live inside the exec that runs the tests. `run-shard.sh` therefore, every time:
@@ -142,8 +142,9 @@ fails to start, and what answers presents a host key of its own and refuses `tl-
 `Host localhost 127.0.0.1` block with `Port 2222` to `~/.ssh/config` once, drops earlier `known_hosts` entries for those
 names (a template's file can hold keys from an earlier boot, and ssh refuses on a stale entry rather than trying an
 appended one), and records the current keys with `ssh-keyscan -4 -p 2222` (without `-4`, `ssh-keyscan localhost` tries
-::1 alone). `summary.txt` says `self-ssh: ok` or `FAILED`; a failed one leaves every spec that uses the second host
-failing with "ssh fixture must be connected", so a run with it is not evidence.
+::1 alone). `summary.txt` says `self-ssh: ok`, or `FAILED` with ssh's last error line; a failed one also adds
+`setup failed:` and the shard stops before running any test, since every spec that uses the second host would fail with
+"ssh fixture must be connected" and the specs that skip without one would pass while covering less.
 
 ## Tensorlake CLI traps
 
