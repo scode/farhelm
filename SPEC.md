@@ -2733,6 +2733,10 @@ stops updating underneath it, continuing to resume that recorded conversation is
 stopped the updates, not a separate defect in itself. Such tracking bugs are still to be avoided; having a recorded
 conversation does not mean Farhelm can detect every later failure to update it.
 
+Confirmed 2026-11-04: a conversation Farhelm learned in the last moments before an OS crash or power loss may be
+forgotten, like other recent state. Restart may then have no conversation to resume or may resume the previously
+recorded conversation instead.
+
 The environment contract: a session process behaves as if the user had SSHed into the host and typed the command in
 their interactive shell — PATH, rc-file variables, locale included — even though the supervisor starts at boot. That
 SSH-and-type test is the contract when shell sourcing subtleties (login vs. non-login, `.profile` vs. `.bashrc`) would

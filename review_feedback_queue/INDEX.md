@@ -20,9 +20,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`container-policy-missing-from-approvals.md`](container-policy-missing-from-approvals.md) — An agent's approved
   template change can alter container isolation without showing that change in its approval card.
 
-- [`power-loss-removes-valid-resume-binding.md`](power-loss-removes-valid-resume-binding.md) — A power loss can remove
-  or replace an already accepted Resume offer after its report has been acknowledged and deleted.
-
 - [`failed-restart-restoration-loses-valid-resume.md`](failed-restart-restoration-loses-valid-resume.md) — A named
   Restart that never starts its replacement can permanently remove the previous Resume offer if the database restoration
   write also fails.

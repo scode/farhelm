@@ -21238,7 +21238,8 @@
 - Completion criteria: SPEC.md "Durability and resume" says a conversation Farhelm learned in the last moments before an
   OS crash or power loss may be forgotten, like other recent state, so Restart may not resume it or may resume the
   previous one. No code change. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/durability-revocations.md`.
+- Execution: implemented in jj change `vpqwtnypqrsqvtnntprmvztorrllkykp`, bookmark
+  `plan/durability-revocations/04-resume-power-loss-spec`; draft PR https://github.com/scode/farhelm/pull/3031/changes.
 
 ## failed-restart-restoration-loses-valid-resume.md
 
