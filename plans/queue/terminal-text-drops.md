@@ -255,3 +255,44 @@ bookmark and PR URL) and removing its feedback file and `review_feedback_queue/I
 section exists, its latest entry must also be satisfied. Then close the plan per `plans/.agents/executing.md`,
 "Executing one plan" (steps 11 and 12): deliver its report through the queue script, write a closing entry in its log,
 and stop the watchdog. Never edit `plans/` yourself.
+
+## Blocked
+
+Blocked on 2026-11-05 (claim 7e32f1).
+
+### Restoring vowel signs changes which character a selector can affect
+
+New terminals currently delete standalone Kirat Rai vowel signs from the screen and copied text, including in an
+ordinary word with no emoji. Triage chose "Keep visible letters; accept dropping invisible formatting". The independent
+documentation outcome is finished in [draft PR #3029](https://github.com/scode/farhelm/pull/3029/changes): the
+specification and the Move sessions to new terminals guide now state the accepted loss of invisible formatting from
+copies, scrollback and saved terminal contents. No terminal code has changed; the vowel-sign bug remains.
+
+The remaining outcome requires an unattached vowel or trailing sign to print at its ordinary width while a following
+emoji selector still finds the earlier emoji. These requirements conflict with the specified rule that a selector uses
+the immediately preceding stored character. For example, printing a heart, then the one-column Kirat Rai sign U+16D67,
+then the emoji selector U+FE0F would retain the sign between the heart and selector. The selector would therefore be
+ignored. Reaching past the sign to widen the heart would change selector eligibility and need layout rules to keep the
+new wide heart from overwriting the sign. A zero-width Hangul sign restored as an ordinary combining mark also becomes
+the predecessor and blocks a following selector. This is established by source inspection and an independent read-only
+investigation; no new runtime experiment was run.
+
+Which behavior should the repair implement?
+
+- **Restore ordinary printing for every unattached sign.** Keep the existing immediate-predecessor selector rule: a
+  selector after a retained sign is ignored. This gives the requested pre-change scalar behavior, including characters
+  that ordinary printing stores as combining marks, but drops the requirement to reach the earlier emoji. Recommended:
+  it preserves the text without introducing a new selector or layout policy.
+- **Restore only printable, nonzero-width signs.** Continue dropping rejected zero-width signs, so selectors can still
+  reach an emoji across those; a retained Kirat Rai sign blocks the selector. This fixes the visible-text bug and keeps
+  the current zero-width selector cases, but narrows both the ordinary-printing requirement and the selector guarantee.
+- **Require selectors to reach past retained signs.** Authorize a separate selector/layout design and reassess its scope
+  and snapshot constraints before implementing it. This needs rules for preserving the intervening text when an emoji
+  grows, including at the end of a row, and is wider than the agreed small repair.
+
+The existing roughly 100-line gate still applies to a clarified repair, including code, tests, documentation and the
+vendored patch; no exemption for mirrored patch lines or documentation references has been assumed. The paired parser
+test and a snapshot test also pin today's deletion, beyond the three tests named in the plan. They must change with the
+clarified behavior. The invisible-formatting documentation passed formatting and whitespace checks; the instruction
+checker reported zero errors and three existing unrelated warnings. No runtime tests or website build were needed for
+that prose-only change, which adds no links or headings.
