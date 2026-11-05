@@ -452,6 +452,52 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   ("Name the session you just launched"); warn when the text looks like a launcher query (`gh:`, `tl:`, `host:`) that
   this only renames, and offer to open New session with it; possibly stop the prompt from stealing focus from typing
   that is already under way elsewhere.
+- **A UI activity log that feedback can include.** Keep a timestamped log of what the UI did (dialogs, focus, shortcuts,
+  requests to the helm and how long they took), and add an "Include application logs" checkbox to Send feedback. The
+  point is general: whenever "I did X and something odd happened" or "I did X and it took about 5 seconds" comes up, the
+  maintainer files feedback right after noticing, and the log says what actually happened and where the time went,
+  instead of an agent guessing from code. The `gh:owner/repo` entry above is the motivating example: a log reading
+  "shortcut ⌘P → quick launch; dialog opened: Rename session (after quick launch); focus → rename field; typed 11
+  characters; Enter → submitted" would have settled in one report what code reading could only speculate about.
+
+  What to log: semantic events, not raw input. Which shortcut matched and which action it dispatched; dialogs opening
+  and closing, with their kind and why they opened where that differs (the post-quick-launch naming prompt versus an
+  ordinary Rename); focus moving between named controls; submit, cancel and Escape; launches and other operations
+  starting and completing; and every request to the helm with its start, end, outcome and duration. Timing is a
+  first-class requirement, not a nicety: every event carries a monotonic timestamp with millisecond resolution (not only
+  wall clock), and anything with a duration logs both ends, so "it took like 5 seconds" can be broken down into which
+  request, wait or render was slow. Ideally the helm logs the same requests with its own timing under a request id the
+  UI log also records, so a slow step can be split into UI, network, helm and host time; how far that correlation goes
+  is a design question.
+
+  Privacy, by construction rather than by care: never log typed characters, only counts ("typed 11 characters into
+  Name"), since fields hold prompts, paths, repository and host names, and secrets such as API keys. Model events as a
+  closed set of typed kinds rather than free-form strings, so a later edit cannot leak a session title or path by
+  accident, and name controls by Farhelm's own labels, never by page content or peer-supplied values. Requests are
+  logged by route shape, not by the ids, paths or names inside them. The checkbox reveals the exact log text that will
+  be sent before Send, keeping the dialog's existing contract that what it shows is the whole submission. A SPEC.md
+  "Feedback" update has to state this promise.
+
+  Shape: an in-memory ring buffer per window (last few hundred events or about 10 to 15 minutes, to be tuned), never
+  written to disk and never sent anywhere until the box is ticked. This covers the "only noticed afterwards" case as
+  long as feedback is filed soon after. Most events can come from a few shared places rather than per-call-site logging:
+  the shared modal dialog component, the shortcut dispatcher, one page-wide focus listener, and the API client for
+  request timing. This is separate from the existing desktop client-log route, which forwards webview console errors
+  into the helm's own logs and exists for a different job.
+
+  Caveats:
+  - Size. Feedback is capped today at a 4000-character message (shared by the UI, the helm and the farhelm.io endpoint)
+    and a 64 KiB request body (the helm and the endpoint); the maintainer plans to raise those limits. Compress the log
+    in the client before sending. The dialog still shows the uncompressed text.
+  - Where the log lands. The endpoint files each submission as an issue in a private GitHub repository, and an issue
+    body is limited to roughly 65,000 characters and is not a place for a compressed blob. The endpoint will need to
+    decompress and split the log across comments, or store it elsewhere and link it; decide before building the client
+    half.
+  - Who can read it. Whoever can see that private repository can read every included log, which is one more reason the
+    privacy rules above must hold without exception.
+  - The helm side has no file logging yet (stderr only, per SPEC_impl.md), so helm-side timing for a report would have
+    to come from an in-memory buffer as well, or wait for file logging.
+  - Browser and desktop both need it; unlike the client-log route, this is not desktop-only.
 
 ## Doc todo
 
