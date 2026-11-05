@@ -63,3 +63,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`podman-rigor-todo`](reports/podman-rigor-todo.report.md) landed 2026-11-05 in #3017: containerized sessions: move eight review findings into one near-term Podman rigor TODO entry
 - [`printed-link-mismatch`](reports/printed-link-mismatch.report.md) landed 2026-11-05 in #3018, #3019, #3021: printed links: no lasting mismatch between the shown and opened address; spec the hover warning
 - [`unlikely-races-nov4`](reports/unlikely-races-nov4.report.md) landed 2026-11-05 in #3020, #3022, #3026, #3030, #3033: terminals: fix four very unlikely races where straightforward, accept the rest in FILTER.md
+- [`durability-revocations`](reports/durability-revocations.report.md) landed 2026-11-05 in #3023, #3025, #3028, #3031, #3034: power loss: write host permission revocations durably, key retries by host entry, and spec the accepted losses
