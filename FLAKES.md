@@ -3695,3 +3695,98 @@ evidence, which expires with cleanup.
 Class: unknown
 
 Cause: hypothesis
+
+## 2026-11-05 — an update's progress label shows no step name while following (e2e/tests/provisioning.spec.ts)
+
+Several provisioning tests follow a host update and expect its row's label to match `Updating: N/M <step> m:ss`. Three
+of them failed because the label stayed at, for example, "Updating: 0/9 0:04", with no step name, for the whole
+five-second wait, each in a different round of the plans landing monitor's sandbox runs and each passing three re-runs
+alone on the same build: `changed-host advice while following: identity` (Chromium, run
+`8add8072-2ed9-4899-a9ac-d1f5bf3c95d3`, 2026-11-04, tested commit `bddbbc68`; re-run
+`f30c513a-8a65-4a7a-b566-f0d745ec0f86`), `a first identity learned while following: replacement` (Chromium, run
+`4d9291ef-904c-4048-ae81-b527a60f6449`, 2026-11-05, `46088b77`; re-run `a2bc56b8-f28c-4c1e-b7f6-d4a1b21ad011`) and
+`a first identity learned while following: completion` (WebKit, run `541a7a0e-0619-4e57-b9ba-2d345c1279f8`, `8a57ad6e`;
+re-run `26350798-45c1-4214-9580-a064ea065d53`). None of the plans landing in those rounds changed provisioning.
+Hypothesis: under a loaded full-suite shard the first step's name reaches the label later than five seconds after the
+update starts, so the wait ends while the label still shows only the count and timer. Open; the three tests are excluded
+from deflake sweeps; no fix attempted.
+
+```text
+Expected pattern: /Updating: \d+\/\d+ .+ \d+:\d{2}/
+Received string:  "Updating: 0/9 0:04"
+```
+
+Evidence: Tensorlake sandboxes (4-vCPU x86_64 Linux virtual machines booting systemd, each running only its shard with
+three Playwright workers and one owned stack each; load average not measured), the recorder's generic mode
+(`python3 scripts/record-test-run.py --kind development --tmux required -- npx playwright test --project=<engine>-<spec> ... --retries=0 --reporter=line`),
+Node 24.16 with the Playwright and browser builds the tested tree pins. Recorded tmux 3.7c executable SHA256
+`1f51ad46eb731a90b75e74afc35719666405e8231fa73ab58ff35a5e9e6f92cd`, locale C.UTF-8, child `FARHELM_TEST_TRACE_DIR` (and
+`FARHELM_E2E_SUITE_TERMINALS` in host-terminal runs) after the recorder scrubbed ambient `FARHELM_*`; the tracked tree
+was clean. Run UUIDs address retained temporary evidence, which expires with cleanup.
+
+Class: readiness
+
+Cause: hypothesis
+
+## 2026-11-05 — quick launch's focus does not return to the page body on Chromium (e2e/tests/quick-launch.spec.ts)
+
+Two quick-launch tests blur the focused element and then poll for `document.activeElement === document.body`; on
+Chromium the poll sometimes never sees the body.
+`a sequence refused at its prefix leaves later sequences their own bindings` failed once (run
+`2d338903-2d70-4c8c-99c4-3d4044d78670`, 2026-11-05, tested commit `9c2fc015`; three re-runs passed,
+`75b17c09-0b63-4b41-b68d-504f176cf3c0`). `typed page refusals are atomic and empty Enter leaves later bindings paired`
+failed in the host-terminal suite twice (runs `ffe0693e-0a67-4039-a8e4-4621365c4561`, `f7dad865`, and
+`4b6e1aad-91ab-4aee-b721-f760fb42b0cf`, `8a57ad6e`) and once in three ordinary re-runs
+(`443ebd09-f5c5-4cd3-8ad1-d27e96a75532`); its other re-runs passed (`479e3dde-6a6a-488f-ac2d-f9cb6a1d29ec`,
+`65431942-c7a7-4344-9529-55d0d7a2b493`). None of the plans landing in those rounds changed quick launch. Hypothesis:
+something in the page (a launcher or terminal focus handoff) takes focus back after the blur, so the body never holds it
+when the poll looks. Open; both tests are excluded from deflake sweeps; no fix attempted.
+
+```text
+Expected: true
+Received: false
+> 450 |       await expect.poll(() => page.evaluate(() => document.activeElement === document.body)).toBe(true);
+```
+
+Evidence: Tensorlake sandboxes (4-vCPU x86_64 Linux virtual machines booting systemd, each running only its shard with
+three Playwright workers and one owned stack each; load average not measured), the recorder's generic mode
+(`python3 scripts/record-test-run.py --kind development --tmux required -- npx playwright test --project=<engine>-<spec> ... --retries=0 --reporter=line`),
+Node 24.16 with the Playwright and browser builds the tested tree pins. Recorded tmux 3.7c executable SHA256
+`1f51ad46eb731a90b75e74afc35719666405e8231fa73ab58ff35a5e9e6f92cd`, locale C.UTF-8, child `FARHELM_TEST_TRACE_DIR` (and
+`FARHELM_E2E_SUITE_TERMINALS` in host-terminal runs) after the recorder scrubbed ambient `FARHELM_*`; the tracked tree
+was clean. Run UUIDs address retained temporary evidence, which expires with cleanup.
+
+Class: pointer-focus
+
+Cause: hypothesis
+
+## 2026-11-05 — the Tensorlake lifecycle spec's activity read misses its own session on WebKit (e2e/tests/tensorlake-lifecycle.spec.ts)
+
+Several lifecycle tests intercept the browser's session activity read and assert that the session the test created is in
+it ("owned agent is present in the activity read"). On WebKit three of them failed because it was absent, each in a
+different round and each passing three re-runs:
+`suspending an agent with unknown status asks before sending the request` (run `4a0618c3-d05d-437b-92c0-1918b3fbfbc7`,
+2026-11-05, tested commit `9c2fc015`; re-run `f7329da0-6ebe-4059-b0dd-1363a1dee94f`),
+`suspending a current idle agent acts immediately` (run `f14c83fa-5bfc-49cc-b78f-415857edbd33`, `46088b77`; re-run
+`399aa780-8b13-47da-b46d-584d26340128`) and `suspending an agent with stale idle status asks before sending the request`
+(run `c57979d2-fb33-4824-a370-dfc0ebe24286`, `f7dad865`; re-run `2974246f-1a72-4475-a170-439dd5a5e91b`). Hypothesis: the
+intercepted read can be one the page issued before the test's session was listed, so the assertion sees an older
+listing. Open; the three tests are excluded from deflake sweeps; no fix attempted.
+
+```text
+Error: owned agent is present in the activity read
+Expected: true
+Received: false
+```
+
+Evidence: Tensorlake sandboxes (4-vCPU x86_64 Linux virtual machines booting systemd, each running only its shard with
+three Playwright workers and one owned stack each; load average not measured), the recorder's generic mode
+(`python3 scripts/record-test-run.py --kind development --tmux required -- npx playwright test --project=<engine>-<spec> ... --retries=0 --reporter=line`),
+Node 24.16 with the Playwright and browser builds the tested tree pins. Recorded tmux 3.7c executable SHA256
+`1f51ad46eb731a90b75e74afc35719666405e8231fa73ab58ff35a5e9e6f92cd`, locale C.UTF-8, child `FARHELM_TEST_TRACE_DIR` (and
+`FARHELM_E2E_SUITE_TERMINALS` in host-terminal runs) after the recorder scrubbed ambient `FARHELM_*`; the tracked tree
+was clean. Run UUIDs address retained temporary evidence, which expires with cleanup.
+
+Class: unknown
+
+Cause: hypothesis

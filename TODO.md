@@ -583,6 +583,24 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   draft PR #2549 records. Hypothesis: WebKit sometimes never reports an intercepted request as finished (FLAKES.md,
   2026-11-04).
 
+- **An update's progress label shows no step name while following.** In `e2e/tests/provisioning.spec.ts`, three "while
+  following" tests failed waiting for `Updating: N/M <step> m:ss`, the label holding only the count and timer for five
+  seconds (runs `8add8072-2ed9-4899-a9ac-d1f5bf3c95d3`, `4d9291ef-904c-4048-ae81-b527a60f6449`,
+  `541a7a0e-0619-4e57-b9ba-2d345c1279f8`); each passed three re-runs. Hypothesis: the step name arrives late under load
+  (FLAKES.md, 2026-11-05).
+
+- **Quick launch's focus does not return to the page body on Chromium.** Two tests in `e2e/tests/quick-launch.spec.ts`
+  poll for the body to hold focus after a blur and sometimes never see it (runs `2d338903-2d70-4c8c-99c4-3d4044d78670`,
+  `ffe0693e-0a67-4039-a8e4-4621365c4561`, `4b6e1aad-91ab-4aee-b721-f760fb42b0cf`,
+  `443ebd09-f5c5-4cd3-8ad1-d27e96a75532`). Hypothesis: a focus handoff in the page takes focus back (FLAKES.md,
+  2026-11-05).
+
+- **The Tensorlake lifecycle spec's activity read misses its own session on WebKit.** Three tests in
+  `e2e/tests/tensorlake-lifecycle.spec.ts` found their session absent from an intercepted activity read (runs
+  `4a0618c3-d05d-437b-92c0-1918b3fbfbc7`, `f14c83fa-5bfc-49cc-b78f-415857edbd33`,
+  `c57979d2-fb33-4824-a370-dfc0ebe24286`); each passed three re-runs. Hypothesis: the intercepted read predates the
+  session's listing (FLAKES.md, 2026-11-05).
+
 ### Difficult deflake
 
 - Restore the release integration gate and remove the remaining ignored binary-output test when the named Rust flakes
