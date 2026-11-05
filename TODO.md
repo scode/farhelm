@@ -192,6 +192,32 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   found on 2026-10-28; the DeepSeek CLIs that turn up are third-party. Confirm the product and its binary first, then
   add it the way Kimi Code is to be added.
 
+- **Podman rigor: review findings for containerized sessions.** Future work for the experimental feature, from the
+  2026-11-04 triage; these findings were assessed from source, not reproduced at runtime.
+  - Stop approval cards and the session menu describe ending only the agent, although a containerized Stop ends the
+    whole container and its independent tab work. The agent-request route is shipped. Make both descriptions disclose
+    that tabs end too.
+  - The wrapper guide promises Stop preserves terminal tabs without naming the container exception. Qualify that
+    sentence: a containerized Stop ends the whole container, including tabs.
+  - Podman's default detach keys (Ctrl-P then Ctrl-Q) can leave the agent running while Farhelm shows it as exited;
+    later Delete can kill it without the live-agent warning, and tab detachment can end the tab's shell. Disable detach
+    keys for agent and tab connections; first verify the accepted spelling on supported Podman versions.
+  - An optional token file inside the writable checkout can be replaced with a symlink to a readable host file; a later
+    agent start or tab open then receives it as GH_TOKEN. This needs an unusual token-path choice. Refuse paths inside
+    the checkout and read regular files without following links.
+  - Podman inherits host proxy variables by default, potentially giving their credentials to the agent and tabs. This
+    needs proxy settings in the host's login environment; network access is already unisolated. Decide whether to
+    inherit them, and make the spec's environment list and code comment accurate either way.
+  - Opening a tab in a stopped retained container can run old, agent-edited shell startup files against a replacement
+    checkout. This needs a manual re-clone at the saved path while keeping the old session. Decide whether the accepted
+    rule that tabs follow their working-directory path covers containerized tabs, and state it explicitly.
+  - A create retry after a crash and reboot can remove an already initialized container if writing its launch spec
+    fails, losing in-container files rather than the checkout. Several rare conditions must coincide; recovery before
+    reboot was not ruled out. Decide whether that container counts as launch evidence, or explicitly accept the loss.
+  - Account inspection of a checkpoint image may restore its old workload instead of inspecting an ordinary image. The
+    route remains unverified in supported rootless use: restoration is root-only and requires a compatible
+    checkpoint/runtime. Consider refusing checkpoint images and a root supervisor.
+
 - **Containerized sessions: Farhelm integration inside the container.** The first, experimental containerized sessions
   (rootless podman) run like a launch with conversation hooks turned off: no hooks, no conversation capture for Restart,
   no `farhelm agent` commands or spawning, no attachments from inside. Add the full integration, restricted so a
