@@ -147,3 +147,106 @@ second unit's final review found no actionable issues. An independent scope chec
 through the existing dialog. The final visual status correction received a bounded Sol/high review with no findings, and
 a fresh scope reassessment supported the integrated design without new machinery. Commit/PR wording passed the required
 cold read. No review finding was left unresolved.
+
+### Landing
+
+Landed with no fixes at landing. You can now mark several sessions in the list (Shift-click a range from the open
+session, or Cmd/Ctrl-click single rows) and Stop, Delete, Pin or Unpin, or Mark them read or unread together, without
+changing the session you have open.
+
+- #3052: marking sessions, the marked-sessions bar and its Pin, Unpin, Mark read and Mark unread actions, with the
+  browser spec and the session-list guide.
+- #3053: bulk Stop and Delete, with their browser cases and the Stop, restart and resume guide.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the plan's base, main gained tensorlake-ui-fixes (#3048-#3051: Tensorlake suspend and resume progress, the suspend
+confirmation, the recipe editor and the Tensorlake Add host dialog); nothing else landed in this round. A fresh-context
+review found no overlap: the new code uses the host list only to find the local host, and none of the dialog styles the
+Tensorlake fixes changed. The same review checked it against the plans that landed shortly before its base:
+
+- Delete's consent: bulk Delete sends each session the same delete precondition a single Delete sends, taken from what
+  the question showed, and a refusal appears on that session's row as it does for a single Delete. Bulk Stop asks
+  nothing, as a single Stop does, so neither ends live tabs beyond what the single action would.
+- Pin order: a drag starts only from the grip, the drag's own Escape never clears the marks, and a Shift-click range
+  follows the same row order the drag uses while the list holds its order steady under the pointer.
+- The host attention list and Hosts: the marked-sessions menu closes when a host warning appears above the list and
+  moves the bar; while Hosts is open no marks count and every bulk action refuses.
+- Trash: while sessions are marked, the Trash button is only hidden, so an open Trash dialog keeps its work.
+
+#### Things you should know
+
+- The plan's new browser test "bulk Stop paces nine rows on one host while another host progresses" failed once in the
+  full suite on Chromium: on one host, two sessions were stopped in a different order from the one the test had read off
+  the list. It then passed ten re-runs. The test reads the list's order before it clicks Stop, so if the list re-sorts
+  in between, the test's expectation is stale while the product follows the list as shown; the landing did not establish
+  whether that or a real ordering bug caused it. Because it is the plan's own new test with one failure and ten passes,
+  it is not recorded as a flake, and nothing tracks it if it recurs; a recurrence would be worth recording and
+  investigating, since the test already reads the order just before the click and a re-sort during the run would fit the
+  failure as well.
+- The browser test of hover text failed every time in this round, as on main in earlier rounds, because the plain Add
+  host form's "SSH" and "Tensorlake sandbox" choices have no hover text (from #2973). Nothing in TODO.md or the review
+  queue records it yet.
+- If the session list fails to load while the bulk Delete question is open, confirming does nothing and says nothing.
+  SPEC.md allows it; keeping the question open until the list loads again would be a small follow-up.
+- Each status change on a live session re-issues the Delete question, so a Confirm click that lands at that moment is
+  refused and needs a second click.
+- Closing Templates or Trash while a bulk action runs tries to put focus on the disabled ⋯ button, so focus is lost.
+- The review suspects, without verifying it, that Shift+Enter or Cmd+Space on a focused row may mark it rather than open
+  it, if the browser passes the held key on to the click.
+- Smaller: an ended session with no tabs reads "Delete anyway:" with nothing after the colon (the existing wording the
+  plan asked for); the marked-sessions menu items repeat their visible text as hover text, which SPEC_impl.md says is
+  unnecessary; and SPEC.md's list of confirmations that start with focus on their confirm button does not name bulk
+  Delete.
+
+#### Checks
+
+This round landed only this plan, stacked on main `627dc733`. On the stack:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, the web-target UI lint,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, the check that every
+  test delay states its reason (`python -B scripts/check-test-sleeps.py`, 412 delays, none without a reason),
+  `dprint check`, `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py` (no errors; three
+  warnings about older text), the docs website build (`bun run build` in `website/`), the workspace debug build and the
+  UI's release web build: all passed.
+- The UI's JavaScript tests (`node --test` in `crates/farhelm-ui/js-tests`), run `a84727a0-9a5e-42d0-9894-89029198c9ba`:
+  all 527 passed. The UI's Rust tests, `cargo nextest run -p farhelm-ui`, run `d33c3fa1-1323-4816-8fbd-c8a2d48537ed`:
+  all 895 passed; its desktop-build tests, `cargo nextest run -p farhelm-ui --features desktop`, run
+  `0a3a26d7-6b03-4f3c-8471-30e53afc4fa1`: all 1084 passed. The whole Rust workspace with the pinned tmux,
+  `cargo nextest run --workspace --exclude farhelm-desktop`, run `f73eb4f2-d5df-41b3-9926-916d708c615d`: all 5653
+  passed, 70 skipped (ignored by design).
+- The whole browser suite on Chromium and WebKit, on ten Tensorlake sandboxes at the maintainer's request (cloud virtual
+  machines; each booted the usual three test stacks and ran its share of the suite's projects through the recorder's
+  generic mode, `python3 scripts/record-test-run.py --kind development ...` running
+  `npx playwright test --project=<engine>-<spec> ... --retries=0`, with the binaries and web bundle built locally from
+  this stack), runs `4a668f9e-baca-4b20-be38-19482ccd2288`, `82a8ff34-43be-4fee-b4bf-ce22fdd27319`,
+  `6149e681-af26-4b48-a9dd-4db02eb8c3b7`, `ab912df5-65aa-4e5a-a1b6-433fba1581c8`,
+  `69205a4b-0b1e-4713-ade3-e78b51012f9b`, `6de6e6be-dbe8-441b-8e18-f2da02830bad`,
+  `9afdafba-923d-4dc5-ac15-1b1cd2635155`, `6022701f-d571-4419-a78b-b1547487552f`,
+  `bdc062f4-b027-46c8-8dde-0ab1a3c88ca2`, `1b760148-02b4-43df-beae-203e056ab313`: 3075 passed, 18 skipped by the specs'
+  own design, 3 failed. Then the same suite with every stack's terminals in terminal hosts, since the plan's new spec
+  joins that run's list (`FARHELM_E2E_SUITE_TERMINALS=host`; this run covers only the specs listed in
+  `e2e/host-terminal-specs.ts`, so it holds fewer tests), runs `25f1728f-9e0d-43f0-85b9-55239e150f80`,
+  `e6f07923-a365-47cf-b111-afd0d7d53cb2`, `77ddde1d-eac9-48c2-81af-81cb046c7502`,
+  `cf209d3c-e234-4e9b-bdef-3317505218a0`, `70620ae9-eae6-4220-af10-5430cc2d9679`,
+  `55bc7668-e195-4157-bb3f-6265da3c1307`, `06d8be44-2eae-41f5-afad-d36c92534a81`,
+  `63394f54-9b33-4fbb-841f-874d84e18ec6`, `0ce6af40-d9f5-488c-b849-afb2b9252517`,
+  `532f9738-391d-4cb1-82ed-c0e3d3adc98c`: 2110 passed, 75 skipped by the specs' own design, 3 failed. Of the six
+  failures:
+  - "Sidebar surfaces give every control hover text" failed four times, in both engines in both suites (runs `9afdafba`,
+    twice, `25f1728f`, `63394f54`), on the Add host form's "SSH" and "Tensorlake sandbox" choices (see Things you should
+    know).
+  - The launcher's "Runs in YOLO mode" step on WebKit, in "create-intent-key-rebinds-on-host-change: a new target is a
+    new intent" (run `cf209d3c`), a recorded flake.
+  - The plan's own new "bulk Stop paces nine rows on one host while another host progresses" (Chromium, run `6de6e6be`;
+    see Things you should know), which then passed five times on each engine, also on sandboxes, Chromium run
+    `8aaac66b-5db7-45f2-a0dc-6b6b55fc5fc6` and WebKit run `2ffb7b31-cbec-411c-9233-fbb124cfb39a`.
+- Not run: the doctests (no doc examples changed), the separate host-terminal browser configuration, the desktop crate
+  and asset checks and the CentOS provisioning test (none of their code changed), the grid component's browser suite (no
+  grid code changed), the desktop smoke tests and the installer tests (no desktop shell, packaging or installer code
+  changed), the development screenshot review (no shot changed), the docs website preview (the build above passed; no
+  page was viewed) and the native Mac app (not runnable on Linux).
+
+The executor's report calls the PRs drafts and skips the whole Rust workspace run, which the landing ran; what landed is
+its two commits rebased onto current main, identical in content to the ones it tested. Native macOS interaction was not
+exercised by the landing either. Nothing else in it became untrue at landing.
