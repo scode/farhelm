@@ -57,6 +57,38 @@ paragraphs. Classes are `readiness`, `replay-live`, `fixture-premise`, `peer-lif
 Confidence is `established`, `hypothesis`, or `unknown`; `Cause:` is the last line. These fields apply only to new
 entries. Missing historical fields are missing evidence, not an implicit cause classification.
 
+## 2026-11-05 — host menu fixture absent before expanded setup failure (e2e/tests/provisioning.spec.ts)
+
+`expanded setup failure closes the menu below it` failed in Chromium during browser sweep run
+`b0269440-1711-4470-8e18-f6f7ef88bec3`. Opening the second host's menu never produced its flyout through the five-second
+visibility wait, before the test could check that growing setup failure details close that menu. All three isolated
+classification reruns passed on both engines: `1d205cfb-1e97-4479-96bf-d07b22e5dc3a`,
+`33e6b9ea-fbe3-49a5-a93b-acced1730ff3`, and `919edd50-a83c-4c2a-a5f1-ee90f7387526`. No cause was established. Open and
+excluded from future sweeps; no fix attempted.
+
+```text
+Locator: locator('[data-host-id="71"]').locator('.host-row-menu-flyout')
+Expected: visible
+Timeout: 5000ms
+Error: element(s) not found
+```
+
+Evidence: clean commit `2146e607ea9227579740704f2e120ee6192c2525`, shared x86_64 Linux; ordinary browser suite on both
+engines, three workers with one stack each and zero retries. The same run failed
+`sidebar surfaces give every control hover text` on Chromium and WebKit; its console summary reported 3,037 passed, 18
+skipped and three failed. The retained Playwright JSON is 33,090,209 bytes and exceeds the recorder's report inspection
+limit, so those full-run totals come from the console, not validated report counts; the classification reports are
+complete. The five-second menu wait is known, but total failing-case duration, concurrent load, memory pressure and
+browser build identifiers are unavailable. Recorded tmux 3.7c SHA256
+`811e874f9f7802eb8f58cb4e9ff972959bc0f4d760d4273f0190d462ca0cfdc4`; locale C.UTF-8; Node 26.13.0, Playwright 1.64.0,
+Python 3.15.2, Linux kernel 6.8.0-147-generic. Recorder-owned child variables were `FARHELM_TEST_TRACE_DIR` and
+`FARHELM_PLAYWRIGHT_POLICY_FILE`, with ambient Farhelm variables scrubbed. Raw evidence remains in the UUID run
+directories and expires with temporary-file cleanup.
+
+Class: fixture-premise
+
+Cause: unknown
+
 ## 2026-11-04 — visit-history deletion fixture reports error after Stop (e2e/tests/sidebar.spec.ts)
 
 `visit history chooses and remembers the next session after row deletion` failed in Chromium during sweep browser run

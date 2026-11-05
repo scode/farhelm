@@ -551,6 +551,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Deflake
 
+- **Host menu fixture sometimes never opens before an expanded setup failure.**
+  `expanded setup failure closes the menu below it` in `e2e/tests/provisioning.spec.ts` failed in Chromium browser sweep
+  run `b0269440-1711-4470-8e18-f6f7ef88bec3`: the second host's menu flyout was absent through a five-second wait,
+  before the assertion about closing it when failure details grow. All three isolated classification reruns passed on
+  both engines (`1d205cfb-1e97-4479-96bf-d07b22e5dc3a`, `33e6b9ea-fbe3-49a5-a93b-acced1730ff3`,
+  `919edd50-a83c-4c2a-a5f1-ee90f7387526`). Cause unknown; preserve the growth and menu-closing assertions (FLAKES.md,
+  2026-11-05).
+
 - **Visit-history deletion fixture stops in error instead of exited.**
   `visit history chooses and remembers the next session after row deletion` in `e2e/tests/sidebar.spec.ts` failed its
   stopped-session premise in Chromium sweep run `ceac5813-b025-478a-9019-a370b5fc97e5`: expected `exited`, observed
