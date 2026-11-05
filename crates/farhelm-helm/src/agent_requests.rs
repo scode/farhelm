@@ -729,6 +729,7 @@ impl AgentRequestHandler for HelmAgentRequests {
                 create_for_agent(
                     &state,
                     origin,
+                    &caller_entry_uuid,
                     session_id,
                     CreateRequest {
                         edits: LaunchEditsRequest {
@@ -752,6 +753,7 @@ impl AgentRequestHandler for HelmAgentRequests {
                 clone_for_agent(
                     &state,
                     origin,
+                    &caller_entry_uuid,
                     session_id,
                     CloneRequest {
                         source_session_id: source_session_id.into_string(),
@@ -1616,13 +1618,14 @@ fn on_host<T>(result: anyhow::Result<T>, host_name: &str) -> anyhow::Result<T> {
 /// (or checkout) instead of returning the earlier one. The host is the
 /// registry entry the request arrived on, which approvals follow across a
 /// destination change or an adopted identity (SPEC.md, 2026-10-10).
-/// The registry's durable namespace distinguishes the same host row ID in a
-/// fresh database after recovery. Every database gains one at upgrade, so an
-/// in-flight pre-upgrade retry needs approval again rather than reusing the
+/// The random entry UUID also distinguishes a host number reused after a
+/// registry rollback; a numeric row must never inherit an earlier entry's
+/// approval. The registry namespace separates fresh databases. Keys from
+/// before the entry-UUID binding need approval again rather than reusing an
 /// earlier attempt's reservation.
 fn asker_scoped_intent_key(
     registry_namespace: &str,
-    asking_host: HostId,
+    asking_host_entry: &str,
     asking_session: &str,
     key: Option<String>,
 ) -> Option<String> {
@@ -1631,8 +1634,7 @@ fn asker_scoped_intent_key(
         let mut hash = sha2::Sha256::new();
         hash.update((registry_namespace.len() as u64).to_be_bytes());
         hash.update(registry_namespace.as_bytes());
-        hash.update(asking_host.to_be_bytes());
-        for part in [asking_session, key.as_str()] {
+        for part in [asking_host_entry, asking_session, key.as_str()] {
             hash.update((part.len() as u64).to_be_bytes());
             hash.update(part.as_bytes());
         }
@@ -1711,6 +1713,7 @@ fn asker_scoped_intent_key(
 async fn create_for_agent(
     state: &AppState,
     origin: AgentOrigin,
+    asking_host_entry: &str,
     asking_session: &str,
     request: CreateRequest,
 ) -> anyhow::Result<AgentReply> {
@@ -1761,7 +1764,7 @@ async fn create_for_agent(
     let intent_key = match intent_key {
         Some(key) => asker_scoped_intent_key(
             &state.store.registry_namespace().await?,
-            origin.host,
+            asking_host_entry,
             asking_session,
             Some(key),
         ),
@@ -3448,6 +3451,7 @@ async fn template_listing(state: &AppState, caller_entry_uuid: &str) -> anyhow::
 async fn clone_for_agent(
     state: &AppState,
     origin: AgentOrigin,
+    asking_host_entry: &str,
     asking_session: &str,
     request: CloneRequest,
 ) -> anyhow::Result<AgentReply> {
@@ -3560,7 +3564,7 @@ async fn clone_for_agent(
     let intent_key = match request.intent_key {
         Some(key) => asker_scoped_intent_key(
             &state.store.registry_namespace().await?,
-            origin.host,
+            asking_host_entry,
             asking_session,
             Some(key),
         ),
@@ -4011,32 +4015,32 @@ mod tests {
     #[farhelm_testtrace::test]
     fn agent_intent_keys_are_scoped_to_the_registry_host_and_session() {
         let namespace = "first-registry";
-        let parent = asker_scoped_intent_key(namespace, 1, "parent-session", Some("k".into()));
-        let child = asker_scoped_intent_key(namespace, 1, "child-session", Some("k".into()));
+        let parent = asker_scoped_intent_key(namespace, "a", "parent-session", Some("k".into()));
+        let child = asker_scoped_intent_key(namespace, "a", "child-session", Some("k".into()));
         assert_ne!(parent, child);
         assert_ne!(
             parent,
-            asker_scoped_intent_key(namespace, 2, "parent-session", Some("k".into()))
+            asker_scoped_intent_key(namespace, "b", "parent-session", Some("k".into()))
         );
         assert_ne!(
             parent,
-            asker_scoped_intent_key("other-registry", 1, "parent-session", Some("k".into()))
+            asker_scoped_intent_key("other-registry", "a", "parent-session", Some("k".into()))
         );
         assert_eq!(
             parent,
-            asker_scoped_intent_key(namespace, 1, "parent-session", Some("k".into()))
+            asker_scoped_intent_key(namespace, "a", "parent-session", Some("k".into()))
         );
         assert_ne!(
-            asker_scoped_intent_key(namespace, 1, "ab", Some("c".into())),
-            asker_scoped_intent_key(namespace, 1, "a", Some("bc".into()))
+            asker_scoped_intent_key(namespace, "a", "ab", Some("c".into())),
+            asker_scoped_intent_key(namespace, "a", "a", Some("bc".into()))
         );
         assert_eq!(
-            asker_scoped_intent_key(namespace, 1, "parent-session", None),
+            asker_scoped_intent_key(namespace, "a", "parent-session", None),
             None
         );
         let long = asker_scoped_intent_key(
             namespace,
-            i64::MAX,
+            "00000000-0000-4000-8000-000000000001",
             &"s".repeat(1024),
             Some("x".repeat(512)),
         )
@@ -4048,7 +4052,8 @@ mod tests {
     /// Recovered registries can assign identical numeric host IDs. Even when
     /// the supplied session, key and request are unchanged, their target-side
     /// reservations must differ: a request digest cannot supply the missing
-    /// registry identity. This uses real databases to pin that scope's source.
+    /// registry identity. A lost tail can also reuse a number within the same
+    /// namespace, so distinct entry UUIDs must suffice without a namespace change.
     #[farhelm_testtrace::test]
     async fn agent_intent_keys_distinguish_fresh_registries() {
         let dir = tempfile::tempdir().unwrap();
@@ -4064,6 +4069,9 @@ mod tests {
             first_host, second_host,
             "premise: independently assigned host IDs collide"
         );
+        let first_entry = first.entry_uuid_of(first_host).await.unwrap().unwrap();
+        let second_entry = second.entry_uuid_of(second_host).await.unwrap().unwrap();
+        assert_ne!(first_entry, second_entry, "premise: distinct host entries");
         let first_namespace = first.registry_namespace().await.unwrap();
         let second_namespace = second.registry_namespace().await.unwrap();
         assert_ne!(
@@ -4073,17 +4081,30 @@ mod tests {
         assert_ne!(
             asker_scoped_intent_key(
                 &first_namespace,
-                first_host,
+                &first_entry,
                 "same-session",
                 Some("same-key".into())
             ),
             asker_scoped_intent_key(
                 &second_namespace,
-                second_host,
+                &first_entry,
                 "same-session",
                 Some("same-key".into())
             ),
             "the same request must not find another registry's approved reservation"
+        );
+        let same_registry_key = |entry| {
+            asker_scoped_intent_key(
+                &first_namespace,
+                entry,
+                "same-session",
+                Some("same-key".into()),
+            )
+        };
+        assert_ne!(
+            same_registry_key(&first_entry),
+            same_registry_key(&second_entry),
+            "a reused host number must not find the previous entry's approved reservation"
         );
     }
 
@@ -8425,7 +8446,7 @@ mod tests {
                 seen[0].intent_key,
                 asker_scoped_intent_key(
                     &h.store.registry_namespace().await.unwrap(),
-                    local,
+                    &h.manager.status(local).unwrap().entry_uuid,
                     "asker",
                     Some("clone-key".to_string())
                 ),
@@ -9666,7 +9687,7 @@ mod tests {
             seen[0].intent_key,
             asker_scoped_intent_key(
                 &h.store.registry_namespace().await.unwrap(),
-                local,
+                &h.manager.status(local).unwrap().entry_uuid,
                 "asker",
                 Some("raw-key".to_string())
             ),

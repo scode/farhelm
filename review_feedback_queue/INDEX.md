@@ -27,10 +27,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`power-loss-removes-valid-resume-binding.md`](power-loss-removes-valid-resume-binding.md) — A power loss can remove
   or replace an already accepted Resume offer after its report has been acknowledged and deleted.
 
-- [`rolled-back-host-number-transfers-retained-approval.md`](rolled-back-host-number-transfers-retained-approval.md) —
-  After a particular registry rollback, a different connected host can finish an earlier host's retained, approved
-  launch using the same request.
-
 - [`failed-restart-restoration-loses-valid-resume.md`](failed-restart-restoration-loses-valid-resume.md) — A named
   Restart that never starts its replacement can permanently remove the previous Resume offer if the database restoration
   write also fails.
