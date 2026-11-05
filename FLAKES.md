@@ -4083,3 +4083,37 @@ cleanup; cold setup attempts with no executed assertions remain separate, incomp
 Class: unknown
 
 Cause: unknown
+
+## 2026-11-05 — quick-launch body-focus flake recurs with host terminals (e2e/tests/quick-launch.spec.ts)
+
+`typed page refusals are atomic and empty Enter leaves later bindings paired` failed on Chromium in the full
+host-terminal browser run `b8e18c76-972f-4e97-bf66-828778581c59`, on clean commit
+`0563c44f721b6f55dcb9e1f1b625ac9c5a0206eb`. After blurring the focused element, the test never observed the page body
+holding focus; the failure snapshot instead showed the terminal input focused. This is the same premise failure as the
+earlier quick-launch entry on this date. The WebKit case passed. The console reports 2,114 passed, 75 skipped and this
+one failure across 2,190 selected cases; these are console observations from generic recording, without validated runner
+counts. The failing case took 7.2 seconds, including its five-second focus poll. Open; the existing TODO entry and sweep
+exclusion remain, with no further reproduction or fix attempted.
+
+```text
+Error: expect(received).toBe(expected) // Object.is equality
+Expected: true
+Received: false
+Call Log:
+- Timeout 5000ms exceeded while waiting on the predicate
+> await expect.poll(() => page.evaluate(() => document.activeElement === document.body)).toBe(true);
+```
+
+Evidence: shared 18-CPU x86_64 Linux, kernel 6.8.0-147-generic, Node 26.13.0, Playwright 1.64.0 and CPython 3.15.2. The
+run used `FARHELM_E2E_SUITE_TERMINALS=host` with `npx playwright test --retries=0`, three browser workers and one owned
+stack each, both engines. Global setup printed `suite terminals: host`. Recorded tmux 3.7c executable SHA256
+`d60bcc711383c8282d560926854f2cb8d2d15e9af72641e1396e32f27af9a802`; locale C.UTF-8. The child retained only
+`FARHELM_E2E_SUITE_TERMINALS` and recorder-owned `FARHELM_TEST_TRACE_DIR` after ambient Farhelm variables were scrubbed.
+Case-level load, memory pressure, a typical passing duration and browser executable identity were not measured. Recorder
+source/lifecycle inspection and console EOF are complete, with no dropped or truncated output. The retained UUID run,
+failure snapshot and browser trace are private temporary evidence and expire with cleanup. The terminal regaining focus
+is observed; which focus handoff caused it remains a hypothesis.
+
+Class: pointer-focus
+
+Cause: hypothesis
