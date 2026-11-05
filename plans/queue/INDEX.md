@@ -7,7 +7,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `printed-link-mismatch.md` — printed links: no lasting mismatch between the shown and opened address; spec the hover warning
 - [in-flight ea0dba] `delete-unreadable-terminals.md` — Delete: keep warning about and reaping work after a terminal stops responding
 - [blocked] `terminal-text-drops.md` — new terminals: state the invisible-formatting drop, print Kirat Rai vowel signs again
-- [in-flight a9edb1] `triage-misc-nov4.md` — template card shows the container, escape host text in helm logs, paste-after-gap clause, one discard
+- [complete] `triage-misc-nov4.md` — template card shows the container, escape host text in helm logs, paste-after-gap clause, one discard
 - [in-flight 21354e] `pinned-session-order.md` — Pinned sessions keep one shared manual order: new pins go to the bottom, and the user rearranges them by dragging or with Move up / Move down in the row menu
 - [pending] `bulk-session-actions.md` — Shift+click and Cmd/Ctrl+click select several sessions; a bar offers Stop, Delete, Pin/Unpin and Mark read/unread, with one structured confirmation for a bulk Delete
 - [pending] `host-attention-list.md` — A list above the sessions shows every host with a problem, an update, or setup/update in progress, with its action; it replaces the update banner and card
