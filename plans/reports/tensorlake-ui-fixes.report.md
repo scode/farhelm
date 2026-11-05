@@ -204,3 +204,148 @@ The follow-up's fresh gpt-6.1-sol review at high effort found no issues in the f
 regression. Its separate scope checkpoint supported the local existing-owner correction without new state or a broader
 focus framework. Updated PR wording passed a fresh cold read, and all three changed files received the documentation
 pass.
+
+### Landing
+
+Landed with fixes at landing. Tensorlake hosts now show Suspend and Resume as pending until the service confirms them,
+the launcher shows its own resume progress instead of a brief "unavailable", recipe actions and errors stay in view,
+sandbox discovery shows its progress, and the Add host question for a sandbox is laid out as the usual setup
+confirmation.
+
+- #3048: suspend and resume progress, and the launcher's resume progress.
+- #3049: the Suspend confirmation in the app's normal dialog, with hover text added at landing.
+- #3050: recipe controls and sandbox discovery, with hover text added at landing and the focus fix from the send-back
+  below.
+- #3051: the Add host dialog for sandboxes, with the stylesheet and changelog fixes below.
+
+#### Sent back once, and why
+
+The first landing attempt found that closing Settings from its header with an unsaved new recipe sometimes showed no
+"Save these changes before leaving?" question on WebKit: "closing Settings with an unsaved recipe asks first and
+finishes the close" failed 4 of 14 WebKit runs on the stack and 0 of 10 on main without the plan. The monitor blocked
+the landing, nothing merged, and it answered the block by sending the plan back to fix the cause. The executor found it:
+the recipe editor, opening in Settings, now moves focus to its heading one animation frame after it appears; when that
+frame ran after the Name field had already been chosen, it took focus away before the typing arrived, so the recipe
+stayed unchanged and there was nothing to ask about. The editor now leaves focus alone when a usable field or control
+already holds it, and a new browser test holds that frame to show the typing and the question survive. The landing added
+a check to that test that the frame really has not run yet when the field is chosen, so it cannot pass vacuously if the
+clock stops holding it. Those changes are all in #3050.
+
+#### The fixes made at landing
+
+- The stylesheet test that requires design tokens rather than bare values read two new id selectors in #3051,
+  `#add-tensorlake-name-help` and `#add-tensorlake-recipe-help`, as the hex color `#add`, so the UI's JavaScript tests
+  failed on this stack. The landing selects the same elements by the classes they already carry; the page renders the
+  same, and the ids stay for the fields' accessible descriptions.
+- Only #3048 touched a changelog fragment, so the release-time sweep would have reported #3049 and #3050, both `fix:`
+  PRs, as uncovered. Tensorlake hosts have not shipped yet, so the landing added a `pr: 3049, 3050` claim to the
+  existing Tensorlake hosts fragment, in #3051 (a PR that edits a fragment counts as covered). The fragment's text is
+  unchanged; the executor judged that this presentation polish needs no entry of its own, and the claim keeps that
+  judgment while satisfying the sweep.
+- Three new controls had no hover text, which every control should have: the Suspend confirmation's Cancel and Suspend
+  buttons (#3049) and sandbox discovery's Refresh (#3050). The landing added it ("Cancel: keep the sandbox running",
+  "Suspend: pause this sandbox until it is resumed", "Refresh: check Tensorlake again for sandboxes not on this helm").
+  The tooltip coverage test never opens these, so it did not catch them.
+
+All three were made in the first attempt, pushed to the plan's branches with the block, and kept by the executor.
+
+#### What landed since the stack was based, and whether it interacted
+
+Nothing but plan bookkeeping landed on main since the plan's base, and nothing else landed in this round. A
+fresh-context review read it against the plans that landed just before its base, and a second one read the send-back's
+change: the host attention list (a sandbox that is suspending or resuming gets no attention row of its own, and setup
+warnings still produce one, as the amended specification says) and the pin order (the two plans share one helm file,
+where this plan only adds a refusal message); it found no interaction with either. The second review found the fix sound
+and asked only for the test's premise check. No helm schema or supervisor protocol changed; an older browser tab shows a
+host in the new transitional state as "Host state unknown", the designed tolerance (the item below about the
+suspend/resume direction is about a later, unknown direction value, which has no such fallback).
+
+#### Things you should know
+
+- The editor's opening focus now gives way to any focused, visible control anywhere on the page, not only to its own
+  fields. Every current way of opening the editor removes the control that opened it, so the initial focus still
+  happens; a future way of opening it that leaves its trigger on screen would quietly lose that focus.
+- The browser test of hover text still fails on main: the plain SSH Add host form's "SSH" and "Tensorlake sandbox"
+  choices have no hover text (from #2973). This plan does not touch that form, and the Tensorlake form keeps the same
+  two buttons without hover text. Nothing in TODO.md or the review queue records it yet.
+- The specification and docs call the reconnecting state "Connecting…", while the UI shows "Connecting" without the
+  ellipsis.
+- After a confirmed Suspend, the host briefly shows Connecting before settling on Suspended. That happened before the
+  plan too, but it slightly undercuts "Suspended only after confirmation".
+- The suspend/resume direction carried to the browser has no fallback for an unknown value, so a future third direction
+  would make an older browser tab fail the whole Hosts panel rather than just that host.
+- Sandbox discovery now shows "Checking…" on every automatic reread, not only after Refresh, which may look busy.
+- The new host state has no row in the shared host-list fixture that the helm and UI tests both decode.
+
+#### Checks
+
+The checks ran in two rounds. The first, on the plan as first delivered with the landing's fixes (stack top `f7dad865`,
+on main `c501a760`), covered everything; the second, on the redelivered plan (stack top `10078dbe`, on main `30981f76`,
+which differs from `c501a760` only in plan bookkeeping), covered what changed since: one browser-side script inside the
+recipe editor's opening, the new browser test and one SPEC_impl.md sentence. That script runs only when the recipe
+editor opens, in Settings or in Add host, so the second round re-ran the specs that open it; the first round's results
+for everything else still describe what landed.
+
+- On the final stack: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, the web-target UI lint,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, the check that every
+  test delay states its reason (`python -B scripts/check-test-sleeps.py`, 412 delays, none without a reason),
+  `dprint check`, `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py` (no errors; three
+  warnings about older text), the docs website build (`bun run build` in `website/`), the workspace debug build and the
+  UI's release web build: all passed. The same gates passed in the first round.
+- The UI's Rust tests, `cargo nextest run -p farhelm-ui`, on the final stack, run
+  `35152fa7-1718-4177-94c7-fd49eeed8e6e`: all 879 passed. In the first round: the UI's JavaScript tests (`node --test`
+  in `crates/farhelm-ui/js-tests`), run `7c1acb97-f311-4bb1-ae49-3b21278c0630`: all 527 passed; the desktop-build tests,
+  `cargo nextest run -p farhelm-ui --features desktop`, run `7a05d383-7ba1-4246-aa01-42994081f4da`: all 1068 passed; the
+  whole Rust workspace with the pinned tmux, `cargo nextest run --workspace --exclude farhelm-desktop`, run
+  `73aa2036-84f8-4cc3-a6fe-9e8f2433bc9a`: all 5637 passed, 70 skipped (ignored by design).
+- Browser tests on Tensorlake sandboxes at the maintainer's request (cloud virtual machines; each booted the usual three
+  test stacks and ran its share through the recorder's generic mode,
+  `python3 scripts/record-test-run.py --kind development ...` running
+  `npx playwright test --project=<engine>-<spec> ... --retries=0`, with the binaries and web bundle built locally from
+  the stack). On the final stack: the whole Tensorlake recipes spec, the new test included, three times on each engine,
+  WebKit run `ad95c4c4-4c8f-455f-b17e-d657670d7858` and Chromium run `bc1b731a-0418-4a29-b9f6-d05c0b52f7bb`: all 24
+  passed on each; then "closing Settings with an unsaved recipe asks first and finishes the close" 20 more times on
+  WebKit, runs `54cb0c34-c1ca-4db2-8ebf-f951c8280ddd` and `99b8f20d-c215-4e2c-973c-89fc39620a2f`: all 20 passed. With
+  the three in the spec runs, that test passed 23 of 23 on WebKit, against 4 failures in 14 before the fix. And the
+  Tensorlake hosts spec, where Add host opens the recipe editor, once on each engine: all 11 passed on each, WebKit run
+  `de43a0e9-152e-4ae3-9b00-ab2b6a83dc20` and Chromium run `7292840f-e1c1-42a0-a619-a42b54fd7ce8`.
+- In the first round, the whole browser suite on Chromium and WebKit on ten sandboxes, runs
+  `31c2d692-0ec9-48c7-adf4-af4353c493bb`, `ec2dbf12-452d-4c2d-8520-c26c49c779a6`,
+  `21068fb4-aef7-4b2b-8e28-e6ad7031512b`, `e6073bcc-504c-46aa-9f99-31a9cb9643ab`,
+  `8411fc9f-2464-45c0-ad0a-6f7f8841b8a9`, `74e243c9-914e-41b7-9bc1-5631ba143577`,
+  `b9f92afa-efbe-4593-859b-52ddd19ad3a6`, `c79eff47-d0e5-4250-a622-e0533ac56c92`,
+  `23b86d4f-9b92-460e-bd50-f71a009dcf88`, `c57979d2-fb33-4824-a370-dfc0ebe24286`: 3042 passed, 18 skipped by the specs'
+  own design, 6 failed; and the same suite with terminals in terminal hosts (only the specs listed in
+  `e2e/host-terminal-specs.ts`), runs `e73aba9f-520c-400d-844f-2f1de83b71e8`, `faa86185-9d47-418b-8633-27b9612af67c`,
+  `c572aa6c-e2f2-4ea4-83f7-7125c8682018`, `c08116ac-b22b-4023-a990-1f1a76c6dd0d`,
+  `ffe0693e-0a67-4039-a8e4-4621365c4561`, `4ae30c9a-4e63-4ace-ad31-5c5da7d54ac0`,
+  `42c9376d-fb3e-4620-85e7-b2c0fe9f16b2`, `538090f9-d51b-4683-bcd6-5990d0e63298`,
+  `99125a81-b208-4643-b900-b50c321f1b39`, `db26ceb4-057d-4c4a-9a9f-727cdb7d6aaf`: 2082 passed, 75 skipped by the specs'
+  own design, 3 failed. Of the nine failures:
+  - "Sidebar surfaces give every control hover text" failed four times, in both engines in both suites (runs `ec2dbf12`,
+    `b9f92afa`, `c08116ac`, `538090f9`), on the Add host form's "SSH" and "Tensorlake sandbox" choices (see Things you
+    should know).
+  - The feedback dialog's disabled Send color on WebKit, in "the dialog refuses blank and over-long messages without
+    sending" (run `c79eff47`), a recorded flake.
+  - "Closing Settings with an unsaved recipe asks first and finishes the close" (WebKit, run `23b86d4f`), the failure
+    that sent the plan back, fixed as described above.
+  - Three single failures, none in the code the plan changed, each of which then passed three re-runs on the same build,
+    also on sandboxes (the run ids below are the re-runs): "incarnation churn keeps a followed run while a target change
+    detaches it" (WebKit; failed in `e6073bcc`, re-run `094b6771-a369-44dd-9d4b-45c33620a55f`); "suspending an agent
+    with stale idle status asks before sending the request" (WebKit; its session was missing from an activity read, as
+    other tests in the same spec did in earlier rounds; failed in `c57979d2`, re-run
+    `2974246f-1a72-4475-a170-439dd5a5e91b`); and "typed page refusals are atomic and empty Enter leaves later bindings
+    paired" (Chromium; focus did not return to the page body, as another quick-launch test did in an earlier round;
+    failed in `ffe0693e`, re-run `479e3dde-6a6a-488f-ac2d-f9cb6a1d29ec`). Each is a single failure, not recorded as a
+    flake.
+- Not run: the doctests (no doc examples changed), the grid component's browser suite (no grid code changed), the
+  desktop smoke tests and the installer tests (no desktop shell, packaging or installer code changed), the development
+  screenshot review (no shot changed), the docs website preview (the build above passed; no page was viewed), the native
+  Mac app (not runnable on Linux) and the real Tensorlake service (the browser specs use the existing fake).
+
+The executor's report calls the PRs drafts; what landed is its commits rebased onto main `30981f76` (the report names an
+earlier plan-bookkeeping commit as the base) with the landing's fixes above, each in the commit it belongs to. Its
+statement that the final branches hold exactly the tested correction stopped being true when the landing added the
+premise check to the new test. Its 20 clean WebKit runs of the close test came after 10 clean runs before the fix on its
+own machine, so they did not by themselves show the fix; the landing's runs in Checks above did, on the sandboxes where
+the failure had shown. Nothing else in it became untrue at landing.
