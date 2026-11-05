@@ -50,7 +50,6 @@ use farhelm_proto::{
     ResolvedGithubCheckout, SessionInfo, SessionLaunch, TerminalSelector,
     github_checkout::GithubPreviewRequest,
 };
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -518,27 +517,21 @@ async fn forward_owned_request_panic(
 /// Describe a renamed session with the same freshness contract as a list.
 ///
 /// The timer supplies launch errors, Resume readiness and notifications;
-/// this reply only probes pane liveness and tabs. A terminal-less restart gap
-/// needs no tmux query, so an unrelated server failure cannot break its reply.
+/// this reply only probes pane liveness and tabs, including old tmux tabs
+/// that survive losing the agent terminal.
 async fn session_info_now(
     sup: &Arc<Supervisor>,
     entry: &Arc<SessionEntry>,
 ) -> anyhow::Result<SessionInfo> {
-    // Without a terminal there is no pane to classify, so neither the tmux
-    // probe nor the registry snapshot is worth taking.
-    // Matched per kind, not as `Some(_)`: whether tmux must be asked depends
-    // on the terminal's kind, and a catch-all would send a terminal tmux
-    // does not hold into the tmux query. A host agent's status comes from
-    // its runtime, but its session's tmux tabs, if any, from the pane map,
-    // so it asks too, as the list does (`listing::list_all`), and a failed
-    // query fails the reply as it does for tmux: "we could not ask" is never
-    // "there are none", and a client takes the reply's tab list as the truth.
-    // The registry snapshot classifies only tmux panes and is not needed for
-    // it.
+    // Every session may retain old tmux tabs, including after its agent
+    // terminal is lost. As in `listing::list_all`, a failed query cannot
+    // produce an authoritative empty tab list. Only a tmux agent needs the
+    // registry snapshot to classify its pane's ownership.
     let (pane_states, known) = match &entry.terminal {
         Some(Terminal::Tmux(_)) => (sup.tmux.pane_states().await?, sup.known_tmux_names().await),
-        Some(Terminal::Host(_)) => (sup.tmux.pane_states().await?, KnownTmuxNames::default()),
-        None => (HashMap::new(), KnownTmuxNames::default()),
+        Some(Terminal::Host(_)) | None => {
+            (sup.tmux.pane_states().await?, KnownTmuxNames::default())
+        }
     };
     sup.with_checkout_metadata(entry_info(entry, &pane_states, &known))
         .await
@@ -10103,12 +10096,8 @@ mod tests {
     /// `truncated: true`, and — because the ordering contract
     /// (`listing::list_order_key`) keeps the newest and drops the oldest —
     /// missing precisely the session created first. `fake_entry` gives
-    /// every entry a synthetic, terminal-less (`terminal: None`) fixture,
-    /// which is enough to drive the cap wiring without a single real tmux
-    /// round trip (`session_status` returns `Exited` for a terminal-less
-    /// entry without ever consulting `pane_states`) — `LIST_SESSIONS_CAP +
-    /// 1` REAL tmux sessions would be slow and environment-dependent for
-    /// no added signal.
+    /// every entry a synthetic, terminal-less (`terminal: None`) fixture:
+    /// real tmux sessions would add launch work without testing the cap.
     #[farhelm_testtrace::test]
     async fn list_sessions_honors_the_session_cap_at_the_handler_level() {
         let state = StateDir::new();
@@ -10321,19 +10310,13 @@ mod tests {
     // shot, so there is no walk to interleave a mutation into and no
     // budget to force a mid-page cut. Deleted rather than adapted.
 
-    /// PLAN_M2.md's list-status contract: a `ListSessions` reply whose
-    /// (capped) subset contains NO entry with a terminal at all —
-    /// including the empty-list case, but exercised here with one
-    /// terminal-less entry so the reply is checked for real content too —
-    /// must succeed even if tmux itself is completely unreachable, because
-    /// those statuses are decidable without asking tmux anything
-    /// (`session_status` returns `Exited` for a terminal-less entry
-    /// unconditionally). Killing the private server alone produces a
-    /// tolerated empty answer. Removing its socket after shutdown supplies
-    /// a verified propagating query error, so an unconditional query would
-    /// yield an Error instead of the expected SessionList.
+    /// Only an empty listing can skip tmux: a terminal-less session may
+    /// still have old tabs, so a failed query cannot prove its tab list empty.
+    /// A stopped server can be a tolerated empty answer; removing its socket
+    /// supplies a verified propagating error that both list and rename must
+    /// preserve rather than hide tabs behind a successful empty result.
     #[farhelm_testtrace::test]
-    async fn list_sessions_skips_pane_states_when_nothing_has_a_terminal() {
+    async fn only_an_empty_listing_skips_failed_pane_queries() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
@@ -10360,6 +10343,7 @@ mod tests {
             sup.tmux.pane_states().await.is_err(),
             "fixture premise: querying the missing socket must propagate an error"
         );
+        assert!(list_sessions(&sup, 0).await.0.is_empty());
 
         sup.sessions.lock().await.insert(
             "s1".to_string(),
@@ -10441,17 +10425,12 @@ mod tests {
             .expect("spawned ListSessions handler never replied")
             .expect("reply channel closed before a reply arrived");
         let decoded: ControlMsg = serde_json::from_slice(&reply.body).unwrap();
-        let ControlMsg::SessionList { sessions, .. } = decoded else {
-            panic!(
-                "expected ControlMsg::SessionList (tmux must not have been consulted at all), \
-                 got {decoded:?}"
-            );
+        let ControlMsg::Error { kind, .. } = decoded else {
+            panic!("terminal-less tabs could not be read: {decoded:?}");
         };
-        assert_eq!(sessions.len(), 1);
-        assert_eq!(
-            sessions[0].status,
-            SessionStatus::Exited { exit_code: None }
-        );
+        assert_eq!(kind, ErrorKind::Internal);
+        let entry = sup.sessions.lock().await["s1"].clone();
+        assert!(session_info_now(&sup, &entry).await.is_err());
     }
 
     // ---------------------------------------------------------------------

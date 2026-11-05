@@ -5495,10 +5495,10 @@ pub(crate) fn unknown_pane_owner_refusal(pane: &str, owner: &str, expected: &str
 /// no longer does, because the row reads unknown and an unknown-status agent
 /// restarts without asking (SPEC.md, Lifecycle operations).
 ///
-/// Every other terminal-less row is not alive. The common way to lose a
-/// terminal is a reboot or a tmux server that died under a restarted
+/// Every other terminal-less row has no known live agent. The common way to
+/// lose a terminal is a reboot or a tmux server that died under a restarted
 /// supervisor: reload publishes those rows as `Interrupted` or `Exited` with no
-/// terminal, and nothing of theirs is running.
+/// terminal. Surviving tabs are independent; Delete must still discover them.
 fn terminal_less_launch_may_be_live(entry: &SessionEntry) -> bool {
     entry.terminal.is_none()
         && matches!(
@@ -13677,8 +13677,6 @@ impl Supervisor {
         // preserved-session path re-discovers it after replacement; the
         // snapshot remains useful for pane reuse and for failure reporting.
         // A read failure refuses the restart before anything destructive.
-        // No terminal means no tmux session, and therefore no windows for a
-        // tab to be (`session_tabs` answers that without asking tmux).
         let tabs = self.session_tabs(entry).await.map_err(|e| {
             RelaunchFailure::definitive(
                 e.context("reading this session's terminal tabs before relaunching it"),
@@ -14733,8 +14731,7 @@ impl Supervisor {
         // only window; see `pane_states_with_markers`). Missing it here
         // would let an "unconfirmed" delete kill that tab.
         // Tmux tabs are windows in the session's tmux session, whatever the
-        // agent's kind (`tmux_tab_home`); a session with no agent terminal
-        // has no tmux session recorded to look in, as before hosts.
+        // agent's kind (`tmux_tab_home`), including after its terminal is lost.
         let tmux_tabs = match entry.terminal.as_ref() {
             Some(terminal) => {
                 let (tmux_name, agent_pane) = tmux_tab_home(&entry.info.id, terminal);
@@ -14748,7 +14745,17 @@ impl Supervisor {
                     .filter(|tab| !tab.dead)
                     .count()
             }
-            None => 0,
+            None => {
+                let states = self
+                    .tmux
+                    .pane_states_with_markers()
+                    .await
+                    .context("listing this session's terminal tabs")?;
+                tabs_from_pane_states(states.values(), &session_tmux_name(&entry.info.id), None)
+                    .into_iter()
+                    .filter(|tab| !tab.dead)
+                    .count()
+            }
         };
         if let Some(gate) = self.seams.faults.delete_tab_count_gate() {
             gate().await;
@@ -14777,10 +14784,8 @@ impl Supervisor {
     ///
     /// Fallible on purpose, and the two failure shapes are not the same
     /// answer. tmux definitively reporting that there is no server (or no
-    /// panes) is `Ok(vec![])` — the session genuinely has no tabs, which
-    /// is exactly what a session whose terminal no longer exists looks like.
-    /// Any
-    /// OTHER query failure is an `Err`: "we could not ask" is not "there
+    /// panes) is `Ok(vec![])` — the session genuinely has no tmux tabs.
+    /// Any other query failure is an `Err`: "we could not ask" is not "there
     /// are none", and a caller that flattened the two would publish an
     /// empty tab strip for a session whose tabs are alive and attached.
     /// [`crate::tmux::TmuxDriver::is_definitively_empty`] is what draws
@@ -14797,14 +14802,12 @@ impl Supervisor {
     /// [`Self::session_tabs_including_dead`].
     ///
     /// The tmux tabs are the session's windows, wherever its agent runs
-    /// (`tmux_tab_home`); for an entry without a terminal, none, since with
-    /// no agent terminal there is no tmux session recorded to look in, as
-    /// `entry_info` says. The tabs in terminal hosts follow them, in the
-    /// order they were opened (`host_tabs::listed_host_tabs`), whatever the
-    /// agent terminal: they are the session's runtimes, not anything tmux
-    /// holds.
+    /// (`tmux_tab_home`), including when its agent terminal is lost.
+    /// The tabs in terminal hosts follow them in the order they were opened
+    /// (`host_tabs::listed_host_tabs`), whatever the agent terminal: they are
+    /// the session's runtimes, not anything tmux holds.
     pub(crate) async fn session_tabs(&self, entry: &SessionEntry) -> anyhow::Result<Vec<TabInfo>> {
-        let mut tabs = match entry.terminal.as_ref() {
+        let mut tabs: Vec<TabInfo> = match entry.terminal.as_ref() {
             Some(terminal) => {
                 let (tmux_name, agent_pane) = tmux_tab_home(&entry.info.id, terminal);
                 let states = self.tmux.pane_states().await?;
@@ -14814,7 +14817,14 @@ impl Supervisor {
                     .map(DiscoveredTab::tab_info)
                     .collect()
             }
-            None => Vec::new(),
+            None => {
+                let states = self.tmux.pane_states().await?;
+                tabs_from_pane_states(states.values(), &session_tmux_name(&entry.info.id), None)
+                    .into_iter()
+                    .filter(|tab| !tab.dead)
+                    .map(DiscoveredTab::tab_info)
+                    .collect()
+            }
         };
         tabs.extend(host_tabs::listed_host_tabs(&entry.session.host_tabs, false));
         Ok(tabs)
@@ -22878,7 +22888,9 @@ pub(crate) mod tests {
     /// which listing it uses. Spec: with the agent pane gone and one live tab
     /// left as the session's only window, `still_alive_for_delete` reports the
     /// tab under
-    /// `DeleteGuard::NothingAlive`, and reports nothing under `AgentEnded`
+    /// `DeleteGuard::NothingAlive`, including with no agent terminal after a
+    /// reload; the ordinary session list must still show that same tab.
+    /// The guard reports nothing under `AgentEnded`
     /// (a prompt that warned about tabs covers closing this one) or
     /// `Unconditional`.
     #[farhelm_testtrace::test(flavor = "multi_thread")]
@@ -22891,7 +22903,7 @@ pub(crate) mod tests {
             .create_session_without_overrides("/tmp", "sleep 300", None, 80, 24, None)
             .await
             .expect("agent session");
-        sup.open_tab(&created.id).await.expect("terminal tab");
+        let tab = sup.open_tab(&created.id).await.expect("terminal tab");
         let entry = sup
             .sessions
             .lock()
@@ -22950,6 +22962,26 @@ pub(crate) mod tests {
                 "{guard:?} covers a lone tab beside an ended agent"
             );
         }
+        // A reload can lose the agent terminal while keeping this tab's session.
+        // Preserve the same launch so refusal cannot come from an unsettled create.
+        let mut entry = same_launch_entry(&entry, entry.info.clone(), entry.snapshot.clone());
+        Arc::get_mut(&mut entry).unwrap().terminal = None;
+        assert!(!terminal_less_launch_may_be_live(&entry));
+        *sup.sessions.lock().await.get_mut(&created.id).unwrap() = Arc::clone(&entry);
+        assert_eq!(sup.session_tabs(&entry).await.unwrap(), vec![tab.clone()]);
+        let listed = crate::service::listing::list_all(&sup)
+            .await
+            .expect("terminal-less listing");
+        assert_eq!(listed.sessions.len(), 1);
+        assert_eq!(listed.sessions[0].tabs, vec![tab]);
+        assert_eq!(
+            sup.still_alive_for_delete(&entry, farhelm_proto::DeleteGuard::NothingAlive)
+                .await
+                .unwrap()
+                .0
+                .as_deref(),
+            Some("this session has 1 terminal tab open")
+        );
     }
 
     /// Create an owned raw-input recorder without a vendor binary or launch

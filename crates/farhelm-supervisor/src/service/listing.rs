@@ -159,21 +159,9 @@ pub(crate) async fn list_all(sup: &Supervisor) -> anyhow::Result<ListReply> {
     // ONE query for every session's liveness, not one per
     // session (`TmuxDriver::pane_states`'s own docs on why
     // that multiplies subprocess spawns under a polling UI) —
-    // and skipped altogether when it could not possibly
-    // change the answer: a terminal-less entry is decided
-    // entirely by its recorded outcome (`session_status` never
-    // consults the map for one), so a capped subset that is
-    // ALL terminal-less (including the empty list) is fully
-    // decidable without asking tmux anything. This matters
-    // beyond just saving a subprocess spawn: it is what keeps
-    // an authoritative "every session is a restart gap" (or
-    // simply empty) listing from being turned into a spurious
-    // `Internal` error by a private tmux server that happens
-    // to ALSO be down for an unrelated reason.
-    //
-    // Whether an entry needs the query is decided per terminal kind, by an
-    // exhaustive match rather than `is_some()`, even though every kind needs
-    // it today: a new kind of terminal then has to decide whether it does.
+    // and skipped only when there are no entries to describe. Old tmux
+    // tabs can survive losing the agent terminal, so a terminal-less entry
+    // still needs the query even though its agent status does not.
     //
     // A host agent's status needs no tmux (its runtime answers), but its
     // session's tmux tabs, if any, are listed from the same map
@@ -183,10 +171,7 @@ pub(crate) async fn list_all(sup: &Supervisor) -> anyhow::Result<ListReply> {
     // the truth (a session migrated into a host can still have live tmux
     // tabs). A private server that is simply not running reads as an empty
     // map, not an error, so a fleet of host terminals without tmux lists.
-    let needs_tmux = entries.iter().any(|entry| match &entry.terminal {
-        Some(Terminal::Tmux(_) | Terminal::Host(_)) => true,
-        None => false,
-    });
+    let needs_tmux = !entries.is_empty();
     let pane_states = if needs_tmux {
         // An error here is reached only for a genuinely
         // UNCLASSIFIED tmux failure: `TmuxDriver::pane_states`
