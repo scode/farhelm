@@ -270,29 +270,46 @@ section exists, its latest entry must also be satisfied. Then close the plan per
 "Executing one plan" (steps 11 and 12): deliver its report through the queue script, write a closing entry in its log,
 and stop the watchdog. Never edit `plans/` yourself.
 
-## Blocked
+## Decisions
 
-Blocked on 2026-11-05 (claim 3e6ee9).
+### 2026-11-05: answer to a blocked question
 
-### Keeping old tabs visible needs a larger fix
+The question, as the executor put it:
 
-After an upgrade moves an agent into a new terminal, its old terminal tabs keep running. If the agent's terminal is
-later lost, those tabs can disappear from the session list even though Delete still ends them. Delete can therefore stop
-running tabs after showing a confirmation that says nothing is alive.
+> Blocked on 2026-11-05 (claim 3e6ee9).
+>
+> ### Keeping old tabs visible needs a larger fix
+>
+> After an upgrade moves an agent into a new terminal, its old terminal tabs keep running. If the agent's terminal is
+> later lost, those tabs can disappear from the session list even though Delete still ends them. Delete can therefore
+> stop running tabs after showing a confirmation that says nothing is alive.
+>
+> The agreed second outcome fixes both the missing tabs and Delete's live-work check, with a gate of about 100 changed
+> lines of code, tests and documentation. The smallest coherent proposal found is 164 lines, excluding the ledger, queue
+> removal and changelog. The session list and the replies to Rename and Restart must all obtain and show the surviving
+> tabs; Delete must count them. An existing test explicitly requires skipping that lookup and must be corrected along
+> with the comments describing it. A smaller guard-only change would leave the required visibility repair incomplete.
+> The proposal uses the existing session identity and adds no persistent metadata or terminal-host protocol change.
+>
+> Allow this larger, roughly 164-line single PR, or retain the current limit and leave the second outcome pending. I
+> recommend allowing the complete proposal. It has been inspected and sized privately, but has not been implemented,
+> compiled or correctness-reviewed.
+>
+> The independent first and third outcomes are in draft PRs: [#3024](https://github.com/scode/farhelm/pull/3024/changes)
+> refuses Delete when a tab becomes unreadable during its final check, and
+> [#3032](https://github.com/scode/farhelm/pull/3032/changes) preserves program cleanup after a failed agent or tab
+> reconnect. Both passed the required independent review and targeted checks. The third is temporarily based on the
+> first; an authorized second fix must be inserted between them before this plan can be delivered. The plan remains
+> incomplete.
 
-The agreed second outcome fixes both the missing tabs and Delete's live-work check, with a gate of about 100 changed
-lines of code, tests and documentation. The smallest coherent proposal found is 164 lines, excluding the ledger, queue
-removal and changelog. The session list and the replies to Rename and Restart must all obtain and show the surviving
-tabs; Delete must count them. An existing test explicitly requires skipping that lookup and must be corrected along with
-the comments describing it. A smaller guard-only change would leave the required visibility repair incomplete. The
-proposal uses the existing session identity and adds no persistent metadata or terminal-host protocol change.
+The maintainer's answer:
 
-Allow this larger, roughly 164-line single PR, or retain the current limit and leave the second outcome pending. I
-recommend allowing the complete proposal. It has been inspected and sized privately, but has not been implemented,
-compiled or correctness-reviewed.
+The maintainer chose to allow the larger change on 2026-11-05, in conversation with the landing monitor: "allow".
 
-The independent first and third outcomes are in draft PRs: [#3024](https://github.com/scode/farhelm/pull/3024/changes)
-refuses Delete when a tab becomes unreadable during its final check, and
-[#3032](https://github.com/scode/farhelm/pull/3032/changes) preserves program cleanup after a failed agent or tab
-reconnect. Both passed the required independent review and targeted checks. The third is temporarily based on the first;
-an authorized second fix must be inserted between them before this plan can be delivered. The plan remains incomplete.
+Implement the complete second outcome as one PR of roughly 164 changed lines (code, tests and documentation, not
+counting the ledger, queue removal and changelog): the session list and the replies to Rename and Restart show the
+surviving old terminal tabs, Delete counts them as live work, and the existing test that requires skipping that lookup
+is corrected together with the comments describing it. This replaces the roughly 100-line gate for this outcome only; if
+the implemented change grows well past the proposal, say so in the report rather than blocking again. Keep the
+proposal's limits: use the existing session identity, with no new persistent metadata and no terminal-host protocol
+change. Insert it between #3024 and #3032 as the Blocked section describes, and give it the usual independent review.
