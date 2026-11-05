@@ -1977,7 +1977,7 @@ impl HostTerminal {
         reason: Unavailability,
         peer: Option<HostProcess>,
     ) -> HostTerminal {
-        Self::ended(socket, Liveness::Unavailable { reason, peer }, None)
+        Self::ended(socket, Liveness::Unavailable { reason, peer }, None, None)
     }
 
     /// A host a retry found gone, retaining any process its earlier runtime
@@ -1986,7 +1986,7 @@ impl HostTerminal {
     /// This handle runs no terminal task and has no program screen.
     /// Like [`Self::unavailable`], it must be made within a tokio runtime.
     pub fn gone(socket: &Path, adopted: Option<HostProcess>) -> HostTerminal {
-        Self::ended(socket, Liveness::Gone, adopted)
+        Self::ended(socket, Liveness::Gone, adopted, None)
     }
 
     /// A retry failed without disproving the host process pinned by this
@@ -1994,6 +1994,7 @@ impl HostTerminal {
     /// missing socket still cannot prove the original process ended.
     /// `peer` describes this failure's evidence; it does not replace the
     /// separate identity that cleanup must confirm gone.
+    /// Delete also retains the child's pinned identity, revalidated against the process table.
     pub(crate) fn unavailable_again(
         &self,
         reason: Unavailability,
@@ -2003,13 +2004,19 @@ impl HostTerminal {
             self.socket(),
             Liveness::Unavailable { reason, peer },
             self.adopted_process(),
+            Some(&self.status()),
         )
     }
 
     /// A handle with final liveness and closed request channels. Used when
     /// no runtime can drive the host; the blank emulator keeps the handle's
     /// representation uniform, but is never a recovered program screen.
-    fn ended(socket: &Path, liveness: Liveness, adopted: Option<HostProcess>) -> HostTerminal {
+    fn ended(
+        socket: &Path,
+        liveness: Liveness,
+        adopted: Option<HostProcess>,
+        previous: Option<&HostStatus>,
+    ) -> HostTerminal {
         let size = farhelm_terminal_emulator::Size {
             columns: 80,
             lines: 24,
@@ -2019,8 +2026,8 @@ impl HostTerminal {
         let (notices, _) = broadcast::channel(1);
         let (_, status) = watch::channel(HostStatus {
             liveness,
-            child_pid: 0,
-            child_start: None,
+            child_pid: previous.map_or(0, |status| status.child_pid),
+            child_start: previous.and_then(|status| status.child_start),
             position: Position::default(),
             revision: 0,
             caught_up: false,

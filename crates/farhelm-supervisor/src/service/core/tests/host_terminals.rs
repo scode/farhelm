@@ -2189,6 +2189,61 @@ async fn readoption_backs_off_without_spinning() {
 
 // ---- Recovery after a runtime ran ----------------------------------------------------
 
+/// A failed reconnect must preserve the agent's or tab's root through Delete.
+/// The unmarked child must be swept even though the unreadable stand-in's
+/// peer is this test runner, whose identity deliberately refuses host teardown.
+#[farhelm_testtrace::test]
+async fn delete_roots_children_after_failed_agent_and_tab_reconnects() {
+    for agent in [true, false] {
+        let state = StateDir::new();
+        let (sup, old, test_host) = if agent {
+            let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+                .await
+                .unwrap();
+            let (host, test_host) = readoption_runtime(&sup, &state).await;
+            (sup, host, test_host)
+        } else {
+            let (sup, test_host) = readoption_tab_fixture(&state).await;
+            let host = readoption_tab(&sup).await.host;
+            // The fixture's starter is its live child; Delete needs a finished starter.
+            let record = crate::launch::tab_host_record_path(state.path(), "s1", "t1");
+            std::fs::remove_file(record).unwrap();
+            (sup, host, test_host)
+        };
+        record_s1(&state, old.socket());
+        let child = test_host.child_pid();
+        assert_eq!(old.status().child_pid, child);
+        assert!(old.status().child_start.is_some());
+        readoption_make_unstable(&old, &test_host).await;
+        test_host.set_answering(false);
+        let recovered = if agent {
+            sup.readopt_one("s1", 0, &old).await
+        } else {
+            sup.readopt_tab_one("s1", "t1", &old).await
+        };
+        assert!(!recovered);
+        assert!(if agent {
+            matches!(s1_terminal(&sup).await, Some(Terminal::Host(host)) if host.is_placeholder())
+        } else {
+            readoption_tab(&sup).await.host.is_placeholder()
+        });
+        assert!(
+            runs(child),
+            "premise: failed recovery left the child running"
+        );
+        let message = refusal(
+            delete_s1(&sup, farhelm_proto::DeleteGuard::Unconditional).await,
+            "the stand-in peer cannot be ended",
+        );
+        assert!(
+            message.contains("could not confirm that this session's terminal hosts ended"),
+            "{message}"
+        );
+        assert!(!runs(child), "Delete lost the child root (agent={agent})");
+        end_discoverable(test_host);
+    }
+}
+
 /// Install an adopted agent at a socket the one-socket retry can discover.
 /// An ordinary temporary socket would look absent to that scan and would
 /// let a test pass through the wrong recovery path.
