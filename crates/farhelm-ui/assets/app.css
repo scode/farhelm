@@ -3893,7 +3893,7 @@ a:any-link,
   background: var(--danger-bg);
   color: var(--on-fill);
   border: 2px solid var(--danger-strong);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   font-size: 15px;
   font-weight: 700;
   line-height: 1.45;
