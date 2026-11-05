@@ -426,6 +426,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   - Possibly: live resize (boot small, grow on demand), shared scratch volumes, and forking a warm sandbox from a memory
     checkpoint or live copy (restores running processes with the same boot ID, which is also a trap: a forked supervisor
     keeps its identity).
+- **`gh:owner/repo` launches can land in a session in the wrong repository.** When launching a GitHub managed checkout
+  by typing `gh:owner/repo`, the string is sometimes treated as a session name instead, so the launch lands in a session
+  in the wrong repo. Keeps happening to the maintainer; cause unknown at recording time. TBD.
 
 ## Doc todo
 
