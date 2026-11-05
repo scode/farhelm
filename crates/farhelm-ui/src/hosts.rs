@@ -3357,6 +3357,9 @@ pub(crate) fn HostsPanel(
                     },
                 }
             }
+            // All ways out release isolation before clearing the question. Dismissal
+            // returns to the visible host control; acceptance leaves the surviving
+            // panel in charge of the request and any later refusal.
             if let Some(host) = suspend_question() {
                 crate::modal_isolation::HostModal {
                     div { class: "host-settings-backdrop", role: "presentation",
@@ -3364,14 +3367,78 @@ pub(crate) fn HostsPanel(
                             handle: DialogHandle::new(".host-suspend-dialog"),
                             focus: DialogFocus::remembered(".host-suspend-cancel", Some(".host-suspend-cancel"), true, None),
                             class: "host-settings-dialog host-suspend-dialog host-dialog-framed",
-                            role: "dialog", aria_modal: "true", aria_label: "Suspend host",
-                            on_escape: move |_| { suspend_question.set(None); },
-                            p { "An agent on " span { class: "peer-value", dir: "ltr", "{host.name.escaped()}" }
-                                " is working, or its status could not be checked. Suspend keeps it as it is and it continues when you resume the host." }
-                            button { class: "btn host-suspend-cancel", onclick: move |_| { suspend_question.set(None); }, "Cancel" }
-                            button { class: "btn", onclick: move |_| {
-                                suspend_question.set(None); lifecycle.call((host.clone(), false));
-                            }, "Suspend" }
+                            role: "dialog", aria_modal: "true", aria_label: "Suspend {host.name.escaped()}?",
+                            tabindex: "-1",
+                            on_escape: {
+                                let id = host.id;
+                                move |evt: KeyboardEvent| {
+                                    if !evt.is_composing() {
+                                        DialogHandle::new(".host-suspend-dialog").close(
+                                            &return_focus.call((id, rail_dialog_hosts.peek().contains(&id))).script(),
+                                        );
+                                        suspend_question.set(None);
+                                    }
+                                }
+                            },
+                            crate::modal_dialog::DialogHeader {
+                                title: rsx! { "Suspend " span { class: "peer-value", dir: "ltr", "{host.name.escaped()}" } "?" },
+                                close: rsx! { button {
+                                    r#type: "button",
+                                    class: "dialog-close host-settings-dismiss",
+                                    aria_label: "Close",
+                                    "data-tooltip": "Cancel host suspension",
+                                    onclick: {
+                                        let id = host.id;
+                                        move |_| {
+                                            DialogHandle::new(".host-suspend-dialog").close(
+                                                &return_focus.call((id, rail_dialog_hosts.peek().contains(&id))).script(),
+                                            );
+                                            suspend_question.set(None);
+                                        }
+                                    },
+                                    "×"
+                                } },
+                            }
+                            ScrollRegion { class: "dialog-body host-settings-body",
+                                handle: DialogHandle::new(".host-suspend-dialog"),
+                                selector: ".host-settings-body",
+                                name: "Host suspension details",
+                                recovery: RecoveryFocus::new(".host-suspend-cancel", None, true, RecoveryDelay::OneFrame),
+                                p { class: "host-dialog-help",
+                                    "An agent on " span { class: "peer-value", dir: "ltr", "{host.name.escaped()}" }
+                                    " is working, or its status could not be checked. Suspend keeps it as it is and it continues when you resume the host."
+                                }
+                            }
+                            crate::modal_dialog::DialogFooter { class: "host-dialog-footer",
+                                crate::modal_dialog::DialogActions {
+                                    button {
+                                        r#type: "button",
+                                        class: "btn btn-neutral host-suspend-cancel",
+                                        "data-tooltip": "Cancel: keep the sandbox running",
+                                        onclick: {
+                                            let id = host.id;
+                                            move |_| {
+                                                DialogHandle::new(".host-suspend-dialog").close(
+                                                    &return_focus.call((id, rail_dialog_hosts.peek().contains(&id))).script(),
+                                                );
+                                                suspend_question.set(None);
+                                            }
+                                        },
+                                        "Cancel"
+                                    }
+                                    button {
+                                        r#type: "button",
+                                        class: "btn btn-primary",
+                                        "data-tooltip": "Suspend: pause this sandbox until it is resumed",
+                                        onclick: move |_| {
+                                            DialogHandle::new(".host-suspend-dialog").release();
+                                            suspend_question.set(None);
+                                            lifecycle.call((host.clone(), false));
+                                        },
+                                        "Suspend"
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -5282,13 +5349,26 @@ fn HostRow(
                     }
             }
             // These shared inputs are also the accepted host read's causal
-            // contribution. Keep the three PeerLine containers independent:
+            // contribution. Keep the PeerLine containers independent:
             // their displayed text can exchange rows without moving a prefix.
             div { class: "host-row-details", hidden: !panel_visible,
             if let Some(sandbox) = host.tensorlake.as_ref().filter(|_| details_open) {
-                p { class: "host-tensorlake-detail",
-                    "Sandbox: {display_peer(sandbox.sandbox.raw())} · Recipe: {display_peer(sandbox.recipe.raw())}"
-                    if let Some(size) = sandbox.size { " · {size.cpus} CPUs · {size.memory_gb} GB memory" }
+                PeerLine {
+                    class: "host-detail host-tensorlake-detail",
+                    parts: {
+                        let mut parts = vec![
+                            DetailPart::text("Sandbox: "),
+                            DetailPart::peer(sandbox.sandbox.clone()),
+                            DetailPart::text(" · Recipe: "),
+                            DetailPart::peer(sandbox.recipe.clone()),
+                        ];
+                        if let Some(size) = sandbox.size {
+                            parts.push(DetailPart::text(format!(
+                                " · {} CPUs · {} GB memory", size.cpus, size.memory_gb,
+                            )));
+                        }
+                        parts
+                    },
                 }
                 if let Some(view) = sandbox.tunnels.clone() {
                     crate::tensorlake::tunnels::TunnelDetails { view }

@@ -290,6 +290,10 @@ timed-out request shows its error and reconnects rather than claiming the sandbo
 transition offers a competing lifecycle action or host setup/update. Repeating Resume on an already-running, connected
 sandbox preserves its live sessions' connections.
 
+The Suspend confirmation is titled **Suspend &lt;host&gt;?**, with its explanation below the heading and **Cancel** /
+**Suspend** in the footer. Its close control, Escape and Cancel dismiss without suspending. The sandbox name, recipe and
+resources use the normal subdued details styling in Hosts.
+
 The session launcher shows its own **Resuming** preparation through both the Tensorlake call and reconnection, including
 quick launch. On the existing-directory path it says the session starts when the host is ready; on the fresh-checkout
 path it says to review the checkout and launch again. A failed preparation says the session was not launched, without
