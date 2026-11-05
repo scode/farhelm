@@ -12,7 +12,6 @@
 
 playwright settings.spec.ts an untouched checkout folder save writes nothing and edited paths are trimmed  # checkout-folder-save-cleanup
 playwright sidebar.spec.ts visit history chooses and remembers the next session after row deletion  # visit-history-stopped-session-error
-playwright github-checkouts.spec.ts borrowers retain the checkout until the final stopped session is deleted  # shared-checkout-browser-timeout-and-fixture-cleanup
 nextest farhelm::e2e terminal_backpressure::shallow_pause_resumes_without_reset_or_replay  # shallow-pause-resets-under-load
 playwright terminal-reconnect.spec.ts view-changes-do-not-postpone-a-recovery  # reconnect-recovery-misses-its-window-under-load
 playwright replace.spec.ts plain Replace keeps a newer same-source key after old header YOLO cancellation  # same-source-replace-menu-after-yolo-cancellation
