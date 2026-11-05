@@ -26,8 +26,8 @@ use web_time::Instant;
 
 const DIALOG: &str = ".checkout-trash-dialog";
 /// Only whole-dialog dismissal returns here; cancelling a confirmation stays inside.
-const RETURN_FOCUS: &str =
-    "document.querySelector('.checkout-trash-button')?.focus({preventScroll:true});";
+/// A retained mark can become visible during cleanup, concealing the old trigger.
+const RETURN_FOCUS: &str = "(document.querySelector('.marked-menu-toggle') ?? document.querySelector('.checkout-trash-button'))?.focus({preventScroll:true});";
 // The host rejects larger batches; disclose this rather than silently omitting
 // a host from a global destructive confirmation.
 const MAX_SELECTION: usize = 10_000;
@@ -520,11 +520,14 @@ fn ConfirmBand(
 
 /// Keep the button and its dialog mounted under the list owner, so a session
 /// deletion or selection change cannot drop an in-flight cleanup task.
+/// Marking may conceal the trigger after a listing refresh, but never this
+/// owner's active dialog or queues; trigger presentation is independent.
 #[component]
 pub(super) fn TrashControl(
     hosts: Signal<HostsRead>,
     revision: Signal<u64>,
     gate: PaneGate,
+    #[props(default)] trigger_hidden: bool,
 ) -> Element {
     let base = use_context::<ApiBase>().0;
     let popovers = use_context::<MovementOwner>();
@@ -944,6 +947,7 @@ pub(super) fn TrashControl(
     rsx! {
         button {
             class: if full { "btn btn-neutral checkout-trash-button full" } else { "btn btn-neutral checkout-trash-button" },
+            hidden: trigger_hidden,
             r#type: "button", aria_label: accessible_name, aria_haspopup: "dialog", "data-count": "{count}",
             "data-tooltip": tooltip, disabled: gate.busy(),
             onclick: move |_| { if !gate.busy_now() { notices.write().clear(); confirmation.clear(); open.set(true); } },
@@ -1114,6 +1118,8 @@ pub(super) fn TrashControl(
 
 /// Capture the row before its confirmed reply removes it. Geometry belongs to
 /// the persistent button's DOM, so unmounting the list cannot leak a global map.
+/// A marked title band conceals the destination; it must not capture a flight
+/// toward a zero-sized hidden button.
 pub(super) fn capture_row(id: &str) {
     let id = serde_json::to_string(id).expect("string literal");
     document::eval(&format!(
@@ -1121,13 +1127,17 @@ pub(super) fn capture_row(id: &str) {
         const id = {id}, button = document.querySelector('.checkout-trash-button');
         const row = Array.from(document.querySelectorAll('.session-row')).find(row => row.dataset.sessionId === id);
         if (!button || !row) return;
+        button.__farhelmTrashOrigins?.delete(id);
+        const target = button.getBoundingClientRect();
+        if (!button.getClientRects().length || target.width <= 0 || target.height <= 0) return;
         (button.__farhelmTrashOrigins ??= new Map()).set(id, row.getBoundingClientRect());
     }})()"#
     ));
 }
 
 /// Only this client's affirmative archive reply plays the cue. A bare Delete,
-/// a remote disappearance and reduced motion all skip flight and wiggle.
+/// a remote disappearance, a concealed destination and reduced motion all skip
+/// flight and wiggle. Completion still consumes a prior capture when hidden.
 ///
 /// The flight outline is a terminal link cover (`data-link-cover`, see
 /// app.css's z-index ladder). It only travels within the sidebar column, but a
@@ -1144,8 +1154,10 @@ pub(super) fn finish_row_cue(id: &str, archived: bool) {
         if (!button) return;
         const origin = button.__farhelmTrashOrigins?.get({id});
         button.__farhelmTrashOrigins?.delete({id});
-        if (!{archived} || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-        const wiggle = () => {{ if (button.isConnected) button.animate([
+        const visible = () => {{ const rect = button.getBoundingClientRect();
+            return button.isConnected && button.getClientRects().length && rect.width > 0 && rect.height > 0; }};
+        if (!{archived} || !visible() || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+        const wiggle = () => {{ if (visible()) button.animate([
             {{transform:'rotate(0deg)'}}, {{transform:'rotate(-16deg)'}}, {{transform:'rotate(12deg)'}},
             {{transform:'rotate(-8deg)'}}, {{transform:'rotate(4deg)'}}, {{transform:'rotate(0deg)'}}
         ], {{duration:900, easing:'ease-out'}}); }};

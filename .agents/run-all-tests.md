@@ -195,10 +195,10 @@ check passes, land it without waiting for unrelated work.
 
 The browser suite's host-terminal run (`.agents/validation.md`, the `FARHELM_E2E_SUITE_TERMINALS=host` entry) is not
 part of the sweep: the spec files `e2e/host-terminal-specs.ts` lists, on both engines, against stacks whose supervisors
-create terminals in terminal hosts. It is about the size of the browser suite, so run it like a runtime phase, after the
-sweep's timing-sensitive phases or once the sweep finishes, through the recorder with
-`--keep-farhelm-env FARHELM_E2E_SUITE_TERMINALS`, or on Tensorlake sandboxes
-(`sandbox-tests.ts run --suite-terminals host`) when the maintainer asked for them.
+create terminals in terminal hosts, including marked-session Escape ownership in `bulk-session-actions.spec.ts`. It is
+about the size of the browser suite, so run it like a runtime phase, after the sweep's timing-sensitive phases or once
+the sweep finishes, through the recorder with `--keep-farhelm-env FARHELM_E2E_SUITE_TERMINALS`, or on Tensorlake
+sandboxes (`sandbox-tests.ts run --suite-terminals host`) when the maintainer asked for them.
 
 ## 4. Release gate and CI in GitHub
 

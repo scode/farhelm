@@ -49,6 +49,7 @@ export const HOST_TERMINAL_SPECS: ReadonlySet<string> = new Set([
   "approval-layout.spec.ts",
   "auth.spec.ts",
   "buttons.spec.ts",
+  "bulk-session-actions.spec.ts",
   "chrome.spec.ts",
   "claude-trust.spec.ts",
   "clone.spec.ts",

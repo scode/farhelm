@@ -18,7 +18,7 @@ remembers the width on this device, so changing it here leaves your other screen
   alt="One row of the session list, with its status, agent and permissions mark, and host and directory explained."
 />
 
-The age at the right of a row says how long ago the session last did something: `now`, `<1m`, `5m`, `1d`. Select a row
+The age at the right of a row says how long ago the session last did something: `now`, `<1m`, `5m`, `1d`. Click a row
 to open its terminal beside the list. Hovering over the dot or the marks beside the title says what each one means.
 [Permission modes](/docs/agents/#permission-modes) explains the shields, including when one turns to YOLO because
 Farhelm saw the agent switch modes.
@@ -142,6 +142,17 @@ with the page once to allow sound. Sounds your browser blocks are skipped, rathe
 The number beside the list's title counts every session; when a host or status narrows the list, it says how many
 match, as in `3 of 12`. There is no search box in the sidebar; with many sessions, narrow the list by host or status,
 or sort by title.
+
+### Mark several sessions
+
+Shift-click a row to mark every session from the one you have open to that row, in the order shown. Cmd-click on a Mac,
+or Ctrl-click elsewhere, adds or removes a single mark without opening the session. Marked rows have a side marker and
+tint; the session you have open keeps its blue highlight.
+
+The bar at the top counts the marked sessions currently shown. Its ⋯ menu lets you [pin or unpin](/docs/using/session-list/#pin-a-session-to-the-top),
+or mark them read or unread together; each choice applies where it makes sense for that session. A host or status filter
+leaves hidden sessions out of the count and actions. Click ✕ to clear the marks, press Escape while focus is in the list,
+or click a row normally to open it and clear them. Escape in the terminal still goes to the agent.
 
 ### Jump with the keyboard
 

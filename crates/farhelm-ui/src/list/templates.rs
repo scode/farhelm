@@ -451,8 +451,8 @@ const DEFAULT: &str = "default";
 pub(super) struct TemplatesRevision(pub(super) Signal<u64>);
 
 /// Shared close schedules this only after an approved whole-dialog departure.
-pub(super) const RETURN_FOCUS: &str =
-    "document.querySelector('.templates-button')?.focus({ preventScroll: true });";
+/// A shortcut can open Templates while marking conceals its ordinary trigger.
+pub(super) const RETURN_FOCUS: &str = "(document.querySelector('.marked-menu-toggle') ?? document.querySelector('.templates-button'))?.focus({ preventScroll: true });";
 
 /// Move focus after responsive navigation has mounted its destination. A phone
 /// row or Back button disappears when activated, so retaining focus there would
