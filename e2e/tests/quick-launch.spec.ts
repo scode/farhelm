@@ -3,6 +3,7 @@
  * modal ownership from input leaked to an agent or a quietly retried refusal. */
 import { expect, test } from "./helpers/evidence";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
+import { drainedRoute } from "./helpers/drained-route";
 import type { APIRequestContext, Locator, Page, Route } from "@playwright/test";
 import {
   cleanupSession,
@@ -1274,7 +1275,7 @@ for (const recover of [false, true]) {
       const feed = await stubFeed(page);
       let failing = true;
       let creates = 0;
-      await page.route("**/api/hosts", async (route) => {
+      const stopHostRoute = await drainedRoute(page, "**/api/hosts", async (route) => {
         // Fail this reader's decoding without taking down the helm transport or
         // its feed, which independently supplies the recovery notification.
         if (failing) {
@@ -1323,7 +1324,9 @@ for (const recover of [false, true]) {
         expect(creates).toBe(0);
         await form.getByRole("button", { name: "Cancel", exact: true }).click();
       } finally {
-        await page.unroute("**/api/hosts");
+        // The build-stamp read in a host reply may still be pending after
+        // cancellation. Finish that callback before releasing its route.
+        await stopHostRoute();
         await page.unroute("**/api/sessions");
         await request.delete(`/api/templates/${name}`);
       }

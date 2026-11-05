@@ -531,12 +531,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `d53c5dbf-8491-4eba-bf3d-3f3714cc0674`. Hypothesis: the request-finished observation stalls, as in the pending
   post-clone save flake; investigate without weakening the save assertions (FLAKES.md, 2026-11-04).
 
-- **Quick-launch host-read fixture loses an intercepted route during cleanup.**
-  `a host-read fallback permits keyboard cancellation before recovery` in `e2e/tests/quick-launch.spec.ts` failed in
-  WebKit host-terminal run `81a954d9-bbe9-4556-a8bd-dd718350514c` with `Route is already handled!`. Its trace shows
-  cleanup removing the host-list interception while its reply callback was reading the build stamp; the callback then
-  tried to fulfill the released route. Drain the callback before removing the handler (FLAKES.md, 2026-11-04).
-
 - **Folder reset stays outside the dropdown viewport in WebKit.**
   `composer folder dropdown preserves keyboard launch and grouped history` in `e2e/tests/sidebar.spec.ts` selected the
   reset option but failed its viewport assertion in sweep run `e0526613-832f-4fba-b023-b38cc064e5c2`. All three isolated
