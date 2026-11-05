@@ -6170,9 +6170,13 @@ fn AddHostForm(
                 }
                 div { class: "dialog-body host-settings-body",
                 if !from_agent_request {
+                    // The selected choice is still focusable. Both choices
+                    // need hover help, even when pressing one changes nothing.
                     div { class: "segmented-control", role: "group", aria_label: "Host kind",
-                        button { r#type: "button", aria_pressed: "true", "SSH" }
+                        button { r#type: "button", aria_pressed: "true",
+                            "data-tooltip": "Connect a machine through its SSH destination", "SSH" }
                         button { r#type: "button", aria_pressed: "false", disabled: busy,
+                            "data-tooltip": "Create a Tensorlake sandbox from a saved recipe",
                             onclick: move |_| tensorlake.set(true), "Tensorlake sandbox" }
                     }
                 }

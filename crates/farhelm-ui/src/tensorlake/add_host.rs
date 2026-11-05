@@ -295,9 +295,14 @@ pub(crate) fn TensorlakeAddDialog(
                         }
                     } else {
                       div { class: "dialog-body host-settings-body",
+                        // Match the SSH form's help on both choices, including
+                        // the selected button that does not switch forms.
                         div { class: "segmented-control", role: "group", aria_label: "Host kind",
-                            button { r#type: "button", aria_pressed: "false", disabled: locked, onclick: move |_| on_ssh.call(()), "SSH" }
-                            button { r#type: "button", aria_pressed: "true", "Tensorlake sandbox" }
+                            button { r#type: "button", aria_pressed: "false", disabled: locked,
+                                "data-tooltip": "Connect a machine through its SSH destination",
+                                onclick: move |_| on_ssh.call(()), "SSH" }
+                            button { r#type: "button", aria_pressed: "true",
+                                "data-tooltip": "Create a Tensorlake sandbox from a saved recipe", "Tensorlake sandbox" }
                         }
                         match loaded {
                             None => rsx! { p { "Loading Tensorlake settings…" } },
