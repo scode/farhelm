@@ -222,6 +222,7 @@ test("new pins remain held across replies until the original hold ends", async (
     await pinSession(request, d);
     feed.notify(2);
     await expect(row(d)).toHaveAttribute("data-session-pinned", "true");
+    await expect(row(d).locator(".session-pin-grip")).toHaveCount(0);
     expect(await ownedOrder(page, created)).toEqual(heldOrder);
     await expect(row(a).locator("xpath=following-sibling::*[1]")).toHaveClass(/session-pin-separator/);
     await openRowMenu(row(d));
@@ -237,6 +238,7 @@ test("new pins remain held across replies until the original hold ends", async (
     feed.notify(4);
     await expect(row(c)).toContainText(`c-held-pin-third-${stamp}`);
     expect(await ownedOrder(page, created), "later replies must not recapture the new pin as an original pin").toEqual(heldOrder);
+    await expect(row(d).locator(".session-pin-grip")).toHaveCount(0);
     await expect(row(d).locator(".session-row-menu")).toHaveAttribute("aria-expanded", "true");
     await expect.poll(() => ownedOrder(other, created)).toEqual([d, b, a, c]);
 
@@ -244,6 +246,7 @@ test("new pins remain held across replies until the original hold ends", async (
     await page.keyboard.press("Escape");
     await page.mouse.move(0, 0);
     await expect.poll(() => ownedOrder(page, created), { timeout: 2_000 }).toEqual([d, b, a, c]);
+    await expect(row(d).locator(".session-pin-grip")).toHaveCount(1);
     await openRowMenu(row(d));
     await expect(row(d).getByRole("menuitem", { name: "Move down", exact: true })).toBeVisible();
     await expect(row(d).getByRole("menuitem", { name: "Move up", exact: true })).toHaveCount(0);
@@ -254,6 +257,187 @@ test("new pins remain held across replies until the original hold ends", async (
     await cleanupOwnedSteps(bodyFailed, [
       ["preferences", () => resetPreferences(request)],
       ["observer page", () => other.close()],
+      ...created.reverse().map((id): [string, () => Promise<void>] => [`session ${id}`, () => cleanupSession(request, id)]),
+    ]);
+  }
+});
+
+/** A real captured pointer sends one visible-neighbor move, shared and saved by the helm.
+ * Escape, an outside release and source removal must retire paint without changing pin membership or order.
+ * The asset unit tests separately distinguish no-send cleanup from the Rust bridge rejecting a stale intent. */
+test("drag pins within their group and cancel interrupted moves", async ({ page, request, context }, testInfo) => {
+  const created: string[] = [];
+  const other = await context.newPage();
+  const moves: { id: string; body: unknown }[] = [];
+  let bodyFailed = false;
+  await resetPreferences(request);
+  try {
+    const stamp = Date.now();
+    for (const title of ["z", "a", "m", "n"]) {
+      created.push((await createSession(request, { title: `${title}-drag-pin-${stamp}` })).id);
+    }
+    const [a, b, c, unpinned] = created;
+    for (const id of [a, b, c]) await pinSession(request, id);
+    await patchPreferences(request, { list_sort: "title" });
+    page.on("request", (r) => {
+      if (r.method() !== "PUT") return;
+      const match = new URL(r.url()).pathname.match(/^\/api\/sessions\/([^/]+)\/pin-order$/);
+      if (match) moves.push({ id: decodeURIComponent(match[1]), body: r.postDataJSON() });
+    });
+    await page.goto("/");
+    await other.goto("/");
+    await page.bringToFront();
+    const row = (id: string) => page.locator(`.session-row[data-session-id="${id}"]`);
+    await expect.poll(() => ownedOrder(page, created)).toEqual([a, b, c, unpinned]);
+    await expect.poll(() => ownedOrder(other, created)).toEqual([a, b, c, unpinned]);
+    await expect(row(unpinned).locator(".session-pin-grip")).toHaveCount(0);
+    const grip = row(c).locator(".session-pin-grip");
+    await row(c).hover();
+    await expect(grip).toHaveCSS("opacity", "1");
+    await expect(grip).toBeEnabled();
+    const source = await grip.boundingBox();
+    const target = await row(a).boundingBox();
+    expect(source).not.toBeNull();
+    expect(target).not.toBeNull();
+    await page.mouse.move(source!.x + source!.width / 2, source!.y + source!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(target!.x + target!.width / 2, target!.y + 3);
+    await expect(row(c)).toHaveAttribute("data-pin-dragging", "true");
+    await expect(row(a)).toHaveAttribute("data-pin-drop", "before");
+    expect(await ownedOrder(page, created), "paint must not optimistically reorder the rows").toEqual([a, b, c, unpinned]);
+    await testInfo.attach("dragging-pin", { body: await page.locator(".app-sidebar").screenshot(), contentType: "image/png" });
+    await page.mouse.up();
+    await expect.poll(() => moves).toEqual([{ id: c, body: { neighbor: a, placement: "before" } }]);
+    await expect.poll(() => ownedOrder(page, created), { timeout: 2_000 }).toEqual([c, a, b, unpinned]);
+    await expect.poll(() => ownedOrder(other, created)).toEqual([c, a, b, unpinned]);
+    await expect(page.locator("[data-pin-dragging], [data-pin-drop]")).toHaveCount(0);
+    await page.mouse.move(0, 0);
+    await page.reload();
+    await expect.poll(() => ownedOrder(page, created)).toEqual([c, a, b, unpinned]);
+
+    // Every cancellation begins with a real valid target, so an inert bridge
+    // or an unarmed pointer cannot satisfy the cleanup and unchanged-order checks.
+    for (const cancellation of ["escape", "outside", "separator"] as const) {
+      const from = row(b).locator(".session-pin-grip");
+      await row(b).hover();
+      const start = await from.boundingBox();
+      const before = await row(c).boundingBox();
+      expect(start).not.toBeNull();
+      expect(before).not.toBeNull();
+      await page.mouse.move(start!.x + start!.width / 2, start!.y + start!.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(before!.x + before!.width / 2, before!.y + 3);
+      await expect(row(c)).toHaveAttribute("data-pin-drop", "before");
+      if (cancellation === "escape") await page.keyboard.press("Escape");
+      else if (cancellation === "outside") {
+        const list = await page.locator(".session-list").boundingBox();
+        expect(list).not.toBeNull();
+        await page.mouse.move(list!.x + list!.width + 20, before!.y + 3);
+      } else {
+        const below = await row(unpinned).boundingBox();
+        expect(below).not.toBeNull();
+        await page.mouse.move(below!.x + below!.width / 2, below!.y + below!.height / 2);
+      }
+      await page.mouse.up();
+      await expect(page.locator("[data-pin-dragging], [data-pin-drop]")).toHaveCount(0);
+      await page.mouse.move(0, 0);
+      await page.reload();
+      await expect.poll(() => ownedOrder(page, created)).toEqual([c, a, b, unpinned]);
+      expect(moves).toHaveLength(1);
+    }
+
+    const removedGrip = await row(b).locator(".session-pin-grip").boundingBox();
+    const before = await row(c).boundingBox();
+    expect(removedGrip).not.toBeNull();
+    expect(before).not.toBeNull();
+    await page.mouse.move(removedGrip!.x + removedGrip!.width / 2, removedGrip!.y + removedGrip!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(before!.x + before!.width / 2, before!.y + 3);
+    await expect(row(c)).toHaveAttribute("data-pin-drop", "before");
+    await cleanupSession(request, b);
+    await expect(row(b)).toHaveCount(0);
+    await expect(page.locator("[data-pin-dragging], [data-pin-drop]")).toHaveCount(0);
+    await page.mouse.up();
+    await page.mouse.move(0, 0);
+    await page.reload();
+    await expect.poll(() => ownedOrder(page, created)).toEqual([c, a, unpinned]);
+    expect(moves).toHaveLength(1);
+    const saved = await listSessions(request);
+    for (const id of [c, a]) expect(saved.sessions.find((session) => session.id === id)?.pinned).toBe(true);
+    expect(saved.sessions.find((session) => session.id === unpinned)?.pinned).toBe(false);
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
+  } finally {
+    await cleanupOwnedSteps(bodyFailed, [
+      ["captured pointer", () => page.mouse.up()],
+      ["preferences", () => resetPreferences(request)],
+      ["observer page", () => other.close()],
+      ...created.reverse().map((id): [string, () => Promise<void>] => [`session ${id}`, () => cleanupSession(request, id)]),
+    ]);
+  }
+});
+
+/** A listing error replaces the list DOM without remounting its surrounding view.
+ * Recovery must create a working drag bridge; predecessor cleanup cannot retire the successor's listeners. */
+test("pin dragging survives a failed listing and replacement list mount", async ({ page, request }) => {
+  const created: string[] = [];
+  let failListing = false;
+  let bodyFailed = false;
+  await resetPreferences(request);
+  try {
+    const stamp = Date.now();
+    for (const title of ["a", "b"]) {
+      const session = await createSession(request, { title: `${title}-remount-pin-${stamp}` });
+      created.push(session.id);
+      await pinSession(request, session.id);
+    }
+    const [a, b] = created;
+    const feed = await stubFeed(page);
+    feed.notifyOnConnect(1);
+    await page.route((url) => url.pathname === "/api/sessions", async (route) => {
+      if (!failListing || route.request().method() !== "GET") return route.continue();
+      const response = await route.fetch();
+      const headers = { ...response.headers(), "content-type": "text/plain" };
+      delete headers["content-length"];
+      await route.fulfill({ status: 503, headers, body: "controlled listing failure" });
+    });
+    await page.goto("/");
+    await feed.waitForConnection(1);
+    await expect.poll(() => ownedOrder(page, created)).toEqual([a, b]);
+    const predecessor = await page.locator(".session-list").elementHandle();
+    expect(predecessor).not.toBeNull();
+    failListing = true;
+    feed.notify(2);
+    await expect(page.getByText(/Failed to load sessions:.*controlled listing failure/)).toBeVisible();
+    await expect(page.locator(".session-list")).toHaveCount(0);
+    expect(await predecessor!.evaluate((node) => node.isConnected)).toBe(false);
+    failListing = false;
+    feed.notify(3);
+    await expect.poll(() => ownedOrder(page, created)).toEqual([a, b]);
+    const row = (id: string) => page.locator(`.session-row[data-session-id="${id}"]`);
+    await row(b).hover();
+    const grip = await row(b).locator(".session-pin-grip").boundingBox();
+    const target = await row(a).boundingBox();
+    expect(grip).not.toBeNull();
+    expect(target).not.toBeNull();
+    await page.mouse.move(grip!.x + grip!.width / 2, grip!.y + grip!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(target!.x + target!.width / 2, target!.y + 3);
+    await expect(row(a)).toHaveAttribute("data-pin-drop", "before");
+    const move = page.waitForRequest((r) => r.method() === "PUT" && r.url().endsWith(`/${encodeURIComponent(b)}/pin-order`));
+    await page.mouse.up();
+    expect((await move).postDataJSON()).toEqual({ neighbor: a, placement: "before" });
+    await expect.poll(() => ownedOrder(page, created)).toEqual([b, a]);
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
+  } finally {
+    failListing = false;
+    await cleanupOwnedSteps(bodyFailed, [
+      ["captured pointer", () => page.mouse.up()],
+      ["listing route", () => page.unrouteAll({ behavior: "wait" })],
+      ["preferences", () => resetPreferences(request)],
       ...created.reverse().map((id): [string, () => Promise<void>] => [`session ${id}`, () => cleanupSession(request, id)]),
     ]);
   }

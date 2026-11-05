@@ -65,6 +65,9 @@
 //!   the optimistic-rename overlay and the pruning rule that retires it, plus
 //!   the count banner's wording. Pure functions of a listing reply, so `list`
 //!   is left holding only the component, the state, and the handlers.
+//! - `pin_drag`: the list-owned pointer bridge for moving a pin relative to
+//!   a visible neighbor. Geometry and temporary paint live in the JS asset;
+//!   eligibility still comes from `rows` and writes use the ordinary move path.
 //! - `status`: what a session's status SAYS — the badge both the list and
 //!   the session view render it as, and the consequence sentence a delete
 //!   confirmation opens with. Wording only; what a status MEANS is
@@ -172,6 +175,7 @@ mod modal_isolation;
 mod ntfy_settings;
 mod ops;
 mod peer;
+mod pin_drag;
 mod provisioning;
 mod reader;
 mod reconnect;
@@ -1545,6 +1549,8 @@ declare_assets! {
     const EVENTS_JS: Asset = asset!("/assets/events.js");
     // Width is a per-device DOM preference, shared by web and desktop.
     const SIDEBAR_WIDTH_JS: Asset = asset!("/assets/sidebar-width.js");
+    // Capture and drop geometry belong to the mounted list on both renderers.
+    const PIN_ORDER_JS: Asset = asset!("/assets/pin-order.js");
     const SOUNDS_JS: Asset = asset!("/assets/sounds.js");
     // Farhelm's own hover tooltip (see the file's module docs for why the
     // browser's `title` tooltip is not used anywhere). It installs one
@@ -1966,6 +1972,7 @@ fn AppBody() -> Element {
         document::Script { src: TERMINAL_JS }
         document::Script { src: EVENTS_JS }
         document::Script { src: SIDEBAR_WIDTH_JS }
+        document::Script { src: PIN_ORDER_JS }
         document::Script { src: SOUNDS_JS }
         // Above both views and outside the match, deliberately: a build
         // mismatch is a fact about this whole PAGE rather than about

@@ -5679,11 +5679,21 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   the same node remains connected, the document still has focus, and no independent focus intervened. A later focus
   choice or row removal retires that observer; focusout without replacement focus retires it at the next animation frame
   if reinsertion has not restored focus. An old mutation or frame callback cannot affect its successor. No optimistic
-  order or client write queue is introduced. Replace copies a source pin and its position to the new id before
-  requesting the source's deletion, so a pin write failure leaves the source intact; if deletion fails both surviving
-  sessions can be pinned at the same position. An already-pinned replacement keeps its position. Positions deliberately
-  are not unique, and their total order is `(position, host_id, session_id)`. Confirmed deletion clears the old pin best
-  effort, like the other viewer metadata.
+  order or client write queue is introduced. Pointer dragging uses `pin-order.js`, an unconditional asset on web and
+  desktop, with its eval bridge owned by the component that renders the actual list root. Listing error/recovery can
+  replace that root without replacing ListView; the bridge owner follows the root so late predecessor cleanup cannot
+  release its successor. Setup waits for the asynchronous asset while the root's mount marker remains current, and the
+  eval awaits its subscription lifetime. The grip shares the existing displayed eligibility projection and stays out of
+  sequential Tab order; menu moves supply keyboard reordering. An armed pointer owns temporary document capture and
+  Escape listeners, removed on drop, cancellation or teardown. Geometry is sampled from current eligible rows and
+  clipped to the visible pinned group. Only transient lift/drop-line paint changes before the ordinary relative move
+  callback; receipt rechecks current source admission and displayed membership without recapturing adjacency. Hiding the
+  list cancels its gesture. No HTML drag-and-drop, optimistic DOM order, separate rank or drag focus-retention mechanism
+  is introduced. Replace copies a source pin and its position to the new id before requesting the source's deletion, so
+  a pin write failure leaves the source intact; if deletion fails both surviving sessions can be pinned at the same
+  position. An already-pinned replacement keeps its position. Positions deliberately are not unique, and their total
+  order is `(position, host_id, session_id)`. Confirmed deletion clears the old pin best effort, like the other viewer
+  metadata.
 
   `PUT /api/sessions/{id}/pin-order` requires `{neighbor: full_session_reference, placement: "before" | "after"}`. Both
   sessions must be known to the helm, including cached sessions on unreachable hosts, and both must still be pinned; a
