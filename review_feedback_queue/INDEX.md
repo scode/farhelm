@@ -46,10 +46,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   a separate Enter. The conditional Bash 5.2 route is established; whether the accepted wrong-mode recovery limit also
   accepts this consequence is ambiguous.
 
-- [`colliding-start-cleanup-ends-winning-terminal.md`](colliding-start-cleanup-ends-winning-terminal.md) — An
-  interrupted terminal start that collides with another terminal's socket name can close that other terminal and hang up
-  its work. The ordinary foreground Ctrl-C route remains outside any clearly matching accepted exception.
-
 - [`attachment-debug-trace-emits-remote-controls.md`](attachment-debug-trace-emits-remote-controls.md) — With attachment
   debug tracing enabled, a remote tab identifier can put terminal control bytes into the operator's log display. This is
   a conditional trust-boundary issue; no payload or runtime exploitation was attempted.

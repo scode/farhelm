@@ -21121,7 +21121,11 @@
   of diff, not counting this ledger, the queue removal or a changelog fragment, or it needs a design choice), do not fix
   it: instead add a FILTER.md entry accepting this specific case, as the decision says. Remove the feedback file and its
   index entry.
-- Execution: planned in `plans/queue/unlikely-races-nov4.md`.
+- Execution: took the approved fallback in jj change `zwpxwpwwkptputzlszxztvzlqxsmrqkn`, bookmark
+  `plan/unlikely-races-nov4/02-start-cleanup-checks-tag`. A tag check through the existing client would first take over
+  the foreign host; a non-displacing probe with matching and foreign-host fixtures needs at least about 140 diff lines.
+  Added the specific collision-and-interruption filter instead. Draft PR:
+  https://github.com/scode/farhelm/pull/3022/changes.
 
 ## async-process-verification-leaves-stale-signal-authority.md
 
