@@ -6,8 +6,6 @@
 
 use std::collections::{HashMap, HashSet};
 
-use dioxus::prelude::*;
-
 use super::{host_update_kind, remote_update_available};
 use crate::api::ProvisioningOperation;
 use crate::provisioning::{ActionRequest, HostBinding, ProvisioningMenuState};
@@ -91,7 +89,7 @@ impl UpdateDismissal {
     }
 
     /// A new host or changed helm build permanently retires this dismissal.
-    /// Required updates count as new too, even while their banner hides the card.
+    /// Required updates count as new too; dismissal only conceals optional rows.
     pub(crate) fn invalidated_by(&self, updates: &HostUpdates, helm_build: &str) -> bool {
         self.helm_build != helm_build
             || updates
@@ -100,20 +98,6 @@ impl UpdateDismissal {
                 .chain(&updates.required)
                 .any(|host| !self.hosts.contains(&host.id))
     }
-}
-
-/// Whether optional updates deserve a card in the currently visible session list.
-/// Required updates take precedence and never consult the dismissal choice.
-pub(crate) fn card_visible(
-    updates: &HostUpdates,
-    dismissal: Option<&UpdateDismissal>,
-    helm_build: &str,
-    hosts_open: bool,
-) -> bool {
-    !hosts_open
-        && updates.required.is_empty()
-        && !updates.optional.is_empty()
-        && dismissal.is_none_or(|dismissal| dismissal.invalidated_by(updates, helm_build))
 }
 
 /// Queue only still-eligible members of the rendered prompt, with its original binding.
@@ -141,107 +125,6 @@ pub(crate) fn requests_for_shown(
             ))
         })
         .collect()
-}
-
-/// Name the scope of a required update without implying that optional hosts join it.
-fn required_action(count: usize) -> String {
-    let number = match count {
-        1 => return "↑ Update now".into(),
-        2 => "two",
-        3 => "three",
-        4 => "four",
-        5 => "five",
-        6 => "six",
-        7 => "seven",
-        8 => "eight",
-        9 => "nine",
-        _ => return format!("↑ Update all {count}"),
-    };
-    format!("↑ Update all {number}")
-}
-
-/// Render the nondismissible prerequisite to using protocol-incompatible hosts.
-/// The single peer name stays escaped and direction-isolated like host-row names.
-#[component]
-pub(crate) fn HostUpdateBanner(
-    hosts: Vec<Host>,
-    on_update: EventHandler<Vec<Host>>,
-    on_show_hosts: EventHandler<()>,
-) -> Element {
-    let count = hosts.len();
-    let action = required_action(count);
-    rsx! {
-        section { class: "host-update-banner", "data-update-kind": "required",
-            aria_label: "Host updates required",
-            p { class: "host-update-heading",
-                if count == 1 {
-                    span { class: "peer-value", "{hosts[0].name.escaped()}" }
-                    " must be updated before you can use it"
-                } else { "{count} hosts must be updated before you can use them" }
-            }
-            p { if count == 1 {
-                "Its supervisor speaks an older protocol than this helm. Its sessions show as unreachable until it is updated."
-            } else {
-                "Their supervisors speak an older protocol than this helm. Their sessions show as unreachable until they are updated."
-            } }
-            div { class: "host-update-actions",
-                button { r#type: "button", class: "btn btn-neutral",
-                    "data-tooltip": "Update required hosts: install this helm's version on exactly these hosts",
-                    onclick: move |_| on_update.call(hosts.clone()), "{action}"
-                }
-                button { r#type: "button", class: "btn btn-neutral",
-                    "data-tooltip": "Show hosts: open host management",
-                    onclick: move |_| on_show_hosts.call(()), "Show hosts"
-                }
-            }
-        }
-    }
-}
-
-/// Keep optional updates discoverable next to the Hosts toggle without blocking work.
-/// Dismissal is owned by ListView so replacing this card with a required banner
-/// cannot accidentally forget the person's choice.
-#[component]
-pub(crate) fn HostUpdateCard(
-    hosts: Vec<Host>,
-    on_update: EventHandler<Vec<Host>>,
-    on_show_hosts: EventHandler<()>,
-    on_dismiss: EventHandler<()>,
-) -> Element {
-    let count = hosts.len();
-    rsx! {
-        section { class: "host-update-card", "data-update-kind": "optional",
-            aria_label: "Host updates available",
-            button { r#type: "button", class: "btn btn-neutral host-update-dismiss",
-                aria_label: "Dismiss host update reminder",
-                "data-tooltip": "Dismiss: hide until another host has an update or the helm build changes",
-                onclick: move |_| on_dismiss.call(()), "✕"
-            }
-            p { class: "host-update-heading",
-                if count == 1 { "1 host has an update" } else { "{count} hosts have updates" }
-            }
-            div { class: "host-update-body", role: "region",
-                aria_label: "Hosts with available updates", tabindex: "0",
-                ul { class: "host-update-names",
-                    for host in &hosts {
-                        li { key: "{host.id}",
-                            span { class: "peer-value", "{host.name.escaped()}" }
-                        }
-                    }
-                }
-            }
-            div { class: "host-update-actions",
-                button { r#type: "button", class: "btn btn-neutral",
-                    "data-tooltip": "Update all now: install this helm's version on the listed hosts",
-                    onclick: move |_| on_update.call(hosts.clone()), "Update all now"
-                }
-                button { r#type: "button", class: "btn btn-neutral",
-                    "data-tooltip": "Show hosts: open host management",
-                    onclick: move |_| on_show_hosts.call(()), "Show hosts"
-                }
-            }
-        }
-    }
 }
 
 #[cfg(test)]
@@ -389,42 +272,33 @@ mod tests {
         );
     }
 
-    /// Losing a known update temporarily must not resurrect a dismissed card.
-    /// New identities and helm builds invalidate it; required updates still take precedence.
+    /// A temporarily absent update does not revive a dismissed reminder.
+    /// New identities or builds retire the dismissal, including a required host.
     #[farhelm_testtrace::test]
-    fn dismissal_tracks_membership_and_build_without_hiding_required_updates() {
+    fn dismissal_tracks_membership_and_build() {
         let updates = HostUpdates {
             optional: vec![optional(1), optional(2)],
             ..Default::default()
         };
         let dismissal = UpdateDismissal::new(&updates, "build-a".into());
-        assert!(card_visible(&updates, None, "build-a", false));
-        assert!(!card_visible(&updates, Some(&dismissal), "build-a", false));
+        assert!(!dismissal.invalidated_by(&updates, "build-a"));
         let subset = HostUpdates {
             optional: vec![optional(1)],
             ..Default::default()
         };
         assert!(!dismissal.invalidated_by(&subset, "build-a"));
-        assert!(!card_visible(&subset, Some(&dismissal), "build-a", false));
-        assert!(card_visible(&updates, Some(&dismissal), "build-b", false));
+        assert!(dismissal.invalidated_by(&updates, "build-b"));
         let added = HostUpdates {
             optional: vec![optional(3)],
             ..Default::default()
         };
-        assert!(card_visible(&added, Some(&dismissal), "build-a", false));
-        assert!(!card_visible(&updates, None, "build-a", true));
+        assert!(dismissal.invalidated_by(&added, "build-a"));
         let mixed = HostUpdates {
             optional: updates.optional.clone(),
             required: vec![required(3)],
         };
         assert!(dismissal.invalidated_by(&mixed, "build-a"));
-        assert!(!card_visible(&mixed, None, "build-a", false));
-        assert!(!card_visible(
-            &HostUpdates::default(),
-            None,
-            "build-a",
-            false
-        ));
+        assert!(!dismissal.invalidated_by(&HostUpdates::default(), "build-a"));
     }
 
     /// A stale prompt can shrink safely, but never pick up new or retargeted hosts.
@@ -450,14 +324,5 @@ mod tests {
         assert_eq!(requests[&1].operation, ProvisioningOperation::Update);
         assert!(!requests[&1].return_to_rail);
         assert_eq!(requests[&6].binding, HostBinding::from(&shown[4]));
-    }
-
-    /// Small counts read naturally; larger fleets retain an unambiguous exact number.
-    #[farhelm_testtrace::test]
-    fn required_button_names_its_scope() {
-        assert_eq!(required_action(1), "↑ Update now");
-        assert_eq!(required_action(3), "↑ Update all three");
-        assert_eq!(required_action(9), "↑ Update all nine");
-        assert_eq!(required_action(10), "↑ Update all 10");
     }
 }

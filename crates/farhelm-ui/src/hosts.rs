@@ -96,6 +96,7 @@ use crate::provisioning::{
 use crate::{ApiBase, ConnectionStage, Host, HostId, HostKind, HostPhase, RefreshHealth};
 
 pub(crate) mod attention;
+pub(crate) mod attention_list;
 pub(crate) mod settings_dialog;
 #[path = "tensorlake/add_host.rs"]
 mod tensorlake_add;
@@ -1808,6 +1809,12 @@ pub(crate) fn HostsPanel(
     mut ops: OpLock,
     mut mutation_busy_hosts: Signal<std::collections::HashSet<HostId>>,
     mut provisioning_busy_hosts: Signal<std::collections::HashSet<HostId>>,
+    /// The session column reads these same projections while management is
+    /// concealed. Provisioning keeps its one mounted publisher per host.
+    row_update_progress: Signal<HashMap<HostId, HostUpdateProgress>>,
+    /// Opening Hosts still acknowledges warnings here, including pending Add
+    /// receipts; lifting storage must not create a second acknowledgement path.
+    mut row_attention: Signal<HashMap<HostId, HostAttention>>,
     /// Shared with the session-list prompts. Row panels publish their offers
     /// and consume exact-target requests even while management is concealed.
     provisioning_menu_states: Signal<HashMap<HostId, ProvisioningMenuState>>,
@@ -1851,13 +1858,9 @@ pub(crate) fn HostsPanel(
                 .capture_affected(&MovedRows::new(AnchorRegion::Hosts, Vec::<String>::new()))
         }
     });
-    // The parent owns one compact update status per row and passes it to both
-    // the renderer and the provisioning child that publishes it.
-    let row_update_progress = use_signal(HashMap::<HostId, HostUpdateProgress>::new);
-    // Both provisioning rows and the initial Add receipt feed this small
-    // presentation state. Opening Hosts acknowledges even a receipt whose
-    // registered row has not reached the registry reader yet.
-    let mut row_attention = use_signal(HashMap::<HostId, HostAttention>::new);
+    // The page owns progress and warnings so both visible surfaces read the
+    // same facts. This mounted owner still reconciles registration and Add
+    // receipts, including receipts that outrun the first registry response.
     let mut add_attention = use_signal(Vec::<AddAttentionReceipt>::new);
     use_effect(move || {
         let open = panel_open();

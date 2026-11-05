@@ -804,20 +804,21 @@ dialog is mounted, and during a request the primary action stays focusable (unav
 the other controls are disabled, because a focused control that is natively disabled or unmounted drops focus to `body`.
 
 Hosts use one permanently mounted management owner, with its ordinary content swapped for session content by a
-page-local presentation signal. The rail's Hosts toggle belongs to ListView and renders in AppBar's existing footer
-above Settings and Help; it keeps focus and names the management region. Neither list owner nor any keyed HostRow or
-ProvisioningPanel unmounts during a swap. Only ordinary headers, rows, notices and inline provisioning fragments are
-hidden. Add, agent Add, Settings, Remove, refusals and setup/uninstall confirmations remain outside those concealed
-fragments. Listing reads, sounds, operation identities and the page lock keep their existing lifetime. Height-driven
-movement reports are gated while management is concealed; membership/order and the actual rail's scroll still invalidate
-its existing anchors. Dialog focus uses the remembered menu origin and the currently visible presentation: rail avatars
-while present, visible panel rows for panel openings, the visible Add control for Add, and the persistent Hosts toggle
-after removal. Asynchronous retirement uses the existing document-focus guard so a newer approval or control retains
-focus. Its header gives the known host count, an unpersisted global details switch, Update all and the secondary add
-control. Every row always shows its name and a muted actions toggle that appears on hover, keyboard focus, or a coarse
-pointer, in the same narrow trailing gutter as the session-row actions toggle, and shows its phase dot except while a
-setup, update or uninstall runs, when the progress line below the name takes its place; connected reads `Connected`
-unless the helm marks a compatible older build, in which case the amber `Old version` advisory is shown, or a newer one
+page-local presentation signal. The compact attention list remains above sessions while management is concealed and
+hosts need attention. The rail's Hosts toggle belongs to ListView and renders in AppBar's existing footer above Settings
+and Help; it keeps focus and names the management region. Neither list owner nor any keyed HostRow or ProvisioningPanel
+unmounts during a swap. Only ordinary headers, rows, notices and inline provisioning fragments are hidden. Add, agent
+Add, Settings, Remove, refusals and setup/uninstall confirmations remain outside those concealed fragments. Listing
+reads, sounds, operation identities and the page lock keep their existing lifetime. Height-driven movement reports are
+gated while management is concealed; membership/order and the actual rail's scroll still invalidate its existing
+anchors. Dialog focus uses the remembered menu origin and the currently visible presentation: rail avatars while
+present, visible panel rows for panel openings, the visible Add control for Add, and the persistent Hosts toggle after
+removal. Asynchronous retirement uses the existing document-focus guard so a newer approval or control retains focus.
+Its header gives the known host count, an unpersisted global details switch, Update all and the secondary add control.
+Every row always shows its name and a muted actions toggle that appears on hover, keyboard focus, or a coarse pointer,
+in the same narrow trailing gutter as the session-row actions toggle, and shows its phase dot except while a setup,
+update or uninstall runs, when the progress line below the name takes its place; connected reads `Connected` unless the
+helm marks a compatible older build, in which case the amber `Old version` advisory is shown, or a newer one
 (`newer_version`), in which case the amber `Too new` advisory is shown. A skew whose peer protocol is the higher one
 also reads `Too new`, but keeps the red styling of every skew, since that host cannot be used until one side is updated.
 Either way the `Too new` label's hover names both versions, and Update (and a rerun of a failed Update) is not offered.
@@ -7027,20 +7028,39 @@ cannot turn the header click into a delayed update after setup finishes. All eli
 waiting for one another; a failed plan or run stays on its own row and cannot suppress another host's result. There is
 no fleet endpoint or page-wide update result to reconcile against those host-scoped authorities.
 
-The session-list update prompts use the rail's narrower available-update classification, not the header's Update all
-list: an offered remote Update, no live provisioning work, and either a compatible older build or a lower peer protocol.
-The Hosts toggle summarizes its count and highest urgency. Required updates replace the optional card with an
-undismissable banner; both send the existing binding-captured requests for their displayed host set. Only the card can
-be dismissed. Its page-local memory keeps the dismissed host ids and helm build, allowing another host's new update or a
-different build to reveal it without any stored dismissal or new backend resource. Hosts management conceals both
-surfaces without ending their owner's lifetime.
+The attention list's Update rows use the rail's narrower available-update classification, not the Hosts header's Update
+all list: an offered remote Update, no live provisioning work, and either a compatible older build or a lower peer
+protocol. The Hosts toggle still summarizes that update count and highest urgency. Each Update action sends the existing
+binding-captured request for its displayed host; the attention header's Update all uses exactly its displayed Update
+rows and appears only for more than one. No fleet endpoint or second provisioning owner is added.
 
-ListView owns the provisioning offer and request maps alongside the busy set; the permanently mounted host panels still
-publish and consume them. Reminder identity uses the latest nonempty response build observation, separately from the
+The pure `hosts::attention_list` classifier reads the retained host snapshot, that update classification, per-host
+`HostUpdateProgress`, `HostAttention::unseen()`, Tensorlake tunnel health, and the existing optional-update dismissal.
+Progress wins over a problem, which wins over an update; the resulting rows are grouped as Problems, Working, Updates,
+preserving registry order within each group. Pending and running setup/update/uninstall use their actual verb. Problems
+cover the phases SPEC.md names, protocol skew without a usable update offer, resume and tunnel failures, and unseen
+setup/update outcomes. Connecting, usable current/newer connections and ordinarily suspended hosts do not contribute a
+row on their own. The classifier does not invent an unreachable-since time or change the attention owner's
+acknowledgement rules.
+
+ListView owns the progress and attention maps alongside the existing provisioning offer, request and busy maps. The
+permanently mounted host panels still publish progress, consume requests and reconcile warnings and initial Add
+receipts. Both visible surfaces read those same projections. Opening the attention row reveals the mounted Hosts panel,
+then uses one animation-frame handoff to focus its existing menu button without scrolling before bringing the row into
+view. It changes no host filter and adds no persistent scroll or highlight signal.
+
+The required-update banner and optional-update card, their components, display helpers and CSS are removed. Their
+page-local `UpdateDismissal` remains: it captures update host ids and the helm build, and applies only to optional
+Update rows. A host outside the dismissed set gaining an update or a changed build invalidates it; required, Problem and
+Working rows remain visible. Reminder identity uses the latest nonempty response build observation, separately from the
 first-mismatch skew verdict. A late old reply can renew a reminder but cannot clear that verdict or restore unattended
-reconnection. Prompt copy and presence join the existing pre-render movement capture for session anchors, so layout
-changes retire only openings measured against the old rows. The optional card bounds its height and scrolls only its
-host names, leaving its heading, dismissal and actions reachable; the names region supports keyboard scrolling.
+reconnection.
+
+The attention region is a bounded sibling above the session-content scroller; only its row region scrolls, including
+from the keyboard, leaving its heading and header actions reachable. Hosts management conceals it without ending its
+owner's lifetime. Its layout key joins the existing pre-render movement capture for session anchors: row identities,
+groups, names and wrapped state copy retire only openings measured against the old layout. Progress counts, step text,
+run identity and elapsed time do not enter that key, so routine progress polls cannot close an open session menu.
 
 A supervisor that answers the hello but speaks a DIFFERENT protocol version is a distinct discovery outcome, not a probe
 failure: presence is proven (only a live supervisor sends a hello) and the skew payload names its build, but nothing

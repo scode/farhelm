@@ -57,8 +57,8 @@ closes. Otherwise Farhelm shows what it would set up there and asks first:
 
 When the host has no new enough tmux, Farhelm brings its own copy, as the list shows. After you choose **Set up**, the
 dialog closes and setup runs: the host's mark on the [navigation rail](/docs/using/manage-hosts/), the column of icons
-down the left edge of the sidebar, shows a ring until it is done, and its row in the host list, under **Hosts** at the
-rail's foot, shows each step:
+down the left edge of the sidebar, shows a ring until it is done. Setup progress also appears above your sessions;
+select that host there to open its row in **Hosts**, where you can see each step:
 
 <Screenshot
   name="add-a-remote-host/connected-host"
@@ -79,8 +79,9 @@ settings behind the gear at the foot of the navigation rail; [Manage hosts](/doc
 - When Farhelm cannot reach the host, the dialog shows ssh's own error. Check that `ssh <destination> true` works in
   a terminal without a password.
 - A host without systemd's services for your user account cannot be set up automatically, and the dialog says so.
-- When setup fails partway, the host's mark on the navigation rail shows a warning until you open **Hosts**, where its
-  row shows which step failed. Choose **Re-run** in the host's `⋯` menu there to try again.
+- When setup fails partway, the host appears above your sessions with **Details**, and its mark on the navigation rail
+  shows a warning. Choose **Details** to open the host list at that host and see which step failed. **Re-run** in its
+  `⋯` menu tries again.
 - Adding a destination that is already in your host list is refused, and the dialog names that host. To set it up
   again, use **Update** in its `⋯` menu, or **Re-run** if its setup failed.
 
