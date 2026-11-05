@@ -21447,7 +21447,10 @@
   matches. A unit test covers a tab name with control bytes. Size gate: about 100 lines of diff (code, tests and docs,
   not counting this ledger, the queue removal or a changelog fragment); over it, block and bring it back. Remove the
   feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-misc-nov4.md`.
+- Execution: implemented in jj change `soqwuvpnryxsxomqmwkuvpyzpwnntyqt`, bookmark
+  `plan/triage-misc-nov4/02-escape-peer-log-text`; attachment trace tab IDs use the existing bounded escaping, and the
+  specification covers all peer-supplied text the helm logs or retains. Draft PR
+  [#3036](https://github.com/scode/farhelm/pull/3036/changes).
 
 ## stored-wrapper-breaks-new-prompt-literalness.md
 

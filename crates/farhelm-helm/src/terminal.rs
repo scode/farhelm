@@ -117,20 +117,21 @@ const ATTACHMENT_TRACE: &str = "farhelm_helm::terminal_attachments";
 /// exactly once.
 struct TracedAttachment {
     session: String,
-    /// `agent`, or `tab:<id>`.
+    /// `agent`, or `tab:` followed by a bounded, escaped peer identifier.
     terminal: String,
     /// `bytes` or `grid`.
     stream: &'static str,
 }
 
 impl TracedAttachment {
-    /// Trace `session`'s attachment as the browser's request named it.
+    /// Trace the admitted attachment without giving a host's tab ID control of
+    /// the operator's log terminal. Keep `agent` plain for the desktop smoke.
     fn start(session: &str, tab: Option<&str>, stream: farhelm_proto::StreamKind) -> Self {
         let traced = Self {
             session: session.to_string(),
             terminal: match tab {
                 None => "agent".to_string(),
-                Some(tab) => format!("tab:{tab}"),
+                Some(tab) => format!("tab:{}", crate::manager::peer_text(tab)),
             },
             stream: match stream {
                 farhelm_proto::StreamKind::Bytes => "bytes",
@@ -1560,6 +1561,31 @@ mod tests {
         );
         assert_eq!(traced("terminal ended"), 1);
         assert_eq!(traced("terminal attached"), 1);
+    }
+
+    /// Successful attachments can carry host-supplied tab IDs, so both trace
+    /// events must escape controls even when no error or refusal occurred.
+    #[farhelm_testtrace::test]
+    async fn the_attachment_trace_escapes_peer_tab_controls() {
+        let events = crate::test_capture::current();
+        let traced = super::TracedAttachment::start(
+            "sess-1",
+            Some("shell\n\u{1b}[2J\t\r\0"),
+            farhelm_proto::StreamKind::Grid,
+        );
+        drop(traced);
+        for message in ["terminal attached", "terminal ended"] {
+            let matches: Vec<_> = crate::test_capture::matching(&events, message)
+                .into_iter()
+                .filter(|event| event.target == super::ATTACHMENT_TRACE)
+                .collect();
+            assert_eq!(matches.len(), 1, "{message}: {matches:?}");
+            assert_eq!(
+                matches[0].field("terminal"),
+                Some(r#"tab:"shell\n\u{1b}[2J\t\r\0""#),
+                "{message}: peer controls must remain printable log data"
+            );
+        }
     }
 
     /// A terminal peer declaring an oversized frame is refused before its
