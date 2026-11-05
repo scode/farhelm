@@ -68,11 +68,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   signal, allowing unrelated work to be signalled. The accepted adjacent synchronous window explicitly excludes this
   scheduling gap.
 
-- [`registry-test-basename-lookup-can-kill-foreign-host.md`](registry-test-basename-lookup-can-kill-foreign-host.md) — A
-  registry test can identify a terminal host by its socket's basename and then kill it, even if that host belongs to a
-  different directory and holds unrelated work. The conditional wrong-selection route is established; an actual
-  collision was not observed.
-
 - [`resize-journal-exhaustion-does-not-trigger-checkpoint.md`](resize-journal-exhaustion-does-not-trigger-checkpoint.md)
   — Enough applied size changes on a quiet terminal can consume its retained journal without making a new checkpoint
   due. A later crash, or the newer small-tail skip on a successful orderly stop, can then lose recoverable output. The

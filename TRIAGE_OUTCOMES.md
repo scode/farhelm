@@ -21151,7 +21151,9 @@
 - Completion criteria: the test identifies its host by the exact socket path (or the peer process of a connection to its
   own socket) before signalling. If execution finds it is not straightforward, add a FILTER.md entry accepting this
   specific case instead. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/unlikely-races-nov4.md`.
+- Execution: implemented in jj change `yowuqoloxutoxtmutvrrtlrkqrruuwnr`, bookmark
+  `plan/unlikely-races-nov4/01-registry-test-exact-socket`; the real-host registry test and targeted lint passed. Draft
+  PR: https://github.com/scode/farhelm/pull/3020/changes.
 
 ## displaced-input-pump-can-submit-replacement-typing.md
 
