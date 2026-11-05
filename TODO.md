@@ -613,13 +613,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   three (`03eda759-efdb-41ff-956b-564f134ad83d`), and it also failed on a stack without launch-progress. Cause unknown;
   whether launch-progress's waiting status raises its rate is open (FLAKES.md, 2026-11-04).
 
-- **Host-terminal run's startup-session check races its stack.** `e2e/global-setup.ts` (`expectHostTerminals`) can list
-  a stack's sessions before `start-stack.sh` has created the startup session, stopping the whole host-terminal run
-  before any test (runs `9f66f369-97d3-44e9-985c-e92d4fd84753` and `1287cb5b-7bcd-4ba4-9628-87100731c260`). Hypothesis:
-  global setup starts once the helm answers; waiting for the listing to name the session would close it (FLAKES.md,
-  2026-11-04). It recurred in run `6e4fb56e-d4bf-4833-bf75-57115b19170d`; the next run
-  `a74201be-2382-44b1-9b21-bcafb83e5626` reached and passed its two selected tests.
-
 - **The launcher's YOLO question does not take its answer on WebKit.** `answerYolo` in `e2e/tests/helpers/term.ts`
   (through `fillCreateForm`) failed with "Clicking the checkbox did not change its state" in three tests in three
   rounds: two in `e2e/tests/terminal-multihost.spec.ts` and one in `e2e/tests/terminal-create-idempotency.spec.ts` (runs

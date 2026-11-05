@@ -114,7 +114,7 @@ async function authenticateStack({ baseURL, stackInfoPath, authStatePath }: Stac
 
 /**
  * The browser suite's host-terminal run (host-terminal-specs.ts): this stack
- * really creates terminals in terminal hosts, read once per stack from the
+ * really creates terminals in terminal hosts, checked once per stack from the
  * helm's listing of its startup session before any spec runs.
  *
  * Why here: every spec helper reads whichever component a terminal holds, so
@@ -124,11 +124,17 @@ async function authenticateStack({ baseURL, stackInfoPath, authStatePath }: Stac
  * stack before any of them starts.
  */
 async function expectHostTerminals(client: APIRequestContext, secret: string, baseURL: string) {
-  const listed = await client.get("/api/sessions", { headers: { Authorization: `Bearer ${secret}` } });
-  expect(listed, "the session listing must answer").toBeOK();
-  const sessions = ((await listed.json()) as { sessions: Record<string, unknown>[] }).sessions;
-  const startup = sessions.find((session) => session.title === "e2e-session");
-  expect(startup, `the stack at ${baseURL} must list its startup session`).toBeTruthy();
+  // Playwright's webServer probe sees the helm before start-stack.sh finishes
+  // creating its startup session. Wait for that creation, then judge its kind:
+  // an existing session of the wrong kind remains an immediate setup failure.
+  let startup: Record<string, unknown> | undefined;
+  await expect.poll(async () => {
+    const listed = await client.get("/api/sessions", { headers: { Authorization: `Bearer ${secret}` } });
+    expect(listed, "the session listing must answer").toBeOK();
+    const sessions = ((await listed.json()) as { sessions: Record<string, unknown>[] }).sessions;
+    startup = sessions.find((session) => session.title === "e2e-session");
+    return startup !== undefined;
+  }, { timeout: 30_000, message: `the stack at ${baseURL} must list its startup session` }).toBe(true);
   expect(
     { agent_terminal: startup!.agent_terminal, supervisor_creates_host_terminals: startup!.supervisor_creates_host_terminals },
     `the host-terminal run's stack at ${baseURL} must create terminals in terminal hosts`,

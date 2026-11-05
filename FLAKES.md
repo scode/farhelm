@@ -139,6 +139,10 @@ failure, consistent with the earlier startup-race hypothesis below. A second run
 `a74201be-2382-44b1-9b21-bcafb83e5626`, reached and passed both selected tests. The cause remains a hypothesis and the
 existing Deflake entry stays open; this setup check is not a test that can be excluded from a sweep.
 
+Follow-up: fixed in #3042 by waiting for the startup session's publication before checking its terminal kind. The helm
+can answer Playwright's web-server probe before the stack script finishes creating that session; a published session of
+the wrong kind still fails immediately.
+
 ```text
 Error: the stack at <loopback URL> must list its startup session
 ```
