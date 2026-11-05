@@ -452,3 +452,54 @@ passed its code review gate, and the last PR has removed the last of the six TOD
 removes the ones it addresses). Open, not merged. If a `## Decisions` section exists, its latest entry must also be
 satisfied. Then close the plan per `plans/.agents/executing.md`, "Executing one plan" (steps 11 and 12): deliver its
 report through the queue script, write a closing entry in its log, and stop the watchdog. Never edit `plans/` yourself.
+
+## Blocked
+
+Blocked while landing on 2026-11-05 (claim 3aac99).
+
+### Closing Settings from its header sometimes fails to ask about an unsaved recipe on WebKit
+
+The landing monitor's browser runs found that this plan makes an existing test fail on WebKit: "closing Settings with an
+unsaved recipe asks first and finishes the close" in `e2e/tests/tensorlake-recipes.spec.ts`. After a new recipe's name
+is typed, the test clicks the Settings dialog's header close button ("Close settings") and expects the "Save these
+changes before leaving?" question; sometimes no question appears within Playwright's five-second wait. The earlier steps
+of the same test, which leave through Escape and through the footer's Close, did not fail. If the dialog closes instead
+of asking, the user loses the unsaved recipe without being asked, which is what the question exists to prevent; the runs
+kept no screenshot, so whether the dialog closed or the question was only slow is not known.
+
+It failed 4 of 14 WebKit runs on the stack (once in the full suite, run `23b86d4f-9b92-460e-bd50-f71a009dcf88`; once in
+three re-runs, `a126926f-176a-4624-abc6-a36e687d1766`; twice in ten more, `8cc4459e-d2b0-4ecd-9c7a-7cff2ed24db3` and
+`5a3253ff-e442-4c19-b3ca-9e9e55602e63`), and 0 of 10 WebKit runs on main without the plan
+(`27de77f7-5f8f-4ba7-85ed-e7d136357bfb`, `c78cf354-0a65-43ad-831f-0f948be20ce4`); Chromium passed 3 of 3 on the stack
+(`dbd9010e-eed3-40ac-bb22-45dc3440f08c`). #3050 changed how the recipe editor takes focus when it opens in Settings (it
+now scrolls to and focuses the editor's heading one animation frame after it appears, instead of focusing the heading at
+once) and moved the editor's Save and Cancel buttons, and the unsaved-changes question that replaces them, into a bar
+pinned to the bottom of the panel. The monitor suspects one of those changes but did not establish the mechanism.
+
+Nothing of the plan has merged; main holds none of it. The monitor pushed three small landing fixes to the plan's
+branches, which the executor should keep:
+
+- #3051: the two new help paragraphs are styled by their classes instead of `#add-tensorlake-name-help` and
+  `#add-tensorlake-recipe-help`, which the stylesheet token test read as the hex color `#add` and failed on;
+- #3051: the Tensorlake hosts changelog fragment gains `pr: 3049, 3050`, so the release sweep counts #3049 and #3050 as
+  covered;
+- #3049 and #3050: hover text on the Suspend confirmation's Cancel and Suspend buttons and on sandbox discovery's
+  Refresh, which had none, though every control should have it.
+
+With those, the landing's other checks passed on the stack: the gates and builds, the whole Rust workspace, the UI's
+Rust, desktop and JavaScript tests, and the browser suite apart from this test, the hover-text test "sidebar surfaces
+give every control hover text" (which fails on main too, on the plain Add host form's "SSH" and "Tensorlake sandbox"
+choices, unrelated to the fixes above), and failures that are recorded flakes or passed three re-runs.
+
+What should happen to the plan?
+
+- **Send it back to find and fix the cause** (recommended): the executor finds why the header close sometimes does not
+  ask on WebKit, fixes it in the plan's code rather than in the test, and shows it with that test passing 20 times in a
+  row on WebKit (with a 4-in-14 failure rate, 20 clean runs would be very unlikely if the bug remained). This is a test
+  failure the plan introduced, and the fix belongs with the code that changed.
+- **Send it back with a narrower fallback**: as above, but if no cause is found, return the Settings editor to focusing
+  its heading at once, as main does, and accept the scrolling it then does. Quicker, but it may drop the opening
+  behavior #3050 was for, and it is only a guess at the cause.
+- **Land #3048 and #3049 now and send back only #3050 and #3051**: the suspend and resume fixes would ship sooner. The
+  queue records a plan as landed only when its whole stack has merged, and #3050 and #3051 both change the add-host
+  dialog, so this would need the plan split; not recommended for a fix of this size.
