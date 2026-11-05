@@ -3878,3 +3878,27 @@ remain private by run UUID and expire with temporary-file cleanup.
 Class: peer-lifecycle
 
 Cause: established
+
+## 2026-11-05 — suspension activity fixture scope and lifetime (e2e/tests/tensorlake-lifecycle.spec.ts)
+
+The three recorded missing-agent cases did not recur in baseline `d22a6787-f6bc-4d36-b7aa-38e2de618d27`: unknown,
+stale-idle and current-idle each passed three of three per engine. Inspection found that the activity fixture asserted
+its agent's presence on every session-list query, including queries that can be filtered to another host, and remained
+installed while cleanup deleted that agent. The fixture now requires the agent in the real host-scoped listing before
+controlling activity, controls only Suspend's host-scoped read, and drains that control before deletion. The assertion
+that the controlled read contains the agent, and the tests' confirmation/no-confirmation outcomes, remain intact.
+Final-source run `0877bae7-861b-40a7-b9a3-be836ac6b306` passed three of three per engine for all five activity variants
+(working, unknown, stale idle, current idle and current waiting). These repairs establish the intended fixture contract;
+the unavailable older traces do not identify which scope/lifetime boundary each historical failure crossed. This change
+removes the three exclusions and their TODO entry.
+
+Evidence: shared x86_64 Linux, Node 26.13.0, Playwright 1.64.0, three workers with one stack each, zero retries, locale
+C.UTF-8; verified tmux 3.7c executable SHA256 `ba702d3003667a258c423b1516d4fe9de43b20bfefeeae213a3bb1363dccfceb`.
+Baseline was clean `ce630ce7a18a69f8a58fec5786778fdbafd9b3a5`; validation used that base with four browser-test fixes
+dirty. Ambient Farhelm variables were scrubbed and `FARHELM_TEST_TRACE_DIR` was recorder-owned. Other host workloads
+were present; case-level load and memory pressure were not measured. No new failure occurred to quote. Private reports
+are addressed by run UUID and expire with temporary-file cleanup.
+
+Class: fixture-premise
+
+Cause: hypothesis

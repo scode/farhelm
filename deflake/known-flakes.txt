@@ -27,6 +27,3 @@ playwright provisioning.spec.ts a first identity learned while following: replac
 playwright provisioning.spec.ts a first identity learned while following: completion  # update-progress-step-name-late
 playwright quick-launch.spec.ts a sequence refused at its prefix leaves later sequences their own bindings  # quick-launch-body-focus-chromium
 playwright quick-launch.spec.ts typed page refusals are atomic and empty Enter leaves later bindings paired  # quick-launch-body-focus-chromium
-playwright tensorlake-lifecycle.spec.ts suspending an agent with unknown status asks before sending the request  # lifecycle-activity-read-misses-session
-playwright tensorlake-lifecycle.spec.ts suspending a current idle agent acts immediately  # lifecycle-activity-read-misses-session
-playwright tensorlake-lifecycle.spec.ts suspending an agent with stale idle status asks before sending the request  # lifecycle-activity-read-misses-session
