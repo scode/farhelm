@@ -21268,7 +21268,8 @@
   number), with a test that the same number under two entry IDs gives different keys. Size gate: about 100 lines of diff
   (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over it, block and bring
   it back. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/durability-revocations.md`.
+- Execution: implemented in jj change `otlrlutupmpvqpkwtnqmpnoozsyovmzu`, bookmark
+  `plan/durability-revocations/02-retry-key-entry-id`; draft PR https://github.com/scode/farhelm/pull/3025/changes.
 
 ## critical-mac-commits-omit-media-flush.md
 

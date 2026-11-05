@@ -3478,22 +3478,23 @@ shared operation; they do not relax that operation's checks.
 separating "what your creating verb produced" from "the row you changed" and the CLI checks it before printing an id. It
 is not a novelty claim: a create or clone carrying an idempotency key the target has already served replays that
 session, which arrives under this same tag. The relay stores an agent's key on the target as
-`agent-v3-<SHA-256 of the registry namespace, asking host row, session and key>`, with length-delimited strings. Each
+`agent-v3-<SHA-256 of the registry namespace, host entry UUID, session and key>`, with length-delimited strings. Each
 helm database has a durable random namespace, minted at creation or migration, so a fresh registry cannot reuse an
-earlier registry's approved retry when numeric host rows coincide. The host row keeps approvals tied to the logical host
-across adoption. Existing databases also gain a namespace: an in-flight keyed retry across this upgrade needs approval
-again and, if approved, creates a new session or checkout instead of returning the earlier one. The namespace is read
-only for keyed agent requests, so offline commands can still open older schemas without migrating them. The fixed-length
-hash keeps any agent key within the target's intent-key limit. The helm draws the one distinction that matters from it —
-a clone whose result is the asking session or the named source is refused rather than reported, before anything durable
-is recorded for the replayed row. The two creating verbs name their target host by display name, matching
-`AgentHost::name`. Registry IDs join host and session discovery and distinguish duplicate labels; they are not
-destination selectors. A name matching two registered hosts is refused as a `Conflict` naming the collision, never
-resolved to whichever row the listing ordered first: display names are not unique by construction (the local row renders
-as `this machine`, and an ssh destination may be spelled the same), and guessing between them would put a session on a
-machine nobody chose. A registered name carrying a control character can never be typed back at all, since the relay
-refuses one in `--host`; the not-found refusal says so by count, because the fix is a rename and an agent has no rename
-verb for hosts.
+earlier registry's approved retry when numeric host rows coincide. The entry UUID keeps approvals tied to the logical
+host across adoption. A number reused after rollback cannot inherit another entry's approval.
+
+Including the entry UUID changes retry keys: an in-flight keyed retry across this upgrade needs approval again and, if
+approved, creates a new session or checkout instead of returning the earlier one. The namespace is read only for keyed
+agent requests, so offline commands can still open older schemas without migrating them. The fixed-length hash keeps any
+agent key within the target's intent-key limit. The helm draws the one distinction that matters from it — a clone whose
+result is the asking session or the named source is refused rather than reported, before anything durable is recorded
+for the replayed row. The two creating verbs name their target host by display name, matching `AgentHost::name`.
+Registry IDs join host and session discovery and distinguish duplicate labels; they are not destination selectors. A
+name matching two registered hosts is refused as a `Conflict` naming the collision, never resolved to whichever row the
+listing ordered first: display names are not unique by construction (the local row renders as `this machine`, and an ssh
+destination may be spelled the same), and guessing between them would put a session on a machine nobody chose. A
+registered name carrying a control character can never be typed back at all, since the relay refuses one in `--host`;
+the not-found refusal says so by count, because the fix is a rename and an agent has no rename verb for hosts.
 
 An agent's create sends a `LaunchRequest`: a command launch (`--command`, the required `--yolo`/`--no-yolo` assertion,
 an optional declared `--agent` and `--resume-command`), which the relay's doorway checks by the command-launch rules
