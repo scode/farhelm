@@ -3902,3 +3902,37 @@ are addressed by run UUID and expire with temporary-file cleanup.
 Class: fixture-premise
 
 Cause: hypothesis
+
+## 2026-11-05 — folder dropdown refusal latched build skew (e2e/tests/sidebar.spec.ts)
+
+`composer folder dropdown preserves keyboard launch and grouped history` passed three of three per engine in the
+ordinary baseline but failed both WebKit attempts in host-terminal run `6c3945cf-9c27-4f04-b5a1-be4b3ea9d5b6` at the
+unchanged selected-reset visibility check. The selected reset was below the clipped scrollport, and the screenshot also
+showed an unexpected build-mismatch warning. Both controlled launch-refusal replies omitted the serving helm's build
+stamp, which latches that warning and withdraws background readers. They now retain a required real build stamp, and the
+test also checks that the warning remains absent. No selection, focus, scroll or viewport assertion was relaxed; no
+fixture scrolling was added at the failing boundary. The corrected case passed three of three per engine with host
+terminals in `210aac92-24fa-4445-a59e-78927ca391e7` and three of three per engine with ordinary terminals in
+`8734165a-d7cc-4f53-b113-5369df8c71fa`. This corrects the observed fixture-protocol error; it does not prove that every
+historical WebKit viewport failure had the same trigger. The TODO entry and exclusion are removed by this change.
+
+```text
+Error: keyboard navigation must reveal a reset below the scroll cap
+Expected: in viewport
+Received: viewport ratio 0
+Timeout: 5000ms
+```
+
+Evidence: shared x86_64 Linux, Node 26.13.0, Playwright 1.64.0, three workers with one stack each, zero retries, locale
+C.UTF-8; verified tmux 3.7c executable SHA256 `ba702d3003667a258c423b1516d4fe9de43b20bfefeeae213a3bb1363dccfceb`. The
+failing host run used `e7fb5df7f4f26c315a6845e28c1261de40e91b6a` with the other browser-fixture repairs dirty; the
+corrected host run used `a2d05035aac82c7ed06a05646f6c3d5411df151e`, and the corrected ordinary run used
+`7df1a7d6b954298eb428b0b7e156b9404b18fa05`, each with this fixture's stamp and no-skew assertions and unrelated pending
+test/documentation edits dirty. No product asset changed. Ambient Farhelm variables were scrubbed; both runs supplied
+recorder-owned `FARHELM_TEST_TRACE_DIR`, and the host run retained `FARHELM_E2E_SUITE_TERMINALS`. Other workloads were
+present; exact case-level load and memory pressure were not measured. Private reports, screenshots and traces remain
+addressed by run UUID and expire with temporary-file cleanup.
+
+Class: fixture-premise
+
+Cause: established

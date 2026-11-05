@@ -6568,11 +6568,14 @@ test("composer folder dropdown preserves keyboard launch and grouped history", a
     created_at: 20 - index, creation_seq: 20 - index,
   }));
   await installComposerChoices(page, request, [], [{ id: "dropdown-model", harness: "codex", efforts: ["high"] }], folders);
+  const build = requireHelmBuild(await request.get("/api/sessions"), "folder dropdown refusal fixture");
   const posts: any[] = [];
   await page.route("**/api/sessions", async (route) => {
     if (route.request().method() !== "POST") return route.continue();
     posts.push(route.request().postDataJSON());
-    await route.fulfill({ status: 500, body: "folder dropdown fixture refuses launch" });
+    // A refusal is still a reply from this helm. Omitting its identity would
+    // latch build skew, add a banner and withdraw readers during the geometry check.
+    await route.fulfill({ status: 500, headers: { "x-farhelm-build": build }, body: "folder dropdown fixture refuses launch" });
   });
   await page.goto("/");
   await page.locator(".new-session-button").click();
@@ -6621,6 +6624,7 @@ test("composer folder dropdown preserves keyboard launch and grouped history", a
   await expect(form.locator(".create-session-submit")).toBeEnabled();
   await folder.press("Enter");
   await expect(form.locator(".create-session-error")).toContainText("folder dropdown fixture refuses launch");
+  await expect(page.locator(".build-skew")).toHaveCount(0);
   await expect(list, "refused Enter must leave the controls below the folder reachable").toHaveCount(0);
   await expect(folder).toHaveAttribute("aria-expanded", "false");
   await expect(folder).toHaveValue("/tmp");
@@ -6645,6 +6649,7 @@ test("composer folder dropdown preserves keyboard launch and grouped history", a
   await page.mouse.up();
   await expect.poll(() => posts.length).toBe(2);
   expect(posts[1]).toMatchObject({ cwd: "/var/tmp", command: { command: "sleep 1" } });
+  await expect(page.locator(".build-skew")).toHaveCount(0);
   await form.getByRole("tab", { name: "Agent", exact: true }).click();
 
   await folderOptions(form);
