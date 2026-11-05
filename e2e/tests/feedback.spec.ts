@@ -731,6 +731,10 @@ test("the dialog refuses blank and over-long messages without sending", async ({
   await expect(send).toBeDisabled();
   for (const colorScheme of ["dark", "light"] as const) {
     await page.emulateMedia({ colorScheme });
+    // Media emulation can return before the page handles its change event.
+    // Sampling an expected token first would pin the old palette while the
+    // assertion below observes the newly applied one.
+    await expect(page.locator("html")).toHaveAttribute("data-appearance", colorScheme);
     // Disabled filled actions use a readable quiet surface in both palettes;
     // an empty message must not leave faded inverse text on an affirmative fill.
     await expect(send).toHaveCSS("background-color", await resolveToken(page, "--bg-1"));

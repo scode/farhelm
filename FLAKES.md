@@ -3821,3 +3821,33 @@ cleanup/authentication results are discarded as invalid evidence, not classified
 Class: budget
 
 Cause: established
+
+## 2026-11-05 — feedback expected-color snapshot races appearance (e2e/tests/feedback.spec.ts)
+
+The disabled Send color failure has a fixture mechanism on both engines: `page.emulateMedia` and the page's media-change
+handler are separate boundaries. Resolving the expected palette token before the handler applies the new appearance can
+pin the old color for the whole assertion. The ordinary known-flake baseline passed three of three per engine. A
+controlled reproduction held the real media-change callback until after sampling that token, then applied the callback:
+run `1b09e852-73fb-4fc2-b192-27efbecc28e9` failed on Chromium and WebKit with the old expected color and new actual
+color. Moving the resolved-appearance wait before sampling passed both engines under the same gate in
+`7c073af5-3796-40a9-a8f0-136071612a5d`. The gate was removed; ordinary final-source validation
+`0877bae7-861b-40a7-b9a3-be836ac6b306` passed three of three per engine. The disabled-state, exact-color, opacity,
+length-limit and zero-send assertions remain. This change removes the TODO entry and sweep exclusion.
+
+```text
+Expected: "rgb(233, 237, 244)"
+Received: "rgb(29, 34, 44)"
+```
+
+Evidence: shared x86_64 Linux, Node 26.13.0, Playwright 1.64.0, three workers with one stack each, zero retries, tmux
+3.7c executable SHA256 `ba702d3003667a258c423b1516d4fe9de43b20bfefeeae213a3bb1363dccfceb`, locale C.UTF-8. Base
+`ce630ce7a18a69f8a58fec5786778fdbafd9b3a5`; controlled runs had temporary test-only event gating and unrelated fixture
+edits dirty, final validation had the four reviewed browser-test fixes dirty. No product asset changed. Ambient Farhelm
+variables were scrubbed; the recorder supplied `FARHELM_TEST_TRACE_DIR`. Other host workloads were present; load at the
+individual color checks and memory pressure were not measured. Reports and controlled-failure traces remain private,
+addressed by run UUID, and expire with temporary-file cleanup. This establishes the expected-color race; it does not
+attribute every older screenshot without its original timing evidence.
+
+Class: readiness
+
+Cause: established
