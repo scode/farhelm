@@ -51,10 +51,10 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::api::SessionListing;
+use crate::api::{SessionFilter, SessionListing};
 use crate::hosts::{HostsRead, session_unavailable_cause};
 use crate::status::{StatusBadge, status_badge};
-use crate::{Session, SessionStatus};
+use crate::{HostId, Session, SessionStatus};
 
 /// The listing as it should be RENDERED: the server's rows with this
 /// view's own just-landed renames painted over them (PLAN_M5.md item 6).
@@ -756,10 +756,31 @@ pub(crate) fn absence_is_evidence(listing: &SessionListing) -> bool {
     !listing.omits_fleet_members && listing_is_complete(listing)
 }
 
-/// The no-match line for a filtered reply with nothing to show — or `None`
+/// The empty result's wording and host identity, before any registry lookup.
+///
+/// A complete result can name its answered filters; a limited result keeps
+/// its qualified sentence rather than claiming no matching session exists.
+/// Keeping the host as a routing id lets rendering use the current identity
+/// mark without making this pure projection depend on registry availability.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum NoMatchLine {
+    /// A qualified line whose full wording must remain intact.
+    Text(&'static str),
+    /// The complete-list sentence, with an optional host appended by rendering.
+    Filters {
+        /// The status-qualified noun phrase, before any host or final period.
+        lead: &'static str,
+        /// The answered query's host, even if that registry row is now absent.
+        host: Option<HostId>,
+        /// Whether this result offers the independent status-clearing action.
+        clear_status: bool,
+    },
+}
+
+/// The no-match line for the query this filtered reply answered — or `None`
 /// when no such line may be printed.
 ///
-/// The categorical claim ("no sessions match this filter") is about the
+/// The categorical claim ("no waiting sessions", for example) is about the
 /// FLEET, and it is only true when the helm counted the matches over the
 /// whole fleet and counted zero — which requires a COMPLETE listing. A
 /// truncated one counted only the rows the caps retained, and a match may
@@ -774,16 +795,34 @@ pub(crate) fn absence_is_evidence(listing: &SessionListing) -> bool {
 ///   banner is already reporting (see [`count_banner`]) — printing
 ///   "nothing matched" above visible rows would be the UI arguing with
 ///   itself.
-pub(crate) fn no_match_line(listing: &SessionListing) -> Option<&'static str> {
+///
+/// `answered` belongs to this committed reply, not to the controls while a
+/// newer read is pending. Naming the requested host over the previous empty
+/// result would attribute evidence to a query the helm has not answered yet.
+pub(crate) fn no_match_line(
+    listing: &SessionListing,
+    answered: &SessionFilter,
+) -> Option<NoMatchLine> {
     if !(listing.filtered && listing.matching == Some(0) && listing.sessions.is_empty()) {
         return None;
     }
-    Some(if listing_is_complete(listing) {
-        "No sessions match this filter"
-    } else {
+    Some(if !listing_is_complete(listing) {
         // SPEC.md's "could not read to the end", scoped to what this line
         // is allowed to claim under a cut list.
-        "No matches among the sessions that could be read — the list could not be read to the end"
+        NoMatchLine::Text(
+            "No matches among the sessions that could be read — the list could not be read to the end",
+        )
+    } else {
+        NoMatchLine::Filters {
+            lead: match answered.status.as_str() {
+                "running" => "No running sessions",
+                "waiting" => "No waiting sessions",
+                "idle" => "No idle sessions",
+                _ => "No sessions",
+            },
+            host: answered.host,
+            clear_status: !answered.status.is_empty(),
+        }
     })
 }
 
@@ -2266,39 +2305,78 @@ mod tests {
     /// the user off to change a query that was working.
     #[farhelm_testtrace::test]
     fn the_no_match_line_follows_the_matching_count_rather_than_the_rows() {
+        let answered = SessionFilter {
+            host: Some(7),
+            status: "waiting".into(),
+            ..Default::default()
+        };
         assert_eq!(
-            no_match_line(&filtered_listing(0, 0, 700, false)),
-            Some("No sessions match this filter"),
+            no_match_line(&filtered_listing(0, 0, 700, false), &answered),
+            Some(NoMatchLine::Filters {
+                lead: "No waiting sessions",
+                host: Some(7),
+                clear_status: true
+            }),
             "the helm counted the matches over a complete listing and counted none"
         );
         assert_eq!(
-            no_match_line(&filtered_listing(0, 0, 700, true)),
-            Some(
+            no_match_line(&filtered_listing(0, 0, 700, true), &answered),
+            Some(NoMatchLine::Text(
                 "No matches among the sessions that could be read — the list could not be read \
                  to the end"
-            ),
+            )),
             "a cut listing's zero is a count over a prefix, and the line must say so"
         );
         assert_eq!(
-            no_match_line(&filtered_listing(0, 12, 700, true)),
+            no_match_line(&filtered_listing(0, 12, 700, true), &answered),
             None,
             "twelve matched and this reply carried none of them: a truncation, not an empty search"
         );
         assert_eq!(
-            no_match_line(&old_peer_filtered_listing(0, 0, false)),
+            no_match_line(&old_peer_filtered_listing(0, 0, false), &answered),
             None,
             "a helm that ignored the filter counted nothing, so it cannot be quoted as counting zero"
         );
         assert_eq!(
-            no_match_line(&listing(0, 0, false)),
+            no_match_line(&listing(0, 0, false), &SessionFilter::default()),
             None,
             "and an unfiltered listing has no filter to report on"
         );
         assert_eq!(
-            no_match_line(&filtered_listing(2, 0, 700, false)),
+            no_match_line(&filtered_listing(2, 0, 700, false), &answered),
             None,
             "zero matches over visible rows is a contradiction the banner reports; the line would \
              argue with the rows"
         );
+    }
+
+    /// Each offered status names the query that produced the empty result.
+    /// The host remains an unresolved id so a missing registry row cannot
+    /// silently turn a host-specific result into an all-hosts claim.
+    #[farhelm_testtrace::test]
+    fn empty_results_name_the_answered_host_and_status_independently() {
+        let empty = filtered_listing(0, 0, 9, false);
+        for (status, lead) in [
+            ("", "No sessions"),
+            ("running", "No running sessions"),
+            ("waiting", "No waiting sessions"),
+            ("idle", "No idle sessions"),
+        ] {
+            for host in [None, Some(17)] {
+                let answered = SessionFilter {
+                    host,
+                    status: status.into(),
+                    ..Default::default()
+                };
+                assert_eq!(
+                    no_match_line(&empty, &answered),
+                    Some(NoMatchLine::Filters {
+                        lead,
+                        host,
+                        clear_status: !status.is_empty()
+                    }),
+                );
+            }
+        }
     }
 }

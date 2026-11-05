@@ -695,11 +695,13 @@ fn rail_presentation(
 /// the row's existing measurement generation owns repeated openings.
 type RailMenuOpener = Callback<(Rc<MountedData>, MenuOpenIntent)>;
 
-/// Keep the full destination available when a collapsed avatar only shows a caption.
+/// Keep a host's full identity available beside a shortened visible label.
 /// Inputs are raw peer values; display escaping happens here before the string
 /// becomes both the tooltip and the button's accessible name. Local hosts have
 /// no SSH destination, and an unaliased remote must not repeat its own name.
-fn rail_identity(name: &str, destination: Option<&str>, local: bool) -> String {
+/// The rail and filter chip append their own interaction wording separately;
+/// neither identity tooltip needs to borrow the other's connection-state text.
+pub(crate) fn rail_identity(name: &str, destination: Option<&str>, local: bool) -> String {
     let shown = gui_host_name(name, local);
     match destination.filter(|destination| !local && *destination != name) {
         Some(destination) => format!("{shown} ({})", display_peer(destination)),

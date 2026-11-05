@@ -39,6 +39,20 @@ async function selectHost(page: Page, host: number | undefined): Promise<void> {
   await chooseHost(page, host);
 }
 
+/** Change only a host's displayed identity; its real helm membership still answers every list query.
+ * A fictional destination makes the tooltip assertion independent of the machine running the stack. */
+async function showHostIdentity(page: Page, id: number, name: string): Promise<void> {
+  await page.route((url) => url.pathname === "/api/hosts", async (route: Route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    const response = await route.fetch();
+    const body = await response.json();
+    const host = body.hosts.find((host: { id: number }) => host.id === id);
+    expect(host, "the presentation fixture must retain a real registered host").toBeDefined();
+    Object.assign(host, { name, alias: name, destination: "ops@build.example", icon: "database", color: "teal" });
+    await route.fulfill({ response, json: body });
+  });
+}
+
 test.describe("permanent host filtering", () => {
   const created: string[] = [];
   test.afterEach(async ({ request }) => { while (created.length) await cleanupSession(request, created.pop()!); });
@@ -81,22 +95,52 @@ test.describe("permanent host filtering", () => {
     expect(remoteReads.every((read) => read.body.sessions.some((s) => s.id === remoteSession.id) && !read.body.sessions.some((s) => s.id === localSession.id))).toBe(true);
   });
 
-  /** Empty matches are a host-query result, not the empty-fleet placeholder. */
+  /** Empty matches name the chosen identity and every status, rather than looking like an empty fleet.
+   * Clearing either dimension must retain the other, with a surviving keyboard focus owner. */
   test("a known empty remote selection says that the host filter matched nothing", async ({ page, request }) => {
     const local = await localHostId(request);
     const remote = (await listHosts(request)).find((host) => host.id !== local);
     expect(remote).toBeTruthy();
     expect((await listSessions(request, `host=${remote!.id}`)).sessions, "the empty fixture must be asserted before selection").toHaveLength(0);
+    await showHostIdentity(page, remote!.id, "Build farm");
     await openList(page); await selectHost(page, remote!.id);
-    await expect(page.locator(".filter-empty")).toBeVisible({ timeout: 20_000 });
+    const chip = page.getByRole("button", { name: "Filtered to host Build farm; remove filter", exact: true });
+    await expect(chip).toBeVisible();
+    await expect(chip).toHaveAttribute("data-tooltip", "Build farm (ops@build.example)");
+    await expect(chip.locator('.host-kind-icon[data-glyph="database"][data-host-color="teal"]')).toHaveCount(1);
+    await expect(page.locator(".filter-empty")).toHaveText("No sessions on Build farm.", { timeout: 20_000 });
+    await expect(page.locator(".filter-empty .host-kind-icon")).toHaveCount(1);
     await expect(page.locator(".session-count")).toHaveText(/^0 of \d+$/);
+
+    for (const status of ["Running", "Waiting", "Idle"] as const) {
+      await chooseStatus(page, status);
+      await expect(page.locator(".filter-empty")).toHaveText(`No ${status.toLowerCase()} sessions on Build farm.`);
+    }
+    const clearStatus = page.getByRole("button", { name: "Show all statuses", exact: true });
+    await clearStatus.focus();
+    await expect(clearStatus).toBeFocused();
+    await clearStatus.press("Enter");
+    await expect(hostChoice(page)).toBeFocused();
+    await expect(hostChoice(page, remote!.id)).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("radio", { name: "All", exact: true })).toBeChecked();
+    await expect(page.locator(".filter-empty")).toHaveText("No sessions on Build farm.");
+
+    const clearHost = page.getByRole("button", { name: "Show all hosts", exact: true });
+    await clearHost.click();
+    await expect(hostChoice(page)).toHaveAttribute("aria-pressed", "true");
+    await expect(hostChoice(page)).toBeFocused();
+    await expect(chip).toHaveCount(0);
+    await expect(page.locator(".filter-empty")).toHaveCount(0);
   });
 
-  /** A removed selected host remains a disabled tombstone so its query cannot silently widen to ALL. */
+  /** A removed selected host stays a disabled rail tombstone without silently widening its query.
+   * Its independent chip must still offer a keyboard escape back to All. */
   test("a removed selected host remains a named tombstone and query", async ({ page, request }) => {
     const local = await localHostId(request);
     const remote = (await listHosts(request)).find((host) => host.id !== local);
-    expect(remote).toBeTruthy(); let remove = false;
+    expect(remote).toBeTruthy();
+    expect((await listSessions(request, `host=${remote!.id}`)).sessions, "the removed host's listing must already be empty").toHaveLength(0);
+    let remove = false;
     await page.route((url) => url.pathname === "/api/hosts", async (route: Route) => {
       if (route.request().method() !== "GET") return route.continue();
       const response = await route.fetch(); const body = await response.json();
@@ -111,7 +155,171 @@ test.describe("permanent host filtering", () => {
     await expect(tombstone).toHaveJSProperty("disabled", true);
     await expect(tombstone).toHaveAttribute("aria-pressed", "true");
     await expect.poll(() => reads.some((read) => read.url.searchParams.get("host") === String(remote!.id))).toBe(true);
+    const chip = page.getByRole("button", { name: `Filtered to host Host ${remote!.id} (no longer registered); remove filter`, exact: true });
+    await expect(chip).toBeEnabled();
+    await expect(chip).toContainText("?");
+    await expect(page.locator(".filter-empty")).toContainText("No sessions on");
+    await expect(page.locator(".filter-empty .filter-host-name")).toHaveText(`Host ${remote!.id} (no longer registered)`);
+    await chip.focus();
+    await expect(chip).toBeFocused();
+    await chip.press("Space");
+    await expect(hostChoice(page)).toBeFocused();
+    await expect(hostChoice(page)).toHaveAttribute("aria-pressed", "true");
+    await expect(chip).toHaveCount(0);
+    await expect.poll(() => reads.some((read) => !read.url.searchParams.has("host"))).toBe(true);
   });
+
+  /** The chip is a current control, while the empty message belongs to the accepted reply.
+   * Holding the next host's bytes distinguishes those two lifetimes without a timing window. */
+  test("an empty message keeps its answered host while another host read is held", async ({ page, request }) => {
+    const local = await localHostId(request);
+    const remote = (await listHosts(request)).find((host) => host.id !== local);
+    expect(remote).toBeTruthy();
+    expect((await listSessions(request, `host=${remote!.id}`)).sessions).toHaveLength(0);
+    const localRows = (await listSessions(request, `host=${local}`)).sessions;
+    expect(localRows.length, "the replacement listing must visibly distinguish itself from the empty remote").toBeGreaterThan(0);
+    await showHostIdentity(page, remote!.id, "Build farm");
+    await openList(page);
+    await selectHost(page, remote!.id);
+    const empty = page.locator(".filter-empty");
+    await expect(empty).toHaveText("No sessions on Build farm.");
+
+    const held = await holdReads(page, (url) => url.pathname === "/api/sessions" && url.searchParams.get("host") === String(local));
+    try {
+      await selectHost(page, local);
+      await held.waitForCaptures(1);
+      expect(JSON.parse(held.reply(1).body).sessions.some((session: { id: string }) => session.id === localRows[0].id)).toBe(true);
+      const chip = page.getByRole("button", { name: "Filtered to host Local; remove filter", exact: true });
+      await expect(chip).toBeVisible();
+      await expect(empty).toHaveText("No sessions on Build farm.");
+      await expect(empty.locator(".filter-host-name")).not.toHaveText("Local");
+      held.release(1);
+      await expect(row(page, localRows[0].id)).toBeVisible();
+      await expect(empty).toHaveCount(0);
+
+      // The local chip also uses native keyboard activation and returns focus
+      // to the surviving All control after removing itself.
+      await page.getByRole("radio", { name: "Idle", exact: true }).focus();
+      await expect(page.getByRole("radio", { name: "Idle", exact: true })).toBeFocused();
+      await page.keyboard.press("Tab");
+      await expect(chip).toBeFocused();
+      await chip.press("Enter");
+      await expect(chip).toHaveCount(0);
+      await expect(hostChoice(page)).toHaveAttribute("aria-pressed", "true");
+      await expect(hostChoice(page)).toBeFocused();
+    } finally {
+      held.releaseAll();
+    }
+  });
+
+  for (const [aliasCase, name] of [
+    ["spaced", "Build farm for the release verification sessions with a deliberately long host alias"],
+    ["unbroken", "a".repeat(64)],
+  ] as const) {
+    /** Long aliases need different presentation in the chip and the empty sentence: ellipsis and full wrapping.
+     * Both words and an unbroken valid alias must fit the real sidebar floor, with punctuation on the final name line. */
+    test(`the host chip truncates a long alias at the minimum sidebar width (${aliasCase})`, async ({ page, request }) => {
+      const local = await localHostId(request);
+      const remote = (await listHosts(request)).find((host) => host.id !== local);
+      expect(remote).toBeTruthy();
+      await showHostIdentity(page, remote!.id, name);
+      await openList(page);
+      await selectHost(page, remote!.id);
+      const chip = page.getByRole("button", { name: `Filtered to host ${name}; remove filter`, exact: true });
+      await expect(chip).toHaveAttribute("data-tooltip", `${name} (ops@build.example)`);
+      const resize = page.getByRole("separator", { name: "Sidebar width" });
+      try {
+        await resize.focus();
+        await expect(resize).toBeFocused();
+        for (let step = 0; step < 10; step++) await resize.press("ArrowLeft");
+        await expect(resize).toHaveAttribute("aria-valuenow", "296");
+        for (const colorScheme of ["dark", "light"] as const) {
+          await page.emulateMedia({ colorScheme });
+          await expect(page.locator("html")).toHaveAttribute("data-appearance", colorScheme);
+          await page.evaluate(() => document.fonts.ready);
+          await expect.poll(() => chip.evaluate((element) => {
+            const box = element.getBoundingClientRect();
+            const group = element.closest(".session-status-filter")!;
+            const well = group.getBoundingClientRect();
+            const statuses = group.querySelector(".segmented-control")!.getBoundingClientRect();
+            const name = element.querySelector(".filter-host-name")!;
+            const style = getComputedStyle(name);
+            return {
+              inside: box.left >= well.left - 0.5 && box.right <= well.right + 0.5,
+              separateLine: box.top >= statuses.bottom - 0.5,
+              ellipsis: style.textOverflow === "ellipsis" && style.overflowX === "hidden" && name.scrollWidth > name.clientWidth,
+              escapeInside: element.scrollWidth <= element.clientWidth + 1,
+            };
+          })).toEqual({ inside: true, separateLine: true, ellipsis: true, escapeInside: true });
+          const message = page.locator(".filter-empty");
+          await expect(message).toHaveText(`No sessions on ${name}.`);
+          await expect(message.locator(".filter-host-name")).toHaveText(name);
+          // Text content remains complete under CSS ellipsis or overflow.
+          // Check every host glyph against the message's content box as well
+          // as its ending: inline-flex once clipped the name, and ordinary
+          // inline flow without overflow wrapping still lost an unbroken alias.
+          await expect.poll(() => message.evaluate((element) => {
+            const label = element.querySelector(".filter-host-name")!;
+            const walker = document.createTreeWalker(label, NodeFilter.SHOW_TEXT);
+            const nameTexts: Text[] = [];
+            for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+              if (node.textContent?.length) nameTexts.push(node as Text);
+            }
+            const lastNameText = nameTexts[nameTexts.length - 1];
+            const periodText = Array.from(element.childNodes).reverse().find((node) =>
+              node.nodeType === Node.TEXT_NODE && node.textContent?.trim() === "."
+            ) as Text | undefined;
+            if (!lastNameText || !periodText) throw new Error("the empty-message fixture needs a host name and final period");
+            const end = document.createRange();
+            end.setStart(lastNameText, lastNameText.length - 1);
+            end.setEnd(lastNameText, lastNameText.length);
+            const period = document.createRange();
+            const offset = periodText.data.lastIndexOf(".");
+            period.setStart(periodText, offset);
+            period.setEnd(periodText, offset + 1);
+            const lastCharacter = end.getBoundingClientRect();
+            const punctuation = period.getBoundingClientRect();
+            const bounds = element.getBoundingClientRect();
+            const style = getComputedStyle(element);
+            const content = {
+              left: bounds.left + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft),
+              right: bounds.right - parseFloat(style.borderRightWidth) - parseFloat(style.paddingRight),
+              top: bounds.top + parseFloat(style.borderTopWidth) + parseFloat(style.paddingTop),
+              bottom: bounds.bottom - parseFloat(style.borderBottomWidth) - parseFloat(style.paddingBottom),
+            };
+            const glyphs = [punctuation];
+            let painted = punctuation.width > 0;
+            const glyph = document.createRange();
+            for (const text of nameTexts) {
+              for (let offset = 0; offset < text.length; offset++) {
+                if (!text.data[offset].trim()) continue;
+                glyph.setStart(text, offset);
+                glyph.setEnd(text, offset + 1);
+                const rectangles = Array.from(glyph.getClientRects()).filter((rect) => rect.width > 0);
+                painted &&= rectangles.length > 0;
+                glyphs.push(...rectangles);
+              }
+            }
+            return {
+              painted,
+              inside: glyphs.every((rect) => rect.left >= content.left - 0.5 && rect.right <= content.right + 0.5
+                && rect.top >= content.top - 0.5 && rect.bottom <= content.bottom + 0.5),
+              sameLine: Math.abs(lastCharacter.top - punctuation.top) < 1,
+            };
+          })).toEqual({ painted: true, inside: true, sameLine: true });
+          await test.info().attach(`minimum-host-filter-${aliasCase}-${colorScheme}`, {
+            body: await page.locator(".app-sidebar").screenshot(), contentType: "image/png",
+          });
+        }
+        await chip.focus();
+        await expect(chip).toBeFocused();
+        await chip.press("Space");
+        await expect(hostChoice(page)).toBeFocused();
+      } finally {
+        await page.evaluate(() => localStorage.removeItem("farhelm.sidebar-width"));
+      }
+    });
+  }
 
   /**
    * Registry presentation is mutable, but a filter is a stable host ID rather

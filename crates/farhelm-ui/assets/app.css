@@ -1522,9 +1522,13 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 /* Status is a single server query. Keep the shared native radio anatomy
    and fit all four words inside the collapsed rail's 240px column floor. */
 .session-status-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
   padding: 6px 8px;
 }
-.session-status-filter .segmented-control { display: flex; }
+.session-status-filter .segmented-control { display: flex; flex: 1 1 220px; min-width: 0; }
 .session-status-filter .segment-radio { min-width: 0; flex: 1 1 0; }
 /* An expanded rail can borrow list width even before the terminal's
    narrow-window mode applies. Let the existing control wrap from its
@@ -1539,6 +1543,24 @@ html.host-rail-open .session-status-filter .segment-radio { flex: 1 0 auto; }
 /* At the stored sidebar minimum, expansion can leave a 76px column. Even
    one selected word must fit the well's inner width in both font engines. */
 html.host-rail-open .session-status-filter .segment-radio > span { padding-inline: 3px; }
+
+/* A host remains named while its read is pending or failed. At the sidebar
+   floor the chip wraps below the statuses; only its name yields space, so
+   the mark and removal control remain visible beside an unbounded alias. */
+.session-status-filter .host-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 4px 6px;
+  font-size: 12px;
+}
+.host-filter-chip .host-kind-icon,
+.filter-host-identity .host-kind-icon { width: 14px; height: 14px; flex: 0 0 14px; }
+.filter-host-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.filter-host-remove,
+.filter-host-missing { flex: 0 0 auto; }
 
 /* The host choice stays visible even for a failed list read. Its registry
    label can be long, so it must not impose its
@@ -6347,10 +6369,27 @@ a:any-link,
   background: var(--bg-1);
 }
 
-/* A host-filter result still needs a textual empty state. */
+/* The sentence belongs to the answered query, while the controls below it
+   can widen the current choice. Separate elements keep the result readable
+   as one sentence and leave keyboard focus on a stable rail control. */
 .filter-empty {
   color: var(--fg-1);
+  padding-bottom: 8px;
 }
+.filter-host-identity {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  vertical-align: bottom;
+}
+/* The message can use several lines to name a host. Keep ordinary inline
+   word wrapping here so its sentence-ending period stays with the name;
+   only the removable chip needs an ellipsis beside its fixed controls. */
+.filter-empty .filter-host-identity { display: inline; }
+.filter-empty .filter-host-name { white-space: normal; overflow-wrap: anywhere; }
+.filter-empty .host-kind-icon { margin-inline-end: 4px; }
+.filter-empty-actions { display: flex; flex-wrap: wrap; gap: 8px 12px; padding: 0 28px 28px; font-size: 12px; }
 
 /* ===== Create dialog ============================================== */
 

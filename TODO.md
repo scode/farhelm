@@ -24,6 +24,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Generally rethink the session filtering experience.** The list now names its active filters and shows a removable
+  host chip; revisit the broader filtering experience.
+
 - **The desktop smoke's appearance leg on grid terminals.** The optional appearance leg of the Linux desktop smoke
   (`DESKTOP_SMOKE_APPEARANCE=1 scripts/desktop-smoke.sh`) checks each light/dark case's terminal too: its background
   color, that typing reaches the agent, and that a 512-line burst arrives whole and in order on the same attachment.
@@ -423,13 +426,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   - Possibly: live resize (boot small, grow on demand), shared scratch volumes, and forking a warm sandbox from a memory
     checkpoint or live copy (restores running processes with the same boot ID, which is also a trap: a forked supervisor
     keeps its identity).
-
-### Trivial
-
-- **Host click in the navigation rail gives no feedback.** Clicking a host in the navigation rail shows no sign of what
-  it did, especially with an empty session list. Make "No sessions match this filter" name the active filter — showing
-  the host with icon and name when a host is filtered on — and show the host in the filter bar. Generally rethink the
-  filter experience. Plan: `plans/queue/host-filter-feedback.md`.
 
 ## Doc todo
 
