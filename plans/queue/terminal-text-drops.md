@@ -321,52 +321,67 @@ Update the tests that pin today's deletion (the three the plan names, the paired
 the restored behavior, and state the selector rule where the specification describes selectors. The roughly 100-line
 gate still applies as the Blocked section describes, with no exemption for the vendored patch or documentation.
 
-## Blocked
+### 2026-11-05: answer to a blocked question
 
-Blocked on 2026-11-05 (claim 85f8c7).
+The question, as the executor put it:
 
-### Restoring vowel signs exceeds the retained change-size limit
+> Blocked on 2026-11-05 (claim 85f8c7).
+>
+> ### Restoring vowel signs exceeds the retained change-size limit
+>
+> New terminals currently delete standalone Kirat Rai vowel signs from the screen and copied text, including inside an
+> ordinary word with no emoji. Triage chose to preserve visible letters while accepting loss of invisible formatting.
+> The accepted formatting-loss documentation is finished in
+> [draft PR #3029](https://github.com/scode/farhelm/pull/3029/changes), which remains open and draft. It changes no
+> terminal behavior; the vowel-sign bug remains.
+>
+> The previous answer settled the behavior: every unattached vowel or trailing sign uses ordinary character printing,
+> including zero-width signs stored as combining marks. A selector following a retained sign is ignored. The same answer
+> explicitly kept the roughly 100-line limit, counting the mirrored vendor patch, tests and documentation.
+>
+> A concrete private proposal for that behavior measures 320 physical added-plus-deleted lines, before two lines for the
+> patch's regenerated hash and any formatting or review corrections:
+>
+> | Part                                                            | Changed lines |
+> | --------------------------------------------------------------- | ------------: |
+> | Terminal implementation and its three existing regression tests |           105 |
+> | Required mirrored vendor patch, including moved hunk headers    |           115 |
+> | Vendor documentation, mostly moved patch references             |            58 |
+> | Paired parser regression expectations                           |             6 |
+> | Saved-state regression test                                     |            33 |
+> | Selector specification                                          |             3 |
+>
+> The repair uses one shared, read-only attachment check. A sign attaches under the existing legal-pair rules or falls
+> through to existing ordinary printing. The repeat command uses the same check before printing: a standalone printable
+> Kirat sign becomes the repeated character, while an attached sign keeps the prior character. Existing legal Hangul
+> attachments stay intact. There is no new remembered state, selector layout rule or snapshot format.
+>
+> The code and its three tests alone require 210 lines when mirrored, before the other required files. Smaller wording
+> or test edits may shave that down, but no credible complete proposal near 100 lines was found. A helper that changes
+> the grid cannot also answer the repeat command's read-only pre-print query; duplicating the rules would create two
+> definitions of attachment. Omitting required tests, leaving patch references stale or exempting mirrored lines would
+> weaken or bypass the recorded constraints.
+>
+> Authorize a ceiling of **400 physical changed lines for this repair**, with all existing counting rules and behavior
+> unchanged, or keep the 100-line ceiling and defer the repair. I recommend 400: the measured proposal is about 322
+> lines with its patch hash, and the remaining room covers normal formatting and review corrections. Keeping 100 leaves
+> the known text-loss bug unresolved; it does not supply an alternative implementation.
+>
+> The proposal is sizing evidence, not a tested implementation. No repair was applied to the checkout, and no new
+> runtime tests ran. Implementation still requires the plan's focused vendor/emulator checks and single fresh
+> gpt-6.1-sol/high review. The unchanged documentation PR passed formatting and whitespace checks; the instruction
+> checker reported zero errors and three existing unrelated warnings. Its previous review remains applicable after an
+> empty-interdiff rebase. No website build was needed because no links or headings changed.
 
-New terminals currently delete standalone Kirat Rai vowel signs from the screen and copied text, including inside an
-ordinary word with no emoji. Triage chose to preserve visible letters while accepting loss of invisible formatting. The
-accepted formatting-loss documentation is finished in
-[draft PR #3029](https://github.com/scode/farhelm/pull/3029/changes), which remains open and draft. It changes no
-terminal behavior; the vowel-sign bug remains.
+The maintainer's answer:
 
-The previous answer settled the behavior: every unattached vowel or trailing sign uses ordinary character printing,
-including zero-width signs stored as combining marks. A selector following a retained sign is ignored. The same answer
-explicitly kept the roughly 100-line limit, counting the mirrored vendor patch, tests and documentation.
+The maintainer allowed the larger repair on 2026-11-05, in conversation with the landing monitor: "its fine allow the
+lines".
 
-A concrete private proposal for that behavior measures 320 physical added-plus-deleted lines, before two lines for the
-patch's regenerated hash and any formatting or review corrections:
-
-| Part                                                            | Changed lines |
-| --------------------------------------------------------------- | ------------: |
-| Terminal implementation and its three existing regression tests |           105 |
-| Required mirrored vendor patch, including moved hunk headers    |           115 |
-| Vendor documentation, mostly moved patch references             |            58 |
-| Paired parser regression expectations                           |             6 |
-| Saved-state regression test                                     |            33 |
-| Selector specification                                          |             3 |
-
-The repair uses one shared, read-only attachment check. A sign attaches under the existing legal-pair rules or falls
-through to existing ordinary printing. The repeat command uses the same check before printing: a standalone printable
-Kirat sign becomes the repeated character, while an attached sign keeps the prior character. Existing legal Hangul
-attachments stay intact. There is no new remembered state, selector layout rule or snapshot format.
-
-The code and its three tests alone require 210 lines when mirrored, before the other required files. Smaller wording or
-test edits may shave that down, but no credible complete proposal near 100 lines was found. A helper that changes the
-grid cannot also answer the repeat command's read-only pre-print query; duplicating the rules would create two
-definitions of attachment. Omitting required tests, leaving patch references stale or exempting mirrored lines would
-weaken or bypass the recorded constraints.
-
-Authorize a ceiling of **400 physical changed lines for this repair**, with all existing counting rules and behavior
-unchanged, or keep the 100-line ceiling and defer the repair. I recommend 400: the measured proposal is about 322 lines
-with its patch hash, and the remaining room covers normal formatting and review corrections. Keeping 100 leaves the
-known text-loss bug unresolved; it does not supply an alternative implementation.
-
-The proposal is sizing evidence, not a tested implementation. No repair was applied to the checkout, and no new runtime
-tests ran. Implementation still requires the plan's focused vendor/emulator checks and single fresh gpt-6.1-sol/high
-review. The unchanged documentation PR passed formatting and whitespace checks; the instruction checker reported zero
-errors and three existing unrelated warnings. Its previous review remains applicable after an empty-interdiff rebase. No
-website build was needed because no links or headings changed.
+Implement the measured proposal with a ceiling of 400 physical changed lines for this repair, counted under the existing
+rules (code, tests, the mirrored vendor patch and its hash, vendor documentation and the specification). The behavior
+stays as the previous answer settled it: every unattached vowel or trailing sign uses ordinary printing, a selector
+after a retained sign is ignored, and the repeat command uses the same shared attachment check. Add no new remembered
+state, selector layout rule or snapshot format. The roughly 100-line limit the previous answer restated came from the
+monitor carrying the plan's gate forward, not from the maintainer, and this answer replaces it for this repair. Run the
+plan's focused vendor and emulator checks and its required independent review as before.
