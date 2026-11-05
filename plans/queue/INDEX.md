@@ -4,4 +4,4 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 
 - [in-flight d38be5] `bulk-session-actions.md` — Shift+click and Cmd/Ctrl+click select several sessions; a bar offers Stop, Delete, Pin/Unpin and Mark read/unread, with one structured confirmation for a bulk Delete
 - [pending] `host-filter-feedback.md` — A host chosen in the rail shows as a removable chip beside the status filter, and an empty filtered list names its host and status
-- [in-flight 17f206] `tensorlake-ui-fixes.md` — Tensorlake fixes: recipe Save always visible, Suspending…/Resuming… states, launch-resume progress instead of a false "unavailable", Refresh with feedback, structured add-host and suspend dialogs
+- [complete] `tensorlake-ui-fixes.md` — Tensorlake fixes: recipe Save always visible, Suspending…/Resuming… states, launch-resume progress instead of a false "unavailable", Refresh with feedback, structured add-host and suspend dialogs

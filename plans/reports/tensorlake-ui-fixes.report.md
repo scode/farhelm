@@ -1,3 +1,26 @@
+## Since the last review
+
+The landing monitor returned the stack because closing Settings from its header sometimes showed no unsaved-recipe
+question on WebKit. Nothing had merged. This round updates #3050 in place; no PR was added or dropped. The other three
+PRs retain their reviewed behavior and the monitor's fixes: the Suspend and Refresh hover text, class selectors for the
+Add host help, and the changelog's coverage of #3049 and #3050.
+
+A controlled browser run established a focus race. The editor's opening animation frame could take focus from Name after
+the field was selected. Subsequent text then never reached the field, leaving the draft unchanged; header Close
+therefore closed without a question. The correction makes that initial focus and scroll yield to a field or control
+already chosen. The ordinary heading focus and editor-top opening remain. Close authorization and the recipe's draft,
+save and confirmation owners are unchanged.
+
+The original test was left unchanged. A separate regression holds the actual opening frame, chooses Name, then releases
+the frame and checks that focus, scroll position, typing and the header-close question survive. It failed before the
+product correction and passes afterward in Chromium and WebKit. The natural failure did not recur in ten unchanged
+baseline WebKit runs here, so the controlled result establishes the mechanism without claiming to recover the original
+monitor runs' exact event order.
+
+The unchanged close test passed 20 consecutive WebKit repetitions after the correction, with one worker and no retries.
+The full recipe spec passed all 16 cases, and four Add host focus cases passed, covering both palettes and both engines.
+All landing fixes remain in the four draft PRs.
+
 ## What this was about
 
 Tensorlake's interface made several operations hard to follow: Suspend claimed the sandbox was suspended before the
@@ -48,15 +71,63 @@ intercepted plans.
 - [#3050](https://github.com/scode/farhelm/pull/3050/changes): visible recipe actions and sandbox discovery feedback.
 - [#3051](https://github.com/scode/farhelm/pull/3051/changes): structured Add host form and creation confirmation.
 
-All four remain drafts in one linear stack. The stack was carefully rebased onto main after manual pin ordering landed;
-each PR's patch was unchanged. The review covered the new pin positions and schema, session-list ownership and menu
-focus, shared API types, styles and specification text. No design conflict or manual resolution was needed.
+All four remain drafts in one linear stack. The earlier integration rebase covered manual pin ordering, its schema,
+session-list ownership and menu focus, shared API types, styles and specification text. This round rebased onto
+`551a733d03c379736abfc5f008900ef5ed0d3410`; main had gained only plan bookkeeping. Every PR patch and the working
+correction were unchanged by that rebase. The focus correction is folded into #3050, preserving its reviewed descendant.
+Final published tip `076f420ede3272819536d2e0dbfd0834db544c49` has the same product and test files as the validated
+correction; only the plan index and Decision differ from that tested tree. No design conflict or manual resolution was
+needed.
 
 ## Checks run, reused and skipped
 
 Runtime commands below ran through `python3 scripts/record-test-run.py`, with pinned tmux 3.7c, zero retries, four Rust
 slots or up to three browser workers as applicable. Counts name observations rather than treating a later pass as
 erasing a failure.
+
+This round's new evidence covers the three-file focus correction before committing, with Git head
+`f7dad8657b044b5da5339e92c7dbecdf1d5d07ab` and working-tree fingerprint
+`1706c0c5286f7693505875e988ba949e159a49cec7797cb2590a6ea2709e6b41`. It changes the recipe opening handoff, its browser
+regression and the implementation specification. Backend lifecycle behavior and the other dialogs remain as reviewed.
+
+- The unchanged exact close test passed ten baseline WebKit repetitions in `5543e95d-6cdf-4948-90af-7e1961f8aa68`; this
+  was a non-reproduction before the fix. The separate held-frame case then failed its post-frame focus assertion in
+  `a16d3703-f84f-4ef6-9186-9ecd10faa439`. Diagnostic run `fd93b603-62d7-4e46-894c-0c48ba0df2f6` reproduced that failure
+  and captured the heading active, an empty Name after typing, and Settings gone after the real header close. Both
+  failed records and their private screenshots and traces were retained.
+- The corrected held-frame case passed once per engine in `61406cf3-40f7-4145-ab4e-826e84efccc5`, using the real
+  corrected release web bundle. Source, reports, output and cleanup are complete, with no skipped or interrupted cases.
+- The unchanged original close test passed 20 consecutive WebKit repetitions in `8df432db-3301-4005-8913-a0ab4ed9e60c`.
+  Its retained JSON report confirms 20 executed passes, only the WebKit recipe project, one worker, no retries, skips,
+  flaky outcomes or global errors. The source fingerprint matches the corrected held-frame run; output reaches EOF
+  without omission and all owned stacks cleaned up. This was generic recording to permit the deliberate single-engine
+  repetition policy.
+- The complete recipe file passed all 16 cases, eight per engine, in `43034a1e-621f-48a0-b014-36143dcaf139`. This
+  includes both palettes' opening and sticky-answer geometry, CRUD, token privacy, validation, all close paths, refresh
+  recovery and snapshot builds. Four Add host inline-recipe cases passed in `e81ac0f3-1e70-4ab9-a267-001e8541c928`,
+  covering initial Name focus and persistent answers in both palettes and engines. Both records have the same corrected
+  source fingerprint, complete reports and output, no skipped or interrupted cases, and complete cleanup.
+- The actual release web build and native UI all-target desktop-feature Clippy check passed after the correction. The
+  test-delay source check inspected 412 delays with none missing a reason; formatting and whitespace checks passed.
+- The whole UI JavaScript harness passed all 527 tests, with no skips, in `9395b061-4465-42ff-b002-167242d2edb6` at
+  `f7dad8657b044b5da5339e92c7dbecdf1d5d07ab`. This includes the monitor's stylesheet selector correction. Its asset and
+  JavaScript-test inputs are unchanged by the subsequent Rust focus, browser-test and specification patch, so that
+  command's coverage is reused.
+
+The additional child commands were:
+
+```sh
+npx playwright test --project=webkit-tensorlake-recipes -g 'closing Settings with an unsaved recipe asks first and finishes the close' --repeat-each=10 --workers=1 --max-failures=1
+npx playwright test --project=webkit-tensorlake-recipes -g 'a recipe opening preserves a newer field focus before header close' --workers=1
+npx playwright test 'tensorlake-recipes\.spec\.ts' -g 'a recipe opening preserves a newer field focus before header close'
+npx playwright test --project=webkit-tensorlake-recipes -g 'closing Settings with an unsaved recipe asks first and finishes the close' --repeat-each=20 --workers=1 --max-failures=1 --reporter=list,json
+npx playwright test 'tensorlake-recipes\.spec\.ts'
+npx playwright test 'tensorlake-hosts\.spec\.ts' -g 'Add host pins inline recipe answers and focuses Name'
+node --test
+```
+
+The first two used generic recording for intentional single-engine reproduction; the corrected two-engine run used the
+recorder's controlled Playwright mode. Node ran from the UI JavaScript test directory with its default discovery.
 
 The reused checks cover completed PR1 source at `3e6f1894a121c8f397e31cb6b80e1a10c96392f9`, PR2 at
 `c182602ebb6c3578ebb80354794a3d1501b84019`, and PR3 at `cc2443d864fd15d393549c9e8f496cdf450334cc`. Runs were recorded
@@ -128,3 +199,8 @@ Every PR passed its required independent gpt-6.1-sol review at high effort. Find
 fractional clipping were fixed and reviewed again. A separate review at the executing model checked the editor's scope
 and supported the smaller existing-owner design. No required finding remains unresolved or was rejected. Commit and PR
 wording passed fresh cold reads, and changed files received a separate documentation pass.
+
+The follow-up's fresh gpt-6.1-sol review at high effort found no issues in the focus admission or strict clock
+regression. Its separate scope checkpoint supported the local existing-owner correction without new state or a broader
+focus framework. Updated PR wording passed a fresh cold read, and all three changed files received the documentation
+pass.
