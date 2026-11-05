@@ -358,6 +358,10 @@ pub(super) struct HostOption {
     pub(super) phase: Option<String>,
     /// An explicitly resumable destination, unlike an unavailable SSH host.
     pub(super) suspended: bool,
+    /// Connecting or an explicit Tensorlake lifecycle request, rather than a
+    /// settled refusal. Used only to bridge a successful Resume's stale display
+    /// snapshot; it grants no availability, preview, or submission authority.
+    pub(super) connection_pending: bool,
     /// This host's current incarnation (`hosts::host_incarnation`) — what an
     /// idempotency key is bound to, so that an id pointed at a different
     /// machine since the key was minted is a different intent.
@@ -388,6 +392,13 @@ pub(super) struct HostOption {
 }
 
 impl HostOption {
+    /// A launch may resume a suspended host, but cannot join another surface's
+    /// lifecycle request. Only this form's own preparation keeps its selected
+    /// host available through the vendor request and subsequent SSH reconnect.
+    pub(super) fn available_for_launch(&self, resuming_host: Option<HostId>) -> bool {
+        self.phase.is_none() || self.suspended || resuming_host == Some(self.id)
+    }
+
     /// What the `<option>` reads: the host's name, with its phase appended
     /// when there is one to warn about. The unaliased local row uses the
     /// `host:local` search word beside its familiar machine name.
@@ -659,7 +670,14 @@ pub(super) fn host_options(hosts: &[Host]) -> Vec<HostOption> {
             // one is an informed choice rather than a surprise refusal.
             phase: (!is_connected(&host.state))
                 .then(|| phase_display_label(&host.state).to_string()),
+            // A shared transition is not an invitation to resume: the helm's
+            // lifecycle lock would refuse a competing request. The submitting
+            // form supplies its own exception in `available_for_launch`.
             suspended: matches!(host.state, crate::HostPhase::Suspended { .. }),
+            connection_pending: matches!(
+                host.state,
+                crate::HostPhase::Connecting { .. } | crate::HostPhase::TensorlakeChanging { .. }
+            ),
             incarnation: host_incarnation(host),
             connection: host.incarnation,
             identity: host
@@ -802,6 +820,7 @@ pub(super) mod tests {
             color: Default::default(),
             phase: None,
             suspended: false,
+            connection_pending: false,
             incarnation: format!("incarnation-{id}"),
             connection: 1,
             identity: Some(format!("install-{id}")),
@@ -1220,6 +1239,50 @@ pub(super) mod tests {
             color: Default::default(),
             tensorlake: None,
         }
+    }
+
+    /// A lifecycle request by another surface must remain unavailable. Only
+    /// the submitting form's same-host preparation may bridge both that phase
+    /// and Connecting; it must not accidentally admit a different host.
+    #[farhelm_testtrace::test]
+    fn only_owned_resume_preparation_keeps_a_transitioning_host_available() {
+        use farhelm_proto::tensorlake::LifecycleDirection;
+        let mut host = registry_row(7, HostKind::Tensorlake);
+        assert!(!host_options(std::slice::from_ref(&host))[0].connection_pending);
+        for direction in [LifecycleDirection::Suspending, LifecycleDirection::Resuming] {
+            host.state = crate::HostPhase::TensorlakeChanging {
+                direction,
+                requested_at: 1,
+            };
+            let options = host_options(std::slice::from_ref(&host));
+            assert!(!options[0].suspended);
+            assert!(options[0].connection_pending);
+            assert!(!options[0].available_for_launch(None));
+            assert!(!options[0].available_for_launch(Some(8)));
+            assert!(options[0].available_for_launch(Some(7)));
+        }
+        host.state = crate::HostPhase::Connecting {
+            attempt: 1,
+            stage: None,
+            last_error: None,
+        };
+        let options = host_options(std::slice::from_ref(&host));
+        assert!(options[0].connection_pending);
+        assert!(!options[0].available_for_launch(None));
+        assert!(options[0].available_for_launch(Some(7)));
+        host.state = crate::HostPhase::Suspended {
+            observed_at: 1,
+            suspended_by_farhelm_at: None,
+            resume_failed: None,
+        };
+        let options = host_options(std::slice::from_ref(&host));
+        assert!(options[0].available_for_launch(None));
+        assert!(!options[0].connection_pending);
+        host.state = crate::HostPhase::Unreachable {
+            cause: "transport-failure".into(),
+            last_error: "gone".into(),
+        };
+        assert!(!host_options(&[host])[0].connection_pending);
     }
 
     /// The local option is found by KIND, not by position or by name.

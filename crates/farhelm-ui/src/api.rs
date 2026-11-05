@@ -5488,7 +5488,10 @@ async fn host_lifecycle(base: &str, host: HostId, verb: &str) -> Result<(), Stri
 
 /// Wait for the connection established after an explicit Resume. Return the
 /// fresh registry snapshot so a launch binds its new connection token, never
-/// the token invalidated by suspension. Reads and polling are bounded.
+/// the token invalidated by suspension. Reads and polling are bounded. A
+/// TensorlakeChanging phase is still preparation, as is Connecting after
+/// vendor confirmation; neither permits session creation. Callers own any
+/// preparation indicator across this whole future, separate from create progress.
 pub(crate) async fn resume_host_connected(base: &str, host: HostId) -> Result<Vec<Host>, String> {
     resume_host(base, host).await?;
     let mut ready = Box::pin(async {
@@ -5501,14 +5504,16 @@ pub(crate) async fn resume_host_connected(base: &str, host: HostId) -> Result<Ve
             if crate::hosts::is_connected(&current.state) {
                 return Ok(hosts);
             }
-            if matches!(
-                current.state,
+            match &current.state {
                 crate::HostPhase::Suspended {
                     resume_failed: Some(_),
                     ..
-                }
-            ) {
-                return Err("Tensorlake could not resume this host; check its details".into());
+                } => return Err("Tensorlake could not resume this host; check its details".into()),
+                // The hold can remain visible between its release and the
+                // actor's next publication. Wait for Connected, not the
+                // disappearance of a suspended or transitional phase.
+                crate::HostPhase::TensorlakeChanging { .. } => {}
+                _ => {}
             }
             crate::reader::sleep_ms(1000).await;
         }

@@ -917,6 +917,9 @@ fn refusal_text(host: store::HostId, state: &manager::HostState) -> String {
             "this entry reaches the machine host {twin} already holds, so nothing is connected; \
              remove that entry or change this one's destination, then press Retry"
         ),
+        manager::HostState::TensorlakeChanging { .. } => "the host's Tensorlake sandbox is \
+            changing its running state; wait for that operation to finish"
+            .to_string(),
         manager::HostState::Suspended { resume_failed, .. } => match resume_failed {
             None => "the host's Tensorlake sandbox is suspended; it runs again once it is \
                      resumed"

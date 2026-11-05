@@ -143,9 +143,10 @@ a refusal opens a short dialog instead.
 ## Suspend or delete a Tensorlake sandbox
 
 **Suspend** pauses a Tensorlake host with its processes and sessions intact. It asks first if an agent is working or
-Farhelm cannot check activity reliably. A suspended host shows a grey **Suspended** state and a **Resume** button on its
-row; the menu offers **Resume** too. An open session offers **Resume host**. Tensorlake can also suspend the sandbox
-after its plan's idle limit; [Tensorlake sandboxes](/docs/using/tensorlake-sandboxes/#suspend-and-resume) explains the
+Farhelm cannot check activity reliably. The host shows **Suspending…** until Tensorlake confirms it, then a grey
+**Suspended** state and a **Resume** button on its row; the menu offers **Resume** too. Resuming shows **Resuming…**,
+then **Connecting…** while Farhelm reconnects. An open session offers **Resume host**. Tensorlake can also suspend the
+sandbox after its plan's idle limit; [Tensorlake sandboxes](/docs/using/tensorlake-sandboxes/#suspend-and-resume) explains the
 24-hour limit on Usage Credits and launching after resume.
 
 **Delete sandbox** permanently deletes the sandbox, its files, sessions and snapshots taken from it. It always asks,

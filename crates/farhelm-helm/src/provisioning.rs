@@ -4092,6 +4092,69 @@ mod tests {
         );
     }
 
+    /// Lifecycle intent cannot authorize a setup probe just because it is
+    /// different from Suspended. Neither direction is a usable connection;
+    /// Update and setup must refuse before reaching the backend, even when
+    /// no lifecycle caller owns the provisioning lock anymore.
+    #[farhelm_testtrace::test]
+    async fn a_changing_sandbox_is_never_probed_for_update_or_setup() {
+        use farhelm_proto::tensorlake::LifecycleDirection;
+        for direction in [LifecycleDirection::Suspending, LifecycleDirection::Resuming] {
+            let (harness, host) = sandbox_harness(SwitchedSandboxes::new(
+                crate::tensorlake::api::SandboxStatus::Suspended,
+            ))
+            .await;
+            harness
+                .await_state(host, |state| matches!(state, HostState::Suspended { .. }))
+                .await;
+            harness
+                .manager
+                .hold_connection(
+                    host,
+                    HostState::TensorlakeChanging {
+                        direction,
+                        requested_at: 1,
+                    },
+                )
+                .await;
+            assert!(matches!(
+                harness.manager.state(host),
+                Some(HostState::TensorlakeChanging { direction: held, .. }) if held == direction
+            ));
+            let lock = harness.manager.try_host_provision_lock(host).unwrap();
+            drop(lock);
+            let root = tempfile::tempdir().unwrap();
+            let backend = FakeBackend::absent(root.path().to_path_buf());
+            let service = service(&harness, backend.clone(), root.path());
+            let update = service
+                .plan_update(host)
+                .await
+                .expect_err("a changing sandbox is not updated");
+            assert!(
+                format!("{update:#}").contains("wait for that operation"),
+                "{update:#}"
+            );
+            let setup = service
+                .probe(ProbeRequest {
+                    target: ProbeDestination::Ssh {
+                        destination: crate::tensorlake::hosts::test_support::destination(
+                            "farhelm-host-k7q2-gpu-dev-m3x9",
+                        ),
+                    },
+                    remote_farhelm: None,
+                    remote_state_dir: None,
+                    new_entry: None,
+                })
+                .await
+                .expect_err("a changing sandbox is not set up again");
+            assert!(
+                format!("{setup:#}").contains("wait for that operation"),
+                "{setup:#}"
+            );
+            assert_eq!(backend.probes.load(std::sync::atomic::Ordering::SeqCst), 0);
+        }
+    }
+
     /// Why: a plan is confirmed some time after it was made, and a sandbox
     /// suspended in between must not be dialed by the confirmed run.
     ///

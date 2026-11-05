@@ -63,6 +63,7 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use dioxus::prelude::*;
+use farhelm_proto::tensorlake::LifecycleDirection;
 
 use crate::anchored_popovers::{
     AnchorRegion, MovedRows, MovementOwner, MovementTicket, Registration, use_anchor_binding,
@@ -370,6 +371,7 @@ pub(crate) fn phase_label(state: &HostPhase) -> &'static str {
         HostPhase::IdentityMismatch { .. } => "identity-mismatch",
         HostPhase::IdentityUnverified { .. } => "identity-unverified",
         HostPhase::Duplicate { .. } => "duplicate",
+        HostPhase::TensorlakeChanging { .. } => "tensorlake-changing",
         HostPhase::Suspended { .. } => "suspended",
         HostPhase::Retired { .. } => "retired",
         HostPhase::Unrecognized => "unrecognized",
@@ -399,9 +401,18 @@ pub(crate) fn phase_display_label(state: &HostPhase) -> &'static str {
         HostPhase::IdentityMismatch { .. } => "Identity mismatch",
         HostPhase::IdentityUnverified { .. } => "Identity unverified",
         HostPhase::Duplicate { .. } => "Duplicate",
+        HostPhase::TensorlakeChanging { direction, .. } => lifecycle_label(*direction),
         HostPhase::Suspended { .. } => "Suspended",
         HostPhase::Retired { .. } => "Retired",
         HostPhase::Unrecognized => "Unrecognized",
+    }
+}
+
+/// Name the requested operation without claiming Tensorlake has completed it.
+fn lifecycle_label(direction: LifecycleDirection) -> &'static str {
+    match direction {
+        LifecycleDirection::Suspending => "Suspending…",
+        LifecycleDirection::Resuming => "Resuming…",
     }
 }
 
@@ -528,6 +539,10 @@ fn remote_update_available(host: &Host, menu: Option<&ProvisioningMenuState>, bu
     host.kind.updates_from_panel()
         && host.kind.updates_automatically()
         && !runs_newer_version(&host.state)
+        && !matches!(
+            host.state,
+            HostPhase::Suspended { .. } | HostPhase::TensorlakeChanging { .. }
+        )
         && !busy
         && menu.is_some_and(|state| state.update)
 }
@@ -605,6 +620,7 @@ pub(crate) fn phase_class(state: &HostPhase) -> &'static str {
         } => "old-version",
         HostPhase::Connected { .. } => "connected",
         HostPhase::Connecting { .. } => "connecting",
+        HostPhase::TensorlakeChanging { .. } => "connecting",
         HostPhase::Unreachable { .. } => "unreachable",
         // Grey: nothing is wrong and nothing will change by itself until the
         // sandbox is resumed; neither the amber of a host that comes back
@@ -652,11 +668,13 @@ fn rail_presentation(
     let phase_words = phase_display_label(state);
     RailPresentation {
         phase: phase_class(state),
-        // A suspended host is as unusable as an unreachable one, so its
-        // identity mark dims the same way.
+        // Suspended and changing sandboxes cannot serve sessions, so their
+        // identity marks dim the same way as an unreachable host's.
         dimmed: matches!(
             state,
-            HostPhase::Unreachable { .. } | HostPhase::Suspended { .. }
+            HostPhase::Unreachable { .. }
+                | HostPhase::Suspended { .. }
+                | HostPhase::TensorlakeChanging { .. }
         ),
         updating: operation.is_some(),
         update_available: update_available && operation.is_none() && !runs_newer_version(state),
@@ -777,7 +795,11 @@ fn HostRailAvatar(
                 onmounted: move |event| handle.set(Some(event.data())),
                 HostMark { icon: host.icon, color: host.color, local: host.kind.is_this_machine(), tooltip: tooltip.clone() }
                 span { class: "host-rail-state {presentation.phase}", "aria-hidden": "true",
-                    span { class: "status-dot" }
+                    if matches!(host.state, HostPhase::TensorlakeChanging { .. }) {
+                        span { class: "delete-spinner" }
+                    } else {
+                        span { class: "status-dot" }
+                    }
                 }
                 if presentation.update_available {
                     span { class: "host-rail-update", "aria-hidden": "true", "↑" }
@@ -1088,6 +1110,17 @@ pub(crate) fn state_detail(state: &HostPhase) -> Vec<DetailPart> {
             *suspended_by_farhelm_at,
             resume_failed.as_ref(),
         ),
+        HostPhase::TensorlakeChanging {
+            direction,
+            requested_at,
+        } => vec![DetailPart::text(format!(
+            "Asked Tensorlake to {} at {}; waiting for confirmation",
+            match direction {
+                LifecycleDirection::Suspending => "suspend",
+                LifecycleDirection::Resuming => "resume",
+            },
+            crate::activity::utc_stamp(*requested_at / 1000)
+        ))],
         HostPhase::Unrecognized => vec![DetailPart::text(
             "This build does not know the state the helm is reporting for this host",
         )],
@@ -1211,6 +1244,7 @@ pub(crate) fn state_remedy(state: &HostPhase) -> Option<Vec<DetailPart>> {
         | HostPhase::Connecting { .. }
         | HostPhase::Connected { .. }
         | HostPhase::Suspended { .. }
+        | HostPhase::TensorlakeChanging { .. }
         | HostPhase::Unrecognized => None,
         HostPhase::VersionSkew { remediation, .. } => {
             (!remediation.raw().trim().is_empty()).then(|| vec![DetailPart::peer(remediation)])
@@ -1533,6 +1567,10 @@ pub(crate) fn session_unavailable_cause(lookup: HostLookup<'_>) -> &'static str 
             HostPhase::IdentityUnverified { .. } => "Host identity unverified",
             HostPhase::Duplicate { .. } => "Duplicate host",
             HostPhase::Suspended { .. } => "Host suspended",
+            HostPhase::TensorlakeChanging { direction, .. } => match direction {
+                LifecycleDirection::Suspending => "Host suspending",
+                LifecycleDirection::Resuming => "Host resuming",
+            },
             HostPhase::Retired { .. } => "Host connection stopped",
             HostPhase::Unrecognized => "Host state unknown",
         },
@@ -1590,6 +1628,20 @@ pub(crate) fn stale_session_notice(
             explanation.push(DetailPart::text(
                 " is suspended; this session continues when it resumes.",
             ));
+            let mut detail = name;
+            detail.push(DetailPart::text(": "));
+            detail.extend(state_detail(&host.state));
+            (explanation, detail)
+        }
+        HostLookup::Known(host) if matches!(host.state, HostPhase::TensorlakeChanging { .. }) => {
+            let mut explanation = name.clone();
+            explanation.push(DetailPart::text(match &host.state {
+                HostPhase::TensorlakeChanging {
+                    direction: LifecycleDirection::Suspending,
+                    ..
+                } => " is suspending; this session continues when the host resumes.",
+                _ => " is resuming; this view reconnects when the host is ready.",
+            }));
             let mut detail = name;
             detail.push(DetailPart::text(": "));
             detail.extend(state_detail(&host.state));
@@ -2208,6 +2260,11 @@ pub(crate) fn HostsPanel(
         else {
             return;
         };
+        // A queued click must not start a competing request after another
+        // surface acquires the lifecycle hold.
+        if matches!(snapshot.state, HostPhase::TensorlakeChanging { .. }) {
+            return;
+        }
         if resume {
             lifecycle.call((snapshot, true));
             return;
@@ -4109,6 +4166,40 @@ fn UpdateProgressDot() -> Element {
     rsx! { span { class: "host-update-dot", "aria-hidden": "true" } }
 }
 
+/// Show vendor-confirmation progress from the helm's request time, rather
+/// than from when this viewer happened to mount. The timer belongs to this
+/// label and stops when the shared host phase changes or the row unmounts.
+#[component]
+fn TensorlakeChangingStatus(direction: LifecycleDirection, requested_at: i64) -> Element {
+    let mut seconds = use_signal(move || lifecycle_age_secs(requested_at));
+    use_future(move || async move {
+        loop {
+            crate::reader::sleep_ms(1_000).await;
+            seconds.set(lifecycle_age_secs(requested_at));
+        }
+    });
+    let seconds = seconds();
+    rsx! {
+        span { class: "host-lifecycle-progress",
+            span { class: "delete-spinner", aria_hidden: "true" }
+            "{lifecycle_label(direction)}"
+            span { class: "host-lifecycle-elapsed", aria_hidden: "true", " asked Tensorlake {seconds} s ago" }
+        }
+    }
+}
+
+/// Epoch timestamps come from the helm, so a viewer clock behind it must
+/// clamp the displayed age instead of wrapping into an enormous duration.
+fn lifecycle_age_secs(requested_at: i64) -> u64 {
+    #[cfg(target_arch = "wasm32")]
+    let now = web_sys::js_sys::Date::now() as i64;
+    #[cfg(not(target_arch = "wasm32"))]
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_millis().min(i64::MAX as u128) as i64);
+    now.saturating_sub(requested_at).max(0) as u64 / 1_000
+}
+
 /// Keep short elapsed times readable without capping long-running updates.
 fn format_elapsed(seconds: u64) -> String {
     let hours = seconds / 3_600;
@@ -4323,8 +4414,10 @@ fn HostRow(
     // even while a menu built against the wider list is still up.
     let adoptable_now = adopt_identity.is_some();
     let suspended = matches!(host.state, HostPhase::Suspended { .. });
+    let lifecycle_changing = matches!(host.state, HostPhase::TensorlakeChanging { .. });
+    let offers_resume = suspended || lifecycle_changing;
     let lifecycle_action = if host.kind.suspends() {
-        Some(if suspended {
+        Some(if offers_resume {
             HostMenuAction::Resume
         } else {
             HostMenuAction::Suspend
@@ -4623,8 +4716,8 @@ fn HostRow(
                     HostKind::Unrecognized => rsx! {},
                 }
                 span { class: "host-name peer-value", dir: "ltr", "{shown_name}" }
-                if suspended {
-                    button { class: "btn host-resume", disabled: busy, onclick: move |_| { if !busy { on_lifecycle.call((id, true)); } }, "Resume" }
+                if offers_resume {
+                    button { class: "btn host-resume", disabled: busy || lifecycle_changing, onclick: move |_| { if !busy && !lifecycle_changing { on_lifecycle.call((id, true)); } }, "Resume" }
                 }
                 span {
                     // `updating` lets the status group shrink so the step
@@ -4676,7 +4769,9 @@ fn HostRow(
                             span {
                                 class: "host-status-label",
                                 "data-tooltip": too_new_title(&host.state).unwrap_or_else(|| phase_display_label(&host.state).to_string()),
-                                if is_connected(&host.state) && inline_update.is_none()
+                                if let HostPhase::TensorlakeChanging { direction, requested_at } = &host.state {
+                                    TensorlakeChangingStatus { key: "{requested_at}-{direction:?}", direction: *direction, requested_at: *requested_at }
+                                } else if is_connected(&host.state) && inline_update.is_none()
                                     && !matches!(&host.state, HostPhase::Connected { old_version: true, .. })
                                     && !runs_newer_version(&host.state) {
                                     "Connected"
@@ -4842,16 +4937,16 @@ fn HostRow(
                                 }
                                 if let Some(action) = lifecycle_action {
                                     button { class: "btn menu-item host-row-menu-item", role: "menuitem",
-                                        disabled: busy,
+                                        disabled: busy || lifecycle_changing,
                                         tabindex: if menu_tab_stop == Some(action) { "0" } else { "-1" },
                                         "data-menu-focus": menu_panel::menu_item_focus_key(menu_wiring, action),
                                         onmounted: move |element| remember_menu_item(menu_wiring, action, element.data()),
                                         onfocusin: move |_| record_menu_item_focus(menu_wiring, action),
                                         onfocusout: move |_| menu_focus.set(None),
                                         onkeydown: move |evt| handle_menu_key(&evt, menu_order.position(action), menu_wiring, &id),
-                                        onclick: move |_| { if !busy { on_lifecycle.call((id, suspended)); } },
+                                        onclick: move |_| { if !busy && !lifecycle_changing { on_lifecycle.call((id, offers_resume)); } },
                                         HostMenuActionIcon { action }
-                                        if suspended { "Resume" } else { "Suspend" }
+                                        if offers_resume { "Resume" } else { "Suspend" }
                                     }
                                 }
                                 if let (Some(reported), Some(label)) = (adopt_identity, adopt_label) {
@@ -6927,6 +7022,10 @@ mod tests {
                 reason: "sentinel-retired-reason".into(),
             },
             HostPhase::Unrecognized,
+            HostPhase::TensorlakeChanging {
+                direction: LifecycleDirection::Suspending,
+                requested_at: 1_700_000_200_000,
+            },
         ]
     }
 
@@ -6969,6 +7068,7 @@ mod tests {
             ("suspended", "Suspended", true),
             ("needs-attention", "Retired", false),
             ("needs-attention", "Unrecognized", false),
+            ("connecting", "Suspending…", true),
         ];
         for (state, (phase, words, dimmed)) in every_phase().into_iter().zip(expected) {
             let ordinary = rail_presentation(&state, None, false);
@@ -7069,6 +7169,7 @@ mod tests {
                 "suspended",
                 "retired",
                 "unrecognized",
+                "tensorlake-changing",
             ]
         );
         // Every label distinct: two phases sharing a word would make the
@@ -7914,6 +8015,7 @@ mod tests {
             "Host suspended",
             "Host connection stopped",
             "Host state unknown",
+            "Host suspending",
         ];
         for (state, expected) in every_phase().into_iter().zip(expected) {
             let host = host(state);
@@ -7939,6 +8041,51 @@ mod tests {
         let notice = stale_session_notice("local", HostLookup::Known(&local));
         assert_eq!(notice.cause, "Waiting for supervisor");
         assert_eq!(Some(notice.explanation), state_remedy(&local.state));
+    }
+
+    /// A lifecycle request cannot look like completed suspension or a broken
+    /// host. Both directions keep their own words, no competing Resume on the
+    /// session card, and no stale Update offer while the lifecycle hold runs.
+    #[farhelm_testtrace::test]
+    fn tensorlake_transitions_keep_confirmation_and_recovery_distinct() {
+        for (direction, words, cause, explanation) in [
+            (
+                LifecycleDirection::Suspending,
+                "Suspending…",
+                "Host suspending",
+                "is suspending",
+            ),
+            (
+                LifecycleDirection::Resuming,
+                "Resuming…",
+                "Host resuming",
+                "is resuming",
+            ),
+        ] {
+            let mut host = host(HostPhase::TensorlakeChanging {
+                direction,
+                requested_at: 1_700_000_000_000,
+            });
+            host.kind = HostKind::Tensorlake;
+            assert_eq!(phase_display_label(&host.state), words);
+            assert_eq!(phase_label(&host.state), "tensorlake-changing");
+            assert!(!is_connected(&host.state));
+            let notice = stale_session_notice("gpu dev", HostLookup::Known(&host));
+            assert_eq!(notice.cause, cause);
+            assert_eq!(notice.resume_host, None);
+            assert!(detail_text(&notice.explanation).contains(explanation));
+            let details = detail_text(&notice.detail);
+            assert!(details.contains("waiting for confirmation"));
+            assert!(!details.contains("Suspended outside Farhelm"));
+            assert!(!remote_update_available(
+                &host,
+                Some(&ProvisioningMenuState {
+                    update: true,
+                    ..Default::default()
+                }),
+                false
+            ));
+        }
     }
 
     /// Spec: a suspended host's detail says when Farhelm suspended it, or,

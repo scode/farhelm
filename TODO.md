@@ -386,17 +386,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **TensorLake recipe Save button hidden until scrolling.** When adding a TensorLake recipe, the Save button is not
   visible until the view scrolls down to it; it must be reachable without hunting. Details TBD. Plan:
   `plans/queue/tensorlake-ui-fixes.md`.
-- **TensorLake sandbox suspension must be confirmed before shown as suspended.** Suspending a TensorLake sandbox looks
-  suspiciously fast, so the user can get the impression it is suspended before that state is actually confirmed. The UI
-  must not present the sandbox as suspended until the suspension is confirmed. Plan:
-  `plans/queue/tensorlake-ui-fixes.md`.
 - **TensorLake "Refresh sandboxes" button feels inert.** In the TensorLake settings menu, "Refresh sandboxes" sits below
   "New recipe" as a bare button and appears to do nothing; there may be an empty list above it. Unclear UX; fix TBD.
   Plan: `plans/queue/tensorlake-ui-fixes.md`.
-- **Transient "selected host is unavailable" while launching on a suspended sandbox.** Launching a session on a
-  suspended TensorLake sandbox briefly shows a "selected host is unavailable"-style message before the session starts
-  (launch resumes the sandbox, so starting is expected). The UI should not flash a misleading unavailable state when
-  launch will resume the sandbox. Plan: `plans/queue/tensorlake-ui-fixes.md`.
 - **TensorLake add-host sandbox dialog lacks structure.** The dialog for adding a TensorLake sandbox host is just a
   block of text with no visual structure. Fix TBD. Plan: `plans/queue/tensorlake-ui-fixes.md`.
 
@@ -406,13 +398,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   connection ends on its own, leaving the recipe's listeners open on the sandbox and possibly keeping the sandbox from
   idle-suspending. Make the tunnels die with the helm on macOS too, for example with a small watcher that notices the
   helm's exit (kqueue `NOTE_EXIT`) and ends them.
-
-- **Show progress while a launch resumes a suspended host.** Launch on a suspended Tensorlake host resumes it first: a
-  lifecycle request with a 150-second client budget, then up to 60 seconds waiting for the new connection. Nothing shows
-  progress during that time; the launch-progress status ("Launching on …") deliberately starts only when the session
-  create is sent, so it cannot be reused as is without claiming a launch that has not happened. Add a separately worded
-  "Resuming host" preparation status (in the quick-launch surface too, where it can be reached), with its own failure
-  wording, which must not promise the session-create retry guarantees. Plan: `plans/queue/tensorlake-ui-fixes.md`.
 
 - **One click for a fresh checkout on a suspended host.** Launching a fresh GitHub checkout on a suspended Tensorlake
   host resumes the host, then stops and asks the user to review the refreshed checkout preview and press Launch again.

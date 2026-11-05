@@ -1160,6 +1160,14 @@ pub enum HostPhase {
         #[serde(skip)]
         twin_name: Option<PeerText>,
     },
+    /// An explicit Tensorlake lifecycle request awaiting vendor confirmation.
+    /// This does not imply suspension or a usable connection. `requested_at`
+    /// is unix ms; after Resume completes, ordinary Connecting covers SSH recovery.
+    #[serde(rename = "tensorlake-changing")]
+    TensorlakeChanging {
+        direction: farhelm_proto::tensorlake::LifecycleDirection,
+        requested_at: i64,
+    },
     /// A Tensorlake host whose sandbox is suspended (or failed to resume):
     /// nothing is dialed until it runs again. Times are unix ms.
     /// `observed_at` is when the helm first saw the suspension;
@@ -3058,6 +3066,31 @@ mod tests {
             &hosts[2].state,
             HostPhase::Duplicate { twin: 2, identity, .. } if identity.raw() == "identity-shared"
         ));
+    }
+
+    /// Explicit lifecycle phases retain direction and the request stamp;
+    /// neither may decode as Suspended before vendor confirmation. This also
+    /// pins the shared wire spelling independently of display labels.
+    #[farhelm_testtrace::test]
+    fn tensorlake_lifecycle_phase_keeps_direction_and_request_time() {
+        use farhelm_proto::tensorlake::LifecycleDirection;
+        for (word, direction) in [
+            ("suspending", LifecycleDirection::Suspending),
+            ("resuming", LifecycleDirection::Resuming),
+        ] {
+            let state: HostPhase = serde_json::from_value(serde_json::json!({
+                "phase": "tensorlake-changing", "direction": word,
+                "requested_at": 1_700_000_000_123_i64,
+            }))
+            .unwrap();
+            assert_eq!(
+                state,
+                HostPhase::TensorlakeChanging {
+                    direction,
+                    requested_at: 1_700_000_000_123,
+                }
+            );
+        }
     }
 
     /// A phase (or refresh status) this build has never heard of must cost

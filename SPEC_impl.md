@@ -5258,24 +5258,26 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   loudly (the registry is authority for which hosts exist at all).
 - One connection actor per registry row, the local row included (PLAN_M6.md item 4), each owning its transport
   connection, its reconnect state machine, and its slice of the session cache. A row's connection is always in exactly
-  one of six states (a Tensorlake host has a seventh, below), and the last three exist because folding them into
-  "unreachable" would throw away the only information that makes the situation fixable: **connecting** (active retries
-  in progress), **unreachable-reprobing** (the active window is spent, background probes continue forever, no give-up),
-  **connected**, **version-skew** (the hello was answered and refused; carries both protocol versions, the peer's build,
-  and the remediation text, since SPEC.md demands actionable rather than merely diagnostic errors),
+  one of seven connection states (a Tensorlake host has two more, below), and the refusal states exist because folding
+  them into "unreachable" would throw away the only information that makes the situation fixable: **connecting** (active
+  retries in progress), **unreachable-reprobing** (the active window is spent, background probes continue forever, no
+  give-up), **connected**, **version-skew** (the hello was answered and refused; carries both protocol versions, the
+  peer's build, and the remediation text, since SPEC.md demands actionable rather than merely diagnostic errors),
   **identity-mismatch** (frozen, carrying both identities, connecting nothing until the user adopts or fixes the
-  destination), and **duplicate** (this entry's identity is already another entry's; frozen like identity-mismatch,
-  connecting nothing until a Retry, an edit of the entry, or a helm restart asks again, while the entry stays visible
-  naming the other one), and, for a Tensorlake host only, **suspended** (Tensorlake reports the sandbox suspended or
-  failed to resume; nothing is dialed, see "Tensorlake hosts"). First contact checks whether another entry holds the
-  reported identity before comparing it with the one this entry recorded, so an entry that recorded one install and now
-  reaches another entry's machine is a duplicate; and an adopt prompt shown before the other entry recorded the identity
-  turns into the duplicate state when its adoption is refused, because the refusal starts the entry's next attempt. The
-  local row's unreachable state additionally distinguishes "no supervisor is running on this machine" from a generic
-  transport failure, because that is the one case whose remedy is a command on the machine the user is already sitting
-  at — a manual-path hint, never an offer to install (provisioning is M7's). A seventh state exists that is not about
-  the host at all — **retired** — for an entry whose actor has stopped: a panicked task, or one that outlived its own
-  registry row. Without it, an actor's last published status stands forever after the actor is gone, so a task that died
+  destination), **identity-unverified** (the peer cannot confirm the recorded identity, so nothing is connected), and
+  **duplicate** (this entry's identity is already another entry's; frozen like identity-mismatch, connecting nothing
+  until a Retry, an edit of the entry, or a helm restart asks again, while the entry stays visible naming the other
+  one), and, for a Tensorlake host only, **suspended** (Tensorlake reports the sandbox suspended or failed to resume;
+  nothing is dialed) and **tensorlake-changing** (an explicit suspend or resume is awaiting confirmation under a
+  connection hold; see "Tensorlake hosts"). First contact checks whether another entry holds the reported identity
+  before comparing it with the one this entry recorded, so an entry that recorded one install and now reaches another
+  entry's machine is a duplicate; and an adopt prompt shown before the other entry recorded the identity turns into the
+  duplicate state when its adoption is refused, because the refusal starts the entry's next attempt. The local row's
+  unreachable state additionally distinguishes "no supervisor is running on this machine" from a generic transport
+  failure, because that is the one case whose remedy is a command on the machine the user is already sitting at — a
+  manual-path hint, never an offer to install (provisioning is M7's). A separate state exists that is not about the host
+  at all — **retired** — for an entry whose actor has stopped: a panicked task, or one that outlived its own registry
+  row. Without it, an actor's last published status stands forever after the actor is gone, so a task that died
   mid-connection would leave the entry reading connected, with a routable client, and nothing left running to ever
   correct it. Each actor is therefore supervised by the task the manager actually holds, which publishes the retired
   state (client dropped) when the actor it wraps finishes for any reason other than being cancelled on purpose.
@@ -6015,14 +6017,35 @@ before any card.
 
 Explicit Tensorlake Suspend and Resume use `POST /api/hosts/{id}/suspend` and `/resume`, on helm-owned tasks so a closed
 tab cannot strand a hold. Both take the host's provisioning lock before reading its binding, excluding setup, update and
-removal. Suspend holds the actor, releases both shared SSH masters, asks Tensorlake to suspend, waits at most 60
-seconds, and records the completion time. Resume asks Tensorlake to resume, waits at most 120 seconds for running,
-clears the timestamp and releases the hold with a fresh retry. Already-at-target states succeed; conflicts are
-reconciled by reading status. An actual resume withdraws any pre-suspension connection and releases both masters before
-retrying, even if the actor has not yet detected an external suspension. Only an already-running sandbox with an
-already-connected actor skips recovery, preserving its viewers on repeated Resume. Every failure releases the hold. The
-launcher's existing-folder path binds the fresh connection token after resume; fresh checkouts require a second click to
-accept the newly fetched preview.
+removal. `HostState::TensorlakeChanging` and its UI projection carry `LifecycleDirection` (suspending or resuming) and
+the request's unix-ms time under wire phase `tensorlake-changing`. Suspend holds the actor in that transient state,
+releases both shared SSH masters, asks Tensorlake to suspend and waits at most 60 seconds. Only confirmed suspension
+records the completion time and publishes `Suspended` under the hold, so the displayed timestamp cannot momentarily
+attribute Farhelm's own suspension to an outside action. Resume holds a disconnected actor as Resuming around the
+Tensorlake call, waits at most 120 seconds for running, clears the timestamp and releases the hold with a fresh retry.
+The transient phase ends at hold release rather than covering reconnection. The confirmed Suspended snapshot also
+carries Farhelm's completion time: a host listing may have read an older registry row before taking that snapshot, so
+the snapshot's attribution wins over the row's. The stored value remains the fallback after a restart. Already-at-target
+states succeed; conflicts are reconciled by reading status. An actual resume withdraws any pre-suspension connection and
+releases both masters before retrying, even if the actor has not yet detected an external suspension. Only an
+already-running sandbox with an already-connected actor skips recovery, preserving its viewers on repeated Resume. Every
+failure releases the hold. The launcher's existing-folder path binds the fresh connection token after resume; fresh
+checkouts require a second click to accept the newly fetched preview.
+
+The launcher's preparation signal belongs to its own submit and names the host being resumed. It surrounds
+`resume_host_connected`, including that helper's bounded reconnection wait; only that form treats its own pending host
+as available and replaces the unavailable note with preparation progress. The existing-directory copy promises the
+subsequent create, while fresh-checkout copy preserves the review-again boundary. Quick launch renders the same
+preparation in its existing progress surface. Preparation failure sends no create and has its own refusal wording;
+session-create progress and uncertain-outcome recovery begin only at their existing dispatch boundary. The attention
+classifier treats a routine lifecycle transition as neither a Problem nor an Update, while independent provisioning
+progress and unseen setup warnings keep their existing precedence. Tunnel failures retain their connected-host
+eligibility; stopped forwards during a lifecycle hold do not report a live tunnel failure.
+
+A successful helper read can precede the form's independent host read. A display-only receipt suppresses the obsolete
+unavailable note for that exact pending target and connection token until the displayed snapshot changes. It grants no
+launch or checkout-preview authority, and retires on a changed token, target, or settled state, so it cannot hide a
+later connection failure.
 
 The remote `internal stdio` proxy has no input deadline by default. Only Tensorlake's steady-state SSH command opts in
 with `--stdin-idle-limit-secs 120`, after probing that executable's `internal stdio --help` for the advertised option.

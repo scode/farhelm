@@ -137,13 +137,17 @@ Choose **Suspend** in the host's `⋯` menu in **Hosts**. Farhelm asks first if 
 activity reliably. Suspending keeps processes, files and sessions intact. The host shows **Suspended**, and **Resume**
 on its row or menu continues it. An open session also offers **Resume host** in its suspended banner.
 
+While Tensorlake is suspending the host, Farhelm shows **Suspending…**; **Suspended** means Tensorlake has confirmed it.
+Resuming shows **Resuming…**, then **Connecting…** until Farhelm can reach the host again.
+
 On Tensorlake's Usage Credits plan, Tensorlake suspends a sandbox after 24 hours without a connection from Farhelm, for
 example while the helm's machine is asleep. An idle agent while Farhelm stays connected does not start that countdown.
 Farhelm does not suspend idle hosts itself or resume them without a user action. A tunnel by itself does not keep a
 sandbox from reaching Tensorlake's idle limit.
 
-Launching on a suspended host resumes it first. For a fresh GitHub checkout, resume refreshes the checkout preview:
-review it and click **Launch** again.
+Launching on a suspended host shows progress while it resumes and reconnects. Starting in an existing directory then
+continues automatically. For a fresh GitHub checkout, resume refreshes the checkout preview: review it and click
+**Launch** again.
 
 ## Delete a sandbox
 

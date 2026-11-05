@@ -575,6 +575,14 @@ pub enum HostState {
         /// without a second lookup.
         identity: String,
     },
+    /// Farhelm owns an explicit Tensorlake lifecycle request under a connection
+    /// hold. The direction is intent, not evidence of the sandbox's final state.
+    /// The request time (unix ms) lets clients show elapsed work without
+    /// inventing a suspension time. Release hands presentation back to the actor.
+    TensorlakeChanging {
+        direction: farhelm_proto::tensorlake::LifecycleDirection,
+        requested_at: i64,
+    },
     /// The host is a Tensorlake sandbox that Tensorlake reports suspended
     /// (or failed to resume), so nothing is dialed: a new ssh connection to
     /// a suspended sandbox is refused, and a new session on an old one
@@ -587,11 +595,16 @@ pub enum HostState {
     /// [`Cadence::reprobe`], one status call each time and no dial, so a
     /// sandbox resumed outside Farhelm comes back on its own; Farhelm never
     /// resumes one by itself.
+    /// Explicit Suspend also publishes this under its hold after Tensorlake
+    /// confirms suspension and the host row records Farhelm's completion time.
     Suspended {
         /// When this helm first saw the suspension (unix ms): the "since"
         /// for a suspension Farhelm did not make. Kept across re-probes.
-        /// Farhelm's own suspend time is on the host row, not here.
         observed_at: i64,
+        /// Farhelm's confirmed completion time (unix ms), also persisted on
+        /// the host row. Carrying it with the state keeps a host-list read
+        /// from joining a new confirmation to an older registry snapshot.
+        suspended_by_farhelm_at: Option<i64>,
         /// Tensorlake's diagnosis when the sandbox's status is
         /// `resume_failed`; `None` for an ordinary suspension.
         resume_failed: Option<String>,
@@ -635,6 +648,7 @@ impl HostState {
             HostState::IdentityMismatch { .. } => "identity-mismatch",
             HostState::IdentityUnverified { .. } => "identity-unverified",
             HostState::Duplicate { .. } => "duplicate",
+            HostState::TensorlakeChanging { .. } => "tensorlake-changing",
             HostState::Suspended { .. } => "suspended",
             HostState::Retired { .. } => "retired",
         }
@@ -3673,6 +3687,16 @@ impl HostActor {
             } else {
                 &[]
             };
+            // An active probe first publishes Connecting. Retain the prior
+            // confirmed attribution before that publication can erase it:
+            // a failed row reload may still be using an older registry row.
+            let suspended_by_farhelm_at = match &self.status.borrow().state {
+                HostState::Suspended {
+                    suspended_by_farhelm_at,
+                    ..
+                } => *suspended_by_farhelm_at,
+                _ => None,
+            };
             let (outcome, attempt) = self
                 .connect_phase(&row, ladder, active, incarnation, &mut nudge)
                 .await;
@@ -3813,6 +3837,11 @@ impl HostActor {
                     }
                     self.set_state(HostState::Suspended {
                         observed_at: previous.unwrap_or_else(unix_millis),
+                        suspended_by_farhelm_at: suspended_by_farhelm_at.or_else(|| {
+                            row.tensorlake
+                                .as_ref()
+                                .and_then(|binding| binding.suspended_at)
+                        }),
                         resume_failed,
                     });
                     active = self.hold(&mut nudge, self.cadence.reprobe).await;
@@ -12813,8 +12842,10 @@ mod tests {
     /// Spec: with Tensorlake reporting the sandbox suspended, the actor
     /// publishes Suspended without ever dialing, releases the host's shared
     /// ssh connections once on the way in, and checks again once per
-    /// re-probe interval with the first observation time kept. When the
-    /// answer turns to running, the next re-probe dials and connects.
+    /// re-probe interval with the first observation time kept. Re-probes
+    /// recover persisted attribution and preserve a newer confirmation even
+    /// across an active probe's Connecting publication and an older row.
+    /// When the answer turns to running, the next re-probe dials and connects.
     #[farhelm_testtrace::test(start_paused = true)]
     async fn a_suspended_sandbox_is_never_dialed_and_resumes_by_itself() {
         use crate::tensorlake::api::SandboxStatus;
@@ -12827,12 +12858,20 @@ mod tests {
             .expect("actor is running");
         let HostState::Suspended {
             observed_at,
+            suspended_by_farhelm_at: None,
             resume_failed: None,
         } = first
         else {
             panic!("expected an ordinary suspension, got {first:?}");
         };
         assert_eq!(fixture.transport.releases(host), 1);
+        assert!(
+            fixture
+                .store
+                .set_tensorlake_suspended_at(host, Some(10))
+                .await
+                .unwrap()
+        );
         let checks = sandboxes.wait_for_checks(3).await;
         assert_eq!(
             checks
@@ -12852,10 +12891,36 @@ mod tests {
             fixture.manager.state(host),
             Some(HostState::Suspended {
                 observed_at,
+                suspended_by_farhelm_at: Some(10),
                 resume_failed: None
             }),
-            "re-probes keep the first observation time"
+            "re-probes keep the first observation time and load persisted attribution"
         );
+
+        // Model a confirmed state joined to an older actor row, then force
+        // an active probe (which publishes Connecting before its API read).
+        // The confirmed stamp must survive both intermediate observations.
+        let checked = sandboxes.checks().len();
+        fixture
+            .manager
+            .hold_connection(
+                host,
+                HostState::Suspended {
+                    observed_at,
+                    suspended_by_farhelm_at: Some(30),
+                    resume_failed: None,
+                },
+            )
+            .await;
+        fixture.manager.release_hold(host, true);
+        sandboxes.wait_for_checks(checked + 1).await;
+        assert!(matches!(
+            fixture.manager.state(host),
+            Some(HostState::Suspended {
+                suspended_by_farhelm_at: Some(30),
+                ..
+            })
+        ));
 
         sandboxes.answer(sandbox_status(SandboxStatus::Running));
         fixture

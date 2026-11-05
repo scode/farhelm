@@ -279,6 +279,9 @@ fn attach_refusal(state: &HostState) -> Option<BackendFailure> {
         HostState::Suspended { .. } => "the host's Tensorlake sandbox was suspended during \
              setup; resume it and run setup again"
             .to_string(),
+        HostState::TensorlakeChanging { .. } => "the host's Tensorlake sandbox is changing \
+             its running state; wait for that operation, then run setup again"
+            .to_string(),
         _ => return None,
     };
     Some(BackendFailure::new(sentence, ""))
@@ -2241,7 +2244,7 @@ impl ProvisioningService {
     }
 
     /// Why provisioning must not reach `host` now, when it is a Tensorlake
-    /// host whose sandbox the connection manager knows to be suspended.
+    /// host whose sandbox is suspended or changing its running state.
     ///
     /// Every setup, rerun and Update step opens ssh to the host, and the
     /// connection actor deliberately stops dialing a suspended sandbox: a new
@@ -2249,12 +2252,21 @@ impl ProvisioningService {
     /// until the probe's deadline. Nothing here resumes a sandbox, so the
     /// answer is to resume it first. Asked before planning probes anything and
     /// again before a confirmed run does, so a plan made while the sandbox ran
-    /// cannot proceed after it was suspended.
+    /// cannot proceed after it was suspended or a lifecycle request began.
     fn suspended_refusal(&self, host: HostId) -> Option<&'static str> {
-        matches!(self.manager.state(host), Some(HostState::Suspended { .. })).then_some(
-            "this host's Tensorlake sandbox is suspended, so Farhelm cannot reach it; resume the \
-             sandbox first, then try again",
-        )
+        match self.manager.state(host) {
+            Some(HostState::Suspended { .. }) => Some(
+                "this host's Tensorlake sandbox is suspended, so Farhelm cannot reach it; resume the \
+                 sandbox first, then try again",
+            ),
+            // A released hold can retain this label until the actor next
+            // publishes. Do not let that gap authorize a setup SSH probe.
+            Some(HostState::TensorlakeChanging { .. }) => Some(
+                "this host's Tensorlake sandbox is changing its running state; wait for that \
+                 operation to finish, then try again",
+            ),
+            _ => None,
+        }
     }
 
     /// [`Self::suspended_refusal`] as the failure a confirmed run ends with.
