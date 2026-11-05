@@ -21304,7 +21304,10 @@
   window before the screen updates ... may be carried out as delivered"), as read in the 2026-10-26 ruling that named
   guards hold and otherwise the target follows the click. The plain-URL sentence is not a named guard.
 - Completion criteria: no code or spec change. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/printed-link-mismatch.md`.
+- Execution: `complete`; removed as covered by the accepted sub-second redraw window in SPEC.md, "One GUI at a time". No
+  code or specification change. jj change `vqyslquwmwquvnovprnzpxutnptspkqy`, bookmark
+  `plan/printed-link-mismatch/02-remove-prepaint-finding`; draft PR
+  [#3019](https://github.com/scode/farhelm/pull/3019/changes).
 
 ## stationary-hover-omits-canonical-ancestor-dependencies.md
 
