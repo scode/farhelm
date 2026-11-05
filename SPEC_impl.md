@@ -5848,12 +5848,21 @@ uploader sets `umask 077` before creating its temporary, so even an existing mod
 tokens during upload or after interruption. Its finishing command applies the requested final mode.
 
 The add dialog embeds the full recipe editor with deletion disabled and a `DialogCloseGuard` for Escape and Close. It
-uses Tensorlake's acknowledged `create_without_asking` setting, never the general setup preference, and refreshes the
-host list after an accepted or ambiguous submission. An inline Settings entry point opens its Tensorlake section. Rerun
-retains the Tensorlake plan kind, consults only that acknowledged setting, and offers no answer that writes the general
-SSH setup preference. The add dialog binds confirmation to a `ConfirmSlot` opening; accepted close retires it
-synchronously through the recipe close guard, before notifying its parent. Automatic submission consumes only the
-opening it just created, so a cancelled or replaced opening cannot authorize a later billed POST.
+selects the editor outside its own body wrapper: the editor supplies a body and `DialogFooter` as direct siblings of the
+existing header, which is the frame's pinned-footer contract. An explicit presentation prop selects that layout;
+deletion permission does not infer the embedding context. The editor still owns the draft, requests and close guard. Its
+Add host mount focuses Name; its Settings mount aligns the editor's top, including Back, to the existing body's top and
+focuses its heading without a second native scroll. Deferred focus captures the mounted editor and never targets a later
+replacement; both focus and scroll yield when a usable editor field or modal control already owns focus, so opening
+cannot redirect typing that began before its animation frame. Settings keeps normal, leave and delete answers and their
+refusal messages in one opaque bottom-sticky wrapper inside the editor, so hiding the Tensorlake section hides every
+answer while the global Close footer stays unchanged. It uses Tensorlake's acknowledged `create_without_asking` setting,
+never the general setup preference, and refreshes the host list after an accepted or ambiguous submission. An inline
+Settings entry point opens its Tensorlake section. Rerun retains the Tensorlake plan kind, consults only that
+acknowledged setting, and offers no answer that writes the general SSH setup preference. The add dialog binds
+confirmation to a `ConfirmSlot` opening; accepted close retires it synchronously through the recipe close guard, before
+notifying its parent. Automatic submission consumes only the opening it just created, so a cancelled or replaced opening
+cannot authorize a later billed POST.
 
 ## Tensorlake recipes
 
@@ -6113,6 +6122,15 @@ of the saved key, or remounting Settings; unrelated fleet changes must not keep 
 replacement in this dialog triggers discovery even when a key was already saved. A successful Test resumes failed
 discovery with one reload. Another tab's key save is not observed automatically: this tab needs Refresh, Test or
 reopening Settings.
+
+`OrphanList` keeps local checking and last-successful-check feedback beside its existing rows, discovery error and
+generation. A saved key keeps its section mounted when discovery is empty; Refresh sits beside the heading and is
+disabled during discovery or a deletion request. Only the current successful read updates rows and the viewer-local
+HH:MM label, obtained from the renderer's Date; the generation is checked again after that bridge await. A bridge
+failure labels the time unavailable without changing a successful discovery into an API failure. Failed reads keep
+earlier rows and hide the empty-success message. An earlier discovery error remains while explicit recovery runs so
+unrelated feed notices remain paused. Clearing the key invalidates pending reads and clears checking/time feedback.
+These are presentation facts, not new backend operation state or a timer.
 
 ## Feedback forwarding
 

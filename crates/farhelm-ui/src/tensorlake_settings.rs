@@ -177,7 +177,6 @@ pub(crate) fn TensorlakeSettings() -> Element {
             "Tensorlake sandboxes are cloud machines Farhelm can create and use as hosts. Farhelm creates them in the Tensorlake project your API key belongs to."
         }
         section { class: "host-settings-section tensorlake-settings", aria_label: "Tensorlake API key",
-            h4 { class: "host-settings-section-title", "API key" }
             // A failed load seeds nothing editable: every control stays
             // locked until a retry brings the helm's own snapshot.
             if let Some(error) = load_error {

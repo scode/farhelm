@@ -383,12 +383,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **GH_TOKEN in Tensorlake sandboxes.** Inject `GH_TOKEN` into Tensorlake sandboxes like containerized sessions, from a
   named file on the host.
 
-- **TensorLake recipe Save button hidden until scrolling.** When adding a TensorLake recipe, the Save button is not
-  visible until the view scrolls down to it; it must be reachable without hunting. Details TBD. Plan:
-  `plans/queue/tensorlake-ui-fixes.md`.
-- **TensorLake "Refresh sandboxes" button feels inert.** In the TensorLake settings menu, "Refresh sandboxes" sits below
-  "New recipe" as a bare button and appears to do nothing; there may be an empty list above it. Unclear UX; fix TBD.
-  Plan: `plans/queue/tensorlake-ui-fixes.md`.
 - **TensorLake add-host sandbox dialog lacks structure.** The dialog for adding a TensorLake sandbox host is just a
   block of text with no visual structure. Fix TBD. Plan: `plans/queue/tensorlake-ui-fixes.md`.
 

@@ -1,11 +1,11 @@
-//! The Tensorlake recipe editor: one recipe's form, as a body rather than a
-//! dialog.
+//! The Tensorlake recipe editor owns one editing session inside its host modal.
 //!
-//! It is a body so two hosts can embed it without nesting modals: Settings →
-//! Tensorlake swaps its recipe list for it, and the add-host dialog will open
-//! it in place for "New recipe…" (the add-host change; there `allow_delete`
-//! stays off). The editor owns everything about one editing session: the
-//! draft and its baseline, local validation, the save or delete request, and
+//! Settings → Tensorlake swaps its recipe list for it and keeps its answers
+//! sticky inside that panel. Add host opens it in place for "New recipe…",
+//! with deletion disabled, and receives a scrolling body and pinned footer
+//! as direct siblings. Neither layout creates a nested modal or takes over
+//! its host's focus boundary. The editor owns the draft and its baseline,
+//! local validation, the save or delete request, and
 //! the "Save these changes before leaving?" question when Back or Cancel would
 //! drop unsaved edits. The host only decides what happens after it reports
 //! saved, cancelled or deleted.
@@ -31,7 +31,7 @@ use farhelm_proto::tensorlake::recipes::{
 
 use crate::ApiBase;
 use crate::api::{create_recipe, delete_recipe, update_recipe};
-use crate::modal_dialog::DialogActions;
+use crate::modal_dialog::{DialogActions, DialogFooter};
 use crate::ops::use_confirm_slot;
 
 // ---------------------------------------------------------------------------
@@ -267,9 +267,9 @@ fn token_fate(saved: Option<&EndpointView>, draft: &EndpointDraft) -> TokenFate 
 /// A dialog's close request, held back while an embedded editor has unsaved
 /// changes.
 ///
-/// The editor lives inside another modal (Settings today, the add-host dialog
-/// later), and that modal's Escape and close button would otherwise unmount it
-/// and drop the draft without the "Save these changes before leaving?"
+/// The editor lives inside Settings or Add host, and that modal's Escape and
+/// close button would otherwise unmount it and drop the draft without the
+/// "Save these changes before leaving?"
 /// question its own Back and Cancel ask. The enclosing dialog provides one
 /// guard ([`Self::provide`]) and routes every close through
 /// [`Self::request`]; a mounted editor registers itself. The close the user
@@ -311,7 +311,55 @@ impl DialogCloseGuard {
 /// different future types.
 type Request<T> = Pin<Box<dyn Future<Output = Result<T, String>>>>;
 
+/// Hand a newly mounted editor focus without repeating the host modal's setup.
+///
+/// Add host starts at Name. Settings reveals the editor's top, including its
+/// Back button, and focuses the heading without native nearest-focus scrolling
+/// moving it again. Run only on mount: input rerenders must not
+/// jump the viewport or take focus from a field or confirmation answer.
+/// The section supplies its own leading padding; adding the body's padding
+/// would leave a strip of preceding account text visible above the editor.
+/// The deferred frame captures this exact editor, so a later replacement does
+/// not inherit a retired opening's focus handoff. It yields to a field or
+/// control already chosen in this opening: stealing focus between selection
+/// and text input can leave the draft unchanged even though typing began.
+fn focus_editor(in_add_host: bool) {
+    let dialog = if in_add_host {
+        ".add-host-form"
+    } else {
+        ".app-settings-dialog[aria-label=\"Settings\"]"
+    };
+    let dialog = serde_json::to_string(dialog).expect("a selector always serializes");
+    document::eval(&format!(
+        r#"(() => {{
+            const editor = document.querySelector({dialog})?.querySelector('.recipe-editor');
+            requestAnimationFrame(() => {{
+                if (!editor?.isConnected || !editor.getClientRects().length) return;
+                const active = document.activeElement;
+                // The mount handoff is only an initial destination. A field or
+                // another modal control may already own the next input by now.
+                if (active instanceof HTMLElement && active !== editor.closest('[role="dialog"]')
+                    && (editor.contains(active) || active.matches('button, input, textarea, select, a[href], [contenteditable]'))
+                    && !active.matches(':disabled') && !active.closest('[hidden], [inert]')
+                    && active.getClientRects().length
+                    && !['hidden', 'collapse'].includes(getComputedStyle(active).visibility)) return;
+                const heading = editor.querySelector('.recipe-editor-title');
+                const body = editor.closest('.host-settings-body');
+                if (!{in_add_host} && heading && body) {{
+                    body.scrollTop += editor.getBoundingClientRect().top - body.getBoundingClientRect().top;
+                }}
+                const target = {in_add_host} ? editor.querySelector('.recipe-name') : heading;
+                target?.focus({{ preventScroll: true }});
+            }});
+        }})();"#,
+    ));
+}
+
 /// One recipe's editor. `existing: None` edits a new recipe.
+///
+/// `in_add_host` supplies the host dialog's body and footer as direct siblings;
+/// the default Settings layout keeps its answers inside the editor so hiding
+/// the Tensorlake panel hides them too. Both share the same editing state.
 ///
 /// Reports through its handlers and never closes itself: `on_saved` after a
 /// successful save (with what the helm stored), `on_cancel` when the user
@@ -325,6 +373,7 @@ pub(crate) fn RecipeEditor(
     existing: Option<RecipeView>,
     on_saved: EventHandler<RecipeView>,
     on_cancel: EventHandler<()>,
+    #[props(default)] in_add_host: bool,
     #[props(default)] allow_delete: bool,
     #[props(default)] on_deleted: Option<EventHandler<String>>,
 ) -> Element {
@@ -508,18 +557,20 @@ pub(crate) fn RecipeEditor(
         Some(view) => format!("Recipe: {}", view.name),
     };
 
-    rsx! {
-        section { class: "host-settings-section recipe-editor", aria_label: "{title}",
+    let fields = rsx! {
+        if !in_add_host {
             button { r#type: "button", class: "btn btn-neutral recipe-editor-back", disabled: locked,
                 "data-tooltip": "Back to the recipe list; unsaved changes ask before leaving",
                 onclick: move |_| leave.call(()), "‹ Recipes"
             }
+        }
+        if in_add_host {
+            h3 { class: "recipe-editor-title", "{title}" }
+        } else {
             h4 { class: "host-settings-section-title recipe-editor-title", tabindex: "-1",
-                // The click that opened the editor removed its own button;
-                // without this, keyboard focus would fall back to the body.
-                onmounted: move |event| { spawn(async move { let _ = event.set_focus(true).await; }); },
                 "{title}"
             }
+        }
             p { class: "host-settings-help", "How Farhelm creates Tensorlake sandboxes for this recipe." }
 
             label { class: "checkout-root-label", span { "Name" }
@@ -661,6 +712,14 @@ pub(crate) fn RecipeEditor(
                 }
             }
 
+    };
+    // Questions replace the ordinary actions in either layout. Keeping this
+    // one branch preserves the same pending-close and confirmation ownership
+    // when the answers move from the panel into Add host's pinned footer.
+    let actions = rsx! {
+            // Save can be used before the last field is visible. Its refusal
+            // must stay beside those persistent answers, including while a
+            // deferred close keeps the leave question open for another try.
             if let Some(reason) = error() {
                 p { class: "checkout-root-error", role: "alert", "{reason}" }
             }
@@ -668,8 +727,11 @@ pub(crate) fn RecipeEditor(
                 div { class: "templates-departure recipe-departure", role: "status",
                     // A close request can open this while the editor is out of
                     // view (another Settings section, or scrolled away); bring
-                    // the question and its Save into view and focus.
-                    onmounted: move |_| { document::eval("requestAnimationFrame(() => { const prompt = document.querySelector('.recipe-departure'); prompt?.scrollIntoView({block: 'nearest'}); prompt?.querySelector('.btn-primary')?.focus({preventScroll: true}); })"); },
+                    // the whole answer surface into view, including its
+                    // padding, before focusing Save. Scrolling just the inner
+                    // question can leave its last border clipped at the body's
+                    // fractional edge after a hidden panel is revealed.
+                    onmounted: move |_| { document::eval("requestAnimationFrame(() => { const prompt = document.querySelector('.recipe-departure'); const surface = prompt?.closest('.recipe-editor-sticky-actions, .recipe-editor-footer') ?? prompt; surface?.scrollIntoView({block: 'nearest'}); prompt?.querySelector('.btn-primary')?.focus({preventScroll: true}); })"); },
                     p { "Save these changes before leaving?" }
                     DialogActions {
                         button { r#type: "button", class: "btn btn-neutral", disabled: locked,
@@ -732,6 +794,26 @@ pub(crate) fn RecipeEditor(
                         if busy() { "Saving…" } else { "Save" }
                     }
                 }
+            }
+    };
+    if in_add_host {
+        // The frame pins only direct body/footer siblings. A wrapper around
+        // this fragment would put Save back inside the scrolling content.
+        rsx! {
+            div { class: "dialog-body host-settings-body",
+                section { class: "host-settings-section recipe-editor", aria_label: "{title}",
+                    onmounted: move |_| focus_editor(true),
+                    {fields}
+                }
+            }
+            DialogFooter { class: "host-dialog-footer recipe-editor-footer", {actions} }
+        }
+    } else {
+        rsx! {
+            section { class: "host-settings-section recipe-editor", aria_label: "{title}",
+                onmounted: move |_| focus_editor(false),
+                {fields}
+                div { class: "recipe-editor-sticky-actions", {actions} }
             }
         }
     }

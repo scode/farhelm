@@ -307,13 +307,15 @@ sandbox running indefinitely. Ordinary SSH hosts and connections from older helm
 
 **Add host** offers **SSH** and **Tensorlake sandbox**. A sandbox needs a Name and a saved recipe; **New recipe…** opens
 the full recipe editor inside the dialog and saves it under its name. Without an API key, the form points to Settings →
-Tensorlake. Continue shows the sandbox name, size and setup steps, says it bills while running, links to Tensorlake
-pricing, and explains the 24-hour idle-suspend limit on Usage Credits. Only **Create Tensorlake sandboxes without
-asking** skips this confirmation, including for setup reruns; the ordinary host-setup preference does not, and sandbox
-confirmation never changes that ordinary preference. Cancelling retires the displayed creation offer immediately. The
-host appears as soon as its setup run is accepted, before a snapshot is built or a sandbox is created, and shows
-progress in the usual setup view. Its details show the sandbox name, recipe, CPU and memory. New Tensorlake hosts start
-with **Start YOLO sessions without asking** on; the other three host permissions remain off.
+Tensorlake. The inline editor opens at **New recipe**, focuses Name and keeps Cancel / Save in the dialog's pinned
+footer; it has no Recipes back button. Continue shows the sandbox name, size and setup steps, says it bills while
+running, links to Tensorlake pricing, and explains the 24-hour idle-suspend limit on Usage Credits. Only **Create
+Tensorlake sandboxes without asking** skips this confirmation, including for setup reruns; the ordinary host-setup
+preference does not, and sandbox confirmation never changes that ordinary preference. Cancelling retires the displayed
+creation offer immediately. The host appears as soon as its setup run is accepted, before a snapshot is built or a
+sandbox is created, and shows progress in the usual setup view. Its details show the sandbox name, recipe, CPU and
+memory. New Tensorlake hosts start with **Start YOLO sessions without asking** on; the other three host permissions
+remain off.
 
 Setup builds a managed recipe's snapshot if missing (or joins a build already running), creates the named sandbox at the
 recipe's size with the plan's maximum idle timeout and automatic resume off, prepares its user manager, writes any
@@ -378,13 +380,21 @@ changes, whether by its own Back or Cancel or by closing Settings with Escape or
 discard or keep editing, and saving or discarding then completes the close. Delete asks for confirmation. A list refresh
 that fails keeps the rows shown, says they may be out of date, and offers **Retry loading**.
 
+In Settings the editor opens at its top, including Back, with field labels smaller than its section captions. Its
+actions and leave/delete questions and refusal messages stay visible at the bottom of the scrolling panel, above the
+unchanged Close footer. Switching Settings sections hides those actions with the editor. In Add host, the same answers
+use the dialog's pinned footer. Keyboard navigation reaches the answers after the fields. As with other framed dialogs,
+a very short window scrolls the whole card when its header and footer cannot fit.
+
 Settings also lists **Sandboxes not on this helm**: sandbox names beginning with `farhelm-host-` or `farhelm-build-`
 that no host or recipe build on this helm owns. Each shows its creation time when available, its state, and **from
 another helm** when its name carries another helm's tag. **Delete** asks plainly before terminating it and deleting its
 snapshots. Unfinished cleanup remains in the list with its error and **Retry cleanup**, even after closing and reopening
 Settings; running cleanup shows **Cleaning up…**. This operation state lasts until cleanup succeeds or the helm
-restarts. The list is hidden when empty; Farhelm never cleans it automatically. The browser-test namespace
-`farhelm-sbx-` and sandboxes without Farhelm's reserved prefixes never appear.
+restarts. With a saved API key the section stays visible even when empty, with a small **Refresh** beside its heading. A
+read shows **Checking…**, then an empty success shows **None found · checked HH:MM** in the viewer's local time. A
+failed read shows its reason and keeps earlier rows rather than claiming an empty result. Farhelm never cleans it
+automatically. The browser-test namespace `farhelm-sbx-` and sandboxes without Farhelm's reserved prefixes never appear.
 
 A package recipe's hosts start from a snapshot Farhelm builds; the UI calls it a snapshot, never a template, which means
 launch templates. Saving a recipe never builds one, because a build bills: the list offers **Build snapshot** while a
@@ -1854,31 +1864,33 @@ text, so it works on any machine where Tensorlake's `tl` CLI is signed in. The s
 the registration, because an API key cannot list SSH keys. `<tag>` is the helm tag: four lowercase letters or digits
 derived from the helm's registry, stable for the life of its state, which the names of the sandboxes this helm creates
 also carry. Below the account, the section lists the helm's Tensorlake recipes with **New recipe** and an editor per
-recipe (see [Topology](#topology)). The off-by-default **Create Tensorlake sandboxes without asking** switch saves only
-when the helm acknowledges it and shows only the stored choice; `Set up new hosts without asking` never covers creating
-a sandbox. The section also notes that on Tensorlake's Usage Credits plan Tensorlake suspends a sandbox after 24 hours
-without a connection from Farhelm. The **Terminal** section chooses whether web links open in Farhelm without passing
-the click on (the default), open in Farhelm and also pass the click on, or only pass the click on. The latter two
-choices explain the risk of a second browser tab and that a program without mouse reporting cannot act on a click. This
-choice covers every client of the helm and takes effect in every mounted terminal of the current client immediately;
-other open clients pick it up when they reload, like the host choices. In the desktop app, the **Terminal** section also
-has tunnel consent and a free-form, comma-separated **File types to open with Cmd-click** field (Ctrl-click outside
-macOS). It defaults to `md, txt, json`; saving an empty list disables opening while downloads still save. This field
-requires an explicit, acknowledged save, but its value lives in the shared preference row. The dialog shows one
-prominent warning beside the field for each listed type outside `md`, `txt`, `json` and `log`; HTML-like types have a
-browser-specific warning, and all other unrecognized types have a generic warning. The warnings follow the draft as
-typed, including when another entry is malformed. A refused save leaves the draft and current helm policy unchanged and
-shows the reason inline. Under **Notifications**, sounds has three device switches (see Status), and **ntfy alerts** has
-an off-by-default switch, server URL (default `https://ntfy.sh`), topic, optional access token, and priority (Min, Low,
-Default, High, Urgent; default Default). These are explicitly saved helm configuration, shared by every client, outside
-the preference row. Save refusals appear inline. The stored token is never returned: the form shows whether one exists
-and allows replacing or clearing it. Changing to another server clears a saved token unless a new one is entered, and
-the form says so before saving. **Send test** uses the saved configuration, even while disabled, and reports success or
-failure inline. The **Checkouts** section holds the explicitly saved all-hosts checkout folder and, below it, a
-monospace multi-line post-clone command field and the default-on **Keep a checkout ready for faster launches** switch
-(see [Managed checkouts](#managed-checkouts)). The switch's help explains one extra checkout's disk space per repository
-and host, promptless login-shell preparation, earlier file times and Git hooks/filters, and discard on the next create
-or after 30 days unused; it links the full earlier-clone caveats. The folder's help explains expansion on each host,
+recipe (see [Topology](#topology)); New recipe takes only the width its label needs. Below the recipes, **Sandboxes not
+on this helm** keeps its heading and Refresh visible even when none are found. The off-by-default **Create Tensorlake
+sandboxes without asking** switch saves only when the helm acknowledges it and shows only the stored choice;
+`Set up new hosts without asking` never covers creating a sandbox. The section also notes that on Tensorlake's Usage
+Credits plan Tensorlake suspends a sandbox after 24 hours without a connection from Farhelm. The **Terminal** section
+chooses whether web links open in Farhelm without passing the click on (the default), open in Farhelm and also pass the
+click on, or only pass the click on. The latter two choices explain the risk of a second browser tab and that a program
+without mouse reporting cannot act on a click. This choice covers every client of the helm and takes effect in every
+mounted terminal of the current client immediately; other open clients pick it up when they reload, like the host
+choices. In the desktop app, the **Terminal** section also has tunnel consent and a free-form, comma-separated **File
+types to open with Cmd-click** field (Ctrl-click outside macOS). It defaults to `md, txt, json`; saving an empty list
+disables opening while downloads still save. This field requires an explicit, acknowledged save, but its value lives in
+the shared preference row. The dialog shows one prominent warning beside the field for each listed type outside `md`,
+`txt`, `json` and `log`; HTML-like types have a browser-specific warning, and all other unrecognized types have a
+generic warning. The warnings follow the draft as typed, including when another entry is malformed. A refused save
+leaves the draft and current helm policy unchanged and shows the reason inline. Under **Notifications**, sounds has
+three device switches (see Status), and **ntfy alerts** has an off-by-default switch, server URL (default
+`https://ntfy.sh`), topic, optional access token, and priority (Min, Low, Default, High, Urgent; default Default). These
+are explicitly saved helm configuration, shared by every client, outside the preference row. Save refusals appear
+inline. The stored token is never returned: the form shows whether one exists and allows replacing or clearing it.
+Changing to another server clears a saved token unless a new one is entered, and the form says so before saving. **Send
+test** uses the saved configuration, even while disabled, and reports success or failure inline. The **Checkouts**
+section holds the explicitly saved all-hosts checkout folder and, below it, a monospace multi-line post-clone command
+field and the default-on **Keep a checkout ready for faster launches** switch (see
+[Managed checkouts](#managed-checkouts)). The switch's help explains one extra checkout's disk space per repository and
+host, promptless login-shell preparation, earlier file times and Git hooks/filters, and discard on the next create or
+after 30 days unused; it links the full earlier-clone caveats. The folder's help explains expansion on each host,
 first-use folder creation, and that command-line host overrides keep their folder. The command's help explains that it
 runs in each new checkout on its host, after cloning and before the agent starts, that changes affect future checkouts
 only, and that command-line host overrides keep their command. The installed desktop app's dialog also has an **App**
