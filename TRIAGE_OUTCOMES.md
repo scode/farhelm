@@ -21142,7 +21142,9 @@
 - Completion criteria: add a FILTER.md filter for this specific case: a process number reused inside Farhelm's internal
   handoff between verifying a terminal host's identity and signalling it, during forced termination. Say it was accepted
   by the maintainer on 2026-11-04. No code or spec change. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/unlikely-races-nov4.md`.
+- Execution: completed the accepted-case documentation in jj change `vzpwwzzwoynwplwktroznrqprzmrvslo`, bookmark
+  `plan/unlikely-races-nov4/05-filter-handoff-pid-reuse`. Added only the specific internal verification-to-signal
+  handoff filter; no code or spec change. Draft PR: https://github.com/scode/farhelm/pull/3033/changes.
 
 ## registry-test-basename-lookup-can-kill-foreign-host.md
 

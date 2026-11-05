@@ -54,11 +54,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   moves to a terminal host and its host is lost, independent old terminal tabs can disappear from the live-work count.
   Delete can then end those tabs without the required warning, although they may still hold work.
 
-- [`async-process-verification-leaves-stale-signal-authority.md`](async-process-verification-leaves-stale-signal-authority.md)
-  — A process can exit and its number be reused after asynchronous identity verification but before Farhelm sends its
-  signal, allowing unrelated work to be signalled. The accepted adjacent synchronous window explicitly excludes this
-  scheduling gap.
-
 - [`retained-delete-approval-can-kill-new-tab.md`](retained-delete-approval-can-kill-new-tab.md) — A Delete approved
   when nothing was alive can later end a newly opened tab without asking about that work if its host becomes unreadable
   between two status reads. The conditional approval and status sequence is established.
