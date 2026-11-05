@@ -1199,9 +1199,11 @@
     // pointer, counts (`answerLines`).
     //
     // A hover rests on the row objects it read, captured when its `hover()`
-    // runs and nowhere else: the lines the link covers, plus an OSC 8 link's
-    // `evidence` lines (the adjacent rows its text is joined from, and one
-    // beyond each end). Rows are immutable and replaced only when the
+    // runs and nowhere else: the lines the link covers, plus its `evidence`
+    // lines. OSC 8 links include adjacent tagged rows and their boundaries;
+    // printed URLs include the search window and its boundary rows, since
+    // an edit outside the matched cells can change the address.
+    // Rows are immutable and replaced only when the
     // supervisor sends that row, so "the hover is current" is one identity
     // check per line. Every path checks it before relying on the hover: a
     // pointer move, the paint after rows changed, and a release. A hover

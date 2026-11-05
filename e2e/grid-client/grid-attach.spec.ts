@@ -1181,6 +1181,42 @@ test("an equal-length relabel of a hovered OSC 8 link under a resting pointer is
   await expect(display).toContainText("Text says: https://bank.example/");
 });
 
+test("a printed URL extended on the neighboring row opens its new address after repaint", async ({ page }) => {
+  // A retained hover must remember the wrapped rows that established its
+  // match, even when the old address occupied only the row under the pointer.
+  // Otherwise a program can change the visible host indefinitely while a
+  // click still opens the old prefix. Keep the pointer and first row fixed.
+  await page.addInitScript(() => {
+    const w = window as any;
+    w.opened = [];
+    w.open = (url: string) => w.opened.push(url);
+  });
+  await mountTerminal(page);
+  await attachGrid(page);
+  await showScreen(page, [{ w: true, r: [[0, 15, "https://bank.co", [0, -1, -1]]] }, ""], { cols: 15 });
+  const at = await gridCell(page, 10, 0, 15);
+  await page.mouse.move(at.x, at.y);
+  await expect(page.locator("#term .grid-terminal")).toHaveClass(/grid-terminal-link-hover/);
+  await page.mouse.click(at.x, at.y);
+  await expect.poll(() => page.evaluate(() => (window as any).opened.slice())).toEqual(["https://bank.co"]);
+  // Send only row 1, then paint it: neither row 0 nor its identity changes.
+  await page.evaluate(() => {
+    const ws = (window as any).FakeSocket.all[0];
+    ws.binary(JSON.stringify({ t: "rows", rows: [[1, { w: false, r: [[0, 1, "m", [0, -1, -1]]] }]] }));
+    ws.binary(JSON.stringify({
+      t: "frame", rev: 3, cols: 15, rows: 4,
+      cursor: { x: 0, y: 3, visible: false, shape: "block", blink: true },
+    }));
+    (window as any).__farhelmGrid.flush();
+  });
+  await expect(page.locator("#term .grid-terminal-row").nth(0)).toHaveText("https://bank.co");
+  await expect(page.locator("#term .grid-terminal-row").nth(1)).toHaveText("m");
+  await page.mouse.click(at.x, at.y);
+  await expect.poll(() => page.evaluate(() => (window as any).opened.slice())).toEqual([
+    "https://bank.co", "https://bank.com",
+  ]);
+});
+
 test("a change to only an adjacent row of a hovered link is judged again", async ({ page }) => {
   // The comparison joins the rows of one link; the hovered row staying put
   // must not keep a verdict about a continuation that changed.
