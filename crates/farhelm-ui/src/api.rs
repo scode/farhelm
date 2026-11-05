@@ -3643,6 +3643,28 @@ pub(crate) async fn set_pin(base: &str, id: &str, pinned: bool) -> Result<(), St
     Ok(())
 }
 
+/// Move a pin beside the neighbor the user saw, without inventing a global
+/// index for filtered or held rows. Success is read through the ordinary
+/// listing/feed; stale pins use the backend's refusal rather than a retry
+/// against a different target. This request shares Pin's metadata ownership.
+pub(crate) async fn move_pin(
+    base: &str,
+    id: &str,
+    neighbor: &str,
+    before: bool,
+) -> Result<(), String> {
+    let url = format!("{base}/api/sessions/{}/pin-order", encode_path_segment(id));
+    let resp = send(client().put(&url).json(&serde_json::json!({
+        "neighbor": neighbor,
+        "placement": if before { "before" } else { "after" },
+    })))
+    .await?;
+    if !resp.status().is_success() {
+        return Err(refusal_text("PUT", &url, resp).await);
+    }
+    Ok(())
+}
+
 /// `PUT /api/sessions/{id}/notifications/read` (or `/cleared` when `clear`
 /// is set): mark the session's notifications read, or cleared, through
 /// sequence number `through` (SPEC.md, Status).
@@ -5674,6 +5696,78 @@ mod tests {
             super::http_error_text(error().with_url(ordinary.clone())),
             error().with_url(ordinary).to_string()
         );
+    }
+
+    /// Pin moves send the exact visible neighbor and direction through the
+    /// protected HTTP funnel. Raw full references survive JSON while path
+    /// delimiters are encoded, and a stale-pin refusal must reach the caller.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[farhelm_testtrace::test]
+    async fn pin_moves_send_relative_targets_and_preserve_refusals() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let mut dom = dioxus::prelude::VirtualDom::new(dioxus::core::VNode::empty);
+        dom.rebuild_in_place();
+        const ID: &str = "11111111-1111-4111-8111-111111111111:a/b";
+        const NEIGHBOR: &str = "22222222-2222-4222-8222-222222222222:other:雪";
+        for (before, refused) in [(true, false), (false, false), (true, true)] {
+            let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+                .await
+                .unwrap();
+            let base = format!("http://{}", listener.local_addr().unwrap());
+            let peer = tokio::spawn(async move {
+                tokio::time::timeout(std::time::Duration::from_secs(10), async move {
+                    let (mut socket, _) = listener.accept().await.unwrap();
+                    let mut request = Vec::new();
+                    let mut chunk = [0; 1024];
+                    let header_end = loop {
+                        let read = socket.read(&mut chunk).await.unwrap();
+                        assert!(read > 0, "the client must finish the request headers");
+                        request.extend_from_slice(&chunk[..read]);
+                        assert!(request.len() <= 8192, "bounded fixture request");
+                        if let Some(end) = request.windows(4).position(|bytes| bytes == b"\r\n\r\n") {
+                            break end + 4;
+                        }
+                    };
+                    let headers = std::str::from_utf8(&request[..header_end]).unwrap();
+                    assert!(headers.starts_with("PUT /api/sessions/11111111-1111-4111-8111-111111111111%3Aa%2Fb/pin-order HTTP/1.1\r\n"));
+                    let length: usize = headers.lines().find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        name.eq_ignore_ascii_case("content-length").then(|| value.trim().parse().unwrap())
+                    }).expect("a JSON request declares its length");
+                    assert!(length <= 1024, "bounded fixture body");
+                    while request.len() < header_end + length {
+                        let read = socket.read(&mut chunk).await.unwrap();
+                        assert!(read > 0, "the client must finish the JSON body");
+                        request.extend_from_slice(&chunk[..read]);
+                        assert!(request.len() <= 8192);
+                    }
+                    let body: serde_json::Value = serde_json::from_slice(&request[header_end..header_end + length]).unwrap();
+                    assert_eq!(body, serde_json::json!({"neighbor": NEIGHBOR, "placement": if before { "before" } else { "after" }}));
+                    let (status, body) = if refused { ("409 Conflict", "\"session or neighbor is no longer pinned\"") } else { ("200 OK", "{}") };
+                    let response = format!("HTTP/1.1 {status}\r\nContent-Type: application/json\r\n{}: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", crate::skew::BUILD_HEADER, crate::skew::CLIENT_BUILD, body.len());
+                    socket.write_all(response.as_bytes()).await.unwrap();
+                    socket.shutdown().await.unwrap();
+                }).await.expect("the owned move exchange must finish");
+            });
+            // The real funnel observes the helm build through global signals.
+            // Scope every poll as the app would, without holding a runtime
+            // guard across unrelated Tokio work while this request is pending.
+            let mut request = Box::pin(super::move_pin(&base, ID, NEIGHBOR, before));
+            let result = std::future::poll_fn(|cx| {
+                dom.in_scope(dioxus::core::ScopeId::APP, || request.as_mut().poll(cx))
+            })
+            .await;
+            peer.await.unwrap();
+            if refused {
+                assert!(
+                    result
+                        .unwrap_err()
+                        .contains("session or neighbor is no longer pinned")
+                );
+            } else {
+                result.unwrap();
+            }
+        }
     }
 
     /// Serve one bounded HTTP fixture so response readers see reqwest's real

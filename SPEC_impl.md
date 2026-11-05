@@ -5666,11 +5666,24 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   unpin/re-pin appends again. Only an overflowing maximum requires compaction before appending, in the same transaction.
   Listing and detail rows carry `pinned: bool` and `pin_position: integer | null`; the list reads positions in one batch
   for both cached and identity-less live rows. The helm sort stays unchanged for the quick switcher. The sidebar stably
-  partitions accepted replies before applying its reorder hold, and computes the separator from the resulting display.
-  Replace copies a source pin and its position to the new id before requesting the source's deletion, so a pin write
-  failure leaves the source intact; if deletion fails both surviving sessions can be pinned at the same position. An
-  already-pinned replacement keeps its position. Positions deliberately are not unique, and their total order is
-  `(position, host_id, session_id)`. Confirmed deletion clears the old pin best effort, like the other viewer metadata.
+  partitions accepted replies, orders the pinned partition by that total key before applying its reorder hold, and
+  computes the separator from the resulting display. A hold retains displayed IDs and original pin membership across
+  reply reconciliation: original pins still pinned now sort within their held slots; other rows keep their slots,
+  disappearing IDs are removed, and new IDs append. Reconciliation adopts the displayed IDs without recapturing pin
+  membership. Move neighbors come from the displayed leading run of original, still-pinned rows, excluding pins added
+  during the hold even when contiguous. Missing or mixed pin positions retain the older stable partition with no Move
+  controls. Row menus use their existing action-identity focus reconciliation; accepting Move returns focus to the keyed
+  row's toggle before the request, then uses the ordinary row refusal and explicit listing refresh paths. The page's
+  menu-focus helper observes direct list-child mutations only while a session toggle owns focus. If its keyed row is
+  removed and reinserted, the helper restores focus lost to the document body after that actual DOM mutation, provided
+  the same node remains connected, the document still has focus, and no independent focus intervened. A later focus
+  choice or row removal retires that observer; focusout without replacement focus retires it at the next animation frame
+  if reinsertion has not restored focus. An old mutation or frame callback cannot affect its successor. No optimistic
+  order or client write queue is introduced. Replace copies a source pin and its position to the new id before
+  requesting the source's deletion, so a pin write failure leaves the source intact; if deletion fails both surviving
+  sessions can be pinned at the same position. An already-pinned replacement keeps its position. Positions deliberately
+  are not unique, and their total order is `(position, host_id, session_id)`. Confirmed deletion clears the old pin best
+  effort, like the other viewer metadata.
 
   `PUT /api/sessions/{id}/pin-order` requires `{neighbor: full_session_reference, placement: "before" | "after"}`. Both
   sessions must be known to the helm, including cached sessions on unreachable hosts, and both must still be pinned; a

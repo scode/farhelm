@@ -598,6 +598,12 @@ pub struct Session {
     /// omit it and decode unpinned. Only the sidebar uses it for ordering.
     #[serde(default)]
     pub pinned: bool,
+    /// Shared manual order from the helm. Missing on older peers and bare
+    /// mutation replies; only accepted sidebar listings use it for ordering.
+    /// Signed values and ties are valid: Replace can temporarily keep two
+    /// pins at one position, resolved by numeric host and bare session ID.
+    #[serde(default)]
+    pub pin_position: Option<i64>,
     /// The session's notifications that no client of this helm has cleared,
     /// newest first and at most 10 (SPEC.md, Status): what the row's bell
     /// lists. The helm has already dropped cleared ones, so an empty list
@@ -2652,6 +2658,33 @@ mod tests {
         assert_eq!(origin.cwd.raw(), "/work/bar-1");
     }
 
+    /// Older helms omit positions and current unpinned rows send null. Both
+    /// remain absent rather than inventing rank zero; signed endpoints stay
+    /// exact so the sidebar can apply the store's whole ordering domain.
+    #[farhelm_testtrace::test]
+    fn pin_positions_decode_legacy_absence_null_and_signed_values() {
+        let mut body = serde_json::json!({"id": "s1", "title": "pin", "cwd": "/work", "invocation": "agent", "pinned": true});
+        let row: Session = serde_json::from_value(body.clone()).unwrap();
+        assert!(row.pinned);
+        assert_eq!(row.pin_position, None);
+        body["pin_position"] = serde_json::Value::Null;
+        assert_eq!(
+            serde_json::from_value::<Session>(body.clone())
+                .unwrap()
+                .pin_position,
+            None
+        );
+        for position in [i64::MIN, -1, 0, i64::MAX] {
+            body["pin_position"] = serde_json::json!(position);
+            assert_eq!(
+                serde_json::from_value::<Session>(body.clone())
+                    .unwrap()
+                    .pin_position,
+                Some(position)
+            );
+        }
+    }
+
     /// `host_identity`'s three wire shapes decode to three DISTINCT values:
     /// an absent key (a helm predating the field) to the outer `None`, JSON
     /// `null` (a current helm, host with no recorded identity) to
@@ -3262,6 +3295,7 @@ mod tests {
             working_copy: None,
             seen_activity_at: None,
             pinned: false,
+            pin_position: None,
             notifications: Vec::new(),
             notifications_read_through: 0,
             agent_terminal: None,
@@ -3333,6 +3367,7 @@ mod tests {
             working_copy: None,
             seen_activity_at,
             pinned: false,
+            pin_position: None,
             notifications: Vec::new(),
             notifications_read_through: 0,
             agent_terminal: None,

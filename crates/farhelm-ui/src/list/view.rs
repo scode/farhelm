@@ -1327,10 +1327,12 @@ pub(crate) fn ListView(
     // filter's listing covered, so nothing about evidence changes with it.
     let mut sort = use_signal(move || stored_sort(preferences));
     // The session list's order hold: while the pointer is over the list,
-    // the ids in the order they are displayed, so no row moves out from
-    // under the pointer on its way to a click (SPEC.md, Session list). A
-    // display-only exception to rendering the helm's order as served:
-    // nothing here is remembered or sent anywhere, and
+    // remember displayed slots and pin membership at capture. Original pins
+    // still pinned now may follow a manual move within their own slots;
+    // every other row stays under the pointer (SPEC.md, Session list). A
+    // display-only exception to rendering the sidebar's current order:
+    // the snapshot lasts only for this hold; it is never persisted or sent
+    // to the helm, and
     // `rows::held_display_order` is the whole rule for what a hold shows.
     //
     // A hold always describes the committed `listing`, never the controls:
@@ -1338,7 +1340,7 @@ pub(crate) fn ListView(
     // `commit_listing`), because changing the host, filter, or sort is
     // asking for a different list. That also covers a hold taken while a
     // changed query's reply is still in flight, which froze the old rows.
-    let mut order_hold = use_signal(|| None::<Vec<String>>);
+    let mut order_hold = use_signal(|| None::<rows::HeldOrder>);
     // The query the committed `listing` answers, which is what a new reply
     // is compared against to decide whether the hold still applies.
     let mut listing_query = use_signal(|| None::<(SessionFilter, ListSort)>);
@@ -1373,9 +1375,9 @@ pub(crate) fn ListView(
             let Some(Ok(listing)) = listing.as_ref() else {
                 return;
             };
-            let held = order_hold.peek().clone().unwrap_or_default();
+            let held = order_hold.peek().clone();
             rows::rows_below_changed(
-                &rows::held_display_order(&held, &listing.sessions),
+                &rows::held_display_order(held.as_ref(), &listing.sessions),
                 &changed,
             )
         };
@@ -1507,7 +1509,7 @@ pub(crate) fn ListView(
         if !accepted {
             return;
         }
-        // Partition only this sidebar's copy, before any hold reconciliation.
+        // Apply shared pin order only to this sidebar's copy, before the hold.
         // The helm order and quick switcher's independent read stay intact.
         if let Ok(listing) = &mut fetched {
             rows::pinned_first(&mut listing.sessions);
@@ -1585,24 +1587,26 @@ pub(crate) fn ListView(
                     _ => None,
                 };
                 // Compared as DISPLAYED, not as served: while the order
-                // is held, a served reorder moves nothing on screen and
-                // must not close a menu whose row stayed put. The two
+                // is held, ordinary served reorders leave slots alone, while
+                // original pins can move within their held slots. Only the
+                // resulting display can invalidate a menu's anchor. The two
                 // sides are shown under different holds when this reply
                 // answers a different query, which ends the hold below.
-                let previous_held = order_hold.peek().clone().unwrap_or_default();
+                let previous_held = order_hold.peek().clone();
                 let incoming_held = if answers_listing_query(&requested, ordered_by) {
                     previous_held.clone()
                 } else {
-                    Vec::new()
+                    None
                 };
                 let previous_shown = previous_sessions
-                    .map(|previous| rows::held_display_order(&previous_held, previous));
+                    .map(|previous| rows::held_display_order(previous_held.as_ref(), previous));
                 // Peeked live rather than taken from this render's
                 // `compact`: the reply may land renders after the
                 // closure was built, and a toggle in between decides
                 // whether detail lines are on screen now.
                 let detail_lines_shown = !compact_choice(preferences.0.peek().compact);
-                let incoming_shown = rows::held_display_order(&incoming_held, &listing.sessions);
+                let incoming_shown =
+                    rows::held_display_order(incoming_held.as_ref(), &listing.sessions);
                 let mut moved = rows::menu_rows_reordered(
                     previous_shown.as_deref(),
                     &incoming_shown,
@@ -1754,15 +1758,14 @@ pub(crate) fn ListView(
             // A reply to the same query as the rows on screen keeps the hold
             // and makes it adopt what it now shows, including rows the reply
             // appended at the bottom, so a later reply cannot re-sort those
-            // among themselves while the pointer is still over them. A reply
-            // to a different query ends the hold (see `order_hold`).
+            // among themselves while the pointer is still over them. Original
+            // pin membership survives this adoption: repeated replies must not
+            // admit a new pin to the manual-order exception. A different query
+            // ends the hold (see `order_hold`).
             let reconciled = match order_hold.peek().as_ref() {
-                Some(held) if answers_listing_query(&requested, ordered_by) => Some(
-                    rows::held_display_order(held, &listing.sessions)
-                        .into_iter()
-                        .map(|session| session.id.raw().to_owned())
-                        .collect::<Vec<_>>(),
-                ),
+                Some(held) if answers_listing_query(&requested, ordered_by) => {
+                    Some(held.reconcile(&listing.sessions))
+                }
                 _ => None,
             };
             if reconciled.is_some() || order_hold.peek().is_some() {
@@ -1911,8 +1914,8 @@ pub(crate) fn ListView(
                     let session_moved = if let Some(Ok(current)) = current_listing.as_ref()
                         && !compact
                     {
-                        let held = order_hold.peek().clone().unwrap_or_default();
-                        let shown = rows::held_display_order(&held, &current.sessions);
+                        let held = order_hold.peek().clone();
+                        let shown = rows::held_display_order(held.as_ref(), &current.sessions);
                         let current_errors = errors.peek();
                         rows::session_content_rows_moved(
                             Some(rows::SessionFlow {
@@ -2358,12 +2361,12 @@ pub(crate) fn ListView(
                         // can make differ from the served one. The menu and
                         // bell exclude each other; check their sole anchor
                         // before removal discards the old layout baseline.
-                        let held = order_hold.peek().clone().unwrap_or_default();
+                        let held = order_hold.peek().clone();
                         if remove_row_reporting_menu_move(
                             &mut current.sessions,
                             &id,
                             open_anchor.as_deref(),
-                            &held,
+                            held.as_ref(),
                         ) {
                             // The old paired clear also wrote the closed slot.
                             // Keep those effect notifications, including when
@@ -3232,15 +3235,11 @@ pub(crate) fn ListView(
             if order_hold.peek().is_some() {
                 return;
             }
-            let ids: Vec<String> = match listing.peek().as_ref() {
-                Some(Ok(current)) => current
-                    .sessions
-                    .iter()
-                    .map(|s| s.id.raw().to_owned())
-                    .collect(),
+            let held = match listing.peek().as_ref() {
+                Some(Ok(current)) => rows::HeldOrder::capture(&current.sessions),
                 _ => return,
             };
-            order_hold.set(Some(ids));
+            order_hold.set(Some(held));
             let generation = hold_generation.get() + 1;
             hold_generation.set(generation);
             let hold_generation = hold_generation.clone();
@@ -3428,6 +3427,31 @@ pub(crate) fn ListView(
             }
         });
     });
+    let move_pin_base = base.clone();
+    let move_pin_refresh = request_listing.clone();
+    // Keep the visible-neighbor intent intact while the request runs. The
+    // helm owns order; a refusal stays on this row and a success re-reads it.
+    let on_move_pin = use_callback(move |(id, neighbor, before): (String, String, bool)| {
+        menu_open.set(None);
+        let base = move_pin_base.clone();
+        let refresh = move_pin_refresh.clone();
+        spawn(async move {
+            let result = api::move_pin(&base, &id, &neighbor, before).await;
+            let Ok(mut errors) = errors.try_write() else {
+                return;
+            };
+            match result {
+                Ok(()) => {
+                    errors.remove(&id);
+                    drop(errors);
+                    refresh(Trigger::Explicit);
+                }
+                Err(error) => {
+                    errors.insert(id, format!("Move pin: {error}"));
+                }
+            }
+        });
+    });
     let mark_seen_base = base.clone();
     // The row's read/unread toggle — the menu item and the dot both funnel
     // here (SPEC.md, Status). Routed through `queue_seen_write` rather than
@@ -3540,16 +3564,16 @@ pub(crate) fn ListView(
     // ordinary replace's own success path.
     let created_listing = request_listing.clone();
     // The order hold that applies to the list being shown, if any, as the
-    // ids `rows::held_display_order` keeps in place. Read (not peeked) so a
-    // hold starting or ending re-renders the rows.
-    let held_order: Vec<String> = order_hold.read().clone().unwrap_or_default();
+    // slots and original pins `rows::held_display_order` keeps. Read rather
+    // than peeked so a hold starting or ending re-renders the rows.
+    let held_order = order_hold.read().clone();
     let displayed = listing
         .read()
         .as_ref()
         .and_then(|result| result.as_ref().ok())
         .map(|listing| {
             apply_optimistic_renames(
-                &rows::held_display_order(&held_order, &listing.sessions),
+                &rows::held_display_order(held_order.as_ref(), &listing.sessions),
                 &renamed.read(),
             )
         });
@@ -3557,6 +3581,10 @@ pub(crate) fn ListView(
         .as_deref()
         .and_then(rows::pin_separator_after)
         .map(str::to_string);
+    let pin_neighbors = rows::pin_move_neighbors(
+        held_order.as_ref(),
+        displayed.as_deref().unwrap_or_default(),
+    );
     // Prepare the exact local delete/activity values once for both the copy
     // comparison and the row props. The existing clock read above remains the
     // sole time source, and held rows retain their current accepted fields.
@@ -4719,9 +4747,9 @@ pub(crate) fn ListView(
                         // layout change) is `layout_epoch`'s job instead —
                         // see the `use_effect` near `show_create`'s
                         // declaration.
-                        // While the pointer holds the order, rows keep the
-                        // positions they had when it arrived (see
-                        // `rows::held_display_order` for new and removed rows).
+                        // Held slots stay fixed except for original pins'
+                        // shared manual order; new and removed rows follow
+                        // `rows::held_display_order`'s reconciliation rule.
                         for (session, row_deleting, row_activity) in displayed_rows.clone().unwrap_or_default() {
                             SessionRow {
                                 key: "{session.id.raw()}",
@@ -4731,6 +4759,7 @@ pub(crate) fn ListView(
                                 listing_ready,
                                 compact,
                                 pin_separator: pin_separator.as_deref() == Some(session.id.raw()),
+                                pin_neighbors: pin_neighbors.get(session.id.raw()).cloned(),
                                 state: RowState {
                                     error: errors.read().get(session.id.raw()).cloned(),
                                     // The shared token counts as busy for
@@ -4786,6 +4815,7 @@ pub(crate) fn ListView(
                                 on_replace_with,
                                 on_mark_seen,
                                 on_pin,
+                                on_move_pin,
                                 on_replace,
                                 on_confirm_replace: confirm_replace,
                                 on_cancel_replace: cancel_replace,
@@ -5081,8 +5111,9 @@ mod tests {
                     session
                 })
                 .collect();
-            let held = ["A".to_string(), "B".to_string(), "C".to_string()];
-            let shown = rows::held_display_order(&held, &served);
+            let held =
+                rows::HeldOrder::capture(&["A", "B", "C"].map(super::super::row::row_specimen));
+            let shown = rows::held_display_order(Some(&held), &served);
             assert_eq!(
                 shown.iter().map(|row| row.id.raw()).collect::<Vec<_>>(),
                 ["A", "B", "C"]
@@ -5265,13 +5296,15 @@ mod tests {
         let c = super::super::row::row_specimen("9303");
         let mut a = super::super::row::row_specimen("9302");
         let b = super::super::row::row_specimen("9301");
-        let held = vec!["9303".to_string(), "9302".to_string(), "9301".to_string()];
+        let held = rows::HeldOrder::capture(
+            &["9303", "9302", "9301"].map(super::super::row::row_specimen),
+        );
         let renamed = HashMap::from([(
             "9302".to_string(),
             ("actual optimistic title".to_string(), 1),
         )]);
         let prepare = |served: &[Session]| {
-            apply_optimistic_renames(&rows::held_display_order(&held, served), &renamed)
+            apply_optimistic_renames(&rows::held_display_order(Some(&held), served), &renamed)
                 .into_iter()
                 .map(|session| (session, false, None))
                 .collect::<Vec<RenderedSession>>()

@@ -1905,18 +1905,20 @@ fixing when the fix is reasonably simple, but it is not a defect to engineer aro
 never runs a command, or applies a destructive action, that the user did not activate on a control that was visibly
 focused when they activated it.
 
-Pinned sessions appear first in the sidebar, with each group preserving the chosen list order below. A pin is shared
-helm data, so every client agrees without a private rank; it works even when the session's host is unreachable. Host
-selection and other filters still apply. Pins have no manual or pin-time order. Under most recent activity, even a stale
-pin comes before connected running and waiting work. The quick switcher keeps its existing activity order and does not
-group pins first. Deleting a session removes its pin; Replace and Replace with carry it to the new session, and Restart
-keeps it on the same id.
+Pinned sessions appear first in the sidebar in a manual order shared by every client of the helm, independent of the
+list's chosen sort. A new pin goes at the bottom of the pinned group; unpinning and pinning again puts it there again.
+Move up and Move down in the row menu rearrange pins relative to the displayed neighbor. Unpinned rows keep the chosen
+list order below. Pins work even when the session's host is unreachable; host selection and other filters still apply
+without changing the stored order. Under most recent activity, even a stale pin comes before connected running and
+waiting work. The quick switcher keeps its existing activity order and does not group pins first. Deleting a session
+removes its pin; Replace and Replace with carry the pin and its position to the new session, and Restart keeps it on the
+same id.
 
-Within each pin group, the option labelled most recent activity sorts connected running and waiting sessions first, then
-every other session — idle, unclassified, ended, and anything on an unreachable host. Inside each group the order is the
-most recent observed START of a work burst: a session promotes when it moves from known idle or waiting into running
-(both idle-to-running and waiting-to-running count) and when it starts waiting on the user, since a question for the
-user is work the user should see; later output inside that burst, and a question that stays on screen, leave the
+Among unpinned sessions, the option labelled most recent activity sorts connected running and waiting sessions first,
+then every other session — idle, unclassified, ended, and anything on an unreachable host. Inside each group the order
+is the most recent observed START of a work burst: a session promotes when it moves from known idle or waiting into
+running (both idle-to-running and waiting-to-running count) and when it starts waiting on the user, since a question for
+the user is work the user should see; later output inside that burst, and a question that stays on screen, leave the
 position alone. Only a change the supervisor itself observed between two of its own looks counts: the first look after a
 supervisor restart, a session restart, or a recovery from failed screen captures only establishes where the session
 stands. Moving between the groups is what idling and completion do — a finished session drops below still-running work
@@ -1927,18 +1929,22 @@ and neither moves a row. The grouping and the key are authoritative helm and sup
 without keeping a private rank.
 
 A client holds back reordering while the pointer is over the list, so a row does not move out from under the pointer on
-its way to a click. The hold is display-only and remembers nothing: the shared pin grouping and chosen order stay
-authoritative, and the client shows them again as soon as the pointer leaves the list or has been completely still over
-it for 5 seconds (a scroll counts as movement). During a hold, rows keep updating in place; a session that disappears is
-removed at once, since a deleted session must not stay clickable; and a new session appears at the bottom of the list,
-moving no row above it, until the hold ends and it takes its place. Changing the list's host, filter, or order is asking
-for a different list, so the hold does not apply to it. While a session row's menu is open, the hold is kept until the
-menu closes, even if the pointer leaves the list or stays still, because releasing it would move the very row the menu
-belongs to; pointer movement over the list starts the 5 seconds of stillness over. Pin changes update in place during a
-hold and move to their grouped positions when it ends. A muted pin glyph immediately before the title names a pinned row
-in its tooltip and accessible text. A heavier separator with a small gap below follows the displayed leading contiguous
-run of pinned rows, only when an unpinned row follows; there is no Pinned heading. A newly pinned row held below that
-run does not move the separator there, and unpinning a row inside the run shortens it immediately.
+its way to a click. The hold is display-only and its snapshot is discarded when it ends: the shared pin order and chosen
+unpinned order stay authoritative, and the client shows them again as soon as the pointer leaves the list or has been
+completely still over it for 5 seconds (a scroll counts as movement). During a hold, rows keep updating in place; a
+session that disappears is removed at once, since a deleted session must not stay clickable; and a new session appears
+at the bottom of the list, moving no row above it, until the hold ends and it takes its place. Changing the list's host,
+filter, or order is asking for a different list, so the hold does not apply to it. While a session row's menu is open,
+the hold is kept until the menu closes, even if the pointer leaves the list or stays still, because releasing it would
+move the very row the menu belongs to; pointer movement over the list starts the 5 seconds of stillness over. Pins
+present in both the original held snapshot and the current reply follow their shared manual order within the slots those
+pins already hold, so a manual move takes effect without waiting for the hold to end. Other pin and unpin changes update
+in place during a hold and move to their grouped positions when it ends. Newly pinned rows offer no Move actions until
+then, including a new pin contiguous with the leading pinned run; original pins cannot use that new pin as a Move
+neighbor during the hold. A muted pin glyph immediately before the title names a pinned row in its tooltip and
+accessible text. A heavier separator with a small gap below follows the displayed leading contiguous run of pinned rows,
+only when an unpinned row follows; there is no Pinned heading. A newly pinned row held below that run does not move the
+separator there, and unpinning a row inside the run shortens it immediately.
 
 The list always carries a count beside its title: **N**, or **N of M** when narrowed, where N matched and M is the whole
 fleet. A truncated reply or an unsupported filter retains its explicit warning rather than claiming a complete matching
@@ -1978,30 +1984,32 @@ short window; the session view provides those details in full. Its agent line re
 header describes only the stored launch. A row's own actions menu, beyond the lifecycle operations above, also offers a
 mark read / mark unread toggle — reachable there or by clicking the dot itself — that sets the session's seen state
 directly (see Status). Directly after it in the menu's first metadata group, **Pin to top** / **Unpin** toggles the
-shared pin. Every session row carries one permission mark. An amber slashed shield means the session's launch is YOLO by
-the rule under Creation: its effective agent-launch permission is custom or YOLO, or its command was asserted to be
-YOLO. A green plain shield means an agent launch in guarded or an approval mode, or a command asserted not to be YOLO. A
-session created before launch kinds existed that was not an agent launch has no assertion and carries an amber question
-mark. Hover and screen-reader text name the specific agent-launch mode (guarded, custom, approve, smart approve, chat,
-or YOLO), or say that the mark is the assertion made when the command was launched, by the user or by an agent, and not
-something Farhelm checked, or that a pre-existing session's command was never classified. A grey dashed shield means the
-agent's own setting, including older sessions started without guarded flags. Its hover says Not classified and that the
-host guard treats it as YOLO. For Claude, Grok, Muse and Cursor, Farhelm also tries to read the agent's permission mode
-from its status line. A definite no-checks reading changes any shield other than YOLO or asserted-YOLO to the YOLO
-shield. Hover and screen-reader text name the observed mode and say it was seen on screen, while retaining the launch
-mode and command. Once observed, YOLO stays for the rest of the agent run: a recognized non-YOLO mode, an unreadable or
-obscured line, or an unrecognized mode cannot clear it. This errs toward safety: restoring a safer shield would risk
-leaving it there if a later switch back to YOLO went unnoticed. This never makes the shield safer than its launch
-choice. Restart, Replace and resume start a new run with no observed evidence; a supervisor restart also clears it until
-new definite samples arrive. Command launches with a declared agent type are included; legacy sessions and the other
-agents are not read. This is advisory and best effort, not a promise of detection: a missed or late reading is outside
-the guarantee. It cannot see allow rules, hooks or managed policy. It is display only; host YOLO guards, spawned-session
-permission inheritance and approval decisions still use the stored launch alone. Every guarded hover names the agent's
-mode and meaning, shows the actual stored command under Launched with, and explains that allow rules, hooks, plugins,
-always-allow answers, sandbox settings and in-session switches can loosen it; agents may change behavior between
-versions. A custom hover says the flags were the user's, that Farhelm does not check them and counts the session as
-YOLO, and shows both the flags and the full stored command under Launched with. The launcher's permission choice has a
-separate ? button with that help, opening the docs section on permission modes.
+shared pin. Directly after Unpin, **Move up** and **Move down** rearrange eligible pins relative to the displayed
+neighbor; an unavailable direction is hidden, and unpinned rows offer neither action. Accepting a move closes the menu
+and keeps keyboard focus on the moved row's menu button. Every session row carries one permission mark. An amber slashed
+shield means the session's launch is YOLO by the rule under Creation: its effective agent-launch permission is custom or
+YOLO, or its command was asserted to be YOLO. A green plain shield means an agent launch in guarded or an approval mode,
+or a command asserted not to be YOLO. A session created before launch kinds existed that was not an agent launch has no
+assertion and carries an amber question mark. Hover and screen-reader text name the specific agent-launch mode (guarded,
+custom, approve, smart approve, chat, or YOLO), or say that the mark is the assertion made when the command was
+launched, by the user or by an agent, and not something Farhelm checked, or that a pre-existing session's command was
+never classified. A grey dashed shield means the agent's own setting, including older sessions started without guarded
+flags. Its hover says Not classified and that the host guard treats it as YOLO. For Claude, Grok, Muse and Cursor,
+Farhelm also tries to read the agent's permission mode from its status line. A definite no-checks reading changes any
+shield other than YOLO or asserted-YOLO to the YOLO shield. Hover and screen-reader text name the observed mode and say
+it was seen on screen, while retaining the launch mode and command. Once observed, YOLO stays for the rest of the agent
+run: a recognized non-YOLO mode, an unreadable or obscured line, or an unrecognized mode cannot clear it. This errs
+toward safety: restoring a safer shield would risk leaving it there if a later switch back to YOLO went unnoticed. This
+never makes the shield safer than its launch choice. Restart, Replace and resume start a new run with no observed
+evidence; a supervisor restart also clears it until new definite samples arrive. Command launches with a declared agent
+type are included; legacy sessions and the other agents are not read. This is advisory and best effort, not a promise of
+detection: a missed or late reading is outside the guarantee. It cannot see allow rules, hooks or managed policy. It is
+display only; host YOLO guards, spawned-session permission inheritance and approval decisions still use the stored
+launch alone. Every guarded hover names the agent's mode and meaning, shows the actual stored command under Launched
+with, and explains that allow rules, hooks, plugins, always-allow answers, sandbox settings and in-session switches can
+loosen it; agents may change behavior between versions. A custom hover says the flags were the user's, that Farhelm does
+not check them and counts the session as YOLO, and shows both the flags and the full stored command under Launched with.
+The launcher's permission choice has a separate ? button with that help, opening the docs section on permission modes.
 
 Agent marks use distinct identity colors where their owners' terms allow: a published owner hue where one exists,
 otherwise a Farhelm choice, with shades suited to each theme. Codex, Goose and the ordinary Terminal mark stay grey.
