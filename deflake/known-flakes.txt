@@ -15,7 +15,6 @@ nextest farhelm::e2e terminal_backpressure::shallow_pause_resumes_without_reset_
 playwright terminal-reconnect.spec.ts view-changes-do-not-postpone-a-recovery  # reconnect-recovery-misses-its-window-under-load
 playwright replace.spec.ts plain Replace keeps a newer same-source key after old header YOLO cancellation  # same-source-replace-menu-after-yolo-cancellation
 playwright terminal-restart.spec.ts don't ask again on a refused YOLO replace marks the host, then replaces with the override  # interrupted-card-replace-click-lost
-playwright sidebar.spec.ts composer folder dropdown preserves keyboard launch and grouped history  # folder-reset-viewport
 playwright header.spec.ts native tunnel preview keeps ports and actions inside a 650px pane  # native-tunnel-preview-webkit-budget
 playwright trash-dialog.spec.ts trash header and global confirmation remain reachable at width 1000  # trash-dialog-pagedown
 playwright trash-dialog.spec.ts trash header and global confirmation remain reachable at width 360  # trash-dialog-pagedown

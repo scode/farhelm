@@ -558,13 +558,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `7a1c431b-99c8-4581-b46b-b126c58b3407`, `63f93b25-ad0e-4db1-99a5-6b9367db2d30`). Cause unknown (FLAKES.md,
   2026-11-04).
 
-- **Folder reset stays outside the dropdown viewport in WebKit.**
-  `composer folder dropdown preserves keyboard launch and grouped history` in `e2e/tests/sidebar.spec.ts` selected the
-  reset option but failed its viewport assertion in sweep run `e0526613-832f-4fba-b023-b38cc064e5c2`. All three isolated
-  classification reruns passed: `e3ebe846-ebc4-44da-9a7c-cf6981037ca2`, `eaf03d42-4533-48b6-9fc6-21ffa08944f1`, and
-  `7a80d996-edd8-46aa-8d82-f1ca43c6d5c8`. Cause unknown; preserve the keyboard visibility assertion (FLAKES.md,
-  2026-10-29).
-
 - **Native tunnel preview exceeds WebKit's case budget.**
   `native tunnel preview keeps ports and actions inside a 650px pane` in `e2e/tests/header.spec.ts` timed out during
   cleanup at its unchanged 60-second deadline in recorder `1fc8687c-1044-4c63-83f9-dfddf8da2604`, then passed unchanged
