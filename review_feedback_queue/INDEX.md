@@ -59,11 +59,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   signal, allowing unrelated work to be signalled. The accepted adjacent synchronous window explicitly excludes this
   scheduling gap.
 
-- [`resize-journal-exhaustion-does-not-trigger-checkpoint.md`](resize-journal-exhaustion-does-not-trigger-checkpoint.md)
-  — Enough applied size changes on a quiet terminal can consume its retained journal without making a new checkpoint
-  due. A later crash, or the newer small-tail skip on a successful orderly stop, can then lose recoverable output. The
-  required count is extreme; the conditional routes are source-established.
-
 - [`retained-delete-approval-can-kill-new-tab.md`](retained-delete-approval-can-kill-new-tab.md) — A Delete approved
   when nothing was alive can later end a newly opened tab without asking about that work if its host becomes unreadable
   between two status reads. The conditional approval and status sequence is established.

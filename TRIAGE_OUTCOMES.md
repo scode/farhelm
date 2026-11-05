@@ -21196,7 +21196,11 @@
   not due" test changes with it. If execution finds it is not straightforward (over about 100 lines of diff, not
   counting this ledger, the queue removal or a changelog fragment, or it needs a design choice), add a FILTER.md entry
   accepting this specific case instead and correct the spec sentences. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/unlikely-races-nov4.md`.
+- Execution: took the approved fallback in jj change `uptspqzqmtsyxyrokqmzolkxlklttlzp`, bookmark
+  `plan/unlikely-races-nov4/04-resizes-count-toward-save`. A complete resize-aware saving candidate, including existing
+  regressions and truthful code/spec contracts, measured 207 changed lines (140 before final documentation and
+  formatting). Added the specific extreme-resize filter and corrected the implementation spec's retention claim and
+  output-only accounting caveat. No code change. Draft PR: https://github.com/scode/farhelm/pull/3030/changes.
 
 ## normal-durability-restores-revoked-grants.md
 

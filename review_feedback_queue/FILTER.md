@@ -218,3 +218,19 @@ A finding matches when all of these hold:
 This covers that specific already-running-poll ordering gap. It does not cover newly received input being accepted after
 its attachment lost ownership, input routed to another terminal, or input interleaving within a whole paste by another
 mechanism.
+
+### Extreme cumulative resizes exhaust a quiet terminal's recovery journal
+
+Added 2026-11-04; accepted by the maintainer.
+
+A finding matches when all of these hold:
+
+- A new terminal has little output since its last snapshot, below the supervisor's output-only checkpoint and stop
+  thresholds.
+- Enough distinct size changes are actually applied to consume the host's journal cap at 64 bytes each; coalesced or
+  unchanged requests do not count. With the default 32 MiB cap this takes about 524,288 applied resizes.
+- Those records evict earlier output that the live emulator still holds, without making a checkpoint due, and a later
+  crash or an orderly stop that skips its save loses that output on recovery.
+
+This covers that specific loss of Farhelm's retained terminal history. It does not cover ordinary resize counts, file or
+process loss, database corruption, or recovery losing output that remains in a usable snapshot and journal.
