@@ -2627,7 +2627,7 @@ async function sentenceSessionShots(page: Page, request: APIRequestContext, scen
       const local = (await realHosts(request)).find(host => host.kind === "local");
       if (!local) throw new Error("ordinary filter review needs the owned local host");
       await chooseHost(page, local.id);
-      await expect(page.locator(".filter-empty")).toHaveText("No sessions match this filter");
+      await expect(page.locator(".filter-empty")).toHaveText("No waiting sessions on Local.");
       await expect(page.locator(".session-count")).toHaveText(/^0 of \d+$/);
       await shot(page, `${name}-status-empty`, window, { pad: 0 });
     } finally {

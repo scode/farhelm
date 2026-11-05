@@ -685,6 +685,59 @@ pub(super) fn end_row_operation(
     }
 }
 
+/// Name a chosen host even after its registry row disappears.
+///
+/// The chip and the answered-query message share the rail's identity rules.
+/// Only the chip is a control; its whole button removes the host filter,
+/// while the message leaves that action to the separate clear-filter link.
+#[component]
+fn FilterHostLabel(
+    id: HostId,
+    host: Option<Host>,
+    #[props(default)] on_remove: Option<EventHandler<()>>,
+) -> Element {
+    let name = host.as_ref().map_or_else(
+        || format!("Host {id} (no longer registered)"),
+        |host| host.short_name().escaped(),
+    );
+    let identity = host.as_ref().map_or_else(
+        || format!("Host {id} (no longer registered)"),
+        |host| {
+            crate::hosts::rail_identity(
+                host.name.raw(),
+                host.destination.as_ref().map(|value| value.raw()),
+                host.kind.is_this_machine(),
+            )
+        },
+    );
+    let content = rsx! {
+        if let Some(host) = host {
+            crate::icons::HostMark {
+                icon: host.icon, color: host.color, local: host.kind.is_this_machine(),
+                tooltip: identity.clone(),
+            }
+        } else {
+            span { class: "filter-host-missing", "aria-hidden": "true", "?" }
+        }
+        span { class: "filter-host-name peer-value", "{name}" }
+    };
+    if let Some(remove) = on_remove {
+        rsx! {
+            button { r#type: "button", class: "btn btn-neutral host-filter-chip",
+                "data-filter-host-id": "{id}", "data-tooltip": identity,
+                aria_label: "Filtered to host {name}; remove filter",
+                onclick: move |_| remove.call(()),
+                {content}
+                span { class: "filter-host-remove", "aria-hidden": "true", "✕" }
+            }
+        }
+    } else {
+        rsx! {
+            span { class: "filter-host-identity", "data-tooltip": identity, {content} }
+        }
+    }
+}
+
 /// The flat session list: host, title, cwd, invocation, and a truthful
 /// status badge per row; the filter and search surface above them, the hosts
 /// panel, the "new session" form and the per-row stop/delete actions
@@ -3833,7 +3886,43 @@ pub(crate) fn ListView(
     // nothing else is happening (see `activity`).
     let now_secs = *ACTIVITY_NOW.read();
 
-    let request_host_filter = request_host_filter.clone();
+    // Rail choices and filter removal are one transition: dismiss menus,
+    // reveal Sessions and request only a changed host, without changing the
+    // status, order, open terminal or retained marks.
+    let choose_host = use_callback(move |host: Option<HostId>| {
+        host_menu_open.set(None);
+        menu_open.set(None);
+        hosts_panel_open.set(false);
+        if filter.peek().host != host {
+            filter.write().host = host;
+            request_host_filter(Trigger::Explicit);
+        }
+    });
+    let clear_host_filter = use_callback(move |()| {
+        choose_host.call(None);
+        FocusTarget::new(".host-rail-all", None, false).focus();
+    });
+    let clear_status_filter = use_callback(move |()| {
+        apply_status.call("");
+        FocusTarget::new(".host-rail-all", None, false).focus();
+    });
+    // The chip follows the controls, while the empty result below follows
+    // listing_query. Its name can rewrap this header before a new listing
+    // arrives, so the existing movement owner retires old row anchors.
+    let chosen_filter_host = filter.read().host.map(|id| {
+        let host = hosts
+            .read()
+            .hosts()
+            .and_then(|rows| rows.iter().find(|host| host.id == id))
+            .cloned();
+        (id, host)
+    });
+    let chip_shape = chosen_filter_host
+        .as_ref()
+        .map(|(id, host)| (*id, host.as_ref().map(Host::short_name)));
+    use_rendered_movement_between(&chip_shape, |_, _| {
+        MovementCapture::Merge(popovers.capture_region(AnchorRegion::Sessions))
+    });
     // The create form's own copy of the API base, for recording a created
     // session as the selection (see `remember_selection`).
     let created_base = base.clone();
@@ -4569,15 +4658,7 @@ pub(crate) fn ListView(
             hosts,
             panel_open: hosts_panel_open,
             selected_host: filter.read().host,
-            on_host_choice: move |host| {
-                host_menu_open.set(None);
-                menu_open.set(None);
-                hosts_panel_open.set(false);
-                if filter.peek().host != host {
-                    filter.write().host = host;
-                    request_host_filter(Trigger::Explicit);
-                }
-            },
+            on_host_choice: choose_host,
             host_registration,
             details_open: host_details_open,
             ops,
@@ -4915,6 +4996,9 @@ pub(crate) fn ListView(
                         }
                     }
                 }
+                if let Some((id, host)) = &chosen_filter_host {
+                    FilterHostLabel { id: *id, host: host.clone(), on_remove: clear_host_filter }
+                }
             }
         }
         if let Some(notice) = delete_notice.0() {
@@ -4965,8 +5049,41 @@ pub(crate) fn ListView(
                     // is `rows::no_match_line`'s: categorical only for a
                     // complete listing, scoped to "the sessions that could
                     // be read" under a cut one.
-                    if let Some(line) = rows::no_match_line(listing) {
-                        div { class: "status filter-empty", hidden: hosts_panel_open(), "{line}" }
+                    if let Some((answered, _)) = listing_query.read().as_ref()
+                        && let Some(line) = rows::no_match_line(listing, answered)
+                    {
+                        match line {
+                            rows::NoMatchLine::Text(line) => rsx! {
+                                div { class: "status filter-empty", hidden: hosts_panel_open(), "{line}" }
+                            },
+                            rows::NoMatchLine::Filters { lead, host, clear_status } => rsx! {
+                                div { class: "status filter-empty", hidden: hosts_panel_open(),
+                                    "{lead}"
+                                    if let Some(id) = host {
+                                        " on "
+                                        FilterHostLabel {
+                                            id,
+                                            host: hosts.read().hosts().and_then(|rows| rows.iter().find(|host| host.id == id)).cloned(),
+                                        }
+                                    }
+                                    "."
+                                }
+                                div { class: "filter-empty-actions", hidden: hosts_panel_open(),
+                                    if host.is_some() {
+                                        button { r#type: "button", class: "inline-link filter-empty-clear",
+                                            "data-tooltip": "Show all hosts: remove the host filter",
+                                            onclick: move |_| clear_host_filter.call(()), "Show all hosts"
+                                        }
+                                    }
+                                    if clear_status {
+                                        button { r#type: "button", class: "inline-link filter-empty-clear",
+                                            "data-tooltip": "Show all statuses: remove the status filter",
+                                            onclick: move |_| clear_status_filter.call(()), "Show all statuses"
+                                        }
+                                    }
+                                }
+                            },
+                        }
                     }
                     if let Some(question) = replace_controller.question() {
                         // Keyed by the source row, so another row's question

@@ -1836,7 +1836,21 @@ Restart remain single-session actions.
 Below the list title, a single-status segmented choice offers **All**, **Running**, **Waiting** and **Idle**, without
 counts. It combines with the host choice in the helm's query and is not persisted. Ended sessions appear only under All.
 A narrowed list keeps its visible "N of M" count, including when every session matches. Hiding the selected session
-changes neither that selection nor its open terminal; a filter with no matches says so in the list.
+changes neither that selection nor its open terminal.
+
+A chosen host appears beside the status segments as a removable chip with its mark and short name, matching the rail.
+Its tooltip gives the name and destination, without state or attention details. A removed host keeps the rail's
+unregistered placeholder, with removal still available. The chip truncates long names and wraps below the status
+segments when needed. Removing it chooses All exactly as the rail does, without changing status, sort or the open
+session.
+
+An empty filtered list names its filters: "No sessions on [host mark] devbox.", "No waiting sessions on [host mark]
+devbox." or "No waiting sessions." It uses the same host identity as the rail, including aliases, Local and removed
+hosts. Buttons styled as links below the message clear each applicable filter: **Show all hosts** and **Show all
+statuses**. After a clear button or the chip removes its focused control, focus returns to the rail's All button. While
+a new filter is loading, the empty message keeps describing the result still on screen; the chip and status segments
+follow the current choice. An unfiltered empty fleet still says "No sessions", and a truncated listing keeps its
+qualified no-match message.
 
 One flat list across all registered hosts, with an always-visible host rail. **All** starts selected, followed by each
 registered host in registry order and **Add host**. Each avatar uses that host's chosen icon and color, with its short

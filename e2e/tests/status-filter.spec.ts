@@ -50,15 +50,57 @@ test("status segments query the helm, count matches and retain a hidden terminal
   await expect(idle).toBeFocused();
   await idle.press("ArrowLeft");
   await expect(page.getByRole("radio", { name: "Waiting", exact: true })).toBeChecked();
-  await expect(page.locator(".filter-empty")).toBeVisible();
+  await expect(page.locator(".filter-empty")).toHaveText("No waiting sessions.");
   await expect(page.locator(`[data-session-id="${live.id}"]`)).toHaveCount(0);
   await expect(terminal).toBeVisible();
   await expect(page.locator(".session-details")).toContainText(live.title);
   await expect.poll(() => reads.some((read) => read.status === "waiting" && read.states.length === 0)).toBe(true);
-  await chooseStatus(page, "All");
+  await chooseHost(page, await localHostId(request));
+  await expect(page.locator(".filter-empty")).toHaveText("No waiting sessions on Local.");
+  await page.getByRole("button", { name: "Show all hosts", exact: true }).click();
+  await expect(hostChoice(page)).toBeFocused();
+  await expect(hostChoice(page)).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("radio", { name: "Waiting", exact: true })).toBeChecked();
+  await expect(page.locator(".filter-empty")).toHaveText("No waiting sessions.");
+  const clear = page.getByRole("button", { name: "Show all statuses", exact: true });
+  await clear.focus();
+  await expect(clear).toBeFocused();
+  await clear.press("Enter");
+  await expect(hostChoice(page)).toBeFocused();
+  await expect(page.getByRole("radio", { name: "All", exact: true })).toBeChecked();
   await expect(page.locator(`[data-session-id="${live.id}"]`)).toHaveAttribute("data-session-selected", "true");
   await expect(page.locator(`[data-session-id="${ended.id}"]`)).toBeVisible();
   await expect(page.locator(".session-count")).toHaveText(/^\d+$/);
+});
+
+/** Every status label must remain explicit when it has no matches, including Idle.
+ * The routed empty replies isolate wording from the sampler; the preceding test proves real status membership. */
+test("empty status queries name their status and clear without changing the host choice", async ({ page }) => {
+  await page.route((url) => url.pathname === "/api/sessions", async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    if (new URL(route.request().url()).searchParams.has("status")) {
+      expect(body.truncated, "the wording fixture requires a complete status reply").toBe(false);
+      body.sessions = [];
+      body.matching = 0;
+    }
+    await route.fulfill({ response, json: body });
+  });
+  const feed = await stubFeed(page);
+  feed.notifyOnConnect(1);
+  await page.goto("/");
+  await expect(page.locator(".session-row").first()).toBeVisible({ timeout: 20_000 });
+  for (const status of ["Running", "Waiting", "Idle"] as const) {
+    await chooseStatus(page, status);
+    await expect(page.locator(".filter-empty")).toHaveText(`No ${status.toLowerCase()} sessions.`);
+    await expect(page.getByRole("button", { name: "Show all hosts", exact: true })).toHaveCount(0);
+    const clear = page.getByRole("button", { name: "Show all statuses", exact: true });
+    await clear.click();
+    await expect(hostChoice(page)).toBeFocused();
+    await expect(hostChoice(page)).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("radio", { name: "All", exact: true })).toBeChecked();
+    await expect(page.locator(".filter-empty")).toHaveCount(0);
+  }
 });
 
 for (const hiddenBy of ["status alone", "host and status", "neither"] as const) {
