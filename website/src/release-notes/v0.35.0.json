@@ -1,0 +1,24 @@
+{
+  "screenshots": [
+    {
+      "entry": 2989,
+      "name": "release-notes/v0-35-0-permissions-first",
+      "alt": "The session launcher's search offers Guarded permissions before an agent is selected."
+    },
+    {
+      "entry": 2963,
+      "name": "release-notes/v0-35-0-discord",
+      "alt": "Chat on Discord in the Help menu."
+    },
+    {
+      "entry": 2961,
+      "name": "release-notes/v0-35-0-agent-colors",
+      "alt": "The session list with colored Claude marks, grey Codex marks, and a white mark on the selected row."
+    },
+    {
+      "entry": 2987,
+      "name": "release-notes/v0-35-0-launcher-warning",
+      "alt": "The session launcher shows Choose a harness first in yellow when an effort is searched before choosing an agent."
+    }
+  ]
+}
